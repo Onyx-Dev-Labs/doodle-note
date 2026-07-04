@@ -38,6 +38,19 @@ enum LiveCommand {
             systemCapture = try await SystemAudioCapture(into: pipeline)
         }
         if let pipeline = micPipeline {
+            // Explicitly request mic access BEFORE touching the audio hardware:
+            // this is what makes macOS actually show the permission prompt
+            // (attributed to the app that launched us). Starting the engine
+            // without permission fails with an opaque '!dev' kAUStartIO error.
+            Events.emit(["event": "status", "stage": "requesting_permission", "permission": "microphone"])
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard granted else {
+                throw EngineError.internalError(
+                    "Microphone permission denied. Open System Settings → Privacy & Security → Microphone, "
+                        + "enable it for the app running Doodle Note (Electron during development), then try again."
+                )
+            }
+            Events.emit(["event": "status", "stage": "permission_granted", "permission": "microphone"])
             // AEC on by default; `--aec off` for A/B comparison.
             micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] != "off")
         }
@@ -161,8 +174,6 @@ final class MicCapture {
     }
 
     func start() throws {
-        Events.emit(["event": "status", "stage": "requesting_permission", "permission": "microphone"])
-
         // Acoustic echo cancellation (Apple's Voice Processing I/O — the FaceTime
         // AEC) subtracts whatever the Mac plays through its speakers from the mic
         // signal. If it fails for any reason, capture must survive: fall back to
@@ -180,7 +191,14 @@ final class MicCapture {
                 engine = AVAudioEngine()
             }
         }
-        try startEngine(withAEC: false)
+        do {
+            try startEngine(withAEC: false)
+        } catch {
+            throw EngineError.internalError(
+                "Microphone capture failed even without echo cancellation "
+                    + "(check the input device in System Settings → Sound): \(error)"
+            )
+        }
     }
 
     private func startEngine(withAEC aec: Bool) throws {
