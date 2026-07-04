@@ -1,0 +1,24 @@
+{
+  "name": "@repo/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "merge-smoke": "tsx scripts/merge-smoke.ts"
+  },
+  "dependencies": {
+    "ai": "^7.0.15",
+    "@ai-sdk/anthropic": "^4.0.8",
+    "@ai-sdk/openai": "^4.0.7",
+    "node-llama-cpp": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,13 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Build scripts are blocked by default in pnpm 10; electron needs its
+# postinstall to download the runtime binary.
+onlyBuiltDependencies:
+  - electron
+
+ignoredBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver

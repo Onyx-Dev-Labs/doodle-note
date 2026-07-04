@@ -1,0 +1,8 @@
+export { availableLocalModels, defaultLocalModel, LOCAL_MODELS, totalRamGB } from './catalog'
+export type { LocalModelSpec } from './catalog'
+export { CloudNotesEngine } from './cloud-engine'
+export type { CloudEngineOptions } from './cloud-engine'
+export { DEFAULT_MODELS_DIR, LocalNotesEngine } from './local-engine'
+export type { LocalEngineOptions } from './local-engine'
+export { buildMergeUserMessage, MERGE_SYSTEM_PROMPT } from './prompt'
+export type { MergedNotes, MergeInput, MergeSegment, NotesEngine } from './types'

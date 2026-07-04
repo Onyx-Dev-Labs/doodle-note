@@ -1,0 +1,27 @@
+# deps
+node_modules/
+
+# builds
+.next/
+dist/
+out/
+.turbo/
+
+# swift
+engine/.build/
+engine/.swiftpm/
+*.xcodeproj
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# local data
+*.db
+*.sqlite
+pgdata/
+
+# os / editor
+.DS_Store
+*.log
