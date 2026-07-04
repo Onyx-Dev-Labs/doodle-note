@@ -98,8 +98,12 @@ export class EngineProcess {
     })
 
     child.stderr.setEncoding('utf8')
-    child.stderr.on('data', () => {
-      // Sidecar diagnostics; intentionally not forwarded to the renderer.
+    child.stderr.on('data', (chunk: string) => {
+      // Sidecar diagnostics: not forwarded to the renderer, but logged so a
+      // failed session leaves footprints in the dev terminal.
+      for (const line of chunk.split('\n')) {
+        if (line.trim().length > 0) console.error(`[engine] ${line}`)
+      }
     })
 
     child.on('error', (err) => {

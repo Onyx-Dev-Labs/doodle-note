@@ -153,6 +153,7 @@ export default function MeetingView({
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [elapsedSec, setElapsedSec] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [emptyNotice, setEmptyNotice] = useState(false)
   const [modelsInfo, setModelsInfo] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
 
@@ -344,6 +345,13 @@ export default function MeetingView({
     }, 400)
   }, [phase, allSegments, savedEcho, state.echoCount, persist])
 
+  // A session that ends with zero transcript is otherwise indistinguishable
+  // from success ("I hit stop and nothing happened") — say so explicitly.
+  useEffect(() => {
+    if (phase === 'starting' || phase === 'recording') setEmptyNotice(false)
+    else if (phase === 'ended' && allSegments.length === 0) setEmptyNotice(true)
+  }, [phase, allSegments.length])
+
   // Flush pending note edits when leaving the view entirely.
   useEffect(() => {
     return () => {
@@ -488,6 +496,19 @@ export default function MeetingView({
         <div className="toast" role="alert">
           <span>{state.error}</span>
           <button type="button" onClick={() => dispatch({ event: 'error', message: '' })}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      {emptyNotice && !state.error && (
+        <div className="toast" role="status">
+          <span>
+            Recording ended, but no speech was transcribed on either channel. Try again speaking
+            near the mic (or with meeting audio playing) — if it keeps happening, the Developer
+            view shows the raw engine events.
+          </span>
+          <button type="button" onClick={() => setEmptyNotice(false)}>
             ✕
           </button>
         </div>

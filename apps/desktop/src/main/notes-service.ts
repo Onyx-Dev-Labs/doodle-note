@@ -98,6 +98,19 @@ export class NotesService {
   private modelsResponse(): NotesModelsResponse {
     const ramGB = totalRamGB()
     const files = this.listModelFiles()
+    // Out-of-the-box behavior: if nothing was explicitly activated but a
+    // usable model is already on disk, adopt the best downloaded one so
+    // Enhance works without requiring a trip to Settings first.
+    if (this.settings.activeLocalModelId === undefined) {
+      const downloaded = LOCAL_MODELS.filter(
+        (m) => m.minRamGB <= ramGB && this.isDownloaded(m, files)
+      )
+      const adopt = downloaded[downloaded.length - 1]
+      if (adopt) {
+        this.settings.activeLocalModelId = adopt.id
+        this.saveSettings()
+      }
+    }
     return {
       ramGB,
       models: LOCAL_MODELS.map((spec) => ({
