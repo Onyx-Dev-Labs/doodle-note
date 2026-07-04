@@ -151,7 +151,7 @@ final class ChannelPipeline {
 // MARK: - Microphone capture
 
 final class MicCapture {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let pipeline: ChannelPipeline
     private let enableAEC: Bool
 
@@ -162,33 +162,47 @@ final class MicCapture {
 
     func start() throws {
         Events.emit(["event": "status", "stage": "requesting_permission", "permission": "microphone"])
-        let input = engine.inputNode
 
         // Acoustic echo cancellation (Apple's Voice Processing I/O — the FaceTime
-        // AEC): subtracts whatever the Mac is playing through its speakers from
-        // the mic signal, so the far side of a speakered call doesn't bleed into
-        // the "You" channel. Must be configured before the tap/format queries.
+        // AEC) subtracts whatever the Mac plays through its speakers from the mic
+        // signal. If it fails for any reason, capture must survive: fall back to
+        // the raw mic (far-side bleed returns, but the meeting is still recorded).
         if enableAEC {
             do {
-                try input.setVoiceProcessingEnabled(true)
-                if #available(macOS 14.0, *) {
-                    // Don't let voice processing lower the meeting audio the user is hearing.
-                    input.voiceProcessingOtherAudioDuckingConfiguration =
-                        AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
-                            enableAdvancedDucking: false,
-                            duckingLevel: .min
-                        )
-                }
-                // VPIO is a full-duplex unit; give the engine a live-but-silent output pair.
-                engine.mainMixerNode.outputVolume = 0
+                try startEngine(withAEC: true)
                 Events.emit(["event": "status", "stage": "aec_enabled", "channel": "mic"])
+                return
             } catch {
+                Events.log("AEC engine start failed — retrying without echo cancellation: \(error)")
                 Events.emit(["event": "status", "stage": "aec_unavailable", "channel": "mic"])
-                Events.log("voice processing unavailable — mic may pick up speaker audio: \(error)")
+                // The failed engine may be half-configured for voice processing;
+                // discard it entirely rather than trying to unwind its state.
+                engine = AVAudioEngine()
             }
         }
+        try startEngine(withAEC: false)
+    }
 
-        // Query the format AFTER enabling voice processing — it changes the I/O format.
+    private func startEngine(withAEC aec: Bool) throws {
+        let input = engine.inputNode
+        if aec {
+            // macOS requires the SAME voice-processing mode on BOTH I/O nodes of
+            // an engine — enabling only the input side fails at kAUInitialize.
+            try input.setVoiceProcessingEnabled(true)
+            try engine.outputNode.setVoiceProcessingEnabled(true)
+            if #available(macOS 14.0, *) {
+                // Don't let voice processing lower the meeting audio the user is hearing.
+                input.voiceProcessingOtherAudioDuckingConfiguration =
+                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                        enableAdvancedDucking: false,
+                        duckingLevel: .min
+                    )
+            }
+            // VPIO is a full-duplex unit; give the engine a live-but-silent output pair.
+            engine.mainMixerNode.outputVolume = 0
+        }
+
+        // Query the format AFTER voice-processing setup — it changes the I/O format.
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw EngineError.internalError("no microphone input available")
