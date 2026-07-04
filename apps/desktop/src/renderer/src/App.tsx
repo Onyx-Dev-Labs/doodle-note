@@ -15,6 +15,7 @@ type ViewId = 'home' | 'editor' | 'settings' | 'dev'
 function App(): React.JSX.Element {
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [autoRecordId, setAutoRecordId] = useState<string | null>(null)
   const [homeRefresh, setHomeRefresh] = useState(0)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -37,6 +38,9 @@ function App(): React.JSX.Element {
       segments: [],
       echoSuppressed: 0
     })
+    // Fresh meetings start recording immediately; opening an existing
+    // meeting from the list never does.
+    setAutoRecordId(id)
     openMeeting(id)
   }, [openMeeting])
 
@@ -146,6 +150,8 @@ function App(): React.JSX.Element {
             key={meetingId}
             meetingId={meetingId}
             visible={view === 'editor'}
+            autoRecord={meetingId === autoRecordId}
+            onAutoRecordStarted={() => setAutoRecordId(null)}
             onBack={goHome}
             onOpenSettings={() => setView('settings')}
           />

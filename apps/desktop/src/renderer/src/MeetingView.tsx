@@ -127,11 +127,16 @@ function BarsIcon({ animated }: { animated: boolean }): React.JSX.Element {
 export default function MeetingView({
   meetingId,
   visible,
+  autoRecord,
+  onAutoRecordStarted,
   onBack,
   onOpenSettings
 }: {
   meetingId: string
   visible: boolean
+  /** True when this meeting was just created via "+ New meeting" — recording starts automatically. */
+  autoRecord: boolean
+  onAutoRecordStarted: () => void
   onBack: () => void
   onOpenSettings: () => void
 }): React.JSX.Element {
@@ -368,6 +373,19 @@ export default function MeetingView({
   }
 
   const stopRecording = (): void => window.engine.stop()
+
+  // Auto-start recording for meetings created via "+ New meeting": the page
+  // loads already capturing (bars animate, stop button shown), so there is
+  // no separate "now find the record button" step.
+  const autoStartedRef = useRef(false)
+  useEffect(() => {
+    if (!autoRecord || !visible || autoStartedRef.current) return
+    if (phase !== 'idle') return
+    autoStartedRef.current = true
+    onAutoRecordStarted()
+    startRecording()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once when eligible
+  }, [autoRecord, visible, phase])
 
   const totalEcho = savedEcho + state.echoCount
   const anyDownloaded = modelsInfo?.models.some((m) => m.downloaded) ?? false
