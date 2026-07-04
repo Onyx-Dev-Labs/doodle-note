@@ -6,11 +6,12 @@ import type {
   NotesModelsResponse,
   NotesSettingsView
 } from '../../shared/notes-api'
+import logoUrl from './assets/doodlenote-logo.png'
 
 /**
- * Onboarding-style model picker (FluidVoice's Voice Engine screen is the
- * reference): one card per catalog model with download/activate states,
- * plus the optional BYOK cloud section.
+ * Settings: one card per catalog model with download/activate states,
+ * plus the optional BYOK cloud section. Same IPC as before — only the
+ * presentation moved to the light DoodleNote theme.
  */
 export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
   const [data, setData] = useState<NotesModelsResponse | null>(null)
@@ -121,11 +122,15 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   return (
     <div className="models">
       <header className="models-header">
-        <h2>Notes model</h2>
-        <p className="models-sub">
-          Doodle Note polishes your meeting notes with a model that runs entirely on this Mac
-          {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your machine.
-        </p>
+        <img className="settings-logo" src={logoUrl} alt="DoodleNote" />
+        <div>
+          <h2>Notes model</h2>
+          <p className="models-sub">
+            DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
+            {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
+            machine.
+          </p>
+        </div>
       </header>
 
       {error && <div className="models-error">{error}</div>}

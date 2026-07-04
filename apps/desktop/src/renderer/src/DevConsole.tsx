@@ -323,9 +323,9 @@ function DevConsole(): React.JSX.Element {
   const hasTranscript = state.finals.length > 0 || state.partial.length > 0
 
   return (
-    <div className="app">
+    <div className="dev-dark app">
       <header>
-        <h1>Doodle Note — engine dev console</h1>
+        <h1>DoodleNote — engine dev console</h1>
       </header>
 
       <div className="controls">

@@ -1,0 +1,58 @@
+/**
+ * Shared meetings-store IPC contract, used by main + preload + renderer.
+ *
+ * The main process owns the on-disk store (userData/meetings/<id>.json);
+ * the renderer owns the *active* meeting document and upserts it as the
+ * user types / records / enhances. TranscriptSession's sessions/*.json
+ * backups are unrelated and stay as-is.
+ */
+
+import type { TranscriptSegment } from './engine-events'
+
+export const MEETINGS_LIST_CHANNEL = 'meetings:list'
+export const MEETINGS_GET_CHANNEL = 'meetings:get'
+export const MEETINGS_UPSERT_CHANNEL = 'meetings:upsert'
+export const MEETINGS_DELETE_CHANNEL = 'meetings:delete'
+
+/** Full meeting document as stored on disk. */
+export interface MeetingRecord {
+  id: string
+  title: string
+  /** ISO timestamp of creation ("+ New meeting"). */
+  createdAt: string
+  /** ISO timestamp of the first live-capture start, if any. */
+  startedAt?: string
+  /** ISO timestamp of the last live-capture end, if any. */
+  endedAt?: string
+  /** The user's rough notes (TipTap doc serialized to markdown). */
+  rawNotesMarkdown: string
+  /** AI-merged notes, present after a successful Enhance run. */
+  enhancedMarkdown?: string
+  /** Which notes engine produced enhancedMarkdown (e.g. "local:…"). */
+  engine?: string
+  /** Interleaved You/Them transcript segments (echo-flagged ones excluded). */
+  segments: TranscriptSegment[]
+  /** How many echo segments were suppressed across the session(s). */
+  echoSuppressed: number
+}
+
+/** Lightweight row for the Home list, sorted newest-first. */
+export interface MeetingSummary {
+  id: string
+  title: string
+  createdAt: string
+  startedAt?: string
+  /** Recorded length in whole minutes, when derivable. */
+  durationMin?: number
+}
+
+/** Partial update; `id` is required, omitted fields keep their stored value. */
+export type MeetingUpsert = Partial<Omit<MeetingRecord, 'id'>> & { id: string }
+
+/** API surface exposed on `window.meetings` by the preload script. */
+export interface MeetingsApi {
+  list(): Promise<MeetingSummary[]>
+  get(id: string): Promise<MeetingRecord | null>
+  upsert(meeting: MeetingUpsert): Promise<MeetingRecord>
+  delete(id: string): Promise<void>
+}

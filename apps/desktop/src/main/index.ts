@@ -3,6 +3,7 @@ import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { EngineProcess } from './engine-process'
+import { MeetingsService } from './meetings-service'
 import { NotesService } from './notes-service'
 import { TranscriptSession } from './transcript-session'
 import {
@@ -40,11 +41,17 @@ function broadcastEngineEvent(event: EngineEvent): void {
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 980,
-    height: 720,
+    width: 1180,
+    height: 760,
+    minWidth: 980,
+    minHeight: 680,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#101014',
+    backgroundColor: '#F7F5EE',
+    // Mac-native feel: content extends under a hidden title bar; the renderer
+    // provides a drag strip and keeps clear of the traffic lights.
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 16 },
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -98,6 +105,9 @@ app.whenReady().then(() => {
 
   notesService = new NotesService(app.getPath('userData'), broadcast)
   notesService.registerIpc()
+
+  const meetingsService = new MeetingsService(join(app.getPath('userData'), 'meetings'))
+  meetingsService.registerIpc()
 
   createWindow()
 

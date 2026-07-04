@@ -4,7 +4,9 @@ import type { EngineTokenTiming } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
 
 /** Build subword tokens the way Parakeet emits them: leading space = new word. */
-function tokens(spec: Array<[text: string, startSec: number, endSec: number]>): EngineTokenTiming[] {
+function tokens(
+  spec: Array<[text: string, startSec: number, endSec: number]>
+): EngineTokenTiming[] {
   return spec.map(([token, startSec, endSec]) => ({ token, startSec, endSec, confidence: 0.95 }))
 }
 
@@ -20,7 +22,15 @@ function sentence(text: string, at: number, wordSec = 0.3): EngineTokenTiming[] 
 
 test('reconstructs text from subword tokens, splitting words on leading spaces', () => {
   const a = new SegmentAssembler()
-  a.addTimings('mic', tokens([[' Hel', 0.5, 0.6], ['lo', 0.6, 0.7], [' wor', 0.75, 0.85], ['ld.', 0.85, 0.95]]))
+  a.addTimings(
+    'mic',
+    tokens([
+      [' Hel', 0.5, 0.6],
+      ['lo', 0.6, 0.7],
+      [' wor', 0.75, 0.85],
+      ['ld.', 0.85, 0.95]
+    ])
+  )
   const segments = a.flush('mic')
   assert.equal(segments.length, 1)
   assert.equal(segments[0]!.text, 'Hello world.')
@@ -31,7 +41,10 @@ test('reconstructs text from subword tokens, splitting words on leading spaces',
 
 test('closes a segment on a pause gap', () => {
   const a = new SegmentAssembler()
-  const first = a.addTimings('system', [...sentence('let us review the numbers', 1.0), ...sentence('next topic is hiring', 4.0)])
+  const first = a.addTimings('system', [
+    ...sentence('let us review the numbers', 1.0),
+    ...sentence('next topic is hiring', 4.0)
+  ])
   const rest = a.flush('system')
   const all = [...first, ...rest]
   assert.equal(all.length, 2)
@@ -91,7 +104,13 @@ test('accounts for channel start skew when matching echo', () => {
 test('assembles words split across timings batches', () => {
   const a = new SegmentAssembler()
   a.addTimings('mic', tokens([[' Hen', 1.0, 1.1]]))
-  a.addTimings('mic', tokens([['der', 1.1, 1.2], ['son', 1.2, 1.3]]))
+  a.addTimings(
+    'mic',
+    tokens([
+      ['der', 1.1, 1.2],
+      ['son', 1.2, 1.3]
+    ])
+  )
   const segments = a.flush('mic')
   assert.equal(segments[0]!.text, 'Henderson')
 })

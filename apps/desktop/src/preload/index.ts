@@ -27,6 +27,16 @@ import {
   type NotesSettingsUpdate,
   type NotesSettingsView
 } from '../shared/notes-api'
+import {
+  MEETINGS_DELETE_CHANNEL,
+  MEETINGS_GET_CHANNEL,
+  MEETINGS_LIST_CHANNEL,
+  MEETINGS_UPSERT_CHANNEL,
+  type MeetingRecord,
+  type MeetingSummary,
+  type MeetingUpsert,
+  type MeetingsApi
+} from '../shared/meetings-api'
 
 const engineApi: EngineApi = {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void {
@@ -89,10 +99,29 @@ const notesApi: NotesApi = {
   }
 }
 
+const meetingsApi: MeetingsApi = {
+  list(): Promise<MeetingSummary[]> {
+    return ipcRenderer.invoke(MEETINGS_LIST_CHANNEL) as Promise<MeetingSummary[]>
+  },
+
+  get(id: string): Promise<MeetingRecord | null> {
+    return ipcRenderer.invoke(MEETINGS_GET_CHANNEL, id) as Promise<MeetingRecord | null>
+  },
+
+  upsert(meeting: MeetingUpsert): Promise<MeetingRecord> {
+    return ipcRenderer.invoke(MEETINGS_UPSERT_CHANNEL, meeting) as Promise<MeetingRecord>
+  },
+
+  delete(id: string): Promise<void> {
+    return ipcRenderer.invoke(MEETINGS_DELETE_CHANNEL, id) as Promise<void>
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
+    contextBridge.exposeInMainWorld('meetings', meetingsApi)
   } catch (error) {
     console.error(error)
   }
@@ -101,4 +130,6 @@ if (process.contextIsolated) {
   window.engine = engineApi
   // @ts-ignore (defined in index.d.ts)
   window.notes = notesApi
+  // @ts-ignore (defined in index.d.ts)
+  window.meetings = meetingsApi
 }
