@@ -14,6 +14,21 @@ import ScreenCaptureKit
 /// Runs until --seconds elapses or SIGINT/SIGTERM (what the desktop app sends).
 enum LiveCommand {
     static func run(_ options: CLIOptions) async throws {
+        // Opt-in parent-death watchdog: hosts that spawn us with a live stdin
+        // pipe pass this flag; when the pipe closes (host crashed/restarted),
+        // stop gracefully instead of recording forever as an orphan. Opt-in
+        // because a /dev/null stdin reads EOF immediately.
+        if options.flags.contains("exit-on-stdin-close") {
+            Thread {
+                while true {
+                    let data = FileHandle.standardInput.availableData
+                    if data.isEmpty { break }  // EOF — host is gone
+                }
+                Events.log("stdin closed — host process gone; finishing session")
+                StopController.shared.stop()
+            }.start()
+        }
+
         let source = options.values["source"] ?? "both"
         let wantMic = source == "mic" || source == "both"
         let wantSystem = source == "system" || source == "both"
