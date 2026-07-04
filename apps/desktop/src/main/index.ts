@@ -3,6 +3,7 @@ import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { EngineProcess } from './engine-process'
+import { NotesService } from './notes-service'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_EVENT_CHANNEL,
@@ -23,13 +24,18 @@ function resolveEngineBinary(): string {
 }
 
 const engine = new EngineProcess(resolveEngineBinary())
+let notesService: NotesService | null = null
 
-function broadcastEngineEvent(event: EngineEvent): void {
+function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
-      window.webContents.send(ENGINE_EVENT_CHANNEL, event)
+      window.webContents.send(channel, payload)
     }
   }
+}
+
+function broadcastEngineEvent(event: EngineEvent): void {
+  broadcast(ENGINE_EVENT_CHANNEL, event)
 }
 
 function createWindow(): void {
@@ -90,6 +96,9 @@ app.whenReady().then(() => {
     engine.stop()
   })
 
+  notesService = new NotesService(app.getPath('userData'), broadcast)
+  notesService.registerIpc()
+
   createWindow()
 
   app.on('activate', function () {
@@ -102,6 +111,7 @@ app.whenReady().then(() => {
 // Make sure the sidecar never outlives the app.
 app.on('will-quit', () => {
   engine.dispose()
+  void notesService?.dispose()
 })
 
 app.on('window-all-closed', () => {

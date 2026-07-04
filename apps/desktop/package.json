@@ -16,12 +16,18 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@electron-toolkit/utils": "^4.0.0"
+    "@electron-toolkit/utils": "^4.0.0",
+    "@repo/ai": "workspace:*",
+    "node-llama-cpp": "^3.19.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@tiptap/extension-list": "^3.27.1",
+    "@tiptap/extensions": "^3.27.1",
+    "@tiptap/react": "^3.27.1",
+    "@tiptap/starter-kit": "^3.27.1",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

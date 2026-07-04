@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import type { Readable } from 'node:stream'
+import type { Readable, Writable } from 'node:stream'
 import type {
   EngineCommand,
   EngineEvent,
@@ -10,8 +10,13 @@ import type {
 
 export type EngineEventListener = (event: EngineEvent) => void
 
-/** Shape produced by spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] }). */
-type EngineChild = ChildProcessByStdio<null, Readable, Readable>
+/**
+ * Shape produced by spawn(..., { stdio: ['pipe', 'pipe', 'pipe'] }).
+ * stdin stays open but unused: it's the engine's parent-death watchdog — if
+ * this process dies or hot-restarts, the OS closes the pipe and the engine
+ * finishes its session instead of recording forever as an orphan.
+ */
+type EngineChild = ChildProcessByStdio<Writable, Readable, Readable>
 
 /**
  * Owns the transcription sidecar child process.
@@ -65,6 +70,7 @@ export class EngineProcess {
     const args: string[] = [command]
     if (command === 'live') {
       args.push('--source', opts.source ?? 'both')
+      args.push('--exit-on-stdin-close')
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }
@@ -76,7 +82,7 @@ export class EngineProcess {
 
     let child: EngineChild
     try {
-      child = spawn(this.binaryPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn(this.binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
     } catch (err) {
       this.emit({ event: 'spawn-error', message: `Failed to spawn engine: ${String(err)}` })
       return

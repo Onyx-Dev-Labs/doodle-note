@@ -1,8 +1,22 @@
 import os from 'node:os'
 import path from 'node:path'
-import { getLlama, LlamaChatSession, resolveModelFile, type Llama, type LlamaModel } from 'node-llama-cpp'
+import type { Llama, LlamaModel } from 'node-llama-cpp'
 import { buildMergeUserMessage, MERGE_SYSTEM_PROMPT } from './prompt'
 import type { MergeInput, MergedNotes, NotesEngine } from './types'
+
+/**
+ * node-llama-cpp is ESM-only *with top-level await*, so it cannot be
+ * `require()`d — and the Electron main process bundles this package to CJS.
+ * A lazy dynamic import() survives CJS bundling verbatim (rollup keeps
+ * `import()` expressions in cjs output), so the module loads correctly from
+ * both ESM (tsx scripts) and CJS (Electron main) consumers.
+ */
+type NodeLlamaCpp = typeof import('node-llama-cpp')
+let nodeLlamaCppPromise: Promise<NodeLlamaCpp> | null = null
+function loadNodeLlamaCpp(): Promise<NodeLlamaCpp> {
+  nodeLlamaCppPromise ??= import('node-llama-cpp')
+  return nodeLlamaCppPromise
+}
 
 /**
  * The default Doodle Note engine: an on-device model downloaded during
@@ -40,6 +54,7 @@ export class LocalNotesEngine implements NotesEngine {
   /** Download (if needed) and load the model. Safe to call more than once. */
   async prepare(): Promise<void> {
     if (this.model) return
+    const { getLlama, resolveModelFile } = await loadNodeLlamaCpp()
     this.modelPath = await resolveModelFile(this.options.modelUri, {
       directory: this.options.modelsDir ?? DEFAULT_MODELS_DIR,
       cli: false,
@@ -53,6 +68,7 @@ export class LocalNotesEngine implements NotesEngine {
 
   async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
     await this.prepare()
+    const { LlamaChatSession } = await loadNodeLlamaCpp()
     const started = Date.now()
 
     // Fresh context per meeting: no state bleeds between generations, and the
