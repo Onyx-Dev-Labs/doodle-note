@@ -1,4 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { spawn } from 'node:child_process'
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -78,6 +79,22 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Warm the engine once per launch: triggers the permission prompts up front
+  // and primes the ASR model cache, so "+ New meeting" starts instantly.
+  try {
+    const preflight = spawn(resolveEngineBinary(), ['preflight'], {
+      stdio: ['ignore', 'ignore', 'pipe']
+    })
+    preflight.stderr?.setEncoding('utf8')
+    preflight.stderr?.on('data', (chunk: string) => {
+      const line = chunk.trim()
+      if (line.length > 0) console.error(`[engine preflight] ${line}`)
+    })
+    preflight.on('error', (err) => console.error('[engine preflight] spawn failed:', err.message))
+  } catch (err) {
+    console.error('[engine preflight] failed:', err)
+  }
+
   electronApp.setAppUserModelId('com.doodlenote.desktop')
 
   // Default open or close DevTools by F12 in development

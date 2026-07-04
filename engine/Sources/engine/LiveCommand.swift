@@ -37,12 +37,14 @@ enum LiveCommand {
         }
         let seconds = options.values["seconds"].flatMap(Double.init)
 
-        // Load pipelines sequentially: the first load may download models, and the
-        // second then hits the local cache instead of racing the same download.
+        // Capture-first startup: pipelines are created WITHOUT loading models so
+        // recording begins the moment permissions clear. Audio queues in each
+        // pipeline's buffer stream while models load behind it — the host can
+        // show "recording" immediately and no audio is lost.
         var micPipeline: ChannelPipeline?
         var systemPipeline: ChannelPipeline?
-        if wantMic { micPipeline = try await ChannelPipeline(channel: "mic") }
-        if wantSystem { systemPipeline = try await ChannelPipeline(channel: "system") }
+        if wantMic { micPipeline = ChannelPipeline(channel: "mic") }
+        if wantSystem { systemPipeline = ChannelPipeline(channel: "system") }
 
         var micCapture: MicCapture?
         var systemCapture: SystemAudioCapture?
@@ -70,15 +72,20 @@ enum LiveCommand {
             micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] != "off")
         }
 
-        micPipeline?.begin()
-        systemPipeline?.begin()
-
         try micCapture?.start()
         try await systemCapture?.start()
 
+        // Capturing now — tell the host immediately (bars animate, timer runs).
         var ready: [String: Any] = ["event": "ready", "mode": "live"]
         ready["channels"] = [wantMic ? "mic" : nil, wantSystem ? "system" : nil].compactMap { $0 }
         Events.emit(ready)
+
+        // Load models sequentially (first load may download; second hits cache),
+        // then start draining the queued audio.
+        try await micPipeline?.prepare()
+        try await systemPipeline?.prepare()
+        micPipeline?.begin()
+        systemPipeline?.begin()
 
         await StopController.shared.wait(timeoutSeconds: seconds)
         Events.emit(["event": "status", "stage": "finishing"])
@@ -106,12 +113,17 @@ final class ChannelPipeline {
     private let epochLock = NSLock()
     private var epochEmitted = false
 
-    init(channel: String) async throws {
+    init(channel: String) {
         self.channel = channel
-        Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
         self.manager = StreamingUnifiedAsrManager()
-        try await manager.loadModels()
         (self.bufferStream, self.bufferContinuation) = AsyncStream.makeStream(of: AVAudioPCMBuffer.self)
+    }
+
+    /// Load models and wire callbacks. Called AFTER capture starts — audio
+    /// queues in the buffer stream until begin() drains it.
+    func prepare() async throws {
+        Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
+        try await manager.loadModels()
         let ch = channel
         await manager.setPartialTranscriptCallback { text in
             Events.emit(["event": "partial", "channel": ch, "text": text])

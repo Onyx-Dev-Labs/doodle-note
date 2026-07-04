@@ -624,6 +624,21 @@ export default function MeetingView({
         </div>
       )}
 
+      {!capturing &&
+        allSegments.length > 0 &&
+        enhancedMarkdown === null &&
+        enhanceStatus !== 'running' && (
+          <button
+            type="button"
+            className="generate-cta"
+            disabled={!canEnhance}
+            title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
+            onClick={() => void runEnhance()}
+          >
+            ✨ Generate notes
+          </button>
+        )}
+
       <div className="bottom-bar">
         <div className="rec-pill">
           {capturing ? (
@@ -658,9 +673,10 @@ export default function MeetingView({
                 type="button"
                 className="record-btn"
                 onClick={startRecording}
-                title="Start recording"
+                title={allSegments.length > 0 ? 'Resume recording' : 'Start recording'}
               >
                 <BarsIcon animated={false} />
+                {allSegments.length > 0 && <span className="rec-resume">Resume</span>}
               </button>
               <button
                 type="button"
@@ -684,18 +700,18 @@ export default function MeetingView({
               : allSegments.length === 0
                 ? 'Record the meeting first'
                 : enhancedMarkdown !== null
-                  ? 'Re-enhance notes'
-                  : 'Enhance notes'
+                  ? 'Regenerate notes'
+                  : 'Generate notes'
           }
           onClick={() => void runEnhance()}
         >
           {enhanceStatus === 'running' ? (
             <>
               <span className="spinner" aria-hidden="true" />
-              {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Enhancing…'}
+              {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
             </>
           ) : (
-            <>✨ {enhancedMarkdown !== null ? 'Re-enhance notes' : 'Enhance notes'}</>
+            <>✨ {enhancedMarkdown !== null ? 'Regenerate notes' : 'Generate notes'}</>
           )}
         </button>
       </div>

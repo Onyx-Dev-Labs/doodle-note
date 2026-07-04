@@ -1643,3 +1643,37 @@ a,
   color: var(--text-faint);
   font-style: italic;
 }
+
+/* generate-notes CTA (Granola-style centered button above the pill bar) */
+.generate-cta {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  background: #5f7247;
+  border: none;
+  color: #fdfcf8;
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 10px 22px;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(38, 40, 31, 0.18);
+  cursor: pointer;
+  z-index: 5;
+}
+
+.generate-cta:hover:not(:disabled) {
+  background: #54663f;
+}
+
+.generate-cta:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rec-resume {
+  margin-left: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5f7247;
+}
