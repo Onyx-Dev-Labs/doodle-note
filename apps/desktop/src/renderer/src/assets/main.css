@@ -1672,8 +1672,20 @@ a,
 }
 
 .rec-resume {
-  margin-left: 7px;
   font-size: 13px;
   font-weight: 500;
   color: #5f7247;
+  white-space: nowrap;
+}
+
+/* With a label the record button is a pill, not a fixed circle. */
+.record-btn.resume {
+  width: auto;
+  padding: 0 14px 0 11px;
+  gap: 7px;
+}
+
+/* The generate spinner sits on a dark button — keep it visible. */
+.generate-cta .spinner {
+  margin-right: 7px;
 }

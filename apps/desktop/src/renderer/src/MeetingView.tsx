@@ -624,20 +624,24 @@ export default function MeetingView({
         </div>
       )}
 
-      {!capturing &&
-        allSegments.length > 0 &&
-        enhancedMarkdown === null &&
-        enhanceStatus !== 'running' && (
-          <button
-            type="button"
-            className="generate-cta"
-            disabled={!canEnhance}
-            title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
-            onClick={() => void runEnhance()}
-          >
-            ✨ Generate notes
-          </button>
-        )}
+      {!capturing && allSegments.length > 0 && enhancedMarkdown === null && (
+        <button
+          type="button"
+          className="generate-cta"
+          disabled={!canEnhance}
+          title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
+          onClick={() => void runEnhance()}
+        >
+          {enhanceStatus === 'running' ? (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+            </>
+          ) : (
+            <>✨ Generate notes</>
+          )}
+        </button>
+      )}
 
       <div className="bottom-bar">
         <div className="rec-pill">
@@ -671,7 +675,7 @@ export default function MeetingView({
             <>
               <button
                 type="button"
-                className="record-btn"
+                className={allSegments.length > 0 ? 'record-btn resume' : 'record-btn'}
                 onClick={startRecording}
                 title={allSegments.length > 0 ? 'Resume recording' : 'Start recording'}
               >
@@ -690,30 +694,26 @@ export default function MeetingView({
           )}
         </div>
 
-        <button
-          type="button"
-          className="enhance-chip"
-          disabled={!canEnhance}
-          title={
-            !modelReady
-              ? 'Activate a notes model in Settings first'
-              : allSegments.length === 0
-                ? 'Record the meeting first'
-                : enhancedMarkdown !== null
-                  ? 'Regenerate notes'
-                  : 'Generate notes'
-          }
-          onClick={() => void runEnhance()}
-        >
-          {enhanceStatus === 'running' ? (
-            <>
-              <span className="spinner" aria-hidden="true" />
-              {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
-            </>
-          ) : (
-            <>✨ {enhancedMarkdown !== null ? 'Regenerate notes' : 'Generate notes'}</>
-          )}
-        </button>
+        {/* The bar chip only handles regeneration once notes exist; first-time
+            generation belongs to the big centered CTA. */}
+        {enhancedMarkdown !== null && !capturing && (
+          <button
+            type="button"
+            className="enhance-chip"
+            disabled={!canEnhance}
+            title={!modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'}
+            onClick={() => void runEnhance()}
+          >
+            {enhanceStatus === 'running' ? (
+              <>
+                <span className="spinner" aria-hidden="true" />
+                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+              </>
+            ) : (
+              <>✨ Regenerate notes</>
+            )}
+          </button>
+        )}
       </div>
     </div>
   )
