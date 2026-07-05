@@ -17,6 +17,8 @@ interface SessionState {
   partials: Partial<Record<EngineChannel, string>>
   echoCount: number
   error: string | null
+  /** True once the ASR models finished warming and transcription is live. */
+  transcribing: boolean
 }
 
 const initialSessionState: SessionState = {
@@ -25,7 +27,8 @@ const initialSessionState: SessionState = {
   segments: [],
   partials: {},
   echoCount: 0,
-  error: null
+  error: null,
+  transcribing: false
 }
 
 const ACTIVE_PHASES: readonly Phase[] = ['starting', 'recording', 'finishing']
@@ -54,6 +57,9 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         const which = (ev.permission ?? 'capture').replace(/_/g, ' ')
         return { ...state, statusText: `Waiting for macOS permission — ${which}` }
       }
+      if (ev.stage === 'transcribing') {
+        return { ...state, transcribing: true, statusText: '' }
+      }
       return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
     }
     case 'ready':
@@ -61,7 +67,7 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       return { ...state, phase: 'recording', statusText: '' }
     case 'partial':
       if (!active || !ev.channel) return state
-      return { ...state, partials: { ...state.partials, [ev.channel]: ev.text } }
+      return { ...state, transcribing: true, partials: { ...state.partials, [ev.channel]: ev.text } }
     case 'segments': {
       // Never attribute segments to a meeting whose view didn't run a session.
       if (state.phase === 'idle') return state
@@ -579,7 +585,11 @@ export default function MeetingView({
               <div className="tp-empty">
                 <p className="tp-empty-title">Transcript on…</p>
                 <p className="tp-empty-sub">
-                  {capturing ? 'Start talking' : 'Hit record and start talking'}
+                  {capturing
+                    ? state.transcribing
+                      ? 'Start talking'
+                      : 'Warming up transcription — keep talking, your audio is being captured'
+                    : 'Hit record and start talking'}
                 </p>
               </div>
             ) : (

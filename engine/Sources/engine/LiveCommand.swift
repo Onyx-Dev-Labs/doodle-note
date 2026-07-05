@@ -86,6 +86,8 @@ enum LiveCommand {
         try await systemPipeline?.prepare()
         micPipeline?.begin()
         systemPipeline?.begin()
+        // Warm-up complete — hosts can flip from "warming up" to live UI.
+        Events.emit(["event": "status", "stage": "transcribing"])
 
         await StopController.shared.wait(timeoutSeconds: seconds)
         Events.emit(["event": "status", "stage": "finishing"])

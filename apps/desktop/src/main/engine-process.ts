@@ -134,9 +134,12 @@ export class EngineProcess {
     if (!child) return
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM')
+      // Generous grace period: on stop the engine may still be finishing model
+      // warm-up and then has to transcribe all queued audio before it can emit
+      // finals — killing it early throws the user's words away.
       const forceKill = setTimeout(() => {
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-      }, 3000)
+      }, 20_000)
       forceKill.unref()
       child.once('close', () => clearTimeout(forceKill))
     }
