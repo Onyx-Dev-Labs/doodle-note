@@ -358,6 +358,12 @@ export default function MeetingView({
     else if (phase === 'ended' && allSegments.length === 0) setEmptyNotice(true)
   }, [phase, allSegments.length])
 
+  // When the session ends, tuck the transcript panel away so the Generate
+  // notes CTA takes the stage (it renders in the space the panel covers).
+  useEffect(() => {
+    if (phase === 'ended') setTranscriptOpen(false)
+  }, [phase])
+
   // Flush pending note edits when leaving the view entirely.
   useEffect(() => {
     return () => {
