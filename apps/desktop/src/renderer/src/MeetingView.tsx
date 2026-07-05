@@ -691,6 +691,23 @@ export default function MeetingView({
                 </button>
               </span>
             )}
+            {enhancedMarkdown !== null && !capturing && (
+              <button
+                type="button"
+                className="chip chip-regen"
+                disabled={!canEnhance}
+                title={!modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'}
+                aria-label="Regenerate notes"
+                onClick={() => void runEnhance()}
+              >
+                {enhanceStatus === 'running' ? <span className="spinner" aria-hidden="true" /> : '↻'}
+              </button>
+            )}
+            {enhancedMarkdown !== null && enhanceStatus === 'running' && (
+              <span className="chip-regen-status">
+                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+              </span>
+            )}
           </div>
 
           <EditorContent editor={editor} className="doc-editor" />
@@ -913,27 +930,6 @@ export default function MeetingView({
             </>
           )}
         </div>
-
-        {/* The bar chip only handles regeneration once notes exist; first-time
-            generation belongs to the big centered CTA. */}
-        {enhancedMarkdown !== null && !capturing && (
-          <button
-            type="button"
-            className="enhance-chip"
-            disabled={!canEnhance}
-            title={!modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'}
-            onClick={() => void runEnhance()}
-          >
-            {enhanceStatus === 'running' ? (
-              <>
-                <span className="spinner" aria-hidden="true" />
-                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
-              </>
-            ) : (
-              <>✨ Regenerate notes</>
-            )}
-          </button>
-        )}
 
         <form
           className="ask-bar"

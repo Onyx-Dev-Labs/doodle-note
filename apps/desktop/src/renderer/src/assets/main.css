@@ -1918,3 +1918,53 @@ a,
 .generate-cta .spinner {
   margin-right: 7px;
 }
+
+/* ============ bottom bar declutter (2 elements: record + ask) ============ */
+
+.bottom-bar {
+  width: min(720px, calc(100% - 48px));
+  gap: 12px;
+}
+
+.ask-bar {
+  min-height: 46px;
+  padding: 6px 8px 6px 18px;
+  box-shadow: var(--shadow-pill);
+}
+
+.ask-input {
+  font-size: 14px;
+}
+
+/* Regenerate lives in the chips row beside the Enhanced toggle. */
+.chip-regen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  font-size: 14px;
+  color: var(--accent-deep);
+}
+
+.chip-regen:hover:not(:disabled) {
+  background: var(--sage-fill);
+}
+
+.chip-regen:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chip-regen-status {
+  font-size: 12px;
+  color: var(--muted);
+  align-self: center;
+}
+
+/* Roomier conversation panel — the chat is the hero when open. */
+.chat-panel {
+  width: min(720px, calc(100% - 48px));
+  height: min(560px, 66vh);
+  bottom: 86px;
+}
