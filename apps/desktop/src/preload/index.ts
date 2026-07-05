@@ -65,9 +65,11 @@ import {
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
+  CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
   type CalendarApi,
   type CalendarConfigUpdate,
+  type CalendarPrefsUpdate,
   type CalendarStartMeetingEvent,
   type CalendarState
 } from '../shared/calendar-api'
@@ -200,6 +202,10 @@ const calendarApi: CalendarApi = {
 
   setConfig(config: CalendarConfigUpdate): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_SET_CONFIG_CHANNEL, config) as Promise<CalendarState>
+  },
+
+  setPrefs(update: CalendarPrefsUpdate): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_SET_PREFS_CHANNEL, update) as Promise<CalendarState>
   },
 
   connect(): Promise<CalendarState> {

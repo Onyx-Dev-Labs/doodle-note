@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CalendarState } from '../../shared/calendar-api'
+import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type {
   CloudProvider,
   EngineChoice,
@@ -54,6 +54,77 @@ function MicrosoftLogo(): React.JSX.Element {
       <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
       <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
     </svg>
+  )
+}
+
+/** A macOS-style menu bar (screen with the top strip highlighted). */
+function MenuBarIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+      <line x1="1.5" y1="5.5" x2="14.5" y2="5.5" />
+      <circle cx="12" cy="4" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function PeopleIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="5.6" cy="5.4" r="2.2" />
+      <path d="M1.6 13.4c0-2.2 1.8-4 4-4s4 1.8 4 4" />
+      <circle cx="11.6" cy="6" r="1.8" />
+      <path d="M11.2 9.5c1.9.3 3.3 1.9 3.3 3.9" />
+    </svg>
+  )
+}
+
+/** Light-theme switch (sage when on), used by the calendar display prefs. */
+function Toggle({
+  checked,
+  onChange,
+  disabled = false,
+  label,
+  title
+}: {
+  checked: boolean
+  onChange: () => void
+  disabled?: boolean
+  /** Accessible name — the visible label lives in the surrounding row. */
+  label: string
+  title?: string
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={checked ? 'toggle on' : 'toggle'}
+      disabled={disabled}
+      {...(title !== undefined ? { title } : {})}
+      onClick={onChange}
+    >
+      <span className="toggle-knob" aria-hidden="true" />
+    </button>
   )
 }
 
@@ -132,6 +203,41 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
 
   const disconnectCalendar = async (): Promise<void> => {
     setCalState(await window.calendar.disconnect())
+  }
+
+  /** Partial display-prefs update; main persists and echoes the new state. */
+  const setCalPrefs = (update: CalendarPrefsUpdate): void => {
+    void window.calendar
+      .setPrefs(update)
+      .then(adoptCalState)
+      .catch(() => {})
+  }
+
+  /**
+   * The effective visible set for the toggles: the saved list, or — while
+   * visibleCalendarIds is null — the default calendar (first one as a last
+   * resort, mirroring the service).
+   */
+  const visibleCalendarIds = (state: CalendarState): Set<string> => {
+    if (state.prefs.visibleCalendarIds !== null) return new Set(state.prefs.visibleCalendarIds)
+    const defaults = state.calendars.filter((c) => c.isDefault).map((c) => c.id)
+    if (defaults.length === 0 && state.calendars.length > 0) {
+      const first = state.calendars[0]
+      if (first) return new Set([first.id])
+    }
+    return new Set(defaults)
+  }
+
+  /** Flip one calendar row, keeping at least one calendar visible. */
+  const toggleCalendar = (state: CalendarState, id: string): void => {
+    const next = visibleCalendarIds(state)
+    if (next.has(id)) {
+      if (next.size === 1) return // min one visible
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    setCalPrefs({ visibleCalendarIds: [...next] })
   }
 
   const refresh = useCallback(() => {
@@ -364,6 +470,91 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
               <button type="button" onClick={() => void disconnectCalendar()}>
                 Disconnect
               </button>
+            </div>
+
+            <div className="cal-subcard">
+              <div className="cal-subcard-head">Display</div>
+              <div className="cal-row">
+                <span className="cal-row-icon">
+                  <MenuBarIcon />
+                </span>
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                  <span className="cal-row-sub">
+                    Display your next meeting and time until it starts in the macOS menu bar
+                  </span>
+                </span>
+                <Toggle
+                  checked={calState.prefs.showMenuBar}
+                  label="Show upcoming meetings in menu bar"
+                  onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
+                />
+              </div>
+              <div className="cal-row">
+                <span className="cal-row-icon">
+                  <PeopleIcon />
+                </span>
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Show events with no participants</span>
+                  <span className="cal-row-sub">
+                    &ldquo;Coming up&rdquo; section will include events without participants or a
+                    video link
+                  </span>
+                </span>
+                <Toggle
+                  checked={calState.prefs.showNoParticipants}
+                  label="Show events with no participants"
+                  onChange={() =>
+                    setCalPrefs({ showNoParticipants: !calState.prefs.showNoParticipants })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="cal-subcard">
+              <div className="cal-subcard-head">
+                Visible calendars
+                <button
+                  type="button"
+                  className="link-btn cal-reset"
+                  title="Back to your default calendar only"
+                  onClick={() => setCalPrefs({ visibleCalendarIds: null })}
+                >
+                  Reset
+                </button>
+              </div>
+              {calState.calendars.length === 0 ? (
+                <div className="cal-row">
+                  <span className="calendar-note">
+                    No calendars synced yet — hit Sync now above
+                  </span>
+                </div>
+              ) : (
+                calState.calendars.map((cal) => {
+                  const visible = visibleCalendarIds(calState)
+                  const isOn = visible.has(cal.id)
+                  const lastOne = isOn && visible.size === 1
+                  return (
+                    <div key={cal.id} className="cal-row">
+                      <span
+                        className="cal-dot"
+                        style={{ background: cal.colorHex }}
+                        aria-hidden="true"
+                      />
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">{cal.name}</span>
+                      </span>
+                      <Toggle
+                        checked={isOn}
+                        disabled={lastOne}
+                        label={`Show ${cal.name} in Coming up`}
+                        title={lastOne ? 'At least one calendar stays visible' : undefined}
+                        onChange={() => toggleCalendar(calState, cal.id)}
+                      />
+                    </div>
+                  )
+                })
+              )}
             </div>
           </div>
         )}

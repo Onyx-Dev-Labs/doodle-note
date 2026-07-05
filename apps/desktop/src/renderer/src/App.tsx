@@ -10,7 +10,7 @@ import DevConsole from './DevConsole'
 import HomeView, { type HomeFilter } from './HomeView'
 import MeetingView from './MeetingView'
 import ModelsView from './ModelsView'
-import mascotUrl from './assets/doodlenote-logo.png'
+import mascotUrl from './assets/mascot-square.png'
 
 type ViewId = 'home' | 'editor' | 'settings' | 'dev'
 
@@ -283,9 +283,7 @@ function App(): React.JSX.Element {
         <aside className="sidebar">
           <div className="sidebar-top drag">
             <div className="wordmark no-drag" onClick={goHome} role="button" tabIndex={0}>
-              <span className="mascot">
-                <img src={mascotUrl} alt="" draggable={false} />
-              </span>
+              <img className="mascot-img" src={mascotUrl} alt="" draggable={false} />
               <span className="wordmark-text">
                 <span className="wm-doodle">Doodle</span>
                 <span className="wm-note">Note</span>

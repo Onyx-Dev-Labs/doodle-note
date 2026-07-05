@@ -468,6 +468,46 @@ a,
 
 /* ---- Coming up: real Microsoft 365 events ---- */
 
+/* Heading row outside the white card: serif title + settings/paging controls. */
+.cu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0 12px;
+}
+
+.cu-head .home-heading {
+  margin: 0;
+}
+
+.cu-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cu-ctl {
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.cu-ctl:hover:not(:disabled) {
+  background: var(--card);
+  color: var(--ink);
+}
+
+.cu-ctl:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .coming-up.has-events {
   padding: 8px 16px;
   display: flex;
@@ -485,7 +525,7 @@ a,
 }
 
 .cu-date {
-  width: 36px;
+  width: 40px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -501,11 +541,26 @@ a,
   line-height: 1.1;
 }
 
+.cu-date-month {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
 .cu-date-wd {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
+}
+
+/* The red-orange "today" marker under the date rail. */
+.cu-today-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #e8804f;
+  margin-top: 4px;
 }
 
 .cu-events {
@@ -527,8 +582,19 @@ a,
   width: 3px;
   align-self: stretch;
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--accent); /* overridden inline by the calendar's colorHex */
   flex-shrink: 0;
+}
+
+/* Grey accent bar + muted text for today's "No events today" row. */
+.cu-bar-muted {
+  background: var(--border);
+}
+
+.cu-no-events {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 3px 0;
 }
 
 .cu-main {
@@ -2127,6 +2193,117 @@ button.fp-row:hover {
   font-weight: 600;
 }
 
+/* Signed-in calendar prefs: "Display" + "Visible calendars" sub-cards. */
+
+.cal-subcard {
+  margin-top: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px 16px 6px;
+  max-width: 560px;
+}
+
+.cal-subcard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 12px 0 6px;
+}
+
+.cal-reset {
+  font-size: 12px;
+}
+
+.cal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+}
+
+.cal-row + .cal-row {
+  border-top: 1px solid var(--border);
+}
+
+.cal-row-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.cal-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cal-row-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.cal-row-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* Per-calendar color chip in the Visible calendars list. */
+.cal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin: 0 7px;
+}
+
+/* Light-theme switch — sage when on. */
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 21px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #d8d5c9;
+  transition: background 0.15s ease;
+}
+
+.toggle.on {
+  background: var(--accent);
+}
+
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s ease;
+}
+
+.toggle.on .toggle-knob {
+  transform: translateX(15px);
+}
+
 /* =====================================================================
    Dev console — the old dark developer palette, scoped to .dev-dark so
    it can never leak into the product surfaces.
@@ -2713,4 +2890,27 @@ button.fp-row:hover {
   border-radius: 999px;
   padding: 2px 8px;
   margin-left: 2px;
+}
+
+/* ============ bigger, cleaner sidebar branding ============ */
+
+.sidebar-top {
+  padding: 46px 4px 14px;
+}
+
+.wordmark {
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.mascot-img {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 10px;
+}
+
+.wordmark-text {
+  font-size: 18.5px;
+  letter-spacing: -0.015em;
 }

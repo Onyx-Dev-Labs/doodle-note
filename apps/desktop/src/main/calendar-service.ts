@@ -1,4 +1,14 @@
-import { app, BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  safeStorage,
+  shell,
+  Tray
+} from 'electron'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
@@ -14,28 +24,44 @@ import {
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
+  CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
+  DEFAULT_CALENDAR_PREFS,
   type CalendarAccount,
   type CalendarConfigUpdate,
   type CalendarEvent,
+  type CalendarInfo,
+  type CalendarPrefs,
+  type CalendarPrefsUpdate,
   type CalendarStartMeetingEvent,
   type CalendarState
 } from '../shared/calendar-api'
 import { BUILT_IN_MS_CLIENT_ID, BUILT_IN_MS_TENANT } from '../shared/ms-app'
+import {
+  filterByParticipants,
+  graphColorToHex,
+  mergeCalendarEvents,
+  nextTrayEvent,
+  resolveVisibleCalendars,
+  trayTitle,
+  upcomingTrayEvents
+} from './calendar-events'
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
 
 /** Delegated Graph permissions; offline_access keeps the refresh token. */
 const SCOPES = ['User.Read', 'Calendars.Read', 'offline_access']
-/** Poll Graph for the upcoming week this often while signed in. */
+/** Poll Graph for the upcoming window this often while signed in. */
 const POLL_INTERVAL_MS = 5 * 60_000
-/** Meeting-start watcher cadence. */
+/** Meeting-start watcher + menu-bar countdown cadence. */
 const WATCH_INTERVAL_MS = 30_000
 /** Window-focus refreshes are skipped when the last sync is this fresh. */
 const FOCUS_REFRESH_MIN_GAP_MS = 60_000
 /** Give up waiting for the browser sign-in after this long. */
 const CONNECT_TIMEOUT_MS = 5 * 60_000
-/** How far ahead the "Coming up" card looks. */
-const LOOKAHEAD_DAYS = 7
+/** How far ahead the "Coming up" card looks (two 7-day pages). */
+const LOOKAHEAD_DAYS = 14
+/** Tray click menu lists this many upcoming meetings. */
+const TRAY_MENU_EVENTS = 3
 
 /**
  * Branded landing pages served by the local OAuth redirect during sign-in.
@@ -76,9 +102,18 @@ interface StoredCalendarConfig {
   tenantId: string
 }
 
-/** What lands in userData/calendar-cache.json (no secrets, ever). */
+/**
+ * What lands in userData/calendar-settings.json: the optional custom app
+ * registration (as before) plus the display prefs, all in one flat object so
+ * older files (ids only) and newer files (prefs only, or both) read fine.
+ */
+interface StoredCalendarSettings extends Partial<StoredCalendarConfig>, Partial<CalendarPrefs> {}
+
+/** What lands in userData/calendar-cache.json (no secrets, ever). Events are
+ *  stored unfiltered; the no-participants pref is applied on the way out. */
 interface StoredCalendarCache {
   events: CalendarEvent[]
+  calendars?: CalendarInfo[]
   lastSyncIso?: string
   account?: CalendarAccount
 }
@@ -93,12 +128,18 @@ export type CalendarBroadcast = (channel: string, payload: unknown) => void
  *   shell.openExternal). The MSAL token cache persists to
  *   userData/calendar-token-cache, encrypted with safeStorage — plaintext
  *   tokens never touch disk. Refresh is silent; interactive only on Connect.
- * - Graph /me/calendarview polling (next 7 days) every 5 minutes while signed
- *   in, plus on connect and window focus; results are cached in memory and in
- *   userData/calendar-cache.json so the Home card fills instantly on boot.
+ * - Graph polling every 5 minutes while signed in (plus on connect and window
+ *   focus): the calendar list (/me/calendars) and then each visible
+ *   calendar's /calendarView for the next 14 days, fetched in parallel and
+ *   merged (calendar-events.ts holds the pure logic). Results are cached in
+ *   memory and in userData/calendar-cache.json so the Home card fills
+ *   instantly on boot. Display prefs (menu bar, no-participant events,
+ *   visible calendars) live additively in userData/calendar-settings.json.
  * - A 30s meeting-start watcher (pure decision logic in calendar-watcher.ts)
  *   that fires an OS notification + a renderer broadcast; notified event ids
  *   persist in userData/calendar-notified.json.
+ * - A text-only macOS menu-bar Tray showing the next meeting and countdown,
+ *   created/destroyed here as sign-in state, prefs and events change.
  *
  * Every IPC entry point resolves to a CalendarState — errors are strings on
  * that state, never rejected promises.
@@ -110,16 +151,21 @@ export class CalendarService {
   private readonly notifiedPath: string
 
   private config: StoredCalendarConfig | null
+  private prefs: CalendarPrefs
   private pca: PublicClientApplication | null = null
   private account: AccountInfo | null = null
   private accountView: CalendarAccount | null = null
-  private events: CalendarEvent[] = []
+  /** All fetched events (merged, sorted, unfiltered) — what the cache stores. */
+  private rawEvents: CalendarEvent[] = []
+  /** The account's calendars from GET /me/calendars. */
+  private calendars: CalendarInfo[] = []
   private lastSyncIso: string | undefined
   private lastError: string | undefined
   private notified: Record<string, string>
 
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private watchTimer: ReturnType<typeof setInterval> | null = null
+  private tray: Tray | null = null
   private connectBusy = false
   private refreshBusy = false
   private disposed = false
@@ -137,13 +183,32 @@ export class CalendarService {
     this.tokenCachePath = join(userDataDir, 'calendar-token-cache')
     this.eventCachePath = join(userDataDir, 'calendar-cache.json')
     this.notifiedPath = join(userDataDir, 'calendar-notified.json')
-    this.config = this.loadConfig()
+    const settings = this.loadSettings()
+    this.config = settings.config
+    this.prefs = settings.prefs
     this.notified = this.loadNotified()
     const cache = this.loadEventCache()
-    this.events = cache.events
+    this.rawEvents = cache.events
+    this.calendars = cache.calendars ?? []
     this.lastSyncIso = cache.lastSyncIso
     this.accountView = cache.account ?? null
     this.ready = this.bootstrap()
+  }
+
+  /** The canonical event list every consumer sees (broadcast, watcher, tray):
+   *  raw events narrowed to the visible calendars (so a toggle takes effect
+   *  before the refetch lands) with the no-participants pref applied. */
+  private visibleEvents(): CalendarEvent[] {
+    let events = filterByParticipants(this.rawEvents, this.prefs.showNoParticipants)
+    if (this.calendars.length > 0) {
+      const visibleIds = new Set(
+        resolveVisibleCalendars(this.calendars, this.prefs.visibleCalendarIds).map((c) => c.id)
+      )
+      // '' marks legacy cache entries from before multi-calendar — keep them
+      // until the next sync stamps real calendar ids.
+      events = events.filter((e) => e.calendarId === '' || visibleIds.has(e.calendarId))
+    }
+    return events
   }
 
   registerIpc(): void {
@@ -154,6 +219,10 @@ export class CalendarService {
     ipcMain.handle(CALENDAR_SET_CONFIG_CHANNEL, async (_event, update: unknown) => {
       await this.ready
       return this.setConfig((update ?? {}) as Partial<CalendarConfigUpdate>)
+    })
+    ipcMain.handle(CALENDAR_SET_PREFS_CHANNEL, async (_event, update: unknown) => {
+      await this.ready
+      return this.setPrefs((update ?? {}) as CalendarPrefsUpdate)
     })
     ipcMain.handle(CALENDAR_CONNECT_CHANNEL, async () => {
       await this.ready
@@ -183,6 +252,7 @@ export class CalendarService {
   dispose(): void {
     this.disposed = true
     this.stopTimers()
+    this.destroyTray()
   }
 
   /* ---- state ---- */
@@ -195,7 +265,9 @@ export class CalendarService {
       ...(this.config ? { clientId: this.config.clientId, tenantId: this.config.tenantId } : {}),
       signedIn,
       ...(signedIn && this.accountView ? { account: this.accountView } : {}),
-      events: signedIn ? this.events : [],
+      events: signedIn ? this.visibleEvents() : [],
+      calendars: signedIn ? this.calendars : [],
+      prefs: { ...this.prefs },
       ...(this.lastSyncIso ? { lastSyncIso: this.lastSyncIso } : {}),
       ...(this.lastError ? { error: this.lastError } : {})
     }
@@ -274,7 +346,7 @@ export class CalendarService {
       // Tokens are minted per app registration — a new one starts signed out.
       this.forgetSession()
       this.config = { clientId, tenantId }
-      this.saveConfig()
+      this.saveSettings()
       try {
         this.pca = this.buildClient(this.config)
       } catch (err) {
@@ -283,6 +355,42 @@ export class CalendarService {
       }
     }
     this.broadcastState()
+    return this.state()
+  }
+
+  /* ---- display prefs ---- */
+
+  /**
+   * Partial prefs update from Settings: merge, persist, retune the tray and
+   * rebroadcast immediately (the participants filter applies in-memory), then
+   * refetch in the background when the visible-calendar set changed — that is
+   * the only pref that alters what Graph is asked for.
+   */
+  private setPrefs(update: CalendarPrefsUpdate): CalendarState {
+    const next: CalendarPrefs = { ...this.prefs }
+    if (typeof update.showMenuBar === 'boolean') next.showMenuBar = update.showMenuBar
+    if (typeof update.showNoParticipants === 'boolean') {
+      next.showNoParticipants = update.showNoParticipants
+    }
+    let visibilityChanged = false
+    if (update.visibleCalendarIds === null) {
+      visibilityChanged = this.prefs.visibleCalendarIds !== null
+      next.visibleCalendarIds = null
+    } else if (Array.isArray(update.visibleCalendarIds)) {
+      const ids = update.visibleCalendarIds.filter(
+        (id): id is string => typeof id === 'string' && id.length > 0
+      )
+      visibilityChanged =
+        this.prefs.visibleCalendarIds === null ||
+        ids.length !== this.prefs.visibleCalendarIds.length ||
+        ids.some((id, i) => this.prefs.visibleCalendarIds?.[i] !== id)
+      next.visibleCalendarIds = ids
+    }
+    this.prefs = next
+    this.saveSettings()
+    this.updateTray()
+    this.broadcastState()
+    if (visibilityChanged && this.account) void this.refreshEvents()
     return this.state()
   }
 
@@ -371,14 +479,17 @@ export class CalendarService {
     return this.state()
   }
 
-  /** Drop every trace of the signed-in session (tokens, events, identity). */
+  /** Drop every trace of the signed-in session (tokens, events, identity).
+   *  Display prefs survive — they are settings, not session data. */
   private forgetSession(): void {
     this.account = null
     this.accountView = null
-    this.events = []
+    this.rawEvents = []
+    this.calendars = []
     this.lastSyncIso = undefined
     this.lastError = undefined
     this.stopTimers()
+    this.destroyTray()
     for (const path of [this.tokenCachePath, this.eventCachePath]) {
       try {
         rmSync(path, { force: true })
@@ -476,8 +587,29 @@ export class CalendarService {
     try {
       const token = await this.getAccessToken()
       if (token === null) return // lastError already explains
-      const events = await this.fetchCalendarView(token)
-      this.events = events
+      this.calendars = await this.fetchCalendars(token)
+      const visible = resolveVisibleCalendars(this.calendars, this.prefs.visibleCalendarIds)
+      // Per-calendar fetches run in parallel; one failing shared calendar
+      // must not kill the sync, so failures are collected, not thrown.
+      const results = await Promise.allSettled(
+        visible.map((calendar) => this.fetchCalendarView(token, calendar))
+      )
+      const lists: CalendarEvent[][] = []
+      let firstFailure: unknown
+      results.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          lists.push(result.value)
+        } else {
+          firstFailure ??= result.reason
+          console.error(`[calendar] sync failed for “${visible[i]?.name}”:`, result.reason)
+        }
+      })
+      // …but when every fetch failed there is nothing fresh at all — surface
+      // the first reason and keep the previous events.
+      if (lists.length === 0 && visible.length > 0) {
+        throw firstFailure instanceof Error ? firstFailure : new Error(String(firstFailure))
+      }
+      this.rawEvents = mergeCalendarEvents(lists)
       this.lastSyncIso = new Date().toISOString()
       this.lastError = undefined
       this.saveEventCache()
@@ -487,27 +619,69 @@ export class CalendarService {
       this.lastError = friendlyError(err)
     } finally {
       this.refreshBusy = false
+      this.updateTray()
       this.broadcastState()
     }
   }
 
-  private async fetchCalendarView(accessToken: string): Promise<CalendarEvent[]> {
+  /** GET /me/calendars — the account's calendar list. Falls back to the
+   *  cached list when Graph hiccups so a blip never blanks the sync. */
+  private async fetchCalendars(accessToken: string): Promise<CalendarInfo[]> {
+    const params = new URLSearchParams({
+      $select: 'id,name,color,hexColor,isDefaultCalendar,canEdit',
+      $top: '50'
+    })
+    try {
+      const res = await fetch(`https://graph.microsoft.com/v1.0/me/calendars?${params}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+      if (!res.ok) {
+        throw new Error(await graphErrorMessage(res))
+      }
+      const body = (await res.json()) as { value?: unknown }
+      const items = Array.isArray(body.value) ? body.value : []
+      const calendars: CalendarInfo[] = []
+      for (const item of items) {
+        const calendar = normalizeGraphCalendar(item)
+        if (calendar) calendars.push(calendar)
+      }
+      // Every mailbox has a default calendar; an empty list is a Graph blip.
+      if (calendars.length === 0) throw new Error('Microsoft returned no calendars')
+      return calendars
+    } catch (err) {
+      if (this.calendars.length > 0) {
+        console.error('[calendar] calendar list refresh failed, using cached list:', err)
+        return this.calendars
+      }
+      throw err
+    }
+  }
+
+  /** GET /me/calendars/{id}/calendarView for the next LOOKAHEAD_DAYS. */
+  private async fetchCalendarView(
+    accessToken: string,
+    calendar: CalendarInfo
+  ): Promise<CalendarEvent[]> {
     const now = new Date()
     const end = new Date(now.getTime() + LOOKAHEAD_DAYS * 86_400_000)
     const timeZone = systemTimeZone()
     const params = new URLSearchParams({
       startDateTime: now.toISOString(),
       endDateTime: end.toISOString(),
-      $select: 'subject,start,end,isAllDay,isOnlineMeeting,onlineMeeting,location,organizer',
+      $select:
+        'subject,start,end,isAllDay,isOnlineMeeting,onlineMeeting,location,organizer,attendees',
       $orderby: 'start/dateTime',
       $top: '50'
     })
-    const res = await fetch(`https://graph.microsoft.com/v1.0/me/calendarview?${params}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Prefer: `outlook.timezone="${timeZone}"`
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(calendar.id)}/calendarView?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Prefer: `outlook.timezone="${timeZone}"`
+        }
       }
-    })
+    )
     if (!res.ok) {
       throw new Error(await graphErrorMessage(res))
     }
@@ -515,10 +689,9 @@ export class CalendarService {
     const items = Array.isArray(body.value) ? body.value : []
     const events: CalendarEvent[] = []
     for (const item of items) {
-      const event = normalizeGraphEvent(item)
+      const event = normalizeGraphEvent(item, calendar)
       if (event) events.push(event)
     }
-    events.sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))
     return events
   }
 
@@ -526,9 +699,12 @@ export class CalendarService {
 
   private checkMeetingStarts(): void {
     const nowMs = Date.now()
+    // The watcher sees the same filtered list the UI shows — hidden
+    // no-participant events never prompt.
+    const shown = this.visibleEvents()
     const beforePrune = Object.keys(this.notified).length
     this.notified = pruneNotified(this.notified, nowMs)
-    const due = eventsToPromptNow(this.events, nowMs, new Set(Object.keys(this.notified)))
+    const due = eventsToPromptNow(shown, nowMs, new Set(Object.keys(this.notified)))
     if (due.length === 0) {
       // Persist only when the prune actually dropped something — this runs
       // every 30s and must not grind the disk.
@@ -537,7 +713,7 @@ export class CalendarService {
     }
     for (const watchable of due) {
       this.notified[watchable.id] = new Date(nowMs).toISOString()
-      const event = this.events.find((e) => e.id === watchable.id)
+      const event = shown.find((e) => e.id === watchable.id)
       const payload: CalendarStartMeetingEvent = {
         action: 'prompt',
         eventId: watchable.id,
@@ -588,6 +764,72 @@ export class CalendarService {
     }
   }
 
+  /* ---- menu bar (Tray) ---- */
+
+  /**
+   * Reconcile the macOS menu-bar item with current state: a text-only Tray
+   * (empty image + title) showing the next meeting and its countdown. It
+   * exists only while signed in, the pref is on, and a timed event is in the
+   * fetched window — otherwise it is destroyed (an empty tray still occupies
+   * menu-bar space). Refreshed on every poll, pref change and 30s watch tick.
+   */
+  private updateTray(): void {
+    if (process.platform !== 'darwin' || this.disposed) {
+      this.destroyTray()
+      return
+    }
+    const nowMs = Date.now()
+    const shown = this.account !== null && this.prefs.showMenuBar ? this.visibleEvents() : []
+    const next = nextTrayEvent(shown, nowMs)
+    if (next === null) {
+      this.destroyTray()
+      return
+    }
+    try {
+      if (this.tray === null) {
+        this.tray = new Tray(nativeImage.createEmpty())
+        this.tray.setToolTip('DoodleNote — upcoming meetings')
+      }
+      this.tray.setTitle(trayTitle(next, nowMs), { fontType: 'monospacedDigit' })
+      const items: Electron.MenuItemConstructorOptions[] = upcomingTrayEvents(
+        shown,
+        nowMs,
+        TRAY_MENU_EVENTS
+      ).map((event) => ({
+        label: `${trayMenuTime(event.startIso)} — ${event.subject.trim() || 'Untitled meeting'}`,
+        enabled: false
+      }))
+      items.push(
+        { type: 'separator' },
+        { label: 'Open DoodleNote', click: () => this.focusWindow() },
+        {
+          label: 'Hide from menu bar',
+          click: () => {
+            this.setPrefs({ showMenuBar: false })
+          }
+        },
+        { type: 'separator' },
+        { label: 'Quit DoodleNote', click: () => app.quit() }
+      )
+      this.tray.setContextMenu(Menu.buildFromTemplate(items))
+    } catch (err) {
+      // Tray support can be flaky (headless CI, odd window managers) — the
+      // in-app card is the real surface; never let the menu bar break sync.
+      console.error('[calendar] tray update failed:', err)
+      this.destroyTray()
+    }
+  }
+
+  private destroyTray(): void {
+    if (this.tray === null) return
+    try {
+      this.tray.destroy()
+    } catch {
+      // Already gone.
+    }
+    this.tray = null
+  }
+
   /* ---- timers ---- */
 
   private startTimers(): void {
@@ -597,7 +839,10 @@ export class CalendarService {
       this.pollTimer.unref?.()
     }
     if (this.watchTimer === null) {
-      this.watchTimer = setInterval(() => this.checkMeetingStarts(), WATCH_INTERVAL_MS)
+      this.watchTimer = setInterval(() => {
+        this.checkMeetingStarts()
+        this.updateTray() // keep the "in 12m" countdown honest
+      }, WATCH_INTERVAL_MS)
       this.watchTimer.unref?.()
     }
   }
@@ -615,28 +860,49 @@ export class CalendarService {
 
   /* ---- disk (all best-effort; corrupt files read as empty) ---- */
 
-  private loadConfig(): StoredCalendarConfig | null {
+  /**
+   * calendar-settings.json holds the optional custom app registration and the
+   * display prefs side by side. Every field is optional on disk — a pre-prefs
+   * file (ids only), a prefs-only file, or no file at all: all read fine,
+   * with missing prefs falling back to DEFAULT_CALENDAR_PREFS.
+   */
+  private loadSettings(): { config: StoredCalendarConfig | null; prefs: CalendarPrefs } {
+    const prefs: CalendarPrefs = { ...DEFAULT_CALENDAR_PREFS }
+    let config: StoredCalendarConfig | null = null
     try {
-      const raw = JSON.parse(
-        readFileSync(this.settingsPath, 'utf8')
-      ) as Partial<StoredCalendarConfig>
+      const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as StoredCalendarSettings
       if (
         typeof raw.clientId === 'string' &&
         raw.clientId.length > 0 &&
         typeof raw.tenantId === 'string' &&
         raw.tenantId.length > 0
       ) {
-        return { clientId: raw.clientId, tenantId: raw.tenantId }
+        config = { clientId: raw.clientId, tenantId: raw.tenantId }
       }
-      return null
+      if (typeof raw.showMenuBar === 'boolean') prefs.showMenuBar = raw.showMenuBar
+      if (typeof raw.showNoParticipants === 'boolean') {
+        prefs.showNoParticipants = raw.showNoParticipants
+      }
+      if (Array.isArray(raw.visibleCalendarIds)) {
+        prefs.visibleCalendarIds = raw.visibleCalendarIds.filter(
+          (id): id is string => typeof id === 'string' && id.length > 0
+        )
+      }
     } catch {
-      return null // not configured yet
+      // No settings yet — defaults all around.
     }
+    return { config, prefs }
   }
 
-  private saveConfig(): void {
+  private saveSettings(): void {
     try {
-      writeFileSync(this.settingsPath, JSON.stringify(this.config, null, 2))
+      const settings: StoredCalendarSettings = {
+        ...(this.config ?? {}),
+        showMenuBar: this.prefs.showMenuBar,
+        showNoParticipants: this.prefs.showNoParticipants,
+        visibleCalendarIds: this.prefs.visibleCalendarIds
+      }
+      writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2))
     } catch (err) {
       console.error('[calendar] failed to save settings:', err)
     }
@@ -648,10 +914,17 @@ export class CalendarService {
         readFileSync(this.eventCachePath, 'utf8')
       ) as Partial<StoredCalendarCache>
       const events = Array.isArray(raw.events)
-        ? raw.events.filter(isStoredCalendarEvent).filter((e) => Date.parse(e.endIso) > Date.now())
+        ? raw.events
+            .filter(isStoredCalendarEvent)
+            .filter((e) => Date.parse(e.endIso) > Date.now())
+            .map(withEventDefaults)
+        : []
+      const calendars = Array.isArray(raw.calendars)
+        ? raw.calendars.filter(isStoredCalendarInfo)
         : []
       return {
         events,
+        ...(calendars.length > 0 ? { calendars } : {}),
         ...(typeof raw.lastSyncIso === 'string' ? { lastSyncIso: raw.lastSyncIso } : {}),
         ...(raw.account && typeof raw.account.email === 'string'
           ? {
@@ -670,7 +943,8 @@ export class CalendarService {
   private saveEventCache(): void {
     try {
       const cache: StoredCalendarCache = {
-        events: this.events,
+        events: this.rawEvents,
+        ...(this.calendars.length > 0 ? { calendars: this.calendars } : {}),
         ...(this.lastSyncIso ? { lastSyncIso: this.lastSyncIso } : {}),
         ...(this.accountView ? { account: this.accountView } : {})
       }
@@ -742,7 +1016,29 @@ function graphDateTimeToIso(value: unknown): string | null {
   return new Date(ms).toISOString()
 }
 
-function normalizeGraphEvent(item: unknown): CalendarEvent | null {
+/** "9:00 AM" for the Tray click menu rows. */
+function trayMenuTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+function normalizeGraphCalendar(item: unknown): CalendarInfo | null {
+  if (typeof item !== 'object' || item === null) return null
+  const raw = item as Record<string, unknown>
+  if (typeof raw.id !== 'string' || raw.id.length === 0) return null
+  return {
+    id: raw.id,
+    name: typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'Calendar',
+    colorHex: graphColorToHex(raw.color, raw.hexColor),
+    isDefault: raw.isDefaultCalendar === true,
+    canEdit: raw.canEdit === true
+  }
+}
+
+function normalizeGraphEvent(item: unknown, calendar: CalendarInfo): CalendarEvent | null {
   if (typeof item !== 'object' || item === null) return null
   const raw = item as Record<string, unknown>
   if (typeof raw.id !== 'string' || raw.id.length === 0) return null
@@ -766,6 +1062,8 @@ function normalizeGraphEvent(item: unknown): CalendarEvent | null {
           ? organizer.emailAddress.address
           : undefined
       : undefined
+  const isOnlineMeeting = raw.isOnlineMeeting === true
+  const attendeeCount = Array.isArray(raw.attendees) ? raw.attendees.length : 0
 
   return {
     id: raw.id,
@@ -773,7 +1071,10 @@ function normalizeGraphEvent(item: unknown): CalendarEvent | null {
     startIso,
     endIso,
     isAllDay: raw.isAllDay === true,
-    isOnlineMeeting: raw.isOnlineMeeting === true,
+    isOnlineMeeting,
+    calendarId: calendar.id,
+    colorHex: calendar.colorHex,
+    hasParticipants: attendeeCount > 0 || isOnlineMeeting,
     ...(joinUrl ? { joinUrl } : {}),
     ...(location && typeof location.displayName === 'string' && location.displayName
       ? { location: location.displayName }
@@ -782,6 +1083,9 @@ function normalizeGraphEvent(item: unknown): CalendarEvent | null {
   }
 }
 
+/** Validates the pre-multi-calendar core of a cached event; the newer fields
+ *  (calendarId, colorHex, hasParticipants) are defaulted by withEventDefaults
+ *  so a cache written by an older build still loads. */
 function isStoredCalendarEvent(value: unknown): value is CalendarEvent {
   if (typeof value !== 'object' || value === null) return false
   const e = value as Partial<CalendarEvent>
@@ -795,6 +1099,31 @@ function isStoredCalendarEvent(value: unknown): value is CalendarEvent {
     Number.isFinite(Date.parse(e.endIso)) &&
     typeof e.isAllDay === 'boolean' &&
     typeof e.isOnlineMeeting === 'boolean'
+  )
+}
+
+/** Fill fields a legacy cache entry predates: unknown calendar, default
+ *  accent, and hasParticipants=true so nothing vanishes behind the filter. */
+function withEventDefaults(e: CalendarEvent): CalendarEvent {
+  const { colorHex, ...rest } = e
+  return {
+    ...rest,
+    calendarId: typeof e.calendarId === 'string' ? e.calendarId : '',
+    hasParticipants: typeof e.hasParticipants === 'boolean' ? e.hasParticipants : true,
+    ...(typeof colorHex === 'string' ? { colorHex } : {})
+  }
+}
+
+function isStoredCalendarInfo(value: unknown): value is CalendarInfo {
+  if (typeof value !== 'object' || value === null) return false
+  const c = value as Partial<CalendarInfo>
+  return (
+    typeof c.id === 'string' &&
+    c.id.length > 0 &&
+    typeof c.name === 'string' &&
+    typeof c.colorHex === 'string' &&
+    typeof c.isDefault === 'boolean' &&
+    typeof c.canEdit === 'boolean'
   )
 }
 

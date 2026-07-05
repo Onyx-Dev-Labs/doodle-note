@@ -39,6 +39,13 @@ function timeLabel(iso: string): string {
 /** Events starting within this window (or in progress) get a Take notes button. */
 const TAKE_NOTES_LEAD_MS = 10 * 60_000
 
+/** The chevrons page the day window a week at a time… */
+const DAYS_PER_PAGE = 7
+/** …across the service's 14-day fetch: page 0 = days 0–6, page 1 = days 7–13. */
+const LAST_PAGE = 1
+
+const DAY_MS = 86_400_000
+
 /** "9:00 – 10:00 AM": the first meridiem is dropped when both sides share it. */
 function timeRange(startIso: string, endIso: string): string {
   const fmt = (iso: string): string =>
@@ -52,36 +59,101 @@ function timeRange(startIso: string, endIso: string): string {
   return `${start} – ${end}`
 }
 
+/** "7/6/2026, 7:00 PM – 7/7/2026, 7:00 PM" for events spanning days. */
+function multiDayRange(startIso: string, endIso: string): string {
+  const fmt = (iso: string): string => {
+    const d = new Date(iso)
+    const date = d.toLocaleDateString(undefined, {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric'
+    })
+    const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    return `${date}, ${time}`
+  }
+  return `${fmt(startIso)} – ${fmt(endIso)}`
+}
+
+/** All day / same-day range / multi-day range, per event shape. */
+function eventTimeLabel(event: CalendarEvent): string {
+  if (event.isAllDay) return 'All day'
+  const start = new Date(event.startIso)
+  const end = new Date(event.endIso)
+  const sameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate()
+  return sameDay
+    ? timeRange(event.startIso, event.endIso)
+    : multiDayRange(event.startIso, event.endIso)
+}
+
 interface ComingUpDay {
   key: string
   dayNum: string
+  month: string
   weekday: string
+  isToday: boolean
   events: CalendarEvent[]
 }
 
+function dayBucket(dayMs: number, todayMs: number, events: CalendarEvent[]): ComingUpDay {
+  const d = new Date(dayMs)
+  return {
+    key: String(dayMs),
+    dayNum: String(d.getDate()),
+    month: d.toLocaleDateString(undefined, { month: 'short' }),
+    weekday: d.toLocaleDateString(undefined, { weekday: 'short' }),
+    isToday: dayMs === todayMs,
+    events
+  }
+}
+
+/** The date-rail day an event renders under: its start day, clamped to today
+ *  for in-progress multi-day events that began earlier. */
+function displayDayMs(event: CalendarEvent, todayMs: number): number {
+  return Math.max(startOfDay(new Date(event.startIso)), todayMs)
+}
+
 /** Group already-sorted events into day buckets for the date-rail layout. */
-function groupEventsByDay(events: CalendarEvent[]): ComingUpDay[] {
+function groupEventsByDay(events: CalendarEvent[], todayMs: number): ComingUpDay[] {
   const days: ComingUpDay[] = []
   for (const event of events) {
-    const d = new Date(event.startIso)
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    const dayMs = displayDayMs(event, todayMs)
     const last = days[days.length - 1]
-    if (last && last.key === key) {
+    if (last && last.key === String(dayMs)) {
       last.events.push(event)
     } else {
-      days.push({
-        key,
-        dayNum: String(d.getDate()),
-        weekday: d.toLocaleDateString(undefined, { weekday: 'short' }),
-        events: [event]
-      })
+      days.push(dayBucket(dayMs, todayMs, [event]))
     }
   }
   return days
 }
 
-/** The Home "Coming up" card: date rail + sage-accented event rows when
- *  signed in; a "Connect calendar" nudge otherwise. */
+function SlidersIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="1.5" y1="4.5" x2="14.5" y2="4.5" />
+      <line x1="1.5" y1="11.5" x2="14.5" y2="11.5" />
+      <circle cx="6" cy="4.5" r="2" fill="var(--card)" />
+      <circle cx="10.5" cy="11.5" r="2" fill="var(--card)" />
+    </svg>
+  )
+}
+
+/** The Home "Coming up" slot: serif heading outside the card with calendar
+ *  settings + week-paging controls; inside, a date rail (today dot, month)
+ *  and per-calendar-colored event rows when signed in; a "Connect calendar"
+ *  nudge otherwise. */
 function ComingUpCard({
   calendar,
   onStart,
@@ -92,6 +164,9 @@ function ComingUpCard({
   onOpenSettings: () => void
 }): React.JSX.Element {
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [page, setPage] = useState(0)
+
+  const signedIn = calendar?.signedIn === true
 
   const events = useMemo(() => {
     if (!calendar?.signedIn) return []
@@ -110,73 +185,148 @@ function ComingUpCard({
     return () => clearInterval(timer)
   }, [events.length])
 
-  if (!calendar?.signedIn) {
-    return (
-      <div className="card coming-up">
-        <div className="coming-up-empty">
-          Connect your calendar to see your meetings here —{' '}
-          <button type="button" className="link-btn" onClick={onOpenSettings}>
-            Connect calendar →
+  const header = (
+    <div className="cu-head">
+      <h2 className="home-heading">Coming up</h2>
+      {signedIn && (
+        <div className="cu-controls">
+          <button
+            type="button"
+            className="cu-ctl"
+            title="Calendar settings"
+            aria-label="Calendar settings"
+            onClick={onOpenSettings}
+          >
+            <SlidersIcon />
+          </button>
+          <button
+            type="button"
+            className="cu-ctl"
+            disabled={page === 0}
+            title="Earlier days"
+            aria-label="Earlier days"
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="cu-ctl"
+            disabled={page === LAST_PAGE}
+            title="Later days"
+            aria-label="Later days"
+            onClick={() => setPage((p) => Math.min(LAST_PAGE, p + 1))}
+          >
+            ›
           </button>
         </div>
-      </div>
+      )}
+    </div>
+  )
+
+  if (!signedIn) {
+    return (
+      <>
+        {header}
+        <div className="card coming-up">
+          <div className="coming-up-empty">
+            Connect your calendar to see your meetings here —{' '}
+            <button type="button" className="link-btn" onClick={onOpenSettings}>
+              Connect calendar →
+            </button>
+          </div>
+        </div>
+      </>
     )
   }
 
-  if (events.length === 0) {
-    return (
-      <div className="card coming-up">
-        <div className="coming-up-empty">Nothing on your calendar for the next 7 days</div>
-      </div>
-    )
+  const todayMs = startOfDay(new Date(nowMs))
+  const windowStart = todayMs + page * DAYS_PER_PAGE * DAY_MS
+  const windowEnd = windowStart + DAYS_PER_PAGE * DAY_MS
+  const pageEvents = events.filter((e) => {
+    const dayMs = displayDayMs(e, todayMs)
+    return dayMs >= windowStart && dayMs < windowEnd
+  })
+  const days = groupEventsByDay(pageEvents, todayMs)
+  // Today always renders — as a muted "No events today" row when empty.
+  if (page === 0 && days[0]?.isToday !== true) {
+    days.unshift(dayBucket(todayMs, todayMs, []))
   }
 
   return (
-    <div className="card coming-up has-events">
-      {groupEventsByDay(events).map((day) => (
-        <div key={day.key} className="cu-day">
-          <div className="cu-date">
-            <span className="cu-date-num">{day.dayNum}</span>
-            <span className="cu-date-wd">{day.weekday}</span>
-          </div>
-          <div className="cu-events">
-            {day.events.map((event) => {
-              const startMs = Date.parse(event.startIso)
-              const canTakeNotes = !event.isAllDay && startMs - nowMs <= TAKE_NOTES_LEAD_MS
-              return (
-                <div key={event.id} className="cu-event">
-                  <span className="cu-bar" aria-hidden="true" />
-                  <span className="cu-main">
-                    <span className="cu-subject">{event.subject.trim() || 'Untitled meeting'}</span>
-                    <span className="cu-time">
-                      {event.isAllDay ? 'All day' : timeRange(event.startIso, event.endIso)}
-                      {event.isOnlineMeeting && event.joinUrl !== undefined && (
-                        <>
-                          {' · '}
+    <>
+      {header}
+      <div className="card coming-up has-events">
+        {days.length === 0 ? (
+          <div className="coming-up-empty">Nothing scheduled these days</div>
+        ) : (
+          days.map((day) => (
+            <div key={day.key} className="cu-day">
+              <div className="cu-date">
+                <span className="cu-date-num">{day.dayNum}</span>
+                <span className="cu-date-month">{day.month}</span>
+                <span className="cu-date-wd">{day.weekday}</span>
+                {day.isToday && <span className="cu-today-dot" aria-hidden="true" />}
+              </div>
+              <div className="cu-events">
+                {day.events.length === 0 ? (
+                  <div className="cu-event">
+                    <span className="cu-bar cu-bar-muted" aria-hidden="true" />
+                    <span className="cu-main">
+                      <span className="cu-no-events">No events today</span>
+                    </span>
+                  </div>
+                ) : (
+                  day.events.map((event) => {
+                    const startMs = Date.parse(event.startIso)
+                    const canTakeNotes = !event.isAllDay && startMs - nowMs <= TAKE_NOTES_LEAD_MS
+                    return (
+                      <div key={event.id} className="cu-event">
+                        <span
+                          className="cu-bar"
+                          style={event.colorHex ? { background: event.colorHex } : undefined}
+                          aria-hidden="true"
+                        />
+                        <span className="cu-main">
+                          <span className="cu-subject">
+                            {event.subject.trim() || 'Untitled meeting'}
+                          </span>
+                          <span className="cu-time">
+                            {eventTimeLabel(event)}
+                            {event.isOnlineMeeting && event.joinUrl !== undefined && (
+                              <>
+                                {' · '}
+                                <button
+                                  type="button"
+                                  className="cu-join"
+                                  title="Open the meeting link"
+                                  onClick={() => window.open(event.joinUrl, '_blank')}
+                                >
+                                  Join
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        </span>
+                        {canTakeNotes && (
                           <button
                             type="button"
-                            className="cu-join"
-                            title="Open the meeting link"
-                            onClick={() => window.open(event.joinUrl, '_blank')}
+                            className="cu-take-notes"
+                            onClick={() => onStart(event)}
                           >
-                            Join
+                            Take notes
                           </button>
-                        </>
-                      )}
-                    </span>
-                  </span>
-                  {canTakeNotes && (
-                    <button type="button" className="cu-take-notes" onClick={() => onStart(event)}>
-                      Take notes
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </>
   )
 }
 
@@ -438,14 +588,13 @@ export default function HomeView({
       <div className="home-scroll">
         <div className="home-col">
           {filter.kind === 'all' && (
-            <>
-              <h2 className="home-heading">Coming up</h2>
-              <ComingUpCard
-                calendar={calendar}
-                onStart={onStartCalendarMeeting}
-                onOpenSettings={onOpenSettings}
-              />
-            </>
+            // The "Coming up" heading + controls render inside (outside the
+            // white card, above it) so paging state stays local.
+            <ComingUpCard
+              calendar={calendar}
+              onStart={onStartCalendarMeeting}
+              onOpenSettings={onOpenSettings}
+            />
           )}
           {filter.kind === 'folder' && <h2 className="home-heading">📁 {folderName}</h2>}
           {inTrash && <h2 className="home-heading">🗑 Trash</h2>}
