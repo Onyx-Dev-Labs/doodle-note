@@ -233,15 +233,16 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
       <section className="keys-section calendar-section">
         <h3>Calendar</h3>
         <p className="models-sub">
-          Connect Microsoft 365 to see the week&rsquo;s meetings on Home and get a nudge to take
-          notes the moment one starts. DoodleNote only reads your calendar.
+          Sign in with any Microsoft account — work, school, or personal — to see the week&rsquo;s
+          meetings on Home and get a nudge to take notes the moment one starts. DoodleNote only
+          reads your calendar.
         </p>
 
         {calState?.error && <div className="models-error">{calState.error}</div>}
 
         {calState === null ? (
           <span className="calendar-note">loading calendar settings…</span>
-        ) : !calState.configured || editingCalConfig ? (
+        ) : (!calState.configured && !calState.builtIn) || editingCalConfig ? (
           <>
             <div className="key-form">
               <input
@@ -275,15 +276,17 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
         ) : !calState.signedIn ? (
           <div className="calendar-actions">
             <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
-              {connecting ? 'Waiting for your browser…' : 'Connect Microsoft 365'}
+              {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
             </button>
-            <button
-              type="button"
-              className="calendar-ghost"
-              onClick={() => setEditingCalConfig(true)}
-            >
-              Edit IDs
-            </button>
+            {!calState.builtIn && (
+              <button
+                type="button"
+                className="calendar-ghost"
+                onClick={() => setEditingCalConfig(true)}
+              >
+                Edit IDs
+              </button>
+            )}
             {connecting && (
               <span className="calendar-note">
                 finish signing in in your browser, then come back

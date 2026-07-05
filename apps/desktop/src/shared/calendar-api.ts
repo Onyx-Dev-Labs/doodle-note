@@ -43,8 +43,10 @@ export interface CalendarAccount {
 
 /** The one snapshot the renderer works from. */
 export interface CalendarState {
-  /** A Client ID + Tenant ID have been saved. */
+  /** A registration is available (built-in, or saved Client/Tenant IDs). */
   configured: boolean
+  /** True when the app ships with a built-in registration — Settings shows one-click sign-in. */
+  builtIn?: boolean
   /** Saved app-registration ids (not secrets), echoed so Settings can prefill. */
   clientId?: string
   tenantId?: string

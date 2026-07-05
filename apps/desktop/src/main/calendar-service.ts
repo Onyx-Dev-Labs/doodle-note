@@ -21,6 +21,7 @@ import {
   type CalendarStartMeetingEvent,
   type CalendarState
 } from '../shared/calendar-api'
+import { BUILT_IN_MS_CLIENT_ID, BUILT_IN_MS_TENANT } from '../shared/ms-app'
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
 
 /** Delegated Graph permissions; offline_access keeps the refresh token. */
@@ -169,7 +170,8 @@ export class CalendarService {
   private state(): CalendarState {
     const signedIn = this.account !== null
     return {
-      configured: this.config !== null,
+      configured: this.effectiveConfig() !== null,
+      builtIn: BUILT_IN_MS_CLIENT_ID.length > 0,
       ...(this.config ? { clientId: this.config.clientId, tenantId: this.config.tenantId } : {}),
       signedIn,
       ...(signedIn && this.accountView ? { account: this.accountView } : {}),
@@ -183,13 +185,26 @@ export class CalendarService {
     this.broadcast(CALENDAR_EVENTS_CHANNEL, this.state())
   }
 
+  /**
+   * The registration to authenticate against: a user-saved custom config
+   * wins; otherwise the built-in DoodleNote registration (when compiled in).
+   */
+  private effectiveConfig(): StoredCalendarConfig | null {
+    if (this.config) return this.config
+    if (BUILT_IN_MS_CLIENT_ID.length > 0) {
+      return { clientId: BUILT_IN_MS_CLIENT_ID, tenantId: BUILT_IN_MS_TENANT }
+    }
+    return null
+  }
+
   /* ---- boot ---- */
 
   /** Rebuild the MSAL client and adopt a cached account, if any. */
   private async bootstrap(): Promise<void> {
-    if (!this.config) return
+    const config = this.effectiveConfig()
+    if (!config) return
     try {
-      this.pca = this.buildClient(this.config)
+      this.pca = this.buildClient(config)
       const accounts = await this.pca.getTokenCache().getAllAccounts()
       this.account = accounts[0] ?? null
       if (this.account) {
@@ -254,9 +269,13 @@ export class CalendarService {
   /* ---- auth ---- */
 
   private async connect(): Promise<CalendarState> {
-    if (!this.config || !this.pca) {
+    const config = this.effectiveConfig()
+    if (!config) {
       this.lastError = 'Add your Client ID and Tenant ID first, then hit Save.'
       return this.state()
+    }
+    if (!this.pca) {
+      this.pca = this.buildClient(config)
     }
     if (this.connectBusy) {
       this.lastError = 'A sign-in is already in progress — finish it in your browser.'
