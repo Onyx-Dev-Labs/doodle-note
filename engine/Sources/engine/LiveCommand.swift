@@ -73,8 +73,11 @@ enum LiveCommand {
                 )
             }
             Events.emit(["event": "status", "stage": "permission_granted", "permission": "microphone"])
-            // AEC on by default; `--aec off` for A/B comparison.
-            micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] != "off")
+            // AEC is opt-in (`--aec on`): Apple's voice processing fails to
+            // initialize on some setups, and its teardown/retry can leave the
+            // fallback mic silently dead. Cross-channel transcript dedup
+            // handles speaker echo, so reliability wins by default.
+            micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] == "on")
         }
 
         try micCapture?.start()
@@ -84,6 +87,40 @@ enum LiveCommand {
         var ready: [String: Any] = ["event": "ready", "mode": "live"]
         ready["channels"] = [wantMic ? "mic" : nil, wantSystem ? "system" : nil].compactMap { $0 }
         Events.emit(ready)
+
+        // Dead-capture watchdog: a live mic delivers buffers continuously even
+        // in silence, so zero buffers means the capture is dead — restart it
+        // once, then say so loudly. A fake recording session is the worst bug
+        // a meeting app can have.
+        if wantMic, let pipeline = micPipeline {
+            let originalCapture = micCapture
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !pipeline.hasProducedAudio else { return }
+                Events.log("mic produced no audio after 3s — restarting capture")
+                Events.emit(["event": "status", "stage": "mic_restarting", "channel": "mic"])
+                originalCapture?.stop()
+                let retry = MicCapture(into: pipeline, enableAEC: false)
+                do {
+                    try retry.start()
+                } catch {
+                    Events.emit([
+                        "event": "error", "channel": "mic",
+                        "message": "Microphone produced no audio and the restart failed (\(error)). "
+                            + "Check System Settings → Sound → Input, then stop and re-record.",
+                    ])
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if !pipeline.hasProducedAudio {
+                    Events.emit([
+                        "event": "error", "channel": "mic",
+                        "message": "Microphone is not delivering audio — check System Settings → "
+                            + "Sound → Input, then stop and re-record.",
+                    ])
+                }
+            }
+        }
 
         // Load models sequentially (first load may download; second hits cache),
         // then start draining the queued audio.
@@ -135,6 +172,13 @@ final class ChannelPipeline {
         await manager.setPartialTranscriptCallback { text in
             Events.emit(["event": "partial", "channel": ch, "text": text])
         }
+    }
+
+    /// Whether at least one audio buffer has arrived from capture.
+    var hasProducedAudio: Bool {
+        epochLock.lock()
+        defer { epochLock.unlock() }
+        return epochEmitted
     }
 
     /// Called from capture callbacks on arbitrary threads.
@@ -219,7 +263,10 @@ final class MicCapture {
                 return
             } catch {
                 Events.log("AEC engine start failed — retrying without echo cancellation: \(error)")
-                Events.emit(["event": "status", "stage": "aec_unavailable", "channel": "mic"])
+                Events.emit([
+                    "event": "status", "stage": "aec_unavailable", "channel": "mic",
+                    "reason": String(describing: error),
+                ])
                 // The failed engine may be half-configured for voice processing;
                 // discard it entirely rather than trying to unwind its state.
                 engine = AVAudioEngine()
