@@ -2696,3 +2696,21 @@ button.fp-row:hover {
   opacity: 0.6;
   cursor: default;
 }
+
+/* Google sign-in placeholder */
+.ms-signin.google-soon {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.soon-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: var(--sage-fill);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 2px;
+}
