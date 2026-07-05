@@ -10,5 +10,5 @@
  * Empty string = no built-in registration; Settings then falls back to the
  * manual Client ID / Tenant ID form (self-hosters bringing their own).
  */
-export const BUILT_IN_MS_CLIENT_ID = ''
+export const BUILT_IN_MS_CLIENT_ID = 'd270c2a7-6e58-424b-baed-6fd33c56c606'
 export const BUILT_IN_MS_TENANT = 'common'
