@@ -677,11 +677,14 @@ a,
 
 /* ---- floating bottom pill bar ---- */
 
+/* Granola layout: [record pill] [ask-anything input filling the middle].
+   The bar needs a real width for the input's flex: 1 to mean anything. */
 .bottom-bar {
   position: absolute;
   bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
+  width: min(640px, calc(100% - 48px));
   display: flex;
   align-items: center;
   gap: 10px;
@@ -689,6 +692,7 @@ a,
 }
 
 .rec-pill {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -823,6 +827,7 @@ a,
 }
 
 .enhance-chip {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -833,6 +838,7 @@ a,
   font-size: 13px;
   font-weight: 500;
   color: var(--accent-deep);
+  white-space: nowrap;
   box-shadow: var(--shadow-pill);
 }
 
@@ -860,6 +866,94 @@ a,
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---- ask-anything bar ---- */
+
+.ask-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 6px 5px 16px;
+  box-shadow: var(--shadow-pill);
+}
+
+.ask-input {
+  flex: 1;
+  min-width: 60px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--ink);
+  padding: 5px 0;
+  user-select: text;
+}
+
+.ask-input::placeholder {
+  color: var(--faint);
+}
+
+.ask-preset {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--body);
+  background: #f1efe4;
+  border-radius: 999px;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+.ask-preset:hover {
+  background: var(--sage-fill);
+  color: var(--accent-deep);
+}
+
+.ask-send {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fdfcf8;
+  font-size: 14px;
+}
+
+.ask-send:hover {
+  background: var(--accent-deep);
+}
+
+.ask-spinner {
+  margin-right: 9px;
+}
+
+/* Transient "record first" nudge, floated just above the bar. */
+.ask-hint {
+  position: absolute;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  box-shadow: var(--shadow-pill);
+  white-space: nowrap;
+  z-index: 22;
 }
 
 /* ---- transcript flyout ---- */
@@ -988,6 +1082,141 @@ a,
   padding: 8px 14px;
   font-size: 11.5px;
   color: var(--faint);
+}
+
+/* ---- ask-anything chat flyout (same shell as the transcript panel) ---- */
+
+.chat-body {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 16px 12px;
+}
+
+.chat-exchange {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-q {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--sage-fill);
+  color: var(--ink);
+  border-radius: 14px 14px 4px 14px;
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 10px 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-a {
+  align-self: stretch;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--body);
+  overflow-wrap: anywhere;
+}
+
+.chat-a p {
+  margin: 0 0 8px;
+}
+
+.chat-a p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-a ul,
+.chat-a ol {
+  margin: 0 0 8px;
+  padding-left: 1.35em;
+}
+
+.chat-a li {
+  margin: 2px 0;
+}
+
+.chat-a li.task {
+  list-style: none;
+}
+
+.chat-a h1,
+.chat-a h2,
+.chat-a h3,
+.chat-a h4 {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 10px 0 4px;
+}
+
+.chat-a blockquote {
+  border-left: 2px solid var(--border);
+  margin: 0 0 8px;
+  padding-left: 10px;
+  color: var(--muted);
+}
+
+.chat-a code {
+  background: #efede2;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.chat-a pre {
+  background: #efede2;
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+
+.chat-a pre code {
+  background: none;
+  padding: 0;
+}
+
+.chat-a hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+
+.chat-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  padding: 2px 0 4px;
+}
+
+.chat-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--danger-soft);
+  border: 1px solid #ddb5a9;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin: 10px 0 2px;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.chat-error button {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--accent-deep);
+  font-weight: 500;
+}
+
+.chat-error button:hover {
+  text-decoration: underline;
 }
 
 /* ---- toasts / error surfaces ---- */

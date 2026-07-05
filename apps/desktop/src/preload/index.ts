@@ -11,6 +11,8 @@ import {
 } from '../shared/engine-events'
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
+  NOTES_ASK_CHANNEL,
+  NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
@@ -18,6 +20,9 @@ import {
   NOTES_MODELS_CHANNEL,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
+  type AskRequest,
+  type AskResult,
+  type AskTokenEvent,
   type DownloadProgressEvent,
   type EnhanceRequest,
   type EnhanceResult,
@@ -90,12 +95,20 @@ const notesApi: NotesApi = {
     return ipcRenderer.invoke(NOTES_ENHANCE_CHANNEL, input) as Promise<EnhanceResult>
   },
 
+  ask(req: AskRequest): Promise<AskResult> {
+    return ipcRenderer.invoke(NOTES_ASK_CHANNEL, req) as Promise<AskResult>
+  },
+
   onDownloadProgress(cb: (ev: DownloadProgressEvent) => void): () => void {
     return subscribe(NOTES_DOWNLOAD_PROGRESS_CHANNEL, cb)
   },
 
   onEnhanceToken(cb: (ev: EnhanceTokenEvent) => void): () => void {
     return subscribe(NOTES_ENHANCE_TOKEN_CHANNEL, cb)
+  },
+
+  onAskToken(cb: (ev: AskTokenEvent) => void): () => void {
+    return subscribe(NOTES_ASK_TOKEN_CHANNEL, cb)
   }
 }
 

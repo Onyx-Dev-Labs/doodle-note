@@ -6,12 +6,15 @@ import {
   LOCAL_MODELS,
   LocalNotesEngine,
   totalRamGB,
+  type AskInput,
   type LocalModelSpec,
   type MergeInput,
   type NotesEngine
 } from '@repo/ai'
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
+  NOTES_ASK_CHANNEL,
+  NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
@@ -19,6 +22,8 @@ import {
   NOTES_MODELS_CHANNEL,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
+  type AskRequest,
+  type AskResult,
   type CloudProvider,
   type EnhanceRequest,
   type EnhanceResult,
@@ -57,6 +62,7 @@ export class NotesService {
   private localEngine: LocalNotesEngine | null = null
   private localEngineModelId: string | null = null
   private enhanceBusy = false
+  private askBusy = false
   private activateBusy = false
 
   constructor(
@@ -79,6 +85,9 @@ export class NotesService {
     )
     ipcMain.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
       this.enhance((request ?? {}) as EnhanceRequest)
+    )
+    ipcMain.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
+      this.ask((request ?? {}) as AskRequest)
     )
   }
 
@@ -202,6 +211,9 @@ export class NotesService {
     if (this.enhanceBusy) {
       return { error: 'Notes are already being generated — wait for the current run to finish.' }
     }
+    if (this.askBusy) {
+      return { error: 'A question is being answered right now — try again in a moment.' }
+    }
     this.enhanceBusy = true
     try {
       const segments = Array.isArray(request.segments) ? request.segments : []
@@ -225,6 +237,51 @@ export class NotesService {
       return { error: err instanceof Error ? err.message : String(err) }
     } finally {
       this.enhanceBusy = false
+    }
+  }
+
+  /* ---- ask anything ---- */
+
+  private async ask(request: AskRequest): Promise<AskResult> {
+    if (this.askBusy) {
+      return { error: 'Still answering the previous question — one at a time.' }
+    }
+    if (this.enhanceBusy) {
+      return { error: 'Notes are being generated right now — ask again when they finish.' }
+    }
+    this.askBusy = true
+    try {
+      const question = typeof request.question === 'string' ? request.question.trim() : ''
+      if (!question) return { error: 'Ask a question first.' }
+
+      const segments = Array.isArray(request.segments) ? request.segments : []
+      const kept = segments.filter((s) => !s.echo)
+      const history = (Array.isArray(request.history) ? request.history : []).filter(
+        (h) => h && typeof h.question === 'string' && typeof h.answer === 'string'
+      )
+      const input: AskInput = {
+        title:
+          typeof request.title === 'string' && request.title.trim()
+            ? request.title.trim()
+            : 'Untitled meeting',
+        rawNotesMarkdown:
+          typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
+        ...(typeof request.enhancedMarkdown === 'string' && request.enhancedMarkdown.trim()
+          ? { enhancedMarkdown: request.enhancedMarkdown }
+          : {}),
+        segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
+        history: history.map((h) => ({ question: h.question, answer: h.answer })),
+        question
+      }
+      const engine = this.pickEngine()
+      const result = await engine.askQuestion(input, (token) => {
+        this.broadcast(NOTES_ASK_TOKEN_CHANNEL, { token })
+      })
+      return { answer: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      this.askBusy = false
     }
   }
 

@@ -7,6 +7,7 @@ import {
   MEETINGS_GET_CHANNEL,
   MEETINGS_LIST_CHANNEL,
   MEETINGS_UPSERT_CHANNEL,
+  type MeetingChatEntry,
   type MeetingRecord,
   type MeetingSummary,
   type MeetingUpsert
@@ -109,8 +110,17 @@ function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     ...(typeof raw.enhancedMarkdown === 'string' ? { enhancedMarkdown: raw.enhancedMarkdown } : {}),
     ...(typeof raw.engine === 'string' ? { engine: raw.engine } : {}),
     segments: Array.isArray(raw.segments) ? (raw.segments as TranscriptSegment[]) : [],
-    echoSuppressed: typeof raw.echoSuppressed === 'number' ? raw.echoSuppressed : 0
+    echoSuppressed: typeof raw.echoSuppressed === 'number' ? raw.echoSuppressed : 0,
+    ...(Array.isArray(raw.chat) ? { chat: raw.chat.filter(isChatEntry) } : {})
   }
+}
+
+function isChatEntry(entry: unknown): entry is MeetingChatEntry {
+  if (typeof entry !== 'object' || entry === null) return false
+  const e = entry as Partial<MeetingChatEntry>
+  return (
+    typeof e.question === 'string' && typeof e.answer === 'string' && typeof e.askedAt === 'string'
+  )
 }
 
 function durationMinOf(record: MeetingRecord): number | undefined {

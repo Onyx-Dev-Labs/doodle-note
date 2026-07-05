@@ -14,6 +14,14 @@ export const MEETINGS_GET_CHANNEL = 'meetings:get'
 export const MEETINGS_UPSERT_CHANNEL = 'meetings:upsert'
 export const MEETINGS_DELETE_CHANNEL = 'meetings:delete'
 
+/** One persisted "ask anything" exchange. */
+export interface MeetingChatEntry {
+  question: string
+  answer: string
+  /** ISO timestamp of when the question was asked. */
+  askedAt: string
+}
+
 /** Full meeting document as stored on disk. */
 export interface MeetingRecord {
   id: string
@@ -34,6 +42,8 @@ export interface MeetingRecord {
   segments: TranscriptSegment[]
   /** How many echo segments were suppressed across the session(s). */
   echoSuppressed: number
+  /** "Ask anything" conversation for this meeting, oldest first. */
+  chat?: MeetingChatEntry[]
 }
 
 /** Lightweight row for the Home list, sorted newest-first. */

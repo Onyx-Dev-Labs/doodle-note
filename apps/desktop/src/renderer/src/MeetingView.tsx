@@ -4,7 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../../shared/engine-events'
-import type { MeetingRecord } from '../../shared/meetings-api'
+import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type { NotesModelsResponse, NotesSettingsView } from '../../shared/notes-api'
 import { docToMarkdown, markdownToHtml } from './lib/markdown'
 
@@ -116,6 +116,10 @@ type EnhanceStatus = 'idle' | 'running' | 'error'
 
 const CHANNEL_SPEAKERS: Record<EngineChannel, string> = { mic: 'You', system: 'Them' }
 
+/** Canned question behind the "✉ Write follow up email" chip. */
+const FOLLOW_UP_EMAIL_QUESTION =
+  'Write a concise, ready-to-send follow-up email for this meeting: brief recap, decisions made, and action items with owners.'
+
 function BarsIcon({ animated }: { animated: boolean }): React.JSX.Element {
   return (
     <span className={animated ? 'bars-icon live' : 'bars-icon'} aria-hidden="true">
@@ -157,6 +161,14 @@ export default function MeetingView({
   const [enhanceStreamed, setEnhanceStreamed] = useState('')
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatThread, setChatThread] = useState<MeetingChatEntry[]>([])
+  const [askText, setAskText] = useState('')
+  /** The question currently being answered; null when no ask is in flight. */
+  const [askPending, setAskPending] = useState<string | null>(null)
+  const [askStreamed, setAskStreamed] = useState('')
+  const [askError, setAskError] = useState<string | null>(null)
+  const [askHint, setAskHint] = useState(false)
   const [elapsedSec, setElapsedSec] = useState(0)
   const [copied, setCopied] = useState(false)
   const [emptyNotice, setEmptyNotice] = useState(false)
@@ -175,6 +187,10 @@ export default function MeetingView({
   const autoOpenedRef = useRef(false)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
+  /** Mirrors chatThread so an in-flight ask reads the freshest history. */
+  const chatThreadRef = useRef<MeetingChatEntry[]>([])
+  const chatFeedRef = useRef<HTMLDivElement>(null)
+  const askHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Mirror the latest session state for the engine-event handler (which
   // must read it outside the render cycle, e.g. when a new session starts).
@@ -244,6 +260,10 @@ export default function MeetingView({
       setSavedEcho(record.echoSuppressed)
       startedAtRef.current = record.startedAt ?? null
       if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
+      if (Array.isArray(record.chat) && record.chat.length > 0) {
+        chatThreadRef.current = record.chat
+        setChatThread(record.chat)
+      }
     })
     return () => {
       cancelled = true
@@ -282,6 +302,7 @@ export default function MeetingView({
           if (!autoOpenedRef.current) {
             autoOpenedRef.current = true
             setTranscriptOpen(true)
+            setChatOpen(false)
           }
         }
         dispatch(ev)
@@ -293,6 +314,14 @@ export default function MeetingView({
     () =>
       window.notes.onEnhanceToken(({ token }) => {
         setEnhanceStreamed((s) => s + token)
+      }),
+    []
+  )
+
+  useEffect(
+    () =>
+      window.notes.onAskToken(({ token }) => {
+        setAskStreamed((s) => s + token)
       }),
     []
   )
@@ -380,6 +409,19 @@ export default function MeetingView({
     const el = feedRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [allSegments, state.partials, transcriptOpen])
+
+  /* ---- chat autoscroll + hint timer cleanup ---- */
+
+  useEffect(() => {
+    const el = chatFeedRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [chatThread, askPending, askStreamed, askError, chatOpen])
+
+  useEffect(() => {
+    return () => {
+      if (askHintTimerRef.current !== null) clearTimeout(askHintTimerRef.current)
+    }
+  }, [])
 
   /* ---- actions ---- */
 
@@ -469,6 +511,93 @@ export default function MeetingView({
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
+  }
+
+  /* ---- ask anything ---- */
+
+  // The chat flyout and the transcript flyout share the same spot above the
+  // bar, so opening one always closes the other.
+  const toggleTranscript = (): void => {
+    if (transcriptOpen) {
+      setTranscriptOpen(false)
+    } else {
+      setTranscriptOpen(true)
+      setChatOpen(false)
+    }
+  }
+
+  const openChat = (): void => {
+    setChatOpen(true)
+    setTranscriptOpen(false)
+  }
+
+  const showAskHint = (): void => {
+    setAskHint(true)
+    if (askHintTimerRef.current !== null) clearTimeout(askHintTimerRef.current)
+    askHintTimerRef.current = setTimeout(() => {
+      askHintTimerRef.current = null
+      setAskHint(false)
+    }, 4000)
+  }
+
+  const submitAsk = async (preset?: string): Promise<void> => {
+    if (askPending !== null) return
+    const question = (preset ?? askText).trim()
+    if (!question) return
+    // Freshest rough notes, same as runEnhance.
+    if (editor && docViewRef.current === 'notes') {
+      roughMarkdownRef.current = docToMarkdown(editor.getJSON())
+    }
+    // Nothing to ground an answer in yet — hint instead of a doomed model call.
+    if (
+      allSegments.length === 0 &&
+      enhancedMarkdown === null &&
+      roughMarkdownRef.current.trim().length === 0
+    ) {
+      showAskHint()
+      return
+    }
+    refreshNotesMeta()
+    setAskError(null)
+    setAskStreamed('')
+    setAskPending(question)
+    if (preset === undefined) setAskText('')
+    openChat()
+
+    const result = await window.notes.ask({
+      title: titleValueRef.current.trim() || 'New meeting',
+      rawNotesMarkdown: roughMarkdownRef.current,
+      enhancedMarkdown,
+      segments: allSegments,
+      history: chatThreadRef.current.map((c) => ({ question: c.question, answer: c.answer })),
+      question
+    })
+    if (result.error !== undefined || result.answer === undefined) {
+      setAskError(result.error ?? 'The model returned no answer.')
+      setAskPending(null)
+      setAskStreamed('')
+      // Put the question back so a retry is one keypress away.
+      setAskText((current) => (current.trim().length > 0 ? current : question))
+      return
+    }
+    const entry: MeetingChatEntry = {
+      question,
+      answer: result.answer,
+      askedAt: new Date().toISOString()
+    }
+    const next = [...chatThreadRef.current, entry]
+    chatThreadRef.current = next
+    setChatThread(next)
+    persist({ chat: next })
+    setAskPending(null)
+    setAskStreamed('')
+  }
+
+  const clearChat = (): void => {
+    chatThreadRef.current = []
+    setChatThread([])
+    setAskError(null)
+    persist({ chat: [] })
   }
 
   const goBack = (): void => {
@@ -626,6 +755,81 @@ export default function MeetingView({
         </div>
       )}
 
+      {chatOpen && (
+        <div className="transcript-panel chat-panel">
+          <div className="tp-head">
+            <span className="tp-meta">Answers come only from this meeting</span>
+            <div className="tp-actions">
+              {chatThread.length > 0 && askPending === null && (
+                <button type="button" onClick={clearChat} title="Clear conversation">
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setChatOpen(false)}
+                title="Minimize"
+                aria-label="Minimize chat"
+              >
+                —
+              </button>
+            </div>
+          </div>
+          <div className="tp-body chat-body" ref={chatFeedRef}>
+            {chatThread.length === 0 && askPending === null && !askError ? (
+              <div className="tp-empty">
+                <p className="tp-empty-title">Ask anything</p>
+                <p className="tp-empty-sub">
+                  Answers come from this meeting&rsquo;s transcript and notes.
+                </p>
+              </div>
+            ) : (
+              <>
+                {chatThread.map((entry, i) => (
+                  <div key={`${entry.askedAt}-${i}`} className="chat-exchange">
+                    <div className="chat-q">{entry.question}</div>
+                    <div
+                      className="chat-a"
+                      // markdownToHtml escapes its input before adding tags.
+                      dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.answer) }}
+                    />
+                  </div>
+                ))}
+                {askPending !== null && (
+                  <div className="chat-exchange">
+                    <div className="chat-q">{askPending}</div>
+                    {askStreamed.length > 0 ? (
+                      <div
+                        className="chat-a"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(askStreamed) }}
+                      />
+                    ) : (
+                      <div className="chat-a chat-thinking">
+                        <span className="spinner" aria-hidden="true" />
+                        Thinking…
+                      </div>
+                    )}
+                  </div>
+                )}
+                {askError && (
+                  <div className="chat-error" role="alert">
+                    <span>{askError}</span>
+                    {!modelReady && (
+                      <button type="button" onClick={onOpenSettings}>
+                        Open Settings →
+                      </button>
+                    )}
+                    <button type="button" onClick={() => setAskError(null)}>
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {enhanceStatus === 'error' && enhanceError && (
         <div className="enhance-error-bar">
           <span>{enhanceError}</span>
@@ -672,7 +876,7 @@ export default function MeetingView({
               <button
                 type="button"
                 className="chev-btn"
-                onClick={() => setTranscriptOpen((v) => !v)}
+                onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
               >
                 {transcriptOpen ? '⌄' : '⌃'}
@@ -701,7 +905,7 @@ export default function MeetingView({
               <button
                 type="button"
                 className="chev-btn"
-                onClick={() => setTranscriptOpen((v) => !v)}
+                onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
               >
                 {transcriptOpen ? '⌄' : '⌃'}
@@ -730,7 +934,56 @@ export default function MeetingView({
             )}
           </button>
         )}
+
+        <form
+          className="ask-bar"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submitAsk()
+          }}
+        >
+          <input
+            className="ask-input"
+            type="text"
+            spellCheck={false}
+            placeholder="Ask anything"
+            value={askText}
+            onChange={(e) => setAskText(e.target.value)}
+            onFocus={() => {
+              // Surface the past conversation, but never open an empty panel.
+              if (chatThread.length > 0 || askPending !== null) openChat()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (chatOpen) setChatOpen(false)
+                else e.currentTarget.blur()
+              }
+            }}
+          />
+          {askPending !== null ? (
+            <span className="spinner ask-spinner" aria-hidden="true" />
+          ) : askText.trim().length > 0 ? (
+            <button type="submit" className="ask-send" title="Ask" aria-label="Ask">
+              ↑
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ask-preset"
+              onClick={() => void submitAsk(FOLLOW_UP_EMAIL_QUESTION)}
+              title="Draft a ready-to-send follow-up email from this meeting"
+            >
+              ✉ Write follow up email
+            </button>
+          )}
+        </form>
       </div>
+
+      {askHint && (
+        <div className="ask-hint" role="status">
+          Record the meeting first — I answer from what was said.
+        </div>
+      )}
     </div>
   )
 }

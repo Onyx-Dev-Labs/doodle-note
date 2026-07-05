@@ -1,4 +1,4 @@
-import type { MergeInput } from './types'
+import type { MergeInput, MergeSegment } from './types'
 
 /**
  * The note-merge prompt — Doodle Note's core product surface.
@@ -41,15 +41,16 @@ function formatTimestamp(ms: number): string {
   return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')}`
 }
 
+/** `[m:ss] Speaker: text`, one line per segment — shared by merge + ask prompts. */
+export function formatTranscript(segments: MergeSegment[]): string {
+  return segments.map((s) => `[${formatTimestamp(s.startMs)}] ${s.speaker}: ${s.text}`).join('\n')
+}
+
 export function buildMergeUserMessage(input: MergeInput): string {
   const title = input.title?.trim() || 'Untitled meeting'
   const rough = input.rawNotesMarkdown.trim() || '(the user took no rough notes)'
   const transcript =
-    input.segments.length > 0
-      ? input.segments
-          .map((s) => `[${formatTimestamp(s.startMs)}] ${s.speaker}: ${s.text}`)
-          .join('\n')
-      : '(no transcript captured)'
+    input.segments.length > 0 ? formatTranscript(input.segments) : '(no transcript captured)'
   const duration =
     input.durationMs !== undefined
       ? `\nDuration: ${Math.round(input.durationMs / 60000)} minutes`
