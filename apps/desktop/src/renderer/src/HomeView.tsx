@@ -66,6 +66,7 @@ export default function HomeView({
   const [askText, setAskText] = useState('')
   /** The question currently being answered; null when no ask is in flight. */
   const [askPending, setAskPending] = useState<string | null>(null)
+  const [chatCopied, setChatCopied] = useState<number | null>(null)
   const [askStreamed, setAskStreamed] = useState('')
   const [askError, setAskError] = useState<string | null>(null)
   const [modelsInfo, setModelsInfo] = useState<NotesModelsResponse | null>(null)
@@ -458,6 +459,19 @@ export default function HomeView({
                       // markdownToHtml escapes its input before adding tags.
                       dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.answer) }}
                     />
+                    <div className="chat-actions">
+                      <button
+                        type="button"
+                        title="Copy response"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(entry.answer)
+                          setChatCopied(i)
+                          setTimeout(() => setChatCopied((v) => (v === i ? null : v)), 1500)
+                        }}
+                      >
+                        {chatCopied === i ? '✓ Copied' : '⧉ Copy'}
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {askPending !== null && (

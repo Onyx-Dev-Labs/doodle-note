@@ -2332,3 +2332,88 @@ button.fp-row:hover {
 .home.has-ask .home-col {
   padding-bottom: 112px;
 }
+
+/* ============ sidebar folder ⋯ menu + chat copy actions ============ */
+
+.folder-row {
+  position: relative;
+}
+
+.folder-menu-btn {
+  display: none;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.folder-row:hover .folder-menu-btn {
+  display: inline-flex;
+}
+
+.folder-row:hover .nav-count {
+  display: none;
+}
+
+.folder-menu-btn:hover {
+  background: rgba(38, 40, 31, 0.08);
+  color: var(--ink);
+}
+
+.folder-menu {
+  position: absolute;
+  top: 100%;
+  right: 6px;
+  z-index: 40;
+  min-width: 172px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-panel);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-menu button {
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--body);
+}
+
+.folder-menu button:hover {
+  background: rgba(38, 40, 31, 0.05);
+}
+
+.folder-menu button.danger {
+  color: var(--danger);
+}
+
+.folder-menu button.danger:hover {
+  background: var(--danger-soft);
+}
+
+.chat-actions {
+  display: flex;
+  margin: -2px 0 4px;
+}
+
+.chat-actions button {
+  font-size: 12px;
+  color: var(--faint);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.chat-exchange:hover .chat-actions button {
+  color: var(--muted);
+}
+
+.chat-actions button:hover {
+  background: rgba(38, 40, 31, 0.06);
+  color: var(--ink);
+}

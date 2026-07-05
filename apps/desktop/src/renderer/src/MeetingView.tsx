@@ -168,6 +168,7 @@ export default function MeetingView({
   const [askText, setAskText] = useState('')
   /** The question currently being answered; null when no ask is in flight. */
   const [askPending, setAskPending] = useState<string | null>(null)
+  const [chatCopied, setChatCopied] = useState<number | null>(null)
   const [askStreamed, setAskStreamed] = useState('')
   const [askError, setAskError] = useState<string | null>(null)
   const [askHint, setAskHint] = useState(false)
@@ -863,6 +864,19 @@ export default function MeetingView({
                       // markdownToHtml escapes its input before adding tags.
                       dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.answer) }}
                     />
+                    <div className="chat-actions">
+                      <button
+                        type="button"
+                        title="Copy response"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(entry.answer)
+                          setChatCopied(i)
+                          setTimeout(() => setChatCopied((v) => (v === i ? null : v)), 1500)
+                        }}
+                      >
+                        {chatCopied === i ? '✓ Copied' : '⧉ Copy'}
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {askPending !== null && (

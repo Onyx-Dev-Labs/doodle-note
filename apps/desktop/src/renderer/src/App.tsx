@@ -28,6 +28,8 @@ function App(): React.JSX.Element {
   const [meetings, setMeetings] = useState<MeetingSummary[] | null>(null)
   const [folders, setFolders] = useState<FolderRecord[]>([])
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
+  const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null)
   const [newFolderName, setNewFolderName] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -108,6 +110,54 @@ function App(): React.JSX.Element {
       // Creation failed (e.g. bad name) — nothing to clean up.
     }
   }, [newFolderName, refreshHome])
+
+  const submitRename = useCallback(async (): Promise<void> => {
+    const target = renamingFolder
+    setRenamingFolder(null)
+    if (!target) return
+    const name = target.name.trim()
+    if (name.length === 0) return
+    try {
+      await window.folders.rename(target.id, name)
+      refreshHome()
+    } catch {
+      // Rename failed; the old name stands.
+    }
+  }, [renamingFolder, refreshHome])
+
+  const deleteFolder = useCallback(
+    async (id: string): Promise<void> => {
+      setFolderMenuId(null)
+      const folder = folders.find((f) => f.id === id)
+      const ok = window.confirm(
+        `Delete "${folder?.name ?? 'this folder'}"? Its meetings move back to My notes.`
+      )
+      if (!ok) return
+      try {
+        await window.folders.remove(id)
+        if (filter.kind === 'folder' && filter.id === id) setFilter({ kind: 'all' })
+        refreshHome()
+      } catch {
+        // Deletion failed; nothing changed.
+      }
+    },
+    [folders, filter, refreshHome]
+  )
+
+  // The folder ⋯ menu closes on any outside click or Escape.
+  useEffect(() => {
+    if (folderMenuId === null) return
+    const close = (): void => setFolderMenuId(null)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('click', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('click', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [folderMenuId])
 
   // ⌘K focuses the sidebar search (when the sidebar is visible).
   useEffect(() => {
@@ -207,22 +257,86 @@ function App(): React.JSX.Element {
                 ＋
               </button>
             </div>
-            {folders.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                className={
-                  onHome && filter.kind === 'folder' && filter.id === f.id
-                    ? 'nav-item nav-sub on'
-                    : 'nav-item nav-sub'
-                }
-                onClick={() => selectFilter({ kind: 'folder', id: f.id })}
-              >
-                <span className="nav-icon">📁</span>
-                <span className="nav-label">{f.name}</span>
-                <span className="nav-count">{folderCounts.get(f.id) ?? 0}</span>
-              </button>
-            ))}
+            {folders.map((f) =>
+              renamingFolder?.id === f.id ? (
+                <div key={f.id} className="folder-new nav-sub">
+                  <input
+                    autoFocus
+                    value={renamingFolder.name}
+                    onChange={(e) => setRenamingFolder({ id: f.id, name: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void submitRename()
+                      if (e.key === 'Escape') setRenamingFolder(null)
+                    }}
+                    onBlur={() => setRenamingFolder(null)}
+                  />
+                </div>
+              ) : (
+                <div
+                  key={f.id}
+                  role="button"
+                  tabIndex={0}
+                  className={
+                    onHome && filter.kind === 'folder' && filter.id === f.id
+                      ? 'nav-item nav-sub folder-row on'
+                      : 'nav-item nav-sub folder-row'
+                  }
+                  onClick={() => selectFilter({ kind: 'folder', id: f.id })}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      selectFilter({ kind: 'folder', id: f.id })
+                    }
+                  }}
+                >
+                  <span className="nav-icon">📁</span>
+                  <span className="nav-label">{f.name}</span>
+                  <span className="nav-count">{folderCounts.get(f.id) ?? 0}</span>
+                  <button
+                    type="button"
+                    className="folder-menu-btn"
+                    title="Folder options"
+                    aria-label="Folder options"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setFolderMenuId((v) => (v === f.id ? null : f.id))
+                    }}
+                  >
+                    ⋯
+                  </button>
+                  {folderMenuId === f.id && (
+                    <div className="folder-menu" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFolderMenuId(null)
+                          setCreatingFolder(true)
+                        }}
+                      >
+                        ⊕ Create folder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFolderMenuId(null)
+                          setRenamingFolder({ id: f.id, name: f.name })
+                        }}
+                      >
+                        ✎ Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => void deleteFolder(f.id)}
+                      >
+                        🗑 Delete folder
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
             {creatingFolder && (
               <div className="folder-new nav-sub">
                 <input
