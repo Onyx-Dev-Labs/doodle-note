@@ -25,3 +25,6 @@ pgdata/
 # os / editor
 .DS_Store
 *.log
+
+# packaged app output
+apps/desktop/release/

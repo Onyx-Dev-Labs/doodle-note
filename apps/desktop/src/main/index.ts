@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -18,13 +18,39 @@ import {
 } from '../shared/engine-events'
 
 /**
- * The Swift transcription sidecar lives at <repo root>/engine/.build/release/engine.
- * In dev, app root (app.getAppPath()) is apps/desktop, so the binary is two
- * levels up. Packaging is not wired yet; when it is, this should switch to a
- * bundled binary under process.resourcesPath.
+ * The Swift transcription sidecar: bundled under Resources/engine in the
+ * packaged app; two levels up from apps/desktop in dev.
  */
 function resolveEngineBinary(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'engine', 'engine')
+  }
   return path.resolve(app.getAppPath(), '..', '..', 'engine', '.build', 'release', 'engine')
+}
+
+/**
+ * One-time migration: dev runs stored everything under the app name
+ * "desktop" (~/Library/Application Support/desktop). The packaged app is
+ * "DoodleNote" — adopt the dev data (meetings, folders, settings, chat,
+ * downloaded models) on first launch so nothing is lost or re-downloaded.
+ */
+function migrateDevUserData(): void {
+  if (!app.isPackaged) return
+  try {
+    const newDir = app.getPath('userData')
+    const oldDir = join(newDir, '..', 'desktop')
+    if (existsSync(join(newDir, 'meetings')) || !existsSync(join(oldDir, 'meetings'))) return
+    console.log('[migrate] adopting dev data from', oldDir)
+    cpSync(join(oldDir, 'meetings'), join(newDir, 'meetings'), { recursive: true })
+    for (const name of ['folders.json', 'settings.json', 'global-chat.json']) {
+      if (existsSync(join(oldDir, name))) cpSync(join(oldDir, name), join(newDir, name))
+    }
+    if (existsSync(join(oldDir, 'models'))) {
+      cpSync(join(oldDir, 'models'), join(newDir, 'models'), { recursive: true })
+    }
+  } catch (err) {
+    console.error('[migrate] failed (continuing with fresh data):', err)
+  }
 }
 
 const engine = new EngineProcess(resolveEngineBinary())
@@ -81,6 +107,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  migrateDevUserData()
+
   // Warm the engine once per launch: triggers the permission prompts up front
   // and primes the ASR model cache, so "+ New meeting" starts instantly.
   try {

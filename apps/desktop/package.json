@@ -13,7 +13,8 @@
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "test": "tsx --test src/main/*.test.ts",
     "lint": "eslint --cache .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "package": "electron-vite build && electron-builder --config electron-builder.yml"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
@@ -43,6 +44,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "typescript": "^5.9.3",
-    "vite": "^7.2.6"
+    "vite": "^7.2.6",
+    "electron-builder": "^26.0.0"
   }
 }
