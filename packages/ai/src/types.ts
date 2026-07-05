@@ -58,4 +58,9 @@ export interface NotesEngine {
   generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes>
   /** Answer a question grounded ONLY in this meeting's content. */
   askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer>
+  /** Answer a question across many meetings' notes (Home-level chat). */
+  askAcrossMeetings(
+    input: import('./global-ask-prompt').GlobalAskInput,
+    onToken?: (text: string) => void
+  ): Promise<AskAnswer>
 }

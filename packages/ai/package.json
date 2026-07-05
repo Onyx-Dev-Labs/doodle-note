@@ -8,7 +8,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "merge-smoke": "tsx scripts/merge-smoke.ts"
+    "merge-smoke": "tsx scripts/merge-smoke.ts",
+    "global-ask-smoke": "tsx scripts/global-ask-smoke.ts"
   },
   "dependencies": {
     "ai": "^7.0.15",

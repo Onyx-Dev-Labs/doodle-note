@@ -2,6 +2,7 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { ASK_SYSTEM_PROMPT, buildAskUserMessage } from './ask-prompt'
+import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
 import { buildMergeUserMessage, MERGE_SYSTEM_PROMPT } from './prompt'
 import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine } from './types'
 
@@ -33,6 +34,13 @@ export class CloudNotesEngine implements NotesEngine {
 
   async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
     return this.runPrompt(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
+  }
+
+  async askAcrossMeetings(
+    input: GlobalAskInput,
+    onToken?: (text: string) => void
+  ): Promise<AskAnswer> {
+    return this.runPrompt(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
   }
 
   private async runPrompt(
