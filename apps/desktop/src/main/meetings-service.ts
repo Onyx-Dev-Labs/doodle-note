@@ -60,6 +60,20 @@ export class MeetingsService {
     return this.readFile(`${id}.json`)
   }
 
+  /**
+   * Every stored meeting document, trashed ones included (callers filter).
+   * Powers cross-meeting features in other services — e.g. NotesService
+   * gathering context for the Home-level "ask anything".
+   */
+  readAll(): MeetingRecord[] {
+    const records: MeetingRecord[] = []
+    for (const file of this.listFiles()) {
+      const record = this.readFile(file)
+      if (record) records.push(record)
+    }
+    return records
+  }
+
   /* ---- writes ---- */
 
   upsert(patch: MeetingUpsert): MeetingRecord {

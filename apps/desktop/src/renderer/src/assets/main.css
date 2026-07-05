@@ -380,6 +380,7 @@ a,
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative; /* anchors the floating ask bar + chat panel */
 }
 
 .home-topbar {
@@ -2309,4 +2310,25 @@ button.fp-row:hover {
   width: min(720px, calc(100% - 48px));
   height: min(560px, 66vh);
   bottom: 86px;
+}
+
+/* ============ Home-level "Ask anything" (cross-meeting chat) ============ */
+
+/* Same white pill as the editor's ask bar, pinned to the bottom of the main
+   column: the home column is 700px max with 32px side padding, so the bar
+   spans that same 636px content width. */
+.home-ask-bar {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(636px, calc(100% - 64px));
+  flex: none;
+  z-index: 20;
+}
+
+/* The floating bar covers the list tail — let the column scroll clear of it.
+   (Trash view has no bar, so it keeps the default 56px.) */
+.home.has-ask .home-col {
+  padding-bottom: 112px;
 }

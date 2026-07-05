@@ -146,11 +146,13 @@ app.whenReady().then(() => {
     engine.stop()
   })
 
-  notesService = new NotesService(app.getPath('userData'), broadcast)
-  notesService.registerIpc()
-
+  // Meetings store first: NotesService reads it to gather cross-meeting
+  // context for the Home-level "ask anything".
   const meetingsService = new MeetingsService(join(app.getPath('userData'), 'meetings'))
   meetingsService.registerIpc()
+
+  notesService = new NotesService(app.getPath('userData'), broadcast, meetingsService)
+  notesService.registerIpc()
 
   const foldersService = new FoldersService(
     join(app.getPath('userData'), 'folders.json'),

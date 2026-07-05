@@ -289,6 +289,7 @@ function App(): React.JSX.Element {
               onOpenMeeting={openMeeting}
               onNewMeeting={() => void newMeeting()}
               onChanged={refreshHome}
+              onOpenSettings={() => setView('settings')}
             />
           </div>
           <div className={view === 'settings' ? 'content-slot' : 'content-slot hidden'}>

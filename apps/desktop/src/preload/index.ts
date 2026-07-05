@@ -12,11 +12,15 @@ import {
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
   NOTES_ASK_CHANNEL,
+  NOTES_ASK_GLOBAL_CHANNEL,
+  NOTES_ASK_GLOBAL_TOKEN_CHANNEL,
   NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
   NOTES_GET_SETTINGS_CHANNEL,
+  NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
+  NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
@@ -27,6 +31,10 @@ import {
   type EnhanceRequest,
   type EnhanceResult,
   type EnhanceTokenEvent,
+  type GlobalAskRequest,
+  type GlobalAskResult,
+  type GlobalAskTokenEvent,
+  type GlobalChatEntry,
   type NotesApi,
   type NotesModelsResponse,
   type NotesSettingsUpdate,
@@ -107,6 +115,18 @@ const notesApi: NotesApi = {
     return ipcRenderer.invoke(NOTES_ASK_CHANNEL, req) as Promise<AskResult>
   },
 
+  askGlobal(req: GlobalAskRequest): Promise<GlobalAskResult> {
+    return ipcRenderer.invoke(NOTES_ASK_GLOBAL_CHANNEL, req) as Promise<GlobalAskResult>
+  },
+
+  getGlobalChat(): Promise<GlobalChatEntry[]> {
+    return ipcRenderer.invoke(NOTES_GLOBAL_CHAT_GET_CHANNEL) as Promise<GlobalChatEntry[]>
+  },
+
+  clearGlobalChat(): Promise<void> {
+    return ipcRenderer.invoke(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL) as Promise<void>
+  },
+
   onDownloadProgress(cb: (ev: DownloadProgressEvent) => void): () => void {
     return subscribe(NOTES_DOWNLOAD_PROGRESS_CHANNEL, cb)
   },
@@ -117,6 +137,10 @@ const notesApi: NotesApi = {
 
   onAskToken(cb: (ev: AskTokenEvent) => void): () => void {
     return subscribe(NOTES_ASK_TOKEN_CHANNEL, cb)
+  },
+
+  onGlobalAskToken(cb: (ev: GlobalAskTokenEvent) => void): () => void {
+    return subscribe(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, cb)
   }
 }
 
