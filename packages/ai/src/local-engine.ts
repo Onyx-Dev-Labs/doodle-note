@@ -1,8 +1,10 @@
 import os from 'node:os'
 import path from 'node:path'
 import type { Llama, LlamaModel } from 'node-llama-cpp'
+import { ASK_SYSTEM_PROMPT, buildAskUserMessage } from './ask-prompt'
+import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
 import { buildMergeUserMessage, MERGE_SYSTEM_PROMPT } from './prompt'
-import type { MergeInput, MergedNotes, NotesEngine } from './types'
+import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine } from './types'
 
 /**
  * node-llama-cpp is ESM-only *with top-level await*, so it cannot be
@@ -67,21 +69,42 @@ export class LocalNotesEngine implements NotesEngine {
   }
 
   async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
+    return this.runPrompt(MERGE_SYSTEM_PROMPT, buildMergeUserMessage(input), onToken)
+  }
+
+  async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
+    return this.runPrompt(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
+  }
+
+  async askAcrossMeetings(
+    input: GlobalAskInput,
+    onToken?: (text: string) => void
+  ): Promise<AskAnswer> {
+    return this.runPrompt(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
+  }
+
+  /**
+   * One generation against the loaded model. Fresh context per call: no state
+   * bleeds between runs, and the model weights stay loaded across calls.
+   */
+  private async runPrompt(
+    systemPrompt: string,
+    userMessage: string,
+    onToken?: (text: string) => void
+  ): Promise<MergedNotes> {
     await this.prepare()
     const { LlamaChatSession } = await loadNodeLlamaCpp()
     const started = Date.now()
 
-    // Fresh context per meeting: no state bleeds between generations, and the
-    // model weights stay loaded across calls.
     const context = await this.model!.createContext({
       contextSize: this.options.contextSize ?? 8192
     })
     try {
       const session = new LlamaChatSession({
         contextSequence: context.getSequence(),
-        systemPrompt: MERGE_SYSTEM_PROMPT
+        systemPrompt
       })
-      const markdown = await session.prompt(buildMergeUserMessage(input), {
+      const markdown = await session.prompt(userMessage, {
         temperature: 0.3,
         onTextChunk: onToken
       })

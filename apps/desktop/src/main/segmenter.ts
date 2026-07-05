@@ -1,8 +1,4 @@
-import type {
-  EngineChannel,
-  EngineTokenTiming,
-  TranscriptSegment
-} from '../shared/engine-events'
+import type { EngineChannel, EngineTokenTiming, TranscriptSegment } from '../shared/engine-events'
 
 /**
  * Assembles the engine's raw token timings into speaker-labeled transcript
@@ -130,8 +126,7 @@ export class SegmentAssembler {
     const tokens = state.pendingTokens
     state.pendingTokens = []
     const text = tokens.map((t) => t.token).join('')
-    const confidence =
-      tokens.reduce((sum, t) => sum + t.confidence, 0) / tokens.length
+    const confidence = tokens.reduce((sum, t) => sum + t.confidence, 0) / tokens.length
     return {
       text,
       norm: normalizeWord(text),
@@ -141,11 +136,7 @@ export class SegmentAssembler {
     }
   }
 
-  private acceptWord(
-    channel: EngineChannel,
-    state: ChannelState,
-    word: Word
-  ): TranscriptSegment[] {
+  private acceptWord(channel: EngineChannel, state: ChannelState, word: Word): TranscriptSegment[] {
     const completed: TranscriptSegment[] = []
 
     if (channel === 'system') {
@@ -195,9 +186,7 @@ export class SegmentAssembler {
       startMs: Math.round(startSec * 1000),
       endMs: Math.round(endSec * 1000),
       confidence: Math.round(confidence * 1000) / 1000,
-      ...(epochMs !== undefined
-        ? { absoluteStartMs: epochMs + Math.round(startSec * 1000) }
-        : {})
+      ...(epochMs !== undefined ? { absoluteStartMs: epochMs + Math.round(startSec * 1000) } : {})
     }
 
     if (channel === 'mic' && this.isEcho(words)) {
@@ -222,8 +211,7 @@ export class SegmentAssembler {
       if (w.norm.length === 0) return false
       const wAligned = w.startSec + skewSec
       return this.systemHistory.some(
-        (s) =>
-          s.norm === w.norm && Math.abs(s.startSec - wAligned) <= this.config.echoWindowSec
+        (s) => s.norm === w.norm && Math.abs(s.startSec - wAligned) <= this.config.echoWindowSec
       )
     })
 

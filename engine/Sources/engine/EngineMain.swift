@@ -20,6 +20,8 @@ struct EngineMain {
                 try await Commands.stream(options)
             case "live":
                 try await LiveCommand.run(options)
+            case "preflight":
+                await PreflightCommand.run()
             case "info":
                 Commands.info()
             default:

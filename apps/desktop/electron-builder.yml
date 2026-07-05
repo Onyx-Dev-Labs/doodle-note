@@ -1,0 +1,29 @@
+appId: com.doodlenote.desktop
+productName: DoodleNote
+directories:
+  buildResources: resources
+  output: release
+files:
+  - out/**
+# The Swift transcription engine ships beside the app code, outside the asar,
+# so it stays a directly-executable binary.
+extraResources:
+  - from: ../../engine/.build/release/engine
+    to: engine/engine
+# node-llama-cpp loads native binaries from real files on disk.
+asarUnpack:
+  - "**/node_modules/node-llama-cpp/**"
+  - "**/node_modules/@node-llama-cpp/**"
+mac:
+  target:
+    - target: dir
+      arch:
+        - arm64
+  icon: resources/icon.icns
+  category: public.app-category.productivity
+  # Local, unsigned build (ad-hoc signature). Signing + notarization come
+  # with the distribution milestone and an Apple Developer account.
+  identity: null
+  extendInfo:
+    NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
+npmRebuild: false

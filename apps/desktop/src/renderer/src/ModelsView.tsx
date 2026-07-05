@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type {
   CloudProvider,
   EngineChoice,
@@ -6,12 +7,127 @@ import type {
   NotesModelsResponse,
   NotesSettingsView
 } from '../../shared/notes-api'
+import logoUrl from './assets/doodlenote-logo.png'
+
+function lastSyncLabel(iso: string): string {
+  const ms = Date.now() - Date.parse(iso)
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  if (ms < 60_000) return 'synced just now'
+  const min = Math.round(ms / 60_000)
+  if (min < 60) return `synced ${min} min ago`
+  return `synced at ${new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
 
 /**
- * Onboarding-style model picker (FluidVoice's Voice Engine screen is the
- * reference): one card per catalog model with download/activate states,
- * plus the optional BYOK cloud section.
+ * Settings: one card per catalog model with download/activate states,
+ * plus the optional BYOK cloud section. Same IPC as before — only the
+ * presentation moved to the light DoodleNote theme.
  */
+function GoogleLogo(): React.JSX.Element {
+  return (
+    <svg width="15" height="15" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+    </svg>
+  )
+}
+
+function MicrosoftLogo(): React.JSX.Element {
+  return (
+    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  )
+}
+
+/** A macOS-style menu bar (screen with the top strip highlighted). */
+function MenuBarIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+      <line x1="1.5" y1="5.5" x2="14.5" y2="5.5" />
+      <circle cx="12" cy="4" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function PeopleIcon(): React.JSX.Element {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="5.6" cy="5.4" r="2.2" />
+      <path d="M1.6 13.4c0-2.2 1.8-4 4-4s4 1.8 4 4" />
+      <circle cx="11.6" cy="6" r="1.8" />
+      <path d="M11.2 9.5c1.9.3 3.3 1.9 3.3 3.9" />
+    </svg>
+  )
+}
+
+/** Light-theme switch (sage when on), used by the calendar display prefs. */
+function Toggle({
+  checked,
+  onChange,
+  disabled = false,
+  label,
+  title
+}: {
+  checked: boolean
+  onChange: () => void
+  disabled?: boolean
+  /** Accessible name — the visible label lives in the surrounding row. */
+  label: string
+  title?: string
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={checked ? 'toggle on' : 'toggle'}
+      disabled={disabled}
+      {...(title !== undefined ? { title } : {})}
+      onClick={onChange}
+    >
+      <span className="toggle-knob" aria-hidden="true" />
+    </button>
+  )
+}
+
 export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
@@ -23,6 +139,106 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
   const cloudFormSeeded = useRef(false)
+
+  /* ---- calendar (Microsoft 365) ---- */
+  const [calState, setCalState] = useState<CalendarState | null>(null)
+  const [clientId, setClientId] = useState('')
+  const [tenantId, setTenantId] = useState('')
+  const [editingCalConfig, setEditingCalConfig] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const calFormSeeded = useRef(false)
+
+  const adoptCalState = useCallback((state: CalendarState) => {
+    setCalState(state)
+    // Seed the config inputs once from what's saved on disk.
+    if (!calFormSeeded.current && state.configured) {
+      calFormSeeded.current = true
+      setClientId(state.clientId ?? '')
+      setTenantId(state.tenantId ?? '')
+    }
+  }, [])
+
+  const refreshCalendar = useCallback(() => {
+    void window.calendar
+      .getState()
+      .then(adoptCalState)
+      .catch(() => setCalState(null))
+  }, [adoptCalState])
+
+  useEffect(() => {
+    if (active) refreshCalendar()
+  }, [active, refreshCalendar])
+
+  useEffect(() => window.calendar.onEvents(adoptCalState), [adoptCalState])
+
+  const saveCalendarConfig = async (): Promise<void> => {
+    const state = await window.calendar.setConfig({
+      clientId: clientId.trim(),
+      tenantId: tenantId.trim()
+    })
+    setCalState(state)
+    if (state.configured && !state.error) setEditingCalConfig(false)
+  }
+
+  const connectCalendar = async (): Promise<void> => {
+    if (connecting) return
+    setConnecting(true)
+    try {
+      setCalState(await window.calendar.connect())
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const syncCalendar = async (): Promise<void> => {
+    if (syncing) return
+    setSyncing(true)
+    try {
+      setCalState(await window.calendar.refresh())
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const disconnectCalendar = async (): Promise<void> => {
+    setCalState(await window.calendar.disconnect())
+  }
+
+  /** Partial display-prefs update; main persists and echoes the new state. */
+  const setCalPrefs = (update: CalendarPrefsUpdate): void => {
+    void window.calendar
+      .setPrefs(update)
+      .then(adoptCalState)
+      .catch(() => {})
+  }
+
+  /**
+   * The effective visible set for the toggles: the saved list, or — while
+   * visibleCalendarIds is null — the default calendar (first one as a last
+   * resort, mirroring the service).
+   */
+  const visibleCalendarIds = (state: CalendarState): Set<string> => {
+    if (state.prefs.visibleCalendarIds !== null) return new Set(state.prefs.visibleCalendarIds)
+    const defaults = state.calendars.filter((c) => c.isDefault).map((c) => c.id)
+    if (defaults.length === 0 && state.calendars.length > 0) {
+      const first = state.calendars[0]
+      if (first) return new Set([first.id])
+    }
+    return new Set(defaults)
+  }
+
+  /** Flip one calendar row, keeping at least one calendar visible. */
+  const toggleCalendar = (state: CalendarState, id: string): void => {
+    const next = visibleCalendarIds(state)
+    if (next.has(id)) {
+      if (next.size === 1) return // min one visible
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    setCalPrefs({ visibleCalendarIds: [...next] })
+  }
 
   const refresh = useCallback(() => {
     void window.notes
@@ -121,11 +337,15 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   return (
     <div className="models">
       <header className="models-header">
-        <h2>Notes model</h2>
-        <p className="models-sub">
-          Doodle Note polishes your meeting notes with a model that runs entirely on this Mac
-          {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your machine.
-        </p>
+        <img className="settings-logo" src={logoUrl} alt="DoodleNote" />
+        <div>
+          <h2>Notes model</h2>
+          <p className="models-sub">
+            DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
+            {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
+            machine.
+          </p>
+        </div>
       </header>
 
       {error && <div className="models-error">{error}</div>}
@@ -149,6 +369,196 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         ))}
       </div>
+
+      <section className="keys-section calendar-section">
+        <h3>Calendar</h3>
+        <p className="models-sub">
+          Sign in with any Microsoft account — work, school, or personal — to see the week&rsquo;s
+          meetings on Home and get a nudge to take notes the moment one starts. DoodleNote only
+          reads your calendar.
+        </p>
+
+        {calState?.error && <div className="models-error">{calState.error}</div>}
+
+        {calState === null ? (
+          <span className="calendar-note">loading calendar settings…</span>
+        ) : (!calState.configured && !calState.builtIn) || editingCalConfig ? (
+          <>
+            <div className="key-form">
+              <input
+                type="text"
+                spellCheck={false}
+                placeholder="Client ID"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+              />
+              <input
+                type="text"
+                spellCheck={false}
+                placeholder="Tenant ID"
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+              />
+              <button type="button" onClick={() => void saveCalendarConfig()}>
+                Save
+              </button>
+              {editingCalConfig && (
+                <button type="button" onClick={() => setEditingCalConfig(false)}>
+                  Cancel
+                </button>
+              )}
+            </div>
+            <p className="calendar-help">
+              Entra admin center → App registrations → DoodleNote — paste the Application (client)
+              ID and Directory (tenant) ID from there.
+            </p>
+          </>
+        ) : !calState.signedIn ? (
+          <div className="calendar-actions">
+            <button
+              type="button"
+              className="ms-signin"
+              disabled={connecting}
+              onClick={() => void connectCalendar()}
+            >
+              <MicrosoftLogo />
+              <span>{connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}</span>
+            </button>
+            <button
+              type="button"
+              className="ms-signin google-soon"
+              disabled
+              title="Google Calendar support is coming soon"
+            >
+              <GoogleLogo />
+              <span>Sign in with Google</span>
+              <span className="soon-badge">coming soon</span>
+            </button>
+            {!calState.builtIn && (
+              <button
+                type="button"
+                className="calendar-ghost"
+                onClick={() => setEditingCalConfig(true)}
+              >
+                Edit IDs
+              </button>
+            )}
+            {connecting && (
+              <span className="calendar-note">
+                finish signing in in your browser, then come back
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="calendar-connected">
+            <span className="calendar-status">
+              Connected as{' '}
+              <strong>{calState.account?.email ?? 'your Microsoft 365 account'}</strong>
+              {calState.lastSyncIso && (
+                <span className="calendar-note"> · {lastSyncLabel(calState.lastSyncIso)}</span>
+              )}
+            </span>
+            <div className="calendar-actions">
+              <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
+                {syncing ? 'Syncing…' : 'Sync now'}
+              </button>
+              {calState.error && (
+                <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
+                  {connecting ? 'Waiting for your browser…' : 'Sign in again'}
+                </button>
+              )}
+              <button type="button" onClick={() => void disconnectCalendar()}>
+                Disconnect
+              </button>
+            </div>
+
+            <div className="cal-subcard">
+              <div className="cal-subcard-head">Display</div>
+              <div className="cal-row">
+                <span className="cal-row-icon">
+                  <MenuBarIcon />
+                </span>
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                  <span className="cal-row-sub">
+                    Display your next meeting and time until it starts in the macOS menu bar
+                  </span>
+                </span>
+                <Toggle
+                  checked={calState.prefs.showMenuBar}
+                  label="Show upcoming meetings in menu bar"
+                  onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
+                />
+              </div>
+              <div className="cal-row">
+                <span className="cal-row-icon">
+                  <PeopleIcon />
+                </span>
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Show events with no participants</span>
+                  <span className="cal-row-sub">
+                    &ldquo;Coming up&rdquo; section will include events without participants or a
+                    video link
+                  </span>
+                </span>
+                <Toggle
+                  checked={calState.prefs.showNoParticipants}
+                  label="Show events with no participants"
+                  onChange={() =>
+                    setCalPrefs({ showNoParticipants: !calState.prefs.showNoParticipants })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="cal-subcard">
+              <div className="cal-subcard-head">
+                Visible calendars
+                <button
+                  type="button"
+                  className="link-btn cal-reset"
+                  title="Back to your default calendar only"
+                  onClick={() => setCalPrefs({ visibleCalendarIds: null })}
+                >
+                  Reset
+                </button>
+              </div>
+              {calState.calendars.length === 0 ? (
+                <div className="cal-row">
+                  <span className="calendar-note">
+                    No calendars synced yet — hit Sync now above
+                  </span>
+                </div>
+              ) : (
+                calState.calendars.map((cal) => {
+                  const visible = visibleCalendarIds(calState)
+                  const isOn = visible.has(cal.id)
+                  const lastOne = isOn && visible.size === 1
+                  return (
+                    <div key={cal.id} className="cal-row">
+                      <span
+                        className="cal-dot"
+                        style={{ background: cal.colorHex }}
+                        aria-hidden="true"
+                      />
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">{cal.name}</span>
+                      </span>
+                      <Toggle
+                        checked={isOn}
+                        disabled={lastOne}
+                        label={`Show ${cal.name} in Coming up`}
+                        title={lastOne ? 'At least one calendar stays visible' : undefined}
+                        onChange={() => toggleCalendar(calState, cal.id)}
+                      />
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="keys-section">
         <h3>AI keys (optional)</h3>

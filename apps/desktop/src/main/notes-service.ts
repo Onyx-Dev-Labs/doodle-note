@@ -6,26 +6,56 @@ import {
   LOCAL_MODELS,
   LocalNotesEngine,
   totalRamGB,
+  type AskInput,
   type LocalModelSpec,
   type MergeInput,
   type NotesEngine
 } from '@repo/ai'
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
+  NOTES_ASK_CHANNEL,
+  NOTES_ASK_GLOBAL_CHANNEL,
+  NOTES_ASK_GLOBAL_TOKEN_CHANNEL,
+  NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
   NOTES_GET_SETTINGS_CHANNEL,
+  NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
+  NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
+  type AskRequest,
+  type AskResult,
   type CloudProvider,
   type EnhanceRequest,
   type EnhanceResult,
+  type GlobalAskRequest,
+  type GlobalAskResult,
+  type GlobalChatEntry,
   type NotesModelsResponse,
   type NotesSettingsUpdate,
   type NotesSettingsView
 } from '../shared/notes-api'
+import type { MeetingRecord } from '../shared/meetings-api'
+import type { MeetingsService } from './meetings-service'
+
+/**
+ * @repo/ai's index does not re-export the global-ask types (the engines
+ * reference them structurally), so they are derived from the engine surface
+ * instead of imported.
+ */
+type GlobalAskInput = Parameters<NotesEngine['askAcrossMeetings']>[0]
+type GlobalAskMeeting = GlobalAskInput['meetings'][number]
+
+/** Newest meetings considered for cross-meeting context; the prompt builder
+ *  trims further to its character budget. */
+const MAX_GLOBAL_MEETINGS = 30
+/** Fallback transcript excerpt length for meetings with no notes at all. */
+const TRANSCRIPT_EXCERPT_CHARS = 1500
+/** Prior exchanges replayed into each cross-meeting ask. */
+const MAX_GLOBAL_HISTORY_SENT = 6
 
 /** What actually lands in userData/settings.json. */
 interface StoredCloudSettings {
@@ -52,18 +82,23 @@ export type NotesBroadcast = (channel: string, payload: unknown) => void
  */
 export class NotesService {
   private readonly settingsPath: string
+  private readonly globalChatPath: string
   private readonly modelsDir: string
   private settings: StoredSettings
   private localEngine: LocalNotesEngine | null = null
   private localEngineModelId: string | null = null
   private enhanceBusy = false
+  private askBusy = false
   private activateBusy = false
 
   constructor(
     userDataDir: string,
-    private readonly broadcast: NotesBroadcast
+    private readonly broadcast: NotesBroadcast,
+    /** Read-only view of the meetings store, for cross-meeting context. */
+    private readonly meetings: MeetingsService
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
+    this.globalChatPath = join(userDataDir, 'global-chat.json')
     this.modelsDir = join(userDataDir, 'models')
     this.settings = this.loadSettings()
   }
@@ -80,6 +115,16 @@ export class NotesService {
     ipcMain.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
       this.enhance((request ?? {}) as EnhanceRequest)
     )
+    ipcMain.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
+      this.ask((request ?? {}) as AskRequest)
+    )
+    ipcMain.handle(NOTES_ASK_GLOBAL_CHANNEL, (_event, request: unknown) =>
+      this.askGlobal((request ?? {}) as GlobalAskRequest)
+    )
+    ipcMain.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () => this.loadGlobalChat())
+    ipcMain.handle(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL, () => {
+      this.saveGlobalChat([])
+    })
   }
 
   async dispose(): Promise<void> {
@@ -98,6 +143,19 @@ export class NotesService {
   private modelsResponse(): NotesModelsResponse {
     const ramGB = totalRamGB()
     const files = this.listModelFiles()
+    // Out-of-the-box behavior: if nothing was explicitly activated but a
+    // usable model is already on disk, adopt the best downloaded one so
+    // Enhance works without requiring a trip to Settings first.
+    if (this.settings.activeLocalModelId === undefined) {
+      const downloaded = LOCAL_MODELS.filter(
+        (m) => m.minRamGB <= ramGB && this.isDownloaded(m, files)
+      )
+      const adopt = downloaded[downloaded.length - 1]
+      if (adopt) {
+        this.settings.activeLocalModelId = adopt.id
+        this.saveSettings()
+      }
+    }
     return {
       ramGB,
       models: LOCAL_MODELS.map((spec) => ({
@@ -189,6 +247,9 @@ export class NotesService {
     if (this.enhanceBusy) {
       return { error: 'Notes are already being generated — wait for the current run to finish.' }
     }
+    if (this.askBusy) {
+      return { error: 'A question is being answered right now — try again in a moment.' }
+    }
     this.enhanceBusy = true
     try {
       const segments = Array.isArray(request.segments) ? request.segments : []
@@ -212,6 +273,147 @@ export class NotesService {
       return { error: err instanceof Error ? err.message : String(err) }
     } finally {
       this.enhanceBusy = false
+    }
+  }
+
+  /* ---- ask anything ---- */
+
+  private async ask(request: AskRequest): Promise<AskResult> {
+    if (this.askBusy) {
+      return { error: 'Still answering the previous question — one at a time.' }
+    }
+    if (this.enhanceBusy) {
+      return { error: 'Notes are being generated right now — ask again when they finish.' }
+    }
+    this.askBusy = true
+    try {
+      const question = typeof request.question === 'string' ? request.question.trim() : ''
+      if (!question) return { error: 'Ask a question first.' }
+
+      const segments = Array.isArray(request.segments) ? request.segments : []
+      const kept = segments.filter((s) => !s.echo)
+      const history = (Array.isArray(request.history) ? request.history : []).filter(
+        (h) => h && typeof h.question === 'string' && typeof h.answer === 'string'
+      )
+      const input: AskInput = {
+        title:
+          typeof request.title === 'string' && request.title.trim()
+            ? request.title.trim()
+            : 'Untitled meeting',
+        rawNotesMarkdown:
+          typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
+        ...(typeof request.enhancedMarkdown === 'string' && request.enhancedMarkdown.trim()
+          ? { enhancedMarkdown: request.enhancedMarkdown }
+          : {}),
+        segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
+        history: history.map((h) => ({ question: h.question, answer: h.answer })),
+        question
+      }
+      const engine = this.pickEngine()
+      const result = await engine.askQuestion(input, (token) => {
+        this.broadcast(NOTES_ASK_TOKEN_CHANNEL, { token })
+      })
+      return { answer: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      this.askBusy = false
+    }
+  }
+
+  /* ---- ask across meetings (Home-level chat) ---- */
+
+  /**
+   * Home "ask anything": the renderer sends only the question; context is
+   * gathered here from the meetings store, and the conversation history is
+   * the persisted global chat. Shares `askBusy` with the per-meeting ask so
+   * global ask, per-meeting ask and enhance are mutually exclusive.
+   */
+  private async askGlobal(request: GlobalAskRequest): Promise<GlobalAskResult> {
+    if (this.askBusy) {
+      return { error: 'Still answering the previous question — one at a time.' }
+    }
+    if (this.enhanceBusy) {
+      return { error: 'Notes are being generated right now — ask again when they finish.' }
+    }
+    this.askBusy = true
+    try {
+      const question = typeof request.question === 'string' ? request.question.trim() : ''
+      if (!question) return { error: 'Ask a question first.' }
+
+      const meetings = this.globalAskContext()
+      if (meetings.length === 0) {
+        return { error: 'No meeting notes yet — record a meeting first.' }
+      }
+
+      const input: GlobalAskInput = {
+        meetings,
+        history: this.loadGlobalChat()
+          .slice(-MAX_GLOBAL_HISTORY_SENT)
+          .map((e) => ({ question: e.question, answer: e.answer })),
+        question
+      }
+      const engine = this.pickEngine()
+      const result = await engine.askAcrossMeetings(input, (token) => {
+        this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token })
+      })
+      this.saveGlobalChat([
+        ...this.loadGlobalChat(),
+        { question, answer: result.markdown, askedAt: new Date().toISOString() }
+      ])
+      return { answer: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      this.askBusy = false
+    }
+  }
+
+  /**
+   * Cross-meeting context: every non-trashed meeting, newest first, reduced
+   * to its best available notes. Meetings with nothing to ground an answer
+   * on are skipped entirely; the newest MAX_GLOBAL_MEETINGS candidates go to
+   * the prompt builder, which trims further to its character budget.
+   */
+  private globalAskContext(): GlobalAskMeeting[] {
+    const records = this.meetings
+      .readAll()
+      .filter((record) => !record.trashedAt)
+      .sort((a, b) => {
+        const aIso = a.startedAt ?? a.createdAt
+        const bIso = b.startedAt ?? b.createdAt
+        return aIso < bIso ? 1 : aIso > bIso ? -1 : 0
+      })
+    const out: GlobalAskMeeting[] = []
+    for (const record of records) {
+      if (out.length >= MAX_GLOBAL_MEETINGS) break
+      const notes = bestNotesOf(record)
+      if (notes === null) continue
+      out.push({
+        title: record.title.trim() || 'Untitled meeting',
+        dateIso: record.startedAt ?? record.createdAt,
+        notesMarkdown: notes
+      })
+    }
+    return out
+  }
+
+  /* ---- global chat persistence (userData/global-chat.json) ---- */
+
+  private loadGlobalChat(): GlobalChatEntry[] {
+    try {
+      const raw = JSON.parse(readFileSync(this.globalChatPath, 'utf8'))
+      return Array.isArray(raw) ? raw.filter(isGlobalChatEntry) : []
+    } catch {
+      return [] // file doesn't exist yet (or is corrupt) — no conversation
+    }
+  }
+
+  private saveGlobalChat(entries: GlobalChatEntry[]): void {
+    try {
+      writeFileSync(this.globalChatPath, JSON.stringify(entries, null, 2))
+    } catch (err) {
+      console.error('[notes] failed to save global chat:', err)
     }
   }
 
@@ -353,4 +555,33 @@ export class NotesService {
       console.error('[notes] failed to save settings:', err)
     }
   }
+}
+
+/**
+ * The densest grounding available for one meeting: generated notes, else the
+ * user's rough notes, else a short transcript excerpt — else null (nothing
+ * to ground on; skip the meeting).
+ */
+function bestNotesOf(record: MeetingRecord): string | null {
+  const enhanced = record.enhancedMarkdown?.trim()
+  if (enhanced) return enhanced
+  const raw = record.rawNotesMarkdown.trim()
+  if (raw) return raw
+  const spoken = record.segments
+    .filter((s) => !s.echo)
+    .map((s) => `${s.speaker}: ${s.text}`)
+    .join('\n')
+    .trim()
+  if (spoken.length === 0) return null
+  return spoken.length > TRANSCRIPT_EXCERPT_CHARS
+    ? `${spoken.slice(0, TRANSCRIPT_EXCERPT_CHARS)}…`
+    : spoken
+}
+
+function isGlobalChatEntry(entry: unknown): entry is GlobalChatEntry {
+  if (typeof entry !== 'object' || entry === null) return false
+  const e = entry as Partial<GlobalChatEntry>
+  return (
+    typeof e.question === 'string' && typeof e.answer === 'string' && typeof e.askedAt === 'string'
+  )
 }

@@ -1,8 +1,10 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
+import { ASK_SYSTEM_PROMPT, buildAskUserMessage } from './ask-prompt'
+import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
 import { buildMergeUserMessage, MERGE_SYSTEM_PROMPT } from './prompt'
-import type { MergeInput, MergedNotes, NotesEngine } from './types'
+import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine } from './types'
 
 /**
  * The optional BYOK path: same merge, run against the user's own API key.
@@ -27,6 +29,25 @@ export class CloudNotesEngine implements NotesEngine {
   }
 
   async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
+    return this.runPrompt(MERGE_SYSTEM_PROMPT, buildMergeUserMessage(input), onToken)
+  }
+
+  async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
+    return this.runPrompt(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
+  }
+
+  async askAcrossMeetings(
+    input: GlobalAskInput,
+    onToken?: (text: string) => void
+  ): Promise<AskAnswer> {
+    return this.runPrompt(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
+  }
+
+  private async runPrompt(
+    system: string,
+    prompt: string,
+    onToken?: (text: string) => void
+  ): Promise<MergedNotes> {
     const started = Date.now()
     const modelId =
       this.options.model ?? (this.options.provider === 'anthropic' ? 'claude-sonnet-5' : 'gpt-5')
@@ -35,12 +56,7 @@ export class CloudNotesEngine implements NotesEngine {
         ? createAnthropic({ apiKey: this.options.apiKey })(modelId)
         : createOpenAI({ apiKey: this.options.apiKey })(modelId)
 
-    const { text } = await generateText({
-      model,
-      system: MERGE_SYSTEM_PROMPT,
-      prompt: buildMergeUserMessage(input),
-      temperature: 0.3
-    })
+    const { text } = await generateText({ model, system, prompt, temperature: 0.3 })
     onToken?.(text)
     return { markdown: text.trim(), engine: this.id, elapsedMs: Date.now() - started }
   }

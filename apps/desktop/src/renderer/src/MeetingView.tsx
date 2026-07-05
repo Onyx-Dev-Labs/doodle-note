@@ -1,30 +1,36 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../../shared/engine-events'
+import type { FolderRecord } from '../../shared/folders-api'
+import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type { NotesModelsResponse, NotesSettingsView } from '../../shared/notes-api'
+import FolderPicker from './FolderPicker'
 import { docToMarkdown, markdownToHtml } from './lib/markdown'
 
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
 
-interface MeetingState {
+interface SessionState {
   phase: Phase
   statusText: string
   segments: TranscriptSegment[]
   partials: Partial<Record<EngineChannel, string>>
   echoCount: number
   error: string | null
+  /** True once the ASR models finished warming and transcription is live. */
+  transcribing: boolean
 }
 
-const initialMeetingState: MeetingState = {
+const initialSessionState: SessionState = {
   phase: 'idle',
   statusText: '',
   segments: [],
   partials: {},
   echoCount: 0,
-  error: null
+  error: null,
+  transcribing: false
 }
 
 const ACTIVE_PHASES: readonly Phase[] = ['starting', 'recording', 'finishing']
@@ -33,12 +39,12 @@ function segmentTime(segment: TranscriptSegment): number {
   return segment.absoluteStartMs ?? segment.startMs
 }
 
-function formatOffset(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000))
-  return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')}`
+function formatClock(totalSec: number): string {
+  const sec = Math.max(0, Math.floor(totalSec))
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 }
 
-function meetingReducer(state: MeetingState, ev: EngineEvent): MeetingState {
+function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
   const active = ACTIVE_PHASES.includes(state.phase)
   switch (ev.event) {
     case 'started':
@@ -46,30 +52,27 @@ function meetingReducer(state: MeetingState, ev: EngineEvent): MeetingState {
         // A file run from the dev console superseded any live session.
         return active ? { ...state, phase: 'idle', statusText: '' } : state
       }
-      return {
-        ...initialMeetingState,
-        phase: 'starting',
-        statusText: 'starting live capture…'
-      }
+      return { ...initialSessionState, phase: 'starting', statusText: 'Starting…' }
     case 'status': {
       if (!active) return state
       if (ev.stage === 'requesting_permission') {
         const which = (ev.permission ?? 'capture').replace(/_/g, ' ')
-        return { ...state, statusText: `waiting for macOS permission — ${which}` }
+        return { ...state, statusText: `Waiting for macOS permission — ${which}` }
+      }
+      if (ev.stage === 'transcribing') {
+        return { ...state, transcribing: true, statusText: '' }
       }
       return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
     }
     case 'ready':
       if (!active) return state
-      return {
-        ...state,
-        phase: 'recording',
-        statusText: `listening (${(ev.channels ?? []).join(' + ') || 'live'})`
-      }
+      return { ...state, phase: 'recording', statusText: '' }
     case 'partial':
       if (!active || !ev.channel) return state
-      return { ...state, partials: { ...state.partials, [ev.channel]: ev.text } }
+      return { ...state, transcribing: true, partials: { ...state.partials, [ev.channel]: ev.text } }
     case 'segments': {
+      // Never attribute segments to a meeting whose view didn't run a session.
+      if (state.phase === 'idle') return state
       const kept = ev.segments.filter((s) => !s.echo)
       const echoDropped = ev.segments.length - kept.length
       if (kept.length === 0 && echoDropped === 0) return state
@@ -81,20 +84,15 @@ function meetingReducer(state: MeetingState, ev: EngineEvent): MeetingState {
       return {
         ...state,
         phase: 'finishing',
-        statusText: `finalizing… (${ev.channel} done)`,
+        statusText: 'Finishing up…',
         partials: { ...state.partials, [ev.channel]: undefined }
       }
     case 'done':
       if (!active) return state
-      return { ...state, phase: 'ended', statusText: 'meeting ended', partials: {} }
+      return { ...state, phase: 'ended', statusText: '', partials: {} }
     case 'session-saved':
       if (!active && state.phase !== 'ended') return state
-      return {
-        ...state,
-        phase: 'ended',
-        statusText: `meeting ended — ${ev.segmentCount} segments saved`,
-        partials: {}
-      }
+      return { ...state, phase: 'ended', statusText: '', partials: {} }
     case 'error':
       return { ...state, error: ev.message }
     case 'spawn-error':
@@ -102,17 +100,12 @@ function meetingReducer(state: MeetingState, ev: EngineEvent): MeetingState {
     case 'exit': {
       if (!active) return state
       if (ev.code !== null && ev.code !== 0 && state.phase === 'starting') {
-        return {
-          ...state,
-          phase: 'idle',
-          statusText: '',
-          error: `engine exited with code ${ev.code}`
-        }
+        return { ...state, phase: 'idle', statusText: '', error: `Engine exited (code ${ev.code})` }
       }
       return {
         ...state,
         phase: state.segments.length > 0 || state.phase !== 'starting' ? 'ended' : 'idle',
-        statusText: state.statusText || 'meeting ended',
+        statusText: '',
         partials: {}
       }
     }
@@ -121,53 +114,203 @@ function meetingReducer(state: MeetingState, ev: EngineEvent): MeetingState {
   }
 }
 
-type EnhanceStatus = 'idle' | 'need-model' | 'running' | 'done' | 'error'
-
-interface EnhanceState {
-  status: EnhanceStatus
-  streamed: string
-  markdown?: string
-  engine?: string
-  elapsedMs?: number
-  error?: string
-}
+type EnhanceStatus = 'idle' | 'running' | 'error'
 
 const CHANNEL_SPEAKERS: Record<EngineChannel, string> = { mic: 'You', system: 'Them' }
 
+/** Canned question behind the "✉ Write follow up email" chip. */
+const FOLLOW_UP_EMAIL_QUESTION =
+  'Write a concise, ready-to-send follow-up email for this meeting: brief recap, decisions made, and action items with owners.'
+
+function BarsIcon({ animated }: { animated: boolean }): React.JSX.Element {
+  return (
+    <span className={animated ? 'bars-icon live' : 'bars-icon'} aria-hidden="true">
+      <i />
+      <i />
+      <i />
+      <i />
+      <i />
+    </span>
+  )
+}
+
+/** The Granola-shaped note editor: title, chips, page-wide TipTap doc,
+ *  floating record/enhance bar and the transcript flyout. */
 export default function MeetingView({
-  active,
-  onOpenModels
+  meetingId,
+  visible,
+  autoRecord,
+  onAutoRecordStarted,
+  onBack,
+  onOpenSettings
 }: {
-  active: boolean
-  onOpenModels: () => void
+  meetingId: string
+  visible: boolean
+  /** True when this meeting was just created via "+ New meeting" — recording starts automatically. */
+  autoRecord: boolean
+  onAutoRecordStarted: () => void
+  onBack: () => void
+  onOpenSettings: () => void
 }): React.JSX.Element {
-  const [title, setTitle] = useState('Untitled meeting')
-  const [state, dispatch] = useReducer(meetingReducer, initialMeetingState)
+  const [meeting, setMeeting] = useState<MeetingRecord | null>(null)
+  const [title, setTitle] = useState('')
+  const [state, dispatch] = useReducer(sessionReducer, initialSessionState)
+  const [savedSegments, setSavedSegments] = useState<TranscriptSegment[]>([])
+  const [savedEcho, setSavedEcho] = useState(0)
+  const [enhancedMarkdown, setEnhancedMarkdown] = useState<string | null>(null)
+  const [docView, setDocView] = useState<'notes' | 'enhanced'>('notes')
+  const [enhanceStatus, setEnhanceStatus] = useState<EnhanceStatus>('idle')
+  const [enhanceStreamed, setEnhanceStreamed] = useState('')
+  const [enhanceError, setEnhanceError] = useState<string | null>(null)
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatThread, setChatThread] = useState<MeetingChatEntry[]>([])
+  const [askText, setAskText] = useState('')
+  /** The question currently being answered; null when no ask is in flight. */
+  const [askPending, setAskPending] = useState<string | null>(null)
+  const [chatCopied, setChatCopied] = useState<number | null>(null)
+  const [askStreamed, setAskStreamed] = useState('')
+  const [askError, setAskError] = useState<string | null>(null)
+  const [askHint, setAskHint] = useState(false)
+  const [elapsedSec, setElapsedSec] = useState(0)
+  const [copied, setCopied] = useState(false)
+  const [emptyNotice, setEmptyNotice] = useState(false)
   const [modelsInfo, setModelsInfo] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
-  const [enhance, setEnhance] = useState<EnhanceState>({ status: 'idle', streamed: '' })
-  const [rightPane, setRightPane] = useState<'transcript' | 'enhanced'>('transcript')
-  const [copied, setCopied] = useState(false)
+  const [folders, setFolders] = useState<FolderRecord[]>([])
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+
+  const roughMarkdownRef = useRef('')
+  const titleValueRef = useRef('')
+  const docViewRef = useRef<'notes' | 'enhanced'>('notes')
+  const applyingRef = useRef(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stateRef = useRef(state)
+  const startedAtRef = useRef<string | null>(null)
+  const recordStartRef = useRef<number | null>(null)
+  const autoOpenedRef = useRef(false)
+  const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
-  const enhancedRef = useRef<HTMLDivElement>(null)
+  /** Mirrors chatThread so an in-flight ask reads the freshest history. */
+  const chatThreadRef = useRef<MeetingChatEntry[]>([])
+  const chatFeedRef = useRef<HTMLDivElement>(null)
+  const askHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Mirror the latest session state for the engine-event handler (which
+  // must read it outside the render cycle, e.g. when a new session starts).
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  const persist = useCallback(
+    (patch: Partial<Omit<MeetingRecord, 'id'>>): void => {
+      void window.meetings.upsert({ id: meetingId, ...patch }).catch(() => {})
+    },
+    [meetingId]
+  )
+
+  const scheduleNotesSave = useCallback((): void => {
+    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null
+      persist({ title: titleValueRef.current, rawNotesMarkdown: roughMarkdownRef.current })
+    }, 700)
+  }, [persist])
+
+  const flushNotesSave = useCallback((): void => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    persist({ title: titleValueRef.current, rawNotesMarkdown: roughMarkdownRef.current })
+  }, [persist])
 
   const editor = useEditor({
     extensions: [
       StarterKit,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Placeholder.configure({ placeholder: 'Jot rough notes during the meeting…' })
-    ]
+      Placeholder.configure({ placeholder: 'Write notes…' })
+    ],
+    onUpdate: ({ editor: ed }) => {
+      if (applyingRef.current || docViewRef.current !== 'notes') return
+      roughMarkdownRef.current = docToMarkdown(ed.getJSON())
+      scheduleNotesSave()
+    }
   })
+
+  const setEditorMarkdown = useCallback(
+    (markdown: string, editable: boolean): void => {
+      if (!editor) return
+      applyingRef.current = true
+      editor.commands.setContent(markdownToHtml(markdown))
+      editor.setEditable(editable)
+      applyingRef.current = false
+    },
+    [editor]
+  )
+
+  /* ---- load the meeting document once ---- */
+
+  useEffect(() => {
+    let cancelled = false
+    void window.meetings.get(meetingId).then((record) => {
+      if (cancelled || !record) return
+      setMeeting(record)
+      setTitle(record.title)
+      titleValueRef.current = record.title
+      roughMarkdownRef.current = record.rawNotesMarkdown
+      setSavedSegments(record.segments.filter((s) => !s.echo))
+      setSavedEcho(record.echoSuppressed)
+      startedAtRef.current = record.startedAt ?? null
+      setFolderId(record.folderId ?? null)
+      if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
+      if (Array.isArray(record.chat) && record.chat.length > 0) {
+        chatThreadRef.current = record.chat
+        setChatThread(record.chat)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [meetingId])
+
+  useEffect(() => {
+    if (!editor || !meeting || contentLoadedRef.current) return
+    contentLoadedRef.current = true
+    if (meeting.enhancedMarkdown) {
+      // One-time init from the loaded document; runs exactly once per mount.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDocView('enhanced')
+      docViewRef.current = 'enhanced'
+      setEditorMarkdown(meeting.enhancedMarkdown, false)
+    } else {
+      setEditorMarkdown(meeting.rawNotesMarkdown, true)
+    }
+  }, [editor, meeting, setEditorMarkdown])
+
+  /* ---- engine events ---- */
 
   useEffect(
     () =>
       window.engine.onEvent((ev) => {
-        // A fresh live session clears the previous enhance output.
         if (ev.event === 'started' && ev.command === 'live') {
-          setEnhance({ status: 'idle', streamed: '' })
-          setRightPane('transcript')
-          setCopied(false)
+          // Fold the previous session's segments into the saved pool before
+          // the reducer resets, so nothing is lost across re-records.
+          const prev = stateRef.current
+          if (prev.segments.length > 0) {
+            setSavedSegments((s) => [...s, ...prev.segments])
+          }
+          if (prev.echoCount > 0) setSavedEcho((n) => n + prev.echoCount)
+          recordStartRef.current = null
+          setElapsedSec(0)
+          if (!autoOpenedRef.current) {
+            autoOpenedRef.current = true
+            setTranscriptOpen(true)
+            setChatOpen(false)
+          }
         }
         dispatch(ev)
       }),
@@ -177,10 +320,20 @@ export default function MeetingView({
   useEffect(
     () =>
       window.notes.onEnhanceToken(({ token }) => {
-        setEnhance((e) => (e.status === 'running' ? { ...e, streamed: e.streamed + token } : e))
+        setEnhanceStreamed((s) => s + token)
       }),
     []
   )
+
+  useEffect(
+    () =>
+      window.notes.onAskToken(({ token }) => {
+        setAskStreamed((s) => s + token)
+      }),
+    []
+  )
+
+  /* ---- models / settings meta (drives the Enhance chip) ---- */
 
   const refreshNotesMeta = useCallback(() => {
     void window.notes
@@ -194,247 +347,704 @@ export default function MeetingView({
   }, [])
 
   useEffect(() => {
-    if (active) refreshNotesMeta()
-  }, [active, refreshNotesMeta])
+    if (visible) refreshNotesMeta()
+  }, [visible, refreshNotesMeta])
+
+  /* ---- folder chip ---- */
+
+  const refreshFolders = useCallback(() => {
+    void window.folders
+      .list()
+      .then(setFolders)
+      .catch(() => setFolders([]))
+  }, [])
+
+  useEffect(() => {
+    if (visible) refreshFolders()
+  }, [visible, refreshFolders])
+
+  const assignFolder = useCallback(
+    (nextFolderId: string | null): void => {
+      setFolderPickerOpen(false)
+      setFolderId(nextFolderId)
+      persist({ folderId: nextFolderId })
+      // The picker may have just created the folder — refresh so the chip
+      // can resolve its name.
+      refreshFolders()
+    },
+    [persist, refreshFolders]
+  )
+
+  /* ---- recording timer ---- */
 
   const phase = state.phase
+  const capturing = ACTIVE_PHASES.includes(phase)
+
+  useEffect(() => {
+    if (phase !== 'recording') return
+    if (recordStartRef.current === null) recordStartRef.current = Date.now()
+    const started = recordStartRef.current
+    const tick = (): void => setElapsedSec((Date.now() - started) / 1000)
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [phase])
+
+  /* ---- persist segments once the session lands ---- */
+
+  const allSegments = useMemo(
+    () => [...savedSegments, ...state.segments].sort((a, b) => segmentTime(a) - segmentTime(b)),
+    [savedSegments, state.segments]
+  )
+
+  useEffect(() => {
+    if (phase !== 'ended') return
+    if (sessionSaveTimerRef.current !== null) clearTimeout(sessionSaveTimerRef.current)
+    // No cleanup on unmount: the timeout only persists (no setState), so
+    // letting it fire after the view is gone still lands the final flush.
+    sessionSaveTimerRef.current = setTimeout(() => {
+      sessionSaveTimerRef.current = null
+      persist({
+        segments: allSegments,
+        echoSuppressed: savedEcho + state.echoCount,
+        endedAt: new Date().toISOString()
+      })
+    }, 400)
+  }, [phase, allSegments, savedEcho, state.echoCount, persist])
+
+  // A session that ends with zero transcript is otherwise indistinguishable
+  // from success ("I hit stop and nothing happened") — say so explicitly.
+  useEffect(() => {
+    if (phase === 'starting' || phase === 'recording') setEmptyNotice(false)
+    else if (phase === 'ended' && allSegments.length === 0) setEmptyNotice(true)
+  }, [phase, allSegments.length])
+
+  // When the session ends, tuck the transcript panel away so the Generate
+  // notes CTA takes the stage (it renders in the space the panel covers).
+  useEffect(() => {
+    if (phase === 'ended') setTranscriptOpen(false)
+  }, [phase])
+
+  // Flush pending note edits when leaving the view entirely.
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current)
+        persist({ title: titleValueRef.current, rawNotesMarkdown: roughMarkdownRef.current })
+      }
+    }
+  }, [persist])
+
+  /* ---- transcript autoscroll ---- */
 
   useEffect(() => {
     const el = feedRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [state.segments, state.partials])
+  }, [allSegments, state.partials, transcriptOpen])
+
+  /* ---- chat autoscroll + hint timer cleanup ---- */
 
   useEffect(() => {
-    const el = enhancedRef.current
+    const el = chatFeedRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [enhance.streamed])
+  }, [chatThread, askPending, askStreamed, askError, chatOpen])
 
-  const capturing = ACTIVE_PHASES.includes(phase)
-  const anyDownloaded = modelsInfo?.models.some((m) => m.downloaded) ?? false
-  const effectiveEngine =
-    settings?.engineChoice === 'cloud' && settings.cloud?.hasKey ? 'cloud' : 'local'
-  const needsModel = effectiveEngine === 'local' && modelsInfo !== null && !anyDownloaded
+  useEffect(() => {
+    return () => {
+      if (askHintTimerRef.current !== null) clearTimeout(askHintTimerRef.current)
+    }
+  }, [])
 
-  const runEnhance = async (): Promise<void> => {
-    if (!editor || enhance.status === 'running') return
-    refreshNotesMeta()
-    if (needsModel) {
-      setEnhance({ status: 'need-model', streamed: '' })
-      setRightPane('enhanced')
-      return
+  /* ---- actions ---- */
+
+  const startRecording = (): void => {
+    if (capturing) return
+    if (startedAtRef.current === null) {
+      startedAtRef.current = new Date().toISOString()
+      persist({ startedAt: startedAtRef.current })
     }
-    setEnhance({ status: 'running', streamed: '' })
-    setRightPane('enhanced')
-    setCopied(false)
-    const result = await window.notes.enhance({
-      title: title.trim() || 'Untitled meeting',
-      rawNotesMarkdown: docToMarkdown(editor.getJSON()),
-      segments: state.segments
-    })
-    if (result.error !== undefined || result.markdown === undefined) {
-      setEnhance((e) => ({
-        ...e,
-        status: 'error',
-        error: result.error ?? 'enhance failed with no output'
-      }))
-      return
-    }
-    setEnhance((e) => ({
-      ...e,
-      status: 'done',
-      markdown: result.markdown,
-      engine: result.engine,
-      elapsedMs: result.elapsedMs
-    }))
+    window.engine.start('live', undefined, { source: 'both' })
   }
 
-  const copyEnhanced = (): void => {
-    if (enhance.markdown === undefined) return
-    void navigator.clipboard.writeText(enhance.markdown).then(() => {
+  const stopRecording = (): void => window.engine.stop()
+
+  // Auto-start recording for meetings created via "+ New meeting": the page
+  // loads already capturing (bars animate, stop button shown), so there is
+  // no separate "now find the record button" step.
+  const autoStartedRef = useRef(false)
+  useEffect(() => {
+    if (!autoRecord || !visible || autoStartedRef.current) return
+    if (phase !== 'idle') return
+    autoStartedRef.current = true
+    onAutoRecordStarted()
+    startRecording()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once when eligible
+  }, [autoRecord, visible, phase])
+
+  const totalEcho = savedEcho + state.echoCount
+  const anyDownloaded = modelsInfo?.models.some((m) => m.downloaded) ?? false
+  const cloudReady = settings?.engineChoice === 'cloud' && settings.cloud?.hasKey === true
+  const modelReady = cloudReady || anyDownloaded
+  const canEnhance = allSegments.length > 0 && modelReady && enhanceStatus !== 'running'
+
+  const runEnhance = async (): Promise<void> => {
+    if (!editor || enhanceStatus === 'running') return
+    refreshNotesMeta()
+    setEnhanceError(null)
+    setEnhanceStatus('running')
+    setEnhanceStreamed('')
+    // Make sure the freshest rough notes go into the merge.
+    if (docViewRef.current === 'notes') {
+      roughMarkdownRef.current = docToMarkdown(editor.getJSON())
+    }
+    const result = await window.notes.enhance({
+      title: titleValueRef.current.trim() || 'New meeting',
+      rawNotesMarkdown: roughMarkdownRef.current,
+      segments: allSegments
+    })
+    if (result.error !== undefined || result.markdown === undefined) {
+      setEnhanceStatus('error')
+      setEnhanceError(result.error ?? 'Enhance failed with no output')
+      return
+    }
+    setEnhanceStatus('idle')
+    setEnhancedMarkdown(result.markdown)
+    persist({
+      enhancedMarkdown: result.markdown,
+      ...(result.engine ? { engine: result.engine } : {})
+    })
+    setDocView('enhanced')
+    docViewRef.current = 'enhanced'
+    setEditorMarkdown(result.markdown, false)
+  }
+
+  const showNotesDoc = (): void => {
+    if (docView === 'notes') return
+    setDocView('notes')
+    docViewRef.current = 'notes'
+    setEditorMarkdown(roughMarkdownRef.current, true)
+  }
+
+  const showEnhancedDoc = (): void => {
+    if (docView === 'enhanced' || enhancedMarkdown === null) return
+    // Capture any rough edits before swapping documents.
+    if (editor && docViewRef.current === 'notes') {
+      roughMarkdownRef.current = docToMarkdown(editor.getJSON())
+      flushNotesSave()
+    }
+    setDocView('enhanced')
+    docViewRef.current = 'enhanced'
+    setEditorMarkdown(enhancedMarkdown, false)
+  }
+
+  const copyTranscript = (): void => {
+    const text = allSegments.map((s) => `${s.speaker}: ${s.text}`).join('\n')
+    void navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
   }
 
-  const hasEnhancedPane = enhance.status !== 'idle'
-  const showEnhanced = rightPane === 'enhanced' && hasEnhancedPane
+  /* ---- ask anything ---- */
+
+  // The chat flyout and the transcript flyout share the same spot above the
+  // bar, so opening one always closes the other.
+  const toggleTranscript = (): void => {
+    if (transcriptOpen) {
+      setTranscriptOpen(false)
+    } else {
+      setTranscriptOpen(true)
+      setChatOpen(false)
+    }
+  }
+
+  const openChat = (): void => {
+    setChatOpen(true)
+    setTranscriptOpen(false)
+  }
+
+  const showAskHint = (): void => {
+    setAskHint(true)
+    if (askHintTimerRef.current !== null) clearTimeout(askHintTimerRef.current)
+    askHintTimerRef.current = setTimeout(() => {
+      askHintTimerRef.current = null
+      setAskHint(false)
+    }, 4000)
+  }
+
+  const submitAsk = async (preset?: string): Promise<void> => {
+    if (askPending !== null) return
+    const question = (preset ?? askText).trim()
+    if (!question) return
+    // Freshest rough notes, same as runEnhance.
+    if (editor && docViewRef.current === 'notes') {
+      roughMarkdownRef.current = docToMarkdown(editor.getJSON())
+    }
+    // Nothing to ground an answer in yet — hint instead of a doomed model call.
+    if (
+      allSegments.length === 0 &&
+      enhancedMarkdown === null &&
+      roughMarkdownRef.current.trim().length === 0
+    ) {
+      showAskHint()
+      return
+    }
+    refreshNotesMeta()
+    setAskError(null)
+    setAskStreamed('')
+    setAskPending(question)
+    if (preset === undefined) setAskText('')
+    openChat()
+
+    const result = await window.notes.ask({
+      title: titleValueRef.current.trim() || 'New meeting',
+      rawNotesMarkdown: roughMarkdownRef.current,
+      enhancedMarkdown,
+      segments: allSegments,
+      history: chatThreadRef.current.map((c) => ({ question: c.question, answer: c.answer })),
+      question
+    })
+    if (result.error !== undefined || result.answer === undefined) {
+      setAskError(result.error ?? 'The model returned no answer.')
+      setAskPending(null)
+      setAskStreamed('')
+      // Put the question back so a retry is one keypress away.
+      setAskText((current) => (current.trim().length > 0 ? current : question))
+      return
+    }
+    const entry: MeetingChatEntry = {
+      question,
+      answer: result.answer,
+      askedAt: new Date().toISOString()
+    }
+    const next = [...chatThreadRef.current, entry]
+    chatThreadRef.current = next
+    setChatThread(next)
+    persist({ chat: next })
+    setAskPending(null)
+    setAskStreamed('')
+  }
+
+  const clearChat = (): void => {
+    chatThreadRef.current = []
+    setChatThread([])
+    setAskError(null)
+    persist({ chat: [] })
+  }
+
+  const goBack = (): void => {
+    flushNotesSave()
+    onBack()
+  }
+
+  /* ---- derived display bits ---- */
+
+  const createdAt = meeting?.createdAt
+  const dateChip = useMemo(() => {
+    if (!createdAt) return 'Today'
+    const d = new Date(createdAt)
+    const today = new Date()
+    const sameDay =
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    return sameDay
+      ? 'Today'
+      : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+  }, [createdAt])
+
+  // A stale folderId (folder deleted elsewhere) simply resolves to no name,
+  // so the chip falls back to "Add to folder".
+  const folderName =
+    folderId !== null ? (folders.find((f) => f.id === folderId)?.name ?? null) : null
+
+  const streamedWords = enhanceStreamed.length > 0 ? enhanceStreamed.trim().split(/\s+/).length : 0
+  const transcriptEmpty = allSegments.length === 0 && Object.values(state.partials).every((p) => !p)
+  const firstSegmentTime = allSegments.length > 0 ? segmentTime(allSegments[0]!) : 0
 
   return (
-    <div className="meeting">
-      {needsModel && (
-        <div className="banner">
-          <span>
-            Download a notes model to enable <strong>✨ Enhance</strong> — everything runs
-            on-device.
-          </span>
-          <button type="button" onClick={onOpenModels}>
-            Open Models →
+    <div className="editor-page">
+      <div className="editor-topbar drag">
+        <button type="button" className="back-pill no-drag" onClick={goBack} title="Back to home">
+          ‹ ⌂
+        </button>
+      </div>
+
+      {state.error && (
+        <div className="toast" role="alert">
+          <span>{state.error}</span>
+          <button type="button" onClick={() => dispatch({ event: 'error', message: '' })}>
+            ✕
           </button>
         </div>
       )}
 
-      <div className="meeting-header">
-        <input
-          className="meeting-title"
-          type="text"
-          spellCheck={false}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onFocus={(e) => e.target.select()}
-        />
-        {capturing ? (
-          <button type="button" className="stop" onClick={() => window.engine.stop()}>
-            ■ Stop
+      {emptyNotice && !state.error && (
+        <div className="toast" role="status">
+          <span>
+            Recording ended, but no speech was transcribed on either channel. Try again speaking
+            near the mic (or with meeting audio playing) — if it keeps happening, the Developer
+            view shows the raw engine events.
+          </span>
+          <button type="button" onClick={() => setEmptyNotice(false)}>
+            ✕
           </button>
-        ) : (
-          <button
-            type="button"
-            className="record"
-            onClick={() => window.engine.start('live', undefined, { source: 'both' })}
-          >
-            ● Start
-          </button>
-        )}
-        {state.statusText && <span className="meeting-status">{state.statusText}</span>}
-        {state.error && <span className="meeting-error">{state.error}</span>}
-      </div>
+        </div>
+      )}
 
-      <div className="meeting-columns">
-        <section className="meeting-col">
-          <div className="col-title-row">
-            <span className="col-title">My notes</span>
-          </div>
-          <EditorContent editor={editor} className="notes-editor" />
-        </section>
+      <div className="editor-scroll">
+        <div className="editor-col">
+          <input
+            className="doc-title"
+            type="text"
+            spellCheck={false}
+            placeholder="New meeting"
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              titleValueRef.current = e.target.value
+              scheduleNotesSave()
+            }}
+          />
 
-        <section className="meeting-col">
-          <div className="col-title-row">
-            <span className="col-title">{showEnhanced ? 'Enhanced notes' : 'Transcript'}</span>
-            {hasEnhancedPane && (
-              <span className="pane-toggle">
+          <div className="chips-row">
+            <span className="chip">📅 {dateChip}</span>
+            <span className="chip">👥 Me</span>
+            <span className="chip-folder-anchor">
+              <button
+                type="button"
+                className="chip chip-folder"
+                title={folderName !== null ? 'Move to another folder' : 'Add to folder'}
+                onClick={() => setFolderPickerOpen((open) => !open)}
+              >
+                📁 {folderName ?? 'Add to folder'}
+              </button>
+              {folderPickerOpen && (
+                <FolderPicker
+                  currentFolderId={folderId}
+                  onAssign={assignFolder}
+                  onClose={() => setFolderPickerOpen(false)}
+                />
+              )}
+            </span>
+            {enhancedMarkdown !== null && (
+              <span className="chip chip-toggle">
                 <button
                   type="button"
-                  className={rightPane === 'transcript' ? 'on' : ''}
-                  onClick={() => setRightPane('transcript')}
+                  className={docView === 'notes' ? 'on' : ''}
+                  onClick={showNotesDoc}
                 >
-                  transcript
+                  My notes
                 </button>
                 <button
                   type="button"
-                  className={rightPane === 'enhanced' ? 'on' : ''}
-                  onClick={() => setRightPane('enhanced')}
+                  className={docView === 'enhanced' ? 'on' : ''}
+                  onClick={showEnhancedDoc}
                 >
-                  enhanced
+                  Enhanced ✓
                 </button>
               </span>
             )}
-            {!showEnhanced && state.echoCount > 0 && (
-              <span className="feed-echo">{state.echoCount} echo suppressed</span>
+            {enhancedMarkdown !== null && !capturing && (
+              <button
+                type="button"
+                className="chip chip-regen"
+                disabled={!canEnhance}
+                title={!modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'}
+                aria-label="Regenerate notes"
+                onClick={() => void runEnhance()}
+              >
+                {enhanceStatus === 'running' ? <span className="spinner" aria-hidden="true" /> : '↻'}
+              </button>
+            )}
+            {enhancedMarkdown !== null && enhanceStatus === 'running' && (
+              <span className="chip-regen-status">
+                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+              </span>
             )}
           </div>
 
-          {showEnhanced ? (
-            <div className="enhanced-pane">
-              {enhance.status === 'need-model' && (
-                <div className="enhanced-prompt">
-                  <p>
-                    No notes model is downloaded yet. Doodle Note enhances notes fully on-device —
-                    download a model once and Enhance works offline forever.
-                  </p>
-                  <button type="button" onClick={onOpenModels}>
-                    Open Models →
-                  </button>
-                </div>
-              )}
-              {enhance.status === 'running' && (
-                <div className="enhanced-stream" ref={enhancedRef}>
-                  {enhance.streamed.length > 0 ? (
-                    <pre>{enhance.streamed}</pre>
-                  ) : (
-                    <span className="placeholder">thinking…</span>
-                  )}
-                  <span className="cursor">▋</span>
-                </div>
-              )}
-              {enhance.status === 'error' && (
-                <div className="enhanced-prompt">
-                  <p className="enhanced-error">{enhance.error}</p>
-                  <button type="button" onClick={() => void runEnhance()}>
-                    Try again
-                  </button>
-                </div>
-              )}
-              {enhance.status === 'done' && enhance.markdown !== undefined && (
-                <>
-                  <div
-                    className="enhanced-body md-render"
-                    // Escaped before tags are added in markdownToHtml — inert HTML.
-                    dangerouslySetInnerHTML={{ __html: markdownToHtml(enhance.markdown) }}
-                  />
-                  <div className="enhanced-meta">
-                    <span>
-                      {enhance.engine ?? 'engine'} · {((enhance.elapsedMs ?? 0) / 1000).toFixed(1)}s
-                    </span>
-                    <button type="button" onClick={copyEnhanced}>
-                      {copied ? 'Copied ✓' : 'Copy'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="feed-body meeting-feed" ref={feedRef}>
-              {state.segments.length === 0 && Object.values(state.partials).every((p) => !p) && (
-                <span className="placeholder">
-                  {capturing
-                    ? 'listening — the transcript appears here…'
-                    : 'transcript appears here once the meeting starts'}
-                </span>
-              )}
-              {state.segments.map((s, _i, all) => {
-                const base = segmentTime(all[0]!)
-                return (
-                  <div key={s.id} className={`feed-row feed-${s.channel}`}>
-                    <span className="feed-time">{formatOffset(segmentTime(s) - base)}</span>
-                    <span className="feed-speaker">{s.speaker}</span>
-                    <span className="feed-text">{s.text}</span>
-                  </div>
-                )
-              })}
-              {capturing &&
-                (['mic', 'system'] as const).map((channel) =>
-                  state.partials[channel] ? (
-                    <div key={channel} className={`feed-row feed-${channel} feed-partial`}>
-                      <span className="feed-time">·</span>
-                      <span className="feed-speaker">{CHANNEL_SPEAKERS[channel]}</span>
-                      <span className="feed-text">{state.partials[channel]}</span>
-                    </div>
-                  ) : null
-                )}
-            </div>
-          )}
-        </section>
+          <EditorContent editor={editor} className="doc-editor" />
+        </div>
       </div>
 
-      {phase === 'ended' && (
-        <div className="enhance-bar">
-          <button
-            type="button"
-            className="enhance"
-            disabled={enhance.status === 'running'}
-            onClick={() => void runEnhance()}
-          >
-            {enhance.status === 'running'
-              ? 'Enhancing…'
-              : enhance.status === 'done'
-                ? '✨ Re-enhance notes'
-                : '✨ Enhance notes'}
-          </button>
-          {enhance.status === 'done' && rightPane === 'transcript' && (
-            <button type="button" onClick={() => setRightPane('enhanced')}>
-              view enhanced notes
+      {transcriptOpen && (
+        <div className="transcript-panel">
+          <div className="tp-head">
+            <span className="tp-meta">{totalEcho > 0 ? `${totalEcho} echo suppressed` : ''}</span>
+            <div className="tp-actions">
+              <button type="button" onClick={copyTranscript} title="Copy transcript">
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTranscriptOpen(false)}
+                title="Minimize"
+                aria-label="Minimize transcript"
+              >
+                —
+              </button>
+            </div>
+          </div>
+          <div className="tp-body" ref={feedRef}>
+            {transcriptEmpty ? (
+              <div className="tp-empty">
+                <p className="tp-empty-title">Transcript on…</p>
+                <p className="tp-empty-sub">
+                  {capturing
+                    ? state.transcribing
+                      ? 'Start talking'
+                      : 'Warming up transcription — keep talking, your audio is being captured'
+                    : 'Hit record and start talking'}
+                </p>
+              </div>
+            ) : (
+              <>
+                {allSegments.map((s) => (
+                  <div key={s.id} className={`tp-row tp-${s.channel}`}>
+                    <span className="tp-speaker">{s.speaker}</span>
+                    <span className="tp-text">{s.text}</span>
+                    <span className="tp-time">
+                      {formatClock((segmentTime(s) - firstSegmentTime) / 1000)}
+                    </span>
+                  </div>
+                ))}
+                {capturing &&
+                  (['mic', 'system'] as const).map((channel) =>
+                    state.partials[channel] ? (
+                      <div key={channel} className={`tp-row tp-${channel} tp-partial`}>
+                        <span className="tp-speaker">{CHANNEL_SPEAKERS[channel]}</span>
+                        <span className="tp-text">{state.partials[channel]}</span>
+                        <span className="tp-time">·</span>
+                      </div>
+                    ) : null
+                  )}
+              </>
+            )}
+          </div>
+          <div className="tp-foot">Always get consent when recording others.</div>
+        </div>
+      )}
+
+      {chatOpen && (
+        <div className="transcript-panel chat-panel">
+          <div className="tp-head">
+            <span className="tp-meta">Answers come only from this meeting</span>
+            <div className="tp-actions">
+              {chatThread.length > 0 && askPending === null && (
+                <button type="button" onClick={clearChat} title="Clear conversation">
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setChatOpen(false)}
+                title="Minimize"
+                aria-label="Minimize chat"
+              >
+                —
+              </button>
+            </div>
+          </div>
+          <div className="tp-body chat-body" ref={chatFeedRef}>
+            {chatThread.length === 0 && askPending === null && !askError ? (
+              <div className="tp-empty">
+                <p className="tp-empty-title">Ask anything</p>
+                <p className="tp-empty-sub">
+                  Answers come from this meeting&rsquo;s transcript and notes.
+                </p>
+              </div>
+            ) : (
+              <>
+                {chatThread.map((entry, i) => (
+                  <div key={`${entry.askedAt}-${i}`} className="chat-exchange">
+                    <div className="chat-q">{entry.question}</div>
+                    <div
+                      className="chat-a"
+                      // markdownToHtml escapes its input before adding tags.
+                      dangerouslySetInnerHTML={{ __html: markdownToHtml(entry.answer) }}
+                    />
+                    <div className="chat-actions">
+                      <button
+                        type="button"
+                        title="Copy response"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(entry.answer)
+                          setChatCopied(i)
+                          setTimeout(() => setChatCopied((v) => (v === i ? null : v)), 1500)
+                        }}
+                      >
+                        {chatCopied === i ? '✓ Copied' : '⧉ Copy'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {askPending !== null && (
+                  <div className="chat-exchange">
+                    <div className="chat-q">{askPending}</div>
+                    {askStreamed.length > 0 ? (
+                      <div
+                        className="chat-a"
+                        dangerouslySetInnerHTML={{ __html: markdownToHtml(askStreamed) }}
+                      />
+                    ) : (
+                      <div className="chat-a chat-thinking">
+                        <span className="spinner" aria-hidden="true" />
+                        Thinking…
+                      </div>
+                    )}
+                  </div>
+                )}
+                {askError && (
+                  <div className="chat-error" role="alert">
+                    <span>{askError}</span>
+                    {!modelReady && (
+                      <button type="button" onClick={onOpenSettings}>
+                        Open Settings →
+                      </button>
+                    )}
+                    <button type="button" onClick={() => setAskError(null)}>
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {enhanceStatus === 'error' && enhanceError && (
+        <div className="enhance-error-bar">
+          <span>{enhanceError}</span>
+          {!modelReady && (
+            <button type="button" onClick={onOpenSettings}>
+              Open Settings →
             </button>
           )}
+          <button type="button" onClick={() => setEnhanceStatus('idle')}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {!capturing && allSegments.length > 0 && enhancedMarkdown === null && (
+        <button
+          type="button"
+          className="generate-cta"
+          disabled={!canEnhance}
+          title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
+          onClick={() => void runEnhance()}
+        >
+          {enhanceStatus === 'running' ? (
+            <>
+              <span className="spinner" aria-hidden="true" />
+              {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+            </>
+          ) : (
+            <>✨ Generate notes</>
+          )}
+        </button>
+      )}
+
+      <div className="bottom-bar">
+        <div className="rec-pill">
+          {capturing ? (
+            <>
+              <span className="rec-live">
+                <BarsIcon animated={phase === 'recording'} />
+                <span className="rec-timer">
+                  {phase === 'recording' ? formatClock(elapsedSec) : state.statusText || '…'}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="chev-btn"
+                onClick={toggleTranscript}
+                title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+              >
+                {transcriptOpen ? '⌄' : '⌃'}
+              </button>
+              <button
+                type="button"
+                className="stop-btn"
+                onClick={stopRecording}
+                title="Stop recording"
+                aria-label="Stop recording"
+              >
+                ■
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={allSegments.length > 0 ? 'record-btn resume' : 'record-btn'}
+                onClick={startRecording}
+                title={allSegments.length > 0 ? 'Resume recording' : 'Start recording'}
+              >
+                <BarsIcon animated={false} />
+                {allSegments.length > 0 && <span className="rec-resume">Resume</span>}
+              </button>
+              <button
+                type="button"
+                className="chev-btn"
+                onClick={toggleTranscript}
+                title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+              >
+                {transcriptOpen ? '⌄' : '⌃'}
+              </button>
+            </>
+          )}
+        </div>
+
+        <form
+          className="ask-bar"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void submitAsk()
+          }}
+        >
+          <input
+            className="ask-input"
+            type="text"
+            spellCheck={false}
+            placeholder="Ask anything"
+            value={askText}
+            onChange={(e) => setAskText(e.target.value)}
+            onFocus={() => {
+              // Surface the past conversation, but never open an empty panel.
+              if (chatThread.length > 0 || askPending !== null) openChat()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (chatOpen) setChatOpen(false)
+                else e.currentTarget.blur()
+              }
+            }}
+          />
+          {askPending !== null ? (
+            <span className="spinner ask-spinner" aria-hidden="true" />
+          ) : askText.trim().length > 0 ? (
+            <button type="submit" className="ask-send" title="Ask" aria-label="Ask">
+              ↑
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ask-preset"
+              onClick={() => void submitAsk(FOLLOW_UP_EMAIL_QUESTION)}
+              title="Draft a ready-to-send follow-up email from this meeting"
+            >
+              ✉ Write follow up email
+            </button>
+          )}
+        </form>
+      </div>
+
+      {askHint && (
+        <div className="ask-hint" role="status">
+          Record the meeting first — I answer from what was said.
         </div>
       )}
     </div>

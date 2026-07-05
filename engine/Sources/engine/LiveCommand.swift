@@ -14,6 +14,11 @@ import ScreenCaptureKit
 /// Runs until --seconds elapses or SIGINT/SIGTERM (what the desktop app sends).
 enum LiveCommand {
     static func run(_ options: CLIOptions) async throws {
+        // Arm stop handling FIRST. A SIGTERM that arrives before the handlers
+        // exist kills the process instantly and silently — which, during model
+        // warm-up, meant an early Stop click threw the whole session away.
+        StopController.shared.arm()
+
         // Opt-in parent-death watchdog: hosts that spawn us with a live stdin
         // pipe pass this flag; when the pipe closes (host crashed/restarted),
         // stop gracefully instead of recording forever as an orphan. Opt-in
@@ -37,12 +42,14 @@ enum LiveCommand {
         }
         let seconds = options.values["seconds"].flatMap(Double.init)
 
-        // Load pipelines sequentially: the first load may download models, and the
-        // second then hits the local cache instead of racing the same download.
+        // Capture-first startup: pipelines are created WITHOUT loading models so
+        // recording begins the moment permissions clear. Audio queues in each
+        // pipeline's buffer stream while models load behind it — the host can
+        // show "recording" immediately and no audio is lost.
         var micPipeline: ChannelPipeline?
         var systemPipeline: ChannelPipeline?
-        if wantMic { micPipeline = try await ChannelPipeline(channel: "mic") }
-        if wantSystem { systemPipeline = try await ChannelPipeline(channel: "system") }
+        if wantMic { micPipeline = ChannelPipeline(channel: "mic") }
+        if wantSystem { systemPipeline = ChannelPipeline(channel: "system") }
 
         var micCapture: MicCapture?
         var systemCapture: SystemAudioCapture?
@@ -66,19 +73,63 @@ enum LiveCommand {
                 )
             }
             Events.emit(["event": "status", "stage": "permission_granted", "permission": "microphone"])
-            // AEC on by default; `--aec off` for A/B comparison.
-            micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] != "off")
+            // AEC is opt-in (`--aec on`): Apple's voice processing fails to
+            // initialize on some setups, and its teardown/retry can leave the
+            // fallback mic silently dead. Cross-channel transcript dedup
+            // handles speaker echo, so reliability wins by default.
+            micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] == "on")
         }
-
-        micPipeline?.begin()
-        systemPipeline?.begin()
 
         try micCapture?.start()
         try await systemCapture?.start()
 
+        // Capturing now — tell the host immediately (bars animate, timer runs).
         var ready: [String: Any] = ["event": "ready", "mode": "live"]
         ready["channels"] = [wantMic ? "mic" : nil, wantSystem ? "system" : nil].compactMap { $0 }
         Events.emit(ready)
+
+        // Dead-capture watchdog: a live mic delivers buffers continuously even
+        // in silence, so zero buffers means the capture is dead — restart it
+        // once, then say so loudly. A fake recording session is the worst bug
+        // a meeting app can have.
+        if wantMic, let pipeline = micPipeline {
+            let originalCapture = micCapture
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !pipeline.hasProducedAudio else { return }
+                Events.log("mic produced no audio after 3s — restarting capture")
+                Events.emit(["event": "status", "stage": "mic_restarting", "channel": "mic"])
+                originalCapture?.stop()
+                let retry = MicCapture(into: pipeline, enableAEC: false)
+                do {
+                    try retry.start()
+                } catch {
+                    Events.emit([
+                        "event": "error", "channel": "mic",
+                        "message": "Microphone produced no audio and the restart failed (\(error)). "
+                            + "Check System Settings → Sound → Input, then stop and re-record.",
+                    ])
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if !pipeline.hasProducedAudio {
+                    Events.emit([
+                        "event": "error", "channel": "mic",
+                        "message": "Microphone is not delivering audio — check System Settings → "
+                            + "Sound → Input, then stop and re-record.",
+                    ])
+                }
+            }
+        }
+
+        // Load models sequentially (first load may download; second hits cache),
+        // then start draining the queued audio.
+        try await micPipeline?.prepare()
+        try await systemPipeline?.prepare()
+        micPipeline?.begin()
+        systemPipeline?.begin()
+        // Warm-up complete — hosts can flip from "warming up" to live UI.
+        Events.emit(["event": "status", "stage": "transcribing"])
 
         await StopController.shared.wait(timeoutSeconds: seconds)
         Events.emit(["event": "status", "stage": "finishing"])
@@ -106,16 +157,28 @@ final class ChannelPipeline {
     private let epochLock = NSLock()
     private var epochEmitted = false
 
-    init(channel: String) async throws {
+    init(channel: String) {
         self.channel = channel
-        Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
         self.manager = StreamingUnifiedAsrManager()
-        try await manager.loadModels()
         (self.bufferStream, self.bufferContinuation) = AsyncStream.makeStream(of: AVAudioPCMBuffer.self)
+    }
+
+    /// Load models and wire callbacks. Called AFTER capture starts — audio
+    /// queues in the buffer stream until begin() drains it.
+    func prepare() async throws {
+        Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
+        try await manager.loadModels()
         let ch = channel
         await manager.setPartialTranscriptCallback { text in
             Events.emit(["event": "partial", "channel": ch, "text": text])
         }
+    }
+
+    /// Whether at least one audio buffer has arrived from capture.
+    var hasProducedAudio: Bool {
+        epochLock.lock()
+        defer { epochLock.unlock() }
+        return epochEmitted
     }
 
     /// Called from capture callbacks on arbitrary threads.
@@ -200,7 +263,10 @@ final class MicCapture {
                 return
             } catch {
                 Events.log("AEC engine start failed — retrying without echo cancellation: \(error)")
-                Events.emit(["event": "status", "stage": "aec_unavailable", "channel": "mic"])
+                Events.emit([
+                    "event": "status", "stage": "aec_unavailable", "channel": "mic",
+                    "reason": String(describing: error),
+                ])
                 // The failed engine may be half-configured for voice processing;
                 // discard it entirely rather than trying to unwind its state.
                 engine = AVAudioEngine()
@@ -331,6 +397,12 @@ final class StopController: @unchecked Sendable {
         stopped = true
         lock.unlock()
         resumable.forEach { $0.resume() }
+    }
+
+    /// Install signal handlers now. Idempotent. Must run before any long
+    /// startup work — see LiveCommand.run.
+    func arm() {
+        installSignalHandlers()
     }
 
     func wait(timeoutSeconds: Double?) async {

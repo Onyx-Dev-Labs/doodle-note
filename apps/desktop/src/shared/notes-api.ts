@@ -14,10 +14,18 @@ export const NOTES_ACTIVATE_MODEL_CHANNEL = 'notes:activate-model'
 export const NOTES_GET_SETTINGS_CHANNEL = 'notes:get-settings'
 export const NOTES_SET_SETTINGS_CHANNEL = 'notes:set-settings'
 export const NOTES_ENHANCE_CHANNEL = 'notes:enhance'
+export const NOTES_ASK_CHANNEL = 'notes:ask'
+export const NOTES_ASK_GLOBAL_CHANNEL = 'notes:ask-global'
+export const NOTES_GLOBAL_CHAT_GET_CHANNEL = 'notes:global-chat-get'
+export const NOTES_GLOBAL_CHAT_CLEAR_CHANNEL = 'notes:global-chat-clear'
 /** main → renderer: model download progress while activating. */
 export const NOTES_DOWNLOAD_PROGRESS_CHANNEL = 'notes:download-progress'
 /** main → renderer: streamed tokens during an enhance run. */
 export const NOTES_ENHANCE_TOKEN_CHANNEL = 'notes:enhance-token'
+/** main → renderer: streamed tokens during an ask run. */
+export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
+/** main → renderer: streamed tokens during a cross-meeting ask run. */
+export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
 export type CloudProvider = 'anthropic' | 'openai'
 export type EngineChoice = 'local' | 'cloud'
@@ -89,6 +97,56 @@ export interface EnhanceResult {
   error?: string
 }
 
+/** One completed question/answer pair, as sent back for prompt context. */
+export interface AskExchange {
+  question: string
+  answer: string
+}
+
+/** Mirrors @repo/ai's AskInput, with the renderer's segment shape. */
+export interface AskRequest {
+  title: string
+  rawNotesMarkdown: string
+  enhancedMarkdown?: string | null
+  segments: TranscriptSegment[]
+  /** Prior exchanges in this meeting's chat (oldest first). */
+  history: AskExchange[]
+  question: string
+}
+
+/** Errors come back as a value, never as a rejected promise. */
+export interface AskResult {
+  answer?: string
+  engine?: string
+  elapsedMs?: number
+  error?: string
+}
+
+/**
+ * Home-level "ask anything", across all meetings. The renderer sends only
+ * the question — the main process gathers the cross-meeting context (and
+ * the persisted conversation history) itself.
+ */
+export interface GlobalAskRequest {
+  question: string
+}
+
+/** Errors come back as a value, never as a rejected promise. */
+export interface GlobalAskResult {
+  answer?: string
+  engine?: string
+  elapsedMs?: number
+  error?: string
+}
+
+/** One persisted Home-level exchange (userData/global-chat.json). */
+export interface GlobalChatEntry {
+  question: string
+  answer: string
+  /** ISO timestamp of when the question was asked. */
+  askedAt: string
+}
+
 export interface DownloadProgressEvent {
   modelId: string
   /** 0..1 */
@@ -99,6 +157,14 @@ export interface EnhanceTokenEvent {
   token: string
 }
 
+export interface AskTokenEvent {
+  token: string
+}
+
+export interface GlobalAskTokenEvent {
+  token: string
+}
+
 /** API surface exposed on `window.notes` by the preload script. */
 export interface NotesApi {
   models(): Promise<NotesModelsResponse>
@@ -106,6 +172,12 @@ export interface NotesApi {
   getSettings(): Promise<NotesSettingsView>
   setSettings(update: NotesSettingsUpdate): Promise<NotesSettingsView>
   enhance(input: EnhanceRequest): Promise<EnhanceResult>
+  ask(req: AskRequest): Promise<AskResult>
+  askGlobal(req: GlobalAskRequest): Promise<GlobalAskResult>
+  getGlobalChat(): Promise<GlobalChatEntry[]>
+  clearGlobalChat(): Promise<void>
   onDownloadProgress(cb: (ev: DownloadProgressEvent) => void): () => void
   onEnhanceToken(cb: (ev: EnhanceTokenEvent) => void): () => void
+  onAskToken(cb: (ev: AskTokenEvent) => void): () => void
+  onGlobalAskToken(cb: (ev: GlobalAskTokenEvent) => void): () => void
 }
