@@ -1,4 +1,5 @@
 import type { EngineApi } from '../shared/engine-events'
+import type { FoldersApi } from '../shared/folders-api'
 import type { MeetingsApi } from '../shared/meetings-api'
 import type { NotesApi } from '../shared/notes-api'
 
@@ -7,6 +8,7 @@ declare global {
     engine: EngineApi
     notes: NotesApi
     meetings: MeetingsApi
+    folders: FoldersApi
   }
 }
 

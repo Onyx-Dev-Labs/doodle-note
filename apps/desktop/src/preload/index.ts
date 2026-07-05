@@ -42,6 +42,14 @@ import {
   type MeetingUpsert,
   type MeetingsApi
 } from '../shared/meetings-api'
+import {
+  FOLDERS_CREATE_CHANNEL,
+  FOLDERS_DELETE_CHANNEL,
+  FOLDERS_LIST_CHANNEL,
+  FOLDERS_RENAME_CHANNEL,
+  type FolderRecord,
+  type FoldersApi
+} from '../shared/folders-api'
 
 const engineApi: EngineApi = {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void {
@@ -130,11 +138,30 @@ const meetingsApi: MeetingsApi = {
   }
 }
 
+const foldersApi: FoldersApi = {
+  list(): Promise<FolderRecord[]> {
+    return ipcRenderer.invoke(FOLDERS_LIST_CHANNEL) as Promise<FolderRecord[]>
+  },
+
+  create(name: string): Promise<FolderRecord> {
+    return ipcRenderer.invoke(FOLDERS_CREATE_CHANNEL, name) as Promise<FolderRecord>
+  },
+
+  rename(id: string, name: string): Promise<FolderRecord | null> {
+    return ipcRenderer.invoke(FOLDERS_RENAME_CHANNEL, id, name) as Promise<FolderRecord | null>
+  },
+
+  remove(id: string): Promise<void> {
+    return ipcRenderer.invoke(FOLDERS_DELETE_CHANNEL, id) as Promise<void>
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
+    contextBridge.exposeInMainWorld('folders', foldersApi)
   } catch (error) {
     console.error(error)
   }
@@ -145,4 +172,6 @@ if (process.contextIsolated) {
   window.notes = notesApi
   // @ts-ignore (defined in index.d.ts)
   window.meetings = meetingsApi
+  // @ts-ignore (defined in index.d.ts)
+  window.folders = foldersApi
 }

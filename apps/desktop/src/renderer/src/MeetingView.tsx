@@ -4,8 +4,10 @@ import StarterKit from '@tiptap/starter-kit'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../../shared/engine-events'
+import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type { NotesModelsResponse, NotesSettingsView } from '../../shared/notes-api'
+import FolderPicker from './FolderPicker'
 import { docToMarkdown, markdownToHtml } from './lib/markdown'
 
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
@@ -174,6 +176,9 @@ export default function MeetingView({
   const [emptyNotice, setEmptyNotice] = useState(false)
   const [modelsInfo, setModelsInfo] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
+  const [folders, setFolders] = useState<FolderRecord[]>([])
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
 
   const roughMarkdownRef = useRef('')
   const titleValueRef = useRef('')
@@ -259,6 +264,7 @@ export default function MeetingView({
       setSavedSegments(record.segments.filter((s) => !s.echo))
       setSavedEcho(record.echoSuppressed)
       startedAtRef.current = record.startedAt ?? null
+      setFolderId(record.folderId ?? null)
       if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
       if (Array.isArray(record.chat) && record.chat.length > 0) {
         chatThreadRef.current = record.chat
@@ -342,6 +348,31 @@ export default function MeetingView({
   useEffect(() => {
     if (visible) refreshNotesMeta()
   }, [visible, refreshNotesMeta])
+
+  /* ---- folder chip ---- */
+
+  const refreshFolders = useCallback(() => {
+    void window.folders
+      .list()
+      .then(setFolders)
+      .catch(() => setFolders([]))
+  }, [])
+
+  useEffect(() => {
+    if (visible) refreshFolders()
+  }, [visible, refreshFolders])
+
+  const assignFolder = useCallback(
+    (nextFolderId: string | null): void => {
+      setFolderPickerOpen(false)
+      setFolderId(nextFolderId)
+      persist({ folderId: nextFolderId })
+      // The picker may have just created the folder — refresh so the chip
+      // can resolve its name.
+      refreshFolders()
+    },
+    [persist, refreshFolders]
+  )
 
   /* ---- recording timer ---- */
 
@@ -621,6 +652,11 @@ export default function MeetingView({
       : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
   }, [createdAt])
 
+  // A stale folderId (folder deleted elsewhere) simply resolves to no name,
+  // so the chip falls back to "Add to folder".
+  const folderName =
+    folderId !== null ? (folders.find((f) => f.id === folderId)?.name ?? null) : null
+
   const streamedWords = enhanceStreamed.length > 0 ? enhanceStreamed.trim().split(/\s+/).length : 0
   const transcriptEmpty = allSegments.length === 0 && Object.values(state.partials).every((p) => !p)
   const firstSegmentTime = allSegments.length > 0 ? segmentTime(allSegments[0]!) : 0
@@ -673,6 +709,23 @@ export default function MeetingView({
           <div className="chips-row">
             <span className="chip">📅 {dateChip}</span>
             <span className="chip">👥 Me</span>
+            <span className="chip-folder-anchor">
+              <button
+                type="button"
+                className="chip chip-folder"
+                title={folderName !== null ? 'Move to another folder' : 'Add to folder'}
+                onClick={() => setFolderPickerOpen((open) => !open)}
+              >
+                📁 {folderName ?? 'Add to folder'}
+              </button>
+              {folderPickerOpen && (
+                <FolderPicker
+                  currentFolderId={folderId}
+                  onAssign={assignFolder}
+                  onClose={() => setFolderPickerOpen(false)}
+                />
+              )}
+            </span>
             {enhancedMarkdown !== null && (
               <span className="chip chip-toggle">
                 <button

@@ -45,7 +45,9 @@ export class MeetingsService {
         title: record.title,
         createdAt: record.createdAt,
         ...(record.startedAt ? { startedAt: record.startedAt } : {}),
-        ...(durationMinOf(record) !== undefined ? { durationMin: durationMinOf(record) } : {})
+        ...(durationMinOf(record) !== undefined ? { durationMin: durationMinOf(record) } : {}),
+        ...(record.folderId ? { folderId: record.folderId } : {}),
+        ...(record.trashedAt ? { trashedAt: record.trashedAt } : {})
       })
     }
     // Newest first; createdAt is ISO so string compare sorts chronologically.
@@ -111,8 +113,19 @@ function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     ...(typeof raw.engine === 'string' ? { engine: raw.engine } : {}),
     segments: Array.isArray(raw.segments) ? (raw.segments as TranscriptSegment[]) : [],
     echoSuppressed: typeof raw.echoSuppressed === 'number' ? raw.echoSuppressed : 0,
-    ...(Array.isArray(raw.chat) ? { chat: raw.chat.filter(isChatEntry) } : {})
+    ...(Array.isArray(raw.chat) ? { chat: raw.chat.filter(isChatEntry) } : {}),
+    // A null (or invalid) value drops the field — that's how "move back to
+    // My notes" (folderId: null) and "restore from trash" (trashedAt: null)
+    // clear state through the { ...existing, ...patch } merge above.
+    ...(typeof raw.folderId === 'string' && raw.folderId.length > 0
+      ? { folderId: raw.folderId }
+      : {}),
+    ...(isIsoString(raw.trashedAt) ? { trashedAt: raw.trashedAt } : {})
   }
+}
+
+function isIsoString(value: unknown): value is string {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value))
 }
 
 function isChatEntry(entry: unknown): entry is MeetingChatEntry {

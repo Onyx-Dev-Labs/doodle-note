@@ -44,6 +44,10 @@ export interface MeetingRecord {
   echoSuppressed: number
   /** "Ask anything" conversation for this meeting, oldest first. */
   chat?: MeetingChatEntry[]
+  /** Folder assignment; null/absent = unfiled ("My notes"). */
+  folderId?: string | null
+  /** ISO timestamp of the move to trash; null/absent = not trashed. */
+  trashedAt?: string | null
 }
 
 /** Lightweight row for the Home list, sorted newest-first. */
@@ -54,6 +58,10 @@ export interface MeetingSummary {
   startedAt?: string
   /** Recorded length in whole minutes, when derivable. */
   durationMin?: number
+  /** Folder assignment; null/absent = unfiled ("My notes"). */
+  folderId?: string | null
+  /** ISO timestamp of the move to trash; null/absent = not trashed. */
+  trashedAt?: string | null
 }
 
 /** Partial update; `id` is required, omitted fields keep their stored value. */

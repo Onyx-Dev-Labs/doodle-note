@@ -295,6 +295,84 @@ a,
   text-decoration: underline;
 }
 
+/* ---- spaces: folders under "My notes", trash below ---- */
+
+.space-item {
+  cursor: pointer; /* it's a div (role=button) so the + can nest inside */
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.nav-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-item.on .nav-count {
+  color: var(--accent-deep);
+}
+
+.folder-add {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.nav-item:hover .folder-add {
+  display: flex;
+}
+
+.folder-add:hover {
+  background: rgba(38, 40, 31, 0.1);
+  color: var(--ink);
+}
+
+/* Folders nest (indented) under the "My notes" space row. */
+.nav-sub {
+  padding-left: 26px;
+}
+
+.folder-new {
+  display: flex;
+  padding: 2px 8px 2px 26px;
+}
+
+.folder-new input {
+  width: 100%;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  user-select: text;
+}
+
+.folder-new input::placeholder {
+  color: var(--faint);
+}
+
+.sidebar-trash {
+  margin-top: 14px;
+}
+
 /* ================= home ================= */
 
 .home {
@@ -310,6 +388,7 @@ a,
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 10px;
   padding: 0 24px;
 }
 
@@ -327,6 +406,16 @@ a,
   border-color: var(--accent);
   color: var(--accent-deep);
   box-shadow: var(--shadow-pill);
+}
+
+.pill-btn.pill-danger {
+  color: var(--danger);
+}
+
+.pill-btn.pill-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .home-scroll {
@@ -370,6 +459,11 @@ a,
   margin-top: 30px;
 }
 
+/* Folder/trash views have their own heading instead of the Coming up card. */
+.meetings-list.flush {
+  margin-top: 4px;
+}
+
 .day-group {
   margin-bottom: 18px;
 }
@@ -385,6 +479,7 @@ a,
 }
 
 .meeting-row {
+  position: relative; /* anchors the ⋯ menu + folder picker popovers */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -392,6 +487,7 @@ a,
   text-align: left;
   padding: 9px 10px;
   border-radius: 10px;
+  cursor: pointer;
 }
 
 .meeting-row:hover {
@@ -461,6 +557,237 @@ a,
   color: var(--muted);
   font-size: 13px;
   padding: 20px 10px;
+}
+
+/* ---- row hover actions (⋯ / Restore / Delete forever) ---- */
+
+/* The time yields its spot to the actions on hover (or while a popover is
+   open, so the anchor doesn't vanish mid-interaction). */
+.row-actions {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.meeting-row:hover .row-actions,
+.meeting-row.actions-open .row-actions {
+  display: flex;
+}
+
+.meeting-row:hover .row-time,
+.meeting-row.actions-open .row-time {
+  display: none;
+}
+
+.row-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.row-menu-btn:hover,
+.meeting-row.actions-open .row-menu-btn {
+  background: rgba(38, 40, 31, 0.08);
+  color: var(--ink);
+}
+
+.row-restore,
+.row-delete {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--body);
+  white-space: nowrap;
+}
+
+.row-restore:hover {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.row-delete {
+  color: var(--danger);
+}
+
+.row-delete:hover {
+  border-color: #ddb5a9;
+  background: var(--danger-soft);
+}
+
+/* ---- row ⋯ menu popover ---- */
+
+.row-menu {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 10px;
+  min-width: 172px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-panel);
+  padding: 4px;
+  z-index: 40;
+  cursor: default;
+}
+
+.row-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--body);
+}
+
+.row-menu button:hover:not(:disabled) {
+  background: rgba(38, 40, 31, 0.05);
+}
+
+.row-menu button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.row-menu button.danger {
+  color: var(--danger);
+}
+
+.row-menu button.danger:hover {
+  background: var(--danger-soft);
+}
+
+.row-menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
+/* ---- folder picker popover (Home rows + editor chip) ---- */
+
+.folder-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 250px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-panel);
+  padding: 8px;
+  z-index: 41;
+  cursor: default;
+}
+
+.folder-picker.align-right {
+  left: auto;
+  right: 10px;
+  top: calc(100% - 4px);
+}
+
+.fp-search {
+  width: 100%;
+  background: var(--card-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+  user-select: text;
+  margin-bottom: 6px;
+}
+
+.fp-search:focus {
+  border-color: var(--accent);
+}
+
+.fp-search::placeholder {
+  color: var(--faint);
+}
+
+.fp-list {
+  max-height: 250px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--body);
+}
+
+button.fp-row:hover {
+  background: rgba(38, 40, 31, 0.05);
+}
+
+.fp-icon {
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.fp-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-check {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-deep);
+}
+
+.fp-new .fp-name,
+.fp-new-icon {
+  color: var(--accent-deep);
+  font-weight: 500;
+}
+
+.fp-new-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+  user-select: text;
+}
+
+.fp-new-row input::placeholder {
+  color: var(--faint);
 }
 
 /* ================= editor page ================= */
@@ -563,6 +890,21 @@ a,
   background: var(--sage-fill);
   color: var(--accent-deep);
   font-weight: 600;
+}
+
+/* The folder chip is a button; its picker hangs off this anchor. */
+.chip-folder-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.chip-folder {
+  cursor: pointer;
+}
+
+.chip-folder:hover {
+  background: var(--sage-fill);
+  color: var(--accent-deep);
 }
 
 /* the TipTap doc IS the page — no box */

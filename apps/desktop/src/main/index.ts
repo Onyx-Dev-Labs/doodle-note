@@ -5,6 +5,7 @@ import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { EngineProcess } from './engine-process'
+import { FoldersService } from './folders-service'
 import { MeetingsService } from './meetings-service'
 import { NotesService } from './notes-service'
 import { TranscriptSession } from './transcript-session'
@@ -150,6 +151,12 @@ app.whenReady().then(() => {
 
   const meetingsService = new MeetingsService(join(app.getPath('userData'), 'meetings'))
   meetingsService.registerIpc()
+
+  const foldersService = new FoldersService(
+    join(app.getPath('userData'), 'folders.json'),
+    meetingsService
+  )
+  foldersService.registerIpc()
 
   createWindow()
 
