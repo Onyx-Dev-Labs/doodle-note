@@ -48,6 +48,8 @@ export interface MeetingRecord {
   folderId?: string | null
   /** ISO timestamp of the move to trash; null/absent = not trashed. */
   trashedAt?: string | null
+  /** Microsoft 365 event id when created from a calendar prompt (dedupe key). */
+  calendarEventId?: string
 }
 
 /** Lightweight row for the Home list, sorted newest-first. */
@@ -62,6 +64,8 @@ export interface MeetingSummary {
   folderId?: string | null
   /** ISO timestamp of the move to trash; null/absent = not trashed. */
   trashedAt?: string | null
+  /** Microsoft 365 event id when created from a calendar prompt (dedupe key). */
+  calendarEventId?: string
 }
 
 /** Partial update; `id` is required, omitted fields keep their stored value. */

@@ -1,3 +1,4 @@
+import type { CalendarApi } from '../shared/calendar-api'
 import type { EngineApi } from '../shared/engine-events'
 import type { FoldersApi } from '../shared/folders-api'
 import type { MeetingsApi } from '../shared/meetings-api'
@@ -9,6 +10,7 @@ declare global {
     notes: NotesApi
     meetings: MeetingsApi
     folders: FoldersApi
+    calendar: CalendarApi
   }
 }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CalendarState } from '../../shared/calendar-api'
 import type {
   CloudProvider,
   EngineChoice,
@@ -7,6 +8,15 @@ import type {
   NotesSettingsView
 } from '../../shared/notes-api'
 import logoUrl from './assets/doodlenote-logo.png'
+
+function lastSyncLabel(iso: string): string {
+  const ms = Date.now() - Date.parse(iso)
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  if (ms < 60_000) return 'synced just now'
+  const min = Math.round(ms / 60_000)
+  if (min < 60) return `synced ${min} min ago`
+  return `synced at ${new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
 
 /**
  * Settings: one card per catalog model with download/activate states,
@@ -24,6 +34,71 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
   const cloudFormSeeded = useRef(false)
+
+  /* ---- calendar (Microsoft 365) ---- */
+  const [calState, setCalState] = useState<CalendarState | null>(null)
+  const [clientId, setClientId] = useState('')
+  const [tenantId, setTenantId] = useState('')
+  const [editingCalConfig, setEditingCalConfig] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const calFormSeeded = useRef(false)
+
+  const adoptCalState = useCallback((state: CalendarState) => {
+    setCalState(state)
+    // Seed the config inputs once from what's saved on disk.
+    if (!calFormSeeded.current && state.configured) {
+      calFormSeeded.current = true
+      setClientId(state.clientId ?? '')
+      setTenantId(state.tenantId ?? '')
+    }
+  }, [])
+
+  const refreshCalendar = useCallback(() => {
+    void window.calendar
+      .getState()
+      .then(adoptCalState)
+      .catch(() => setCalState(null))
+  }, [adoptCalState])
+
+  useEffect(() => {
+    if (active) refreshCalendar()
+  }, [active, refreshCalendar])
+
+  useEffect(() => window.calendar.onEvents(adoptCalState), [adoptCalState])
+
+  const saveCalendarConfig = async (): Promise<void> => {
+    const state = await window.calendar.setConfig({
+      clientId: clientId.trim(),
+      tenantId: tenantId.trim()
+    })
+    setCalState(state)
+    if (state.configured && !state.error) setEditingCalConfig(false)
+  }
+
+  const connectCalendar = async (): Promise<void> => {
+    if (connecting) return
+    setConnecting(true)
+    try {
+      setCalState(await window.calendar.connect())
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const syncCalendar = async (): Promise<void> => {
+    if (syncing) return
+    setSyncing(true)
+    try {
+      setCalState(await window.calendar.refresh())
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const disconnectCalendar = async (): Promise<void> => {
+    setCalState(await window.calendar.disconnect())
+  }
 
   const refresh = useCallback(() => {
     void window.notes
@@ -154,6 +229,92 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         ))}
       </div>
+
+      <section className="keys-section calendar-section">
+        <h3>Calendar</h3>
+        <p className="models-sub">
+          Connect Microsoft 365 to see the week&rsquo;s meetings on Home and get a nudge to take
+          notes the moment one starts. DoodleNote only reads your calendar.
+        </p>
+
+        {calState?.error && <div className="models-error">{calState.error}</div>}
+
+        {calState === null ? (
+          <span className="calendar-note">loading calendar settings…</span>
+        ) : !calState.configured || editingCalConfig ? (
+          <>
+            <div className="key-form">
+              <input
+                type="text"
+                spellCheck={false}
+                placeholder="Client ID"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+              />
+              <input
+                type="text"
+                spellCheck={false}
+                placeholder="Tenant ID"
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+              />
+              <button type="button" onClick={() => void saveCalendarConfig()}>
+                Save
+              </button>
+              {editingCalConfig && (
+                <button type="button" onClick={() => setEditingCalConfig(false)}>
+                  Cancel
+                </button>
+              )}
+            </div>
+            <p className="calendar-help">
+              Entra admin center → App registrations → DoodleNote — paste the Application (client)
+              ID and Directory (tenant) ID from there.
+            </p>
+          </>
+        ) : !calState.signedIn ? (
+          <div className="calendar-actions">
+            <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
+              {connecting ? 'Waiting for your browser…' : 'Connect Microsoft 365'}
+            </button>
+            <button
+              type="button"
+              className="calendar-ghost"
+              onClick={() => setEditingCalConfig(true)}
+            >
+              Edit IDs
+            </button>
+            {connecting && (
+              <span className="calendar-note">
+                finish signing in in your browser, then come back
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="calendar-connected">
+            <span className="calendar-status">
+              Connected as{' '}
+              <strong>{calState.account?.email ?? 'your Microsoft 365 account'}</strong>
+              {calState.lastSyncIso && (
+                <span className="calendar-note"> · {lastSyncLabel(calState.lastSyncIso)}</span>
+              )}
+            </span>
+            <div className="calendar-actions">
+              <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
+                {syncing ? 'Syncing…' : 'Sync now'}
+              </button>
+              {calState.error && (
+                <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
+                  {connecting ? 'Waiting for your browser…' : 'Sign in again'}
+                </button>
+              )}
+              <button type="button" onClick={() => void disconnectCalendar()}>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="keys-section">
         <h3>AI keys (optional)</h3>

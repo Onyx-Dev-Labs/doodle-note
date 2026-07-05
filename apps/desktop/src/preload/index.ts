@@ -58,6 +58,19 @@ import {
   type FolderRecord,
   type FoldersApi
 } from '../shared/folders-api'
+import {
+  CALENDAR_CONNECT_CHANNEL,
+  CALENDAR_DISCONNECT_CHANNEL,
+  CALENDAR_EVENTS_CHANNEL,
+  CALENDAR_GET_STATE_CHANNEL,
+  CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_SET_CONFIG_CHANNEL,
+  CALENDAR_START_MEETING_CHANNEL,
+  type CalendarApi,
+  type CalendarConfigUpdate,
+  type CalendarStartMeetingEvent,
+  type CalendarState
+} from '../shared/calendar-api'
 
 const engineApi: EngineApi = {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void {
@@ -180,12 +193,43 @@ const foldersApi: FoldersApi = {
   }
 }
 
+const calendarApi: CalendarApi = {
+  getState(): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_GET_STATE_CHANNEL) as Promise<CalendarState>
+  },
+
+  setConfig(config: CalendarConfigUpdate): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_SET_CONFIG_CHANNEL, config) as Promise<CalendarState>
+  },
+
+  connect(): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_CONNECT_CHANNEL) as Promise<CalendarState>
+  },
+
+  disconnect(): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_DISCONNECT_CHANNEL) as Promise<CalendarState>
+  },
+
+  refresh(): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_REFRESH_CHANNEL) as Promise<CalendarState>
+  },
+
+  onEvents(cb: (state: CalendarState) => void): () => void {
+    return subscribe(CALENDAR_EVENTS_CHANNEL, cb)
+  },
+
+  onStartMeeting(cb: (ev: CalendarStartMeetingEvent) => void): () => void {
+    return subscribe(CALENDAR_START_MEETING_CHANNEL, cb)
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
+    contextBridge.exposeInMainWorld('calendar', calendarApi)
   } catch (error) {
     console.error(error)
   }
@@ -198,4 +242,6 @@ if (process.contextIsolated) {
   window.meetings = meetingsApi
   // @ts-ignore (defined in index.d.ts)
   window.folders = foldersApi
+  // @ts-ignore (defined in index.d.ts)
+  window.calendar = calendarApi
 }

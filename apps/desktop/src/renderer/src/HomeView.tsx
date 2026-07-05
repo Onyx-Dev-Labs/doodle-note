@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CalendarEvent, CalendarState } from '../../shared/calendar-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingSummary } from '../../shared/meetings-api'
 import type {
@@ -33,6 +34,152 @@ function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
+/* ---- "Coming up" card (Microsoft 365 events) ---- */
+
+/** Events starting within this window (or in progress) get a Take notes button. */
+const TAKE_NOTES_LEAD_MS = 10 * 60_000
+
+/** "9:00 – 10:00 AM": the first meridiem is dropped when both sides share it. */
+function timeRange(startIso: string, endIso: string): string {
+  const fmt = (iso: string): string =>
+    new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  let start = fmt(startIso)
+  const end = fmt(endIso)
+  const meridiem = /\s*([AP]M)\s*$/i
+  const startM = meridiem.exec(start)?.[1]?.toUpperCase()
+  const endM = meridiem.exec(end)?.[1]?.toUpperCase()
+  if (startM !== undefined && startM === endM) start = start.replace(meridiem, '')
+  return `${start} – ${end}`
+}
+
+interface ComingUpDay {
+  key: string
+  dayNum: string
+  weekday: string
+  events: CalendarEvent[]
+}
+
+/** Group already-sorted events into day buckets for the date-rail layout. */
+function groupEventsByDay(events: CalendarEvent[]): ComingUpDay[] {
+  const days: ComingUpDay[] = []
+  for (const event of events) {
+    const d = new Date(event.startIso)
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    const last = days[days.length - 1]
+    if (last && last.key === key) {
+      last.events.push(event)
+    } else {
+      days.push({
+        key,
+        dayNum: String(d.getDate()),
+        weekday: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        events: [event]
+      })
+    }
+  }
+  return days
+}
+
+/** The Home "Coming up" card: date rail + sage-accented event rows when
+ *  signed in; a "Connect calendar" nudge otherwise. */
+function ComingUpCard({
+  calendar,
+  onStart,
+  onOpenSettings
+}: {
+  calendar: CalendarState | null
+  onStart: (event: CalendarEvent) => void
+  onOpenSettings: () => void
+}): React.JSX.Element {
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  const events = useMemo(() => {
+    if (!calendar?.signedIn) return []
+    // Drop events that already ended (stale cache between syncs).
+    return calendar.events.filter((e) => {
+      const end = Date.parse(e.endIso)
+      return Number.isFinite(end) && end > nowMs
+    })
+  }, [calendar, nowMs])
+
+  // The Take notes / Join affordances are time-sensitive: tick every 30s
+  // while there is anything to show.
+  useEffect(() => {
+    if (events.length === 0) return
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000)
+    return () => clearInterval(timer)
+  }, [events.length])
+
+  if (!calendar?.signedIn) {
+    return (
+      <div className="card coming-up">
+        <div className="coming-up-empty">
+          Connect your calendar to see your meetings here —{' '}
+          <button type="button" className="link-btn" onClick={onOpenSettings}>
+            Connect calendar →
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className="card coming-up">
+        <div className="coming-up-empty">Nothing on your calendar for the next 7 days</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card coming-up has-events">
+      {groupEventsByDay(events).map((day) => (
+        <div key={day.key} className="cu-day">
+          <div className="cu-date">
+            <span className="cu-date-num">{day.dayNum}</span>
+            <span className="cu-date-wd">{day.weekday}</span>
+          </div>
+          <div className="cu-events">
+            {day.events.map((event) => {
+              const startMs = Date.parse(event.startIso)
+              const canTakeNotes = !event.isAllDay && startMs - nowMs <= TAKE_NOTES_LEAD_MS
+              return (
+                <div key={event.id} className="cu-event">
+                  <span className="cu-bar" aria-hidden="true" />
+                  <span className="cu-main">
+                    <span className="cu-subject">{event.subject.trim() || 'Untitled meeting'}</span>
+                    <span className="cu-time">
+                      {event.isAllDay ? 'All day' : timeRange(event.startIso, event.endIso)}
+                      {event.isOnlineMeeting && event.joinUrl !== undefined && (
+                        <>
+                          {' · '}
+                          <button
+                            type="button"
+                            className="cu-join"
+                            title="Open the meeting link"
+                            onClick={() => window.open(event.joinUrl, '_blank')}
+                          >
+                            Join
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  </span>
+                  {canTakeNotes && (
+                    <button type="button" className="cu-take-notes" onClick={() => onStart(event)}>
+                      Take notes
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** Home: "Coming up" calendar slot + the day-grouped meetings list, filtered
  *  to everything / one folder / the trash, plus the cross-meeting "Ask
  *  anything" bar and chat panel. Data is owned by App; mutations here
@@ -42,6 +189,8 @@ export default function HomeView({
   folders,
   filter,
   search,
+  calendar,
+  onStartCalendarMeeting,
   onOpenMeeting,
   onNewMeeting,
   onChanged,
@@ -51,6 +200,8 @@ export default function HomeView({
   folders: FolderRecord[]
   filter: HomeFilter
   search: string
+  calendar: CalendarState | null
+  onStartCalendarMeeting: (event: CalendarEvent) => void
   onOpenMeeting: (id: string) => void
   onNewMeeting: () => void
   onChanged: () => void
@@ -289,9 +440,11 @@ export default function HomeView({
           {filter.kind === 'all' && (
             <>
               <h2 className="home-heading">Coming up</h2>
-              <div className="card coming-up">
-                <div className="coming-up-empty">Connect your calendar — coming soon</div>
-              </div>
+              <ComingUpCard
+                calendar={calendar}
+                onStart={onStartCalendarMeeting}
+                onOpenSettings={onOpenSettings}
+              />
             </>
           )}
           {filter.kind === 'folder' && <h2 className="home-heading">📁 {folderName}</h2>}

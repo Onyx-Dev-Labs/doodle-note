@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  CalendarEvent,
+  CalendarStartMeetingEvent,
+  CalendarState
+} from '../../shared/calendar-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingSummary } from '../../shared/meetings-api'
 import DevConsole from './DevConsole'
@@ -8,6 +13,9 @@ import ModelsView from './ModelsView'
 import mascotUrl from './assets/doodlenote-logo.png'
 
 type ViewId = 'home' | 'editor' | 'settings' | 'dev'
+
+/** The "meeting is starting" banner disappears 10 min past the start. */
+const BANNER_TTL_PAST_START_MS = 10 * 60_000
 
 /**
  * View state lives here (no router). The editor stays mounted while a
@@ -31,6 +39,8 @@ function App(): React.JSX.Element {
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
   const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null)
   const [newFolderName, setNewFolderName] = useState('')
+  const [calendar, setCalendar] = useState<CalendarState | null>(null)
+  const [banner, setBanner] = useState<CalendarStartMeetingEvent | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -65,24 +75,104 @@ function App(): React.JSX.Element {
     setView('editor')
   }, [])
 
-  const newMeeting = useCallback(async (): Promise<void> => {
-    const id =
-      typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-    await window.meetings.upsert({
-      id,
-      title: '',
-      createdAt: new Date().toISOString(),
-      rawNotesMarkdown: '',
-      segments: [],
-      echoSuppressed: 0
-    })
-    // Fresh meetings start recording immediately; opening an existing
-    // meeting from the list never does.
-    setAutoRecordId(id)
-    openMeeting(id)
-  }, [openMeeting])
+  const newMeeting = useCallback(
+    async (prefill?: { title?: string; calendarEventId?: string }): Promise<void> => {
+      const id =
+        typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      await window.meetings.upsert({
+        id,
+        title: prefill?.title ?? '',
+        createdAt: new Date().toISOString(),
+        rawNotesMarkdown: '',
+        segments: [],
+        echoSuppressed: 0,
+        ...(prefill?.calendarEventId ? { calendarEventId: prefill.calendarEventId } : {})
+      })
+      // Fresh meetings start recording immediately; opening an existing
+      // meeting from the list never does.
+      setAutoRecordId(id)
+      openMeeting(id)
+    },
+    [openMeeting]
+  )
+
+  /**
+   * "Take notes" for a calendar event (banner button, notification click or
+   * the Coming up row): reuse the exact + New meeting flow, pre-titled from
+   * the event. If a meeting was already created for this event, reopen it
+   * instead of minting a duplicate.
+   */
+  const startCalendarMeeting = useCallback(
+    async (ev: { eventId: string; subject: string }): Promise<void> => {
+      setBanner((b) => (b !== null && b.eventId === ev.eventId ? null : b))
+      try {
+        const list = await window.meetings.list()
+        const existing = list.find((m) => m.calendarEventId === ev.eventId && !m.trashedAt)
+        if (existing) {
+          openMeeting(existing.id)
+          return
+        }
+        await newMeeting({
+          title: ev.subject.trim() || 'Untitled meeting',
+          calendarEventId: ev.eventId
+        })
+      } catch {
+        // Creation failed — the user can still start one manually.
+      }
+    },
+    [newMeeting, openMeeting]
+  )
+
+  const startFromCalendarEvent = useCallback(
+    (event: CalendarEvent): void => {
+      void startCalendarMeeting({ eventId: event.id, subject: event.subject })
+    },
+    [startCalendarMeeting]
+  )
+
+  /* ---- calendar state + meeting-start prompts (window.calendar) ---- */
+
+  useEffect(() => {
+    let cancelled = false
+    void window.calendar
+      .getState()
+      .then((state) => {
+        if (!cancelled) setCalendar(state)
+      })
+      .catch(() => {
+        if (!cancelled) setCalendar(null)
+      })
+    const unsubscribe = window.calendar.onEvents(setCalendar)
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(
+    () =>
+      window.calendar.onStartMeeting((ev) => {
+        if (ev.action === 'start') {
+          // OS notification click: the one click already happened.
+          void startCalendarMeeting(ev)
+        } else {
+          // Watcher prompt: the banner is the guaranteed path.
+          setBanner(ev)
+        }
+      }),
+    [startCalendarMeeting]
+  )
+
+  // The banner takes itself down 10 minutes past the meeting's start.
+  useEffect(() => {
+    if (banner === null) return
+    const expiresAt = Date.parse(banner.startIso) + BANNER_TTL_PAST_START_MS
+    const remaining = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 0
+    const timer = setTimeout(() => setBanner(null), remaining)
+    return () => clearTimeout(timer)
+  }, [banner])
 
   const goHome = useCallback(() => {
     setView('home')
@@ -400,6 +490,8 @@ function App(): React.JSX.Element {
               folders={folders}
               filter={filter}
               search={search}
+              calendar={calendar}
+              onStartCalendarMeeting={startFromCalendarEvent}
               onOpenMeeting={openMeeting}
               onNewMeeting={() => void newMeeting()}
               onChanged={refreshHome}
@@ -426,6 +518,29 @@ function App(): React.JSX.Element {
             onBack={goHome}
             onOpenSettings={() => setView('settings')}
           />
+        </div>
+      )}
+
+      {/* "Meeting is starting" toast: fixed top-center so it shows over Home
+          and the editor alike; the OS notification is only best-effort. */}
+      {banner !== null && (
+        <div className="meeting-banner no-drag" role="status">
+          <span className="mb-emoji" aria-hidden="true">
+            📅
+          </span>
+          <span className="mb-text">
+            <strong>{banner.subject}</strong> is starting
+          </span>
+          <button
+            type="button"
+            className="mb-start"
+            onClick={() => void startCalendarMeeting(banner)}
+          >
+            Start taking notes
+          </button>
+          <button type="button" className="mb-dismiss" onClick={() => setBanner(null)}>
+            Dismiss
+          </button>
         </div>
       )}
     </div>

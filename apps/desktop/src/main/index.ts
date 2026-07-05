@@ -4,6 +4,7 @@ import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'nod
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { CalendarService } from './calendar-service'
 import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
 import { MeetingsService } from './meetings-service'
@@ -55,6 +56,7 @@ function migrateDevUserData(): void {
 
 const engine = new EngineProcess(resolveEngineBinary())
 let notesService: NotesService | null = null
+let calendarService: CalendarService | null = null
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -188,6 +190,13 @@ app.whenReady().then(() => {
   )
   foldersService.registerIpc()
 
+  // Microsoft 365 calendar: auth + Graph polling + the meeting-start watcher.
+  calendarService = new CalendarService(app.getPath('userData'), broadcast, focusMainWindow)
+  calendarService.registerIpc()
+
+  // A fresh look at the app deserves fresh events (throttled inside).
+  app.on('browser-window-focus', () => calendarService?.onWindowFocus())
+
   createWindow()
 
   app.on('activate', function () {
@@ -197,10 +206,24 @@ app.whenReady().then(() => {
   })
 })
 
+/** Bring the app forward for a notification click, recreating the window if
+ *  the user closed it (macOS keeps the app alive without windows). */
+function focusMainWindow(): void {
+  const window = BrowserWindow.getAllWindows()[0]
+  if (window) {
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  } else {
+    createWindow()
+  }
+}
+
 // Make sure the sidecar never outlives the app.
 app.on('will-quit', () => {
   engine.dispose()
   void notesService?.dispose()
+  calendarService?.dispose()
 })
 
 app.on('window-all-closed', () => {

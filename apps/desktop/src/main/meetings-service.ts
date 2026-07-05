@@ -47,7 +47,8 @@ export class MeetingsService {
         ...(record.startedAt ? { startedAt: record.startedAt } : {}),
         ...(durationMinOf(record) !== undefined ? { durationMin: durationMinOf(record) } : {}),
         ...(record.folderId ? { folderId: record.folderId } : {}),
-        ...(record.trashedAt ? { trashedAt: record.trashedAt } : {})
+        ...(record.trashedAt ? { trashedAt: record.trashedAt } : {}),
+        ...(record.calendarEventId ? { calendarEventId: record.calendarEventId } : {})
       })
     }
     // Newest first; createdAt is ISO so string compare sorts chronologically.
@@ -134,7 +135,13 @@ function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     ...(typeof raw.folderId === 'string' && raw.folderId.length > 0
       ? { folderId: raw.folderId }
       : {}),
-    ...(isIsoString(raw.trashedAt) ? { trashedAt: raw.trashedAt } : {})
+    ...(isIsoString(raw.trashedAt) ? { trashedAt: raw.trashedAt } : {}),
+    // Graph event ids are opaque and can be long — validate shape, cap length.
+    ...(typeof raw.calendarEventId === 'string' &&
+    raw.calendarEventId.length > 0 &&
+    raw.calendarEventId.length <= 512
+      ? { calendarEventId: raw.calendarEventId }
+      : {})
   }
 }
 
