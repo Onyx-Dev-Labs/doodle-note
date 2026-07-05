@@ -23,6 +23,37 @@ function resolveSecret(): string {
 const googleEnabled = () =>
   Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
+const microsoftEnabled = () =>
+  Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+
+/**
+ * Social providers are optional: each is only wired up when its env vars
+ * exist, so local dev works with any subset configured.
+ */
+function socialProviders() {
+  return {
+    ...(microsoftEnabled()
+      ? {
+          microsoft: {
+            clientId: process.env.MICROSOFT_CLIENT_ID as string,
+            clientSecret: process.env.MICROSOFT_CLIENT_SECRET as string,
+            // Universal authority: any work, school, or personal account.
+            tenantId: "common",
+            prompt: "select_account" as const,
+          },
+        }
+      : {}),
+    ...(googleEnabled()
+      ? {
+          google: {
+            clientId: process.env.GOOGLE_CLIENT_ID as string,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+          },
+        }
+      : {}),
+  };
+}
+
 /**
  * Builds a Better Auth instance over the given Drizzle database.
  *
@@ -37,20 +68,10 @@ export function createAuth(db: Db) {
     emailAndPassword: {
       enabled: true,
     },
-    // Google sign-in is optional: only wired up when both env vars exist.
-    ...(googleEnabled()
-      ? {
-          socialProviders: {
-            google: {
-              clientId: process.env.GOOGLE_CLIENT_ID as string,
-              clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
-            },
-          },
-        }
-      : {}),
+    socialProviders: socialProviders(),
     plugins: [organization()],
   });
 }
 
 export type Auth = ReturnType<typeof createAuth>;
-export { googleEnabled };
+export { googleEnabled, microsoftEnabled };
