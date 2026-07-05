@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
+import { appendFileSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -107,9 +108,33 @@ app.whenReady().then(() => {
     broadcastEngineEvent,
     join(app.getPath('userData'), 'sessions')
   )
+
+  // Persistent event log: every engine event, timestamped, so failed sessions
+  // can be diagnosed from disk instead of reproduced. Token arrays collapse to
+  // a count to keep lines small; rotated when it grows past ~5MB.
+  const engineLogPath = join(app.getPath('userData'), 'engine-events.log')
+  try {
+    if (existsSync(engineLogPath) && statSync(engineLogPath).size > 5 * 1024 * 1024) {
+      writeFileSync(engineLogPath, '')
+    }
+  } catch {
+    // Log rotation is best-effort.
+  }
+  const logEngineEvent = (event: EngineEvent): void => {
+    try {
+      const compact = JSON.stringify(event, (key, value) =>
+        key === 'tokens' && Array.isArray(value) ? `[${value.length} tokens]` : value
+      )
+      appendFileSync(engineLogPath, `${new Date().toISOString()} ${compact}\n`)
+    } catch {
+      // Never let logging interfere with the session.
+    }
+  }
+
   engine.onEvent((event) => {
     broadcastEngineEvent(event)
     session.handle(event)
+    logEngineEvent(event)
   })
 
   ipcMain.on(ENGINE_START_CHANNEL, (_event, request: EngineStartRequest) => {

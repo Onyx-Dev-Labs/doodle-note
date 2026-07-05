@@ -14,6 +14,11 @@ import ScreenCaptureKit
 /// Runs until --seconds elapses or SIGINT/SIGTERM (what the desktop app sends).
 enum LiveCommand {
     static func run(_ options: CLIOptions) async throws {
+        // Arm stop handling FIRST. A SIGTERM that arrives before the handlers
+        // exist kills the process instantly and silently — which, during model
+        // warm-up, meant an early Stop click threw the whole session away.
+        StopController.shared.arm()
+
         // Opt-in parent-death watchdog: hosts that spawn us with a live stdin
         // pipe pass this flag; when the pipe closes (host crashed/restarted),
         // stop gracefully instead of recording forever as an orphan. Opt-in
@@ -345,6 +350,12 @@ final class StopController: @unchecked Sendable {
         stopped = true
         lock.unlock()
         resumable.forEach { $0.resume() }
+    }
+
+    /// Install signal handlers now. Idempotent. Must run before any long
+    /// startup work — see LiveCommand.run.
+    func arm() {
+        installSignalHandlers()
     }
 
     func wait(timeoutSeconds: Double?) async {
