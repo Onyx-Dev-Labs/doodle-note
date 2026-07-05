@@ -2672,3 +2672,27 @@ button.fp-row:hover {
   background: rgba(38, 40, 31, 0.06);
   color: var(--ink);
 }
+
+/* Official "Sign in with Microsoft" button (MS identity guidelines: symbol + label) */
+.ms-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #3c4043;
+}
+
+.ms-signin:hover:not(:disabled) {
+  border-color: #c9c5b8;
+  box-shadow: var(--shadow-pill);
+}
+
+.ms-signin:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

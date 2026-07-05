@@ -23,6 +23,17 @@ function lastSyncLabel(iso: string): string {
  * plus the optional BYOK cloud section. Same IPC as before — only the
  * presentation moved to the light DoodleNote theme.
  */
+function MicrosoftLogo(): React.JSX.Element {
+  return (
+    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  )
+}
+
 export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
@@ -275,8 +286,14 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </>
         ) : !calState.signedIn ? (
           <div className="calendar-actions">
-            <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
-              {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
+            <button
+              type="button"
+              className="ms-signin"
+              disabled={connecting}
+              onClick={() => void connectCalendar()}
+            >
+              <MicrosoftLogo />
+              <span>{connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}</span>
             </button>
             {!calState.builtIn && (
               <button
