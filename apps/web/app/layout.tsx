@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Doodle Note",
+  title: "DoodleNote",
   description: "AI meeting notes without the bot",
+  icons: { icon: "/mascot.png" },
 };
 
 export default function RootLayout({

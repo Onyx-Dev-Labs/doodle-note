@@ -12,6 +12,19 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* DoodleNote brand palette (mirrors apps/desktop main.css :root) */
+@theme {
+  --color-cream: #f7f5ee;
+  --color-card-soft: #fdfcf8;
+  --color-sand: #e7e3d8;
+  --color-ink: #26281f;
+  --color-bark: #3a3d33;
+  --color-stone: #8a8d7f;
+  --color-sage: #7c9769;
+  --color-sage-deep: #5f7a4e;
+  --color-sage-fill: #e9efe0;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;

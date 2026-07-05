@@ -11,7 +11,24 @@ type Mode = "sign-in" | "sign-up";
 const inputClasses =
   "w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700 dark:placeholder:text-neutral-600 dark:focus:border-neutral-400";
 
-export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
+function MicrosoftLogo() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  );
+}
+
+export function LoginForm({
+  googleEnabled,
+  microsoftEnabled,
+}: {
+  googleEnabled: boolean;
+  microsoftEnabled: boolean;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("sign-in");
   const [name, setName] = useState("");
@@ -40,8 +57,9 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
   return (
     <div className="w-full max-w-sm">
       <div className="mb-8 text-center">
-        <Link href="/" className="text-xl font-semibold tracking-tight">
-          Doodle Note
+        <Link href="/" className="text-xl font-bold tracking-tight">
+          <span className="text-ink">Doodle</span>
+          <span className="text-sage">Note</span>
         </Link>
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
           {mode === "sign-in"
@@ -100,6 +118,22 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
               : "Create account"}
         </button>
       </form>
+
+      {microsoftEnabled && (
+        <button
+          type="button"
+          onClick={() =>
+            authClient.signIn.social({
+              provider: "microsoft",
+              callbackURL: "/app",
+            })
+          }
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+        >
+          <MicrosoftLogo />
+          Sign in with Microsoft
+        </button>
+      )}
 
       {googleEnabled && (
         <button
