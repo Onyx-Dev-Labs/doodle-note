@@ -16,10 +16,15 @@ export default async function WorkspacesPage() {
     headers: requestHeaders,
   });
 
+  // Same fallback as the meetings library: no explicit active workspace
+  // means the first one is treated as active.
+  const activeOrganizationId =
+    session.session.activeOrganizationId ?? organizations[0]?.id ?? null;
+
   return (
     <WorkspacesPanel
       userEmail={session.user.email}
-      activeOrganizationId={session.session.activeOrganizationId ?? null}
+      activeOrganizationId={activeOrganizationId}
       organizations={organizations.map((org) => ({
         id: org.id,
         name: org.name,
