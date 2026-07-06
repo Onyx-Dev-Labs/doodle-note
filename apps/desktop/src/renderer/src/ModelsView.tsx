@@ -130,7 +130,17 @@ function Toggle({
   )
 }
 
+type SettingsSection = 'general' | 'calendar' | 'sync' | 'model'
+
+const SETTINGS_NAV: Array<{ key: SettingsSection; icon: string; label: string }> = [
+  { key: 'general', icon: '⚙️', label: 'General' },
+  { key: 'calendar', icon: '📅', label: 'Calendar' },
+  { key: 'sync', icon: '☁️', label: 'Cloud sync' },
+  { key: 'model', icon: '✨', label: 'Notes model' }
+]
+
 export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
+  const [section, setSection] = useState<SettingsSection>('general')
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
   const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
@@ -378,18 +388,43 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
       <header className="models-header">
         <img className="settings-logo" src={logoUrl} alt="DoodleNote" />
         <div>
-          <h2>Notes model</h2>
+          <h2>Settings</h2>
           <p className="models-sub">
-            DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
-            {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
-            machine.
+            Local-first by default — nothing leaves this Mac unless you turn it on.
           </p>
         </div>
       </header>
 
-      {error && <div className="models-error">{error}</div>}
+      <div className="settings-shell">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SETTINGS_NAV.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={section === item.key ? 'settings-nav-btn on' : 'settings-nav-btn'}
+              onClick={() => setSection(item.key)}
+            >
+              <span className="settings-nav-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
 
-      <div className="model-cards">
+        <div className="settings-content">
+          {section === 'model' && (
+            <section className="keys-section">
+              <h3>On-device model</h3>
+              <p className="models-sub">
+                DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
+                {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
+                machine.
+              </p>
+
+              {error && <div className="models-error">{error}</div>}
+
+              <div className="model-cards">
         {data === null && <span className="placeholder">loading models…</span>}
         {data?.models.map((m) => (
           <div
@@ -408,7 +443,10 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         ))}
       </div>
+            </section>
+          )}
 
+          {section === 'calendar' && (
       <section className="keys-section calendar-section">
         <h3>Calendar</h3>
         <p className="models-sub">
@@ -598,7 +636,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         )}
       </section>
+          )}
 
+          {section === 'general' && (
       <section className="keys-section calendar-section">
         <h3>Meeting detection</h3>
         <p className="models-sub">
@@ -643,7 +683,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         )}
       </section>
+          )}
 
+          {section === 'sync' && (
       <section className="keys-section calendar-section">
         <h3>Sync with cloud</h3>
         <p className="models-sub">
@@ -734,7 +776,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         )}
       </section>
+          )}
 
+          {section === 'model' && (
       <section className="keys-section">
         <h3>AI keys (optional)</h3>
         <p className="models-sub">
@@ -790,6 +834,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           {(keySaved || settings?.cloud?.hasKey) && <span className="key-saved">key saved ✓</span>}
         </div>
       </section>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
