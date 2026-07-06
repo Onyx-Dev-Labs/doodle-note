@@ -9,24 +9,28 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const workspaces = pgTable("workspaces", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+import { organization, user } from "./auth-schema";
 
-export const meetings = pgTable("meetings", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  workspaceId: uuid("workspace_id").references(() => workspaces.id),
-  title: text("title").notNull().default("Untitled meeting"),
-  status: text("status", { enum: ["recording", "processing", "complete"] })
-    .notNull()
-    .default("recording"),
-  calendarEventId: text("calendar_event_id"),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  endedAt: timestamp("ended_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const meetings = pgTable(
+  "meetings",
+  {
+    /** Desktop-minted UUID — the same id on the Mac and in the cloud. */
+    id: uuid("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("Untitled meeting"),
+    status: text("status", { enum: ["recording", "processing", "complete"] })
+      .notNull()
+      .default("complete"),
+    calendarEventId: text("calendar_event_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("meetings_organization_id_idx").on(table.organizationId)],
+);
 
 export const transcriptSegments = pgTable(
   "transcript_segments",
@@ -54,9 +58,32 @@ export const notes = pgTable("notes", {
     .notNull()
     .unique()
     .references(() => meetings.id, { onDelete: "cascade" }),
-  /** ProseMirror doc — the user's rough notes. */
+  /** The user's rough notes — { format: "markdown", markdown } for now. */
   rawContent: jsonb("raw_content"),
-  /** AI-merged notes. */
+  /** AI-merged notes, same envelope. */
   enhancedContent: jsonb("enhanced_content"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+/**
+ * A linked desktop app. The plaintext token is shown once during the
+ * link-device flow and held by the desktop (safeStorage-encrypted); only its
+ * SHA-256 lives here. Sync requests authenticate with `Authorization: Bearer`.
+ */
+export const syncDevices = pgTable(
+  "sync_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    deviceName: text("device_name").notNull().default("Desktop"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  },
+  (table) => [index("sync_devices_user_id_idx").on(table.userId)],
+);

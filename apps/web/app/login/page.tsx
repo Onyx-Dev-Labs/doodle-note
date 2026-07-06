@@ -8,15 +8,24 @@ import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Sign in — DoodleNote" };
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
+  // Only same-site paths — never redirect off-domain after sign-in.
+  const nextPath = next && next.startsWith("/") && !next.startsWith("//") ? next : "/app";
+
   const session = await auth.api.getSession({ headers: await headers() });
-  if (session) redirect("/app");
+  if (session) redirect(nextPath);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <LoginForm
         googleEnabled={googleEnabled()}
         microsoftEnabled={microsoftEnabled()}
+        next={nextPath}
       />
     </main>
   );

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
+import type { SyncStatus } from '../../shared/sync-api'
 import type {
   CloudProvider,
   EngineChoice,
@@ -140,6 +141,10 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   const [keySaved, setKeySaved] = useState(false)
   const cloudFormSeeded = useRef(false)
 
+  /* ---- cloud sync ---- */
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const [linkPending, setLinkPending] = useState(false)
+
   /* ---- calendar (Microsoft 365) ---- */
   const [calState, setCalState] = useState<CalendarState | null>(null)
   const [clientId, setClientId] = useState('')
@@ -171,6 +176,27 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   }, [active, refreshCalendar])
 
   useEffect(() => window.calendar.onEvents(adoptCalState), [adoptCalState])
+
+  useEffect(() => {
+    if (active) {
+      void window.sync
+        .getStatus()
+        .then(setSyncStatus)
+        .catch(() => setSyncStatus(null))
+    }
+  }, [active])
+
+  useEffect(() => window.sync.onStatus(setSyncStatus), [])
+
+  const connectSync = async (): Promise<void> => {
+    if (linkPending) return
+    setLinkPending(true)
+    try {
+      setSyncStatus(await window.sync.connect())
+    } finally {
+      setLinkPending(false)
+    }
+  }
 
   const saveCalendarConfig = async (): Promise<void> => {
     const state = await window.calendar.setConfig({
@@ -555,6 +581,97 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                   )
                 })
               )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="keys-section calendar-section">
+        <h3>Sync with cloud</h3>
+        <p className="models-sub">
+          Off by default — your meetings live only on this Mac. Turn it on to push meetings,
+          transcripts, and notes to your DoodleNote workspace so you can browse and share them on
+          the web.
+        </p>
+
+        {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
+
+        {syncStatus === null ? (
+          <span className="calendar-note">loading sync settings…</span>
+        ) : !syncStatus.connected ? (
+          <div className="calendar-actions">
+            <button
+              type="button"
+              className="ms-signin"
+              disabled={linkPending || syncStatus.linking}
+              onClick={() => void connectSync()}
+            >
+              <span>
+                {linkPending || syncStatus.linking
+                  ? 'Waiting for your browser…'
+                  : 'Connect DoodleNote Cloud'}
+              </span>
+            </button>
+            {(linkPending || syncStatus.linking) && (
+              <span className="calendar-note">
+                approve the connection in your browser, then come back
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="calendar-connected">
+            <span className="calendar-status">
+              Connected as <strong>{syncStatus.email ?? 'your account'}</strong>
+              {syncStatus.workspaceName && (
+                <span className="calendar-note"> · workspace “{syncStatus.workspaceName}”</span>
+              )}
+              {syncStatus.lastSyncAt && (
+                <span className="calendar-note"> · {lastSyncLabel(syncStatus.lastSyncAt)}</span>
+              )}
+            </span>
+
+            <div className="cal-subcard">
+              <div className="cal-row">
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Sync meetings to the cloud</span>
+                  <span className="cal-row-sub">
+                    {syncStatus.enabled
+                      ? syncStatus.syncing
+                        ? 'Syncing now…'
+                        : syncStatus.pendingCount > 0
+                          ? `${syncStatus.pendingCount} meeting${syncStatus.pendingCount === 1 ? '' : 's'} waiting to sync`
+                          : 'Everything is synced'
+                      : 'Paused — nothing is uploaded while this is off'}
+                  </span>
+                </span>
+                <Toggle
+                  checked={syncStatus.enabled}
+                  label="Sync meetings to the cloud"
+                  onChange={() => {
+                    void window.sync.setEnabled(!syncStatus.enabled).then(setSyncStatus)
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="calendar-actions">
+              <button
+                type="button"
+                disabled={syncStatus.syncing || !syncStatus.enabled}
+                onClick={() => {
+                  void window.sync.syncNow().then(setSyncStatus)
+                }}
+              >
+                {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void window.sync.disconnect().then(setSyncStatus)
+                }}
+              >
+                Disconnect
+              </button>
             </div>
           </div>
         )}

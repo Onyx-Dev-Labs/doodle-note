@@ -1,30 +1,117 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { desc, eq, getDb, meetings, notes, sql } from "@repo/db";
 
 import { auth } from "@/lib/auth";
+import { ensurePersonalWorkspace } from "@/lib/workspace";
 
-import { WorkspacesPanel } from "./workspaces-panel";
+export const metadata = { title: "Meetings — DoodleNote" };
 
-export const metadata = { title: "Workspaces — Doodle Note" };
+function formatWhen(date: Date | null): string {
+  if (!date) return "";
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
-export default async function AppPage() {
+export default async function MeetingsPage() {
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) redirect("/login");
 
+  const personal = await ensurePersonalWorkspace(session.user.id);
   const organizations = await auth.api.listOrganizations({
     headers: requestHeaders,
   });
+  const activeOrg =
+    organizations.find(
+      (org) => org.id === session.session.activeOrganizationId,
+    ) ??
+    organizations[0] ??
+    personal;
+
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: meetings.id,
+      title: meetings.title,
+      startedAt: meetings.startedAt,
+      createdAt: meetings.createdAt,
+      endedAt: meetings.endedAt,
+      hasNotes: sql<boolean>`${notes.id} is not null`,
+    })
+    .from(meetings)
+    .leftJoin(notes, eq(notes.meetingId, meetings.id))
+    .where(eq(meetings.organizationId, activeOrg.id))
+    .orderBy(desc(sql`coalesce(${meetings.startedAt}, ${meetings.createdAt})`))
+    .limit(200);
 
   return (
-    <WorkspacesPanel
-      userEmail={session.user.email}
-      activeOrganizationId={session.session.activeOrganizationId ?? null}
-      organizations={organizations.map((org) => ({
-        id: org.id,
-        name: org.name,
-        slug: org.slug,
-      }))}
-    />
+    <main className="flex flex-1 flex-col">
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">
+          Meetings
+        </h1>
+        <span className="text-sm text-stone">{activeOrg.name}</span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="mt-10 rounded-xl border border-sand bg-card-soft p-8 text-center">
+          <h2 className="text-base font-semibold text-ink">
+            No meetings synced yet
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-bark">
+            Open DoodleNote on your Mac and turn on{" "}
+            <strong>Settings → Sync with cloud</strong>. Your meetings,
+            transcripts, and notes will appear here.
+          </p>
+        </div>
+      ) : (
+        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-white">
+          {rows.map((meeting) => {
+            const when = meeting.startedAt ?? meeting.createdAt;
+            const durationMin =
+              meeting.startedAt && meeting.endedAt
+                ? Math.max(
+                    1,
+                    Math.round(
+                      (meeting.endedAt.getTime() -
+                        meeting.startedAt.getTime()) /
+                        60_000,
+                    ),
+                  )
+                : null;
+            return (
+              <li key={meeting.id}>
+                <Link
+                  href={`/app/meeting/${meeting.id}`}
+                  className="flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-sage-fill/40"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">
+                      {meeting.title || "Untitled meeting"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-stone">
+                      {formatWhen(when)}
+                      {durationMin ? ` · ${durationMin} min` : ""}
+                    </p>
+                  </div>
+                  {meeting.hasNotes && (
+                    <span className="shrink-0 rounded-full bg-sage-fill px-2.5 py-0.5 text-xs font-medium text-sage-deep">
+                      Notes
+                    </span>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </main>
   );
 }

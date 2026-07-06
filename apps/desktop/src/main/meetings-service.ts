@@ -22,6 +22,13 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/
  * the active meeting); this service just validates, merges and persists.
  */
 export class MeetingsService {
+  /**
+   * Post-write hook (cloud sync): fires after any persisted change.
+   * `deletedId` is set when a meeting was hard-deleted or moved to trash —
+   * both mean its cloud copy (if any) should go away.
+   */
+  onDidWrite: ((change: { deletedId?: string }) => void) | null = null
+
   constructor(private readonly dir: string) {}
 
   registerIpc(): void {
@@ -86,12 +93,14 @@ export class MeetingsService {
     const merged = normalizeRecord({ ...(existing ?? {}), ...patch, id })
     mkdirSync(this.dir, { recursive: true })
     writeFileSync(join(this.dir, `${id}.json`), JSON.stringify(merged, null, 2))
+    this.onDidWrite?.(merged.trashedAt ? { deletedId: id } : {})
     return merged
   }
 
   delete(id: string): void {
     if (!SAFE_ID.test(id)) return
     rmSync(join(this.dir, `${id}.json`), { force: true })
+    this.onDidWrite?.({ deletedId: id })
   }
 
   /* ---- disk ---- */

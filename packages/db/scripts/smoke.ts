@@ -6,6 +6,7 @@ import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 
+import * as authSchema from "../src/auth-schema";
 import * as schema from "../src/schema";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,9 +18,28 @@ async function main(): Promise<void> {
 
   await migrate(db, { migrationsFolder: path.join(packageRoot, "drizzle") });
 
+  // Meetings hang off a Better Auth organization + user now.
+  await db.insert(authSchema.user).values({
+    id: "user_smoke",
+    name: "Smoke Tester",
+    email: "smoke@example.com",
+    updatedAt: new Date(),
+  });
+  await db.insert(authSchema.organization).values({
+    id: "org_smoke",
+    name: "Personal",
+    slug: "personal-smoke",
+    createdAt: new Date(),
+  });
+
   const [meeting] = await db
     .insert(schema.meetings)
-    .values({ title: "Weekly sync", status: "complete" })
+    .values({
+      id: "3b4c1a52-90cd-4f6e-b8b3-2a4f0f6f9d01",
+      organizationId: "org_smoke",
+      title: "Weekly sync",
+      status: "complete",
+    })
     .returning();
   if (!meeting) throw new Error("meeting insert returned no row");
 

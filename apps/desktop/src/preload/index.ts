@@ -59,6 +59,16 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  SYNC_CONNECT_CHANNEL,
+  SYNC_DISCONNECT_CHANNEL,
+  SYNC_GET_STATUS_CHANNEL,
+  SYNC_NOW_CHANNEL,
+  SYNC_SET_ENABLED_CHANNEL,
+  SYNC_STATUS_EVENT_CHANNEL,
+  type SyncApi,
+  type SyncStatus
+} from '../shared/sync-api'
+import {
   CALENDAR_CONNECT_CHANNEL,
   CALENDAR_DISCONNECT_CHANNEL,
   CALENDAR_EVENTS_CHANNEL,
@@ -229,6 +239,32 @@ const calendarApi: CalendarApi = {
   }
 }
 
+const syncApi: SyncApi = {
+  getStatus(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_GET_STATUS_CHANNEL) as Promise<SyncStatus>
+  },
+
+  connect(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_CONNECT_CHANNEL) as Promise<SyncStatus>
+  },
+
+  disconnect(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_DISCONNECT_CHANNEL) as Promise<SyncStatus>
+  },
+
+  setEnabled(enabled: boolean): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_SET_ENABLED_CHANNEL, enabled) as Promise<SyncStatus>
+  },
+
+  syncNow(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_NOW_CHANNEL) as Promise<SyncStatus>
+  },
+
+  onStatus(cb: (status: SyncStatus) => void): () => void {
+    return subscribe(SYNC_STATUS_EVENT_CHANNEL, cb)
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
@@ -236,6 +272,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
+    contextBridge.exposeInMainWorld('sync', syncApi)
   } catch (error) {
     console.error(error)
   }
@@ -250,4 +287,6 @@ if (process.contextIsolated) {
   window.folders = foldersApi
   // @ts-ignore (defined in index.d.ts)
   window.calendar = calendarApi
+  // @ts-ignore (defined in index.d.ts)
+  window.sync = syncApi
 }
