@@ -15,6 +15,7 @@ import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import {
   DETECT_GET_STATE_CHANNEL,
+  DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
   type DetectPrefsUpdate,
   type DetectState
@@ -155,16 +156,24 @@ app.whenReady().then(() => {
 
   // Ad-hoc meeting detection: engine micmon watches for other apps holding
   // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
-  const micWatcher = new MicWatcher(resolveEngineBinary(), app.getPath('userData'), (appLabel) => {
-    calendarService?.deliverPrompt({
-      action: 'prompt',
-      eventId: '',
-      // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
-      subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
-      startIso: new Date().toISOString(),
-      adHoc: true
-    })
-  })
+  const micWatcher = new MicWatcher(
+    resolveEngineBinary(),
+    app.getPath('userData'),
+    (appLabel) => {
+      calendarService?.deliverPrompt({
+        action: 'prompt',
+        eventId: '',
+        // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
+        subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
+        startIso: new Date().toISOString(),
+        adHoc: true
+      })
+    },
+    () => {
+      // Meeting app hung up mid-recording — the editor stops its capture.
+      broadcast(DETECT_MEETING_ENDED_CHANNEL, {})
+    }
+  )
 
   const session = new TranscriptSession(
     broadcastEngineEvent,
@@ -236,13 +245,13 @@ app.whenReady().then(() => {
   calendarService.registerIpc()
 
   // Meeting-detection settings: login item (OS-owned) + the mic watcher.
-  ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => {
-    return {
-      loginItem: app.getLoginItemSettings().openAtLogin,
-      micDetect: micWatcher.enabled,
-      micMonitorAlive: micWatcher.monitorAlive
-    }
+  const detectState = (): DetectState => ({
+    loginItem: app.getLoginItemSettings().openAtLogin,
+    micDetect: micWatcher.enabled,
+    autoStop: micWatcher.autoStop,
+    micMonitorAlive: micWatcher.monitorAlive
   })
+  ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
   ipcMain.handle(DETECT_SET_PREFS_CHANNEL, (_event, update: DetectPrefsUpdate): DetectState => {
     if (typeof update?.loginItem === 'boolean') {
       app.setLoginItemSettings({ openAtLogin: update.loginItem })
@@ -250,11 +259,10 @@ app.whenReady().then(() => {
     if (typeof update?.micDetect === 'boolean') {
       micWatcher.setEnabled(update.micDetect)
     }
-    return {
-      loginItem: app.getLoginItemSettings().openAtLogin,
-      micDetect: micWatcher.enabled,
-      micMonitorAlive: micWatcher.monitorAlive
+    if (typeof update?.autoStop === 'boolean') {
+      micWatcher.setAutoStop(update.autoStop)
     }
+    return detectState()
   })
   micWatcher.start()
   app.on('quit', () => micWatcher.stop())

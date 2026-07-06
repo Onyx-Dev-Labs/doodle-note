@@ -65,6 +65,7 @@ import {
 } from '../shared/theme-api'
 import {
   DETECT_GET_STATE_CHANNEL,
+  DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
   type DetectApi,
   type DetectPrefsUpdate,
@@ -302,6 +303,10 @@ const detectApi: DetectApi = {
 
   setPrefs(update: DetectPrefsUpdate): Promise<DetectState> {
     return ipcRenderer.invoke(DETECT_SET_PREFS_CHANNEL, update) as Promise<DetectState>
+  },
+
+  onMeetingEnded(cb: () => void): () => void {
+    return subscribe(DETECT_MEETING_ENDED_CHANNEL, cb)
   }
 }
 

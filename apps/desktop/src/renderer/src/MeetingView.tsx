@@ -435,6 +435,26 @@ export default function MeetingView({
   const phase = state.phase
   const capturing = ACTIVE_PHASES.includes(phase)
 
+  /* ---- auto-stop when the meeting app hangs up (Granola-style) ---- */
+
+  const [autoStopped, setAutoStopped] = useState(false)
+  const capturingRef = useRef(false)
+  capturingRef.current = capturing
+
+  useEffect(() => {
+    return window.detect.onMeetingEnded(() => {
+      if (!capturingRef.current) return
+      window.engine.stop()
+      setAutoStopped(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!autoStopped) return
+    const timer = setTimeout(() => setAutoStopped(false), 8000)
+    return () => clearTimeout(timer)
+  }, [autoStopped])
+
   useEffect(() => {
     if (phase !== 'recording') return
     if (recordStartRef.current === null) recordStartRef.current = Date.now()
@@ -729,6 +749,15 @@ export default function MeetingView({
         <div className="toast" role="alert">
           <span>{state.error}</span>
           <button type="button" onClick={() => dispatch({ event: 'error', message: '' })}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      {autoStopped && !state.error && (
+        <div className="toast" role="status">
+          <span>Meeting ended — recording stopped. Hit Resume if you&rsquo;re still going.</span>
+          <button type="button" onClick={() => setAutoStopped(false)}>
             ✕
           </button>
         </div>

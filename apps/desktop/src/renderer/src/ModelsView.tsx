@@ -714,6 +714,22 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                 }}
               />
             </div>
+            <div className="cal-row">
+              <span className="cal-row-main">
+                <span className="cal-row-label">Stop recording when the meeting ends</span>
+                <span className="cal-row-sub">
+                  When the meeting app hangs up, DoodleNote stops recording on its own — no more
+                  minutes of empty audio after everyone leaves
+                </span>
+              </span>
+              <Toggle
+                checked={detect.autoStop}
+                label="Stop recording when the meeting ends"
+                onChange={() => {
+                  void window.detect.setPrefs({ autoStop: !detect.autoStop }).then(setDetect)
+                }}
+              />
+            </div>
           </div>
         )}
       </section>

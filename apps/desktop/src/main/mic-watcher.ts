@@ -2,13 +2,19 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  initialEndState,
   initialMicState,
+  markEnded,
   markPrompted,
+  MEETING_END_DEBOUNCE_MS,
   meetingAppLabel,
   MIC_DEBOUNCE_MS,
+  onCaptureMicEvent,
   onMicEvent,
   setSuppressed,
+  shouldAutoStop,
   shouldPrompt,
+  type MeetingEndState,
   type MicPromptState
 } from './mic-watcher-logic'
 
@@ -16,7 +22,10 @@ import {
 const RESTART_DELAY_MS = 5_000
 
 interface MicWatcherConfig {
+  /** Prompt when a meeting app grabs the mic (ad-hoc detection). */
   enabled: boolean
+  /** Stop the recording when the meeting app releases the mic. */
+  autoStop: boolean
 }
 
 /**
@@ -38,10 +47,17 @@ export class MicWatcher {
   /** Friendly name of the meeting app behind the current busy stretch. */
   private currentAppLabel: string | null = null
 
+  /** Meeting-end watch, alive only while our own capture runs (suppressed). */
+  private capturing = false
+  private endState: MeetingEndState = initialEndState()
+  private endTimer: NodeJS.Timeout | null = null
+
   constructor(
     private readonly enginePath: string,
     userDataDir: string,
-    private readonly onMeetingDetected: (appLabel: string | null) => void
+    private readonly onMeetingDetected: (appLabel: string | null) => void,
+    /** The meeting app left the mic mid-capture — stop the recording. */
+    private readonly onMeetingEnded: () => void
   ) {
     this.configPath = join(userDataDir, 'mic-watch.json')
     this.config = this.readConfig()
@@ -51,12 +67,21 @@ export class MicWatcher {
     return this.config.enabled
   }
 
+  get autoStop(): boolean {
+    return this.config.autoStop
+  }
+
   get monitorAlive(): boolean {
     return this.child !== null
   }
 
+  /** Either feature needs the micmon child. */
+  private get childWanted(): boolean {
+    return this.config.enabled || this.config.autoStop
+  }
+
   start(): void {
-    if (this.config.enabled) this.spawnChild()
+    if (this.childWanted) this.spawnChild()
   }
 
   stop(): void {
@@ -68,18 +93,47 @@ export class MicWatcher {
     if (this.config.enabled === enabled) return
     this.config.enabled = enabled
     this.writeConfig()
-    if (enabled) {
+    this.state = initialMicState()
+    this.reconcileChild()
+  }
+
+  setAutoStop(autoStop: boolean): void {
+    if (this.config.autoStop === autoStop) return
+    this.config.autoStop = autoStop
+    this.writeConfig()
+    this.resetEndWatch()
+    this.reconcileChild()
+  }
+
+  private reconcileChild(): void {
+    if (this.childWanted) {
       this.spawnChild()
     } else {
       this.killChild()
-      this.state = initialMicState()
     }
   }
 
-  /** True while DoodleNote's own capture holds the mic — don't self-prompt. */
+  /** True while DoodleNote's own capture holds the mic — don't self-prompt.
+   *  That same window is when the meeting-end watch is armed. */
   setSuppressed(suppressed: boolean): void {
     this.state = setSuppressed(this.state, suppressed)
     if (suppressed) this.clearDebounce()
+    this.capturing = suppressed
+    this.resetEndWatch()
+    // micmon only emits on CHANGES — if the meeting app already held the mic
+    // when recording started (the normal case), seed the watch from the
+    // last-known state or the end edge would never arm.
+    if (suppressed && this.currentAppLabel !== null) {
+      this.endState = onCaptureMicEvent(this.endState, true, Date.now())
+    }
+  }
+
+  private resetEndWatch(): void {
+    this.endState = initialEndState()
+    if (this.endTimer) {
+      clearTimeout(this.endTimer)
+      this.endTimer = null
+    }
   }
 
   /* ---- child process ---- */
@@ -119,6 +173,7 @@ export class MicWatcher {
             const label = event.running ? meetingAppLabel(bundles) : null
             this.currentAppLabel = label
             this.handleMicEvent(event.running && label !== null)
+            this.handleEndWatch(label !== null)
           }
         } catch {
           // CoreML/CoreAudio noise on stdout — NDJSON hosts skip unparseable lines.
@@ -186,14 +241,35 @@ export class MicWatcher {
     }
   }
 
+  /** Meeting-end watch: armed while our capture runs and autoStop is on. */
+  private handleEndWatch(meetingPresent: boolean): void {
+    if (!this.capturing || !this.config.autoStop) return
+    this.endState = onCaptureMicEvent(this.endState, meetingPresent, Date.now())
+    if (this.endTimer) {
+      clearTimeout(this.endTimer)
+      this.endTimer = null
+    }
+    if (this.endState.absentSinceMs !== null && !this.endState.ended) {
+      this.endTimer = setTimeout(() => {
+        this.endTimer = null
+        if (this.capturing && shouldAutoStop(this.endState, Date.now())) {
+          this.endState = markEnded(this.endState)
+          this.onMeetingEnded()
+        }
+      }, MEETING_END_DEBOUNCE_MS)
+      this.endTimer.unref?.()
+    }
+  }
+
   /* ---- config ---- */
 
   private readConfig(): MicWatcherConfig {
     try {
       const raw = JSON.parse(readFileSync(this.configPath, 'utf8')) as Partial<MicWatcherConfig>
-      return { enabled: raw.enabled !== false } // default ON
+      // Both default ON.
+      return { enabled: raw.enabled !== false, autoStop: raw.autoStop !== false }
     } catch {
-      return { enabled: true }
+      return { enabled: true, autoStop: true }
     }
   }
 
