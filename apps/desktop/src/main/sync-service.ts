@@ -135,13 +135,17 @@ export class SyncService {
             const token = url.searchParams.get('token') ?? ''
             const email = url.searchParams.get('email') ?? ''
             const workspace = url.searchParams.get('workspace') ?? ''
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-            res.end(
-              '<html><body style="font-family:-apple-system,sans-serif;background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>DoodleNote is connected</h2><p>You can close this tab and return to the app.</p></div></body></html>'
-            )
             if (token.startsWith('dnsy_')) {
+              // Land the user in their web meetings library — they're already
+              // signed in there from the approval page.
+              res.writeHead(302, { Location: `${this.baseUrl}/app` })
+              res.end()
               resolve({ token, email, workspace })
             } else {
+              res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
+              res.end(
+                '<html><body style="font-family:-apple-system,sans-serif;background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>Connection failed</h2><p>Return to DoodleNote and try connecting again.</p></div></body></html>'
+              )
               reject(new Error('The browser did not return a valid token'))
             }
           })
