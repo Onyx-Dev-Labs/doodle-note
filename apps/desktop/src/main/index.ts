@@ -265,7 +265,17 @@ app.whenReady().then(() => {
     return detectState()
   })
   micWatcher.start()
-  app.on('quit', () => micWatcher.stop())
+
+  // node-llama-cpp's async workers SIGABRT if they complete during Electron's
+  // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —
+  // macOS then shows "DoodleNote quit unexpectedly" on the next launch. All
+  // app state is written synchronously as it changes, and child processes
+  // (transcription engine, micmon) exit on their own via stdin-close
+  // watchdogs, so skipping native teardown loses nothing.
+  app.on('before-quit', () => {
+    micWatcher.stop()
+    process.exit(0)
+  })
 
   // The renderer mirrors its theme pref here so nativeTheme (and with it the
   // floating prompt panel + native chrome) matches the in-app appearance.
