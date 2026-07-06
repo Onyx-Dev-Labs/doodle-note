@@ -11,6 +11,16 @@ import HomeView, { type HomeFilter } from './HomeView'
 import MeetingView from './MeetingView'
 import ModelsView from './ModelsView'
 import mascotUrl from './assets/mascot-square.png'
+import {
+  CalendarIcon,
+  FolderIcon,
+  GearIcon,
+  HomeIcon,
+  LockIcon,
+  MicIcon,
+  PencilIcon,
+  TrashIcon
+} from './icons'
 
 type ViewId = 'home' | 'editor' | 'settings' | 'dev'
 
@@ -315,7 +325,10 @@ function App(): React.JSX.Element {
               className={onHome && filter.kind === 'all' ? 'nav-item on' : 'nav-item'}
               onClick={() => selectFilter({ kind: 'all' })}
             >
-              <span className="nav-icon">⌂</span> Home
+              <span className="nav-icon">
+                <HomeIcon size={14} />
+              </span>{' '}
+              Home
             </button>
           </nav>
 
@@ -336,7 +349,9 @@ function App(): React.JSX.Element {
                 }
               }}
             >
-              <span className="nav-icon">✎</span>
+              <span className="nav-icon">
+                <PencilIcon size={13} />
+              </span>
               <span className="nav-label">My notes</span>
               <button
                 type="button"
@@ -384,7 +399,9 @@ function App(): React.JSX.Element {
                     }
                   }}
                 >
-                  <span className="nav-icon">📁</span>
+                  <span className="nav-icon">
+                    <FolderIcon size={13} />
+                  </span>
                   <span className="nav-label">{f.name}</span>
                   <span className="nav-count">{folderCounts.get(f.id) ?? 0}</span>
                   <button
@@ -417,14 +434,14 @@ function App(): React.JSX.Element {
                           setRenamingFolder({ id: f.id, name: f.name })
                         }}
                       >
-                        ✎ Rename
+                        <PencilIcon size={12} /> Rename
                       </button>
                       <button
                         type="button"
                         className="danger"
                         onClick={() => void deleteFolder(f.id)}
                       >
-                        🗑 Delete folder
+                        <TrashIcon size={12} /> Delete folder
                       </button>
                     </div>
                   )}
@@ -464,7 +481,9 @@ function App(): React.JSX.Element {
               className={onHome && filter.kind === 'trash' ? 'nav-item on' : 'nav-item'}
               onClick={() => selectFilter({ kind: 'trash' })}
             >
-              <span className="nav-icon">🗑</span>
+              <span className="nav-icon">
+                <TrashIcon size={13} />
+              </span>
               <span className="nav-label">Trash</span>
               {trashCount > 0 && <span className="nav-count">{trashCount}</span>}
             </button>
@@ -473,13 +492,18 @@ function App(): React.JSX.Element {
           <div className="sidebar-spacer" />
 
           <div className="sidebar-bottom">
-            <div className="privacy-badge">🔒 Local &amp; private</div>
+            <div className="privacy-badge">
+              <LockIcon size={12} /> Local &amp; private
+            </div>
             <button
               type="button"
               className={view === 'settings' ? 'nav-item on' : 'nav-item'}
               onClick={() => setView('settings')}
             >
-              <span className="nav-icon">⚙</span> Settings
+              <span className="nav-icon">
+                <GearIcon size={14} />
+              </span>{' '}
+              Settings
             </button>
             <button type="button" className="dev-link" onClick={() => setView('dev')}>
               Developer
@@ -531,7 +555,7 @@ function App(): React.JSX.Element {
       {banner !== null && (
         <div className="meeting-banner no-drag" role="status">
           <span className="mb-emoji" aria-hidden="true">
-            {banner.adHoc ? '🎙' : '📅'}
+            {banner.adHoc ? <MicIcon size={15} /> : <CalendarIcon size={15} />}
           </span>
           <span className="mb-text">
             {banner.adHoc ? (

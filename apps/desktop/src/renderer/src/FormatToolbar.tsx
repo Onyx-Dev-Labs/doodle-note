@@ -1,8 +1,9 @@
 import { useEffect, useReducer } from 'react'
 import type { Editor } from '@tiptap/react'
+import { CheckSquareIcon, ImageIcon } from './icons'
 
 interface ToolButton {
-  label: string
+  label: React.ReactNode
   title: string
   isOn: (editor: Editor) => boolean
   run: (editor: Editor) => void
@@ -52,7 +53,7 @@ const TOOLS: ToolButton[] = [
     run: (e) => e.chain().focus().toggleOrderedList().run()
   },
   {
-    label: '☑',
+    label: <CheckSquareIcon size={13} />,
     title: 'To-do list',
     isOn: (e) => e.isActive('taskList'),
     run: (e) => e.chain().focus().toggleTaskList().run()
@@ -116,7 +117,7 @@ export default function FormatToolbar({
         onMouseDown={(e) => e.preventDefault()}
         onClick={onPickImage}
       >
-        🖼
+        <ImageIcon size={13} />
       </button>
     </div>
   )

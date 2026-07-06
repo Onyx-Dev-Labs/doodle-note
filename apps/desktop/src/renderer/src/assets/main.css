@@ -62,6 +62,13 @@ textarea {
   font-family: inherit;
 }
 
+/* Shared SVG icons (icons.tsx): sit on the text baseline when inline; flex
+   containers (nav rows, chips with align-items) center them naturally. */
+.ico {
+  vertical-align: -2.5px;
+  flex-shrink: 0;
+}
+
 /* macOS window chrome helpers */
 .drag {
   -webkit-app-region: drag;

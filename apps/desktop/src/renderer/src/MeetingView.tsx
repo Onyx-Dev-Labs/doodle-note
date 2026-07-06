@@ -10,6 +10,15 @@ import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type { NotesModelsResponse, NotesSettingsView } from '../../shared/notes-api'
 import FolderPicker from './FolderPicker'
 import FormatToolbar from './FormatToolbar'
+import {
+  CalendarIcon,
+  FolderIcon,
+  HomeIcon,
+  MailIcon,
+  PencilIcon,
+  SparkleIcon,
+  UsersIcon
+} from './icons'
 import { docToMarkdown, markdownToHtml } from './lib/markdown'
 
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
@@ -712,7 +721,7 @@ export default function MeetingView({
     <div className="editor-page">
       <div className="editor-topbar drag">
         <button type="button" className="back-pill no-drag" onClick={goBack} title="Back to home">
-          ‹ ⌂
+          ‹ <HomeIcon size={13} />
         </button>
       </div>
 
@@ -754,8 +763,20 @@ export default function MeetingView({
           />
 
           <div className="chips-row">
-            <span className="chip">📅 {dateChip}</span>
-            <span className="chip">{meeting?.kind === 'note' ? '✎ Note' : '👥 Me'}</span>
+            <span className="chip">
+              <CalendarIcon size={12} /> {dateChip}
+            </span>
+            <span className="chip">
+              {meeting?.kind === 'note' ? (
+                <>
+                  <PencilIcon size={12} /> Note
+                </>
+              ) : (
+                <>
+                  <UsersIcon size={12} /> Me
+                </>
+              )}
+            </span>
             <span className="chip-folder-anchor">
               <button
                 type="button"
@@ -763,7 +784,7 @@ export default function MeetingView({
                 title={folderName !== null ? 'Move to another folder' : 'Add to folder'}
                 onClick={() => setFolderPickerOpen((open) => !open)}
               >
-                📁 {folderName ?? 'Add to folder'}
+                <FolderIcon size={12} /> {folderName ?? 'Add to folder'}
               </button>
               {folderPickerOpen && (
                 <FolderPicker
@@ -1003,7 +1024,9 @@ export default function MeetingView({
               {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
             </>
           ) : (
-            <>✨ Generate notes</>
+            <>
+              <SparkleIcon size={14} /> Generate notes
+            </>
           )}
         </button>
       )}
@@ -1097,7 +1120,7 @@ export default function MeetingView({
               onClick={() => void submitAsk(FOLLOW_UP_EMAIL_QUESTION)}
               title="Draft a ready-to-send follow-up email from this meeting"
             >
-              ✉ Write follow up email
+              <MailIcon size={12} /> Write follow up email
             </button>
           )}
         </form>

@@ -8,6 +8,7 @@ import type {
   NotesSettingsView
 } from '../../shared/notes-api'
 import FolderPicker from './FolderPicker'
+import { CheckSquareIcon, DocIcon, FolderIcon, PencilIcon, TrashIcon } from './icons'
 import { markdownToHtml } from './lib/markdown'
 import logoUrl from './assets/doodlenote-logo.png'
 
@@ -606,8 +607,16 @@ export default function HomeView({
               onOpenSettings={onOpenSettings}
             />
           )}
-          {filter.kind === 'folder' && <h2 className="home-heading">📁 {folderName}</h2>}
-          {inTrash && <h2 className="home-heading">🗑 Trash</h2>}
+          {filter.kind === 'folder' && (
+            <h2 className="home-heading">
+              <FolderIcon size={17} /> {folderName}
+            </h2>
+          )}
+          {inTrash && (
+            <h2 className="home-heading">
+              <TrashIcon size={17} /> Trash
+            </h2>
+          )}
 
           <div className={filter.kind === 'all' ? 'meetings-list' : 'meetings-list flush'}>
             {noneInView && filter.kind === 'all' && (
@@ -646,7 +655,9 @@ export default function HomeView({
                         }
                       }}
                     >
-                      <span className="row-icon">{m.kind === 'note' ? '✎' : '☰'}</span>
+                      <span className="row-icon">
+                        {m.kind === 'note' ? <PencilIcon size={14} /> : <DocIcon size={14} />}
+                      </span>
                       <span className="row-main">
                         <span className="row-title">
                           {m.title.trim() || (m.kind === 'note' ? 'New note' : 'New meeting')}
@@ -863,7 +874,7 @@ export default function HomeView({
               onClick={() => void submitAsk(RECENT_TODOS_QUESTION)}
               title="List outstanding action items from your recent meetings"
             >
-              ☑ List recent todos
+              <CheckSquareIcon size={13} /> List recent todos
             </button>
           )}
         </form>

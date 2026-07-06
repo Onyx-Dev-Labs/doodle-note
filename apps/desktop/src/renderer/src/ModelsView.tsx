@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
+import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon } from './icons'
 import type {
   CloudProvider,
   EngineChoice,
@@ -132,11 +133,11 @@ function Toggle({
 
 type SettingsSection = 'general' | 'calendar' | 'sync' | 'model'
 
-const SETTINGS_NAV: Array<{ key: SettingsSection; icon: string; label: string }> = [
-  { key: 'general', icon: '⚙️', label: 'General' },
-  { key: 'calendar', icon: '📅', label: 'Calendar' },
-  { key: 'sync', icon: '☁️', label: 'Cloud sync' },
-  { key: 'model', icon: '✨', label: 'Notes model' }
+const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label: string }> = [
+  { key: 'general', icon: <GearIcon size={15} />, label: 'General' },
+  { key: 'calendar', icon: <CalendarIcon size={15} />, label: 'Calendar' },
+  { key: 'sync', icon: <CloudIcon size={15} />, label: 'Cloud sync' },
+  { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' }
 ]
 
 export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
