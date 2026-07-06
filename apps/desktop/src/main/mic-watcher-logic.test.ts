@@ -7,6 +7,7 @@ import {
   markPrompted,
   MEETING_END_DEBOUNCE_MS,
   meetingAppLabel,
+  meetingRingLabel,
   MIC_COOLDOWN_MS,
   MIC_DEBOUNCE_MS,
   onCaptureMicEvent,
@@ -116,5 +117,15 @@ describe('meeting-end watch', () => {
     s = onCaptureMicEvent(s, false, T0 + 10_000)
     s = markEnded(s)
     assert.equal(shouldAutoStop(s, T0 + 10 * 60_000), false)
+  })
+})
+
+describe('meetingRingLabel', () => {
+  it('rings only for native meeting apps, never browsers', () => {
+    assert.equal(meetingRingLabel(['us.zoom.xos']), 'Zoom')
+    assert.equal(meetingRingLabel(['com.apple.FaceTime']), 'FaceTime')
+    assert.equal(meetingRingLabel(['com.google.Chrome']), null) // YouTube ≠ meeting
+    assert.equal(meetingRingLabel(['com.spotify.client']), null)
+    assert.equal(meetingRingLabel([]), null)
   })
 })

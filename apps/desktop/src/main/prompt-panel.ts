@@ -92,10 +92,10 @@ function escapeHtml(s: string): string {
 
 function panelDataUrl(prompt: CalendarStartMeetingEvent): string {
   const heading = prompt.adHoc
-    ? 'Looks like you’re in a meeting'
+    ? 'Looks like you’re on a call'
     : `${escapeHtml(prompt.subject)} is starting`
   const sub = prompt.adHoc
-    ? 'Your microphone is live — want notes?'
+    ? 'Want DoodleNote to record and take notes?'
     : 'Want DoodleNote to take notes?'
   // Follows nativeTheme, which the renderer keeps in sync with the in-app pref.
   const dark = nativeTheme.shouldUseDarkColors

@@ -45,6 +45,17 @@ export function meetingAppLabel(bundles: readonly string[]): string | null {
   return null
 }
 
+/**
+ * Ring detection works on audio OUTPUT — an incoming call rings long before
+ * the mic engages. Browsers are excluded here (any tab playing audio would
+ * read as a meeting); only native meeting apps count, and the debounce
+ * filters their short notification dings.
+ */
+export function meetingRingLabel(bundles: readonly string[]): string | null {
+  const label = meetingAppLabel(bundles)
+  return label === 'browser' ? null : label
+}
+
 export interface MicPromptState {
   /** Epoch ms when the mic went busy; null while idle. */
   busySinceMs: number | null
