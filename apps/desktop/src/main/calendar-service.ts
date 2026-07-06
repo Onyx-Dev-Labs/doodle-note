@@ -47,6 +47,7 @@ import {
   upcomingTrayEvents
 } from './calendar-events'
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
+import type { PromptPanel } from './prompt-panel'
 
 /** Delegated Graph permissions; offline_access keeps the refresh token. */
 const SCOPES = ['User.Read', 'Calendars.Read', 'offline_access']
@@ -177,7 +178,9 @@ export class CalendarService {
     userDataDir: string,
     private readonly broadcast: CalendarBroadcast,
     /** Bring the app forward (or recreate the window) on notification click. */
-    private readonly focusWindow: () => void
+    private readonly focusWindow: () => void,
+    /** Floating always-on-top card for when the main window can't be seen. */
+    private readonly promptPanel?: PromptPanel
   ) {
     this.settingsPath = join(userDataDir, 'calendar-settings.json')
     this.tokenCachePath = join(userDataDir, 'calendar-token-cache')
@@ -714,47 +717,68 @@ export class CalendarService {
     for (const watchable of due) {
       this.notified[watchable.id] = new Date(nowMs).toISOString()
       const event = shown.find((e) => e.id === watchable.id)
-      const payload: CalendarStartMeetingEvent = {
+      this.deliverPrompt({
         action: 'prompt',
         eventId: watchable.id,
         subject: (event?.subject ?? '').trim() || 'Untitled meeting',
         startIso: watchable.startIso
-      }
-      // The banner broadcast is the guaranteed path; the OS notification and
-      // dock bounce are best-effort attention-getters on top.
-      this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
-      this.showNotification(payload)
-      try {
-        app.dock?.bounce('informational')
-      } catch {
-        // Not on macOS, or no dock — the banner already covers it.
-      }
+      })
     }
     this.saveNotified()
+  }
+
+  /**
+   * Fan a "meeting is starting" prompt out to every attention channel: the
+   * in-app banner (guaranteed when the window is visible), the OS
+   * notification and dock bounce (best-effort), and — when the main window
+   * is closed or buried — the floating prompt panel. Also the entry point
+   * for ad-hoc mic-detected prompts (MicWatcher).
+   */
+  deliverPrompt(payload: CalendarStartMeetingEvent): void {
+    this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
+    this.showNotification(payload)
+    try {
+      app.dock?.bounce('informational')
+    } catch {
+      // Not on macOS, or no dock — the banner already covers it.
+    }
+    const window = BrowserWindow.getAllWindows()[0]
+    const bannerVisible = window !== undefined && window.isVisible() && window.isFocused()
+    if (!bannerVisible) {
+      this.promptPanel?.show(payload, (action) => {
+        if (action === 'start') this.actOnPromptStart(payload)
+      })
+    }
+  }
+
+  /** One click anywhere = meeting created + recording (renderer handles it). */
+  private actOnPromptStart(prompt: CalendarStartMeetingEvent): void {
+    const payload = { ...prompt, action: 'start' as const }
+    const hadWindow = BrowserWindow.getAllWindows().length > 0
+    this.focusWindow()
+    if (hadWindow) {
+      this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
+    } else {
+      // focusWindow just created the window — wait for the renderer to
+      // load (plus a beat for React to attach listeners) before sending.
+      const window = BrowserWindow.getAllWindows()[0]
+      window?.webContents.once('did-finish-load', () => {
+        setTimeout(() => this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload), 400)
+      })
+    }
   }
 
   private showNotification(prompt: CalendarStartMeetingEvent): void {
     try {
       if (!Notification.isSupported()) return
       const notification = new Notification({
-        title: `${prompt.subject} is starting`,
+        title: prompt.adHoc
+          ? 'Looks like you’re in a meeting'
+          : `${prompt.subject} is starting`,
         body: 'Click to start taking notes'
       })
       notification.on('click', () => {
-        const payload = { ...prompt, action: 'start' as const }
-        const hadWindow = BrowserWindow.getAllWindows().length > 0
-        this.focusWindow()
-        if (hadWindow) {
-          // One click = meeting created + recording, handled by the renderer.
-          this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
-        } else {
-          // focusWindow just created the window — wait for the renderer to
-          // load (plus a beat for React to attach listeners) before sending.
-          const window = BrowserWindow.getAllWindows()[0]
-          window?.webContents.once('did-finish-load', () => {
-            setTimeout(() => this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload), 400)
-          })
-        }
+        this.actOnPromptStart(prompt)
       })
       notification.show()
     } catch (err) {

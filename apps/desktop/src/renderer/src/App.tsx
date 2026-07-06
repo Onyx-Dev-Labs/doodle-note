@@ -531,10 +531,16 @@ function App(): React.JSX.Element {
       {banner !== null && (
         <div className="meeting-banner no-drag" role="status">
           <span className="mb-emoji" aria-hidden="true">
-            📅
+            {banner.adHoc ? '🎙' : '📅'}
           </span>
           <span className="mb-text">
-            <strong>{banner.subject}</strong> is starting
+            {banner.adHoc ? (
+              <>Looks like you&rsquo;re in a meeting</>
+            ) : (
+              <>
+                <strong>{banner.subject}</strong> is starting
+              </>
+            )}
           </span>
           <button
             type="button"

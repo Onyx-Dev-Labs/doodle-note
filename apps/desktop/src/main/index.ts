@@ -9,8 +9,16 @@ import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
 import { MediaService } from './media-service'
 import { MeetingsService } from './meetings-service'
+import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
+import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
+import {
+  DETECT_GET_STATE_CHANNEL,
+  DETECT_SET_PREFS_CHANNEL,
+  type DetectPrefsUpdate,
+  type DetectState
+} from '../shared/detect-api'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_EVENT_CHANNEL,
@@ -143,6 +151,18 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  // Ad-hoc meeting detection: engine micmon watches for other apps holding
+  // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
+  const micWatcher = new MicWatcher(resolveEngineBinary(), app.getPath('userData'), () => {
+    calendarService?.deliverPrompt({
+      action: 'prompt',
+      eventId: '',
+      subject: 'Meeting',
+      startIso: new Date().toISOString(),
+      adHoc: true
+    })
+  })
+
   const session = new TranscriptSession(
     broadcastEngineEvent,
     join(app.getPath('userData'), 'sessions')
@@ -177,11 +197,15 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on(ENGINE_START_CHANNEL, (_event, request: EngineStartRequest) => {
+    // Our own capture holds the mic — the ad-hoc meeting detector must not
+    // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
+    micWatcher.setSuppressed(true)
     engine.start(request.command, request.filePath, request.opts)
   })
 
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
     engine.stop()
+    micWatcher.setSuppressed(false)
   })
 
   // Meetings store first: NotesService reads it to gather cross-meeting
@@ -199,8 +223,38 @@ app.whenReady().then(() => {
   foldersService.registerIpc()
 
   // Microsoft 365 calendar: auth + Graph polling + the meeting-start watcher.
-  calendarService = new CalendarService(app.getPath('userData'), broadcast, focusMainWindow)
+  // The floating panel catches prompts when the main window can't be seen.
+  calendarService = new CalendarService(
+    app.getPath('userData'),
+    broadcast,
+    focusMainWindow,
+    new PromptPanel()
+  )
   calendarService.registerIpc()
+
+  // Meeting-detection settings: login item (OS-owned) + the mic watcher.
+  ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => {
+    return {
+      loginItem: app.getLoginItemSettings().openAtLogin,
+      micDetect: micWatcher.enabled,
+      micMonitorAlive: micWatcher.monitorAlive
+    }
+  })
+  ipcMain.handle(DETECT_SET_PREFS_CHANNEL, (_event, update: DetectPrefsUpdate): DetectState => {
+    if (typeof update?.loginItem === 'boolean') {
+      app.setLoginItemSettings({ openAtLogin: update.loginItem })
+    }
+    if (typeof update?.micDetect === 'boolean') {
+      micWatcher.setEnabled(update.micDetect)
+    }
+    return {
+      loginItem: app.getLoginItemSettings().openAtLogin,
+      micDetect: micWatcher.enabled,
+      micMonitorAlive: micWatcher.monitorAlive
+    }
+  })
+  micWatcher.start()
+  app.on('quit', () => micWatcher.stop())
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
   const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)

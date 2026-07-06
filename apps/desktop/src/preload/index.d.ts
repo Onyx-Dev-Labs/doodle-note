@@ -1,4 +1,5 @@
 import type { CalendarApi } from '../shared/calendar-api'
+import type { DetectApi } from '../shared/detect-api'
 import type { EngineApi } from '../shared/engine-events'
 import type { FoldersApi } from '../shared/folders-api'
 import type { MediaApi } from '../shared/media-api'
@@ -15,6 +16,7 @@ declare global {
     calendar: CalendarApi
     sync: SyncApi
     media: MediaApi
+    detect: DetectApi
   }
 }
 

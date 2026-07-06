@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
+import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
 import type {
   CloudProvider,
@@ -145,6 +146,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [linkPending, setLinkPending] = useState(false)
 
+  /* ---- meeting detection ---- */
+  const [detect, setDetect] = useState<DetectState | null>(null)
+
   /* ---- calendar (Microsoft 365) ---- */
   const [calState, setCalState] = useState<CalendarState | null>(null)
   const [clientId, setClientId] = useState('')
@@ -187,6 +191,15 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   }, [active])
 
   useEffect(() => window.sync.onStatus(setSyncStatus), [])
+
+  useEffect(() => {
+    if (active) {
+      void window.detect
+        .getState()
+        .then(setDetect)
+        .catch(() => setDetect(null))
+    }
+  }, [active])
 
   const connectSync = async (): Promise<void> => {
     if (linkPending) return
@@ -581,6 +594,51 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                   )
                 })
               )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="keys-section calendar-section">
+        <h3>Meeting detection</h3>
+        <p className="models-sub">
+          DoodleNote already nudges you when a calendar meeting starts. These make sure it never
+          misses one.
+        </p>
+        {detect === null ? (
+          <span className="calendar-note">loading detection settings…</span>
+        ) : (
+          <div className="cal-subcard">
+            <div className="cal-row">
+              <span className="cal-row-main">
+                <span className="cal-row-label">Start DoodleNote at login</span>
+                <span className="cal-row-sub">
+                  Keeps meeting prompts working without remembering to open the app
+                </span>
+              </span>
+              <Toggle
+                checked={detect.loginItem}
+                label="Start DoodleNote at login"
+                onChange={() => {
+                  void window.detect.setPrefs({ loginItem: !detect.loginItem }).then(setDetect)
+                }}
+              />
+            </div>
+            <div className="cal-row">
+              <span className="cal-row-main">
+                <span className="cal-row-label">Detect meetings from mic activity</span>
+                <span className="cal-row-sub">
+                  Prompts to take notes when Zoom, Teams, or Meet holds your microphone open —
+                  even for meetings that aren&rsquo;t on your calendar
+                </span>
+              </span>
+              <Toggle
+                checked={detect.micDetect}
+                label="Detect meetings from mic activity"
+                onChange={() => {
+                  void window.detect.setPrefs({ micDetect: !detect.micDetect }).then(setDetect)
+                }}
+              />
             </div>
           </div>
         )}
