@@ -20,6 +20,7 @@
     "@azure/msal-node": "^5.3.1",
     "@electron-toolkit/utils": "^4.0.0",
     "@repo/ai": "workspace:*",
+    "@tiptap/extension-image": "^3.27.2",
     "node-llama-cpp": "^3.19.0"
   },
   "devDependencies": {

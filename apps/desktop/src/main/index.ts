@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol } from 'electron'
 import { spawn } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
@@ -7,6 +7,7 @@ import icon from '../../resources/icon.png?asset'
 import { CalendarService } from './calendar-service'
 import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
+import { MediaService } from './media-service'
 import { MeetingsService } from './meetings-service'
 import { NotesService } from './notes-service'
 import { SyncService } from './sync-service'
@@ -54,6 +55,12 @@ function migrateDevUserData(): void {
     console.error('[migrate] failed (continuing with fresh data):', err)
   }
 }
+
+// Must run before app ready: lets <img src="doodle-media://…"> load without
+// mixed-content blocking (the dev renderer is served over http).
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'doodle-media', privileges: { secure: true, supportFetchAPI: true } }
+])
 
 const engine = new EngineProcess(resolveEngineBinary())
 let notesService: NotesService | null = null
@@ -199,6 +206,11 @@ app.whenReady().then(() => {
   const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)
   syncService.registerIpc()
   meetingsService.onDidWrite = (change) => syncService.onMeetingsChanged(change.deletedId)
+
+  // Image attachments for the notes editor (doodle-media:// protocol).
+  const mediaService = new MediaService(join(app.getPath('userData'), 'attachments'))
+  mediaService.registerIpc()
+  mediaService.registerProtocol()
 
   // A fresh look at the app deserves fresh events (throttled inside).
   app.on('browser-window-focus', () => calendarService?.onWindowFocus())

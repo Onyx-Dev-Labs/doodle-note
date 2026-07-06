@@ -1161,9 +1161,64 @@ button.fp-row:hover {
   color: var(--accent-deep);
 }
 
+/* slim formatting bar above the doc */
+.fmt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 10px 0 2px;
+  padding: 3px;
+  width: fit-content;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.fmt-btn {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.fmt-btn:hover {
+  background: var(--card-soft);
+  color: var(--ink);
+}
+
+.fmt-btn.on {
+  background: var(--sage-fill);
+  color: var(--accent-deep);
+}
+
+.fmt-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
 /* the TipTap doc IS the page — no box */
 .doc-editor {
   user-select: text;
+}
+
+.doc-editor .tiptap img {
+  display: block;
+  max-width: min(100%, 560px);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.doc-editor .tiptap img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .doc-editor .tiptap {

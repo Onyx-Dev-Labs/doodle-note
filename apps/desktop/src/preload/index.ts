@@ -59,6 +59,12 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  MEDIA_SAVE_CHANNEL,
+  type MediaApi,
+  type MediaSaveRequest,
+  type MediaSaveResult
+} from '../shared/media-api'
+import {
   SYNC_CONNECT_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
@@ -265,6 +271,12 @@ const syncApi: SyncApi = {
   }
 }
 
+const mediaApi: MediaApi = {
+  save(request: MediaSaveRequest): Promise<MediaSaveResult> {
+    return ipcRenderer.invoke(MEDIA_SAVE_CHANNEL, request) as Promise<MediaSaveResult>
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
@@ -273,6 +285,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
     contextBridge.exposeInMainWorld('sync', syncApi)
+    contextBridge.exposeInMainWorld('media', mediaApi)
   } catch (error) {
     console.error(error)
   }
@@ -289,4 +302,6 @@ if (process.contextIsolated) {
   window.calendar = calendarApi
   // @ts-ignore (defined in index.d.ts)
   window.sync = syncApi
+  // @ts-ignore (defined in index.d.ts)
+  window.media = mediaApi
 }
