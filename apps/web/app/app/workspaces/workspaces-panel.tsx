@@ -11,13 +11,6 @@ interface Workspace {
   slug: string;
 }
 
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 export function WorkspacesPanel({
   userEmail,
   activeOrganizationId,
@@ -28,28 +21,7 @@ export function WorkspacesPanel({
   organizations: Workspace[];
 }) {
   const router = useRouter();
-  const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  async function handleCreate(event: React.FormEvent) {
-    event.preventDefault();
-    const name = newName.trim();
-    if (!name) return;
-    setError(null);
-    setPending(true);
-    const result = await authClient.organization.create({
-      name,
-      slug: slugify(name),
-    });
-    setPending(false);
-    if (result.error) {
-      setError(result.error.message ?? "Could not create workspace");
-      return;
-    }
-    setNewName("");
-    router.refresh();
-  }
 
   async function handleSetActive(organizationId: string) {
     setError(null);
@@ -115,27 +87,18 @@ export function WorkspacesPanel({
         </ul>
       )}
 
-      <form onSubmit={handleCreate} className="mt-4 flex items-start gap-2">
-        <div className="flex-1">
-          <input
-            type="text"
-            placeholder="New workspace name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            className="w-full rounded-md border border-sand bg-white px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
-          />
-          {newName.trim() && (
-            <p className="mt-1 text-xs text-stone">slug: {slugify(newName)}</p>
-          )}
+      <div className="mt-4 rounded-xl border border-dashed border-sand bg-card-soft px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-ink">Team workspaces</span>
+          <span className="rounded-full bg-sage-fill px-2 py-0.5 text-xs font-medium text-sage-deep">
+            coming soon
+          </span>
         </div>
-        <button
-          type="submit"
-          disabled={pending || !newName.trim()}
-          className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-cream transition-opacity hover:opacity-90 disabled:opacity-50"
-        >
-          {pending ? "Creating…" : "Create"}
-        </button>
-      </form>
+        <p className="mt-1 text-sm text-stone">
+          Invite your team to a shared meeting library — everyone&rsquo;s
+          synced meetings, searchable in one place.
+        </p>
+      </div>
     </main>
   );
 }
