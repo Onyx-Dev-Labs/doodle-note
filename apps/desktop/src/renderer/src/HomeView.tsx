@@ -39,10 +39,10 @@ function timeLabel(iso: string): string {
 /** Events starting within this window (or in progress) get a Take notes button. */
 const TAKE_NOTES_LEAD_MS = 10 * 60_000
 
-/** The chevrons page the day window a week at a time… */
-const DAYS_PER_PAGE = 7
-/** …across the service's 14-day fetch: page 0 = days 0–6, page 1 = days 7–13. */
-const LAST_PAGE = 1
+/** The card shows two days at a time (today + tomorrow); chevrons page by two… */
+const DAYS_PER_PAGE = 2
+/** …across the service's 14-day fetch: page 0 = days 0–1 … page 6 = days 12–13. */
+const LAST_PAGE = 6
 
 const DAY_MS = 86_400_000
 
@@ -343,6 +343,7 @@ export default function HomeView({
   onStartCalendarMeeting,
   onOpenMeeting,
   onNewMeeting,
+  onNewNote,
   onChanged,
   onOpenSettings
 }: {
@@ -354,6 +355,7 @@ export default function HomeView({
   onStartCalendarMeeting: (event: CalendarEvent) => void
   onOpenMeeting: (id: string) => void
   onNewMeeting: () => void
+  onNewNote: () => void
   onChanged: () => void
   onOpenSettings: () => void
 }): React.JSX.Element {
@@ -580,6 +582,14 @@ export default function HomeView({
             Empty trash
           </button>
         )}
+        <button
+          type="button"
+          className="pill-btn new-note no-drag"
+          title="A blank note — type freely, or hit record to mind-dump and generate notes"
+          onClick={onNewNote}
+        >
+          + New note
+        </button>
         <button type="button" className="pill-btn new-meeting no-drag" onClick={onNewMeeting}>
           + New meeting
         </button>
@@ -636,11 +646,14 @@ export default function HomeView({
                         }
                       }}
                     >
-                      <span className="row-icon">☰</span>
+                      <span className="row-icon">{m.kind === 'note' ? '✎' : '☰'}</span>
                       <span className="row-main">
-                        <span className="row-title">{m.title.trim() || 'New meeting'}</span>
+                        <span className="row-title">
+                          {m.title.trim() || (m.kind === 'note' ? 'New note' : 'New meeting')}
+                        </span>
                         <span className="row-sub">
-                          Me{m.durationMin !== undefined ? ` · ${m.durationMin} min` : ''}
+                          {m.kind === 'note' ? 'Note' : 'Me'}
+                          {m.durationMin !== undefined ? ` · ${m.durationMin} min` : ''}
                         </span>
                       </span>
                       <span className="row-time">{timeLabel(m.createdAt)}</span>

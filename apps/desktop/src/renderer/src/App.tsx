@@ -76,13 +76,18 @@ function App(): React.JSX.Element {
   }, [])
 
   const newMeeting = useCallback(
-    async (prefill?: { title?: string; calendarEventId?: string }): Promise<void> => {
+    async (prefill?: {
+      title?: string
+      calendarEventId?: string
+      kind?: 'note'
+    }): Promise<void> => {
       const id =
         typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
           : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
       await window.meetings.upsert({
         id,
+        ...(prefill?.kind === 'note' ? { kind: 'note' as const } : {}),
         title: prefill?.title ?? '',
         createdAt: new Date().toISOString(),
         rawNotesMarkdown: '',
@@ -91,8 +96,9 @@ function App(): React.JSX.Element {
         ...(prefill?.calendarEventId ? { calendarEventId: prefill.calendarEventId } : {})
       })
       // Fresh meetings start recording immediately; opening an existing
-      // meeting from the list never does.
-      setAutoRecordId(id)
+      // meeting from the list never does. Quick notes never auto-record —
+      // typing is their default, the rec pill is there when wanted.
+      if (prefill?.kind !== 'note') setAutoRecordId(id)
       openMeeting(id)
     },
     [openMeeting]
@@ -492,6 +498,7 @@ function App(): React.JSX.Element {
               onStartCalendarMeeting={startFromCalendarEvent}
               onOpenMeeting={openMeeting}
               onNewMeeting={() => void newMeeting()}
+              onNewNote={() => void newMeeting({ kind: 'note' })}
               onChanged={refreshHome}
               onOpenSettings={() => setView('settings')}
             />

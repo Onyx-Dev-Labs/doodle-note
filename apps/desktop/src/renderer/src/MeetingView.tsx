@@ -698,7 +698,7 @@ export default function MeetingView({
             className="doc-title"
             type="text"
             spellCheck={false}
-            placeholder="New meeting"
+            placeholder={meeting?.kind === 'note' ? 'New note' : 'New meeting'}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value)
@@ -709,7 +709,7 @@ export default function MeetingView({
 
           <div className="chips-row">
             <span className="chip">📅 {dateChip}</span>
-            <span className="chip">👥 Me</span>
+            <span className="chip">{meeting?.kind === 'note' ? '✎ Note' : '👥 Me'}</span>
             <span className="chip-folder-anchor">
               <button
                 type="button"
