@@ -7,7 +7,11 @@ import { Placeholder } from '@tiptap/extensions'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../../shared/engine-events'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
-import type { NotesModelsResponse, NotesSettingsView } from '../../shared/notes-api'
+import type {
+  NotesModelsResponse,
+  NotesSettingsView,
+  NotesTemplateInfo
+} from '../../shared/notes-api'
 import FolderPicker from './FolderPicker'
 import FormatToolbar from './FormatToolbar'
 import {
@@ -320,6 +324,8 @@ export default function MeetingView({
       setSavedSegments(record.segments.filter((s) => !s.echo))
       setSavedEcho(record.echoSuppressed)
       startedAtRef.current = record.startedAt ?? null
+      setTemplateId(record.templateId ?? 'general')
+      templateIdRef.current = record.templateId ?? 'general'
       setFolderId(record.folderId ?? null)
       if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
       if (Array.isArray(record.chat) && record.chat.length > 0) {
@@ -435,17 +441,54 @@ export default function MeetingView({
   const phase = state.phase
   const capturing = ACTIVE_PHASES.includes(phase)
 
+  /* ---- note templates ---- */
+
+  const [templates, setTemplates] = useState<NotesTemplateInfo[]>([])
+  const [templateId, setTemplateId] = useState('general')
+  const templateIdRef = useRef('general')
+  const [tplMenuOpen, setTplMenuOpen] = useState(false)
+
+  useEffect(() => {
+    void window.notes
+      .templates()
+      .then(setTemplates)
+      .catch(() => setTemplates([]))
+  }, [])
+
+  // Close the template menu on outside click or Escape.
+  useEffect(() => {
+    if (!tplMenuOpen) return
+    const onDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('.tpl-menu') || target?.closest('.tpl-anchor')) return
+      setTplMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setTplMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [tplMenuOpen])
+
   /* ---- auto-stop when the meeting app hangs up (Granola-style) ---- */
 
   const [autoStopped, setAutoStopped] = useState(false)
   const capturingRef = useRef(false)
   capturingRef.current = capturing
 
+  /** Meeting ended → after the capture settles, generate notes on their own. */
+  const pendingAutoGenRef = useRef(false)
+
   useEffect(() => {
     return window.detect.onMeetingEnded(() => {
       if (!capturingRef.current) return
       window.engine.stop()
       setAutoStopped(true)
+      pendingAutoGenRef.current = true
     })
   }, [])
 
@@ -575,7 +618,8 @@ export default function MeetingView({
     const result = await window.notes.enhance({
       title: titleValueRef.current.trim() || 'New meeting',
       rawNotesMarkdown: roughMarkdownRef.current,
-      segments: allSegments
+      segments: allSegments,
+      templateId: templateIdRef.current
     })
     if (result.error !== undefined || result.markdown === undefined) {
       setEnhanceStatus('error')
@@ -592,6 +636,44 @@ export default function MeetingView({
     docViewRef.current = 'enhanced'
     setEditorMarkdown(result.markdown, false)
   }
+
+  /** Pick a template: remember it on the meeting and (re)generate with it. */
+  const chooseTemplate = (id: string): void => {
+    setTemplateId(id)
+    templateIdRef.current = id
+    setTplMenuOpen(false)
+    persist({ templateId: id })
+    void runEnhance()
+  }
+
+  const templateMenu = (
+    <div className="tpl-menu" role="menu" aria-label="Note templates">
+      {templates.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="menuitemradio"
+          aria-checked={t.id === templateId}
+          className={t.id === templateId ? 'tpl-item on' : 'tpl-item'}
+          onClick={() => chooseTemplate(t.id)}
+        >
+          <span className="tpl-item-label">{t.label}</span>
+          <span className="tpl-item-desc">{t.description}</span>
+        </button>
+      ))}
+    </div>
+  )
+
+  // Granola-style: notes appear on their own after the meeting ends. Waits
+  // for the stop to settle (capturing false, segments folded) and the model
+  // to be ready; skips silently when there is nothing to write from.
+  useEffect(() => {
+    if (!pendingAutoGenRef.current || capturing) return
+    if (enhanceStatus === 'running') return
+    if (allSegments.length === 0 || !modelReady) return
+    pendingAutoGenRef.current = false
+    void runEnhance()
+  })
 
   const showNotesDoc = (): void => {
     if (docView === 'notes') return
@@ -853,6 +935,21 @@ export default function MeetingView({
                 {enhanceStatus === 'running' ? <span className="spinner" aria-hidden="true" /> : '↻'}
               </button>
             )}
+            {enhancedMarkdown !== null && !capturing && (
+              <span className="chip-template-anchor tpl-anchor">
+                <button
+                  type="button"
+                  className="chip"
+                  disabled={!canEnhance}
+                  title="Regenerate with a different template"
+                  aria-expanded={tplMenuOpen}
+                  onClick={() => setTplMenuOpen((o) => !o)}
+                >
+                  {templates.find((t) => t.id === templateId)?.label ?? 'Template'} ▾
+                </button>
+                {tplMenuOpen && templateMenu}
+              </span>
+            )}
             {enhancedMarkdown !== null && enhanceStatus === 'running' && (
               <span className="chip-regen-status">
                 {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
@@ -1040,24 +1137,38 @@ export default function MeetingView({
       )}
 
       {!capturing && allSegments.length > 0 && enhancedMarkdown === null && (
-        <button
-          type="button"
-          className="generate-cta"
-          disabled={!canEnhance}
-          title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
-          onClick={() => void runEnhance()}
-        >
-          {enhanceStatus === 'running' ? (
-            <>
-              <span className="spinner" aria-hidden="true" />
-              {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
-            </>
-          ) : (
-            <>
-              <SparkleIcon size={14} /> Generate notes
-            </>
-          )}
-        </button>
+        <div className="generate-cta-wrap tpl-anchor">
+          <button
+            type="button"
+            className="generate-cta"
+            disabled={!canEnhance}
+            title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
+            onClick={() => void runEnhance()}
+          >
+            {enhanceStatus === 'running' ? (
+              <>
+                <span className="spinner" aria-hidden="true" />
+                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+              </>
+            ) : (
+              <>
+                <SparkleIcon size={14} /> Generate notes
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            className="generate-cta generate-cta-arrow"
+            disabled={!canEnhance}
+            title="Choose a note template"
+            aria-label="Choose a note template"
+            aria-expanded={tplMenuOpen}
+            onClick={() => setTplMenuOpen((o) => !o)}
+          >
+            ▾
+          </button>
+          {tplMenuOpen && templateMenu}
+        </div>
       )}
 
       <div className="bottom-bar">

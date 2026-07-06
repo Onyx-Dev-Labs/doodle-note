@@ -23,6 +23,7 @@ import {
   NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
   NOTES_SET_SETTINGS_CHANNEL,
+  NOTES_TEMPLATES_CHANNEL,
   type ActivateModelResult,
   type AskRequest,
   type AskResult,
@@ -38,7 +39,8 @@ import {
   type NotesApi,
   type NotesModelsResponse,
   type NotesSettingsUpdate,
-  type NotesSettingsView
+  type NotesSettingsView,
+  type NotesTemplateInfo
 } from '../shared/notes-api'
 import {
   MEETINGS_DELETE_CHANNEL,
@@ -82,8 +84,10 @@ import {
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
   SYNC_NOW_CHANNEL,
+  SYNC_SHARE_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
+  type ShareResult,
   type SyncApi,
   type SyncStatus
 } from '../shared/sync-api'
@@ -135,6 +139,10 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const notesApi: NotesApi = {
+  templates(): Promise<NotesTemplateInfo[]> {
+    return ipcRenderer.invoke(NOTES_TEMPLATES_CHANNEL) as Promise<NotesTemplateInfo[]>
+  },
+
   models(): Promise<NotesModelsResponse> {
     return ipcRenderer.invoke(NOTES_MODELS_CHANNEL) as Promise<NotesModelsResponse>
   },
@@ -259,6 +267,10 @@ const calendarApi: CalendarApi = {
 }
 
 const syncApi: SyncApi = {
+  share(meetingId: string): Promise<ShareResult> {
+    return ipcRenderer.invoke(SYNC_SHARE_CHANNEL, meetingId) as Promise<ShareResult>
+  },
+
   getStatus(): Promise<SyncStatus> {
     return ipcRenderer.invoke(SYNC_GET_STATUS_CHANNEL) as Promise<SyncStatus>
   },

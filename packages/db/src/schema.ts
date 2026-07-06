@@ -24,6 +24,8 @@ export const meetings = pgTable(
       .notNull()
       .default("complete"),
     calendarEventId: text("calendar_event_id"),
+    /** Public share-link token; null = not shared. */
+    shareToken: text("share_token").unique(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

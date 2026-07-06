@@ -3,7 +3,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { ASK_SYSTEM_PROMPT, buildAskUserMessage } from './ask-prompt'
 import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
-import { buildMergeUserMessage, MERGE_SYSTEM_PROMPT } from './prompt'
+import { buildMergeSystemPrompt, buildMergeUserMessage } from './prompt'
 import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine } from './types'
 
 /**
@@ -29,7 +29,7 @@ export class CloudNotesEngine implements NotesEngine {
   }
 
   async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
-    return this.runPrompt(MERGE_SYSTEM_PROMPT, buildMergeUserMessage(input), onToken)
+    return this.runPrompt(buildMergeSystemPrompt(input.templateId), buildMergeUserMessage(input), onToken)
   }
 
   async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {

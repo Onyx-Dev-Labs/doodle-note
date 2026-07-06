@@ -12,6 +12,8 @@ export interface MergeInput {
   rawNotesMarkdown: string
   segments: MergeSegment[]
   durationMs?: number
+  /** Note template shaping the output (see templates.ts); default "general". */
+  templateId?: string
 }
 
 export interface MergedNotes {

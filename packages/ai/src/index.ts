@@ -17,3 +17,4 @@ export type {
   MergeSegment,
   NotesEngine
 } from './types'
+export { NOTE_TEMPLATES, templateById, type NoteTemplate } from './templates'
