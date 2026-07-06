@@ -11,6 +11,16 @@ import HomeView, { type HomeFilter } from './HomeView'
 import MeetingView from './MeetingView'
 import ModelsView from './ModelsView'
 import mascotUrl from './assets/mascot-square.png'
+import {
+  CalendarIcon,
+  FolderIcon,
+  GearIcon,
+  HomeIcon,
+  LockIcon,
+  MicIcon,
+  PencilIcon,
+  TrashIcon
+} from './icons'
 
 type ViewId = 'home' | 'editor' | 'settings' | 'dev'
 
@@ -76,13 +86,18 @@ function App(): React.JSX.Element {
   }, [])
 
   const newMeeting = useCallback(
-    async (prefill?: { title?: string; calendarEventId?: string }): Promise<void> => {
+    async (prefill?: {
+      title?: string
+      calendarEventId?: string
+      kind?: 'note'
+    }): Promise<void> => {
       const id =
         typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
           : `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
       await window.meetings.upsert({
         id,
+        ...(prefill?.kind === 'note' ? { kind: 'note' as const } : {}),
         title: prefill?.title ?? '',
         createdAt: new Date().toISOString(),
         rawNotesMarkdown: '',
@@ -91,8 +106,9 @@ function App(): React.JSX.Element {
         ...(prefill?.calendarEventId ? { calendarEventId: prefill.calendarEventId } : {})
       })
       // Fresh meetings start recording immediately; opening an existing
-      // meeting from the list never does.
-      setAutoRecordId(id)
+      // meeting from the list never does. Quick notes never auto-record —
+      // typing is their default, the rec pill is there when wanted.
+      if (prefill?.kind !== 'note') setAutoRecordId(id)
       openMeeting(id)
     },
     [openMeeting]
@@ -309,7 +325,10 @@ function App(): React.JSX.Element {
               className={onHome && filter.kind === 'all' ? 'nav-item on' : 'nav-item'}
               onClick={() => selectFilter({ kind: 'all' })}
             >
-              <span className="nav-icon">⌂</span> Home
+              <span className="nav-icon">
+                <HomeIcon size={14} />
+              </span>{' '}
+              Home
             </button>
           </nav>
 
@@ -330,7 +349,9 @@ function App(): React.JSX.Element {
                 }
               }}
             >
-              <span className="nav-icon">✎</span>
+              <span className="nav-icon">
+                <PencilIcon size={13} />
+              </span>
               <span className="nav-label">My notes</span>
               <button
                 type="button"
@@ -378,7 +399,9 @@ function App(): React.JSX.Element {
                     }
                   }}
                 >
-                  <span className="nav-icon">📁</span>
+                  <span className="nav-icon">
+                    <FolderIcon size={13} />
+                  </span>
                   <span className="nav-label">{f.name}</span>
                   <span className="nav-count">{folderCounts.get(f.id) ?? 0}</span>
                   <button
@@ -411,14 +434,14 @@ function App(): React.JSX.Element {
                           setRenamingFolder({ id: f.id, name: f.name })
                         }}
                       >
-                        ✎ Rename
+                        <PencilIcon size={12} /> Rename
                       </button>
                       <button
                         type="button"
                         className="danger"
                         onClick={() => void deleteFolder(f.id)}
                       >
-                        🗑 Delete folder
+                        <TrashIcon size={12} /> Delete folder
                       </button>
                     </div>
                   )}
@@ -458,7 +481,9 @@ function App(): React.JSX.Element {
               className={onHome && filter.kind === 'trash' ? 'nav-item on' : 'nav-item'}
               onClick={() => selectFilter({ kind: 'trash' })}
             >
-              <span className="nav-icon">🗑</span>
+              <span className="nav-icon">
+                <TrashIcon size={13} />
+              </span>
               <span className="nav-label">Trash</span>
               {trashCount > 0 && <span className="nav-count">{trashCount}</span>}
             </button>
@@ -467,13 +492,18 @@ function App(): React.JSX.Element {
           <div className="sidebar-spacer" />
 
           <div className="sidebar-bottom">
-            <div className="privacy-badge">🔒 Local &amp; private</div>
+            <div className="privacy-badge">
+              <LockIcon size={12} /> Local &amp; private
+            </div>
             <button
               type="button"
               className={view === 'settings' ? 'nav-item on' : 'nav-item'}
               onClick={() => setView('settings')}
             >
-              <span className="nav-icon">⚙</span> Settings
+              <span className="nav-icon">
+                <GearIcon size={14} />
+              </span>{' '}
+              Settings
             </button>
             <button type="button" className="dev-link" onClick={() => setView('dev')}>
               Developer
@@ -492,6 +522,7 @@ function App(): React.JSX.Element {
               onStartCalendarMeeting={startFromCalendarEvent}
               onOpenMeeting={openMeeting}
               onNewMeeting={() => void newMeeting()}
+              onNewNote={() => void newMeeting({ kind: 'note' })}
               onChanged={refreshHome}
               onOpenSettings={() => setView('settings')}
             />
@@ -524,10 +555,16 @@ function App(): React.JSX.Element {
       {banner !== null && (
         <div className="meeting-banner no-drag" role="status">
           <span className="mb-emoji" aria-hidden="true">
-            📅
+            {banner.adHoc ? <MicIcon size={15} /> : <CalendarIcon size={15} />}
           </span>
           <span className="mb-text">
-            <strong>{banner.subject}</strong> is starting
+            {banner.adHoc ? (
+              <>Looks like you&rsquo;re in a meeting</>
+            ) : (
+              <>
+                <strong>{banner.subject}</strong> is starting
+              </>
+            )}
           </span>
           <button
             type="button"

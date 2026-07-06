@@ -89,6 +89,12 @@ function blockToMarkdown(node: JSONContent, indent: string): string | null {
     }
     case 'horizontalRule':
       return indent + '---'
+    case 'image': {
+      const src = typeof node.attrs?.['src'] === 'string' ? node.attrs['src'] : ''
+      if (!src) return null
+      const alt = typeof node.attrs?.['alt'] === 'string' ? node.attrs['alt'] : ''
+      return `${indent}![${alt.replace(/[[\]]/g, '')}](${src})`
+    }
     default: {
       const text = inlineChildren(node)
       return text.trim().length > 0 ? indent + text : null
@@ -108,6 +114,12 @@ export function docToMarkdown(doc: JSONContent | null | undefined): string {
 }
 
 /* ---- tiny markdown → HTML for displaying enhanced notes ---- */
+
+/**
+ * Only local attachments render as images — the src whitelist keeps
+ * javascript:/http: URLs (e.g. from a pasted markdown doc) inert.
+ */
+const IMAGE_LINE = /^!\[([^\]]*)\]\((doodle-media:\/\/[a-z0-9.-]+)\)$/
 
 function escapeHtml(s: string): string {
   return s
@@ -171,6 +183,12 @@ export function markdownToHtml(md: string): string {
       continue
     }
 
+    const image = IMAGE_LINE.exec(line.trim())
+    if (image) {
+      closeList()
+      out.push(`<img src="${image[2]}" alt="${escapeHtml(image[1] ?? '')}">`)
+      continue
+    }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line)
     if (heading) {
       closeList()

@@ -49,6 +49,7 @@ export class MeetingsService {
       if (!record) continue
       summaries.push({
         id: record.id,
+        ...(record.kind === 'note' ? { kind: 'note' as const } : {}),
         title: record.title,
         createdAt: record.createdAt,
         ...(record.startedAt ? { startedAt: record.startedAt } : {}),
@@ -128,6 +129,8 @@ export class MeetingsService {
 function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
   return {
     id: raw.id,
+    // Only "note" is stored; anything else normalizes to the meeting default.
+    ...(raw.kind === 'note' ? { kind: 'note' as const } : {}),
     title: typeof raw.title === 'string' ? raw.title : '',
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
     ...(typeof raw.startedAt === 'string' ? { startedAt: raw.startedAt } : {}),

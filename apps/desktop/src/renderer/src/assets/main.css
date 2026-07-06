@@ -62,6 +62,13 @@ textarea {
   font-family: inherit;
 }
 
+/* Shared SVG icons (icons.tsx): sit on the text baseline when inline; flex
+   containers (nav rows, chips with align-items) center them naturally. */
+.ico {
+  vertical-align: -2.5px;
+  flex-shrink: 0;
+}
+
 /* macOS window chrome helpers */
 .drag {
   -webkit-app-region: drag;
@@ -1161,9 +1168,64 @@ button.fp-row:hover {
   color: var(--accent-deep);
 }
 
+/* slim formatting bar above the doc */
+.fmt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 10px 0 2px;
+  padding: 3px;
+  width: fit-content;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.fmt-btn {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.fmt-btn:hover {
+  background: var(--card-soft);
+  color: var(--ink);
+}
+
+.fmt-btn.on {
+  background: var(--sage-fill);
+  color: var(--accent-deep);
+}
+
+.fmt-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
 /* the TipTap doc IS the page — no box */
 .doc-editor {
   user-select: text;
+}
+
+.doc-editor .tiptap img {
+  display: block;
+  max-width: min(100%, 560px);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.doc-editor .tiptap img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .doc-editor .tiptap {
@@ -1879,7 +1941,7 @@ button.fp-row:hover {
 
 .models {
   height: 100%;
-  max-width: 660px;
+  max-width: 780px;
   margin: 0 auto;
   padding: 28px 28px 32px;
   display: flex;
@@ -2068,6 +2130,73 @@ button.fp-row:hover {
   flex-direction: column;
   gap: 10px;
   padding-bottom: 8px;
+}
+
+/* ---- settings shell: nav rail + one visible section ---- */
+
+.settings-shell {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  min-height: 0;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 148px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.settings-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--body);
+  text-align: left;
+}
+
+.settings-nav-btn:hover {
+  background: var(--card-soft);
+  color: var(--ink);
+}
+
+.settings-nav-btn.on {
+  background: var(--sage-fill);
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.settings-nav-icon {
+  width: 18px;
+  text-align: center;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* the visible section starts flush — no orphan divider under the header */
+.settings-content > .keys-section:first-child {
+  border-top: none;
+  padding-top: 0;
 }
 
 .engine-choice {

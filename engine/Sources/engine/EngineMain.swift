@@ -22,6 +22,8 @@ struct EngineMain {
                 try await LiveCommand.run(options)
             case "preflight":
                 await PreflightCommand.run()
+            case "micmon":
+                MicMonitorCommand.run()
             case "info":
                 Commands.info()
             default:

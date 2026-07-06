@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
+import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
+import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon } from './icons'
 import type {
   CloudProvider,
   EngineChoice,
@@ -129,7 +131,17 @@ function Toggle({
   )
 }
 
+type SettingsSection = 'general' | 'calendar' | 'sync' | 'model'
+
+const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label: string }> = [
+  { key: 'general', icon: <GearIcon size={15} />, label: 'General' },
+  { key: 'calendar', icon: <CalendarIcon size={15} />, label: 'Calendar' },
+  { key: 'sync', icon: <CloudIcon size={15} />, label: 'Cloud sync' },
+  { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' }
+]
+
 export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
+  const [section, setSection] = useState<SettingsSection>('general')
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
   const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
@@ -144,6 +156,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   /* ---- cloud sync ---- */
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [linkPending, setLinkPending] = useState(false)
+
+  /* ---- meeting detection ---- */
+  const [detect, setDetect] = useState<DetectState | null>(null)
 
   /* ---- calendar (Microsoft 365) ---- */
   const [calState, setCalState] = useState<CalendarState | null>(null)
@@ -187,6 +202,15 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   }, [active])
 
   useEffect(() => window.sync.onStatus(setSyncStatus), [])
+
+  useEffect(() => {
+    if (active) {
+      void window.detect
+        .getState()
+        .then(setDetect)
+        .catch(() => setDetect(null))
+    }
+  }, [active])
 
   const connectSync = async (): Promise<void> => {
     if (linkPending) return
@@ -365,18 +389,43 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
       <header className="models-header">
         <img className="settings-logo" src={logoUrl} alt="DoodleNote" />
         <div>
-          <h2>Notes model</h2>
+          <h2>Settings</h2>
           <p className="models-sub">
-            DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
-            {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
-            machine.
+            Local-first by default — nothing leaves this Mac unless you turn it on.
           </p>
         </div>
       </header>
 
-      {error && <div className="models-error">{error}</div>}
+      <div className="settings-shell">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {SETTINGS_NAV.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={section === item.key ? 'settings-nav-btn on' : 'settings-nav-btn'}
+              onClick={() => setSection(item.key)}
+            >
+              <span className="settings-nav-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
 
-      <div className="model-cards">
+        <div className="settings-content">
+          {section === 'model' && (
+            <section className="keys-section">
+              <h3>On-device model</h3>
+              <p className="models-sub">
+                DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
+                {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
+                machine.
+              </p>
+
+              {error && <div className="models-error">{error}</div>}
+
+              <div className="model-cards">
         {data === null && <span className="placeholder">loading models…</span>}
         {data?.models.map((m) => (
           <div
@@ -395,7 +444,10 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         ))}
       </div>
+            </section>
+          )}
 
+          {section === 'calendar' && (
       <section className="keys-section calendar-section">
         <h3>Calendar</h3>
         <p className="models-sub">
@@ -585,7 +637,57 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         )}
       </section>
+          )}
 
+          {section === 'general' && (
+      <section className="keys-section calendar-section">
+        <h3>Meeting detection</h3>
+        <p className="models-sub">
+          DoodleNote already nudges you when a calendar meeting starts. These make sure it never
+          misses one.
+        </p>
+        {detect === null ? (
+          <span className="calendar-note">loading detection settings…</span>
+        ) : (
+          <div className="cal-subcard">
+            <div className="cal-row">
+              <span className="cal-row-main">
+                <span className="cal-row-label">Start DoodleNote at login</span>
+                <span className="cal-row-sub">
+                  Keeps meeting prompts working without remembering to open the app
+                </span>
+              </span>
+              <Toggle
+                checked={detect.loginItem}
+                label="Start DoodleNote at login"
+                onChange={() => {
+                  void window.detect.setPrefs({ loginItem: !detect.loginItem }).then(setDetect)
+                }}
+              />
+            </div>
+            <div className="cal-row">
+              <span className="cal-row-main">
+                <span className="cal-row-label">Detect meetings from mic activity</span>
+                <span className="cal-row-sub">
+                  Prompts when a meeting app — Zoom, Teams, Webex, Slack, FaceTime, or a browser
+                  — holds your microphone, even without a calendar event. Dictation tools are
+                  ignored.
+                </span>
+              </span>
+              <Toggle
+                checked={detect.micDetect}
+                label="Detect meetings from mic activity"
+                onChange={() => {
+                  void window.detect.setPrefs({ micDetect: !detect.micDetect }).then(setDetect)
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </section>
+          )}
+
+          {section === 'sync' && (
       <section className="keys-section calendar-section">
         <h3>Sync with cloud</h3>
         <p className="models-sub">
@@ -676,7 +778,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         )}
       </section>
+          )}
 
+          {section === 'model' && (
       <section className="keys-section">
         <h3>AI keys (optional)</h3>
         <p className="models-sub">
@@ -732,6 +836,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           {(keySaved || settings?.cloud?.hasKey) && <span className="key-saved">key saved ✓</span>}
         </div>
       </section>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

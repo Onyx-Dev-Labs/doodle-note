@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../../shared/engine-events'
@@ -8,6 +9,16 @@ import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type { NotesModelsResponse, NotesSettingsView } from '../../shared/notes-api'
 import FolderPicker from './FolderPicker'
+import FormatToolbar from './FormatToolbar'
+import {
+  CalendarIcon,
+  FolderIcon,
+  HomeIcon,
+  MailIcon,
+  PencilIcon,
+  SparkleIcon,
+  UsersIcon
+} from './icons'
 import { docToMarkdown, markdownToHtml } from './lib/markdown'
 
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
@@ -134,6 +145,11 @@ function BarsIcon({ animated }: { animated: boolean }): React.JSX.Element {
   )
 }
 
+/** The image files in a paste/drop/pick payload (other file types ignored). */
+function imageFilesFrom(list: FileList | null | undefined): File[] {
+  return Array.from(list ?? []).filter((f) => f.type.startsWith('image/'))
+}
+
 /** The Granola-shaped note editor: title, chips, page-wide TipTap doc,
  *  floating record/enhance bar and the transcript flyout. */
 export default function MeetingView({
@@ -227,19 +243,58 @@ export default function MeetingView({
     persist({ title: titleValueRef.current, rawNotesMarkdown: roughMarkdownRef.current })
   }, [persist])
 
+  /** Pasted/dropped image files route through here (set once editor exists). */
+  const insertImagesRef = useRef<(files: File[]) => void>(() => {})
+
   const editor = useEditor({
     extensions: [
       StarterKit,
       TaskList,
       TaskItem.configure({ nested: true }),
+      Image,
       Placeholder.configure({ placeholder: 'Write notes…' })
     ],
+    editorProps: {
+      // Pasted and dragged-in images persist to the local attachments store.
+      handlePaste: (_view, event) => {
+        const files = imageFilesFrom(event.clipboardData?.files)
+        if (files.length === 0) return false
+        insertImagesRef.current(files)
+        return true
+      },
+      handleDrop: (_view, event, _slice, moved) => {
+        if (moved) return false
+        const files = imageFilesFrom(event.dataTransfer?.files)
+        if (files.length === 0) return false
+        insertImagesRef.current(files)
+        return true
+      }
+    },
     onUpdate: ({ editor: ed }) => {
       if (applyingRef.current || docViewRef.current !== 'notes') return
       roughMarkdownRef.current = docToMarkdown(ed.getJSON())
       scheduleNotesSave()
     }
   })
+
+  useEffect(() => {
+    insertImagesRef.current = (files: File[]): void => {
+      if (!editor) return
+      void (async () => {
+        for (const file of files) {
+          const bytes = await file.arrayBuffer()
+          const result = await window.media.save({ bytes, mime: file.type })
+          if ('url' in result) {
+            editor.chain().focus().setImage({ src: result.url }).run()
+          } else {
+            console.error('[media] image save failed:', result.error)
+          }
+        }
+      })()
+    }
+  }, [editor])
+
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   const setEditorMarkdown = useCallback(
     (markdown: string, editable: boolean): void => {
@@ -666,7 +721,7 @@ export default function MeetingView({
     <div className="editor-page">
       <div className="editor-topbar drag">
         <button type="button" className="back-pill no-drag" onClick={goBack} title="Back to home">
-          ‹ ⌂
+          ‹ <HomeIcon size={13} />
         </button>
       </div>
 
@@ -698,7 +753,7 @@ export default function MeetingView({
             className="doc-title"
             type="text"
             spellCheck={false}
-            placeholder="New meeting"
+            placeholder={meeting?.kind === 'note' ? 'New note' : 'New meeting'}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value)
@@ -708,8 +763,20 @@ export default function MeetingView({
           />
 
           <div className="chips-row">
-            <span className="chip">📅 {dateChip}</span>
-            <span className="chip">👥 Me</span>
+            <span className="chip">
+              <CalendarIcon size={12} /> {dateChip}
+            </span>
+            <span className="chip">
+              {meeting?.kind === 'note' ? (
+                <>
+                  <PencilIcon size={12} /> Note
+                </>
+              ) : (
+                <>
+                  <UsersIcon size={12} /> Me
+                </>
+              )}
+            </span>
             <span className="chip-folder-anchor">
               <button
                 type="button"
@@ -717,7 +784,7 @@ export default function MeetingView({
                 title={folderName !== null ? 'Move to another folder' : 'Add to folder'}
                 onClick={() => setFolderPickerOpen((open) => !open)}
               >
-                📁 {folderName ?? 'Add to folder'}
+                <FolderIcon size={12} /> {folderName ?? 'Add to folder'}
               </button>
               {folderPickerOpen && (
                 <FolderPicker
@@ -764,6 +831,21 @@ export default function MeetingView({
             )}
           </div>
 
+          {docView === 'notes' && (
+            <FormatToolbar editor={editor} onPickImage={() => imageInputRef.current?.click()} />
+          )}
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const files = imageFilesFrom(e.target.files)
+              if (files.length > 0) insertImagesRef.current(files)
+              e.target.value = ''
+            }}
+          />
           <EditorContent editor={editor} className="doc-editor" />
         </div>
       </div>
@@ -942,7 +1024,9 @@ export default function MeetingView({
               {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
             </>
           ) : (
-            <>✨ Generate notes</>
+            <>
+              <SparkleIcon size={14} /> Generate notes
+            </>
           )}
         </button>
       )}
@@ -1036,7 +1120,7 @@ export default function MeetingView({
               onClick={() => void submitAsk(FOLLOW_UP_EMAIL_QUESTION)}
               title="Draft a ready-to-send follow-up email from this meeting"
             >
-              ✉ Write follow up email
+              <MailIcon size={12} /> Write follow up email
             </button>
           )}
         </form>

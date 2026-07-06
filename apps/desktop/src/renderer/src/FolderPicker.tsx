@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingSummary } from '../../shared/meetings-api'
+import { FolderIcon, LockIcon } from './icons'
 
 /**
  * Granola-style "Add to folder" popover: search field, "My notes" + folder
@@ -111,7 +112,9 @@ export default function FolderPicker({
       <div className="fp-list">
         {showMyNotes && (
           <button type="button" className="fp-row" onClick={() => onAssign(null)}>
-            <span className="fp-icon">🔒</span>
+            <span className="fp-icon">
+              <LockIcon size={13} />
+            </span>
             <span className="fp-name">My notes</span>
             {currentFolderId === null ? (
               <span className="fp-check">✓</span>
@@ -122,7 +125,9 @@ export default function FolderPicker({
         )}
         {shownFolders.map((f) => (
           <button key={f.id} type="button" className="fp-row" onClick={() => onAssign(f.id)}>
-            <span className="fp-icon">📁</span>
+            <span className="fp-icon">
+              <FolderIcon size={13} />
+            </span>
             <span className="fp-name">{f.name}</span>
             {currentFolderId === f.id ? (
               <span className="fp-check">✓</span>

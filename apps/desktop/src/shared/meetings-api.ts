@@ -25,6 +25,12 @@ export interface MeetingChatEntry {
 /** Full meeting document as stored on disk. */
 export interface MeetingRecord {
   id: string
+  /**
+   * What this document is: a meeting (default when absent) or a standalone
+   * quick note ("+ New note" — same editor and optional recording, but
+   * created without a meeting context and never auto-recorded).
+   */
+  kind?: 'meeting' | 'note'
   title: string
   /** ISO timestamp of creation ("+ New meeting"). */
   createdAt: string
@@ -55,6 +61,8 @@ export interface MeetingRecord {
 /** Lightweight row for the Home list, sorted newest-first. */
 export interface MeetingSummary {
   id: string
+  /** "note" marks standalone quick notes; absent = meeting. */
+  kind?: 'meeting' | 'note'
   title: string
   createdAt: string
   startedAt?: string

@@ -116,9 +116,12 @@ export interface CalendarStartMeetingEvent {
    *            the OS notification).
    */
   action: 'prompt' | 'start'
+  /** Empty for ad-hoc (mic-detected) meetings — no calendar event to link. */
   eventId: string
   subject: string
   startIso: string
+  /** True when detected from mic activity rather than the calendar. */
+  adHoc?: boolean
 }
 
 /** API surface exposed on `window.calendar` by the preload script. */

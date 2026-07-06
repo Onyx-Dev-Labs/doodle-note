@@ -59,6 +59,19 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  DETECT_GET_STATE_CHANNEL,
+  DETECT_SET_PREFS_CHANNEL,
+  type DetectApi,
+  type DetectPrefsUpdate,
+  type DetectState
+} from '../shared/detect-api'
+import {
+  MEDIA_SAVE_CHANNEL,
+  type MediaApi,
+  type MediaSaveRequest,
+  type MediaSaveResult
+} from '../shared/media-api'
+import {
   SYNC_CONNECT_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
@@ -265,6 +278,22 @@ const syncApi: SyncApi = {
   }
 }
 
+const mediaApi: MediaApi = {
+  save(request: MediaSaveRequest): Promise<MediaSaveResult> {
+    return ipcRenderer.invoke(MEDIA_SAVE_CHANNEL, request) as Promise<MediaSaveResult>
+  }
+}
+
+const detectApi: DetectApi = {
+  getState(): Promise<DetectState> {
+    return ipcRenderer.invoke(DETECT_GET_STATE_CHANNEL) as Promise<DetectState>
+  },
+
+  setPrefs(update: DetectPrefsUpdate): Promise<DetectState> {
+    return ipcRenderer.invoke(DETECT_SET_PREFS_CHANNEL, update) as Promise<DetectState>
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
@@ -273,6 +302,8 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
     contextBridge.exposeInMainWorld('sync', syncApi)
+    contextBridge.exposeInMainWorld('media', mediaApi)
+    contextBridge.exposeInMainWorld('detect', detectApi)
   } catch (error) {
     console.error(error)
   }
@@ -289,4 +320,8 @@ if (process.contextIsolated) {
   window.calendar = calendarApi
   // @ts-ignore (defined in index.d.ts)
   window.sync = syncApi
+  // @ts-ignore (defined in index.d.ts)
+  window.media = mediaApi
+  // @ts-ignore (defined in index.d.ts)
+  window.detect = detectApi
 }
