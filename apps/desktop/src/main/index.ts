@@ -9,6 +9,7 @@ import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
 import { MeetingsService } from './meetings-service'
 import { NotesService } from './notes-service'
+import { SyncService } from './sync-service'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_EVENT_CHANNEL,
@@ -193,6 +194,11 @@ app.whenReady().then(() => {
   // Microsoft 365 calendar: auth + Graph polling + the meeting-start watcher.
   calendarService = new CalendarService(app.getPath('userData'), broadcast, focusMainWindow)
   calendarService.registerIpc()
+
+  // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
+  const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)
+  syncService.registerIpc()
+  meetingsService.onDidWrite = (change) => syncService.onMeetingsChanged(change.deletedId)
 
   // A fresh look at the app deserves fresh events (throttled inside).
   app.on('browser-window-focus', () => calendarService?.onWindowFocus())

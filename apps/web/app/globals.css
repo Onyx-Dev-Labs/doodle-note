@@ -37,3 +37,42 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Markdown-rendered meeting notes (web library detail page). */
+.prose-notes {
+  color: var(--color-bark);
+  font-size: 0.925rem;
+  line-height: 1.65;
+}
+.prose-notes h1,
+.prose-notes h2,
+.prose-notes h3 {
+  color: var(--color-ink);
+  font-weight: 600;
+  margin: 1.1em 0 0.4em;
+}
+.prose-notes h1 { font-size: 1.25rem; }
+.prose-notes h2 { font-size: 1.1rem; }
+.prose-notes h3 { font-size: 1rem; }
+.prose-notes p { margin: 0.5em 0; }
+.prose-notes ul,
+.prose-notes ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.prose-notes ul { list-style: disc; }
+.prose-notes ol { list-style: decimal; }
+.prose-notes li { margin: 0.2em 0; }
+.prose-notes strong { color: var(--color-ink); }
+.prose-notes code {
+  background: var(--color-sage-fill);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
+.prose-notes blockquote {
+  border-left: 3px solid var(--color-sand);
+  margin: 0.6em 0;
+  padding-left: 0.9em;
+  color: var(--color-stone);
+}

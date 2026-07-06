@@ -25,9 +25,11 @@ function MicrosoftLogo() {
 export function LoginForm({
   googleEnabled,
   microsoftEnabled,
+  next = "/app",
 }: {
   googleEnabled: boolean;
   microsoftEnabled: boolean;
+  next?: string;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("sign-in");
@@ -50,7 +52,7 @@ export function LoginForm({
       setError(result.error.message ?? "Something went wrong");
       return;
     }
-    router.push("/app");
+    router.push(next);
     router.refresh();
   }
 
@@ -125,7 +127,7 @@ export function LoginForm({
           onClick={() =>
             authClient.signIn.social({
               provider: "microsoft",
-              callbackURL: "/app",
+              callbackURL: next,
             })
           }
           className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
@@ -139,7 +141,7 @@ export function LoginForm({
         <button
           type="button"
           onClick={() =>
-            authClient.signIn.social({ provider: "google", callbackURL: "/app" })
+            authClient.signIn.social({ provider: "google", callbackURL: next })
           }
           className="mt-3 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
         >
