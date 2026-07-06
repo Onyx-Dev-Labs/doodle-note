@@ -11,6 +11,7 @@ enum MicMonitorCommand {
     private static var deviceId = AudioObjectID(kAudioObjectUnknown)
     private static var lastRunning: Bool?
     private static var lastBundles: Set<String> = []
+    private static var lastOutputBundles: Set<String> = []
     private static let queue = DispatchQueue(label: "micmon")
     private static var timer: DispatchSourceTimer?
 
@@ -93,6 +94,17 @@ enum MicMonitorCommand {
 
     /// Bundle ids of every process currently capturing audio input.
     private static func capturingBundles() -> Set<String> {
+        processBundles(input: true)
+    }
+
+    /// Bundle ids of every process currently playing audio output — an
+    /// incoming Zoom/Teams/FaceTime call RINGS long before the mic engages,
+    /// and the ring is sustained meeting-app output.
+    private static func outputBundles() -> Set<String> {
+        processBundles(input: false)
+    }
+
+    private static func processBundles(input: Bool) -> Set<String> {
         guard #available(macOS 14.4, *) else { return [] }
         var listAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
@@ -112,7 +124,7 @@ enum MicMonitorCommand {
         var bundles: Set<String> = []
         for process in processes {
             var inputAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioProcessPropertyIsRunningInput,
+                mSelector: input ? kAudioProcessPropertyIsRunningInput : kAudioProcessPropertyIsRunningOutput,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
@@ -144,15 +156,19 @@ enum MicMonitorCommand {
     private static func emitCurrent() {
         lastRunning = isRunningSomewhere()
         lastBundles = capturingBundles()
+        lastOutputBundles = outputBundles()
         emit()
     }
 
     private static func emitIfChanged() {
         let running = isRunningSomewhere()
         let bundles = capturingBundles()
-        guard running != lastRunning || bundles != lastBundles else { return }
+        let output = outputBundles()
+        guard running != lastRunning || bundles != lastBundles || output != lastOutputBundles
+        else { return }
         lastRunning = running
         lastBundles = bundles
+        lastOutputBundles = output
         emit()
     }
 
@@ -160,7 +176,8 @@ enum MicMonitorCommand {
         Events.emit([
             "event": "micmon",
             "running": lastRunning ?? false,
-            "bundles": lastBundles.sorted()
+            "bundles": lastBundles.sorted(),
+            "outputBundles": lastOutputBundles.sorted()
         ])
     }
 }

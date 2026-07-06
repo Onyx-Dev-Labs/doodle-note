@@ -8,6 +8,7 @@ import {
   markPrompted,
   MEETING_END_DEBOUNCE_MS,
   meetingAppLabel,
+  meetingRingLabel,
   MIC_DEBOUNCE_MS,
   onCaptureMicEvent,
   onMicEvent,
@@ -165,15 +166,23 @@ export class MicWatcher {
             event?: string
             running?: boolean
             bundles?: string[]
+            outputBundles?: string[]
           }
           if (event.event === 'micmon' && typeof event.running === 'boolean') {
             // Only capture by an actual meeting app counts as "busy" —
-            // dictation tools like FluidVoice must never prompt.
+            // dictation tools like FluidVoice must never prompt. Sustained
+            // meeting-app OUTPUT (an incoming call ringing) counts too, so
+            // the prompt lands before the call is even answered.
             const bundles = Array.isArray(event.bundles) ? event.bundles.map(String) : []
-            const label = event.running ? meetingAppLabel(bundles) : null
-            this.currentAppLabel = label
-            this.handleMicEvent(event.running && label !== null)
-            this.handleEndWatch(label !== null)
+            const output = Array.isArray(event.outputBundles)
+              ? event.outputBundles.map(String)
+              : []
+            const inputLabel = event.running ? meetingAppLabel(bundles) : null
+            const ringLabel = meetingRingLabel(output)
+            this.currentAppLabel = inputLabel ?? ringLabel
+            this.handleMicEvent(inputLabel !== null || ringLabel !== null)
+            // The end watch keys on the MIC only — output lingers on dings.
+            this.handleEndWatch(inputLabel !== null)
           }
         } catch {
           // CoreML/CoreAudio noise on stdout — NDJSON hosts skip unparseable lines.

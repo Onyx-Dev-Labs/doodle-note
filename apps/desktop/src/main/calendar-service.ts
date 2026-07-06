@@ -773,7 +773,7 @@ export class CalendarService {
       if (!Notification.isSupported()) return
       const notification = new Notification({
         title: prompt.adHoc
-          ? 'Looks like you’re in a meeting'
+          ? 'Looks like you’re on a call'
           : `${prompt.subject} is starting`,
         body: 'Click to start taking notes'
       })

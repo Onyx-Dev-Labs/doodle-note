@@ -559,7 +559,7 @@ function App(): React.JSX.Element {
           </span>
           <span className="mb-text">
             {banner.adHoc ? (
-              <>Looks like you&rsquo;re in a meeting</>
+              <>Looks like you&rsquo;re on a call</>
             ) : (
               <>
                 <strong>{banner.subject}</strong> is starting
