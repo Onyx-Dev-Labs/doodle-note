@@ -44,6 +44,8 @@ export interface MeetingRecord {
   enhancedMarkdown?: string
   /** Which notes engine produced enhancedMarkdown (e.g. "local:…"). */
   engine?: string
+  /** Note template used for Generate notes; absent = "general". */
+  templateId?: string
   /** Interleaved You/Them transcript segments (echo-flagged ones excluded). */
   segments: TranscriptSegment[]
   /** How many echo segments were suppressed across the session(s). */

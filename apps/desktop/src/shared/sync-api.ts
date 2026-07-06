@@ -3,6 +3,7 @@ export const SYNC_CONNECT_CHANNEL = 'sync:connect'
 export const SYNC_DISCONNECT_CHANNEL = 'sync:disconnect'
 export const SYNC_SET_ENABLED_CHANNEL = 'sync:set-enabled'
 export const SYNC_NOW_CHANNEL = 'sync:now'
+export const SYNC_SHARE_CHANNEL = 'sync:share'
 export const SYNC_STATUS_EVENT_CHANNEL = 'sync:status-event'
 
 export interface SyncStatus {
@@ -26,7 +27,11 @@ export interface SyncStatus {
   linking: boolean
 }
 
+export type ShareResult = { url: string } | { error: string }
+
 export interface SyncApi {
+  /** Push the meeting (fresh) and mint/fetch its public share link. */
+  share(meetingId: string): Promise<ShareResult>
   getStatus(): Promise<SyncStatus>
   /** Opens the browser link flow; resolves when linked, failed, or timed out. */
   connect(): Promise<SyncStatus>

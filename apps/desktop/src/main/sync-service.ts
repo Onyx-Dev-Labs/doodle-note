@@ -7,11 +7,13 @@ import { ipcMain, safeStorage, shell } from 'electron'
 import type { MeetingRecord } from '../shared/meetings-api'
 import {
   SYNC_CONNECT_CHANNEL,
+  SYNC_SHARE_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
+  type ShareResult,
   type SyncStatus
 } from '../shared/sync-api'
 import type { MeetingsService } from './meetings-service'
@@ -69,6 +71,9 @@ export class SyncService {
       this.setEnabled(Boolean(enabled))
     )
     ipcMain.handle(SYNC_NOW_CHANNEL, () => this.syncNow())
+    ipcMain.handle(SYNC_SHARE_CHANNEL, (_event, meetingId: unknown) =>
+      this.share(String(meetingId))
+    )
 
     setInterval(() => {
       if (this.config.enabled && this.token()) void this.pushAll()
@@ -206,6 +211,48 @@ export class SyncService {
     if (this.config.enabled) void this.pushAll()
     this.emitStatus()
     return this.status()
+  }
+
+  /**
+   * Push the meeting fresh (the shared page must show current content),
+   * then mint or fetch its public share link.
+   */
+  async share(meetingId: string): Promise<ShareResult> {
+    const token = this.token()
+    if (!token) return { error: 'Connect cloud sync in Settings first' }
+    const record = this.meetings
+      .readAll()
+      .find((r) => r.id === meetingId && !r.trashedAt)
+    if (!record) return { error: 'Meeting not found' }
+
+    try {
+      const pushResponse = await fetch(`${this.baseUrl}/api/sync/push`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetings: [toPushMeeting(record)] })
+      })
+      if (!pushResponse.ok) {
+        return { error: `Could not sync the meeting (HTTP ${pushResponse.status})` }
+      }
+      this.config.pushed[record.id] = contentHash(record)
+      this.writeConfig()
+
+      const shareResponse = await fetch(`${this.baseUrl}/api/sync/share`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meetingId, enable: true })
+      })
+      const body = (await shareResponse.json().catch(() => ({}))) as {
+        url?: string
+        error?: string
+      }
+      if (!shareResponse.ok || typeof body.url !== 'string') {
+        return { error: body.error ?? `Share failed (HTTP ${shareResponse.status})` }
+      }
+      return { url: body.url }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Share failed' }
+    }
   }
 
   async syncNow(): Promise<SyncStatus> {

@@ -363,6 +363,30 @@ export default function HomeView({
   /** Meeting id whose ⋯ menu is open, and whose folder picker is open. */
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [pickerFor, setPickerFor] = useState<string | null>(null)
+  /** Transient share feedback: message shown as a toast under the topbar. */
+  const [shareNotice, setShareNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (shareNotice === null) return
+    const timer = setTimeout(() => setShareNotice(null), 6000)
+    return () => clearTimeout(timer)
+  }, [shareNotice])
+
+  const copyShareLink = async (id: string): Promise<void> => {
+    setMenuFor(null)
+    setShareNotice('Creating share link…')
+    const result = await window.sync.share(id)
+    if ('url' in result) {
+      try {
+        await navigator.clipboard.writeText(result.url)
+        setShareNotice('Share link copied to clipboard ✓')
+      } catch {
+        setShareNotice(result.url) // clipboard blocked — at least show it
+      }
+    } else {
+      setShareNotice(result.error)
+    }
+  }
 
   /* ---- cross-meeting "ask anything" (thread persisted by main) ---- */
   const [chatOpen, setChatOpen] = useState(false)
@@ -596,6 +620,12 @@ export default function HomeView({
         </button>
       </div>
 
+      {shareNotice !== null && (
+        <div className="share-notice" role="status">
+          {shareNotice}
+        </div>
+      )}
+
       <div className="home-scroll">
         <div className="home-col">
           {filter.kind === 'all' && (
@@ -711,11 +741,12 @@ export default function HomeView({
                       )}
                       {menuOpen && (
                         <div className="row-menu" onClick={(e) => e.stopPropagation()}>
-                          <button type="button" disabled title="Coming with cloud sync">
-                            Copy link
-                          </button>
-                          <button type="button" disabled title="Coming with cloud sync">
-                            Share
+                          <button
+                            type="button"
+                            title="Copy a public link to this meeting's notes"
+                            onClick={() => void copyShareLink(m.id)}
+                          >
+                            Copy share link
                           </button>
                           <button
                             type="button"

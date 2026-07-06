@@ -10,6 +10,7 @@
 import type { TranscriptSegment } from './engine-events'
 
 export const NOTES_MODELS_CHANNEL = 'notes:models'
+export const NOTES_TEMPLATES_CHANNEL = 'notes:templates'
 export const NOTES_ACTIVATE_MODEL_CHANNEL = 'notes:activate-model'
 export const NOTES_GET_SETTINGS_CHANNEL = 'notes:get-settings'
 export const NOTES_SET_SETTINGS_CHANNEL = 'notes:set-settings'
@@ -87,6 +88,15 @@ export interface EnhanceRequest {
   title: string
   rawNotesMarkdown: string
   segments: TranscriptSegment[]
+  /** Note template shaping the output; default "general". */
+  templateId?: string
+}
+
+/** Template list for the Generate-notes picker (catalog lives in @repo/ai). */
+export interface NotesTemplateInfo {
+  id: string
+  label: string
+  description: string
 }
 
 /** Errors come back as a value, never as a rejected promise. */
@@ -167,6 +177,7 @@ export interface GlobalAskTokenEvent {
 
 /** API surface exposed on `window.notes` by the preload script. */
 export interface NotesApi {
+  templates(): Promise<NotesTemplateInfo[]>
   models(): Promise<NotesModelsResponse>
   activateModel(modelId: string): Promise<ActivateModelResult>
   getSettings(): Promise<NotesSettingsView>

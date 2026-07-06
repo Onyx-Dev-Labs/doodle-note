@@ -19,6 +19,7 @@ import {
   NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
+  NOTES_TEMPLATES_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
   NOTES_GET_SETTINGS_CHANNEL,
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
@@ -112,6 +113,10 @@ export class NotesService {
     ipcMain.handle(NOTES_SET_SETTINGS_CHANNEL, (_event, update: unknown) =>
       this.applySettings((update ?? {}) as NotesSettingsUpdate)
     )
+    ipcMain.handle(NOTES_TEMPLATES_CHANNEL, async () => {
+      const { NOTE_TEMPLATES } = await import('@repo/ai')
+      return NOTE_TEMPLATES.map((t) => ({ id: t.id, label: t.label, description: t.description }))
+    })
     ipcMain.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
       this.enhance((request ?? {}) as EnhanceRequest)
     )
@@ -262,7 +267,8 @@ export class NotesService {
         rawNotesMarkdown:
           typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
-        ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {})
+        ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
+        ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
       const engine = this.pickEngine()
       const result = await engine.generateNotes(input, (token) => {

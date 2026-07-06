@@ -1,3 +1,4 @@
+import { templateById } from './templates'
 import type { MergeInput, MergeSegment } from './types'
 
 /**
@@ -12,7 +13,7 @@ import type { MergeInput, MergeSegment } from './types'
  * - Markdown out, no preamble, so the result can be dropped straight into
  *   the editor.
  */
-export const MERGE_SYSTEM_PROMPT = `You are the note-writing engine inside Doodle Note, an AI meeting notepad. You turn a meeting transcript plus the user's rough notes into polished meeting notes.
+const MERGE_RULES = `You are the note-writing engine inside Doodle Note, an AI meeting notepad. You turn a meeting transcript plus the user's rough notes into polished meeting notes.
 
 Rules:
 - Use ONLY information present in the transcript or the rough notes. Never invent names, numbers, dates, or commitments.
@@ -21,20 +22,17 @@ Rules:
 - "You" is the note-taker; "Them" is everyone else on the call.
 - Attribute every action item and decision to whoever actually committed to it in the transcript. Use "You" as an owner ONLY when a [You] line contains that commitment; if a [Them] line says "I will…", the owner is the person speaking (use their name if known, otherwise "Them").
 - Write in tight, plain English. No filler, no corporate fluff.
+- A section heading with nothing real to put under it is omitted entirely.
 
-Output format (markdown, nothing before or after it):
-# <meeting title>
+`
 
-<1-2 sentence summary of what the meeting was about and its outcome>
+/** Shared rules + the selected template's output format. */
+export function buildMergeSystemPrompt(templateId?: string): string {
+  return MERGE_RULES + templateById(templateId).outputFormat
+}
 
-## Notes
-<the substance, grouped under short bold topic lines following the meeting's flow; bullets, not paragraphs>
-
-## Decisions
-<bullet list of decisions actually made; omit the section if none>
-
-## Action items
-<markdown checkboxes: - [ ] Owner — task (deadline if stated); omit the section if none>`
+/** The default (general-template) prompt — kept for compatibility. */
+export const MERGE_SYSTEM_PROMPT = buildMergeSystemPrompt('general')
 
 function formatTimestamp(ms: number): string {
   const totalSec = Math.floor(ms / 1000)

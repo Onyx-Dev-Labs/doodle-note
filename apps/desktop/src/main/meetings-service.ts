@@ -138,6 +138,9 @@ function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     rawNotesMarkdown: typeof raw.rawNotesMarkdown === 'string' ? raw.rawNotesMarkdown : '',
     ...(typeof raw.enhancedMarkdown === 'string' ? { enhancedMarkdown: raw.enhancedMarkdown } : {}),
     ...(typeof raw.engine === 'string' ? { engine: raw.engine } : {}),
+    ...(typeof raw.templateId === 'string' && raw.templateId.length > 0
+      ? { templateId: raw.templateId }
+      : {}),
     segments: Array.isArray(raw.segments) ? (raw.segments as TranscriptSegment[]) : [],
     echoSuppressed: typeof raw.echoSuppressed === 'number' ? raw.echoSuppressed : 0,
     ...(Array.isArray(raw.chat) ? { chat: raw.chat.filter(isChatEntry) } : {}),
