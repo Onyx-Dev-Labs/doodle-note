@@ -5,6 +5,7 @@ import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { CalendarService } from './calendar-service'
+import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
 import { MediaService } from './media-service'
@@ -112,6 +113,9 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
+
+  // Spell-check suggestions + edit ops on right-click (Electron has none).
+  registerContextMenu(mainWindow)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
