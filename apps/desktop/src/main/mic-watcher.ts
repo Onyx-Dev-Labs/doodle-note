@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   initialMicState,
   markPrompted,
+  meetingAppLabel,
   MIC_DEBOUNCE_MS,
   onMicEvent,
   setSuppressed,
@@ -34,10 +35,13 @@ export class MicWatcher {
   private restartTimer: NodeJS.Timeout | null = null
   private stopping = false
 
+  /** Friendly name of the meeting app behind the current busy stretch. */
+  private currentAppLabel: string | null = null
+
   constructor(
     private readonly enginePath: string,
     userDataDir: string,
-    private readonly onMeetingDetected: () => void
+    private readonly onMeetingDetected: (appLabel: string | null) => void
   ) {
     this.configPath = join(userDataDir, 'mic-watch.json')
     this.config = this.readConfig()
@@ -103,9 +107,18 @@ export class MicWatcher {
         newline = buffer.indexOf('\n')
         if (line.length === 0) continue
         try {
-          const event = JSON.parse(line) as { event?: string; running?: boolean }
+          const event = JSON.parse(line) as {
+            event?: string
+            running?: boolean
+            bundles?: string[]
+          }
           if (event.event === 'micmon' && typeof event.running === 'boolean') {
-            this.handleMicEvent(event.running)
+            // Only capture by an actual meeting app counts as "busy" —
+            // dictation tools like FluidVoice must never prompt.
+            const bundles = Array.isArray(event.bundles) ? event.bundles.map(String) : []
+            const label = event.running ? meetingAppLabel(bundles) : null
+            this.currentAppLabel = label
+            this.handleMicEvent(event.running && label !== null)
           }
         } catch {
           // CoreML/CoreAudio noise on stdout — NDJSON hosts skip unparseable lines.
@@ -159,7 +172,7 @@ export class MicWatcher {
         const now = Date.now()
         if (shouldPrompt(this.state, now)) {
           this.state = markPrompted(this.state, now)
-          this.onMeetingDetected()
+          this.onMeetingDetected(this.currentAppLabel)
         }
       }, MIC_DEBOUNCE_MS)
       this.debounceTimer.unref?.()

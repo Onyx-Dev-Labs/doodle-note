@@ -153,11 +153,12 @@ app.whenReady().then(() => {
 
   // Ad-hoc meeting detection: engine micmon watches for other apps holding
   // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
-  const micWatcher = new MicWatcher(resolveEngineBinary(), app.getPath('userData'), () => {
+  const micWatcher = new MicWatcher(resolveEngineBinary(), app.getPath('userData'), (appLabel) => {
     calendarService?.deliverPrompt({
       action: 'prompt',
       eventId: '',
-      subject: 'Meeting',
+      // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
+      subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
       startIso: new Date().toISOString(),
       adHoc: true
     })

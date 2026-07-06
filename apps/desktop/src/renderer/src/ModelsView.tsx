@@ -668,8 +668,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
               <span className="cal-row-main">
                 <span className="cal-row-label">Detect meetings from mic activity</span>
                 <span className="cal-row-sub">
-                  Prompts to take notes when Zoom, Teams, or Meet holds your microphone open —
-                  even for meetings that aren&rsquo;t on your calendar
+                  Prompts when a meeting app — Zoom, Teams, Webex, Slack, FaceTime, or a browser
+                  — holds your microphone, even without a calendar event. Dictation tools are
+                  ignored.
                 </span>
               </span>
               <Toggle

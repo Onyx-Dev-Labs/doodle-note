@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   initialMicState,
   markPrompted,
+  meetingAppLabel,
   MIC_COOLDOWN_MS,
   MIC_DEBOUNCE_MS,
   onMicEvent,
@@ -47,6 +48,19 @@ describe('mic-watcher-logic', () => {
     let s = onMicEvent(initialMicState(), true, T0)
     s = onMicEvent(s, false, T0 + 3_000)
     assert.equal(shouldPrompt(s, T0 + MIC_DEBOUNCE_MS), false)
+  })
+
+  it('recognizes meeting apps by bundle id, ignores everything else', () => {
+    assert.equal(meetingAppLabel(['us.zoom.xos']), 'Zoom')
+    assert.equal(meetingAppLabel(['com.microsoft.teams2']), 'Teams')
+    assert.equal(meetingAppLabel(['com.google.Chrome.helper']), 'browser')
+    // Dictation tools hold the mic all day — never a meeting.
+    assert.equal(meetingAppLabel(['com.fluidvoice.app']), null)
+    assert.equal(meetingAppLabel(['com.apple.VoiceMemos']), null)
+    // No attribution (macOS < 14.4) stays conservative.
+    assert.equal(meetingAppLabel([]), null)
+    // A meeting app among others still wins.
+    assert.equal(meetingAppLabel(['com.fluidvoice.app', 'us.zoom.xos']), 'Zoom')
   })
 
   it('suppression swallows events and requires a fresh edge after lifting', () => {

@@ -9,6 +9,42 @@ export const MIC_DEBOUNCE_MS = 8_000
 /** After a prompt (or a dismissal), stay quiet this long. */
 export const MIC_COOLDOWN_MS = 5 * 60_000
 
+/**
+ * Only mic capture by an actual meeting app counts — dictation tools
+ * (FluidVoice et al.), voice memos, and everything else are ignored by
+ * bundle id. Browsers are included for Meet/Teams-web. Substring match,
+ * lowercase.
+ */
+const MEETING_BUNDLE_PATTERNS: ReadonlyArray<{ pattern: string; label: string }> = [
+  { pattern: 'us.zoom', label: 'Zoom' },
+  { pattern: 'com.microsoft.teams', label: 'Teams' },
+  { pattern: 'cisco', label: 'Webex' }, // Cisco-Systems.Spark
+  { pattern: 'com.tinyspeck.slackmacgap', label: 'Slack' },
+  { pattern: 'com.hnc.discord', label: 'Discord' },
+  { pattern: 'com.apple.facetime', label: 'FaceTime' },
+  { pattern: 'com.skype', label: 'Skype' },
+  { pattern: 'com.google.chrome', label: 'browser' },
+  { pattern: 'com.apple.safari', label: 'browser' },
+  { pattern: 'org.mozilla.firefox', label: 'browser' },
+  { pattern: 'com.microsoft.edgemac', label: 'browser' },
+  { pattern: 'company.thebrowser', label: 'browser' }, // Arc
+  { pattern: 'com.brave.browser', label: 'browser' }
+]
+
+/**
+ * The friendly name of the first meeting app among the capturing bundles,
+ * or null when none of them is meeting-shaped. Empty bundle info (macOS
+ * < 14.4 or attribution failure) is conservative: no prompt.
+ */
+export function meetingAppLabel(bundles: readonly string[]): string | null {
+  for (const bundle of bundles) {
+    const lower = bundle.toLowerCase()
+    const match = MEETING_BUNDLE_PATTERNS.find((m) => lower.includes(m.pattern))
+    if (match) return match.label
+  }
+  return null
+}
+
 export interface MicPromptState {
   /** Epoch ms when the mic went busy; null while idle. */
   busySinceMs: number | null
