@@ -1,10 +1,11 @@
-import { app, shell, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, protocol } from 'electron'
 import { spawn } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { CalendarService } from './calendar-service'
+import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
 import { MediaService } from './media-service'
@@ -15,10 +16,12 @@ import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import {
   DETECT_GET_STATE_CHANNEL,
+  DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
   type DetectPrefsUpdate,
   type DetectState
 } from '../shared/detect-api'
+import { THEME_SET_SOURCE_CHANNEL } from '../shared/theme-api'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_EVENT_CHANNEL,
@@ -92,9 +95,10 @@ function createWindow(): void {
     height: 760,
     minWidth: 980,
     minHeight: 680,
+    // Matches the active palette so launch never flashes the wrong color.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#F7F5EE',
     // Mac-native feel: content extends under a hidden title bar; the renderer
     // provides a drag strip and keeps clear of the traffic lights.
     titleBarStyle: 'hiddenInset',
@@ -109,6 +113,9 @@ function createWindow(): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
+
+  // Spell-check suggestions + edit ops on right-click (Electron has none).
+  registerContextMenu(mainWindow)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -153,16 +160,24 @@ app.whenReady().then(() => {
 
   // Ad-hoc meeting detection: engine micmon watches for other apps holding
   // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
-  const micWatcher = new MicWatcher(resolveEngineBinary(), app.getPath('userData'), (appLabel) => {
-    calendarService?.deliverPrompt({
-      action: 'prompt',
-      eventId: '',
-      // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
-      subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
-      startIso: new Date().toISOString(),
-      adHoc: true
-    })
-  })
+  const micWatcher = new MicWatcher(
+    resolveEngineBinary(),
+    app.getPath('userData'),
+    (appLabel) => {
+      calendarService?.deliverPrompt({
+        action: 'prompt',
+        eventId: '',
+        // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
+        subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
+        startIso: new Date().toISOString(),
+        adHoc: true
+      })
+    },
+    () => {
+      // Meeting app hung up mid-recording — the editor stops its capture.
+      broadcast(DETECT_MEETING_ENDED_CHANNEL, {})
+    }
+  )
 
   const session = new TranscriptSession(
     broadcastEngineEvent,
@@ -234,13 +249,13 @@ app.whenReady().then(() => {
   calendarService.registerIpc()
 
   // Meeting-detection settings: login item (OS-owned) + the mic watcher.
-  ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => {
-    return {
-      loginItem: app.getLoginItemSettings().openAtLogin,
-      micDetect: micWatcher.enabled,
-      micMonitorAlive: micWatcher.monitorAlive
-    }
+  const detectState = (): DetectState => ({
+    loginItem: app.getLoginItemSettings().openAtLogin,
+    micDetect: micWatcher.enabled,
+    autoStop: micWatcher.autoStop,
+    micMonitorAlive: micWatcher.monitorAlive
   })
+  ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
   ipcMain.handle(DETECT_SET_PREFS_CHANNEL, (_event, update: DetectPrefsUpdate): DetectState => {
     if (typeof update?.loginItem === 'boolean') {
       app.setLoginItemSettings({ openAtLogin: update.loginItem })
@@ -248,14 +263,29 @@ app.whenReady().then(() => {
     if (typeof update?.micDetect === 'boolean') {
       micWatcher.setEnabled(update.micDetect)
     }
-    return {
-      loginItem: app.getLoginItemSettings().openAtLogin,
-      micDetect: micWatcher.enabled,
-      micMonitorAlive: micWatcher.monitorAlive
+    if (typeof update?.autoStop === 'boolean') {
+      micWatcher.setAutoStop(update.autoStop)
     }
+    return detectState()
   })
   micWatcher.start()
-  app.on('quit', () => micWatcher.stop())
+
+  // node-llama-cpp's async workers SIGABRT if they complete during Electron's
+  // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —
+  // macOS then shows "DoodleNote quit unexpectedly" on the next launch. All
+  // app state is written synchronously as it changes, and child processes
+  // (transcription engine, micmon) exit on their own via stdin-close
+  // watchdogs, so skipping native teardown loses nothing.
+  app.on('before-quit', () => {
+    micWatcher.stop()
+    process.exit(0)
+  })
+
+  // The renderer mirrors its theme pref here so nativeTheme (and with it the
+  // floating prompt panel + native chrome) matches the in-app appearance.
+  ipcMain.on(THEME_SET_SOURCE_CHANNEL, (_event, source: unknown) => {
+    nativeTheme.themeSource = source === 'light' || source === 'dark' ? source : 'system'
+  })
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
   const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)

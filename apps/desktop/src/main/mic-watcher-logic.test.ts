@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  initialEndState,
   initialMicState,
+  markEnded,
   markPrompted,
+  MEETING_END_DEBOUNCE_MS,
   meetingAppLabel,
   MIC_COOLDOWN_MS,
   MIC_DEBOUNCE_MS,
+  onCaptureMicEvent,
   onMicEvent,
   setSuppressed,
+  shouldAutoStop,
   shouldPrompt
 } from './mic-watcher-logic'
 
@@ -73,5 +78,43 @@ describe('mic-watcher-logic', () => {
     // Fresh idle→busy edge after unsuppression is trusted again.
     s = onMicEvent(s, true, T0 + 60_000)
     assert.equal(shouldPrompt(s, T0 + 60_000 + MIC_DEBOUNCE_MS), true)
+  })
+})
+
+describe('meeting-end watch', () => {
+  const T0 = 5_000_000
+
+  it('stops after the meeting app stays off the mic past the debounce', () => {
+    let s = onCaptureMicEvent(initialEndState(), true, T0) // Zoom on mic
+    s = onCaptureMicEvent(s, false, T0 + 60_000) // call ended
+    assert.equal(shouldAutoStop(s, T0 + 60_000 + MEETING_END_DEBOUNCE_MS - 1), false)
+    assert.equal(shouldAutoStop(s, T0 + 60_000 + MEETING_END_DEBOUNCE_MS), true)
+  })
+
+  it('a reconnect inside the debounce cancels the stop', () => {
+    let s = onCaptureMicEvent(initialEndState(), true, T0)
+    s = onCaptureMicEvent(s, false, T0 + 60_000)
+    s = onCaptureMicEvent(s, true, T0 + 65_000) // network blip, back on
+    assert.equal(shouldAutoStop(s, T0 + 60_000 + MEETING_END_DEBOUNCE_MS + 1), false)
+  })
+
+  it('mic-only recordings (no meeting app ever) never auto-stop', () => {
+    let s = onCaptureMicEvent(initialEndState(), false, T0)
+    s = onCaptureMicEvent(s, false, T0 + 120_000)
+    assert.equal(shouldAutoStop(s, T0 + 600_000), false)
+  })
+
+  it('joining the call mid-recording still arms the end watch', () => {
+    let s = onCaptureMicEvent(initialEndState(), false, T0) // recording alone
+    s = onCaptureMicEvent(s, true, T0 + 30_000) // joins Zoom late
+    s = onCaptureMicEvent(s, false, T0 + 90_000)
+    assert.equal(shouldAutoStop(s, T0 + 90_000 + MEETING_END_DEBOUNCE_MS), true)
+  })
+
+  it('fires at most once per capture', () => {
+    let s = onCaptureMicEvent(initialEndState(), true, T0)
+    s = onCaptureMicEvent(s, false, T0 + 10_000)
+    s = markEnded(s)
+    assert.equal(shouldAutoStop(s, T0 + 10 * 60_000), false)
   })
 })

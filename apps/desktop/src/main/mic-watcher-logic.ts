@@ -94,3 +94,57 @@ export function shouldPrompt(state: MicPromptState, nowMs: number): boolean {
 export function markPrompted(state: MicPromptState, nowMs: number): MicPromptState {
   return { ...state, promptedThisSession: true, lastPromptMs: nowMs }
 }
+
+/* ---- meeting-end watch (auto-stop recording, Granola-style) ---- */
+
+/**
+ * The meeting app must stay OFF the mic this long before we call the meeting
+ * over — survives reconnects, device switches, and brief network blips.
+ */
+export const MEETING_END_DEBOUNCE_MS = 12_000
+
+/**
+ * Tracked only while DoodleNote itself is recording. Our engine is a bare
+ * binary with no bundle id, so it never appears in micmon's bundle list —
+ * the meeting app's presence/absence stays cleanly observable during capture.
+ */
+export interface MeetingEndState {
+  /** A meeting app held the mic at some point during this capture. */
+  meetingSeen: boolean
+  /** Epoch ms when the meeting app dropped off the mic; null while present. */
+  absentSinceMs: number | null
+  /** Auto-stop already fired for this capture. */
+  ended: boolean
+}
+
+export function initialEndState(): MeetingEndState {
+  return { meetingSeen: false, absentSinceMs: null, ended: false }
+}
+
+/** Apply a micmon event observed during capture (present = meeting app on mic). */
+export function onCaptureMicEvent(
+  state: MeetingEndState,
+  meetingPresent: boolean,
+  nowMs: number
+): MeetingEndState {
+  if (state.ended) return state
+  if (meetingPresent) {
+    return { ...state, meetingSeen: true, absentSinceMs: null }
+  }
+  if (!state.meetingSeen) return state // plain mic-only recording — never ends
+  return state.absentSinceMs === null ? { ...state, absentSinceMs: nowMs } : state
+}
+
+/** True when the absence has outlasted the debounce — stop the recording. */
+export function shouldAutoStop(state: MeetingEndState, nowMs: number): boolean {
+  return (
+    !state.ended &&
+    state.meetingSeen &&
+    state.absentSinceMs !== null &&
+    nowMs - state.absentSinceMs >= MEETING_END_DEBOUNCE_MS
+  )
+}
+
+export function markEnded(state: MeetingEndState): MeetingEndState {
+  return { ...state, ended: true, absentSinceMs: null }
+}

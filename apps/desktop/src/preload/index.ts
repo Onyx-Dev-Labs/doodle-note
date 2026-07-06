@@ -59,7 +59,13 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  THEME_SET_SOURCE_CHANNEL,
+  type ThemeApi,
+  type ThemeSource
+} from '../shared/theme-api'
+import {
   DETECT_GET_STATE_CHANNEL,
+  DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
   type DetectApi,
   type DetectPrefsUpdate,
@@ -284,6 +290,12 @@ const mediaApi: MediaApi = {
   }
 }
 
+const themeApi: ThemeApi = {
+  setSource(source: ThemeSource): void {
+    ipcRenderer.send(THEME_SET_SOURCE_CHANNEL, source)
+  }
+}
+
 const detectApi: DetectApi = {
   getState(): Promise<DetectState> {
     return ipcRenderer.invoke(DETECT_GET_STATE_CHANNEL) as Promise<DetectState>
@@ -291,6 +303,10 @@ const detectApi: DetectApi = {
 
   setPrefs(update: DetectPrefsUpdate): Promise<DetectState> {
     return ipcRenderer.invoke(DETECT_SET_PREFS_CHANNEL, update) as Promise<DetectState>
+  },
+
+  onMeetingEnded(cb: () => void): () => void {
+    return subscribe(DETECT_MEETING_ENDED_CHANNEL, cb)
   }
 }
 
@@ -304,6 +320,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('sync', syncApi)
     contextBridge.exposeInMainWorld('media', mediaApi)
     contextBridge.exposeInMainWorld('detect', detectApi)
+    contextBridge.exposeInMainWorld('themeNative', themeApi)
   } catch (error) {
     console.error(error)
   }
@@ -324,4 +341,6 @@ if (process.contextIsolated) {
   window.media = mediaApi
   // @ts-ignore (defined in index.d.ts)
   window.detect = detectApi
+  // @ts-ignore (defined in index.d.ts)
+  window.themeNative = themeApi
 }
