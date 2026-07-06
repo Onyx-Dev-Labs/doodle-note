@@ -56,13 +56,6 @@ html[data-theme='dark'] {
   --shadow-panel: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
 
-/* The lockup PNG has ink-colored text — give it a cream plate in dark. */
-html[data-theme='dark'] .settings-logo,
-html[data-theme='dark'] .home-empty-logo {
-  background: #f7f5ee;
-  border-radius: 14px;
-  padding: 8px;
-}
 
 * {
   box-sizing: border-box;
@@ -845,11 +838,25 @@ a,
   font-size: 13.5px;
 }
 
-.home-empty-logo {
-  width: 130px;
-  height: auto;
-  border-radius: 12px;
-  mix-blend-mode: multiply;
+/* Composed brand mark (mascot tile + themed wordmark) — the lockup PNG has
+   ink text baked in and can't follow the theme. */
+.home-empty-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-empty-mascot {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+}
+
+.home-empty-wordmark {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .home-empty-line {
@@ -1994,12 +2001,11 @@ button.fp-row:hover {
   gap: 18px;
 }
 
-.settings-logo {
-  width: 120px;
-  height: auto;
+.settings-mascot {
+  width: 54px;
+  height: 54px;
   flex-shrink: 0;
-  border-radius: 12px;
-  mix-blend-mode: multiply;
+  border-radius: 14px;
 }
 
 .models-header h2,

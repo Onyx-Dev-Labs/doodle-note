@@ -10,7 +10,7 @@ import type {
 import FolderPicker from './FolderPicker'
 import { CheckSquareIcon, DocIcon, FolderIcon, PencilIcon, TrashIcon } from './icons'
 import { markdownToHtml } from './lib/markdown'
-import logoUrl from './assets/doodlenote-logo.png'
+import mascotUrl from './assets/mascot-square.png'
 
 /** Which meetings the Home list shows; lives in App next to `search`. */
 export type HomeFilter = { kind: 'all' } | { kind: 'trash' } | { kind: 'folder'; id: string }
@@ -621,7 +621,13 @@ export default function HomeView({
           <div className={filter.kind === 'all' ? 'meetings-list' : 'meetings-list flush'}>
             {noneInView && filter.kind === 'all' && (
               <div className="home-empty">
-                <img src={logoUrl} alt="DoodleNote" className="home-empty-logo" />
+                <span className="home-empty-mark">
+                  <img src={mascotUrl} alt="" className="home-empty-mascot" />
+                  <span className="home-empty-wordmark">
+                    <span className="wm-doodle">Doodle</span>
+                    <span className="wm-note">Note</span>
+                  </span>
+                </span>
                 <p>No meetings yet — hit + New meeting</p>
               </div>
             )}

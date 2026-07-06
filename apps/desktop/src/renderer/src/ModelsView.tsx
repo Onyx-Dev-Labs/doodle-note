@@ -11,7 +11,7 @@ import type {
   NotesModelsResponse,
   NotesSettingsView
 } from '../../shared/notes-api'
-import logoUrl from './assets/doodlenote-logo.png'
+import mascotUrl from './assets/mascot-square.png'
 
 function lastSyncLabel(iso: string): string {
   const ms = Date.now() - Date.parse(iso)
@@ -391,7 +391,7 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
   return (
     <div className="models">
       <header className="models-header">
-        <img className="settings-logo" src={logoUrl} alt="DoodleNote" />
+        <img className="settings-mascot" src={mascotUrl} alt="" />
         <div>
           <h2>Settings</h2>
           <p className="models-sub">
