@@ -92,7 +92,7 @@ export function LinkDeviceForm({
 
       {done ? (
         <p className="mt-4 rounded-md bg-sage-fill px-3 py-2 text-sm text-sage-deep">
-          Connected — you can close this tab and return to DoodleNote.
+          Connected — taking you to your meetings…
         </p>
       ) : (
         <button
