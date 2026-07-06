@@ -34,6 +34,8 @@ interface SyncConfig {
   lastSyncAt?: string
   /** meetingId → content hash at last successful push. */
   pushed: Record<string, string>
+  /** attachment file name → public blob URL (uploaded once, reused). */
+  mediaUrls: Record<string, string>
   /** Local meetings deleted/trashed whose cloud copy still needs removing. */
   pendingDeletes: string[]
 }
@@ -53,12 +55,15 @@ export class SyncService {
   private debounceTimer: NodeJS.Timeout | null = null
   private linkServer: Server | null = null
 
+  private readonly attachmentsDir: string
+
   constructor(
     userDataDir: string,
     private readonly meetings: MeetingsService,
     private readonly broadcast: (channel: string, payload: unknown) => void
   ) {
     this.configPath = join(userDataDir, 'sync.json')
+    this.attachmentsDir = join(userDataDir, 'attachments')
     this.baseUrl = process.env.DOODLE_SYNC_URL || DEFAULT_BASE_URL
     this.config = this.readConfig()
   }
@@ -108,7 +113,8 @@ export class SyncService {
       ...(this.config.lastSyncAt ? { lastSyncAt: this.config.lastSyncAt } : {}),
       pendingCount: this.pendingMeetings().length + this.config.pendingDeletes.length,
       ...(this.lastError ? { lastError: this.lastError } : {}),
-      linking: this.linking
+      linking: this.linking,
+      baseUrl: this.baseUrl
     }
   }
 
@@ -197,6 +203,7 @@ export class SyncService {
     this.config = {
       enabled: false,
       pushed: {},
+      mediaUrls: {},
       pendingDeletes: []
     }
     this.writeConfig()
@@ -226,15 +233,16 @@ export class SyncService {
     if (!record) return { error: 'Meeting not found' }
 
     try {
+      await this.uploadReferencedMedia(record, token)
       const pushResponse = await fetch(`${this.baseUrl}/api/sync/push`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetings: [toPushMeeting(record)] })
+        body: JSON.stringify({ meetings: [toPushMeeting(record, this.config.mediaUrls)] })
       })
       if (!pushResponse.ok) {
         return { error: `Could not sync the meeting (HTTP ${pushResponse.status})` }
       }
-      this.config.pushed[record.id] = contentHash(record)
+      this.config.pushed[record.id] = contentHash(record, this.config.mediaUrls)
       this.writeConfig()
 
       const shareResponse = await fetch(`${this.baseUrl}/api/sync/share`, {
@@ -266,7 +274,9 @@ export class SyncService {
     return this.meetings
       .readAll()
       .filter((record) => !record.trashedAt)
-      .filter((record) => this.config.pushed[record.id] !== contentHash(record))
+      .filter(
+        (record) => this.config.pushed[record.id] !== contentHash(record, this.config.mediaUrls)
+      )
   }
 
   private async pushAll(): Promise<void> {
@@ -294,13 +304,14 @@ export class SyncService {
       }
 
       for (const record of this.pendingMeetings()) {
+        await this.uploadReferencedMedia(record, token)
         const response = await fetch(`${this.baseUrl}/api/sync/push`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ meetings: [toPushMeeting(record)] })
+          body: JSON.stringify({ meetings: [toPushMeeting(record, this.config.mediaUrls)] })
         })
         if (!response.ok) {
           const body = (await response.json().catch(() => ({}))) as { error?: string }
@@ -315,7 +326,7 @@ export class SyncService {
           console.error('[sync] meeting rejected:', record.id, result?.error)
           continue
         }
-        this.config.pushed[record.id] = contentHash(record)
+        this.config.pushed[record.id] = contentHash(record, this.config.mediaUrls)
         this.writeConfig()
       }
 
@@ -328,6 +339,39 @@ export class SyncService {
     } finally {
       this.syncing = false
       this.emitStatus()
+    }
+  }
+
+  /**
+   * Upload attachments referenced by this meeting's markdown that haven't
+   * been uploaded yet (name → URL cached in config). Images over the API's
+   * 3MB cap (or with missing files) stay local — their refs are left as-is.
+   */
+  private async uploadReferencedMedia(record: MeetingRecord, token: string): Promise<void> {
+    for (const name of mediaRefs(record)) {
+      if (this.config.mediaUrls[name]) continue
+      let bytes: Buffer
+      try {
+        bytes = readFileSync(join(this.attachmentsDir, name))
+      } catch {
+        continue // file gone — nothing to upload
+      }
+      if (bytes.byteLength > 3 * 1024 * 1024) continue
+      try {
+        const response = await fetch(`${this.baseUrl}/api/sync/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, data: bytes.toString('base64') })
+        })
+        if (!response.ok) continue
+        const body = (await response.json()) as { url?: string }
+        if (typeof body.url === 'string' && body.url.startsWith('https://')) {
+          this.config.mediaUrls[name] = body.url
+          this.writeConfig()
+        }
+      } catch {
+        // Network hiccup — the ref stays local; a later push retries.
+      }
     }
   }
 
@@ -353,10 +397,14 @@ export class SyncService {
         ...(typeof raw.workspaceName === 'string' ? { workspaceName: raw.workspaceName } : {}),
         ...(typeof raw.lastSyncAt === 'string' ? { lastSyncAt: raw.lastSyncAt } : {}),
         pushed: raw.pushed && typeof raw.pushed === 'object' ? (raw.pushed as Record<string, string>) : {},
+        mediaUrls:
+          raw.mediaUrls && typeof raw.mediaUrls === 'object'
+            ? (raw.mediaUrls as Record<string, string>)
+            : {},
         pendingDeletes: Array.isArray(raw.pendingDeletes) ? raw.pendingDeletes.map(String) : []
       }
     } catch {
-      return { enabled: false, pushed: {}, pendingDeletes: [] }
+      return { enabled: false, pushed: {}, mediaUrls: {}, pendingDeletes: [] }
     }
   }
 
@@ -369,22 +417,38 @@ export class SyncService {
   }
 }
 
-/** Stable hash of everything the push carries — change detection. */
-function contentHash(record: MeetingRecord): string {
+const MEDIA_REF = /doodle-media:\/\/([a-z0-9.-]+)/g
+
+/** Attachment names referenced in the meeting's markdown. */
+function mediaRefs(record: MeetingRecord): string[] {
+  const text = `${record.rawNotesMarkdown}\n${record.enhancedMarkdown ?? ''}`
+  return [...new Set([...text.matchAll(MEDIA_REF)].map((m) => m[1]!))]
+}
+
+/** Local doodle-media:// refs → public blob URLs (only those uploaded). */
+function rewriteMedia(markdown: string, mediaUrls: Record<string, string>): string {
+  return markdown.replace(MEDIA_REF, (whole, name: string) => mediaUrls[name] ?? whole)
+}
+
+/** Stable hash of everything the push carries — change detection. Includes
+ *  the media rewrite so a late-arriving upload URL triggers a re-push. */
+function contentHash(record: MeetingRecord, mediaUrls: Record<string, string>): string {
   const projection = {
     title: record.title,
     createdAt: record.createdAt,
     startedAt: record.startedAt ?? null,
     endedAt: record.endedAt ?? null,
     calendarEventId: record.calendarEventId ?? null,
-    rawNotesMarkdown: record.rawNotesMarkdown,
-    enhancedMarkdown: record.enhancedMarkdown ?? null,
+    rawNotesMarkdown: rewriteMedia(record.rawNotesMarkdown, mediaUrls),
+    enhancedMarkdown: record.enhancedMarkdown
+      ? rewriteMedia(record.enhancedMarkdown, mediaUrls)
+      : null,
     segments: record.segments.map((s) => [s.channel, s.speaker, s.text, s.startMs, s.endMs])
   }
   return createHash('sha256').update(JSON.stringify(projection)).digest('hex')
 }
 
-function toPushMeeting(record: MeetingRecord): object {
+function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>): object {
   return {
     id: record.id,
     title: record.title,
@@ -392,8 +456,12 @@ function toPushMeeting(record: MeetingRecord): object {
     ...(record.startedAt ? { startedAt: record.startedAt } : {}),
     ...(record.endedAt ? { endedAt: record.endedAt } : {}),
     ...(record.calendarEventId ? { calendarEventId: record.calendarEventId } : {}),
-    ...(record.rawNotesMarkdown ? { rawNotesMarkdown: record.rawNotesMarkdown } : {}),
-    ...(record.enhancedMarkdown ? { enhancedMarkdown: record.enhancedMarkdown } : {}),
+    ...(record.rawNotesMarkdown
+      ? { rawNotesMarkdown: rewriteMedia(record.rawNotesMarkdown, mediaUrls) }
+      : {}),
+    ...(record.enhancedMarkdown
+      ? { enhancedMarkdown: rewriteMedia(record.enhancedMarkdown, mediaUrls) }
+      : {}),
     // Echo-flagged segments are far-side bleed the UI hides — don't sync them.
     segments: record.segments
       .filter((s) => !s.echo)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CalendarEvent, CalendarState } from '../../shared/calendar-api'
 import type { FolderRecord } from '../../shared/folders-api'
-import type { MeetingSummary } from '../../shared/meetings-api'
+import type { MeetingSearchHit, MeetingSummary } from '../../shared/meetings-api'
 import type {
   GlobalChatEntry,
   NotesModelsResponse,
@@ -522,6 +522,29 @@ export default function HomeView({
   const cloudReady = settings?.engineChoice === 'cloud' && settings.cloud?.hasKey === true
   const modelReady = cloudReady || anyDownloaded
 
+  /** Full-text hits for the current query (id → matched field); null while
+   *  the query is empty. Debounced main-process scan. */
+  const [searchHits, setSearchHits] = useState<Map<string, MeetingSearchHit['field']> | null>(null)
+
+  useEffect(() => {
+    const q = search.trim()
+    if (q.length === 0) {
+      setSearchHits(null)
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void window.meetings.search(q).then((hits) => {
+        if (cancelled) return
+        setSearchHits(new Map(hits.map((h) => [h.id, h.field])))
+      })
+    }, 150)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [search])
+
   const visible = useMemo(() => {
     const all = meetings ?? []
     if (filter.kind === 'trash') return all.filter((m) => Boolean(m.trashedAt))
@@ -531,9 +554,13 @@ export default function HomeView({
 
   const groups = useMemo(() => {
     const query = search.trim().toLowerCase()
-    const filtered = visible.filter(
-      (m) => query.length === 0 || (m.title || 'New meeting').toLowerCase().includes(query)
-    )
+    const filtered = visible.filter((m) => {
+      if (query.length === 0) return true
+      // Instant title match keeps typing snappy; the async full-text hits
+      // widen the net to notes and transcripts as they arrive.
+      if ((m.title || 'New meeting').toLowerCase().includes(query)) return true
+      return searchHits?.has(m.id) ?? false
+    })
     const out: Array<{ label: string; items: MeetingSummary[]; older: boolean }> = []
     for (const m of filtered) {
       const label = dayLabel(m.createdAt)
@@ -545,7 +572,7 @@ export default function HomeView({
       }
     }
     return out
-  }, [visible, search])
+  }, [visible, search, searchHits])
 
   /* ---- mutations (upsert/delete, then let App refetch) ---- */
 
@@ -701,6 +728,12 @@ export default function HomeView({
                         <span className="row-sub">
                           {m.kind === 'note' ? 'Note' : 'Me'}
                           {m.durationMin !== undefined ? ` · ${m.durationMin} min` : ''}
+                          {search.trim().length > 0 &&
+                            (searchHits?.get(m.id) === 'transcript'
+                              ? ' · matches transcript'
+                              : searchHits?.get(m.id) === 'notes'
+                                ? ' · matches notes'
+                                : '')}
                         </span>
                       </span>
                       <span className="row-time">{timeLabel(m.createdAt)}</span>

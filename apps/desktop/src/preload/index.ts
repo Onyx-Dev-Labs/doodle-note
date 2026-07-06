@@ -46,8 +46,10 @@ import {
   MEETINGS_DELETE_CHANNEL,
   MEETINGS_GET_CHANNEL,
   MEETINGS_LIST_CHANNEL,
+  MEETINGS_SEARCH_CHANNEL,
   MEETINGS_UPSERT_CHANNEL,
   type MeetingRecord,
+  type MeetingSearchHit,
   type MeetingSummary,
   type MeetingUpsert,
   type MeetingsApi
@@ -197,6 +199,10 @@ const notesApi: NotesApi = {
 }
 
 const meetingsApi: MeetingsApi = {
+  search(query: string): Promise<MeetingSearchHit[]> {
+    return ipcRenderer.invoke(MEETINGS_SEARCH_CHANNEL, query) as Promise<MeetingSearchHit[]>
+  },
+
   list(): Promise<MeetingSummary[]> {
     return ipcRenderer.invoke(MEETINGS_LIST_CHANNEL) as Promise<MeetingSummary[]>
   },

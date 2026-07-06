@@ -17,7 +17,12 @@ enum LiveCommand {
         // Arm stop handling FIRST. A SIGTERM that arrives before the handlers
         // exist kills the process instantly and silently — which, during model
         // warm-up, meant an early Stop click threw the whole session away.
+        let stopper = Stopper()
         StopController.shared.arm()
+        Task {
+            await StopController.shared.wait(timeoutSeconds: nil)
+            stopper.stop()
+        }
 
         // Opt-in parent-death watchdog: hosts that spawn us with a live stdin
         // pipe pass this flag; when the pipe closes (host crashed/restarted),
@@ -34,13 +39,35 @@ enum LiveCommand {
             }.start()
         }
 
-        let source = options.values["source"] ?? "both"
+        try await LiveSession.run(
+            source: options.values["source"] ?? "both",
+            aec: options.values["aec"] == "on",
+            seconds: options.values["seconds"].flatMap(Double.init),
+            micManager: nil,
+            systemManager: nil,
+            stopper: stopper
+        )
+    }
+}
+
+// MARK: - The session itself (shared by `live` and `serve`)
+
+/// One capture-to-finals session. `serve` passes preloaded ASR managers so
+/// transcription starts instantly; `live` passes nil and loads per-session.
+enum LiveSession {
+    static func run(
+        source: String,
+        aec: Bool,
+        seconds: Double?,
+        micManager: StreamingUnifiedAsrManager?,
+        systemManager: StreamingUnifiedAsrManager?,
+        stopper: Stopper
+    ) async throws {
         let wantMic = source == "mic" || source == "both"
         let wantSystem = source == "system" || source == "both"
         guard wantMic || wantSystem else {
             throw EngineError.usage("--source must be mic | system | both")
         }
-        let seconds = options.values["seconds"].flatMap(Double.init)
 
         // Capture-first startup: pipelines are created WITHOUT loading models so
         // recording begins the moment permissions clear. Audio queues in each
@@ -48,8 +75,8 @@ enum LiveCommand {
         // show "recording" immediately and no audio is lost.
         var micPipeline: ChannelPipeline?
         var systemPipeline: ChannelPipeline?
-        if wantMic { micPipeline = ChannelPipeline(channel: "mic") }
-        if wantSystem { systemPipeline = ChannelPipeline(channel: "system") }
+        if wantMic { micPipeline = ChannelPipeline(channel: "mic", manager: micManager) }
+        if wantSystem { systemPipeline = ChannelPipeline(channel: "system", manager: systemManager) }
 
         var micCapture: MicCapture?
         var systemCapture: SystemAudioCapture?
@@ -77,7 +104,7 @@ enum LiveCommand {
             // initialize on some setups, and its teardown/retry can leave the
             // fallback mic silently dead. Cross-channel transcript dedup
             // handles speaker echo, so reliability wins by default.
-            micCapture = MicCapture(into: pipeline, enableAEC: options.values["aec"] == "on")
+            micCapture = MicCapture(into: pipeline, enableAEC: aec)
         }
 
         try micCapture?.start()
@@ -131,7 +158,7 @@ enum LiveCommand {
         // Warm-up complete — hosts can flip from "warming up" to live UI.
         Events.emit(["event": "status", "stage": "transcribing"])
 
-        await StopController.shared.wait(timeoutSeconds: seconds)
+        await stopper.wait(timeoutSeconds: seconds)
         Events.emit(["event": "status", "stage": "finishing"])
 
         micCapture?.stop()
@@ -157,17 +184,22 @@ final class ChannelPipeline {
     private let epochLock = NSLock()
     private var epochEmitted = false
 
-    init(channel: String) {
+    private let preloaded: Bool
+
+    init(channel: String, manager: StreamingUnifiedAsrManager? = nil) {
         self.channel = channel
-        self.manager = StreamingUnifiedAsrManager()
+        self.preloaded = manager != nil
+        self.manager = manager ?? StreamingUnifiedAsrManager()
         (self.bufferStream, self.bufferContinuation) = AsyncStream.makeStream(of: AVAudioPCMBuffer.self)
     }
 
-    /// Load models and wire callbacks. Called AFTER capture starts — audio
-    /// queues in the buffer stream until begin() drains it.
+    /// Load models (unless the serve host preloaded them) and wire callbacks.
+    /// Called AFTER capture starts — audio queues until begin() drains it.
     func prepare() async throws {
-        Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
-        try await manager.loadModels()
+        if !preloaded {
+            Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
+            try await manager.loadModels()
+        }
         let ch = channel
         await manager.setPartialTranscriptCallback { text in
             Events.emit(["event": "partial", "channel": ch, "text": text])
@@ -377,6 +409,42 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         Events.emit(["event": "error", "channel": "system", "message": "system capture stopped: \(error.localizedDescription)"])
         StopController.shared.stop()
+    }
+}
+
+// MARK: - Per-session stop flag (serve reuses the process across sessions)
+
+final class Stopper: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func stop() {
+        lock.lock()
+        let resumable = waiters
+        waiters = []
+        stopped = true
+        lock.unlock()
+        resumable.forEach { $0.resume() }
+    }
+
+    func wait(timeoutSeconds: Double?) async {
+        if let timeoutSeconds {
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                self.stop()
+            }
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if stopped {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
     }
 }
 

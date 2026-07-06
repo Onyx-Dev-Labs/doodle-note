@@ -25,6 +25,8 @@ export interface SyncStatus {
   lastError?: string
   /** True while the browser link flow is waiting for approval. */
   linking: boolean
+  /** Web app origin (prod, or DOODLE_SYNC_URL override) for building links. */
+  baseUrl: string
 }
 
 export type ShareResult = { url: string } | { error: string }
