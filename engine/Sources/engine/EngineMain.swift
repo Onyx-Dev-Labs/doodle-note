@@ -24,6 +24,8 @@ struct EngineMain {
                 await PreflightCommand.run()
             case "micmon":
                 MicMonitorCommand.run()
+            case "serve":
+                try await ServeCommand.run(options)
             case "info":
                 Commands.info()
             default:

@@ -122,6 +122,15 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // In-page link clicks (e.g. the transcript footer in generated notes) go
+  // to the system browser — the app itself never navigates away.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (/^https?:/i.test(url)) {
+      event.preventDefault()
+      shell.openExternal(url)
+    }
+  })
+
   // HMR for renderer based on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -146,8 +155,19 @@ app.whenReady().then(() => {
       if (line.length > 0) console.error(`[engine preflight] ${line}`)
     })
     preflight.on('error', (err) => console.error('[engine preflight] spawn failed:', err.message))
+    // Persistent engine: models load once here, so hitting record is instant.
+    // Started after preflight so the two don't race the model download.
+    let serveStarted = false
+    const startServeOnce = (): void => {
+      if (serveStarted) return
+      serveStarted = true
+      engine.startServe()
+    }
+    preflight.on('exit', startServeOnce)
+    setTimeout(startServeOnce, 120_000).unref()
   } catch (err) {
     console.error('[engine preflight] failed:', err)
+    engine.startServe()
   }
 
   electronApp.setAppUserModelId('com.doodlenote.desktop')

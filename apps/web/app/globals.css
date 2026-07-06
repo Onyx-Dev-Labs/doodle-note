@@ -70,6 +70,13 @@ body {
   padding: 0.1em 0.35em;
   font-size: 0.85em;
 }
+.prose-notes img {
+  max-width: min(100%, 560px);
+  border-radius: 10px;
+  border: 1px solid var(--color-sand);
+  display: block;
+  margin: 0.6em 0;
+}
 .prose-notes blockquote {
   border-left: 3px solid var(--color-sand);
   margin: 0.6em 0;

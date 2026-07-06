@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { desc, eq, getDb, meetings, notes, sql } from "@repo/db";
+import { and, desc, eq, getDb, ilike, meetings, notes, or, sql } from "@repo/db";
 
 import { auth } from "@/lib/auth";
 import { ensurePersonalWorkspace } from "@/lib/workspace";
@@ -19,7 +19,13 @@ function formatWhen(date: Date | null): string {
   });
 }
 
-export default async function MeetingsPage() {
+export default async function MeetingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
+  const query = (q ?? "").trim().slice(0, 200);
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) redirect("/login");
@@ -36,6 +42,8 @@ export default async function MeetingsPage() {
     personal;
 
   const db = getDb();
+  const pattern = `%${query}%`;
+  const scope = eq(meetings.organizationId, activeOrg.id);
   const rows = await db
     .select({
       id: meetings.id,
@@ -47,7 +55,19 @@ export default async function MeetingsPage() {
     })
     .from(meetings)
     .leftJoin(notes, eq(notes.meetingId, meetings.id))
-    .where(eq(meetings.organizationId, activeOrg.id))
+    .where(
+      query.length === 0
+        ? scope
+        : and(
+            scope,
+            or(
+              ilike(meetings.title, pattern),
+              sql`${notes.rawContent}->>'markdown' ilike ${pattern}`,
+              sql`${notes.enhancedContent}->>'markdown' ilike ${pattern}`,
+              sql`exists (select 1 from transcript_segments ts where ts.meeting_id = ${meetings.id} and ts.text ilike ${pattern})`,
+            ),
+          ),
+    )
     .orderBy(desc(sql`coalesce(${meetings.startedAt}, ${meetings.createdAt})`))
     .limit(200);
 
@@ -60,7 +80,21 @@ export default async function MeetingsPage() {
         <span className="text-sm text-stone">{activeOrg.name}</span>
       </div>
 
-      {rows.length === 0 ? (
+      <form method="get" className="mt-4">
+        <input
+          type="search"
+          name="q"
+          defaultValue={query}
+          placeholder="Search titles, notes, and transcripts…"
+          className="w-full rounded-md border border-sand bg-white px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
+        />
+      </form>
+
+      {rows.length === 0 && query.length > 0 ? (
+        <p className="mt-8 rounded-xl border border-sand bg-card-soft p-6 text-center text-sm text-stone">
+          Nothing matches &ldquo;{query}&rdquo;.
+        </p>
+      ) : rows.length === 0 ? (
         <div className="mt-10 rounded-xl border border-sand bg-card-soft p-8 text-center">
           <h2 className="text-base font-semibold text-ink">
             No meetings synced yet

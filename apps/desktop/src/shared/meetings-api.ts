@@ -12,6 +12,7 @@ import type { TranscriptSegment } from './engine-events'
 export const MEETINGS_LIST_CHANNEL = 'meetings:list'
 export const MEETINGS_GET_CHANNEL = 'meetings:get'
 export const MEETINGS_UPSERT_CHANNEL = 'meetings:upsert'
+export const MEETINGS_SEARCH_CHANNEL = 'meetings:search'
 export const MEETINGS_DELETE_CHANNEL = 'meetings:delete'
 
 /** One persisted "ask anything" exchange. */
@@ -82,7 +83,15 @@ export interface MeetingSummary {
 export type MeetingUpsert = Partial<Omit<MeetingRecord, 'id'>> & { id: string }
 
 /** API surface exposed on `window.meetings` by the preload script. */
+/** Where a full-text search query matched (strongest field reported). */
+export interface MeetingSearchHit {
+  id: string
+  field: 'title' | 'notes' | 'transcript'
+}
+
 export interface MeetingsApi {
+  /** Case-insensitive search across titles, notes, and transcripts. */
+  search(query: string): Promise<MeetingSearchHit[]>
   list(): Promise<MeetingSummary[]>
   get(id: string): Promise<MeetingRecord | null>
   upsert(meeting: MeetingUpsert): Promise<MeetingRecord>

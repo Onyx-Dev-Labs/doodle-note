@@ -6,9 +6,11 @@ import {
   MEETINGS_DELETE_CHANNEL,
   MEETINGS_GET_CHANNEL,
   MEETINGS_LIST_CHANNEL,
+  MEETINGS_SEARCH_CHANNEL,
   MEETINGS_UPSERT_CHANNEL,
   type MeetingChatEntry,
   type MeetingRecord,
+  type MeetingSearchHit,
   type MeetingSummary,
   type MeetingUpsert
 } from '../shared/meetings-api'
@@ -38,6 +40,9 @@ export class MeetingsService {
       this.upsert((patch ?? {}) as MeetingUpsert)
     )
     ipcMain.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
+    ipcMain.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>
+      this.search(String(query ?? ''))
+    )
   }
 
   /* ---- queries ---- */
@@ -81,6 +86,31 @@ export class MeetingsService {
       if (record) records.push(record)
     }
     return records
+  }
+
+  /**
+   * Case-insensitive substring search across every stored document. A few
+   * hundred JSON files scan in single-digit milliseconds — no index needed
+   * at this scale. Reports the strongest matching field per meeting
+   * (title > notes > transcript) so the UI can hint where the hit was.
+   */
+  search(query: string): MeetingSearchHit[] {
+    const q = query.trim().toLowerCase()
+    if (q.length === 0) return []
+    const hits: MeetingSearchHit[] = []
+    for (const record of this.readAll()) {
+      if ((record.title || '').toLowerCase().includes(q)) {
+        hits.push({ id: record.id, field: 'title' })
+      } else if (
+        record.rawNotesMarkdown.toLowerCase().includes(q) ||
+        (record.enhancedMarkdown ?? '').toLowerCase().includes(q)
+      ) {
+        hits.push({ id: record.id, field: 'notes' })
+      } else if (record.segments.some((s) => s.text.toLowerCase().includes(q))) {
+        hits.push({ id: record.id, field: 'transcript' })
+      }
+    }
+    return hits
   }
 
   /* ---- writes ---- */

@@ -32,7 +32,109 @@ export class EngineProcess {
   private stdoutBuffer = ''
   private readonly listeners = new Set<EngineEventListener>()
 
+  /* Persistent `serve` sidecar: models stay loaded across sessions. */
+  private serveChild: EngineChild | null = null
+  private serveBuffer = ''
+  private serveReady = false
+  private serveSessionActive = false
+  private serveRestartTimer: NodeJS.Timeout | null = null
+  private disposed = false
+
   constructor(private readonly binaryPath: string) {}
+
+  /**
+   * Launch the persistent engine. Models load once here; live sessions then
+   * start instantly via stdin commands. Restarts itself on crash; while it
+   * is down (or still loading), live falls back to the classic per-session
+   * spawn, so recording always works.
+   */
+  startServe(): void {
+    if (this.serveChild || this.disposed || !existsSync(this.binaryPath)) return
+    let child: EngineChild
+    try {
+      child = spawn(this.binaryPath, ['serve'], { stdio: ['pipe', 'pipe', 'pipe'] })
+    } catch (err) {
+      console.error('[engine serve] spawn failed:', err)
+      return
+    }
+    this.serveChild = child
+    this.serveBuffer = ''
+    this.serveReady = false
+
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      if (this.serveChild !== child) return
+      this.serveBuffer += chunk
+      let nl = this.serveBuffer.indexOf('\n')
+      while (nl !== -1) {
+        const line = this.serveBuffer.slice(0, nl)
+        this.serveBuffer = this.serveBuffer.slice(nl + 1)
+        this.handleServeLine(line)
+        nl = this.serveBuffer.indexOf('\n')
+      }
+    })
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      for (const line of chunk.split('\n')) {
+        if (line.trim().length > 0) console.error(`[engine serve] ${line}`)
+      }
+    })
+    child.on('error', (err) => {
+      console.error('[engine serve] error:', err.message)
+    })
+    child.on('close', () => {
+      if (this.serveChild !== child) return
+      this.serveChild = null
+      this.serveReady = false
+      // A crash mid-session must end the session for the renderer too.
+      if (this.serveSessionActive) {
+        this.serveSessionActive = false
+        this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
+      }
+      if (!this.disposed) {
+        this.serveRestartTimer = setTimeout(() => this.startServe(), 5_000)
+        this.serveRestartTimer.unref()
+      }
+    })
+  }
+
+  private handleServeLine(rawLine: string): void {
+    const line = rawLine.trim()
+    if (line.length === 0) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(line)
+    } catch {
+      return // CoreML noise
+    }
+    const event = parsed as { event?: string; stage?: string }
+    if (typeof event.event !== 'string') return
+    if (event.event === 'status' && event.stage === 'serve_ready') {
+      this.serveReady = true
+      return
+    }
+    if (event.event === 'status' && event.stage === 'serve_loading_models') return
+    // Session events flow only while a session is active — boot noise stays out.
+    if (!this.serveSessionActive) return
+    this.emit(parsed as EngineSidecarEvent)
+    if (event.event === 'done') {
+      this.serveSessionActive = false
+      // The legacy path signalled session end with the child's exit; serve
+      // stays alive, so synthesize it for unchanged renderer semantics.
+      this.emit({ event: 'exit', code: 0, signal: null })
+    }
+  }
+
+  private serveWrite(command: object): boolean {
+    const child = this.serveChild
+    if (!child) return false
+    try {
+      child.stdin.write(`${JSON.stringify(command)}\n`)
+      return true
+    } catch {
+      return false
+    }
+  }
 
   onEvent(listener: EngineEventListener): () => void {
     this.listeners.add(listener)
@@ -42,12 +144,27 @@ export class EngineProcess {
   }
 
   get running(): boolean {
-    return this.child !== null
+    return this.child !== null || this.serveSessionActive
   }
 
   start(command: EngineCommand, filePath?: string, opts: EngineStartOptions = {}): void {
     // Only one sidecar at a time; a new start supersedes (hard-discards) the previous run.
     this.discard()
+
+    // Instant path: the persistent engine has models loaded and is idle.
+    if (command === 'live' && this.serveReady && this.serveChild && !this.serveSessionActive) {
+      this.serveSessionActive = true
+      this.emit({ event: 'started', command, filePath, binaryPath: this.binaryPath })
+      const ok = this.serveWrite({ cmd: 'start', source: opts.source ?? 'both' })
+      if (ok) return
+      this.serveSessionActive = false // fall through to the classic spawn
+    }
+    // A superseding start while a serve session runs: hard-restart serve (its
+    // tail events must not leak into the new session) and use the classic
+    // spawn for this one.
+    if (command === 'live' && this.serveSessionActive) {
+      this.restartServe()
+    }
 
     if (command !== 'stream' && command !== 'transcribe' && command !== 'live') {
       this.emit({ event: 'spawn-error', message: `Unknown engine command: ${String(command)}` })
@@ -130,6 +247,16 @@ export class EngineProcess {
    * Escalates to SIGKILL if the sidecar hangs.
    */
   stop(): void {
+    if (this.serveSessionActive) {
+      this.serveWrite({ cmd: 'stop' })
+      // If the serve engine wedges mid-finish, restart it — the close handler
+      // ends the session for the renderer.
+      const escalate = setTimeout(() => {
+        if (this.serveSessionActive) this.restartServe()
+      }, 25_000)
+      escalate.unref()
+      return
+    }
     const child = this.child
     if (!child) return
     if (child.exitCode === null && child.signalCode === null) {
@@ -170,8 +297,36 @@ export class EngineProcess {
     this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
   }
 
-  /** Kill the sidecar on app shutdown. */
+  /** Hard-restart the persistent engine (crash recovery / supersede). */
+  private restartServe(): void {
+    const child = this.serveChild
+    this.serveChild = null
+    this.serveReady = false
+    if (this.serveSessionActive) {
+      this.serveSessionActive = false
+      this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
+    }
+    if (child) {
+      child.removeAllListeners()
+      child.stdout.removeAllListeners()
+      child.stderr.removeAllListeners()
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    }
+    if (!this.disposed) {
+      this.serveRestartTimer = setTimeout(() => this.startServe(), 1_000)
+      this.serveRestartTimer.unref()
+    }
+  }
+
+  /** Kill the sidecars on app shutdown. */
   dispose(): void {
+    this.disposed = true
+    if (this.serveRestartTimer) clearTimeout(this.serveRestartTimer)
+    const serve = this.serveChild
+    this.serveChild = null
+    if (serve && serve.exitCode === null && serve.signalCode === null) {
+      serve.stdin.end() // its stdin watchdog exits it cleanly
+    }
     this.discard()
     this.listeners.clear()
   }

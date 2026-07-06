@@ -626,15 +626,27 @@ export default function MeetingView({
       setEnhanceError(result.error ?? 'Enhance failed with no output')
       return
     }
+    // Granola-style footer: when the meeting lives in the cloud too, the
+    // notes link to its web page (full transcript + chat). Skipped while
+    // sync is off — local-first notes carry no dead links.
+    let markdown = result.markdown
+    try {
+      const sync = await window.sync.getStatus()
+      if (sync.connected && sync.enabled) {
+        markdown += `\n\n---\n\n[View transcript & chat](${sync.baseUrl}/app/meeting/${meetingId})`
+      }
+    } catch {
+      // status unavailable — plain notes are fine
+    }
     setEnhanceStatus('idle')
-    setEnhancedMarkdown(result.markdown)
+    setEnhancedMarkdown(markdown)
     persist({
-      enhancedMarkdown: result.markdown,
+      enhancedMarkdown: markdown,
       ...(result.engine ? { engine: result.engine } : {})
     })
     setDocView('enhanced')
     docViewRef.current = 'enhanced'
-    setEditorMarkdown(result.markdown, false)
+    setEditorMarkdown(markdown, false)
   }
 
   /** Pick a template: remember it on the meeting and (re)generate with it. */

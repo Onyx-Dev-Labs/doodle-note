@@ -11,23 +11,85 @@ interface Workspace {
   slug: string;
 }
 
+interface Member {
+  id: string;
+  email: string;
+  role: string;
+}
+
+interface Invitation {
+  id: string;
+  email: string;
+  status: string;
+}
+
 export function WorkspacesPanel({
   userEmail,
   activeOrganizationId,
   organizations,
+  members,
+  invitations,
 }: {
   userEmail: string;
   activeOrganizationId: string | null;
   organizations: Workspace[];
+  members: Member[];
+  invitations: Invitation[];
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [invitePending, setInvitePending] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   async function handleSetActive(organizationId: string) {
     setError(null);
     const result = await authClient.organization.setActive({ organizationId });
     if (result.error) {
       setError(result.error.message ?? "Could not switch workspace");
+      return;
+    }
+    router.refresh();
+  }
+
+  async function handleInvite(event: React.FormEvent) {
+    event.preventDefault();
+    const email = inviteEmail.trim();
+    if (!email || !activeOrganizationId) return;
+    setError(null);
+    setInvitePending(true);
+    const result = await authClient.organization.inviteMember({
+      email,
+      role: "member",
+      organizationId: activeOrganizationId,
+    });
+    setInvitePending(false);
+    if (result.error) {
+      setError(result.error.message ?? "Could not create the invitation");
+      return;
+    }
+    setInviteEmail("");
+    router.refresh();
+  }
+
+  async function copyInviteLink(invitationId: string) {
+    const url = `${window.location.origin}/invite/${invitationId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(invitationId);
+      setTimeout(() => setCopiedId(null), 2500);
+    } catch {
+      setError(url); // clipboard blocked — surface the link itself
+    }
+  }
+
+  async function cancelInvite(invitationId: string) {
+    setError(null);
+    const result = await authClient.organization.cancelInvitation({
+      invitationId,
+    });
+    if (result.error) {
+      setError(result.error.message ?? "Could not cancel the invitation");
       return;
     }
     router.refresh();
@@ -44,14 +106,14 @@ export function WorkspacesPanel({
       </p>
 
       {error && (
-        <p role="alert" className="mt-4 text-sm text-red-700">
+        <p role="alert" className="mt-4 break-all text-sm text-red-700">
           {error}
         </p>
       )}
 
       {organizations.length === 0 ? (
         <p className="mt-6 rounded-xl border border-dashed border-sand bg-card-soft px-4 py-6 text-center text-sm text-stone">
-          No workspaces yet — create your first one below.
+          No workspaces yet.
         </p>
       ) : (
         <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-white">
@@ -87,18 +149,75 @@ export function WorkspacesPanel({
         </ul>
       )}
 
-      <div className="mt-4 rounded-xl border border-dashed border-sand bg-card-soft px-5 py-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-ink">Team workspaces</span>
-          <span className="rounded-full bg-sage-fill px-2 py-0.5 text-xs font-medium text-sage-deep">
-            coming soon
-          </span>
-        </div>
+      <section className="mt-8">
+        <h2 className="text-base font-semibold text-ink">Members</h2>
         <p className="mt-1 text-sm text-stone">
-          Invite your team to a shared meeting library — everyone&rsquo;s
-          synced meetings, searchable in one place.
+          Everyone in the active workspace sees its synced meetings.
         </p>
-      </div>
+
+        <ul className="mt-3 divide-y divide-sand rounded-xl border border-sand bg-white">
+          {members.map((member) => (
+            <li
+              key={member.id}
+              className="flex items-center justify-between gap-4 px-5 py-3"
+            >
+              <span className="truncate text-sm text-ink">{member.email}</span>
+              <span className="shrink-0 text-xs text-stone">{member.role}</span>
+            </li>
+          ))}
+          {invitations.map((invite) => (
+            <li
+              key={invite.id}
+              className="flex items-center justify-between gap-4 px-5 py-3"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-ink">
+                  {invite.email}
+                </span>
+                <span className="text-xs text-stone">invited — send them the link</span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => copyInviteLink(invite.id)}
+                  className="rounded-md border border-sand bg-white px-2.5 py-1 text-xs text-ink transition-colors hover:bg-sage-fill"
+                >
+                  {copiedId === invite.id ? "Copied ✓" : "Copy invite link"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => cancelInvite(invite.id)}
+                  className="rounded-md px-2 py-1 text-xs text-stone hover:text-red-700"
+                  title="Cancel invitation"
+                >
+                  ✕
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        <form onSubmit={handleInvite} className="mt-3 flex items-start gap-2">
+          <input
+            type="email"
+            placeholder="teammate@company.com"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            className="flex-1 rounded-md border border-sand bg-white px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
+          />
+          <button
+            type="submit"
+            disabled={invitePending || !inviteEmail.trim() || !activeOrganizationId}
+            className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-cream transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {invitePending ? "Inviting…" : "Invite"}
+          </button>
+        </form>
+        <p className="mt-2 text-xs text-stone">
+          Invitations don&rsquo;t send email yet — copy the link and send it
+          yourself. It works once they sign in with the invited address.
+        </p>
+      </section>
     </main>
   );
 }
