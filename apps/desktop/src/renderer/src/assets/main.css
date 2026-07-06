@@ -19,11 +19,49 @@
   --rec-green: #3f9142;
   --danger: #a8422f;
   --danger-soft: #f3e2dc;
+  --fill: #efede2;
+  --danger-border: #ddb5a9;
+  --control-track: #d8d5c9;
+  --frost: rgba(255, 255, 255, 0.85);
   --shadow-pill: 0 6px 22px rgba(38, 40, 31, 0.12);
   --shadow-panel: 0 18px 50px rgba(38, 40, 31, 0.16);
   --serif: 'New York', ui-serif, Georgia, 'Times New Roman', serif;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+/* Dark theme — same warm sage brand, inverted. Applied by theme.ts as
+   html[data-theme='dark']; 'system' resolves via prefers-color-scheme. */
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1d1f19;
+  --card: #262922;
+  --card-soft: #22251e;
+  --border: #3a3e33;
+  --ink: #f0eee2;
+  --body: #cfcdbe;
+  --muted: #93967f;
+  --faint: #6b6e5c;
+  --accent: #8fb07a;
+  --accent-deep: #aac996;
+  --sage-fill: #34402b;
+  --rec-green: #58b45c;
+  --danger: #d98a75;
+  --danger-soft: #432c25;
+  --fill: #2e3128;
+  --danger-border: #6b4438;
+  --control-track: #43463a;
+  --frost: rgba(29, 31, 25, 0.85);
+  --shadow-pill: 0 6px 22px rgba(0, 0, 0, 0.4);
+  --shadow-panel: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+/* The lockup PNG has ink-colored text — give it a cream plate in dark. */
+html[data-theme='dark'] .settings-logo,
+html[data-theme='dark'] .home-empty-logo {
+  background: #f7f5ee;
+  border-radius: 14px;
+  padding: 8px;
 }
 
 * {
@@ -147,7 +185,7 @@ a,
 }
 
 .wordmark:hover {
-  background: rgba(38, 40, 31, 0.04);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 
 /* Crop the sage mascot square out of the tall lockup (object region
@@ -238,7 +276,7 @@ a,
 }
 
 .nav-item:hover {
-  background: rgba(38, 40, 31, 0.05);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .nav-item.on {
@@ -345,7 +383,7 @@ a,
 }
 
 .folder-add:hover {
-  background: rgba(38, 40, 31, 0.1);
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
   color: var(--ink);
 }
 
@@ -713,7 +751,7 @@ a,
 
 .mb-dismiss:hover {
   color: var(--ink);
-  background: rgba(38, 40, 31, 0.06);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
 .meetings-list {
@@ -752,7 +790,7 @@ a,
 }
 
 .meeting-row:hover {
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--frost);
   box-shadow: 0 1px 4px rgba(38, 40, 31, 0.06);
 }
 
@@ -763,7 +801,7 @@ a,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f1efe4;
+  background: var(--fill);
   border-radius: 8px;
   color: var(--muted);
   font-size: 13px;
@@ -854,7 +892,7 @@ a,
 
 .row-menu-btn:hover,
 .meeting-row.actions-open .row-menu-btn {
-  background: rgba(38, 40, 31, 0.08);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   color: var(--ink);
 }
 
@@ -879,7 +917,7 @@ a,
 }
 
 .row-delete:hover {
-  border-color: #ddb5a9;
+  border-color: var(--danger-border);
   background: var(--danger-soft);
 }
 
@@ -910,7 +948,7 @@ a,
 }
 
 .row-menu button:hover:not(:disabled) {
-  background: rgba(38, 40, 31, 0.05);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .row-menu button:disabled {
@@ -996,7 +1034,7 @@ a,
 }
 
 button.fp-row:hover {
-  background: rgba(38, 40, 31, 0.05);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .fp-icon {
@@ -1130,7 +1168,7 @@ button.fp-row:hover {
   gap: 5px;
   font-size: 12px;
   color: var(--muted);
-  background: #efede2;
+  background: var(--fill);
   border-radius: 6px;
   padding: 3px 9px;
 }
@@ -1138,7 +1176,7 @@ button.fp-row:hover {
 .chip-toggle {
   padding: 0;
   overflow: hidden;
-  background: #efede2;
+  background: var(--fill);
 }
 
 .chip-toggle button {
@@ -1300,7 +1338,7 @@ button.fp-row:hover {
 }
 
 .doc-editor .tiptap code {
-  background: #efede2;
+  background: var(--fill);
   border-radius: 4px;
   padding: 1px 4px;
   font-family: var(--mono);
@@ -1308,7 +1346,7 @@ button.fp-row:hover {
 }
 
 .doc-editor .tiptap pre {
-  background: #efede2;
+  background: var(--fill);
   border-radius: 8px;
   padding: 10px 12px;
   overflow-x: auto;
@@ -1409,7 +1447,7 @@ button.fp-row:hover {
 
 .chev-btn:hover,
 .stop-btn:hover {
-  background: rgba(38, 40, 31, 0.06);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
   color: var(--ink);
 }
 
@@ -1565,7 +1603,7 @@ button.fp-row:hover {
   font-size: 12px;
   font-weight: 500;
   color: var(--body);
-  background: #f1efe4;
+  background: var(--fill);
   border-radius: 999px;
   padding: 6px 12px;
   white-space: nowrap;
@@ -1661,7 +1699,7 @@ button.fp-row:hover {
 }
 
 .tp-actions button:hover {
-  background: rgba(38, 40, 31, 0.06);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
   color: var(--ink);
 }
 
@@ -1817,7 +1855,7 @@ button.fp-row:hover {
 }
 
 .chat-a code {
-  background: #efede2;
+  background: var(--fill);
   border-radius: 4px;
   padding: 1px 4px;
   font-family: var(--mono);
@@ -1825,7 +1863,7 @@ button.fp-row:hover {
 }
 
 .chat-a pre {
-  background: #efede2;
+  background: var(--fill);
   border-radius: 8px;
   padding: 8px 10px;
   overflow-x: auto;
@@ -1858,7 +1896,7 @@ button.fp-row:hover {
   gap: 10px;
   flex-wrap: wrap;
   background: var(--danger-soft);
-  border: 1px solid #ddb5a9;
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
   padding: 8px 12px;
   margin: 10px 0 2px;
@@ -1889,7 +1927,7 @@ button.fp-row:hover {
   gap: 12px;
   max-width: min(560px, calc(100% - 120px));
   background: var(--card);
-  border: 1px solid #ddb5a9;
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 13px;
@@ -1917,7 +1955,7 @@ button.fp-row:hover {
   gap: 12px;
   max-width: min(600px, calc(100% - 48px));
   background: var(--card);
-  border: 1px solid #ddb5a9;
+  border: 1px solid var(--danger-border);
   border-radius: 10px;
   padding: 8px 14px;
   font-size: 12.5px;
@@ -1982,7 +2020,7 @@ button.fp-row:hover {
 
 .models-error {
   background: var(--danger-soft);
-  border: 1px solid #ddb5a9;
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   padding: 8px 10px;
   color: var(--danger);
@@ -2105,7 +2143,7 @@ button.fp-row:hover {
 .progress-track {
   flex: 1;
   height: 6px;
-  background: #efede2;
+  background: var(--fill);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -2130,6 +2168,38 @@ button.fp-row:hover {
   flex-direction: column;
   gap: 10px;
   padding-bottom: 8px;
+}
+
+/* Appearance: three-way segmented control */
+.theme-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--fill);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.theme-seg-btn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.theme-seg-btn:hover {
+  color: var(--ink);
+}
+
+.theme-seg-btn.on {
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* ---- settings shell: nav rail + one visible section ---- */
@@ -2404,7 +2474,7 @@ button.fp-row:hover {
   height: 21px;
   flex-shrink: 0;
   border-radius: 999px;
-  background: #d8d5c9;
+  background: var(--control-track);
   transition: background 0.15s ease;
 }
 
@@ -2424,7 +2494,7 @@ button.fp-row:hover {
   width: 17px;
   height: 17px;
   border-radius: 999px;
-  background: #fff;
+  background: var(--card);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
   transition: transform 0.15s ease;
 }
@@ -2919,7 +2989,7 @@ button.fp-row:hover {
 }
 
 .folder-menu-btn:hover {
-  background: rgba(38, 40, 31, 0.08);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   color: var(--ink);
 }
 
@@ -2947,7 +3017,7 @@ button.fp-row:hover {
 }
 
 .folder-menu button:hover {
-  background: rgba(38, 40, 31, 0.05);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .folder-menu button.danger {
@@ -2975,7 +3045,7 @@ button.fp-row:hover {
 }
 
 .chat-actions button:hover {
-  background: rgba(38, 40, 31, 0.06);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
   color: var(--ink);
 }
 
@@ -2984,7 +3054,7 @@ button.fp-row:hover {
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  background: #ffffff;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 9px 16px;

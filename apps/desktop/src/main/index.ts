@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, protocol } from 'electron'
 import { spawn } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
@@ -19,6 +19,7 @@ import {
   type DetectPrefsUpdate,
   type DetectState
 } from '../shared/detect-api'
+import { THEME_SET_SOURCE_CHANNEL } from '../shared/theme-api'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_EVENT_CHANNEL,
@@ -92,9 +93,10 @@ function createWindow(): void {
     height: 760,
     minWidth: 980,
     minHeight: 680,
+    // Matches the active palette so launch never flashes the wrong color.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#F7F5EE',
     // Mac-native feel: content extends under a hidden title bar; the renderer
     // provides a drag strip and keeps clear of the traffic lights.
     titleBarStyle: 'hiddenInset',
@@ -256,6 +258,12 @@ app.whenReady().then(() => {
   })
   micWatcher.start()
   app.on('quit', () => micWatcher.stop())
+
+  // The renderer mirrors its theme pref here so nativeTheme (and with it the
+  // floating prompt panel + native chrome) matches the in-app appearance.
+  ipcMain.on(THEME_SET_SOURCE_CHANNEL, (_event, source: unknown) => {
+    nativeTheme.themeSource = source === 'light' || source === 'dark' ? source : 'system'
+  })
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
   const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)

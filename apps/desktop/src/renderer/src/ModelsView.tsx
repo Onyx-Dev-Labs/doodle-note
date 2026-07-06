@@ -3,6 +3,7 @@ import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-a
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon } from './icons'
+import { getThemePref, setThemePref, type ThemePref } from './theme'
 import type {
   CloudProvider,
   EngineChoice,
@@ -159,6 +160,9 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
 
   /* ---- meeting detection ---- */
   const [detect, setDetect] = useState<DetectState | null>(null)
+
+  /* ---- appearance ---- */
+  const [theme, setTheme] = useState<ThemePref>(() => getThemePref())
 
   /* ---- calendar (Microsoft 365) ---- */
   const [calState, setCalState] = useState<CalendarState | null>(null)
@@ -640,6 +644,34 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           )}
 
           {section === 'general' && (
+            <>
+      <section className="keys-section">
+        <h3>Appearance</h3>
+        <div className="theme-seg" role="radiogroup" aria-label="Appearance">
+          {(
+            [
+              ['system', 'Match system'],
+              ['light', 'Light'],
+              ['dark', 'Dark']
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={theme === value}
+              className={theme === value ? 'theme-seg-btn on' : 'theme-seg-btn'}
+              onClick={() => {
+                setThemePref(value)
+                setTheme(value)
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="keys-section calendar-section">
         <h3>Meeting detection</h3>
         <p className="models-sub">
@@ -685,6 +717,7 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
           </div>
         )}
       </section>
+            </>
           )}
 
           {section === 'sync' && (
