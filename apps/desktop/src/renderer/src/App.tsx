@@ -528,9 +528,6 @@ function App(): React.JSX.Element {
               </span>{' '}
               Settings
             </button>
-            <button type="button" className="dev-link" onClick={() => setView('dev')}>
-              Developer
-            </button>
           </div>
         </aside>
 
@@ -555,6 +552,7 @@ function App(): React.JSX.Element {
               active={view === 'settings'}
               jump={settingsJump}
               onShowTour={() => setTourOpen(true)}
+              onOpenDevConsole={() => setView('dev')}
             />
           </div>
           <div className={view === 'dev' ? 'content-slot' : 'content-slot hidden'}>
