@@ -1,13 +1,15 @@
 /** Apply drizzle/ migrations to the DATABASE_URL Neon instance. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
+const here = import.meta.dirname;
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { migrate } from "drizzle-orm/neon-http/migrator";
 
 if (!process.env.DATABASE_URL) {
   const envLocal = readFileSync(
-    join(__dirname, "..", "..", "..", ".env.local"),
+    join(here, "..", "..", "..", ".env.local"),
     "utf8",
   );
   const m = envLocal.match(/^DATABASE_URL="?([^"\n]+)"?$/m);
@@ -16,7 +18,7 @@ if (!process.env.DATABASE_URL) {
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not set");
 
 const db = drizzle(neon(process.env.DATABASE_URL));
-migrate(db, { migrationsFolder: join(__dirname, "..", "drizzle") })
+migrate(db, { migrationsFolder: join(here, "..", "drizzle") })
   .then(() => console.log("migrations applied"))
   .catch((err) => {
     console.error(err);
