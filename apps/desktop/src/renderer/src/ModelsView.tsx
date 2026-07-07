@@ -495,7 +495,7 @@ export default function ModelsView({
               type="button"
               className="settings-version"
               title="See what changed in each version"
-              onClick={() => window.open('https://doodle-note.vercel.app/changelog')}
+              onClick={() => window.open('https://www.doodlenote.ai/changelog')}
             >
               v{detect.appVersion} · What&rsquo;s new
             </button>

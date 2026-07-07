@@ -76,4 +76,4 @@ npmRebuild: false
 # (403 Security Checkpoint) which electron-updater cannot pass.
 publish:
   provider: generic
-  url: https://doodle-note.vercel.app/updates
+  url: https://www.doodlenote.ai/updates
