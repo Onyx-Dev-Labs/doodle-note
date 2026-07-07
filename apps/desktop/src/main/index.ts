@@ -38,9 +38,12 @@ import {
   ENGINE_AUDIO_CHANNEL,
   ENGINE_CAPTURE_ERROR_CHANNEL,
   ENGINE_EVENT_CHANNEL,
+  ENGINE_LIST_DEVICES_CHANNEL,
+  ENGINE_SET_INPUT_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineEvent,
+  type EngineInputDevice,
   type EngineStartRequest
 } from '../shared/engine-events'
 
@@ -291,6 +294,17 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
     engine.stop()
     micWatcher.setSuppressed(false)
+  })
+
+  // Mic input picker: device list + (mid-session) switching. macOS engine
+  // only — Windows captures in the renderer, which owns device choice there.
+  ipcMain.handle(ENGINE_LIST_DEVICES_CHANNEL, (): Promise<EngineInputDevice[]> => {
+    return engine instanceof EngineProcess ? engine.listInputDevices() : Promise.resolve([])
+  })
+  ipcMain.on(ENGINE_SET_INPUT_CHANNEL, (_event, uid: unknown) => {
+    if (engine instanceof EngineProcess) {
+      engine.setInputDevice(typeof uid === 'string' && uid.length > 0 ? uid : null)
+    }
   })
 
   // Meetings store first: NotesService reads it to gather cross-meeting
