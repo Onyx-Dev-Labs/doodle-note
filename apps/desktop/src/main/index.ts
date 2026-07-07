@@ -8,6 +8,7 @@ import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
+import { initAutoUpdater } from './updater'
 import { MediaService } from './media-service'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
@@ -289,6 +290,7 @@ app.whenReady().then(() => {
     return detectState()
   })
   micWatcher.start()
+  initAutoUpdater()
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's
   // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —

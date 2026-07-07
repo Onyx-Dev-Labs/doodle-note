@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Doodle Note desktop app — spawns the Swift transcription sidecar and shows its live transcript stream",
   "main": "./out/main/index.js",
@@ -14,13 +14,15 @@
     "test": "tsx --test src/main/*.test.ts",
     "lint": "eslint --cache .",
     "format": "prettier --write .",
-    "package": "electron-vite build && electron-builder --config electron-builder.yml"
+    "package": "electron-vite build && electron-builder --config electron-builder.yml",
+    "release": "pnpm package && node scripts/publish-release.mjs"
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
     "@electron-toolkit/utils": "^4.0.0",
     "@repo/ai": "workspace:*",
     "@tiptap/extension-image": "^3.27.2",
+    "electron-updater": "^6.8.9",
     "node-llama-cpp": "^3.19.0"
   },
   "devDependencies": {
@@ -34,6 +36,7 @@
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@vercel/blob": "^2.5.0",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^43.0.0",
     "electron-builder": "^26.0.0",

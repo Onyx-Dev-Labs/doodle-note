@@ -39,3 +39,8 @@ mac:
     NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
     NSAudioCaptureUsageDescription: DoodleNote captures meeting audio (the other side of your call) to transcribe it on-device.
 npmRebuild: false
+# Auto-update feed: electron-updater reads latest-mac.yml from here.
+# scripts/publish-release.mjs uploads the artifacts after packaging.
+publish:
+  provider: generic
+  url: https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates
