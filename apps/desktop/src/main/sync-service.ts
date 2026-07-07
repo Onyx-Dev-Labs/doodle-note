@@ -28,7 +28,7 @@ import {
 } from './sync-pull-logic'
 
 /** Cloud base URL; override with DOODLE_SYNC_URL for local web-dev testing. */
-const DEFAULT_BASE_URL = 'https://doodle-note.vercel.app'
+const DEFAULT_BASE_URL = 'https://www.doodlenote.ai'
 
 const LINK_TIMEOUT_MS = 5 * 60_000
 const PUSH_DEBOUNCE_MS = 5_000
