@@ -133,7 +133,7 @@ function Toggle({
   )
 }
 
-type SettingsSection = 'general' | 'calendar' | 'sync' | 'model'
+export type SettingsSection = 'general' | 'calendar' | 'sync' | 'model'
 
 const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label: string }> = [
   { key: 'general', icon: <GearIcon size={15} />, label: 'General' },
@@ -142,8 +142,25 @@ const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label
   { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' }
 ]
 
-export default function ModelsView({ active }: { active: boolean }): React.JSX.Element {
+export default function ModelsView({
+  active,
+  jump,
+  onShowTour
+}: {
+  active: boolean
+  /** External deep-link into a section (n bumps to re-trigger). */
+  jump?: { section: SettingsSection; n: number } | null
+  onShowTour?: () => void
+}): React.JSX.Element {
   const [section, setSection] = useState<SettingsSection>('general')
+
+  // Deep-link consumption: derived state during render (no effect) so an
+  // external jump wins exactly once, then normal nav takes over.
+  const [consumedJump, setConsumedJump] = useState(0)
+  if (jump && jump.n !== consumedJump) {
+    setConsumedJump(jump.n)
+    setSection(jump.section)
+  }
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
   const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
@@ -496,554 +513,601 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
               {error && <div className="models-error">{error}</div>}
 
               <div className="model-cards">
-        {data === null && <span className="placeholder">loading models…</span>}
-        {data?.models.map((m) => (
-          <div
-            key={m.id}
-            className={`model-card${m.available ? '' : ' unavailable'}${m.active ? ' is-active' : ''}`}
-          >
-            <div className="model-head">
-              <span className="model-label">{m.label}</span>
-              {m.downloaded && !m.active && <span className="badge">Downloaded</span>}
-            </div>
-            <div className="model-desc">{m.description}</div>
-            <div className="model-meta">
-              {m.sizeGB.toFixed(1)} GB download · needs {m.minRamGB} GB RAM
-            </div>
-            <div className="model-action">{renderAction(m)}</div>
-          </div>
-        ))}
-      </div>
+                {data === null && <span className="placeholder">loading models…</span>}
+                {data?.models.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`model-card${m.available ? '' : ' unavailable'}${m.active ? ' is-active' : ''}`}
+                  >
+                    <div className="model-head">
+                      <span className="model-label">{m.label}</span>
+                      {m.downloaded && !m.active && <span className="badge">Downloaded</span>}
+                    </div>
+                    <div className="model-desc">{m.description}</div>
+                    <div className="model-meta">
+                      {m.sizeGB.toFixed(1)} GB download · needs {m.minRamGB} GB RAM
+                    </div>
+                    <div className="model-action">{renderAction(m)}</div>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
 
           {section === 'calendar' && (
-      <section className="keys-section calendar-section">
-        <h3>Calendar</h3>
-        <p className="models-sub">
-          Sign in with any Microsoft account — work, school, or personal — to see the week&rsquo;s
-          meetings on Home and get a nudge to take notes the moment one starts. DoodleNote only
-          reads your calendar.
-        </p>
+            <section className="keys-section calendar-section">
+              <h3>Calendar</h3>
+              <p className="models-sub">
+                Sign in with any Microsoft account — work, school, or personal — to see the
+                week&rsquo;s meetings on Home and get a nudge to take notes the moment one starts.
+                DoodleNote only reads your calendar.
+              </p>
 
-        {calState?.error && <div className="models-error">{calState.error}</div>}
+              {calState?.error && <div className="models-error">{calState.error}</div>}
 
-        {calState === null ? (
-          <span className="calendar-note">loading calendar settings…</span>
-        ) : (!calState.configured && !calState.builtIn) || editingCalConfig ? (
-          <>
-            <div className="key-form">
-              <input
-                type="text"
-                spellCheck={false}
-                placeholder="Client ID"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-              />
-              <input
-                type="text"
-                spellCheck={false}
-                placeholder="Tenant ID"
-                value={tenantId}
-                onChange={(e) => setTenantId(e.target.value)}
-              />
-              <button type="button" onClick={() => void saveCalendarConfig()}>
-                Save
-              </button>
-              {editingCalConfig && (
-                <button type="button" onClick={() => setEditingCalConfig(false)}>
-                  Cancel
-                </button>
-              )}
-            </div>
-            <p className="calendar-help">
-              Entra admin center → App registrations → DoodleNote — paste the Application (client)
-              ID and Directory (tenant) ID from there.
-            </p>
-          </>
-        ) : !calState.signedIn ? (
-          <div className="calendar-actions">
-            <button
-              type="button"
-              className="ms-signin"
-              disabled={connecting}
-              onClick={() => void connectCalendar()}
-            >
-              <MicrosoftLogo />
-              <span>{connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}</span>
-            </button>
-            <button
-              type="button"
-              className="ms-signin"
-              disabled={googleConnecting}
-              onClick={() => void connectGoogle()}
-            >
-              <GoogleLogo />
-              <span>{googleConnecting ? 'Waiting for your browser…' : 'Sign in with Google'}</span>
-            </button>
-            {!calState.builtIn && (
-              <button
-                type="button"
-                className="calendar-ghost"
-                onClick={() => setEditingCalConfig(true)}
-              >
-                Edit IDs
-              </button>
-            )}
-            {connecting && (
-              <span className="calendar-note">
-                finish signing in in your browser, then come back
-              </span>
-            )}
-          </div>
-        ) : (
-          <div className="calendar-connected">
-            <span className="calendar-status">
-              {calState.msSignedIn && (
+              {calState === null ? (
+                <span className="calendar-note">loading calendar settings…</span>
+              ) : (!calState.configured && !calState.builtIn) || editingCalConfig ? (
                 <>
-                  Microsoft:{' '}
-                  <strong>{calState.account?.email ?? 'connected'}</strong>
+                  <div className="key-form">
+                    <input
+                      type="text"
+                      spellCheck={false}
+                      placeholder="Client ID"
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      spellCheck={false}
+                      placeholder="Tenant ID"
+                      value={tenantId}
+                      onChange={(e) => setTenantId(e.target.value)}
+                    />
+                    <button type="button" onClick={() => void saveCalendarConfig()}>
+                      Save
+                    </button>
+                    {editingCalConfig && (
+                      <button type="button" onClick={() => setEditingCalConfig(false)}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                  <p className="calendar-help">
+                    Entra admin center → App registrations → DoodleNote — paste the Application
+                    (client) ID and Directory (tenant) ID from there.
+                  </p>
                 </>
-              )}
-              {calState.msSignedIn && calState.googleSignedIn && ' · '}
-              {calState.googleSignedIn && (
-                <>
-                  Google: <strong>{calState.googleAccount?.email ?? 'connected'}</strong>
-                </>
-              )}
-              {calState.lastSyncIso && (
-                <span className="calendar-note"> · {lastSyncLabel(calState.lastSyncIso)}</span>
-              )}
-            </span>
-            <div className="calendar-actions">
-              <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
-                {syncing ? 'Syncing…' : 'Sync now'}
-              </button>
-              {calState.msSignedIn && calState.error && (
-                <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
-                  {connecting ? 'Waiting for your browser…' : 'Sign in again'}
-                </button>
-              )}
-              {!calState.msSignedIn && (
-                <button
-                  type="button"
-                  className="provider-btn"
-                  disabled={connecting}
-                  onClick={() => void connectCalendar()}
-                >
-                  <MicrosoftLogo />
-                  {connecting ? 'Waiting for your browser…' : 'Connect Microsoft'}
-                </button>
-              )}
-              {calState.msSignedIn && (
-                <button
-                  type="button"
-                  className="provider-btn"
-                  onClick={() => void disconnectCalendar()}
-                >
-                  <MicrosoftLogo />
-                  Disconnect Microsoft
-                </button>
-              )}
-              {!calState.googleSignedIn && (
-                <button
-                  type="button"
-                  className="provider-btn"
-                  disabled={googleConnecting}
-                  onClick={() => void connectGoogle()}
-                >
-                  <GoogleLogo />
-                  {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
-                </button>
-              )}
-              {calState.googleSignedIn && (
-                <button
-                  type="button"
-                  className="provider-btn"
-                  onClick={() => {
-                    void window.calendar.disconnectGoogle().then(setCalState)
-                  }}
-                >
-                  <GoogleLogo />
-                  Disconnect Google
-                </button>
-              )}
-            </div>
-
-            <div className="cal-subcard">
-              <div className="cal-subcard-head">Display</div>
-              <div className="cal-row">
-                <span className="cal-row-icon">
-                  <MenuBarIcon />
-                </span>
-                <span className="cal-row-main">
-                  <span className="cal-row-label">Show upcoming meetings in menu bar</span>
-                  <span className="cal-row-sub">
-                    Display your next meeting and time until it starts in the macOS menu bar
-                  </span>
-                </span>
-                <Toggle
-                  checked={calState.prefs.showMenuBar}
-                  label="Show upcoming meetings in menu bar"
-                  onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
-                />
-              </div>
-              <div className="cal-row">
-                <span className="cal-row-icon">
-                  <PeopleIcon />
-                </span>
-                <span className="cal-row-main">
-                  <span className="cal-row-label">Show events with no participants</span>
-                  <span className="cal-row-sub">
-                    &ldquo;Coming up&rdquo; section will include events without participants or a
-                    video link
-                  </span>
-                </span>
-                <Toggle
-                  checked={calState.prefs.showNoParticipants}
-                  label="Show events with no participants"
-                  onChange={() =>
-                    setCalPrefs({ showNoParticipants: !calState.prefs.showNoParticipants })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="cal-subcard">
-              <div className="cal-subcard-head">
-                Visible calendars
-                <button
-                  type="button"
-                  className="link-btn cal-reset"
-                  title="Back to your default calendar only"
-                  onClick={() => setCalPrefs({ visibleCalendarIds: null })}
-                >
-                  Reset
-                </button>
-              </div>
-              {calState.calendars.length === 0 ? (
-                <div className="cal-row">
-                  <span className="calendar-note">
-                    No calendars synced yet — hit Sync now above
-                  </span>
+              ) : !calState.signedIn ? (
+                <div className="calendar-actions">
+                  <button
+                    type="button"
+                    className="ms-signin"
+                    disabled={connecting}
+                    onClick={() => void connectCalendar()}
+                  >
+                    <MicrosoftLogo />
+                    <span>
+                      {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ms-signin"
+                    disabled={googleConnecting}
+                    onClick={() => void connectGoogle()}
+                  >
+                    <GoogleLogo />
+                    <span>
+                      {googleConnecting ? 'Waiting for your browser…' : 'Sign in with Google'}
+                    </span>
+                  </button>
+                  {!calState.builtIn && (
+                    <button
+                      type="button"
+                      className="calendar-ghost"
+                      onClick={() => setEditingCalConfig(true)}
+                    >
+                      Edit IDs
+                    </button>
+                  )}
+                  {connecting && (
+                    <span className="calendar-note">
+                      finish signing in in your browser, then come back
+                    </span>
+                  )}
                 </div>
               ) : (
-                calState.calendars.map((cal) => {
-                  const visible = visibleCalendarIds(calState)
-                  const isOn = visible.has(cal.id)
-                  const lastOne = isOn && visible.size === 1
-                  return (
-                    <div key={cal.id} className="cal-row">
-                      <span
-                        className="cal-dot"
-                        style={{ background: cal.colorHex }}
-                        aria-hidden="true"
-                      />
+                <div className="calendar-connected">
+                  <span className="calendar-status">
+                    {calState.msSignedIn && (
+                      <>
+                        Microsoft: <strong>{calState.account?.email ?? 'connected'}</strong>
+                      </>
+                    )}
+                    {calState.msSignedIn && calState.googleSignedIn && ' · '}
+                    {calState.googleSignedIn && (
+                      <>
+                        Google: <strong>{calState.googleAccount?.email ?? 'connected'}</strong>
+                      </>
+                    )}
+                    {calState.lastSyncIso && (
+                      <span className="calendar-note">
+                        {' '}
+                        · {lastSyncLabel(calState.lastSyncIso)}
+                      </span>
+                    )}
+                  </span>
+                  <div className="calendar-actions">
+                    <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
+                      {syncing ? 'Syncing…' : 'Sync now'}
+                    </button>
+                    {calState.msSignedIn && calState.error && (
+                      <button
+                        type="button"
+                        disabled={connecting}
+                        onClick={() => void connectCalendar()}
+                      >
+                        {connecting ? 'Waiting for your browser…' : 'Sign in again'}
+                      </button>
+                    )}
+                    {!calState.msSignedIn && (
+                      <button
+                        type="button"
+                        className="provider-btn"
+                        disabled={connecting}
+                        onClick={() => void connectCalendar()}
+                      >
+                        <MicrosoftLogo />
+                        {connecting ? 'Waiting for your browser…' : 'Connect Microsoft'}
+                      </button>
+                    )}
+                    {calState.msSignedIn && (
+                      <button
+                        type="button"
+                        className="provider-btn"
+                        onClick={() => void disconnectCalendar()}
+                      >
+                        <MicrosoftLogo />
+                        Disconnect Microsoft
+                      </button>
+                    )}
+                    {!calState.googleSignedIn && (
+                      <button
+                        type="button"
+                        className="provider-btn"
+                        disabled={googleConnecting}
+                        onClick={() => void connectGoogle()}
+                      >
+                        <GoogleLogo />
+                        {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
+                      </button>
+                    )}
+                    {calState.googleSignedIn && (
+                      <button
+                        type="button"
+                        className="provider-btn"
+                        onClick={() => {
+                          void window.calendar.disconnectGoogle().then(setCalState)
+                        }}
+                      >
+                        <GoogleLogo />
+                        Disconnect Google
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="cal-subcard">
+                    <div className="cal-subcard-head">Display</div>
+                    <div className="cal-row">
+                      <span className="cal-row-icon">
+                        <MenuBarIcon />
+                      </span>
                       <span className="cal-row-main">
-                        <span className="cal-row-label">{cal.name}</span>
+                        <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                        <span className="cal-row-sub">
+                          Display your next meeting and time until it starts in the macOS menu bar
+                        </span>
                       </span>
                       <Toggle
-                        checked={isOn}
-                        disabled={lastOne}
-                        label={`Show ${cal.name} in Coming up`}
-                        title={lastOne ? 'At least one calendar stays visible' : undefined}
-                        onChange={() => toggleCalendar(calState, cal.id)}
+                        checked={calState.prefs.showMenuBar}
+                        label="Show upcoming meetings in menu bar"
+                        onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
                       />
                     </div>
-                  )
-                })
+                    <div className="cal-row">
+                      <span className="cal-row-icon">
+                        <PeopleIcon />
+                      </span>
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Show events with no participants</span>
+                        <span className="cal-row-sub">
+                          &ldquo;Coming up&rdquo; section will include events without participants
+                          or a video link
+                        </span>
+                      </span>
+                      <Toggle
+                        checked={calState.prefs.showNoParticipants}
+                        label="Show events with no participants"
+                        onChange={() =>
+                          setCalPrefs({ showNoParticipants: !calState.prefs.showNoParticipants })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="cal-subcard">
+                    <div className="cal-subcard-head">
+                      Visible calendars
+                      <button
+                        type="button"
+                        className="link-btn cal-reset"
+                        title="Back to your default calendar only"
+                        onClick={() => setCalPrefs({ visibleCalendarIds: null })}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    {calState.calendars.length === 0 ? (
+                      <div className="cal-row">
+                        <span className="calendar-note">
+                          No calendars synced yet — hit Sync now above
+                        </span>
+                      </div>
+                    ) : (
+                      calState.calendars.map((cal) => {
+                        const visible = visibleCalendarIds(calState)
+                        const isOn = visible.has(cal.id)
+                        const lastOne = isOn && visible.size === 1
+                        return (
+                          <div key={cal.id} className="cal-row">
+                            <span
+                              className="cal-dot"
+                              style={{ background: cal.colorHex }}
+                              aria-hidden="true"
+                            />
+                            <span className="cal-row-main">
+                              <span className="cal-row-label">{cal.name}</span>
+                            </span>
+                            <Toggle
+                              checked={isOn}
+                              disabled={lastOne}
+                              label={`Show ${cal.name} in Coming up`}
+                              title={lastOne ? 'At least one calendar stays visible' : undefined}
+                              onChange={() => toggleCalendar(calState, cal.id)}
+                            />
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
               )}
-            </div>
-          </div>
-        )}
-      </section>
+            </section>
           )}
 
           {section === 'general' && (
             <>
-      <section className="keys-section">
-        <h3>Appearance</h3>
-        <div className="theme-seg" role="radiogroup" aria-label="Appearance">
-          {(
-            [
-              ['system', 'Match system'],
-              ['light', 'Light'],
-              ['dark', 'Dark']
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={theme === value}
-              className={theme === value ? 'theme-seg-btn on' : 'theme-seg-btn'}
-              onClick={() => {
-                setThemePref(value)
-                setTheme(value)
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </section>
+              <section className="keys-section">
+                <h3>Appearance</h3>
+                <div className="theme-seg" role="radiogroup" aria-label="Appearance">
+                  {(
+                    [
+                      ['system', 'Match system'],
+                      ['light', 'Light'],
+                      ['dark', 'Dark']
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={theme === value}
+                      className={theme === value ? 'theme-seg-btn on' : 'theme-seg-btn'}
+                      onClick={() => {
+                        setThemePref(value)
+                        setTheme(value)
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-      <section className="keys-section">
-        <h3>Updates</h3>
-        <div className="cal-subcard">
-          <div className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">
-                DoodleNote v{update?.currentVersion ?? '…'}
-              </span>
-              <span className="cal-row-sub">
-                {update ? updateStatusLine(update) : 'loading…'}
-              </span>
-            </span>
-            {update?.status === 'downloaded' ? (
-              <button
-                type="button"
-                className="pill-btn"
-                onClick={() => void window.updates.install()}
-              >
-                Restart to update
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="pill-btn"
-                disabled={
-                  checkPending ||
-                  update?.supported === false ||
-                  update?.status === 'checking' ||
-                  update?.status === 'downloading'
-                }
-                onClick={() => void checkForUpdates()}
-              >
-                Check for updates
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
+              <section className="keys-section">
+                <h3>Updates</h3>
+                <div className="cal-subcard">
+                  <div className="cal-row">
+                    <span className="cal-row-main">
+                      <span className="cal-row-label">
+                        DoodleNote v{update?.currentVersion ?? '…'}
+                      </span>
+                      <span className="cal-row-sub">
+                        {update ? updateStatusLine(update) : 'loading…'}
+                      </span>
+                    </span>
+                    {update?.status === 'downloaded' ? (
+                      <button
+                        type="button"
+                        className="pill-btn"
+                        onClick={() => void window.updates.install()}
+                      >
+                        Restart to update
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="pill-btn"
+                        disabled={
+                          checkPending ||
+                          update?.supported === false ||
+                          update?.status === 'checking' ||
+                          update?.status === 'downloading'
+                        }
+                        onClick={() => void checkForUpdates()}
+                      >
+                        Check for updates
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
 
-      <section className="keys-section calendar-section">
-        <h3>Meeting detection</h3>
-        <p className="models-sub">
-          DoodleNote already nudges you when a calendar meeting starts. These make sure it never
-          misses one.
-        </p>
-        {detect === null ? (
-          <span className="calendar-note">loading detection settings…</span>
-        ) : (
-          <div className="cal-subcard">
-            <div className="cal-row">
-              <span className="cal-row-main">
-                <span className="cal-row-label">Start DoodleNote at login</span>
-                <span className="cal-row-sub">
-                  Keeps meeting prompts working without remembering to open the app
-                </span>
-              </span>
-              <Toggle
-                checked={detect.loginItem}
-                label="Start DoodleNote at login"
-                onChange={() => {
-                  void window.detect.setPrefs({ loginItem: !detect.loginItem }).then(setDetect)
-                }}
-              />
-            </div>
-            {detect.micDetectSupported && (
-            <div className="cal-row">
-              <span className="cal-row-main">
-                <span className="cal-row-label">Detect meetings from mic activity</span>
-                <span className="cal-row-sub">
-                  Prompts when a meeting app — Zoom, Teams, Webex, Slack, FaceTime, or a browser
-                  — holds your microphone, even without a calendar event. Dictation tools are
-                  ignored.
-                </span>
-              </span>
-              <Toggle
-                checked={detect.micDetect}
-                label="Detect meetings from mic activity"
-                onChange={() => {
-                  void window.detect.setPrefs({ micDetect: !detect.micDetect }).then(setDetect)
-                }}
-              />
-            </div>
-            )}
-            {detect.micDetectSupported && (
-            <div className="cal-row">
-              <span className="cal-row-main">
-                <span className="cal-row-label">Stop recording when the meeting ends</span>
-                <span className="cal-row-sub">
-                  When the meeting app hangs up, DoodleNote stops recording on its own — no more
-                  minutes of empty audio after everyone leaves
-                </span>
-              </span>
-              <Toggle
-                checked={detect.autoStop}
-                label="Stop recording when the meeting ends"
-                onChange={() => {
-                  void window.detect.setPrefs({ autoStop: !detect.autoStop }).then(setDetect)
-                }}
-              />
-            </div>
-            )}
-          </div>
-        )}
-      </section>
+              <section className="keys-section">
+                <h3>Welcome tour</h3>
+                <div className="cal-subcard">
+                  <div className="cal-row">
+                    <span className="cal-row-main">
+                      <span className="cal-row-label">Replay the first-run tour</span>
+                      <span className="cal-row-sub">
+                        A quick tour of recording, calendars, detection, sync, and models.
+                      </span>
+                    </span>
+                    <button type="button" className="pill-btn" onClick={() => onShowTour?.()}>
+                      Show tour
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="keys-section calendar-section">
+                <h3>Meeting detection</h3>
+                <p className="models-sub">
+                  DoodleNote already nudges you when a calendar meeting starts. These make sure it
+                  never misses one.
+                </p>
+                {detect === null ? (
+                  <span className="calendar-note">loading detection settings…</span>
+                ) : (
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Start DoodleNote at login</span>
+                        <span className="cal-row-sub">
+                          Keeps meeting prompts working without remembering to open the app
+                        </span>
+                      </span>
+                      <Toggle
+                        checked={detect.loginItem}
+                        label="Start DoodleNote at login"
+                        onChange={() => {
+                          void window.detect
+                            .setPrefs({ loginItem: !detect.loginItem })
+                            .then(setDetect)
+                        }}
+                      />
+                    </div>
+                    {detect.micDetectSupported && (
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Detect meetings from mic activity</span>
+                          <span className="cal-row-sub">
+                            Prompts when a meeting app — Zoom, Teams, Webex, Slack, FaceTime, or a
+                            browser — holds your microphone, even without a calendar event.
+                            Dictation tools are ignored.
+                          </span>
+                        </span>
+                        <Toggle
+                          checked={detect.micDetect}
+                          label="Detect meetings from mic activity"
+                          onChange={() => {
+                            void window.detect
+                              .setPrefs({ micDetect: !detect.micDetect })
+                              .then(setDetect)
+                          }}
+                        />
+                      </div>
+                    )}
+                    {detect.micDetectSupported && (
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">
+                            Stop recording when the meeting ends
+                          </span>
+                          <span className="cal-row-sub">
+                            When the meeting app hangs up, DoodleNote stops recording on its own —
+                            no more minutes of empty audio after everyone leaves
+                          </span>
+                        </span>
+                        <Toggle
+                          checked={detect.autoStop}
+                          label="Stop recording when the meeting ends"
+                          onChange={() => {
+                            void window.detect
+                              .setPrefs({ autoStop: !detect.autoStop })
+                              .then(setDetect)
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
             </>
           )}
 
           {section === 'sync' && (
-      <section className="keys-section calendar-section">
-        <h3>Sync with cloud</h3>
-        <p className="models-sub">
-          Off by default — your meetings live only on this Mac. Turn it on to push meetings,
-          transcripts, and notes to your DoodleNote workspace so you can browse and share them on
-          the web.
-        </p>
+            <section className="keys-section calendar-section">
+              <h3>Sync with cloud</h3>
+              <p className="models-sub">
+                Off by default — your meetings live only on this Mac. Turn it on to push meetings,
+                transcripts, and notes to your DoodleNote workspace so you can browse and share them
+                on the web.
+              </p>
 
-        {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
+              {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
 
-        {syncStatus === null ? (
-          <span className="calendar-note">loading sync settings…</span>
-        ) : !syncStatus.connected ? (
-          <div className="calendar-actions">
-            <button
-              type="button"
-              className="ms-signin"
-              disabled={linkPending || syncStatus.linking}
-              onClick={() => void connectSync()}
-            >
-              <span>
-                {linkPending || syncStatus.linking
-                  ? 'Waiting for your browser…'
-                  : 'Connect DoodleNote Cloud'}
-              </span>
-            </button>
-            {(linkPending || syncStatus.linking) && (
-              <span className="calendar-note">
-                approve the connection in your browser, then come back
-              </span>
-            )}
-          </div>
-        ) : (
-          <div className="calendar-connected">
-            <span className="calendar-status">
-              Connected as <strong>{syncStatus.email ?? 'your account'}</strong>
-              {syncStatus.workspaceName && (
-                <span className="calendar-note"> · workspace “{syncStatus.workspaceName}”</span>
-              )}
-              {syncStatus.lastSyncAt && (
-                <span className="calendar-note"> · {lastSyncLabel(syncStatus.lastSyncAt)}</span>
-              )}
-            </span>
-
-            <div className="cal-subcard">
-              <div className="cal-row">
-                <span className="cal-row-main">
-                  <span className="cal-row-label">Sync meetings to the cloud</span>
-                  <span className="cal-row-sub">
-                    {syncStatus.enabled
-                      ? syncStatus.syncing
-                        ? 'Syncing now…'
-                        : syncStatus.pendingCount > 0
-                          ? `${syncStatus.pendingCount} meeting${syncStatus.pendingCount === 1 ? '' : 's'} waiting to sync`
-                          : 'Everything is synced'
-                      : 'Paused — nothing is uploaded while this is off'}
+              {syncStatus === null ? (
+                <span className="calendar-note">loading sync settings…</span>
+              ) : !syncStatus.connected ? (
+                <div className="calendar-actions">
+                  <button
+                    type="button"
+                    className="ms-signin"
+                    disabled={linkPending || syncStatus.linking}
+                    onClick={() => void connectSync()}
+                  >
+                    <span>
+                      {linkPending || syncStatus.linking
+                        ? 'Waiting for your browser…'
+                        : 'Connect DoodleNote Cloud'}
+                    </span>
+                  </button>
+                  {(linkPending || syncStatus.linking) && (
+                    <span className="calendar-note">
+                      approve the connection in your browser, then come back
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="calendar-connected">
+                  <span className="calendar-status">
+                    Connected as <strong>{syncStatus.email ?? 'your account'}</strong>
+                    {syncStatus.workspaceName && (
+                      <span className="calendar-note">
+                        {' '}
+                        · workspace “{syncStatus.workspaceName}”
+                      </span>
+                    )}
+                    {syncStatus.lastSyncAt && (
+                      <span className="calendar-note">
+                        {' '}
+                        · {lastSyncLabel(syncStatus.lastSyncAt)}
+                      </span>
+                    )}
                   </span>
-                </span>
-                <Toggle
-                  checked={syncStatus.enabled}
-                  label="Sync meetings to the cloud"
-                  onChange={() => {
-                    void window.sync.setEnabled(!syncStatus.enabled).then(setSyncStatus)
-                  }}
-                />
-              </div>
-            </div>
 
-            <div className="calendar-actions">
-              <button
-                type="button"
-                disabled={syncStatus.syncing || !syncStatus.enabled}
-                onClick={() => {
-                  void window.sync.syncNow().then(setSyncStatus)
-                }}
-              >
-                {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void window.sync.disconnect().then(setSyncStatus)
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Sync meetings to the cloud</span>
+                        <span className="cal-row-sub">
+                          {syncStatus.enabled
+                            ? syncStatus.syncing
+                              ? 'Syncing now…'
+                              : syncStatus.pendingCount > 0
+                                ? `${syncStatus.pendingCount} meeting${syncStatus.pendingCount === 1 ? '' : 's'} waiting to sync`
+                                : 'Everything is synced'
+                            : 'Paused — nothing is uploaded while this is off'}
+                        </span>
+                      </span>
+                      <Toggle
+                        checked={syncStatus.enabled}
+                        label="Sync meetings to the cloud"
+                        onChange={() => {
+                          void window.sync.setEnabled(!syncStatus.enabled).then(setSyncStatus)
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="calendar-actions">
+                    <button
+                      type="button"
+                      disabled={syncStatus.syncing || !syncStatus.enabled}
+                      onClick={() => {
+                        void window.sync.syncNow().then(setSyncStatus)
+                      }}
+                    >
+                      {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void window.sync.disconnect().then(setSyncStatus)
+                      }}
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
           )}
 
           {section === 'model' && (
-      <section className="keys-section">
-        <h3>AI keys (optional)</h3>
-        <p className="models-sub">
-          On-device is the default and needs no account. Add your own API key only if you want
-          cloud-quality notes — the key is encrypted with the macOS keychain and never shown again.
-        </p>
+            <section className="keys-section">
+              <h3>AI keys (optional)</h3>
+              <p className="models-sub">
+                On-device is the default and needs no account. Add your own API key only if you want
+                cloud-quality notes — the key is encrypted with the macOS keychain and never shown
+                again.
+              </p>
 
-        <div className="engine-choice">
-          <label>
-            <input
-              type="radio"
-              name="engine-choice"
-              checked={engineChoice === 'local'}
-              onChange={() => void chooseEngine('local')}
-            />
-            On-device (default)
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="engine-choice"
-              checked={engineChoice === 'cloud'}
-              onChange={() => void chooseEngine('cloud')}
-            />
-            Cloud with my key
-            {engineChoice === 'cloud' && !settings?.cloud?.hasKey && (
-              <span className="model-note"> (no key saved yet — on-device will be used)</span>
-            )}
-          </label>
-        </div>
+              <div className="engine-choice">
+                <label>
+                  <input
+                    type="radio"
+                    name="engine-choice"
+                    checked={engineChoice === 'local'}
+                    onChange={() => void chooseEngine('local')}
+                  />
+                  On-device (default)
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="engine-choice"
+                    checked={engineChoice === 'cloud'}
+                    onChange={() => void chooseEngine('cloud')}
+                  />
+                  Cloud with my key
+                  {engineChoice === 'cloud' && !settings?.cloud?.hasKey && (
+                    <span className="model-note"> (no key saved yet — on-device will be used)</span>
+                  )}
+                </label>
+              </div>
 
-        <div className="key-form">
-          <select value={provider} onChange={(e) => setProvider(e.target.value as CloudProvider)}>
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
-          </select>
-          <input
-            type="text"
-            spellCheck={false}
-            placeholder="model (optional, e.g. claude-sonnet-5)"
-            value={cloudModel}
-            onChange={(e) => setCloudModel(e.target.value)}
-          />
-          <input
-            type="password"
-            placeholder={settings?.cloud?.hasKey ? '••••••••  (key saved)' : 'API key'}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-          <button type="button" onClick={() => void saveCloudKey()}>
-            Save
-          </button>
-          {(keySaved || settings?.cloud?.hasKey) && <span className="key-saved">key saved ✓</span>}
-        </div>
-      </section>
+              <div className="key-form">
+                <select
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as CloudProvider)}
+                >
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+                <input
+                  type="text"
+                  spellCheck={false}
+                  placeholder="model (optional, e.g. claude-sonnet-5)"
+                  value={cloudModel}
+                  onChange={(e) => setCloudModel(e.target.value)}
+                />
+                <input
+                  type="password"
+                  placeholder={settings?.cloud?.hasKey ? '••••••••  (key saved)' : 'API key'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+                <button type="button" onClick={() => void saveCloudKey()}>
+                  Save
+                </button>
+                {(keySaved || settings?.cloud?.hasKey) && (
+                  <span className="key-saved">key saved ✓</span>
+                )}
+              </div>
+            </section>
           )}
         </div>
       </div>

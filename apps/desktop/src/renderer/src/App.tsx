@@ -9,8 +9,10 @@ import type { MeetingSummary } from '../../shared/meetings-api'
 import DevConsole from './DevConsole'
 import HomeView, { type HomeFilter } from './HomeView'
 import MeetingView from './MeetingView'
-import ModelsView from './ModelsView'
+import ModelsView, { type SettingsSection } from './ModelsView'
+import OnboardingTour from './OnboardingTour'
 import mascotUrl from './assets/mascot-square.png'
+import { isOnboardingDone } from './lib/onboarding'
 import { startWinCapture, stopWinCapture } from './lib/win-capture'
 import {
   CalendarIcon,
@@ -52,6 +54,11 @@ function App(): React.JSX.Element {
   const [newFolderName, setNewFolderName] = useState('')
   const [calendar, setCalendar] = useState<CalendarState | null>(null)
   const [banner, setBanner] = useState<CalendarStartMeetingEvent | null>(null)
+  // First launch opens the welcome tour; Settings → General can replay it.
+  const [tourOpen, setTourOpen] = useState(() => !isOnboardingDone())
+  const [settingsJump, setSettingsJump] = useState<{ section: SettingsSection; n: number } | null>(
+    null
+  )
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -541,7 +548,11 @@ function App(): React.JSX.Element {
             />
           </div>
           <div className={view === 'settings' ? 'content-slot' : 'content-slot hidden'}>
-            <ModelsView active={view === 'settings'} />
+            <ModelsView
+              active={view === 'settings'}
+              jump={settingsJump}
+              onShowTour={() => setTourOpen(true)}
+            />
           </div>
           <div className={view === 'dev' ? 'content-slot' : 'content-slot hidden'}>
             <DevConsole />
@@ -561,6 +572,18 @@ function App(): React.JSX.Element {
             onOpenSettings={() => setView('settings')}
           />
         </div>
+      )}
+
+      {tourOpen && (
+        <OnboardingTour
+          calendar={calendar}
+          onOpenModelSettings={() => {
+            setSettingsJump({ section: 'model', n: Date.now() })
+            setView('settings')
+          }}
+          onNewMeeting={() => void newMeeting()}
+          onClose={() => setTourOpen(false)}
+        />
       )}
 
       {/* "Meeting is starting" toast: fixed top-center so it shows over Home

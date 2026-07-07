@@ -3236,3 +3236,219 @@ button.fp-row:hover {
   font-size: 18.5px;
   letter-spacing: -0.015em;
 }
+
+/* ---- first-run welcome tour ---- */
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 32, 24, 0.45);
+  backdrop-filter: blur(3px);
+}
+.tour-card {
+  position: relative;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-panel);
+  padding: 30px 32px 18px;
+}
+.tour-skip {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.tour-skip:hover {
+  color: var(--ink);
+  background: var(--fill);
+}
+.tour-body {
+  min-height: 268px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.tour-mascot {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  align-self: center;
+}
+.tour-glyph {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sage-fill);
+  color: var(--accent-deep);
+}
+.tour-title {
+  font-family: var(--serif);
+  font-size: 23px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  align-self: stretch;
+}
+.tour-body:has(.tour-mascot) .tour-title {
+  text-align: center;
+}
+.tour-lede {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--body);
+  margin: 0;
+}
+.tour-points {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-self: stretch;
+}
+.tour-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--body);
+}
+.tour-points li svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-deep);
+}
+.tour-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+.tour-action {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 15px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-soft);
+  color: var(--ink);
+}
+.tour-action:hover:not(:disabled) {
+  background: var(--sage-fill);
+  border-color: var(--accent);
+}
+.tour-action:disabled {
+  opacity: 0.55;
+}
+.tour-done {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-deep);
+  background: var(--sage-fill);
+  padding: 9px 13px;
+  border-radius: 10px;
+  margin: 2px 0 0;
+}
+.tour-footnote {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.tour-toggle-row {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+  color: var(--body);
+  padding: 8px 0;
+}
+.tour-toggle-row + .tour-toggle-row {
+  border-top: 1px solid var(--border);
+}
+.tour-checklist {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.tour-checklist li.done {
+  color: var(--accent-deep);
+}
+.tour-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.tour-dots {
+  display: flex;
+  gap: 6px;
+}
+.tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--control-track);
+  transition:
+    width 0.18s ease,
+    background 0.18s ease;
+}
+.tour-dot.on {
+  width: 16px;
+  background: var(--accent);
+}
+.tour-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tour-back {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.tour-back:hover {
+  color: var(--ink);
+  background: var(--fill);
+}
+.tour-next {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+}
+.tour-next:hover {
+  background: var(--accent-deep);
+}
