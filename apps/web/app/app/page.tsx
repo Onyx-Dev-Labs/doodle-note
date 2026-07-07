@@ -86,7 +86,7 @@ export default async function MeetingsPage({
           name="q"
           defaultValue={query}
           placeholder="Search titles, notes, and transcripts…"
-          className="w-full rounded-md border border-sand bg-white px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
+          className="w-full rounded-md border border-sand bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
         />
       </form>
 
@@ -106,7 +106,7 @@ export default async function MeetingsPage({
           </p>
         </div>
       ) : (
-        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-white">
+        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-card">
           {rows.map((meeting) => {
             const when = meeting.startedAt ?? meeting.createdAt;
             const durationMin =

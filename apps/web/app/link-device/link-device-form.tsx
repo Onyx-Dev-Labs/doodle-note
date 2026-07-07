@@ -46,7 +46,7 @@ export function LinkDeviceForm({
 
   if (!port) {
     return (
-      <div className="w-full max-w-sm rounded-xl border border-sand bg-white p-6 text-center">
+      <div className="w-full max-w-sm rounded-xl border border-sand bg-card p-6 text-center">
         <h1 className="text-lg font-semibold text-ink">Connect DoodleNote</h1>
         <p className="mt-2 text-sm text-bark">
           This page is opened by the DoodleNote desktop app. Start the
@@ -58,7 +58,7 @@ export function LinkDeviceForm({
   }
 
   return (
-    <div className="w-full max-w-sm rounded-xl border border-sand bg-white p-6">
+    <div className="w-full max-w-sm rounded-xl border border-sand bg-card p-6">
       <h1 className="text-lg font-semibold text-ink">
         Connect “{deviceName}”?
       </h1>
@@ -73,7 +73,7 @@ export function LinkDeviceForm({
           <select
             value={organizationId}
             onChange={(e) => setOrganizationId(e.target.value)}
-            className="mt-1 w-full rounded-md border border-sand bg-white px-3 py-2 text-sm text-ink"
+            className="mt-1 w-full rounded-md border border-sand bg-card px-3 py-2 text-sm text-ink"
           >
             {organizations.map((org) => (
               <option key={org.id} value={org.id}>

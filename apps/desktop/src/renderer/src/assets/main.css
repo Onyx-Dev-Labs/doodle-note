@@ -2903,8 +2903,9 @@ button.fp-row:hover {
 }
 
 /* template picker (shared by the CTA and the regenerate chip) */
-.tpl-anchor {
+.chip-template-anchor {
   position: relative;
+  display: inline-flex;
 }
 
 .tpl-menu {

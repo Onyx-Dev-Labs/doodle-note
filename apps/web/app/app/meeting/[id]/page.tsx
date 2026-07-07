@@ -100,7 +100,7 @@ export default async function MeetingPage({
       )}
 
       {(enhanced ?? raw) ? (
-        <section className="prose-notes mt-6 rounded-xl border border-sand bg-white p-6">
+        <section className="prose-notes mt-6 rounded-xl border border-sand bg-card p-6">
           <ReactMarkdown>{enhanced ?? raw ?? ""}</ReactMarkdown>
         </section>
       ) : (

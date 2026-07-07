@@ -46,7 +46,7 @@ export default function Home() {
         </div>
         <Link
           href="/login"
-          className="rounded-md border border-sand bg-white px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill"
+          className="rounded-md border border-sand bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill"
         >
           Sign in
         </Link>
@@ -73,7 +73,7 @@ export default function Home() {
             </span>
             <Link
               href="/login"
-              className="rounded-md border border-sand bg-white px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill"
+              className="rounded-md border border-sand bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill"
             >
               Open the web dashboard
             </Link>

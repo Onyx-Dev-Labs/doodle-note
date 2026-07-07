@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   initialEndState,
@@ -53,6 +53,8 @@ export class MicWatcher {
   private endState: MeetingEndState = initialEndState()
   private endTimer: NodeJS.Timeout | null = null
 
+  private readonly logPath: string
+
   constructor(
     private readonly enginePath: string,
     userDataDir: string,
@@ -61,7 +63,22 @@ export class MicWatcher {
     private readonly onMeetingEnded: () => void
   ) {
     this.configPath = join(userDataDir, 'mic-watch.json')
+    this.logPath = join(userDataDir, 'mic-watch.log')
     this.config = this.readConfig()
+    try {
+      if (statSync(this.logPath).size > 2 * 1024 * 1024) writeFileSync(this.logPath, '')
+    } catch {
+      // no log yet
+    }
+  }
+
+  /** Detection diary — read this to diagnose missed/false prompts. */
+  private diag(message: string): void {
+    try {
+      appendFileSync(this.logPath, `${new Date().toISOString()} ${message}\n`)
+    } catch {
+      // never let logging break detection
+    }
   }
 
   get enabled(): boolean {
@@ -180,6 +197,10 @@ export class MicWatcher {
             const inputLabel = event.running ? meetingAppLabel(bundles) : null
             const ringLabel = meetingRingLabel(output)
             this.currentAppLabel = inputLabel ?? ringLabel
+            this.diag(
+              `event running=${event.running} in=[${bundles.join(',')}] out=[${output.join(',')}] ` +
+                `inputLabel=${inputLabel} ringLabel=${ringLabel} suppressed=${this.state.suppressed}`
+            )
             this.handleMicEvent(inputLabel !== null || ringLabel !== null)
             // The end watch keys on the MIC only — output lingers on dings.
             this.handleEndWatch(inputLabel !== null)
@@ -230,13 +251,22 @@ export class MicWatcher {
   private handleMicEvent(running: boolean): void {
     this.state = onMicEvent(this.state, running, Date.now())
     this.clearDebounce()
+    // The child may be alive for auto-stop alone — prompts obey the toggle.
+    if (!this.config.enabled) return
     if (running && this.state.busySinceMs !== null) {
       this.debounceTimer = setTimeout(() => {
         this.debounceTimer = null
         const now = Date.now()
         if (shouldPrompt(this.state, now)) {
           this.state = markPrompted(this.state, now)
+          this.diag(`PROMPT fired (${this.currentAppLabel ?? 'unknown app'})`)
           this.onMeetingDetected(this.currentAppLabel)
+        } else {
+          this.diag(
+            `debounce elapsed but no prompt: prompted=${this.state.promptedThisSession} ` +
+              `cooldownRemainMs=${Math.max(0, this.state.lastPromptMs + 5 * 60_000 - now)} ` +
+              `busySince=${this.state.busySinceMs}`
+          )
         }
       }, MIC_DEBOUNCE_MS)
       this.debounceTimer.unref?.()

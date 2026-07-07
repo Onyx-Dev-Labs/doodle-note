@@ -37,7 +37,7 @@ export default async function InvitePage({
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-cream px-6 py-16">
-      <div className="w-full max-w-sm rounded-xl border border-sand bg-white p-6 text-center">
+      <div className="w-full max-w-sm rounded-xl border border-sand bg-card p-6 text-center">
         {problem ? (
           <>
             <h1 className="text-lg font-semibold text-ink">

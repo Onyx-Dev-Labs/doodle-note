@@ -19,11 +19,23 @@ mac:
     - target: dir
       arch:
         - arm64
+    - target: zip
+      arch:
+        - arm64
   icon: resources/icon.icns
   category: public.app-category.productivity
-  # Local, unsigned build (ad-hoc signature). Signing + notarization come
-  # with the distribution milestone and an Apple Developer account.
-  identity: null
+  # Signed with Sean's Developer ID (in the login Keychain). Stable signature
+  # = safeStorage/Keychain secrets survive rebuilds; TCC grants stick.
+  identity: "Developer ID Application: SEAN INMAN (VTZW6K32K4)"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarization runs automatically when APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD
+  # / APPLE_TEAM_ID env vars are present; otherwise electron-builder skips it
+  # (fine for local installs — notarize before distributing to others).
+  notarize: true
   extendInfo:
     NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
+    NSAudioCaptureUsageDescription: DoodleNote captures meeting audio (the other side of your call) to transcribe it on-device.
 npmRebuild: false

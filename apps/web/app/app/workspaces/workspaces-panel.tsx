@@ -116,7 +116,7 @@ export function WorkspacesPanel({
           No workspaces yet.
         </p>
       ) : (
-        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-white">
+        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-card">
           {organizations.map((org) => {
             const isActive = org.id === activeOrganizationId;
             return (
@@ -138,7 +138,7 @@ export function WorkspacesPanel({
                   <button
                     type="button"
                     onClick={() => handleSetActive(org.id)}
-                    className="rounded-md border border-sand bg-white px-2.5 py-1 text-xs text-ink transition-colors hover:bg-sage-fill"
+                    className="rounded-md border border-sand bg-card px-2.5 py-1 text-xs text-ink transition-colors hover:bg-sage-fill"
                   >
                     Set active
                   </button>
@@ -155,7 +155,7 @@ export function WorkspacesPanel({
           Everyone in the active workspace sees its synced meetings.
         </p>
 
-        <ul className="mt-3 divide-y divide-sand rounded-xl border border-sand bg-white">
+        <ul className="mt-3 divide-y divide-sand rounded-xl border border-sand bg-card">
           {members.map((member) => (
             <li
               key={member.id}
@@ -180,7 +180,7 @@ export function WorkspacesPanel({
                 <button
                   type="button"
                   onClick={() => copyInviteLink(invite.id)}
-                  className="rounded-md border border-sand bg-white px-2.5 py-1 text-xs text-ink transition-colors hover:bg-sage-fill"
+                  className="rounded-md border border-sand bg-card px-2.5 py-1 text-xs text-ink transition-colors hover:bg-sage-fill"
                 >
                   {copiedId === invite.id ? "Copied ✓" : "Copy invite link"}
                 </button>
@@ -203,7 +203,7 @@ export function WorkspacesPanel({
             placeholder="teammate@company.com"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
-            className="flex-1 rounded-md border border-sand bg-white px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
+            className="flex-1 rounded-md border border-sand bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
           />
           <button
             type="submit"
