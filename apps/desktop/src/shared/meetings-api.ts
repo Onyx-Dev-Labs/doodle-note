@@ -14,6 +14,8 @@ export const MEETINGS_GET_CHANNEL = 'meetings:get'
 export const MEETINGS_UPSERT_CHANNEL = 'meetings:upsert'
 export const MEETINGS_SEARCH_CHANNEL = 'meetings:search'
 export const MEETINGS_DELETE_CHANNEL = 'meetings:delete'
+/** main → renderer: the store changed outside the renderer (cloud pull). */
+export const MEETINGS_CHANGED_EVENT_CHANNEL = 'meetings:changed-event'
 
 /** One persisted "ask anything" exchange. */
 export interface MeetingChatEntry {
@@ -95,5 +97,7 @@ export interface MeetingsApi {
   list(): Promise<MeetingSummary[]>
   get(id: string): Promise<MeetingRecord | null>
   upsert(meeting: MeetingUpsert): Promise<MeetingRecord>
+  /** Fires when cloud sync imports/updates/trashes meetings — refetch lists. */
+  onChanged(cb: () => void): () => void
   delete(id: string): Promise<void>
 }
