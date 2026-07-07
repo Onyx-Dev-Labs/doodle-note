@@ -10,6 +10,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.3.2",
+    date: "July 7, 2026",
+    highlights: [
+      "Windows: recording now stops and notes generate automatically when your meeting ends, and DoodleNote offers to take notes when a meeting app grabs the mic — same as Mac",
+      "Paw prints! Generating notes now shows a trot of paw prints and doodle-flavored phrases instead of a word counter",
+      "Fixed: \u201cCheck for updates\u201d could report stale versions (the update feed was cached too aggressively)",
+      "Fixed: the Windows desktop icon showed black corners; Settings copy no longer says \u201cMac\u201d on Windows",
+    ],
+  },
+  {
     version: "0.3.1",
     date: "July 7, 2026",
     highlights: [
