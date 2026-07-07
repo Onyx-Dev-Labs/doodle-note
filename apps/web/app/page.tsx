@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { AppleLogo, WindowsLogo } from "./logos";
 
 function Wordmark({ size = "text-lg" }: { size?: string }) {
   return (
@@ -144,14 +145,16 @@ export default function Home() {
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
             <a
               href={DOWNLOADS.mac}
-              className="rounded-md bg-ink px-5 py-2.5 text-sm font-medium text-cream transition-opacity hover:opacity-85"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-ink px-5 py-2.5 text-sm font-medium text-cream transition-opacity hover:opacity-85"
             >
+              <AppleLogo className="h-4 w-4 -mt-0.5" />
               Download for macOS
             </a>
             <a
               href={DOWNLOADS.win}
-              className="rounded-md border border-sand bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill"
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-sand bg-card px-5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill"
             >
+              <WindowsLogo className="h-3.5 w-3.5" />
               Download for Windows (beta)
             </a>
           </div>
