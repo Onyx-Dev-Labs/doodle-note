@@ -11,10 +11,12 @@ function Wordmark({ size = "text-lg" }: { size?: string }) {
   );
 }
 
-/** Update feed on Vercel Blob — publish-release.mjs uploads these. */
+/** Served from this domain: /updates/* proxies the Blob store (the raw
+ *  blob domain is subject to platform bot challenges browsers can't always
+ *  pass for direct downloads). Bump filenames each release. */
 const DOWNLOADS = {
-  mac: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.4-arm64-mac.zip",
-  win: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.4-setup.exe",
+  mac: "/updates/DoodleNote-0.3.4-arm64-mac.zip",
+  win: "/updates/DoodleNote-0.3.4-setup.exe",
 };
 
 const MEETING_APPS = [

@@ -71,6 +71,9 @@ nsis:
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.
 # scripts/publish-release.mjs uploads the artifacts after packaging.
+# Feed served via the app's own domain: static manifests + a Blob proxy
+# for artifacts. The raw blob domain got hit by Vercel's bot challenge
+# (403 Security Checkpoint) which electron-updater cannot pass.
 publish:
   provider: generic
-  url: https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates
+  url: https://doodle-note.vercel.app/updates
