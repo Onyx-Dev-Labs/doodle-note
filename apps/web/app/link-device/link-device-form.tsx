@@ -1,6 +1,25 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
+
+import { buttonPrimary, inputClass } from "../ui";
+
+function DialogCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="w-full max-w-sm rounded-2xl border border-sand bg-card p-6 shadow-[0_1px_0_var(--color-sand),0_12px_32px_-20px_rgba(38,40,31,0.35)]">
+      <Image
+        src="/mascot.png"
+        alt=""
+        width={40}
+        height={40}
+        className="rounded-lg"
+        unoptimized
+      />
+      {children}
+    </div>
+  );
+}
 
 export function LinkDeviceForm({
   port,
@@ -46,25 +65,27 @@ export function LinkDeviceForm({
 
   if (!port) {
     return (
-      <div className="w-full max-w-sm rounded-xl border border-sand bg-card p-6 text-center">
-        <h1 className="text-lg font-semibold text-ink">Connect DoodleNote</h1>
-        <p className="mt-2 text-sm text-bark">
+      <DialogCard>
+        <h1 className="mt-4 font-display text-lg font-semibold text-ink">
+          Connect DoodleNote
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-bark">
           This page is opened by the DoodleNote desktop app. Start the
           connection from <strong>Settings → Sync with cloud</strong> on your
-          Mac.
+          computer.
         </p>
-      </div>
+      </DialogCard>
     );
   }
 
   return (
-    <div className="w-full max-w-sm rounded-xl border border-sand bg-card p-6">
-      <h1 className="text-lg font-semibold text-ink">
-        Connect “{deviceName}”?
+    <DialogCard>
+      <h1 className="mt-4 font-display text-lg font-semibold text-ink">
+        Connect &ldquo;{deviceName}&rdquo;?
       </h1>
-      <p className="mt-2 text-sm text-bark">
-        Your Mac will sync meetings, transcripts, and notes to the workspace
-        below, signed in as <strong>{email}</strong>.
+      <p className="mt-2 text-sm leading-relaxed text-bark">
+        This computer will sync meetings, transcripts, and notes to the
+        workspace below, signed in as <strong>{email}</strong>.
       </p>
 
       {organizations.length > 1 && (
@@ -73,7 +94,7 @@ export function LinkDeviceForm({
           <select
             value={organizationId}
             onChange={(e) => setOrganizationId(e.target.value)}
-            className="mt-1 w-full rounded-md border border-sand bg-card px-3 py-2 text-sm text-ink"
+            className={`mt-1 ${inputClass}`}
           >
             {organizations.map((org) => (
               <option key={org.id} value={org.id}>
@@ -91,7 +112,7 @@ export function LinkDeviceForm({
       )}
 
       {done ? (
-        <p className="mt-4 rounded-md bg-sage-fill px-3 py-2 text-sm text-sage-deep">
+        <p className="mt-4 rounded-lg bg-sage-fill px-3 py-2 text-sm text-sage-deep">
           Connected — taking you to your meetings…
         </p>
       ) : (
@@ -99,11 +120,11 @@ export function LinkDeviceForm({
           type="button"
           disabled={pending || !organizationId}
           onClick={handleApprove}
-          className="mt-4 w-full rounded-md bg-ink px-3 py-2 text-sm font-medium text-cream transition-opacity hover:opacity-90 disabled:opacity-50"
+          className={`mt-5 w-full ${buttonPrimary}`}
         >
           {pending ? "Connecting…" : "Connect desktop app"}
         </button>
       )}
-    </div>
+    </DialogCard>
   );
 }

@@ -3,11 +3,10 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "pnpm",
+      "runtimeExecutable": "sh",
       "runtimeArgs": [
-        "--filter",
-        "web",
-        "dev"
+        "-c",
+        "PATH=\"$HOME/.local/bin:$PATH\" corepack pnpm --filter web dev"
       ],
       "port": 4040
     },

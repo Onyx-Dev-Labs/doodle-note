@@ -21,7 +21,7 @@ export default async function LoginPage({
   if (session) redirect(nextPath);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
+    <main className="flex flex-1 flex-col items-center justify-center bg-cream px-6 py-16 text-bark">
       <LoginForm
         googleEnabled={googleEnabled()}
         microsoftEnabled={microsoftEnabled()}
