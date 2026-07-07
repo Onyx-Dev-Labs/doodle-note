@@ -45,6 +45,8 @@ export class LocalNotesEngine implements NotesEngine {
   private llama: Llama | null = null
   private model: LlamaModel | null = null
   private modelPath: string | null = null
+  /** GPU layer failed once (load or context) — stay on CPU from then on. */
+  private forceCpu = false
   private readonly options: LocalEngineOptions
 
   constructor(options: LocalEngineOptions) {
@@ -65,28 +67,34 @@ export class LocalNotesEngine implements NotesEngine {
       }
     })
     // Staged load: the default compute layer first (Metal on mac, Vulkan on
-    // Windows when present), then CPU-only. Weak/quirky GPUs — typically
-    // laptop iGPUs under Vulkan — can fail at model-load with llama.cpp's
-    // bare "failed to load model"; the CPU binary always loads given enough
-    // RAM. build:'never' everywhere: a packaged app must never attempt a
+    // Windows when present), then CPU-only. Shared laptop iGPUs under Vulkan
+    // fail intermittently — whether the weights or the KV cache fit depends
+    // on what else is using GPU memory at that moment — with llama.cpp's
+    // bare "failed to load model". The CPU binary always loads given enough
+    // RAM, and once the GPU misbehaves we stop trusting it (forceCpu).
+    // build:'never' everywhere: a packaged app must never attempt a
     // from-source build (no toolchain on user machines).
-    try {
-      this.llama = await getLlama({ build: 'never' })
-      this.model = await this.llama.loadModel({ modelPath: this.modelPath })
-    } catch (gpuErr) {
-      console.error('[local-engine] default compute layer failed, retrying CPU-only:', gpuErr)
+    if (!this.forceCpu) {
       try {
-        this.llama = await getLlama({ gpu: false, build: 'never' })
+        this.llama = await getLlama({ build: 'never' })
         this.model = await this.llama.loadModel({ modelPath: this.modelPath })
-      } catch (cpuErr) {
-        this.llama = null
-        this.model = null
-        const detail = cpuErr instanceof Error ? cpuErr.message : String(cpuErr)
-        throw new Error(
-          `The on-device model could not be loaded (tried GPU, then CPU): ${detail}. ` +
-            'If this keeps happening, re-download the model from Settings → Notes model.'
-        )
+        return
+      } catch (gpuErr) {
+        console.error('[local-engine] default compute layer failed, retrying CPU-only:', gpuErr)
+        this.forceCpu = true
       }
+    }
+    try {
+      this.llama = await getLlama({ gpu: false, build: 'never' })
+      this.model = await this.llama.loadModel({ modelPath: this.modelPath })
+    } catch (cpuErr) {
+      this.llama = null
+      this.model = null
+      const detail = cpuErr instanceof Error ? cpuErr.message : String(cpuErr)
+      throw new Error(
+        `The on-device model could not be loaded (tried GPU, then CPU): ${detail}. ` +
+          'If this keeps happening, re-download the model from Settings → Notes model.'
+      )
     }
   }
 
@@ -118,9 +126,24 @@ export class LocalNotesEngine implements NotesEngine {
     const { LlamaChatSession } = await loadNodeLlamaCpp()
     const started = Date.now()
 
-    const context = await this.model!.createContext({
-      contextSize: this.options.contextSize ?? 8192
-    })
+    let context: Awaited<ReturnType<LlamaModel['createContext']>>
+    try {
+      context = await this.model!.createContext({
+        contextSize: this.options.contextSize ?? 8192
+      })
+    } catch (err) {
+      if (this.forceCpu) throw err
+      // Weights fit on the GPU but the KV cache didn't — reload on CPU.
+      console.error('[local-engine] context creation failed on GPU, reloading CPU-only:', err)
+      this.forceCpu = true
+      await this.model?.dispose()
+      this.model = null
+      this.llama = null
+      await this.prepare()
+      context = await this.model!.createContext({
+        contextSize: this.options.contextSize ?? 8192
+      })
+    }
     try {
       const session = new LlamaChatSession({
         contextSequence: context.getSequence(),
