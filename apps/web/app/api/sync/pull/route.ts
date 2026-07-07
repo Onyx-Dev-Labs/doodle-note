@@ -12,7 +12,7 @@ import {
   transcriptSegments,
 } from "@repo/db";
 
-import { authenticateSyncRequest } from "@/lib/sync-auth";
+import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
 
 /** Meetings per page; the desktop loops while hasMore. */
 const PAGE_SIZE = 50;
@@ -31,10 +31,9 @@ function markdownOf(envelope: unknown): string | null {
  * previously-synced id that is no longer present was deleted somewhere.
  */
 export async function GET(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
 
   const url = new URL(request.url);
   const sinceMs = Date.parse(url.searchParams.get("since") ?? "");

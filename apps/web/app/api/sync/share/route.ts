@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { and, eq, getDb, meetings } from "@repo/db";
 
-import { authenticateSyncRequest } from "@/lib/sync-auth";
+import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -18,10 +18,9 @@ function shareOrigin(request: Request): string {
  * (desktop sync token); the meeting must belong to the token's workspace.
  */
 export async function POST(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
 
   let body: { meetingId?: unknown; enable?: unknown };
   try {
