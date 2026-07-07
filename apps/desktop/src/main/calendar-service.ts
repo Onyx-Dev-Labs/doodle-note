@@ -735,8 +735,11 @@ export class CalendarService {
    * for ad-hoc mic-detected prompts (MicWatcher).
    */
   deliverPrompt(payload: CalendarStartMeetingEvent): void {
+    // One surface per prompt — stacking channels put the macOS notification
+    // on top of our own panel (both live top-right). Focused window gets the
+    // in-app banner; otherwise the floating panel (it has the Take-notes
+    // button); the OS notification only when the panel can't be shown.
     this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
-    this.showNotification(payload)
     try {
       app.dock?.bounce('informational')
     } catch {
@@ -744,10 +747,13 @@ export class CalendarService {
     }
     const window = BrowserWindow.getAllWindows()[0]
     const bannerVisible = window !== undefined && window.isVisible() && window.isFocused()
-    if (!bannerVisible) {
-      this.promptPanel?.show(payload, (action) => {
+    if (bannerVisible) return
+    if (this.promptPanel) {
+      this.promptPanel.show(payload, (action) => {
         if (action === 'start') this.actOnPromptStart(payload)
       })
+    } else {
+      this.showNotification(payload)
     }
   }
 
