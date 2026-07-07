@@ -12,8 +12,10 @@ export interface DetectState {
   autoStop: boolean
   /** The engine micmon child is currently alive (diagnostic). */
   micMonitorAlive: boolean
-  /** Mic-activity detection exists on macOS only (CoreAudio attribution). */
+  /** Mic-activity detection: macOS (CoreAudio) and Windows (ConsentStore). */
   micDetectSupported: boolean
+  /** process.platform, for platform-specific renderer copy. */
+  platform: string
   /** Running app version (package.json), e.g. "0.2.1". */
   appVersion: string
 }

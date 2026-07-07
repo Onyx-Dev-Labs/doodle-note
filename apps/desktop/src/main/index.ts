@@ -323,7 +323,8 @@ app.whenReady().then(() => {
     micDetect: micWatcher.enabled,
     autoStop: micWatcher.autoStop,
     micMonitorAlive: micWatcher.monitorAlive,
-    micDetectSupported: process.platform === 'darwin',
+    micDetectSupported: process.platform === 'darwin' || process.platform === 'win32',
+    platform: process.platform,
     appVersion: app.getVersion()
   })
   ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
@@ -339,7 +340,8 @@ app.whenReady().then(() => {
     }
     return detectState()
   })
-  if (process.platform === 'darwin') micWatcher.start()
+  // macOS: engine micmon (CoreAudio). Windows: ConsentStore registry poll.
+  if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
   initAutoUpdater(broadcast)
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's

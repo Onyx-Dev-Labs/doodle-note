@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { WIN_MICMON_ARGS } from './win-micmon'
 import {
   initialEndState,
   initialMicState,
@@ -30,11 +31,15 @@ interface MicWatcherConfig {
 }
 
 /**
- * Ad-hoc meeting detection: runs the engine's `micmon` command (CoreAudio
- * "device is running somewhere" listener) and prompts when some other app
- * holds the microphone open past the debounce — a Zoom/Teams/Meet call that
- * never made it onto the calendar. Decision logic is pure and tested
- * (mic-watcher-logic.ts); this class owns the child process and timers.
+ * Ad-hoc meeting detection: watches which apps hold the microphone and
+ * prompts when a meeting app keeps it open past the debounce — a
+ * Zoom/Teams/Meet call that never made it onto the calendar. The signal
+ * source is per-platform (same NDJSON contract): macOS runs the engine's
+ * `micmon` command (CoreAudio process attribution); Windows runs a
+ * PowerShell poll of the ConsentStore registry (win-micmon.ts). Ring
+ * detection (audio OUTPUT) exists only in the macOS source. Decision logic
+ * is pure and tested (mic-watcher-logic.ts); this class owns the child
+ * process and timers.
  */
 export class MicWatcher {
   private config: MicWatcherConfig
@@ -160,8 +165,17 @@ export class MicWatcher {
     if (this.child || this.stopping) return
     let child: ChildProcessWithoutNullStreams
     try {
-      // stdin stays open as the parent-death watchdog handle.
-      child = spawn(this.enginePath, ['micmon'], { stdio: ['pipe', 'pipe', 'pipe'] })
+      if (process.platform === 'win32') {
+        // Parent-death watchdog is a PID check inside the script's poll loop.
+        child = spawn('powershell.exe', WIN_MICMON_ARGS, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, DOODLE_PARENT_PID: String(process.pid) },
+          windowsHide: true
+        })
+      } else {
+        // stdin stays open as the parent-death watchdog handle.
+        child = spawn(this.enginePath, ['micmon'], { stdio: ['pipe', 'pipe', 'pipe'] })
+      }
     } catch (error) {
       console.error('[micwatch] spawn failed:', error)
       return
@@ -191,9 +205,7 @@ export class MicWatcher {
             // meeting-app OUTPUT (an incoming call ringing) counts too, so
             // the prompt lands before the call is even answered.
             const bundles = Array.isArray(event.bundles) ? event.bundles.map(String) : []
-            const output = Array.isArray(event.outputBundles)
-              ? event.outputBundles.map(String)
-              : []
+            const output = Array.isArray(event.outputBundles) ? event.outputBundles.map(String) : []
             const inputLabel = event.running ? meetingAppLabel(bundles) : null
             const ringLabel = meetingRingLabel(output)
             this.currentAppLabel = inputLabel ?? ringLabel
@@ -215,7 +227,7 @@ export class MicWatcher {
     child.on('exit', () => {
       this.child = null
       this.clearDebounce()
-      if (!this.stopping && this.config.enabled) {
+      if (!this.stopping && this.childWanted) {
         this.restartTimer = setTimeout(() => this.spawnChild(), RESTART_DELAY_MS)
         this.restartTimer.unref?.()
       }
