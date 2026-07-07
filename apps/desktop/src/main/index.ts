@@ -342,7 +342,7 @@ app.whenReady().then(() => {
   })
   // macOS: engine micmon (CoreAudio). Windows: ConsentStore registry poll.
   if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
-  initAutoUpdater(broadcast)
+  initAutoUpdater(broadcast, () => notesService?.dispose() ?? Promise.resolve())
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's
   // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —
@@ -365,9 +365,15 @@ app.whenReady().then(() => {
   })
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
-  const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)
+  const syncService = new SyncService(
+    app.getPath('userData'),
+    meetingsService,
+    foldersService,
+    broadcast
+  )
   syncService.registerIpc()
   meetingsService.onDidWrite = (change) => syncService.onMeetingsChanged(change.deletedId)
+  foldersService.onDidWrite = (change) => syncService.onFoldersChanged(change.deletedId)
 
   // Image attachments for the notes editor (doodle-media:// protocol).
   const mediaService = new MediaService(join(app.getPath('userData'), 'attachments'))

@@ -17,8 +17,15 @@ import {
   type ShareResult,
   type SyncStatus
 } from '../shared/sync-api'
+import type { FolderRecord } from '../shared/folders-api'
+import type { FoldersService } from './folders-service'
 import type { MeetingsService } from './meetings-service'
-import { decidePullAction, shouldTrashLocally } from './sync-pull-logic'
+import {
+  decideFolderPull,
+  decidePullAction,
+  shouldRemoveFolderLocally,
+  shouldTrashLocally
+} from './sync-pull-logic'
 
 /** Cloud base URL; override with DOODLE_SYNC_URL for local web-dev testing. */
 const DEFAULT_BASE_URL = 'https://doodle-note.vercel.app'
@@ -41,6 +48,10 @@ interface SyncConfig {
   pushed: Record<string, string>
   /** updatedAt high-water mark of the last pull. */
   pullCursor?: string
+  /** folderId → name at last successful sync (either direction). */
+  syncedFolders: Record<string, string>
+  /** Local folders deleted whose cloud copy still needs removing. */
+  pendingFolderDeletes: string[]
   /** attachment file name → public blob URL (uploaded once, reused). */
   mediaUrls: Record<string, string>
   /** Local meetings deleted/trashed whose cloud copy still needs removing. */
@@ -71,6 +82,7 @@ export class SyncService {
   constructor(
     userDataDir: string,
     private readonly meetings: MeetingsService,
+    private readonly folders: FoldersService,
     private readonly broadcast: (channel: string, payload: unknown) => void
   ) {
     this.configPath = join(userDataDir, 'sync.json')
@@ -106,6 +118,24 @@ export class SyncService {
   private async syncCycle(): Promise<void> {
     await this.pushAll()
     await this.pullAll()
+  }
+
+  /** FoldersService calls this after every write; deletes pass deletedId. */
+  onFoldersChanged(deletedId?: string): void {
+    if (deletedId && this.config.syncedFolders[deletedId]) {
+      this.config.pendingFolderDeletes = [
+        ...new Set([...this.config.pendingFolderDeletes, deletedId])
+      ]
+      delete this.config.syncedFolders[deletedId]
+      this.writeConfig()
+    }
+    if (!this.config.enabled || !this.token()) return
+    if (this.debounceTimer) clearTimeout(this.debounceTimer)
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null
+      void this.pushAll()
+    }, PUSH_DEBOUNCE_MS)
+    this.debounceTimer.unref?.()
   }
 
   /** MeetingsService calls this after every write; deletes pass deletedId. */
@@ -227,7 +257,9 @@ export class SyncService {
       enabled: false,
       pushed: {},
       mediaUrls: {},
-      pendingDeletes: []
+      pendingDeletes: [],
+      syncedFolders: {},
+      pendingFolderDeletes: []
     }
     this.writeConfig()
     this.lastError = undefined
@@ -250,9 +282,7 @@ export class SyncService {
   async share(meetingId: string): Promise<ShareResult> {
     const token = this.token()
     if (!token) return { error: 'Connect cloud sync in Settings first' }
-    const record = this.meetings
-      .readAll()
-      .find((r) => r.id === meetingId && !r.trashedAt)
+    const record = this.meetings.readAll().find((r) => r.id === meetingId && !r.trashedAt)
     if (!record) return { error: 'Meeting not found' }
 
     try {
@@ -311,17 +341,42 @@ export class SyncService {
 
     try {
       // Deletions first so restores (delete then re-create) settle correctly.
-      if (this.config.pendingDeletes.length > 0) {
+      if (this.config.pendingDeletes.length > 0 || this.config.pendingFolderDeletes.length > 0) {
         const response = await fetch(`${this.baseUrl}/api/sync/push`, {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ ids: this.config.pendingDeletes })
+          body: JSON.stringify({
+            ids: this.config.pendingDeletes,
+            folderIds: this.config.pendingFolderDeletes
+          })
         })
         if (response.ok) {
           this.config.pendingDeletes = []
+          this.config.pendingFolderDeletes = []
+          this.writeConfig()
+        }
+      }
+
+      // Folders next — meetings below may reference them server-side.
+      const dirtyFolders = this.folders
+        .list()
+        .filter((f) => this.config.syncedFolders[f.id] !== f.name)
+      if (dirtyFolders.length > 0) {
+        const response = await fetch(`${this.baseUrl}/api/sync/push`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            folders: dirtyFolders.map((f) => ({ id: f.id, name: f.name, createdAt: f.createdAt }))
+          })
+        })
+        if (response.ok) {
+          for (const f of dirtyFolders) this.config.syncedFolders[f.id] = f.name
           this.writeConfig()
         }
       }
@@ -367,6 +422,65 @@ export class SyncService {
 
   /* ---- pulling ---- */
 
+  /** Create/rename local folders from the cloud list. True when changed. */
+  private applyRemoteFolders(
+    remote: Array<{ id?: unknown; name?: unknown; createdAt?: unknown }>
+  ): boolean {
+    let changed = false
+    const locals = new Map(this.folders.list().map((f) => [f.id, f]))
+    for (const item of remote) {
+      const id = String(item.id ?? '')
+      const name = typeof item.name === 'string' ? item.name.trim() : ''
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) continue
+      if (name.length === 0) continue
+      const local = locals.get(id)
+      const action = decideFolderPull({
+        localExists: local !== undefined,
+        localName: local?.name ?? null,
+        syncedName: this.config.syncedFolders[id] ?? null,
+        remoteName: name
+      })
+      if (action === 'skip') {
+        if (local && local.name === name) this.config.syncedFolders[id] = name
+        continue
+      }
+      this.config.syncedFolders[id] = name
+      this.writeConfig()
+      const record: FolderRecord = {
+        id,
+        name,
+        createdAt:
+          local?.createdAt ??
+          (typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString())
+      }
+      this.folders.upsertRemote(record)
+      changed = true
+    }
+    return changed
+  }
+
+  /** Remove local folders whose cloud copy vanished (rename-safe). */
+  private applyCloudFolderDeletions(remote: Array<{ id?: unknown }>): boolean {
+    const cloudIds = new Set(remote.map((f) => String(f.id ?? '')))
+    let changed = false
+    for (const local of this.folders.list()) {
+      const syncedName = this.config.syncedFolders[local.id]
+      const remove = shouldRemoveFolderLocally({
+        wasSynced: syncedName !== undefined,
+        presentInCloud: cloudIds.has(local.id),
+        localDirty: syncedName !== undefined && local.name !== syncedName
+      })
+      if (!remove) continue
+      // Drop the bookkeeping first so the delete hook doesn't echo a
+      // redundant cloud DELETE for a folder the cloud already removed.
+      delete this.config.syncedFolders[local.id]
+      this.writeConfig()
+      this.folders.delete(local.id) // sweeps member meetings to My notes
+      changed = true
+    }
+    return changed
+  }
+
   /**
    * Cursor-based pull of meetings changed on other devices, applied under
    * the rules in sync-pull-logic.ts. The full cloud id list rides along so
@@ -382,6 +496,7 @@ export class SyncService {
     try {
       let cursor = this.config.pullCursor ?? ''
       let cloudIds: Set<string> | null = null
+      let cloudFolders: Array<{ id?: unknown; name?: unknown }> | null = null
       for (let page = 0; page < MAX_PULL_PAGES; page++) {
         const response = await fetch(
           `${this.baseUrl}/api/sync/pull?since=${encodeURIComponent(cursor)}`,
@@ -390,10 +505,16 @@ export class SyncService {
         if (!response.ok) throw new Error(`Pull failed (HTTP ${response.status})`)
         const body = (await response.json()) as {
           allIds?: unknown
+          folders?: Array<{ id?: unknown; name?: unknown; createdAt?: unknown }>
           changed?: RemoteMeeting[]
           hasMore?: boolean
         }
         cloudIds = new Set(Array.isArray(body.allIds) ? body.allIds.map(String) : [])
+        // Folders first — meetings in this page may point at them.
+        if (Array.isArray(body.folders)) {
+          cloudFolders = body.folders
+          if (this.applyRemoteFolders(body.folders)) storeChanged = true
+        }
         for (const remote of Array.isArray(body.changed) ? body.changed : []) {
           if (this.applyRemote(remote)) storeChanged = true
           if (typeof remote.updatedAt === 'string' && remote.updatedAt > cursor) {
@@ -404,6 +525,9 @@ export class SyncService {
       }
       if (cloudIds) {
         if (this.applyCloudDeletions(cloudIds)) storeChanged = true
+      }
+      if (cloudFolders) {
+        if (this.applyCloudFolderDeletions(cloudFolders)) storeChanged = true
       }
       this.config.pullCursor = cursor
       this.config.lastSyncAt = new Date().toISOString()
@@ -466,8 +590,7 @@ export class SyncService {
     const incoming: MeetingRecord = {
       id,
       title: typeof remote.title === 'string' ? remote.title : '',
-      createdAt:
-        typeof remote.createdAt === 'string' ? remote.createdAt : new Date().toISOString(),
+      createdAt: typeof remote.createdAt === 'string' ? remote.createdAt : new Date().toISOString(),
       ...(typeof remote.startedAt === 'string' ? { startedAt: remote.startedAt } : {}),
       ...(typeof remote.endedAt === 'string' ? { endedAt: remote.endedAt } : {}),
       ...(typeof remote.calendarEventId === 'string'
@@ -477,6 +600,8 @@ export class SyncService {
       ...(typeof remote.enhancedMarkdown === 'string'
         ? { enhancedMarkdown: remote.enhancedMarkdown }
         : {}),
+      // null (not absence) so applying clears a stale local assignment.
+      folderId: typeof remote.folderId === 'string' ? remote.folderId : null,
       segments,
       echoSuppressed: 0
     }
@@ -583,15 +708,32 @@ export class SyncService {
         ...(typeof raw.email === 'string' ? { email: raw.email } : {}),
         ...(typeof raw.workspaceName === 'string' ? { workspaceName: raw.workspaceName } : {}),
         ...(typeof raw.lastSyncAt === 'string' ? { lastSyncAt: raw.lastSyncAt } : {}),
-        pushed: raw.pushed && typeof raw.pushed === 'object' ? (raw.pushed as Record<string, string>) : {},
+        pushed:
+          raw.pushed && typeof raw.pushed === 'object'
+            ? (raw.pushed as Record<string, string>)
+            : {},
         mediaUrls:
           raw.mediaUrls && typeof raw.mediaUrls === 'object'
             ? (raw.mediaUrls as Record<string, string>)
             : {},
-        pendingDeletes: Array.isArray(raw.pendingDeletes) ? raw.pendingDeletes.map(String) : []
+        pendingDeletes: Array.isArray(raw.pendingDeletes) ? raw.pendingDeletes.map(String) : [],
+        syncedFolders:
+          raw.syncedFolders && typeof raw.syncedFolders === 'object'
+            ? (raw.syncedFolders as Record<string, string>)
+            : {},
+        pendingFolderDeletes: Array.isArray(raw.pendingFolderDeletes)
+          ? raw.pendingFolderDeletes.map(String)
+          : []
       }
     } catch {
-      return { enabled: false, pushed: {}, mediaUrls: {}, pendingDeletes: [] }
+      return {
+        enabled: false,
+        pushed: {},
+        mediaUrls: {},
+        pendingDeletes: [],
+        syncedFolders: {},
+        pendingFolderDeletes: []
+      }
     }
   }
 
@@ -612,6 +754,7 @@ interface RemoteMeeting {
   startedAt?: unknown
   endedAt?: unknown
   calendarEventId?: unknown
+  folderId?: unknown
   rawNotesMarkdown?: unknown
   enhancedMarkdown?: unknown
   segments?: Array<{
@@ -646,6 +789,7 @@ function contentHash(record: MeetingRecord, mediaUrls: Record<string, string>): 
     startedAt: record.startedAt ?? null,
     endedAt: record.endedAt ?? null,
     calendarEventId: record.calendarEventId ?? null,
+    folderId: record.folderId ?? null,
     rawNotesMarkdown: rewriteMedia(record.rawNotesMarkdown, mediaUrls),
     enhancedMarkdown: record.enhancedMarkdown
       ? rewriteMedia(record.enhancedMarkdown, mediaUrls)
@@ -663,6 +807,7 @@ function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>)
     ...(record.startedAt ? { startedAt: record.startedAt } : {}),
     ...(record.endedAt ? { endedAt: record.endedAt } : {}),
     ...(record.calendarEventId ? { calendarEventId: record.calendarEventId } : {}),
+    ...(record.folderId ? { folderId: record.folderId } : {}),
     ...(record.rawNotesMarkdown
       ? { rawNotesMarkdown: rewriteMedia(record.rawNotesMarkdown, mediaUrls) }
       : {}),

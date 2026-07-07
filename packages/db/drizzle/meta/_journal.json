@@ -29,6 +29,13 @@
       "when": 1783370735905,
       "tag": "0003_slow_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783449744306,
+      "tag": "0004_gigantic_the_hand",
+      "breakpoints": true
     }
   ]
 }

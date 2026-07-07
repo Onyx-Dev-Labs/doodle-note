@@ -4,8 +4,21 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "dev"
+      ],
       "port": 4040
+    },
+    {
+      "name": "web-alt",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "NEXT_DIST_DIR=.next-preview pnpm --filter web exec next dev --port 4141"
+      ],
+      "port": 4141
     }
   ]
 }

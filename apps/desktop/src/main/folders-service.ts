@@ -19,6 +19,9 @@ const MAX_NAME_LENGTH = 80
  * "My notes" (folderId: null) — meetings themselves are never deleted here.
  */
 export class FoldersService {
+  /** Post-write hook (cloud sync). `deletedId` set on folder deletion. */
+  onDidWrite: ((change: { deletedId?: string }) => void) | null = null
+
   constructor(
     private readonly file: string,
     private readonly meetings: MeetingsService
@@ -49,6 +52,7 @@ export class FoldersService {
       createdAt: new Date().toISOString()
     }
     this.save([...this.list(), folder])
+    this.onDidWrite?.({})
     return folder
   }
 
@@ -58,11 +62,13 @@ export class FoldersService {
     if (!folder) return null
     folder.name = cleanName(name)
     this.save(folders)
+    this.onDidWrite?.({})
     return folder
   }
 
   delete(id: string): void {
     this.save(this.list().filter((f) => f.id !== id))
+    this.onDidWrite?.({ deletedId: id })
     // Sweep the meetings dir: anything filed here moves back to "My notes".
     // (Runs even if the folder was already gone, so orphans self-heal.)
     for (const meeting of this.meetings.list()) {
@@ -70,6 +76,23 @@ export class FoldersService {
         this.meetings.upsert({ id: meeting.id, folderId: null })
       }
     }
+  }
+
+  /** Cloud pull: create or rename with a fixed id, keeping createdAt. */
+  upsertRemote(record: FolderRecord): void {
+    const folders = this.list()
+    const existing = folders.find((f) => f.id === record.id)
+    if (existing) {
+      if (existing.name === record.name) return
+      existing.name = cleanName(record.name)
+      this.save(folders)
+    } else {
+      this.save([
+        ...folders,
+        { id: record.id, name: cleanName(record.name), createdAt: record.createdAt }
+      ])
+    }
+    this.onDidWrite?.({})
   }
 
   private save(folders: FolderRecord[]): void {

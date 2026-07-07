@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { decidePullAction, shouldTrashLocally } from './sync-pull-logic'
+import {
+  decideFolderPull,
+  decidePullAction,
+  shouldRemoveFolderLocally,
+  shouldTrashLocally
+} from './sync-pull-logic'
 
 describe('decidePullAction', () => {
   it('imports meetings that do not exist locally', () => {
@@ -139,6 +144,91 @@ describe('shouldTrashLocally', () => {
         localTrashed: false,
         localDirty: false
       }),
+      false
+    )
+  })
+})
+
+describe('decideFolderPull', () => {
+  it('creates folders that do not exist locally', () => {
+    assert.equal(
+      decideFolderPull({
+        localExists: false,
+        localName: null,
+        syncedName: null,
+        remoteName: 'Clients'
+      }),
+      'create'
+    )
+  })
+
+  it('skips identical names', () => {
+    assert.equal(
+      decideFolderPull({
+        localExists: true,
+        localName: 'Clients',
+        syncedName: 'Clients',
+        remoteName: 'Clients'
+      }),
+      'skip'
+    )
+  })
+
+  it('applies a remote rename to a clean local folder', () => {
+    assert.equal(
+      decideFolderPull({
+        localExists: true,
+        localName: 'Clients',
+        syncedName: 'Clients',
+        remoteName: 'Customers'
+      }),
+      'rename'
+    )
+  })
+
+  it('never overwrites an unsynced local rename', () => {
+    assert.equal(
+      decideFolderPull({
+        localExists: true,
+        localName: 'My Clients',
+        syncedName: 'Clients',
+        remoteName: 'Customers'
+      }),
+      'skip'
+    )
+  })
+
+  it('never renames folders with no sync history', () => {
+    assert.equal(
+      decideFolderPull({
+        localExists: true,
+        localName: 'Local Only',
+        syncedName: null,
+        remoteName: 'Remote'
+      }),
+      'skip'
+    )
+  })
+})
+
+describe('shouldRemoveFolderLocally', () => {
+  it('removes synced folders that vanished from the cloud', () => {
+    assert.equal(
+      shouldRemoveFolderLocally({ wasSynced: true, presentInCloud: false, localDirty: false }),
+      true
+    )
+  })
+
+  it('leaves never-synced folders alone', () => {
+    assert.equal(
+      shouldRemoveFolderLocally({ wasSynced: false, presentInCloud: false, localDirty: false }),
+      false
+    )
+  })
+
+  it('spares folders with a rename pending push', () => {
+    assert.equal(
+      shouldRemoveFolderLocally({ wasSynced: true, presentInCloud: false, localDirty: true }),
       false
     )
   })

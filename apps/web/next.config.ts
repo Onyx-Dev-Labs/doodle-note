@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * Next allows one dev server per dist dir; a second session (agent preview)
+   * can set NEXT_DIST_DIR to run alongside the primary `pnpm dev` server.
+   */
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   /** @repo/db ships raw TypeScript — let Next transpile it. */
   transpilePackages: ["@repo/db"],
   /**

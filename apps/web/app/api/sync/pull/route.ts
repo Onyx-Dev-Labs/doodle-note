@@ -3,6 +3,7 @@ import {
   and,
   asc,
   eq,
+  folders,
   getDb,
   gt,
   inArray,
@@ -47,6 +48,17 @@ export async function GET(request: Request) {
     .where(eq(meetings.organizationId, device.organizationId));
   const allIds = idRows.map((r) => r.id);
 
+  // Folders are few — the full list ships every pull (renames + deletions).
+  const folderRows = await db
+    .select()
+    .from(folders)
+    .where(eq(folders.organizationId, device.organizationId));
+  const allFolders = folderRows.map((f) => ({
+    id: f.id,
+    name: f.name,
+    createdAt: (f.createdAt ?? new Date()).toISOString(),
+  }));
+
   const changedRows = await db
     .select()
     .from(meetings)
@@ -90,6 +102,7 @@ export async function GET(request: Request) {
       ...(m.startedAt ? { startedAt: m.startedAt.toISOString() } : {}),
       ...(m.endedAt ? { endedAt: m.endedAt.toISOString() } : {}),
       ...(m.calendarEventId ? { calendarEventId: m.calendarEventId } : {}),
+      ...(m.folderId ? { folderId: m.folderId } : {}),
       rawNotesMarkdown: markdownOf(note?.rawContent) ?? "",
       ...(markdownOf(note?.enhancedContent)
         ? { enhancedMarkdown: markdownOf(note?.enhancedContent)! }
@@ -105,5 +118,5 @@ export async function GET(request: Request) {
     };
   });
 
-  return NextResponse.json({ allIds, changed, hasMore });
+  return NextResponse.json({ allIds, folders: allFolders, changed, hasMore });
 }

@@ -54,3 +54,36 @@ export interface DeleteDecisionInput {
 export function shouldTrashLocally(input: DeleteDecisionInput): boolean {
   return input.wasSynced && !input.presentInCloud && !input.localTrashed && !input.localDirty
 }
+
+/* ---- folders ---- */
+
+export type FolderPullAction = 'create' | 'rename' | 'skip'
+
+export interface FolderPullInput {
+  localExists: boolean
+  /** Current local name, null when absent. */
+  localName: string | null
+  /** Name recorded at the folder's last successful sync, if any. */
+  syncedName: string | null
+  remoteName: string
+}
+
+/** Same discipline as meetings: an unsynced local rename outranks remote. */
+export function decideFolderPull(input: FolderPullInput): FolderPullAction {
+  if (!input.localExists) return 'create'
+  if (input.localName === input.remoteName) return 'skip'
+  if (input.syncedName === null || input.localName !== input.syncedName) return 'skip'
+  return 'rename'
+}
+
+export interface FolderDeleteInput {
+  wasSynced: boolean
+  presentInCloud: boolean
+  /** Local name differs from the last-synced name (rename pending push). */
+  localDirty: boolean
+}
+
+/** Remove locally when the cloud copy vanished — unless a rename is pending. */
+export function shouldRemoveFolderLocally(input: FolderDeleteInput): boolean {
+  return input.wasSynced && !input.presentInCloud && !input.localDirty
+}
