@@ -1,33 +1,14 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import ReactMarkdown from "react-markdown";
 import { and, asc, eq, getDb, meetings, notes, transcriptSegments } from "@repo/db";
 
 import { auth } from "@/lib/auth";
 import { ensurePersonalWorkspace } from "@/lib/workspace";
+import { markdownOf, MeetingBody } from "../../../meeting-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function markdownOf(content: unknown): string | null {
-  if (
-    content &&
-    typeof content === "object" &&
-    "markdown" in content &&
-    typeof (content as { markdown: unknown }).markdown === "string"
-  ) {
-    return (content as { markdown: string }).markdown;
-  }
-  return null;
-}
-
-function timestamp(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
 
 export default async function MeetingPage({
   params,
@@ -83,11 +64,11 @@ export default async function MeetingPage({
       <Link href="/app" className="text-sm text-stone hover:text-ink">
         ← All meetings
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+      <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight text-ink">
         {meeting.title || "Untitled meeting"}
       </h1>
       {when && (
-        <p className="mt-1 text-sm text-stone">
+        <p className="mt-1.5 text-sm text-stone">
           {when.toLocaleDateString("en-US", {
             weekday: "long",
             month: "long",
@@ -99,40 +80,11 @@ export default async function MeetingPage({
         </p>
       )}
 
-      {(enhanced ?? raw) ? (
-        <section className="prose-notes mt-6 rounded-xl border border-sand bg-card p-6">
-          <ReactMarkdown>{enhanced ?? raw ?? ""}</ReactMarkdown>
-        </section>
-      ) : (
-        <p className="mt-6 rounded-xl border border-sand bg-card-soft p-6 text-sm text-stone">
-          No notes were synced for this meeting.
-        </p>
-      )}
-
-      {segments.length > 0 && (
-        <section className="mt-6">
-          <h2 className="text-base font-semibold text-ink">Transcript</h2>
-          <div className="mt-3 space-y-3 rounded-xl border border-sand bg-card-soft p-5">
-            {segments.map((segment) => (
-              <p key={segment.id} className="text-sm leading-relaxed">
-                <span
-                  className={
-                    segment.speaker === "You"
-                      ? "font-semibold text-sage-deep"
-                      : "font-semibold text-ink"
-                  }
-                >
-                  {segment.speaker}
-                </span>
-                <span className="ml-2 text-xs text-stone">
-                  {timestamp(segment.startMs)}
-                </span>
-                <span className="mt-0.5 block text-bark">{segment.text}</span>
-              </p>
-            ))}
-          </div>
-        </section>
-      )}
+      <MeetingBody
+        markdown={enhanced ?? raw}
+        segments={segments}
+        emptyText="No notes were synced for this meeting."
+      />
     </main>
   );
 }

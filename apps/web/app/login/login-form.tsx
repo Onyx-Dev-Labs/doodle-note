@@ -1,15 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
+import { buttonPrimary, buttonSecondary, inputClass, Wordmark } from "../ui";
 
 type Mode = "sign-in" | "sign-up";
-
-const inputClasses =
-  "w-full rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700 dark:placeholder:text-neutral-600 dark:focus:border-neutral-400";
 
 function MicrosoftLogo() {
   return (
@@ -58,12 +57,20 @@ export function LoginForm({
 
   return (
     <div className="w-full max-w-sm">
-      <div className="mb-8 text-center">
-        <Link href="/" className="text-xl font-bold tracking-tight">
-          <span className="text-ink">Doodle</span>
-          <span className="text-sage">Note</span>
+      <div className="mb-8 flex flex-col items-center text-center">
+        <Link href="/" className="flex flex-col items-center gap-3">
+          <Image
+            src="/mascot.png"
+            alt=""
+            width={48}
+            height={48}
+            className="rounded-xl"
+            priority
+            unoptimized
+          />
+          <Wordmark size="text-xl" />
         </Link>
-        <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-2 text-sm text-stone">
           {mode === "sign-in"
             ? "Sign in to your workspace"
             : "Create your account"}
@@ -79,7 +86,7 @@ export function LoginForm({
             placeholder="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={inputClasses}
+            className={inputClass}
           />
         )}
         <input
@@ -89,7 +96,7 @@ export function LoginForm({
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className={inputClasses}
+          className={inputClass}
         />
         <input
           type="password"
@@ -99,20 +106,16 @@ export function LoginForm({
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className={inputClasses}
+          className={inputClass}
         />
 
         {error && (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-red-700">
             {error}
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="mt-1 rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
-        >
+        <button type="submit" disabled={pending} className={`mt-1 ${buttonPrimary}`}>
           {pending
             ? "Please wait…"
             : mode === "sign-in"
@@ -130,7 +133,7 @@ export function LoginForm({
               callbackURL: next,
             })
           }
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+          className={`mt-3 w-full ${buttonSecondary}`}
         >
           <MicrosoftLogo />
           Sign in with Microsoft
@@ -143,13 +146,13 @@ export function LoginForm({
           onClick={() =>
             authClient.signIn.social({ provider: "google", callbackURL: next })
           }
-          className="mt-3 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900"
+          className={`mt-3 w-full ${buttonSecondary}`}
         >
           Continue with Google
         </button>
       )}
 
-      <p className="mt-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="mt-6 text-center text-sm text-stone">
         {mode === "sign-in" ? (
           <>
             No account?{" "}
@@ -159,7 +162,7 @@ export function LoginForm({
                 setMode("sign-up");
                 setError(null);
               }}
-              className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+              className="underline underline-offset-2 hover:text-ink"
             >
               Sign up
             </button>
@@ -173,7 +176,7 @@ export function LoginForm({
                 setMode("sign-in");
                 setError(null);
               }}
-              className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100"
+              className="underline underline-offset-2 hover:text-ink"
             >
               Sign in
             </button>

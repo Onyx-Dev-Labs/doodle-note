@@ -118,6 +118,7 @@ body {
 .prose-notes h2,
 .prose-notes h3 {
   color: var(--color-ink);
+  font-family: var(--font-bricolage), sans-serif;
   font-weight: 600;
   margin: 1.1em 0 0.4em;
 }
