@@ -5,8 +5,8 @@ import { AppleLogo, WindowsLogo } from "./logos";
 
 /** Update feed on Vercel Blob — publish-release.mjs uploads these. */
 export const DOWNLOADS = {
-  mac: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.4-arm64-mac.zip",
-  win: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.4-setup.exe",
+  mac: "/updates/DoodleNote-0.3.4-arm64-mac.zip",
+  win: "/updates/DoodleNote-0.3.4-setup.exe",
 };
 
 /* Shared control styles — keep every page speaking the same visual language. */
