@@ -365,9 +365,15 @@ app.whenReady().then(() => {
   })
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
-  const syncService = new SyncService(app.getPath('userData'), meetingsService, broadcast)
+  const syncService = new SyncService(
+    app.getPath('userData'),
+    meetingsService,
+    foldersService,
+    broadcast
+  )
   syncService.registerIpc()
   meetingsService.onDidWrite = (change) => syncService.onMeetingsChanged(change.deletedId)
+  foldersService.onDidWrite = (change) => syncService.onFoldersChanged(change.deletedId)
 
   // Image attachments for the notes editor (doodle-media:// protocol).
   const mediaService = new MediaService(join(app.getPath('userData'), 'attachments'))

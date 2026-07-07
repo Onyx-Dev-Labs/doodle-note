@@ -11,6 +11,21 @@ import {
 
 import { organization, user } from "./auth-schema";
 
+export const folders = pgTable(
+  "folders",
+  {
+    /** Desktop-minted UUID — the same id on every device and in the cloud. */
+    id: uuid("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [index("folders_organization_id_idx").on(table.organizationId)],
+);
+
 export const meetings = pgTable(
   "meetings",
   {
@@ -24,6 +39,10 @@ export const meetings = pgTable(
       .notNull()
       .default("complete"),
     calendarEventId: text("calendar_event_id"),
+    /** Optional folder assignment; folder deletion moves meetings out. */
+    folderId: uuid("folder_id").references(() => folders.id, {
+      onDelete: "set null",
+    }),
     /** Public share-link token; null = not shared. */
     shareToken: text("share_token").unique(),
     startedAt: timestamp("started_at", { withTimezone: true }),

@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
-import { and, eq, getDb, meetings, notes, transcriptSegments } from "@repo/db";
+import {
+  and,
+  eq,
+  folders,
+  getDb,
+  inArray,
+  meetings,
+  notes,
+  transcriptSegments,
+} from "@repo/db";
 
 import { authenticateSyncRequest } from "@/lib/sync-auth";
 
@@ -22,9 +31,16 @@ interface PushMeeting {
   startedAt?: string;
   endedAt?: string;
   calendarEventId?: string;
+  folderId?: string;
   rawNotesMarkdown?: string;
   enhancedMarkdown?: string;
   segments: PushSegment[];
+}
+
+interface PushFolder {
+  id: string;
+  name: string;
+  createdAt?: string;
 }
 
 function toDate(value: unknown): Date | null {
@@ -50,7 +66,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
   }
 
-  let body: { meetings?: unknown };
+  let body: { meetings?: unknown; folders?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -59,7 +75,10 @@ export async function POST(request: Request) {
   const items = Array.isArray(body.meetings)
     ? (body.meetings as PushMeeting[])
     : [];
-  if (items.length === 0 || items.length > 20) {
+  const folderItems = Array.isArray(body.folders)
+    ? (body.folders as PushFolder[]).slice(0, 100)
+    : [];
+  if (items.length + folderItems.length === 0 || items.length > 20) {
     return NextResponse.json(
       { error: "Expected 1-20 meetings per push" },
       { status: 400 },
@@ -68,6 +87,45 @@ export async function POST(request: Request) {
 
   const db = getDb();
   const results: Array<{ id: string; ok: boolean; error?: string }> = [];
+
+  // Folders first — meetings in this batch may point at them.
+  for (const item of folderItems) {
+    const id = String(item.id ?? "");
+    if (!UUID_RE.test(id) || typeof item.name !== "string" || !item.name.trim()) {
+      continue; // malformed folder — meetings degrade to unfiled
+    }
+    const existing = await db
+      .select({ organizationId: folders.organizationId })
+      .from(folders)
+      .where(eq(folders.id, id))
+      .limit(1);
+    if (existing[0] && existing[0].organizationId !== device.organizationId) {
+      continue; // id owned by another workspace
+    }
+    const row = {
+      organizationId: device.organizationId,
+      name: item.name.trim().slice(0, 80),
+      createdAt: toDate(item.createdAt) ?? new Date(),
+      updatedAt: new Date(),
+    };
+    await db
+      .insert(folders)
+      .values({ id, ...row })
+      .onConflictDoUpdate({
+        target: folders.id,
+        set: { name: row.name, updatedAt: row.updatedAt },
+      });
+  }
+
+  // Folder assignments must reference folders this workspace owns.
+  const ownFolderIds = new Set(
+    (
+      await db
+        .select({ id: folders.id })
+        .from(folders)
+        .where(eq(folders.organizationId, device.organizationId))
+    ).map((r) => r.id),
+  );
 
   for (const item of items) {
     const id = String(item.id ?? "");
@@ -103,6 +161,10 @@ export async function POST(request: Request) {
             : null,
         startedAt: toDate(item.startedAt),
         endedAt: toDate(item.endedAt),
+        folderId:
+          typeof item.folderId === "string" && ownFolderIds.has(item.folderId)
+            ? item.folderId
+            : null,
         createdAt,
         updatedAt: new Date(),
       };
@@ -166,13 +228,17 @@ export async function DELETE(request: Request) {
   if (!device) {
     return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
   }
-  let body: { ids?: unknown };
+  let body: { ids?: unknown; folderIds?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const ids = (Array.isArray(body.ids) ? body.ids : [])
+    .map(String)
+    .filter((id) => UUID_RE.test(id))
+    .slice(0, 100);
+  const folderIds = (Array.isArray(body.folderIds) ? body.folderIds : [])
     .map(String)
     .filter((id) => UUID_RE.test(id))
     .slice(0, 100);
@@ -185,5 +251,16 @@ export async function DELETE(request: Request) {
         and(eq(meetings.id, id), eq(meetings.organizationId, device.organizationId)),
       );
   }
-  return NextResponse.json({ ok: true, deleted: ids.length });
+  if (folderIds.length > 0) {
+    // FK is ON DELETE SET NULL — meetings inside fall back to unfiled.
+    await db
+      .delete(folders)
+      .where(
+        and(
+          inArray(folders.id, folderIds),
+          eq(folders.organizationId, device.organizationId),
+        ),
+      );
+  }
+  return NextResponse.json({ ok: true, deleted: ids.length + folderIds.length });
 }
