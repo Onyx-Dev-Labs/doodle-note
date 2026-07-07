@@ -1402,6 +1402,9 @@ button.fp-row:hover {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 999px;
+  /* Hold the idle height while recording too — the timer/stop controls are
+     shorter than the record button, and the bar's pills sit on one row. */
+  min-height: 46px;
   padding: 5px 6px;
   box-shadow: var(--shadow-pill);
 }
