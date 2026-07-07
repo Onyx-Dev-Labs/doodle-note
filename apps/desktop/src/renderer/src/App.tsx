@@ -11,6 +11,7 @@ import HomeView, { type HomeFilter } from './HomeView'
 import MeetingView from './MeetingView'
 import ModelsView from './ModelsView'
 import mascotUrl from './assets/mascot-square.png'
+import { startWinCapture, stopWinCapture } from './lib/win-capture'
 import {
   CalendarIcon,
   FolderIcon,
@@ -78,6 +79,18 @@ function App(): React.JSX.Element {
 
   const refreshHome = useCallback(() => {
     setHomeRefresh((n) => n + 1)
+  }, [])
+
+  // Windows: the main process asks the renderer to run audio capture
+  // (Chromium mic + WASAPI loopback). macOS never sends these messages.
+  useEffect(() => {
+    return window.engine.onCaptureControl((control) => {
+      if (control.action === 'start') {
+        void startWinCapture(control.channels ?? ['mic', 'system'])
+      } else {
+        stopWinCapture()
+      }
+    })
   }, [])
 
   const openMeeting = useCallback((id: string) => {

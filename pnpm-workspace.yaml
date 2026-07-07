@@ -11,3 +11,14 @@ ignoredBuiltDependencies:
   - esbuild
   - sharp
   - unrs-resolver
+
+# Cross-building the Windows app from macOS: pnpm must also install the
+# win32-x64 platform binaries (sherpa-onnx, node-llama-cpp) so
+# electron-builder can bundle them.
+supportedArchitectures:
+  os:
+    - darwin
+    - win32
+  cpu:
+    - arm64
+    - x64

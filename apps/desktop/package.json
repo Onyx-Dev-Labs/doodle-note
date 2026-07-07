@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "private": true,
   "description": "Doodle Note desktop app \u2014 spawns the Swift transcription sidecar and shows its live transcript stream",
   "main": "./out/main/index.js",
@@ -15,7 +15,9 @@
     "lint": "eslint --cache .",
     "format": "prettier --write .",
     "package": "electron-vite build && APPLE_KEYCHAIN_PROFILE=doodlenote-notary electron-builder --mac",
-    "release": "pnpm package && node scripts/publish-release.mjs"
+    "package:win": "electron-vite build && electron-builder --win --x64",
+    "release": "pnpm package && node scripts/publish-release.mjs --mac",
+    "release:win": "pnpm package:win && node scripts/publish-release.mjs --win"
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
@@ -23,7 +25,8 @@
     "@repo/ai": "workspace:*",
     "@tiptap/extension-image": "^3.27.2",
     "electron-updater": "^6.8.9",
-    "node-llama-cpp": "^3.19.0"
+    "node-llama-cpp": "^3.19.0",
+    "sherpa-onnx-node": "^1.13.4"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -51,5 +54,8 @@
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
+  },
+  "optionalDependencies": {
+    "@node-llama-cpp/win-x64": "3.19.0"
   }
 }

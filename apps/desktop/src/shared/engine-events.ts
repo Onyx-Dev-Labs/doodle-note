@@ -6,6 +6,18 @@
  * Protocol reference: engine/README.md.
  */
 
+/** main → renderer (Windows): start/stop microphone + loopback capture. */
+export const ENGINE_CAPTURE_CONTROL_CHANNEL = 'engine:capture-control'
+/** renderer → main (Windows): one 16k mono Float32 frame for a channel. */
+export const ENGINE_AUDIO_CHANNEL = 'engine:audio'
+/** renderer → main (Windows): capture could not start (permissions etc.). */
+export const ENGINE_CAPTURE_ERROR_CHANNEL = 'engine:capture-error'
+
+export interface EngineCaptureControl {
+  action: 'start' | 'stop'
+  channels?: string[]
+}
+
 export const ENGINE_EVENT_CHANNEL = 'engine:event'
 export const ENGINE_START_CHANNEL = 'engine:start'
 export const ENGINE_STOP_CHANNEL = 'engine:stop'
@@ -191,4 +203,8 @@ export interface EngineApi {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void
   stop(): void
   onEvent(cb: (event: EngineEvent) => void): () => void
+  /** Windows capture bridge (no-ops on macOS). */
+  onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void
+  sendAudio(channel: string, samples: Float32Array): void
+  reportCaptureError(message: string): void
 }

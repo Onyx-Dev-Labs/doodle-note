@@ -1,8 +1,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
+  ENGINE_AUDIO_CHANNEL,
+  ENGINE_CAPTURE_CONTROL_CHANNEL,
+  ENGINE_CAPTURE_ERROR_CHANNEL,
   ENGINE_EVENT_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
+  type EngineCaptureControl,
   type EngineApi,
   type EngineCommand,
   type EngineEvent,
@@ -137,6 +141,24 @@ const engineApi: EngineApi = {
     return () => {
       ipcRenderer.removeListener(ENGINE_EVENT_CHANNEL, listener)
     }
+  },
+
+  onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void {
+    const listener = (_event: IpcRendererEvent, control: EngineCaptureControl): void => {
+      cb(control)
+    }
+    ipcRenderer.on(ENGINE_CAPTURE_CONTROL_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(ENGINE_CAPTURE_CONTROL_CHANNEL, listener)
+    }
+  },
+
+  sendAudio(channel: string, samples: Float32Array): void {
+    ipcRenderer.send(ENGINE_AUDIO_CHANNEL, { channel, samples })
+  },
+
+  reportCaptureError(message: string): void {
+    ipcRenderer.send(ENGINE_CAPTURE_ERROR_CHANNEL, message)
   }
 }
 
