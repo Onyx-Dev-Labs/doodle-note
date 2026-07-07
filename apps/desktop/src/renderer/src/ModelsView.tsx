@@ -625,31 +625,46 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                 </button>
               )}
               {!calState.msSignedIn && (
-                <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
+                <button
+                  type="button"
+                  className="provider-btn"
+                  disabled={connecting}
+                  onClick={() => void connectCalendar()}
+                >
+                  <MicrosoftLogo />
                   {connecting ? 'Waiting for your browser…' : 'Connect Microsoft'}
                 </button>
               )}
               {calState.msSignedIn && (
-                <button type="button" onClick={() => void disconnectCalendar()}>
+                <button
+                  type="button"
+                  className="provider-btn"
+                  onClick={() => void disconnectCalendar()}
+                >
+                  <MicrosoftLogo />
                   Disconnect Microsoft
                 </button>
               )}
               {!calState.googleSignedIn && (
                 <button
                   type="button"
+                  className="provider-btn"
                   disabled={googleConnecting}
                   onClick={() => void connectGoogle()}
                 >
+                  <GoogleLogo />
                   {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
                 </button>
               )}
               {calState.googleSignedIn && (
                 <button
                   type="button"
+                  className="provider-btn"
                   onClick={() => {
                     void window.calendar.disconnectGoogle().then(setCalState)
                   }}
                 >
+                  <GoogleLogo />
                   Disconnect Google
                 </button>
               )}

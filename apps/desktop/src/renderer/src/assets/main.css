@@ -2208,6 +2208,13 @@ button.fp-row:hover {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
+/* provider buttons in the calendar card carry the brand mark */
+.provider-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 /* ---- settings shell: nav rail + one visible section ---- */
 
 .settings-shell {

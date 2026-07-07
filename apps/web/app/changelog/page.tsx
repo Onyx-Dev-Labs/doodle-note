@@ -10,6 +10,13 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.2.5",
+    date: "July 7, 2026",
+    highlights: [
+      "Microsoft and Google logos on the calendar connect/disconnect buttons",
+    ],
+  },
+  {
     version: "0.2.4",
     date: "July 7, 2026",
     highlights: [
