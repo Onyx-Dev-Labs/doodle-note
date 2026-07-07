@@ -1,7 +1,7 @@
 // Upload the packaged update artifacts to the Blob-hosted feed.
 // Requires BLOB_READ_WRITE_TOKEN (repo-root .env.local has it in dev).
 import { put } from '@vercel/blob'
-import { copyFileSync, createReadStream, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, createReadStream, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,10 +30,18 @@ if (!process.env.BLOB_READ_WRITE_TOKEN) {
 const flags = process.argv.slice(2)
 const wantMac = flags.includes('--mac') || !flags.includes('--win')
 const wantWin = flags.includes('--win') || !flags.includes('--mac')
+// Only the CURRENT version's artifacts upload — older ones are already on
+// the feed and immutable. (Re-uploading history burned ~600MB per release
+// and tripped a stream-reuse bug in the upload client's retry path.)
+const { version } = JSON.parse(
+  readFileSync(path.join(here, '..', 'package.json'), 'utf8')
+)
 const isMacArtifact = (name) =>
-  name === 'latest-mac.yml' || (name.endsWith('.zip') && name.includes('mac'))
+  name === 'latest-mac.yml' ||
+  (name.endsWith('.zip') && name.includes('mac') && name.includes(version))
 const isWinArtifact = (name) =>
-  name === 'latest.yml' || name.endsWith('.exe') || name.endsWith('.exe.blockmap')
+  name === 'latest.yml' ||
+  ((name.endsWith('.exe') || name.endsWith('.exe.blockmap')) && name.includes(version))
 const artifacts = readdirSync(releaseDir).filter(
   (name) => (wantMac && isMacArtifact(name)) || (wantWin && isWinArtifact(name))
 )

@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.3.5",
+    date: "July 7, 2026",
+    highlights: [
+      "Mac: microphone picker in the meeting bar \u2014 choose any input device, switch mid-recording, and DoodleNote falls back to the default mic if your chosen one goes silent (thanks Alec!)",
+      "Mac only for now \u2014 Windows stays on 0.3.4 until the next cross-platform release",
+      "All in-app links now point at doodlenote.ai",
+    ],
+  },
+  {
     version: "0.3.4",
     date: "July 7, 2026",
     highlights: [
