@@ -2261,6 +2261,23 @@ button.fp-row:hover {
   text-align: center;
 }
 
+.settings-version {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--faint);
+  text-align: left;
+}
+
+.settings-version:hover {
+  color: var(--accent-deep);
+  text-decoration: underline;
+}
+
 .settings-content {
   flex: 1;
   min-width: 0;

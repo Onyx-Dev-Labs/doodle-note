@@ -12,6 +12,8 @@ export interface DetectState {
   autoStop: boolean
   /** The engine micmon child is currently alive (diagnostic). */
   micMonitorAlive: boolean
+  /** Running app version (package.json), e.g. "0.2.1". */
+  appVersion: string
 }
 
 export interface DetectPrefsUpdate {

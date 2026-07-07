@@ -415,6 +415,16 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
               {item.label}
             </button>
           ))}
+          {detect !== null && (
+            <button
+              type="button"
+              className="settings-version"
+              title="See what changed in each version"
+              onClick={() => window.open('https://doodle-note.vercel.app/changelog')}
+            >
+              v{detect.appVersion} · What&rsquo;s new
+            </button>
+          )}
         </nav>
 
         <div className="settings-content">

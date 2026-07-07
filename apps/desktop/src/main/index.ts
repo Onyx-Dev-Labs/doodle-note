@@ -274,7 +274,8 @@ app.whenReady().then(() => {
     loginItem: app.getLoginItemSettings().openAtLogin,
     micDetect: micWatcher.enabled,
     autoStop: micWatcher.autoStop,
-    micMonitorAlive: micWatcher.monitorAlive
+    micMonitorAlive: micWatcher.monitorAlive,
+    appVersion: app.getVersion()
   })
   ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
   ipcMain.handle(DETECT_SET_PREFS_CHANNEL, (_event, update: DetectPrefsUpdate): DetectState => {
