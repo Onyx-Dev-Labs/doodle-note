@@ -10,6 +10,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.3.3",
+    date: "July 7, 2026",
+    highlights: [
+      "Two-way sync: meetings recorded on one computer now appear on every device linked to your workspace — deletions travel too (to Trash, always recoverable)",
+      "Fixed: \u201cfailed to load the model\u201d on Windows — note generation now falls back to CPU automatically when the GPU can\u2019t fit the model",
+    ],
+  },
+  {
     version: "0.3.2",
     date: "July 7, 2026",
     highlights: [
