@@ -21,7 +21,7 @@ const T0 = 1_000_000
 
 describe('mic-watcher-logic', () => {
   it('prompts only after the debounce window', () => {
-    let s = onMicEvent(initialMicState(), true, T0)
+    const s = onMicEvent(initialMicState(), true, T0)
     assert.equal(shouldPrompt(s, T0 + MIC_DEBOUNCE_MS - 1), false)
     assert.equal(shouldPrompt(s, T0 + MIC_DEBOUNCE_MS), true)
   })
@@ -67,6 +67,22 @@ describe('mic-watcher-logic', () => {
     assert.equal(meetingAppLabel([]), null)
     // A meeting app among others still wins.
     assert.equal(meetingAppLabel(['com.fluidvoice.app', 'us.zoom.xos']), 'Zoom')
+  })
+
+  it('recognizes Windows ConsentStore key names (exe paths + package families)', () => {
+    // NonPackaged keys are exe paths with '#' for '\', lowercased by win-micmon.
+    assert.equal(meetingAppLabel(['c:#users#sean#appdata#roaming#zoom#bin#zoom.exe']), 'Zoom')
+    // New Teams is a Store app — package family name.
+    assert.equal(meetingAppLabel(['msteams_8wekyb3d8bbwe']), 'Teams')
+    assert.equal(meetingAppLabel(['c:#program files#slack#slack.exe']), 'Slack')
+    assert.equal(
+      meetingAppLabel(['c:#program files#google#chrome#application#chrome.exe']),
+      'browser'
+    )
+    // DoodleNote's own capture shows up in the ConsentStore — never a meeting.
+    assert.equal(meetingAppLabel(['c:#program files#doodlenote#doodlenote.exe']), null)
+    // Windows browsers are excluded from ring labels like mac ones.
+    assert.equal(meetingRingLabel(['c:#...#msedge.exe']), null)
   })
 
   it('suppression swallows events and requires a fresh edge after lifting', () => {

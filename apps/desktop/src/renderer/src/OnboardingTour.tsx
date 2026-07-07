@@ -132,7 +132,7 @@ function OnboardingTour({
     (notes.engineChoice === 'cloud'
       ? notes.cloud?.hasKey === true
       : typeof notes.activeLocalModelId === 'string' && notes.activeLocalModelId.length > 0)
-  const isWindows = detect?.micDetectSupported === false
+  const isWindows = detect?.platform === 'win32'
 
   const next = (): void => setStepIndex((i) => Math.min(i + 1, steps.length - 1))
   const back = (): void => setStepIndex((i) => Math.max(i - 1, 0))
@@ -360,7 +360,7 @@ function OnboardingTour({
                 {calendarConnected ? '✓' : '○'} Calendar{' '}
                 {calendarConnected ? 'connected' : 'not connected'}
               </li>
-              {!isWindows && (
+              {detect?.micDetectSupported !== false && (
                 <li className={detectionOn ? 'done' : ''}>
                   {detectionOn ? '✓' : '○'} Meeting detection {detectionOn ? 'on' : 'off'}
                 </li>

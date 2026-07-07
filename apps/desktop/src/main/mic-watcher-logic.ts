@@ -29,7 +29,22 @@ const MEETING_BUNDLE_PATTERNS: ReadonlyArray<{ pattern: string; label: string }>
   { pattern: 'org.mozilla.firefox', label: 'browser' },
   { pattern: 'com.microsoft.edgemac', label: 'browser' },
   { pattern: 'company.thebrowser', label: 'browser' }, // Arc
-  { pattern: 'com.brave.browser', label: 'browser' }
+  { pattern: 'com.brave.browser', label: 'browser' },
+  // Windows: ConsentStore key names — exe paths ('#' for '\') for classic
+  // apps, package family names for Store apps (new Teams = MSTeams_…).
+  { pattern: 'zoom.exe', label: 'Zoom' },
+  { pattern: 'msteams', label: 'Teams' },
+  { pattern: 'teams.exe', label: 'Teams' },
+  { pattern: 'webex', label: 'Webex' },
+  { pattern: 'ciscocollab', label: 'Webex' },
+  { pattern: 'slack.exe', label: 'Slack' },
+  { pattern: 'discord.exe', label: 'Discord' },
+  { pattern: 'skype.exe', label: 'Skype' },
+  { pattern: 'chrome.exe', label: 'browser' },
+  { pattern: 'msedge', label: 'browser' },
+  { pattern: 'firefox.exe', label: 'browser' },
+  { pattern: 'brave.exe', label: 'browser' },
+  { pattern: 'arc.exe', label: 'browser' }
 ]
 
 /**
