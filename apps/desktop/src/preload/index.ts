@@ -95,7 +95,9 @@ import {
 } from '../shared/sync-api'
 import {
   CALENDAR_CONNECT_CHANNEL,
+  CALENDAR_CONNECT_GOOGLE_CHANNEL,
   CALENDAR_DISCONNECT_CHANNEL,
+  CALENDAR_DISCONNECT_GOOGLE_CHANNEL,
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
@@ -257,6 +259,14 @@ const calendarApi: CalendarApi = {
 
   disconnect(): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_DISCONNECT_CHANNEL) as Promise<CalendarState>
+  },
+
+  connectGoogle(): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_CONNECT_GOOGLE_CHANNEL) as Promise<CalendarState>
+  },
+
+  disconnectGoogle(): Promise<CalendarState> {
+    return ipcRenderer.invoke(CALENDAR_DISCONNECT_GOOGLE_CHANNEL) as Promise<CalendarState>
   },
 
   refresh(): Promise<CalendarState> {

@@ -245,6 +245,18 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
     }
   }
 
+  const [googleConnecting, setGoogleConnecting] = useState(false)
+
+  const connectGoogle = async (): Promise<void> => {
+    if (googleConnecting) return
+    setGoogleConnecting(true)
+    try {
+      setCalState(await window.calendar.connectGoogle())
+    } finally {
+      setGoogleConnecting(false)
+    }
+  }
+
   const syncCalendar = async (): Promise<void> => {
     if (syncing) return
     setSyncing(true)
@@ -518,13 +530,12 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
             </button>
             <button
               type="button"
-              className="ms-signin google-soon"
-              disabled
-              title="Google Calendar support is coming soon"
+              className="ms-signin"
+              disabled={googleConnecting}
+              onClick={() => void connectGoogle()}
             >
               <GoogleLogo />
-              <span>Sign in with Google</span>
-              <span className="soon-badge">coming soon</span>
+              <span>{googleConnecting ? 'Waiting for your browser…' : 'Sign in with Google'}</span>
             </button>
             {!calState.builtIn && (
               <button
@@ -544,8 +555,18 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
         ) : (
           <div className="calendar-connected">
             <span className="calendar-status">
-              Connected as{' '}
-              <strong>{calState.account?.email ?? 'your Microsoft 365 account'}</strong>
+              {calState.msSignedIn && (
+                <>
+                  Microsoft:{' '}
+                  <strong>{calState.account?.email ?? 'connected'}</strong>
+                </>
+              )}
+              {calState.msSignedIn && calState.googleSignedIn && ' · '}
+              {calState.googleSignedIn && (
+                <>
+                  Google: <strong>{calState.googleAccount?.email ?? 'connected'}</strong>
+                </>
+              )}
               {calState.lastSyncIso && (
                 <span className="calendar-note"> · {lastSyncLabel(calState.lastSyncIso)}</span>
               )}
@@ -554,14 +575,40 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
               <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
                 {syncing ? 'Syncing…' : 'Sync now'}
               </button>
-              {calState.error && (
+              {calState.msSignedIn && calState.error && (
                 <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
                   {connecting ? 'Waiting for your browser…' : 'Sign in again'}
                 </button>
               )}
-              <button type="button" onClick={() => void disconnectCalendar()}>
-                Disconnect
-              </button>
+              {!calState.msSignedIn && (
+                <button type="button" disabled={connecting} onClick={() => void connectCalendar()}>
+                  {connecting ? 'Waiting for your browser…' : 'Connect Microsoft'}
+                </button>
+              )}
+              {calState.msSignedIn && (
+                <button type="button" onClick={() => void disconnectCalendar()}>
+                  Disconnect Microsoft
+                </button>
+              )}
+              {!calState.googleSignedIn && (
+                <button
+                  type="button"
+                  disabled={googleConnecting}
+                  onClick={() => void connectGoogle()}
+                >
+                  {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
+                </button>
+              )}
+              {calState.googleSignedIn && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void window.calendar.disconnectGoogle().then(setCalState)
+                  }}
+                >
+                  Disconnect Google
+                </button>
+              )}
             </div>
 
             <div className="cal-subcard">

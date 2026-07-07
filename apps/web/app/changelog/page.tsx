@@ -10,6 +10,18 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.2.3",
+    date: "July 7, 2026",
+    highlights: [
+      "Google Calendar: connect your Google account alongside (or instead of) Microsoft 365 — same Coming-up card, menu-bar countdown, and meeting-start prompts",
+      "Sign in with Google on the web dashboard",
+      "Incoming-call prompts appear within ~5 seconds of the ring (was up to 13)",
+      "Exactly one prompt per meeting — no more stacked notifications covering each other",
+      "Notarized by Apple: DoodleNote now installs cleanly on any Mac",
+      "Version number in Settings links to this page",
+    ],
+  },
+  {
     version: "0.2.0",
     date: "July 7, 2026",
     highlights: [

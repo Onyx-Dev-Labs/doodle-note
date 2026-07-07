@@ -13,6 +13,8 @@ export const CALENDAR_SET_CONFIG_CHANNEL = 'calendar:set-config'
 export const CALENDAR_SET_PREFS_CHANNEL = 'calendar:set-prefs'
 export const CALENDAR_CONNECT_CHANNEL = 'calendar:connect'
 export const CALENDAR_DISCONNECT_CHANNEL = 'calendar:disconnect'
+export const CALENDAR_CONNECT_GOOGLE_CHANNEL = 'calendar:connect-google'
+export const CALENDAR_DISCONNECT_GOOGLE_CHANNEL = 'calendar:disconnect-google'
 export const CALENDAR_REFRESH_CHANNEL = 'calendar:refresh'
 /** main → renderer: full CalendarState after every refresh / auth change. */
 export const CALENDAR_EVENTS_CHANNEL = 'calendar:events'
@@ -87,8 +89,14 @@ export interface CalendarState {
   /** Saved app-registration ids (not secrets), echoed so Settings can prefill. */
   clientId?: string
   tenantId?: string
+  /** Any provider connected (gates events/calendars/prefs display). */
   signedIn: boolean
+  /** Microsoft 365 specifically. */
+  msSignedIn: boolean
+  /** Google Calendar specifically. */
+  googleSignedIn: boolean
   account?: CalendarAccount
+  googleAccount?: CalendarAccount
   /**
    * Next 14 days across the visible calendars, soonest first, already
    * filtered by the no-participants pref. Empty when signed out.
@@ -134,6 +142,10 @@ export interface CalendarApi {
   connect(): Promise<CalendarState>
   /** Signs out and clears cached tokens + events. */
   disconnect(): Promise<CalendarState>
+  /** Interactive Google sign-in (system browser, loopback + PKCE). */
+  connectGoogle(): Promise<CalendarState>
+  /** Disconnects Google Calendar only; Microsoft (if any) stays. */
+  disconnectGoogle(): Promise<CalendarState>
   /** Manual "Sync now". */
   refresh(): Promise<CalendarState>
   onEvents(cb: (state: CalendarState) => void): () => void

@@ -19,6 +19,8 @@ import {
 } from '@azure/msal-node'
 import {
   CALENDAR_CONNECT_CHANNEL,
+  CALENDAR_CONNECT_GOOGLE_CHANNEL,
+  CALENDAR_DISCONNECT_GOOGLE_CHANNEL,
   CALENDAR_DISCONNECT_CHANNEL,
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
@@ -47,6 +49,7 @@ import {
   upcomingTrayEvents
 } from './calendar-events'
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
+import { GoogleCalendarClient } from './google-calendar'
 import type { PromptPanel } from './prompt-panel'
 
 /** Delegated Graph permissions; offline_access keeps the refresh token. */
@@ -115,6 +118,7 @@ interface StoredCalendarSettings extends Partial<StoredCalendarConfig>, Partial<
 interface StoredCalendarCache {
   events: CalendarEvent[]
   calendars?: CalendarInfo[]
+  googleCalendars?: CalendarInfo[]
   lastSyncIso?: string
   account?: CalendarAccount
 }
@@ -160,6 +164,8 @@ export class CalendarService {
   private rawEvents: CalendarEvent[] = []
   /** The account's calendars from GET /me/calendars. */
   private calendars: CalendarInfo[] = []
+  private googleCalendars: CalendarInfo[] = []
+  private google: GoogleCalendarClient
   private lastSyncIso: string | undefined
   private lastError: string | undefined
   private notified: Record<string, string>
@@ -193,19 +199,27 @@ export class CalendarService {
     const cache = this.loadEventCache()
     this.rawEvents = cache.events
     this.calendars = cache.calendars ?? []
+    this.googleCalendars = cache.googleCalendars ?? []
     this.lastSyncIso = cache.lastSyncIso
     this.accountView = cache.account ?? null
+    this.google = new GoogleCalendarClient(userDataDir)
     this.ready = this.bootstrap()
   }
 
   /** The canonical event list every consumer sees (broadcast, watcher, tray):
    *  raw events narrowed to the visible calendars (so a toggle takes effect
    *  before the refetch lands) with the no-participants pref applied. */
+  /** Both providers' calendars, Microsoft first. */
+  private allCalendars(): CalendarInfo[] {
+    return [...this.calendars, ...this.googleCalendars]
+  }
+
   private visibleEvents(): CalendarEvent[] {
     let events = filterByParticipants(this.rawEvents, this.prefs.showNoParticipants)
-    if (this.calendars.length > 0) {
+    const all = this.allCalendars()
+    if (all.length > 0) {
       const visibleIds = new Set(
-        resolveVisibleCalendars(this.calendars, this.prefs.visibleCalendarIds).map((c) => c.id)
+        resolveVisibleCalendars(all, this.prefs.visibleCalendarIds).map((c) => c.id)
       )
       // '' marks legacy cache entries from before multi-calendar — keep them
       // until the next sync stamps real calendar ids.
@@ -235,6 +249,14 @@ export class CalendarService {
       await this.ready
       return this.disconnect()
     })
+    ipcMain.handle(CALENDAR_CONNECT_GOOGLE_CHANNEL, async () => {
+      await this.ready
+      return this.connectGoogle()
+    })
+    ipcMain.handle(CALENDAR_DISCONNECT_GOOGLE_CHANNEL, async () => {
+      await this.ready
+      return this.disconnectGoogle()
+    })
     ipcMain.handle(CALENDAR_REFRESH_CHANNEL, async () => {
       await this.ready
       await this.refreshEvents()
@@ -261,15 +283,20 @@ export class CalendarService {
   /* ---- state ---- */
 
   private state(): CalendarState {
-    const signedIn = this.account !== null
+    const msSignedIn = this.account !== null
+    const googleSignedIn = this.google.signedIn
+    const signedIn = msSignedIn || googleSignedIn
     return {
       configured: this.effectiveConfig() !== null,
       builtIn: BUILT_IN_MS_CLIENT_ID.length > 0,
       ...(this.config ? { clientId: this.config.clientId, tenantId: this.config.tenantId } : {}),
       signedIn,
-      ...(signedIn && this.accountView ? { account: this.accountView } : {}),
+      msSignedIn,
+      googleSignedIn,
+      ...(msSignedIn && this.accountView ? { account: this.accountView } : {}),
+      ...(googleSignedIn && this.google.account ? { googleAccount: this.google.account } : {}),
       events: signedIn ? this.visibleEvents() : [],
-      calendars: signedIn ? this.calendars : [],
+      calendars: signedIn ? this.allCalendars() : [],
       prefs: { ...this.prefs },
       ...(this.lastSyncIso ? { lastSyncIso: this.lastSyncIso } : {}),
       ...(this.lastError ? { error: this.lastError } : {})
@@ -315,6 +342,10 @@ export class CalendarService {
       this.pca = null
       this.account = null
       this.lastError = friendlyError(err)
+    }
+    if (this.google.signedIn) {
+      this.startTimers()
+      void this.refreshEvents()
     }
   }
 
@@ -468,6 +499,39 @@ export class CalendarService {
     }
   }
 
+  private async connectGoogle(): Promise<CalendarState> {
+    if (this.connectBusy) return this.state()
+    this.connectBusy = true
+    try {
+      await this.google.connect()
+      this.lastError = undefined
+      this.startTimers()
+      await this.refreshEvents()
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err)
+    } finally {
+      this.connectBusy = false
+      this.broadcastState()
+    }
+    return this.state()
+  }
+
+  private async disconnectGoogle(): Promise<CalendarState> {
+    this.google.disconnect()
+    this.googleCalendars = []
+    this.rawEvents = this.rawEvents.filter((e) => !e.calendarId.startsWith('g:'))
+    if (this.account === null) {
+      // Nothing left connected — behave like a full sign-out.
+      this.rawEvents = []
+      this.lastSyncIso = undefined
+      this.stopTimers()
+      this.destroyTray()
+    }
+    this.saveEventCache()
+    this.broadcastState()
+    return this.state()
+  }
+
   private async disconnect(): Promise<CalendarState> {
     this.stopTimers()
     try {
@@ -585,17 +649,39 @@ export class CalendarService {
   /* ---- Graph polling ---- */
 
   private async refreshEvents(): Promise<void> {
-    if (this.refreshBusy || !this.account) return
+    if (this.refreshBusy || (!this.account && !this.google.signedIn)) return
     this.refreshBusy = true
     try {
-      const token = await this.getAccessToken()
-      if (token === null) return // lastError already explains
-      this.calendars = await this.fetchCalendars(token)
-      const visible = resolveVisibleCalendars(this.calendars, this.prefs.visibleCalendarIds)
+      let token: string | null = null
+      if (this.account) {
+        token = await this.getAccessToken()
+        if (token !== null) {
+          this.calendars = await this.fetchCalendars(token)
+        } else if (!this.google.signedIn) {
+          return // lastError already explains
+        }
+      }
+      if (this.google.signedIn) {
+        try {
+          this.googleCalendars = await this.google.fetchCalendars()
+        } catch (err) {
+          // Google blip must not kill the Microsoft sync (and vice versa).
+          if (this.googleCalendars.length === 0) throw err
+          console.error('[calendar] google calendar list refresh failed:', err)
+        }
+      }
+      const visible = resolveVisibleCalendars(
+        this.allCalendars(),
+        this.prefs.visibleCalendarIds
+      ).filter((calendar) => (calendar.id.startsWith('g:') ? true : token !== null))
       // Per-calendar fetches run in parallel; one failing shared calendar
       // must not kill the sync, so failures are collected, not thrown.
       const results = await Promise.allSettled(
-        visible.map((calendar) => this.fetchCalendarView(token, calendar))
+        visible.map((calendar) =>
+          calendar.id.startsWith('g:')
+            ? this.google.fetchEvents(calendar)
+            : this.fetchCalendarView(token as string, calendar)
+        )
       )
       const lists: CalendarEvent[][] = []
       let firstFailure: unknown
@@ -975,6 +1061,7 @@ export class CalendarService {
       const cache: StoredCalendarCache = {
         events: this.rawEvents,
         ...(this.calendars.length > 0 ? { calendars: this.calendars } : {}),
+        ...(this.googleCalendars.length > 0 ? { googleCalendars: this.googleCalendars } : {}),
         ...(this.lastSyncIso ? { lastSyncIso: this.lastSyncIso } : {}),
         ...(this.accountView ? { account: this.accountView } : {})
       }
