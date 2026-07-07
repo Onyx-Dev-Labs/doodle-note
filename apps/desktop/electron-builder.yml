@@ -22,6 +22,7 @@ mac:
   # cross-builds work; each platform ships only its own.
   files:
     - "!**/node_modules/@node-llama-cpp/win-*/**"
+    - "!**/node_modules/@node-llama-cpp/linux-*/**"
     - "!**/node_modules/@node-llama-cpp/mac-x64/**"
     - "!**/node_modules/sherpa-onnx-*/**"
   target:
@@ -57,10 +58,12 @@ win:
   # local note generation); CUDA variants add >500MB for little test value.
   files:
     - "!**/node_modules/@node-llama-cpp/mac-*/**"
+    - "!**/node_modules/@node-llama-cpp/linux-*/**"
     - "!**/node_modules/@node-llama-cpp/win-arm64/**"
     - "!**/node_modules/@node-llama-cpp/win-x64-cuda/**"
     - "!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**"
     - "!**/node_modules/sherpa-onnx-darwin-*/**"
+    - "!**/node_modules/sherpa-onnx-linux-*/**"
   # Unsigned for now (no Authenticode cert) — SmartScreen will warn on
   # install; testers click "More info → Run anyway".
 nsis:
@@ -71,6 +74,9 @@ nsis:
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.
 # scripts/publish-release.mjs uploads the artifacts after packaging.
+# Feed served via the app's own domain: static manifests + a Blob proxy
+# for artifacts. The raw blob domain got hit by Vercel's bot challenge
+# (403 Security Checkpoint) which electron-updater cannot pass.
 publish:
   provider: generic
-  url: https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates
+  url: https://www.doodlenote.ai/updates

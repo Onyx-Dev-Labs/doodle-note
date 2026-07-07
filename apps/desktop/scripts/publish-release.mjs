@@ -1,7 +1,7 @@
 // Upload the packaged update artifacts to the Blob-hosted feed.
 // Requires BLOB_READ_WRITE_TOKEN (repo-root .env.local has it in dev).
 import { put } from '@vercel/blob'
-import { createReadStream, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, createReadStream, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -57,5 +57,14 @@ for (const name of artifacts) {
     ...(isManifest ? { cacheControlMaxAge: 60 } : {})
   })
   console.log(blob.url)
+}
+// Manifests also become static files on the app domain (committed with the
+// release PR): doodle-note.vercel.app/updates/latest*.yml never depends on
+// the blob domain, which platform bot-challenges have taken hostage before.
+const webUpdatesDir = path.join(here, '..', '..', 'web', 'public', 'updates')
+mkdirSync(webUpdatesDir, { recursive: true })
+for (const name of artifacts.filter((n) => n.endsWith('.yml'))) {
+  copyFileSync(path.join(releaseDir, name), path.join(webUpdatesDir, name))
+  console.log(`staged ${name} -> apps/web/public/updates (commit with the release PR)`)
 }
 console.log('feed published')

@@ -14,6 +14,23 @@ const nextConfig: NextConfig = {
    * build. Only used as the local dev fallback when DATABASE_URL is unset.
    */
   serverExternalPackages: ["@electric-sql/pglite"],
+  /**
+   * Old links (pre-doodlenote.ai builds, minted share links, the What's-new
+   * link in installed apps) land on the vercel.app alias — bounce PAGE
+   * routes to the branded domain. /api and /updates are excluded on
+   * purpose: installed desktop apps call them with bearer tokens, and
+   * fetch strips Authorization headers on cross-origin redirects.
+   */
+  async redirects() {
+    return [
+      {
+        source: "/:path((?!api/|updates/).*)",
+        has: [{ type: "host" as const, value: "doodle-note.vercel.app" }],
+        destination: "https://www.doodlenote.ai/:path",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
