@@ -10,6 +10,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.2.4",
+    date: "July 7, 2026",
+    highlights: [
+      "Settings → General → Updates: see your version, check for updates on demand, watch the download, and click Restart to update",
+      "Fixed: downloaded updates could fail to install on quit — the new Restart button is the reliable path",
+    ],
+  },
+  {
     version: "0.2.3",
     date: "July 7, 2026",
     highlights: [

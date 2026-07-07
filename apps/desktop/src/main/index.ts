@@ -8,7 +8,7 @@ import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
 import { FoldersService } from './folders-service'
-import { initAutoUpdater } from './updater'
+import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
@@ -291,7 +291,7 @@ app.whenReady().then(() => {
     return detectState()
   })
   micWatcher.start()
-  initAutoUpdater()
+  initAutoUpdater(broadcast)
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's
   // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —
@@ -301,7 +301,10 @@ app.whenReady().then(() => {
   // watchdogs, so skipping native teardown loses nothing.
   app.on('before-quit', () => {
     micWatcher.stop()
-    process.exit(0)
+    // A quit driven by Restart-to-update must proceed normally so Squirrel
+    // can hand off to the installer; the hard exit is only for regular quits
+    // (the llama-addon teardown SIGABRT workaround).
+    if (!isQuittingForUpdate()) process.exit(0)
   })
 
   // The renderer mirrors its theme pref here so nativeTheme (and with it the

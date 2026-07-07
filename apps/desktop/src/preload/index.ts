@@ -63,6 +63,14 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  UPDATE_CHECK_CHANNEL,
+  UPDATE_GET_STATE_CHANNEL,
+  UPDATE_INSTALL_CHANNEL,
+  UPDATE_STATE_EVENT_CHANNEL,
+  type UpdateApi,
+  type UpdateState
+} from '../shared/update-api'
+import {
   THEME_SET_SOURCE_CHANNEL,
   type ThemeApi,
   type ThemeSource
@@ -324,6 +332,24 @@ const themeApi: ThemeApi = {
   }
 }
 
+const updateApi: UpdateApi = {
+  getState(): Promise<UpdateState> {
+    return ipcRenderer.invoke(UPDATE_GET_STATE_CHANNEL) as Promise<UpdateState>
+  },
+
+  check(): Promise<UpdateState> {
+    return ipcRenderer.invoke(UPDATE_CHECK_CHANNEL) as Promise<UpdateState>
+  },
+
+  install(): Promise<void> {
+    return ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL) as Promise<void>
+  },
+
+  onState(cb: (state: UpdateState) => void): () => void {
+    return subscribe(UPDATE_STATE_EVENT_CHANNEL, cb)
+  }
+}
+
 const detectApi: DetectApi = {
   getState(): Promise<DetectState> {
     return ipcRenderer.invoke(DETECT_GET_STATE_CHANNEL) as Promise<DetectState>
@@ -349,6 +375,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('media', mediaApi)
     contextBridge.exposeInMainWorld('detect', detectApi)
     contextBridge.exposeInMainWorld('themeNative', themeApi)
+    contextBridge.exposeInMainWorld('updates', updateApi)
   } catch (error) {
     console.error(error)
   }
@@ -371,4 +398,6 @@ if (process.contextIsolated) {
   window.detect = detectApi
   // @ts-ignore (defined in index.d.ts)
   window.themeNative = themeApi
+  // @ts-ignore (defined in index.d.ts)
+  window.updates = updateApi
 }

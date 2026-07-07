@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
+import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon } from './icons'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import type {
@@ -163,6 +164,49 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
 
   /* ---- appearance ---- */
   const [theme, setTheme] = useState<ThemePref>(() => getThemePref())
+
+  /* ---- updates ---- */
+  const [update, setUpdate] = useState<UpdateState | null>(null)
+  const [checkPending, setCheckPending] = useState(false)
+
+  useEffect(() => {
+    if (active) {
+      void window.updates
+        .getState()
+        .then(setUpdate)
+        .catch(() => setUpdate(null))
+    }
+  }, [active])
+
+  useEffect(() => window.updates.onState(setUpdate), [])
+
+  const checkForUpdates = async (): Promise<void> => {
+    if (checkPending) return
+    setCheckPending(true)
+    try {
+      setUpdate(await window.updates.check())
+    } finally {
+      setCheckPending(false)
+    }
+  }
+
+  const updateStatusLine = (u: UpdateState): string => {
+    if (!u.supported) return 'Updates apply to the installed app (not dev builds)'
+    switch (u.status) {
+      case 'checking':
+        return 'Checking…'
+      case 'downloading':
+        return `Downloading v${u.latestVersion ?? ''}… ${u.percent ?? 0}%`
+      case 'downloaded':
+        return `v${u.latestVersion} is ready to install`
+      case 'up-to-date':
+        return 'You are on the latest version'
+      case 'error':
+        return u.error ?? 'Update check failed'
+      default:
+        return 'Checks automatically on launch and every 6 hours'
+    }
+  }
 
   /* ---- calendar (Microsoft 365) ---- */
   const [calState, setCalState] = useState<CalendarState | null>(null)
@@ -726,6 +770,45 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
               {label}
             </button>
           ))}
+        </div>
+      </section>
+
+      <section className="keys-section">
+        <h3>Updates</h3>
+        <div className="cal-subcard">
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">
+                DoodleNote v{update?.currentVersion ?? '…'}
+              </span>
+              <span className="cal-row-sub">
+                {update ? updateStatusLine(update) : 'loading…'}
+              </span>
+            </span>
+            {update?.status === 'downloaded' ? (
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => void window.updates.install()}
+              >
+                Restart to update
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="pill-btn"
+                disabled={
+                  checkPending ||
+                  update?.supported === false ||
+                  update?.status === 'checking' ||
+                  update?.status === 'downloading'
+                }
+                onClick={() => void checkForUpdates()}
+              >
+                Check for updates
+              </button>
+            )}
+          </div>
         </div>
       </section>
 

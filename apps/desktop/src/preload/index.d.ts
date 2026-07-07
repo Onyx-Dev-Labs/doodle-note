@@ -7,6 +7,7 @@ import type { MeetingsApi } from '../shared/meetings-api'
 import type { NotesApi } from '../shared/notes-api'
 import type { SyncApi } from '../shared/sync-api'
 import type { ThemeApi } from '../shared/theme-api'
+import type { UpdateApi } from '../shared/update-api'
 
 declare global {
   interface Window {
@@ -19,6 +20,7 @@ declare global {
     media: MediaApi
     detect: DetectApi
     themeNative: ThemeApi
+    updates: UpdateApi
   }
 }
 
