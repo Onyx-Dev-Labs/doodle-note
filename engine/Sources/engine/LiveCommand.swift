@@ -1,4 +1,6 @@
 import AVFoundation
+import AudioToolbox
+import CoreAudio
 import CoreMedia
 import FluidAudio
 import Foundation
@@ -27,12 +29,21 @@ enum LiveCommand {
         // Opt-in parent-death watchdog: hosts that spawn us with a live stdin
         // pipe pass this flag; when the pipe closes (host crashed/restarted),
         // stop gracefully instead of recording forever as an orphan. Opt-in
-        // because a /dev/null stdin reads EOF immediately.
+        // because a /dev/null stdin reads EOF immediately. Lines that arrive
+        // before EOF are commands: {"cmd":"set-input","uid":…} switches the
+        // mic device mid-session; {"cmd":"stop"} ends the session.
         if options.flags.contains("exit-on-stdin-close") {
             Thread {
+                var buffer = Data()
                 while true {
-                    let data = FileHandle.standardInput.availableData
-                    if data.isEmpty { break }  // EOF — host is gone
+                    let chunk = FileHandle.standardInput.availableData
+                    if chunk.isEmpty { break }  // EOF — host is gone
+                    buffer.append(chunk)
+                    while let newline = buffer.firstIndex(of: 0x0A) {
+                        let lineData = buffer.subdata(in: buffer.startIndex..<newline)
+                        buffer.removeSubrange(buffer.startIndex...newline)
+                        LiveCommand.handleStdinCommand(lineData)
+                    }
                 }
                 Events.log("stdin closed — host process gone; finishing session")
                 StopController.shared.stop()
@@ -43,10 +54,26 @@ enum LiveCommand {
             source: options.values["source"] ?? "both",
             aec: options.values["aec"] == "on",
             seconds: options.values["seconds"].flatMap(Double.init),
+            inputDevice: options.values["input-device"],
             micManager: nil,
             systemManager: nil,
             stopper: stopper
         )
+    }
+
+    private static func handleStdinCommand(_ lineData: Data) {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+            let cmd = object["cmd"] as? String
+        else { return }
+        switch cmd {
+        case "set-input":
+            MicController.shared.switchInput(toUID: object["uid"] as? String)
+        case "stop":
+            StopController.shared.stop()
+        default:
+            Events.log("live: unknown stdin command \(cmd)")
+        }
     }
 }
 
@@ -59,6 +86,7 @@ enum LiveSession {
         source: String,
         aec: Bool,
         seconds: Double?,
+        inputDevice: String? = nil,
         micManager: StreamingUnifiedAsrManager?,
         systemManager: StreamingUnifiedAsrManager?,
         stopper: Stopper
@@ -78,7 +106,7 @@ enum LiveSession {
         if wantMic { micPipeline = ChannelPipeline(channel: "mic", manager: micManager) }
         if wantSystem { systemPipeline = ChannelPipeline(channel: "system", manager: systemManager) }
 
-        var micCapture: MicCapture?
+        let micBox = MicCaptureBox()
         var systemCapture: SystemAudioCapture?
 
         if let pipeline = systemPipeline {
@@ -104,10 +132,50 @@ enum LiveSession {
             // initialize on some setups, and its teardown/retry can leave the
             // fallback mic silently dead. Cross-channel transcript dedup
             // handles speaker echo, so reliability wins by default.
-            micCapture = MicCapture(into: pipeline, enableAEC: aec)
+            _ = micBox.swap(MicCapture(into: pipeline, enableAEC: aec, deviceUID: inputDevice))
+
+            // Host-driven mid-session mic switch ({"cmd":"set-input"} on stdin):
+            // swap the capture under the same pipeline; the transcript keeps
+            // flowing and the session never restarts.
+            MicController.shared.register { uid in
+                let old = micBox.swap(nil)
+                old?.stop()
+                let next = MicCapture(into: pipeline, enableAEC: false, deviceUID: uid)
+                do {
+                    try next.start()
+                    _ = micBox.swap(next)
+                    Events.emit([
+                        "event": "status", "stage": "input_switched", "channel": "mic",
+                        "device": uid ?? "default",
+                    ])
+                } catch {
+                    Events.emit([
+                        "event": "error", "channel": "mic",
+                        "message":
+                            "Could not switch to that microphone (\(error)). Recording continues on the previous input.",
+                    ])
+                    // Best effort: bring the previous device back so the mic
+                    // channel doesn't go silent because a switch failed.
+                    let revert = MicCapture(into: pipeline, enableAEC: false, deviceUID: old?.deviceUID)
+                    if (try? revert.start()) != nil { _ = micBox.swap(revert) }
+                }
+            }
         }
 
-        try micCapture?.start()
+        // A pinned device that fails to start (unplugged since it was chosen)
+        // must not kill the session — fall back to the system default input.
+        if let capture = micBox.current(), let pipeline = micPipeline {
+            do {
+                try capture.start()
+            } catch where inputDevice != nil {
+                Events.log("pinned input failed to start (\(error)) — using the default input")
+                Events.emit(["event": "status", "stage": "input_default_fallback", "channel": "mic"])
+                micBox.swap(nil)?.stop()
+                let fallback = MicCapture(into: pipeline, enableAEC: false, deviceUID: nil)
+                try fallback.start()
+                _ = micBox.swap(fallback)
+            }
+        }
         try await systemCapture?.start()
 
         // Capturing now — tell the host immediately (bars animate, timer runs).
@@ -117,19 +185,20 @@ enum LiveSession {
 
         // Dead-capture watchdog: a live mic delivers buffers continuously even
         // in silence, so zero buffers means the capture is dead — restart it
-        // once, then say so loudly. A fake recording session is the worst bug
-        // a meeting app can have.
+        // once (same device), then once more on the system default if a pinned
+        // device stays silent, then say so loudly. A fake recording session is
+        // the worst bug a meeting app can have.
         if wantMic, let pipeline = micPipeline {
-            let originalCapture = micCapture
             Task {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard !pipeline.hasProducedAudio else { return }
                 Events.log("mic produced no audio after 3s — restarting capture")
                 Events.emit(["event": "status", "stage": "mic_restarting", "channel": "mic"])
-                originalCapture?.stop()
-                let retry = MicCapture(into: pipeline, enableAEC: false)
+                micBox.swap(nil)?.stop()
+                let retry = MicCapture(into: pipeline, enableAEC: false, deviceUID: inputDevice)
                 do {
                     try retry.start()
+                    _ = micBox.swap(retry)
                 } catch {
                     Events.emit([
                         "event": "error", "channel": "mic",
@@ -139,13 +208,24 @@ enum LiveSession {
                     return
                 }
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if !pipeline.hasProducedAudio {
-                    Events.emit([
-                        "event": "error", "channel": "mic",
-                        "message": "Microphone is not delivering audio — check System Settings → "
-                            + "Sound → Input, then stop and re-record.",
-                    ])
+                guard !pipeline.hasProducedAudio else { return }
+                // A pinned device that never delivers gets one more chance on
+                // the system default — silently recording nothing loses the
+                // meeting; a device change mid-meeting does not.
+                if inputDevice != nil {
+                    Events.log("pinned input silent after restart — falling back to the default input")
+                    Events.emit(["event": "status", "stage": "input_default_fallback", "channel": "mic"])
+                    micBox.swap(nil)?.stop()
+                    let fallback = MicCapture(into: pipeline, enableAEC: false, deviceUID: nil)
+                    if (try? fallback.start()) != nil { _ = micBox.swap(fallback) }
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard !pipeline.hasProducedAudio else { return }
                 }
+                Events.emit([
+                    "event": "error", "channel": "mic",
+                    "message": "Microphone is not delivering audio — check System Settings → "
+                        + "Sound → Input, then stop and re-record.",
+                ])
             }
         }
 
@@ -161,7 +241,8 @@ enum LiveSession {
         await stopper.wait(timeoutSeconds: seconds)
         Events.emit(["event": "status", "stage": "finishing"])
 
-        micCapture?.stop()
+        MicController.shared.register(nil)
+        micBox.swap(nil)?.stop()
         await systemCapture?.stop()
         await micPipeline?.finish()
         await systemPipeline?.finish()
@@ -273,24 +354,37 @@ final class ChannelPipeline {
 
 // MARK: - Microphone capture
 
-final class MicCapture {
+final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     private var engine = AVAudioEngine()
     private let pipeline: ChannelPipeline
     private let enableAEC: Bool
+    /// CoreAudio device UID to record from; nil = system default input.
+    let deviceUID: String?
 
-    init(into pipeline: ChannelPipeline, enableAEC: Bool) {
+    /* Non-AEC path: AVCaptureSession — the API built for explicit device
+       selection. AVAudioEngine's input node fundamentally tracks the system
+       default device; pinning it via AUAudioUnit.setDeviceID reports the right
+       format but never delivers buffers (and re-starts fail with -10868). */
+    private var captureSession: AVCaptureSession?
+    private let captureQueue = DispatchQueue(label: "engine.mic-audio")
+    private let converter = AudioConverter()
+
+    init(into pipeline: ChannelPipeline, enableAEC: Bool, deviceUID: String? = nil) {
         self.pipeline = pipeline
         self.enableAEC = enableAEC
+        self.deviceUID = deviceUID
+        super.init()
     }
 
     func start() throws {
         // Acoustic echo cancellation (Apple's Voice Processing I/O — the FaceTime
         // AEC) subtracts whatever the Mac plays through its speakers from the mic
-        // signal. If it fails for any reason, capture must survive: fall back to
-        // the raw mic (far-side bleed returns, but the meeting is still recorded).
+        // signal. It rides AVAudioEngine and therefore the system default input;
+        // if it fails for any reason, capture must survive: fall back to the raw
+        // mic (far-side bleed returns, but the meeting is still recorded).
         if enableAEC {
             do {
-                try startEngine(withAEC: true)
+                try startEngineWithAEC()
                 Events.emit(["event": "status", "stage": "aec_enabled", "channel": "mic"])
                 return
             } catch {
@@ -305,33 +399,86 @@ final class MicCapture {
             }
         }
         do {
-            try startEngine(withAEC: false)
+            try startCaptureSession()
         } catch {
             throw EngineError.internalError(
-                "Microphone capture failed even without echo cancellation "
+                "Microphone capture failed "
                     + "(check the input device in System Settings → Sound): \(error)"
             )
         }
     }
 
-    private func startEngine(withAEC aec: Bool) throws {
-        let input = engine.inputNode
-        if aec {
-            // macOS requires the SAME voice-processing mode on BOTH I/O nodes of
-            // an engine — enabling only the input side fails at kAUInitialize.
-            try input.setVoiceProcessingEnabled(true)
-            try engine.outputNode.setVoiceProcessingEnabled(true)
-            if #available(macOS 14.0, *) {
-                // Don't let voice processing lower the meeting audio the user is hearing.
-                input.voiceProcessingOtherAudioDuckingConfiguration =
-                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
-                        enableAdvancedDucking: false,
-                        duckingLevel: .min
-                    )
+    private func startCaptureSession() throws {
+        let device: AVCaptureDevice?
+        if let uid = deviceUID {
+            // AVCaptureDevice uniqueID == CoreAudio device UID on macOS.
+            device = AVCaptureDevice(uniqueID: uid)
+            guard device != nil else {
+                throw EngineError.internalError("input device not found: \(uid)")
             }
-            // VPIO is a full-duplex unit; give the engine a live-but-silent output pair.
-            engine.mainMixerNode.outputVolume = 0
+        } else {
+            device = AVCaptureDevice.default(for: .audio)
         }
+        guard let device else {
+            throw EngineError.internalError("no microphone input available")
+        }
+        Events.log("mic capture starting: device=\(device.localizedName) [\(device.uniqueID)]")
+
+        let session = AVCaptureSession()
+        let input = try AVCaptureDeviceInput(device: device)
+        guard session.canAddInput(input) else {
+            throw EngineError.internalError("cannot capture from \(device.localizedName)")
+        }
+        session.addInput(input)
+
+        let output = AVCaptureAudioDataOutput()
+        // Deliver what the ASR managers eat directly: 16kHz mono float PCM —
+        // the same shape the ScreenCaptureKit system channel is configured for.
+        output.audioSettings = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: AudioSupport.sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
+        output.setSampleBufferDelegate(self, queue: captureQueue)
+        guard session.canAddOutput(output) else {
+            throw EngineError.internalError("cannot read audio from \(device.localizedName)")
+        }
+        session.addOutput(output)
+
+        session.startRunning()
+        captureSession = session
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        // extractAVAudioPCMBuffer allocates a fresh buffer — safe to queue as-is.
+        if let pcm = try? converter.extractAVAudioPCMBuffer(from: sampleBuffer) {
+            pipeline.ingest(pcm)
+        }
+    }
+
+    private func startEngineWithAEC() throws {
+        let input = engine.inputNode
+        // macOS requires the SAME voice-processing mode on BOTH I/O nodes of
+        // an engine — enabling only the input side fails at kAUInitialize.
+        try input.setVoiceProcessingEnabled(true)
+        try engine.outputNode.setVoiceProcessingEnabled(true)
+        if #available(macOS 14.0, *) {
+            // Don't let voice processing lower the meeting audio the user is hearing.
+            input.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                    enableAdvancedDucking: false,
+                    duckingLevel: .min
+                )
+        }
+        // VPIO is a full-duplex unit; give the engine a live-but-silent output pair.
+        engine.mainMixerNode.outputVolume = 0
 
         // Query the format AFTER voice-processing setup — it changes the I/O format.
         let format = input.outputFormat(forBus: 0)
@@ -349,8 +496,14 @@ final class MicCapture {
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        if let session = captureSession {
+            session.stopRunning()
+            captureSession = nil
+        }
+        if enableAEC {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
     }
 }
 

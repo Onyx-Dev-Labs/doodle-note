@@ -4,6 +4,7 @@ import type { Readable, Writable } from 'node:stream'
 import type {
   EngineCommand,
   EngineEvent,
+  EngineInputDevice,
   EngineSidecarEvent,
   EngineStartOptions
 } from '../shared/engine-events'
@@ -143,6 +144,89 @@ export class EngineProcess {
     }
   }
 
+  /**
+   * Audio input devices, for the renderer's mic picker. Runs the cheap
+   * `engine devices` command (no models, no permissions, returns instantly);
+   * resolves [] on any failure so the picker just hides.
+   */
+  listInputDevices(): Promise<EngineInputDevice[]> {
+    return new Promise((resolve) => {
+      if (!existsSync(this.binaryPath)) {
+        resolve([])
+        return
+      }
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(this.binaryPath, ['devices'], { stdio: ['ignore', 'pipe', 'ignore'] })
+      } catch {
+        resolve([])
+        return
+      }
+      let out = ''
+      let settled = false
+      const finish = (devices: EngineInputDevice[]): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        resolve(devices)
+      }
+      const timeout = setTimeout(() => {
+        child.kill('SIGKILL')
+        finish([])
+      }, 5_000)
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => {
+        out += chunk
+      })
+      child.on('error', () => finish([]))
+      child.on('close', () => {
+        for (const line of out.split('\n')) {
+          try {
+            const parsed = JSON.parse(line) as {
+              event?: string
+              inputs?: Array<{ uid?: string; name?: string; default?: boolean }>
+            }
+            if (parsed.event === 'devices' && Array.isArray(parsed.inputs)) {
+              finish(
+                parsed.inputs
+                  .filter((d) => typeof d.uid === 'string' && typeof d.name === 'string')
+                  .map((d) => ({
+                    uid: d.uid as string,
+                    name: d.name as string,
+                    isDefault: d.default === true
+                  }))
+              )
+              return
+            }
+          } catch {
+            // Not the devices line — keep scanning.
+          }
+        }
+        finish([])
+      })
+    })
+  }
+
+  /**
+   * Point the mic channel at a different input device. Applies live when a
+   * session is running (serve or classic spawn — both parse stdin commands);
+   * otherwise it's a no-op and the next start's opts carry the choice.
+   */
+  setInputDevice(uid: string | null): void {
+    const command = { cmd: 'set-input', uid: uid ?? '' }
+    if (this.serveSessionActive) {
+      this.serveWrite(command)
+      return
+    }
+    const child = this.child
+    if (!child) return
+    try {
+      child.stdin.write(`${JSON.stringify(command)}\n`)
+    } catch {
+      // Session is tearing down — the next start picks up the new device.
+    }
+  }
+
   get running(): boolean {
     return this.child !== null || this.serveSessionActive
   }
@@ -155,7 +239,11 @@ export class EngineProcess {
     if (command === 'live' && this.serveReady && this.serveChild && !this.serveSessionActive) {
       this.serveSessionActive = true
       this.emit({ event: 'started', command, filePath, binaryPath: this.binaryPath })
-      const ok = this.serveWrite({ cmd: 'start', source: opts.source ?? 'both' })
+      const ok = this.serveWrite({
+        cmd: 'start',
+        source: opts.source ?? 'both',
+        inputDevice: opts.inputDevice ?? ''
+      })
       if (ok) return
       this.serveSessionActive = false // fall through to the classic spawn
     }
@@ -188,6 +276,7 @@ export class EngineProcess {
     if (command === 'live') {
       args.push('--source', opts.source ?? 'both')
       args.push('--exit-on-stdin-close')
+      if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }

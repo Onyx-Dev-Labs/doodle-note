@@ -42,12 +42,14 @@ enum ServeCommand {
                 let stopper = Stopper()
                 let source = object["source"] as? String ?? "both"
                 let aec = (object["aec"] as? String) == "on"
+                let inputDevice = (object["inputDevice"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let started = box.begin(stopper) {
                     do {
                         try await LiveSession.run(
                             source: source,
                             aec: aec,
                             seconds: nil,
+                            inputDevice: inputDevice,
                             micManager: micManager,
                             systemManager: systemManager,
                             stopper: stopper
@@ -65,6 +67,9 @@ enum ServeCommand {
                 }
             case "stop":
                 box.stop()
+            case "set-input":
+                // Mid-session mic switch; ignored (with a log) when idle.
+                MicController.shared.switchInput(toUID: object["uid"] as? String)
             default:
                 Events.log("serve: unknown command \(cmd)")
             }

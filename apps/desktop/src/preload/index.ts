@@ -4,12 +4,15 @@ import {
   ENGINE_CAPTURE_CONTROL_CHANNEL,
   ENGINE_CAPTURE_ERROR_CHANNEL,
   ENGINE_EVENT_CHANNEL,
+  ENGINE_LIST_DEVICES_CHANNEL,
+  ENGINE_SET_INPUT_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineCaptureControl,
   type EngineApi,
   type EngineCommand,
   type EngineEvent,
+  type EngineInputDevice,
   type EngineStartOptions,
   type EngineStartRequest
 } from '../shared/engine-events'
@@ -132,6 +135,14 @@ const engineApi: EngineApi = {
 
   stop(): void {
     ipcRenderer.send(ENGINE_STOP_CHANNEL)
+  },
+
+  listInputDevices(): Promise<EngineInputDevice[]> {
+    return ipcRenderer.invoke(ENGINE_LIST_DEVICES_CHANNEL) as Promise<EngineInputDevice[]>
+  },
+
+  setInputDevice(uid: string | null): void {
+    ipcRenderer.send(ENGINE_SET_INPUT_CHANNEL, uid)
   },
 
   onEvent(cb: (event: EngineEvent) => void): () => void {
