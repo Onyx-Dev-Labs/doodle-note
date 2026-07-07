@@ -14,11 +14,14 @@ ignoredBuiltDependencies:
 
 # Cross-building the Windows app from macOS: pnpm must also install the
 # win32-x64 platform binaries (sherpa-onnx, node-llama-cpp) so
-# electron-builder can bundle them.
+# electron-builder can bundle them. linux stays in the list for Vercel's
+# build machines — omitting it starved them of platform binaries
+# (lightningcss.linux-x64-gnu) and broke web deploys.
 supportedArchitectures:
   os:
     - darwin
     - win32
+    - linux
   cpu:
     - arm64
     - x64
