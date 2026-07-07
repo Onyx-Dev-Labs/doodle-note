@@ -64,8 +64,30 @@ export class LocalNotesEngine implements NotesEngine {
         if (totalSize > 0) this.options.onDownloadProgress?.(downloadedSize / totalSize)
       }
     })
-    this.llama = await getLlama()
-    this.model = await this.llama.loadModel({ modelPath: this.modelPath })
+    // Staged load: the default compute layer first (Metal on mac, Vulkan on
+    // Windows when present), then CPU-only. Weak/quirky GPUs — typically
+    // laptop iGPUs under Vulkan — can fail at model-load with llama.cpp's
+    // bare "failed to load model"; the CPU binary always loads given enough
+    // RAM. build:'never' everywhere: a packaged app must never attempt a
+    // from-source build (no toolchain on user machines).
+    try {
+      this.llama = await getLlama({ build: 'never' })
+      this.model = await this.llama.loadModel({ modelPath: this.modelPath })
+    } catch (gpuErr) {
+      console.error('[local-engine] default compute layer failed, retrying CPU-only:', gpuErr)
+      try {
+        this.llama = await getLlama({ gpu: false, build: 'never' })
+        this.model = await this.llama.loadModel({ modelPath: this.modelPath })
+      } catch (cpuErr) {
+        this.llama = null
+        this.model = null
+        const detail = cpuErr instanceof Error ? cpuErr.message : String(cpuErr)
+        throw new Error(
+          `The on-device model could not be loaded (tried GPU, then CPU): ${detail}. ` +
+            'If this keeps happening, re-download the model from Settings → Notes model.'
+        )
+      }
+    }
   }
 
   async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
