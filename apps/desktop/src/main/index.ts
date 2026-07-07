@@ -342,7 +342,7 @@ app.whenReady().then(() => {
   })
   // macOS: engine micmon (CoreAudio). Windows: ConsentStore registry poll.
   if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
-  initAutoUpdater(broadcast)
+  initAutoUpdater(broadcast, () => notesService?.dispose() ?? Promise.resolve())
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's
   // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —

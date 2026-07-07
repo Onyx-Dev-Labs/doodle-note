@@ -35,10 +35,31 @@ export function isQuittingForUpdate(): boolean {
  * user-driven "Check for updates" in Settings with live status and a
  * Restart-to-update button.
  */
-export function initAutoUpdater(broadcast: (channel: string, payload: unknown) => void): void {
+export function initAutoUpdater(
+  broadcast: (channel: string, payload: unknown) => void,
+  /** Awaited before quitAndInstall — unload native addons that crash on a
+   *  normal teardown (the llama addon SIGABRTs if a model is loaded). */
+  beforeInstall?: () => Promise<void>
+): void {
   const setState = (patch: Partial<UpdateState>): void => {
     state = { ...state, ...patch }
     broadcast(UPDATE_STATE_EVENT_CHANNEL, state)
+  }
+
+  const installNow = async (): Promise<void> => {
+    quittingForUpdate = true
+    // The update quit must be a NORMAL quit (the installer takes over after
+    // it), so the hard-exit workaround doesn't protect this path — unload
+    // the model first, bounded so a hung dispose can't block the update.
+    try {
+      await Promise.race([
+        beforeInstall?.(),
+        new Promise((resolve) => setTimeout(resolve, 3_000))
+      ])
+    } catch {
+      // install regardless
+    }
+    autoUpdater.quitAndInstall()
   }
 
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, () => state)
@@ -53,8 +74,7 @@ export function initAutoUpdater(broadcast: (channel: string, payload: unknown) =
   })
   ipcMain.handle(UPDATE_INSTALL_CHANNEL, () => {
     if (state.status !== 'downloaded') return
-    quittingForUpdate = true
-    autoUpdater.quitAndInstall()
+    void installNow()
   })
 
   if (!app.isPackaged) return
@@ -79,8 +99,7 @@ export function initAutoUpdater(broadcast: (channel: string, payload: unknown) =
         body: 'Click to restart and update now.'
       })
       notification.on('click', () => {
-        quittingForUpdate = true
-        autoUpdater.quitAndInstall()
+        void installNow()
       })
       notification.show()
     } catch {
