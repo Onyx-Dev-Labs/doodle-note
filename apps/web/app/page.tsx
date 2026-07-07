@@ -31,8 +31,8 @@ const FEATURES = [
 
 /** Update feed on Vercel Blob — publish-release.mjs uploads these. */
 const DOWNLOADS = {
-  mac: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.2.5-arm64-mac.zip",
-  win: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.0-setup.exe",
+  mac: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.1-arm64-mac.zip",
+  win: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.1-setup.exe",
 };
 
 export default function Home() {

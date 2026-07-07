@@ -10,6 +10,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.3.1",
+    date: "July 7, 2026",
+    highlights: [
+      "Welcome tour: a first-run walkthrough of recording, calendars, meeting detection, cloud sync, and notes models — replay it anytime from Settings → General",
+      "Fixed: the Windows app icon showed the default Electron logo instead of the DoodleNote mascot",
+    ],
+  },
+  {
     version: "0.3.0",
     date: "July 7, 2026",
     highlights: [
