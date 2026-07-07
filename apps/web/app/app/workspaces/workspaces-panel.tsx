@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
+import { buttonPrimary, inputClass } from "../../ui";
 
 interface Workspace {
   id: string;
@@ -97,10 +98,10 @@ export function WorkspacesPanel({
 
   return (
     <main className="flex flex-1 flex-col">
-      <h1 className="text-2xl font-semibold tracking-tight text-ink">
+      <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
         Workspaces
       </h1>
-      <p className="mt-1 text-sm text-stone">
+      <p className="mt-1.5 text-sm text-stone">
         Signed in as {userEmail}. The active workspace scopes your meetings
         and notes.
       </p>
@@ -112,17 +113,17 @@ export function WorkspacesPanel({
       )}
 
       {organizations.length === 0 ? (
-        <p className="mt-6 rounded-xl border border-dashed border-sand bg-card-soft px-4 py-6 text-center text-sm text-stone">
+        <p className="mt-10 text-center text-sm text-stone">
           No workspaces yet.
         </p>
       ) : (
-        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-card">
+        <ul className="mt-6 border-y border-sand">
           {organizations.map((org) => {
             const isActive = org.id === activeOrganizationId;
             return (
               <li
                 key={org.id}
-                className="flex items-center justify-between gap-4 px-5 py-4"
+                className="flex items-center justify-between gap-4 border-b border-sand px-2 py-4 last:border-b-0"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-ink">
@@ -149,17 +150,19 @@ export function WorkspacesPanel({
         </ul>
       )}
 
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">Members</h2>
+      <section className="mt-10">
+        <h2 className="font-display text-lg font-semibold text-ink">
+          Members
+        </h2>
         <p className="mt-1 text-sm text-stone">
           Everyone in the active workspace sees its synced meetings.
         </p>
 
-        <ul className="mt-3 divide-y divide-sand rounded-xl border border-sand bg-card">
+        <ul className="mt-4 border-y border-sand">
           {members.map((member) => (
             <li
               key={member.id}
-              className="flex items-center justify-between gap-4 px-5 py-3"
+              className="flex items-center justify-between gap-4 border-b border-sand px-2 py-3 last:border-b-0"
             >
               <span className="truncate text-sm text-ink">{member.email}</span>
               <span className="shrink-0 text-xs text-stone">{member.role}</span>
@@ -168,7 +171,7 @@ export function WorkspacesPanel({
           {invitations.map((invite) => (
             <li
               key={invite.id}
-              className="flex items-center justify-between gap-4 px-5 py-3"
+              className="flex items-center justify-between gap-4 border-b border-sand px-2 py-3 last:border-b-0"
             >
               <span className="min-w-0">
                 <span className="block truncate text-sm text-ink">
@@ -197,18 +200,18 @@ export function WorkspacesPanel({
           ))}
         </ul>
 
-        <form onSubmit={handleInvite} className="mt-3 flex items-start gap-2">
+        <form onSubmit={handleInvite} className="mt-4 flex items-start gap-2">
           <input
             type="email"
             placeholder="teammate@company.com"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
-            className="flex-1 rounded-md border border-sand bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
+            className={`flex-1 ${inputClass}`}
           />
           <button
             type="submit"
             disabled={invitePending || !inviteEmail.trim() || !activeOrganizationId}
-            className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-cream transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={buttonPrimary}
           >
             {invitePending ? "Inviting…" : "Invite"}
           </button>

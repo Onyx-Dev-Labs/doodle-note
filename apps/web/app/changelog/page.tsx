@@ -1,5 +1,4 @@
-import Image from "next/image";
-import Link from "next/link";
+import { SiteFooter, SiteHeader } from "../ui";
 
 export const metadata = { title: "What's new — DoodleNote" };
 
@@ -114,41 +113,40 @@ const RELEASES: Array<{
 export default function ChangelogPage() {
   return (
     <div className="flex flex-1 flex-col bg-cream text-bark">
-      <header className="border-b border-sand bg-card-soft">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-3">
-          <Link href="/" className="flex items-center gap-2">
-            <Image src="/mascot.png" alt="" width={26} height={26} className="rounded-md" />
-            <span className="text-sm font-bold tracking-tight">
-              <span className="text-ink">Doodle</span>
-              <span className="text-sage">Note</span>
-            </span>
-          </Link>
-          <span className="text-xs text-stone">What&rsquo;s new</span>
-        </div>
-      </header>
+      <SiteHeader />
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
-        <h1 className="text-3xl font-semibold tracking-tight text-ink">
+      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-24 pt-10 sm:pt-16">
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-ink">
           What&rsquo;s new
         </h1>
-        <p className="mt-2 text-sm text-stone">
+        <p className="mt-3 text-sm leading-relaxed text-stone">
           Every DoodleNote release and what changed. The app updates itself —
           you&rsquo;re always on the newest version within a few hours.
         </p>
 
-        <div className="mt-10 space-y-10">
+        <div className="mt-8">
           {RELEASES.map((release) => (
-            <section key={release.version} id={`v${release.version}`}>
-              <div className="flex items-baseline gap-3">
-                <h2 className="text-xl font-semibold text-ink">
+            <section
+              key={release.version}
+              id={`v${release.version}`}
+              className="grid gap-2 border-b border-sand py-8 last:border-b-0 sm:grid-cols-[8rem_1fr] sm:gap-6"
+            >
+              <div>
+                <h2 className="font-display text-lg font-semibold text-ink">
                   v{release.version}
                 </h2>
-                <span className="text-sm text-stone">{release.date}</span>
+                <p className="mt-0.5 text-xs text-stone">{release.date}</p>
               </div>
-              <ul className="mt-3 space-y-2 rounded-xl border border-sand bg-card p-6">
+              <ul className="space-y-2.5">
                 {release.highlights.map((item) => (
-                  <li key={item} className="flex gap-2.5 text-sm leading-relaxed">
-                    <span className="mt-0.5 shrink-0 text-sage" aria-hidden="true">
+                  <li
+                    key={item}
+                    className="flex gap-2.5 text-sm leading-relaxed"
+                  >
+                    <span
+                      className="mt-0.5 shrink-0 text-sage"
+                      aria-hidden="true"
+                    >
                       •
                     </span>
                     {item}
@@ -160,14 +158,7 @@ export default function ChangelogPage() {
         </div>
       </main>
 
-      <footer className="border-t border-sand">
-        <div className="mx-auto w-full max-w-3xl px-6 py-5 text-sm text-stone">
-          <Link href="/" className="font-semibold text-sage-deep hover:underline">
-            DoodleNote
-          </Link>{" "}
-          — AI meeting notes without the bot.
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

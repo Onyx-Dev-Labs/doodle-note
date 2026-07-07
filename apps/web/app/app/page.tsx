@@ -74,39 +74,39 @@ export default async function MeetingsPage({
   return (
     <main className="flex flex-1 flex-col">
       <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">
+        <h1 className="font-display text-3xl font-semibold tracking-tight text-ink">
           Meetings
         </h1>
         <span className="text-sm text-stone">{activeOrg.name}</span>
       </div>
 
-      <form method="get" className="mt-4">
+      <form method="get" className="mt-5">
         <input
           type="search"
           name="q"
           defaultValue={query}
           placeholder="Search titles, notes, and transcripts…"
-          className="w-full rounded-md border border-sand bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
+          className="w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage"
         />
       </form>
 
       {rows.length === 0 && query.length > 0 ? (
-        <p className="mt-8 rounded-xl border border-sand bg-card-soft p-6 text-center text-sm text-stone">
+        <p className="mt-12 text-center text-sm text-stone">
           Nothing matches &ldquo;{query}&rdquo;.
         </p>
       ) : rows.length === 0 ? (
-        <div className="mt-10 rounded-xl border border-sand bg-card-soft p-8 text-center">
-          <h2 className="text-base font-semibold text-ink">
-            No meetings synced yet
-          </h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-bark">
-            Open DoodleNote on your Mac and turn on{" "}
+        <div className="mt-16 text-center">
+          <p className="font-hand text-3xl text-stone">
+            nothing jotted here yet
+          </p>
+          <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-bark">
+            Open DoodleNote on your computer and turn on{" "}
             <strong>Settings → Sync with cloud</strong>. Your meetings,
             transcripts, and notes will appear here.
           </p>
         </div>
       ) : (
-        <ul className="mt-6 divide-y divide-sand rounded-xl border border-sand bg-card">
+        <ul className="mt-4 border-y border-sand">
           {rows.map((meeting) => {
             const when = meeting.startedAt ?? meeting.createdAt;
             const durationMin =
@@ -121,10 +121,10 @@ export default async function MeetingsPage({
                   )
                 : null;
             return (
-              <li key={meeting.id}>
+              <li key={meeting.id} className="border-b border-sand last:border-b-0">
                 <Link
                   href={`/app/meeting/${meeting.id}`}
-                  className="flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-sage-fill/40"
+                  className="flex items-center justify-between gap-4 px-2 py-4 transition-colors hover:bg-sage-fill/40"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-ink">
