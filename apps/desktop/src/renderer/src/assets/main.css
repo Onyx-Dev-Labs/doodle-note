@@ -1414,7 +1414,9 @@ button.fp-row:hover {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 8px 12px;
+  /* Same height as .rec-pill and .ask-bar — the three sit on one row. */
+  min-height: 46px;
+  padding: 5px 14px;
   box-shadow: var(--shadow-pill);
   color: var(--muted);
   cursor: pointer;
