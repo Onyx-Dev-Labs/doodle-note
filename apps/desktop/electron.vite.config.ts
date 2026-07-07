@@ -13,7 +13,13 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ['@repo/ai'] })],
     build: {
       rollupOptions: {
-        external: ['node-llama-cpp']
+        // engine-win is the Windows ASR utilityProcess entry — built as its
+        // own chunk so utilityProcess.fork can load out/main/engine-win.js.
+        input: {
+          index: resolve('src/main/index.ts'),
+          'engine-win': resolve('src/main/engine-win.ts')
+        },
+        external: ['node-llama-cpp', 'sherpa-onnx-node']
       }
     }
   },

@@ -1,4 +1,13 @@
-import { app, shell, BrowserWindow, ipcMain, nativeTheme, protocol } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  desktopCapturer,
+  ipcMain,
+  nativeTheme,
+  protocol,
+  session as electronSession
+} from 'electron'
 import { spawn } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
@@ -7,6 +16,7 @@ import icon from '../../resources/icon.png?asset'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
+import { WinEngineHost } from './engine-host-win'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
@@ -25,6 +35,8 @@ import {
 import { THEME_SET_SOURCE_CHANNEL } from '../shared/theme-api'
 import { TranscriptSession } from './transcript-session'
 import {
+  ENGINE_AUDIO_CHANNEL,
+  ENGINE_CAPTURE_ERROR_CHANNEL,
   ENGINE_EVENT_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
@@ -74,7 +86,6 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'doodle-media', privileges: { secure: true, supportFetchAPI: true } }
 ])
 
-const engine = new EngineProcess(resolveEngineBinary())
 let notesService: NotesService | null = null
 let calendarService: CalendarService | null = null
 
@@ -85,6 +96,12 @@ function broadcast(channel: string, payload: unknown): void {
     }
   }
 }
+
+/** Per-platform transcription engine host — identical event surface. */
+const engine =
+  process.platform === 'win32'
+    ? new WinEngineHost(broadcast)
+    : new EngineProcess(resolveEngineBinary())
 
 function broadcastEngineEvent(event: EngineEvent): void {
   broadcast(ENGINE_EVENT_CHANNEL, event)
@@ -144,32 +161,63 @@ function createWindow(): void {
 app.whenReady().then(() => {
   migrateDevUserData()
 
-  // Warm the engine once per launch: triggers the permission prompts up front
-  // and primes the ASR model cache, so "+ New meeting" starts instantly.
-  try {
-    const preflight = spawn(resolveEngineBinary(), ['preflight'], {
-      stdio: ['ignore', 'ignore', 'pipe']
-    })
-    preflight.stderr?.setEncoding('utf8')
-    preflight.stderr?.on('data', (chunk: string) => {
-      const line = chunk.trim()
-      if (line.length > 0) console.error(`[engine preflight] ${line}`)
-    })
-    preflight.on('error', (err) => console.error('[engine preflight] spawn failed:', err.message))
-    // Persistent engine: models load once here, so hitting record is instant.
-    // Started after preflight so the two don't race the model download.
-    let serveStarted = false
-    const startServeOnce = (): void => {
-      if (serveStarted) return
-      serveStarted = true
+  // Warm the engine once per launch. macOS: Swift preflight triggers the
+  // permission prompts and primes the CoreML cache before serve starts.
+  // Windows: the sherpa engine forks immediately (downloads its model on
+  // first run) and the renderer handles capture permissions per session.
+  if (process.platform === 'darwin') {
+    try {
+      const preflight = spawn(resolveEngineBinary(), ['preflight'], {
+        stdio: ['ignore', 'ignore', 'pipe']
+      })
+      preflight.stderr?.setEncoding('utf8')
+      preflight.stderr?.on('data', (chunk: string) => {
+        const line = chunk.trim()
+        if (line.length > 0) console.error(`[engine preflight] ${line}`)
+      })
+      preflight.on('error', (err) => console.error('[engine preflight] spawn failed:', err.message))
+      let serveStarted = false
+      const startServeOnce = (): void => {
+        if (serveStarted) return
+        serveStarted = true
+        engine.startServe()
+      }
+      preflight.on('exit', startServeOnce)
+      setTimeout(startServeOnce, 120_000).unref()
+    } catch (err) {
+      console.error('[engine preflight] failed:', err)
       engine.startServe()
     }
-    preflight.on('exit', startServeOnce)
-    setTimeout(startServeOnce, 120_000).unref()
-  } catch (err) {
-    console.error('[engine preflight] failed:', err)
+  } else {
     engine.startServe()
+    // System-audio "Them" channel: answer getDisplayMedia with WASAPI
+    // loopback (the renderer drops the mandatory video track on arrival).
+    electronSession.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+      desktopCapturer
+        .getSources({ types: ['screen'] })
+        .then((sources) => {
+          const first = sources[0]
+          if (first) {
+            callback({ video: first, audio: 'loopback' })
+          } else {
+            callback({})
+          }
+        })
+        .catch(() => callback({}))
+    })
   }
+
+  // Windows capture bridge: PCM frames + failure reports from the renderer.
+  ipcMain.on(ENGINE_AUDIO_CHANNEL, (_event, payload: { channel?: string; samples?: unknown }) => {
+    if (engine instanceof WinEngineHost && payload.samples instanceof Float32Array) {
+      engine.pushAudio(String(payload.channel ?? ''), payload.samples)
+    }
+  })
+  ipcMain.on(ENGINE_CAPTURE_ERROR_CHANNEL, (_event, message: unknown) => {
+    if (engine instanceof WinEngineHost) {
+      engine.captureFailed(String(message ?? 'Audio capture failed'))
+    }
+  })
 
   electronApp.setAppUserModelId('com.doodlenote.desktop')
 
@@ -275,6 +323,7 @@ app.whenReady().then(() => {
     micDetect: micWatcher.enabled,
     autoStop: micWatcher.autoStop,
     micMonitorAlive: micWatcher.monitorAlive,
+    micDetectSupported: process.platform === 'darwin',
     appVersion: app.getVersion()
   })
   ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
@@ -290,7 +339,7 @@ app.whenReady().then(() => {
     }
     return detectState()
   })
-  micWatcher.start()
+  if (process.platform === 'darwin') micWatcher.start()
   initAutoUpdater(broadcast)
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's

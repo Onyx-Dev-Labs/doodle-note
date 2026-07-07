@@ -5,16 +5,25 @@ directories:
   output: release
 files:
   - out/**
-# The Swift transcription engine ships beside the app code, outside the asar,
-# so it stays a directly-executable binary.
-extraResources:
-  - from: ../../engine/.build/release/engine
-    to: engine/engine
-# node-llama-cpp loads native binaries from real files on disk.
+# Native addons load their binaries from real files on disk.
 asarUnpack:
   - "**/node_modules/node-llama-cpp/**"
   - "**/node_modules/@node-llama-cpp/**"
+  - "**/node_modules/sherpa-onnx-node/**"
+  - "**/node_modules/sherpa-onnx-win-x64/**"
 mac:
+  # The Swift transcription engine ships beside the app code, outside the
+  # asar, so it stays a directly-executable binary. macOS-only — Windows
+  # transcription runs in-process via sherpa-onnx.
+  extraResources:
+    - from: ../../engine/.build/release/engine
+      to: engine/engine
+  # pnpm supportedArchitectures installs every platform's native binaries so
+  # cross-builds work; each platform ships only its own.
+  files:
+    - "!**/node_modules/@node-llama-cpp/win-*/**"
+    - "!**/node_modules/@node-llama-cpp/mac-x64/**"
+    - "!**/node_modules/sherpa-onnx-*/**"
   target:
     - target: dir
       arch:
@@ -38,6 +47,27 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
     NSAudioCaptureUsageDescription: DoodleNote captures meeting audio (the other side of your call) to transcribe it on-device.
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+  # Ship CPU + Vulkan llama binaries (Vulkan covers most Windows GPUs for
+  # local note generation); CUDA variants add >500MB for little test value.
+  files:
+    - "!**/node_modules/@node-llama-cpp/mac-*/**"
+    - "!**/node_modules/@node-llama-cpp/win-arm64/**"
+    - "!**/node_modules/@node-llama-cpp/win-x64-cuda/**"
+    - "!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**"
+    - "!**/node_modules/sherpa-onnx-darwin-*/**"
+  # Unsigned for now (no Authenticode cert) — SmartScreen will warn on
+  # install; testers click "More info → Run anyway".
+nsis:
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+  artifactName: ${productName}-${version}-setup.${ext}
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.
 # scripts/publish-release.mjs uploads the artifacts after packaging.

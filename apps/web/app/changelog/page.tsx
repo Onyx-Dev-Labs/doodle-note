@@ -10,6 +10,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.3.0",
+    date: "July 7, 2026",
+    highlights: [
+      "DoodleNote for Windows (beta): recording, on-device transcription, AI notes, calendar, cloud sync — the whole app on your PC",
+      "Windows transcription runs a streaming zipformer model via sherpa-onnx; the speech model downloads automatically on first launch",
+      "Windows captures your mic and system audio (what the other side says) natively — no bot joins your call, same as on Mac",
+    ],
+  },
+  {
     version: "0.2.5",
     date: "July 7, 2026",
     highlights: [

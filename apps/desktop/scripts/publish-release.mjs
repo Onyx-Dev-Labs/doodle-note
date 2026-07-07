@@ -24,11 +24,21 @@ if (!process.env.BLOB_READ_WRITE_TOKEN) {
   process.exit(1)
 }
 
+// Publishes update artifacts from release/: mac (latest-mac.yml + zips)
+// and/or windows (latest.yml + exe + blockmap). Pass --mac / --win to limit
+// the upload to one platform; default is both.
+const flags = process.argv.slice(2)
+const wantMac = flags.includes('--mac') || !flags.includes('--win')
+const wantWin = flags.includes('--win') || !flags.includes('--mac')
+const isMacArtifact = (name) =>
+  name === 'latest-mac.yml' || (name.endsWith('.zip') && name.includes('mac'))
+const isWinArtifact = (name) =>
+  name === 'latest.yml' || name.endsWith('.exe') || name.endsWith('.exe.blockmap')
 const artifacts = readdirSync(releaseDir).filter(
-  (name) => name === 'latest-mac.yml' || (name.endsWith('.zip') && name.includes('mac'))
+  (name) => (wantMac && isMacArtifact(name)) || (wantWin && isWinArtifact(name))
 )
-if (!artifacts.includes('latest-mac.yml')) {
-  console.error('latest-mac.yml missing — run pnpm package first (zip target enabled?)')
+if (!artifacts.includes('latest-mac.yml') && !artifacts.includes('latest.yml')) {
+  console.error('no update manifest found — run pnpm package (mac) or package:win first')
   process.exit(1)
 }
 

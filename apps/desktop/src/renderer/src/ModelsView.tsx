@@ -852,6 +852,7 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                 }}
               />
             </div>
+            {detect.micDetectSupported && (
             <div className="cal-row">
               <span className="cal-row-main">
                 <span className="cal-row-label">Detect meetings from mic activity</span>
@@ -869,6 +870,8 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                 }}
               />
             </div>
+            )}
+            {detect.micDetectSupported && (
             <div className="cal-row">
               <span className="cal-row-main">
                 <span className="cal-row-label">Stop recording when the meeting ends</span>
@@ -885,6 +888,7 @@ export default function ModelsView({ active }: { active: boolean }): React.JSX.E
                 }}
               />
             </div>
+            )}
           </div>
         )}
       </section>
