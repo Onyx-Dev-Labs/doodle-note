@@ -13,6 +13,7 @@ import type {
   NotesTemplateInfo
 } from '../../shared/notes-api'
 import FolderPicker from './FolderPicker'
+import DoodlingIndicator from './DoodlingIndicator'
 import FormatToolbar from './FormatToolbar'
 import {
   CalendarIcon,
@@ -180,7 +181,6 @@ export default function MeetingView({
   const [enhancedMarkdown, setEnhancedMarkdown] = useState<string | null>(null)
   const [docView, setDocView] = useState<'notes' | 'enhanced'>('notes')
   const [enhanceStatus, setEnhanceStatus] = useState<EnhanceStatus>('idle')
-  const [enhanceStreamed, setEnhanceStreamed] = useState('')
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
@@ -374,14 +374,6 @@ export default function MeetingView({
           }
         }
         dispatch(ev)
-      }),
-    []
-  )
-
-  useEffect(
-    () =>
-      window.notes.onEnhanceToken(({ token }) => {
-        setEnhanceStreamed((s) => s + token)
       }),
     []
   )
@@ -610,7 +602,6 @@ export default function MeetingView({
     refreshNotesMeta()
     setEnhanceError(null)
     setEnhanceStatus('running')
-    setEnhanceStreamed('')
     // Make sure the freshest rough notes go into the merge.
     if (docViewRef.current === 'notes') {
       roughMarkdownRef.current = docToMarkdown(editor.getJSON())
@@ -827,7 +818,6 @@ export default function MeetingView({
   const folderName =
     folderId !== null ? (folders.find((f) => f.id === folderId)?.name ?? null) : null
 
-  const streamedWords = enhanceStreamed.length > 0 ? enhanceStreamed.trim().split(/\s+/).length : 0
   const transcriptEmpty = allSegments.length === 0 && Object.values(state.partials).every((p) => !p)
   const firstSegmentTime = allSegments.length > 0 ? segmentTime(allSegments[0]!) : 0
 
@@ -964,7 +954,7 @@ export default function MeetingView({
             )}
             {enhancedMarkdown !== null && enhanceStatus === 'running' && (
               <span className="chip-regen-status">
-                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
+                <DoodlingIndicator />
               </span>
             )}
           </div>
@@ -1158,10 +1148,7 @@ export default function MeetingView({
             onClick={() => void runEnhance()}
           >
             {enhanceStatus === 'running' ? (
-              <>
-                <span className="spinner" aria-hidden="true" />
-                {streamedWords > 0 ? `Writing… ${streamedWords} words` : 'Generating…'}
-              </>
+              <DoodlingIndicator />
             ) : (
               <>
                 <SparkleIcon size={14} /> Generate notes

@@ -3452,3 +3452,72 @@ button.fp-row:hover {
 .tour-next:hover {
   background: var(--accent-deep);
 }
+
+/* ---- doodling indicator (notes are generating) ---- */
+
+.doodling {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.paw-walk {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.paw {
+  display: inline-flex;
+  opacity: 0;
+  animation: paw-step 1.6s ease-in-out infinite;
+}
+/* A right-bound trot: prints angled with the walk, alternating footfalls. */
+.paw-1,
+.paw-3 {
+  transform: translateY(-2.5px) rotate(82deg);
+}
+.paw-2,
+.paw-4 {
+  transform: translateY(2.5px) rotate(98deg);
+}
+.paw-1 {
+  animation-delay: 0s;
+}
+.paw-2 {
+  animation-delay: 0.35s;
+}
+.paw-3 {
+  animation-delay: 0.7s;
+}
+.paw-4 {
+  animation-delay: 1.05s;
+}
+@keyframes paw-step {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.95;
+  }
+  55% {
+    opacity: 0.95;
+  }
+  80% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.doodling-phrase {
+  animation: doodling-fade 0.35s ease;
+}
+@keyframes doodling-fade {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
