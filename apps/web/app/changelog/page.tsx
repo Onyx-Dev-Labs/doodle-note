@@ -10,6 +10,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.3.4",
+    date: "July 7, 2026",
+    highlights: [
+      "Folders sync: your Spaces, and which folder each meeting is in, now travel to every linked device — folder deletions move meetings back to My notes everywhere",
+      "Windows: brand-new full-bleed sage icon — no more black edges on the desktop or taskbar",
+      "Fixed: the \u201cquit unexpectedly\u201d dialog when installing an update on Mac",
+      "Developer console moved out of the sidebar into Settings \u2192 General \u2192 Troubleshooting",
+    ],
+  },
+  {
     version: "0.3.3",
     date: "July 7, 2026",
     highlights: [

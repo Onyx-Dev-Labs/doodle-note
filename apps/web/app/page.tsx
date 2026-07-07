@@ -13,8 +13,8 @@ function Wordmark({ size = "text-lg" }: { size?: string }) {
 
 /** Update feed on Vercel Blob — publish-release.mjs uploads these. */
 const DOWNLOADS = {
-  mac: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.3-arm64-mac.zip",
-  win: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.3-setup.exe",
+  mac: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.4-arm64-mac.zip",
+  win: "https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates/DoodleNote-0.3.4-setup.exe",
 };
 
 const MEETING_APPS = [
