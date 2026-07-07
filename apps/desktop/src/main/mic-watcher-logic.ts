@@ -4,8 +4,9 @@
  * feeds it micmon events and asks when the debounce timer lands.
  */
 
-/** The mic must be held open this long before we call it a meeting. */
-export const MIC_DEBOUNCE_MS = 8_000
+/** Meeting-app audio must persist this long before we prompt — long enough
+ *  to outlive chat dings (1-2s), short enough to land early in a ring. */
+export const MIC_DEBOUNCE_MS = 4_000
 /** After a prompt (or a dismissal), stay quiet this long. */
 export const MIC_COOLDOWN_MS = 5 * 60_000
 

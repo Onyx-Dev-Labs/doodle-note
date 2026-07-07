@@ -25,6 +25,11 @@ enum MicMonitorCommand {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
+    private static var processListAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyProcessObjectList,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
 
     static func run() {
         // Parent-death watchdog: the host spawns us with a live stdin pipe;
@@ -47,11 +52,20 @@ enum MicMonitorCommand {
 
         armDeviceListener()
 
-        // The capturing-process SET can change without the device-level
-        // running flag flipping (a Zoom call joining mid-dictation) — a slow
-        // poll catches those transitions; the listeners catch sharp edges.
+        // Processes join/leave the audio process list the moment they start or
+        // stop doing IO — an incoming ring registers here instantly.
+        if #available(macOS 14.4, *) {
+            AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &processListAddress, queue
+            ) { _, _ in
+                emitIfChanged()
+            }
+        }
+
+        // Backstop poll: per-process IsRunning flags can flip without the list
+        // itself changing (a listed app toggling its mic/output).
         let poll = DispatchSource.makeTimerSource(queue: queue)
-        poll.schedule(deadline: .now() + 5, repeating: 5)
+        poll.schedule(deadline: .now() + 1.5, repeating: 1.5)
         poll.setEventHandler { emitIfChanged() }
         poll.resume()
         timer = poll
