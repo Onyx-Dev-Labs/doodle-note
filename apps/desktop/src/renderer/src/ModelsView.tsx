@@ -145,12 +145,14 @@ const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label
 export default function ModelsView({
   active,
   jump,
-  onShowTour
+  onShowTour,
+  onOpenDevConsole
 }: {
   active: boolean
   /** External deep-link into a section (n bumps to re-trigger). */
   jump?: { section: SettingsSection; n: number } | null
   onShowTour?: () => void
+  onOpenDevConsole?: () => void
 }): React.JSX.Element {
   const [section, setSection] = useState<SettingsSection>('general')
 
@@ -943,6 +945,23 @@ export default function ModelsView({
                     )}
                   </div>
                 )}
+              </section>
+
+              <section className="keys-section">
+                <h3>Troubleshooting</h3>
+                <div className="cal-subcard">
+                  <div className="cal-row">
+                    <span className="cal-row-main">
+                      <span className="cal-row-label">Developer console</span>
+                      <span className="cal-row-sub">
+                        Raw engine controls and event logs — handy when reporting a bug.
+                      </span>
+                    </span>
+                    <button type="button" className="pill-btn" onClick={() => onOpenDevConsole?.()}>
+                      Open
+                    </button>
+                  </div>
+                </div>
               </section>
             </>
           )}
