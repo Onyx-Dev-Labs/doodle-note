@@ -604,8 +604,17 @@ export default function MeetingView({
   }, [])
 
   useEffect(() => {
-    void refreshInputDevices()
-  }, [refreshInputDevices])
+    let cancelled = false
+    window.engine
+      .listInputDevices()
+      .then((devices) => {
+        if (!cancelled) setInputDevices(devices)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const changeInputDevice = (uid: string): void => {
     setInputDeviceUid(uid)
