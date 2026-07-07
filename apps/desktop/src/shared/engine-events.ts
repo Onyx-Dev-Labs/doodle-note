@@ -21,6 +21,18 @@ export interface EngineCaptureControl {
 export const ENGINE_EVENT_CHANNEL = 'engine:event'
 export const ENGINE_START_CHANNEL = 'engine:start'
 export const ENGINE_STOP_CHANNEL = 'engine:stop'
+/** renderer → main (invoke): list audio input devices (macOS engine). */
+export const ENGINE_LIST_DEVICES_CHANNEL = 'engine:list-devices'
+/** renderer → main: switch the mic channel's input device (mid-session too). */
+export const ENGINE_SET_INPUT_CHANNEL = 'engine:set-input'
+
+/** One selectable audio input device (macOS: CoreAudio UID + name). */
+export interface EngineInputDevice {
+  uid: string
+  name: string
+  /** True for the current system default input. */
+  isDefault: boolean
+}
 
 export type EngineCommand = 'stream' | 'transcribe' | 'live'
 
@@ -35,6 +47,8 @@ export interface EngineStartOptions {
   source?: 'mic' | 'system' | 'both'
   /** live only: auto-stop after N seconds (dev/testing) */
   seconds?: number
+  /** live only (macOS): CoreAudio UID of the mic to record from; omit = system default. */
+  inputDevice?: string
 }
 
 export interface EngineStartRequest {
@@ -203,6 +217,10 @@ export interface EngineApi {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void
   stop(): void
   onEvent(cb: (event: EngineEvent) => void): () => void
+  /** Audio input devices for the mic picker; [] where unsupported (Windows). */
+  listInputDevices(): Promise<EngineInputDevice[]>
+  /** Switch the mic input; applies live when a session is recording. null = system default. */
+  setInputDevice(uid: string | null): void
   /** Windows capture bridge (no-ops on macOS). */
   onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void
   sendAudio(channel: string, samples: Float32Array): void

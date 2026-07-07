@@ -1406,6 +1406,38 @@ button.fp-row:hover {
   box-shadow: var(--shadow-pill);
 }
 
+.mic-pill {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+  box-shadow: var(--shadow-pill);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.mic-pill:hover {
+  color: var(--ink);
+}
+
+.mic-select {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  outline: none;
+}
+
 .record-btn {
   display: flex;
   align-items: center;

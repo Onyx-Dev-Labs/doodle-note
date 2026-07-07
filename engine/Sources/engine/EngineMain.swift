@@ -26,6 +26,8 @@ struct EngineMain {
                 MicMonitorCommand.run()
             case "serve":
                 try await ServeCommand.run(options)
+            case "devices":
+                DevicesCommand.run()
             case "info":
                 Commands.info()
             default:

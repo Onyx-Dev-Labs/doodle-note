@@ -4,7 +4,12 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
-import type { EngineChannel, EngineEvent, TranscriptSegment } from '../../shared/engine-events'
+import type {
+  EngineChannel,
+  EngineEvent,
+  EngineInputDevice,
+  TranscriptSegment
+} from '../../shared/engine-events'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type {
@@ -134,6 +139,23 @@ type EnhanceStatus = 'idle' | 'running' | 'error'
 
 const CHANNEL_SPEAKERS: Record<EngineChannel, string> = { mic: 'You', system: 'Them' }
 
+/** Remembered mic choice ('' = system default input). */
+const INPUT_DEVICE_STORAGE_KEY = 'doodle.inputDeviceUid'
+
+function MicIcon(): React.JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="2" />
+      <path
+        d="M5 11a7 7 0 0 0 14 0M12 18v3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 /** Canned question behind the "✉ Write follow up email" chip. */
 const FOLLOW_UP_EMAIL_QUESTION =
   'Write a concise, ready-to-send follow-up email for this meeting: brief recap, decisions made, and action items with owners.'
@@ -200,6 +222,10 @@ export default function MeetingView({
   const [folders, setFolders] = useState<FolderRecord[]>([])
   const [folderId, setFolderId] = useState<string | null>(null)
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  const [inputDevices, setInputDevices] = useState<EngineInputDevice[]>([])
+  const [inputDeviceUid, setInputDeviceUid] = useState<string>(
+    () => window.localStorage.getItem(INPUT_DEVICE_STORAGE_KEY) ?? ''
+  )
 
   const roughMarkdownRef = useRef('')
   const titleValueRef = useRef('')
@@ -567,13 +593,43 @@ export default function MeetingView({
 
   /* ---- actions ---- */
 
+  // Mic picker: [] where unsupported (Windows), which hides the control.
+  // Refreshed when the picker gains focus so plugging in a mic just works.
+  const refreshInputDevices = useCallback(async (): Promise<void> => {
+    try {
+      setInputDevices(await window.engine.listInputDevices())
+    } catch {
+      setInputDevices([])
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshInputDevices()
+  }, [refreshInputDevices])
+
+  const changeInputDevice = (uid: string): void => {
+    setInputDeviceUid(uid)
+    if (uid) window.localStorage.setItem(INPUT_DEVICE_STORAGE_KEY, uid)
+    else window.localStorage.removeItem(INPUT_DEVICE_STORAGE_KEY)
+    // Mid-recording the engine swaps the capture under the live session.
+    if (ACTIVE_PHASES.includes(stateRef.current.phase)) {
+      window.engine.setInputDevice(uid || null)
+    }
+  }
+
   const startRecording = (): void => {
     if (capturing) return
     if (startedAtRef.current === null) {
       startedAtRef.current = new Date().toISOString()
       persist({ startedAt: startedAtRef.current })
     }
-    window.engine.start('live', undefined, { source: 'both' })
+    // Only pin a remembered device that still exists — a stale UID (unplugged
+    // since last time) records from the system default instead.
+    const pinned =
+      inputDeviceUid && inputDevices.some((d) => d.uid === inputDeviceUid)
+        ? inputDeviceUid
+        : undefined
+    window.engine.start('live', undefined, { source: 'both', inputDevice: pinned })
   }
 
   const stopRecording = (): void => window.engine.stop()
@@ -1220,6 +1276,35 @@ export default function MeetingView({
             </>
           )}
         </div>
+
+        {inputDevices.length > 0 && (
+          <label className="mic-pill" title="Microphone input">
+            <MicIcon />
+            <select
+              className="mic-select"
+              aria-label="Microphone input"
+              value={
+                inputDeviceUid && inputDevices.some((d) => d.uid === inputDeviceUid)
+                  ? inputDeviceUid
+                  : ''
+              }
+              onChange={(e) => changeInputDevice(e.target.value)}
+              onFocus={() => void refreshInputDevices()}
+            >
+              <option value="">
+                Default{(() => {
+                  const def = inputDevices.find((d) => d.isDefault)
+                  return def ? ` — ${def.name}` : ''
+                })()}
+              </option>
+              {inputDevices.map((device) => (
+                <option key={device.uid} value={device.uid}>
+                  {device.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <form
           className="ask-bar"

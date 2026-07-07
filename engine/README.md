@@ -26,12 +26,24 @@ engine stream --file meeting.wav [--realtime]
     Feeds a file through the live streaming engine (Parakeet Unified) in
     0.25s chunks — same code path as live capture. Emits growing partials.
 
-engine live [--source mic|system|both] [--seconds N] [--aec off]
+engine live [--source mic|system|both] [--seconds N] [--aec off] [--input-device <uid>]
     Live two-channel capture + transcription:
       mic    → "You"   (AVAudioEngine input tap)
       system → "Them"  (ScreenCaptureKit system audio — the other side of the call)
     Runs until --seconds or SIGINT/SIGTERM. Speaker separation between you and
     the far side comes from the capture topology, not diarization.
+
+    --input-device pins the mic channel to a CoreAudio device UID (from
+    `engine devices`); omitted = system default input. A pinned device that
+    fails to start or delivers no audio falls back to the default rather than
+    recording silence. With --exit-on-stdin-close, stdin lines are commands:
+    {"cmd":"set-input","uid":"…"} switches the mic mid-session ("" = default),
+    {"cmd":"stop"} ends the session. The serve mode accepts the same
+    "inputDevice" on start and the same "set-input" command.
+
+engine devices
+    Lists audio input devices as one NDJSON event and exits immediately:
+    {"event":"devices","inputs":[{"uid":"…","name":"MacBook Pro Microphone","default":true},…]}
 
     Echo isolation: when the call plays through speakers, the mic physically
     hears the far side. Apple's Voice Processing I/O (the FaceTime echo
