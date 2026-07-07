@@ -4,7 +4,8 @@ import { createServer, type Server } from 'node:http'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain, safeStorage, shell } from 'electron'
-import type { MeetingRecord } from '../shared/meetings-api'
+import type { TranscriptSegment } from '../shared/engine-events'
+import { MEETINGS_CHANGED_EVENT_CHANNEL, type MeetingRecord } from '../shared/meetings-api'
 import {
   SYNC_CONNECT_CHANNEL,
   SYNC_SHARE_CHANNEL,
@@ -17,6 +18,7 @@ import {
   type SyncStatus
 } from '../shared/sync-api'
 import type { MeetingsService } from './meetings-service'
+import { decidePullAction, shouldTrashLocally } from './sync-pull-logic'
 
 /** Cloud base URL; override with DOODLE_SYNC_URL for local web-dev testing. */
 const DEFAULT_BASE_URL = 'https://doodle-note.vercel.app'
@@ -24,6 +26,9 @@ const DEFAULT_BASE_URL = 'https://doodle-note.vercel.app'
 const LINK_TIMEOUT_MS = 5 * 60_000
 const PUSH_DEBOUNCE_MS = 5_000
 const PUSH_INTERVAL_MS = 5 * 60_000
+/** Pull pages are capped server-side; this bounds a runaway loop. */
+const MAX_PULL_PAGES = 40
+const STARTUP_SYNC_DELAY_MS = 5_000
 
 interface SyncConfig {
   enabled: boolean
@@ -32,8 +37,10 @@ interface SyncConfig {
   email?: string
   workspaceName?: string
   lastSyncAt?: string
-  /** meetingId → content hash at last successful push. */
+  /** meetingId → content hash at last successful sync (push OR pull). */
   pushed: Record<string, string>
+  /** updatedAt high-water mark of the last pull. */
+  pullCursor?: string
   /** attachment file name → public blob URL (uploaded once, reused). */
   mediaUrls: Record<string, string>
   /** Local meetings deleted/trashed whose cloud copy still needs removing. */
@@ -41,15 +48,19 @@ interface SyncConfig {
 }
 
 /**
- * One-way desktop → cloud sync. Local storage stays the source of truth;
- * when enabled, every non-trashed meeting whose content hash changed is
- * pushed (meeting row + full segments + notes markdown) to the web app.
+ * Two-way desktop ↔ cloud sync. Local storage stays the source of truth
+ * for anything edited here: every non-trashed meeting whose content hash
+ * changed is pushed (meeting row + full segments + notes markdown), and a
+ * cursor-based pull imports meetings recorded on other devices. Local
+ * edits always win until pushed (see sync-pull-logic.ts); cloud deletions
+ * soft-trash the local copy, never hard-delete.
  */
 export class SyncService {
   private config: SyncConfig
   private readonly configPath: string
   private readonly baseUrl: string
   private syncing = false
+  private pulling = false
   private linking = false
   private lastError: string | undefined
   private debounceTimer: NodeJS.Timeout | null = null
@@ -81,8 +92,20 @@ export class SyncService {
     )
 
     setInterval(() => {
-      if (this.config.enabled && this.token()) void this.pushAll()
+      if (this.config.enabled && this.token()) void this.syncCycle()
     }, PUSH_INTERVAL_MS).unref()
+
+    // Boot sync: pick up meetings recorded on other devices since last run.
+    const startup = setTimeout(() => {
+      if (this.config.enabled && this.token()) void this.syncCycle()
+    }, STARTUP_SYNC_DELAY_MS)
+    startup.unref()
+  }
+
+  /** Push first (our edits win), then pull what other devices recorded. */
+  private async syncCycle(): Promise<void> {
+    await this.pushAll()
+    await this.pullAll()
   }
 
   /** MeetingsService calls this after every write; deletes pass deletedId. */
@@ -183,8 +206,8 @@ export class SyncService {
       this.config.workspaceName = token.workspace
       this.config.enabled = true
       this.writeConfig()
-      // First backfill right away — the whole point of connecting.
-      void this.pushAll()
+      // First sync right away — the whole point of connecting.
+      void this.syncCycle()
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : 'Could not connect'
     } finally {
@@ -264,7 +287,7 @@ export class SyncService {
   }
 
   async syncNow(): Promise<SyncStatus> {
-    await this.pushAll()
+    await this.syncCycle()
     return this.status()
   }
 
@@ -342,6 +365,170 @@ export class SyncService {
     }
   }
 
+  /* ---- pulling ---- */
+
+  /**
+   * Cursor-based pull of meetings changed on other devices, applied under
+   * the rules in sync-pull-logic.ts. The full cloud id list rides along so
+   * remote deletions can soft-trash the local copy (no tombstones needed).
+   */
+  private async pullAll(): Promise<void> {
+    if (this.pulling || !this.config.enabled) return
+    const token = this.token()
+    if (!token) return
+    this.pulling = true
+    let storeChanged = false
+
+    try {
+      let cursor = this.config.pullCursor ?? ''
+      let cloudIds: Set<string> | null = null
+      for (let page = 0; page < MAX_PULL_PAGES; page++) {
+        const response = await fetch(
+          `${this.baseUrl}/api/sync/pull?since=${encodeURIComponent(cursor)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+        if (!response.ok) throw new Error(`Pull failed (HTTP ${response.status})`)
+        const body = (await response.json()) as {
+          allIds?: unknown
+          changed?: RemoteMeeting[]
+          hasMore?: boolean
+        }
+        cloudIds = new Set(Array.isArray(body.allIds) ? body.allIds.map(String) : [])
+        for (const remote of Array.isArray(body.changed) ? body.changed : []) {
+          if (this.applyRemote(remote)) storeChanged = true
+          if (typeof remote.updatedAt === 'string' && remote.updatedAt > cursor) {
+            cursor = remote.updatedAt
+          }
+        }
+        if (body.hasMore !== true) break
+      }
+      if (cloudIds) {
+        if (this.applyCloudDeletions(cloudIds)) storeChanged = true
+      }
+      this.config.pullCursor = cursor
+      this.config.lastSyncAt = new Date().toISOString()
+      this.writeConfig()
+      this.lastError = undefined
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Sync failed'
+      console.error('[sync] pull failed:', this.lastError)
+    } finally {
+      this.pulling = false
+      this.emitStatus()
+    }
+
+    if (storeChanged) {
+      // The Home list refetches on this — imported meetings show up live.
+      this.broadcast(MEETINGS_CHANGED_EVENT_CHANNEL, {})
+    }
+  }
+
+  /** Apply one changed cloud meeting. True when the local store changed. */
+  private applyRemote(remote: RemoteMeeting): boolean {
+    const id = String(remote.id ?? '')
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return false
+
+    interface WireSegment {
+      channel: 'mic' | 'system'
+      speaker?: unknown
+      text: string
+      startMs: number
+      endMs: number
+      confidence?: unknown
+    }
+    const segments: TranscriptSegment[] = (Array.isArray(remote.segments) ? remote.segments : [])
+      .filter(
+        (s): s is WireSegment =>
+          (s.channel === 'mic' || s.channel === 'system') &&
+          typeof s.text === 'string' &&
+          typeof s.startMs === 'number' &&
+          Number.isFinite(s.startMs) &&
+          typeof s.endMs === 'number' &&
+          Number.isFinite(s.endMs)
+      )
+      .map((s, index) => ({
+        // Segment ids are local-only (the cloud stores its own); synthesize.
+        id: `${id}-pull-${index}`,
+        channel: s.channel,
+        speaker:
+          s.speaker === 'You' || s.speaker === 'Them'
+            ? s.speaker
+            : s.channel === 'mic'
+              ? ('You' as const)
+              : ('Them' as const),
+        text: s.text,
+        startMs: Math.round(s.startMs),
+        endMs: Math.round(s.endMs),
+        confidence:
+          typeof s.confidence === 'number' && Number.isFinite(s.confidence) ? s.confidence : 0.9
+      }))
+
+    const incoming: MeetingRecord = {
+      id,
+      title: typeof remote.title === 'string' ? remote.title : '',
+      createdAt:
+        typeof remote.createdAt === 'string' ? remote.createdAt : new Date().toISOString(),
+      ...(typeof remote.startedAt === 'string' ? { startedAt: remote.startedAt } : {}),
+      ...(typeof remote.endedAt === 'string' ? { endedAt: remote.endedAt } : {}),
+      ...(typeof remote.calendarEventId === 'string'
+        ? { calendarEventId: remote.calendarEventId }
+        : {}),
+      rawNotesMarkdown: typeof remote.rawNotesMarkdown === 'string' ? remote.rawNotesMarkdown : '',
+      ...(typeof remote.enhancedMarkdown === 'string'
+        ? { enhancedMarkdown: remote.enhancedMarkdown }
+        : {}),
+      segments,
+      echoSuppressed: 0
+    }
+    const remoteHash = contentHash(incoming, this.config.mediaUrls)
+
+    const local = this.meetings.get(id)
+    const action = decidePullAction({
+      localExists: local !== null,
+      localTrashed: Boolean(local?.trashedAt),
+      localHash: local ? contentHash(local, this.config.mediaUrls) : null,
+      syncedHash: this.config.pushed[id] ?? null,
+      remoteHash
+    })
+    if (action === 'skip') {
+      // Identical content still refreshes the bookkeeping hash.
+      if (local && contentHash(local, this.config.mediaUrls) === remoteHash) {
+        this.config.pushed[id] = remoteHash
+      }
+      return false
+    }
+
+    // Record the hash FIRST so the upsert's change hook sees this meeting
+    // as clean and the debounced push loop doesn't echo it straight back.
+    this.config.pushed[id] = remoteHash
+    this.writeConfig()
+    this.meetings.upsert(incoming)
+    return true
+  }
+
+  /** Soft-trash synced meetings whose cloud copy disappeared. */
+  private applyCloudDeletions(cloudIds: Set<string>): boolean {
+    let changed = false
+    for (const local of this.meetings.readAll()) {
+      const syncedHash = this.config.pushed[local.id]
+      const trash = shouldTrashLocally({
+        wasSynced: syncedHash !== undefined,
+        presentInCloud: cloudIds.has(local.id),
+        localTrashed: Boolean(local.trashedAt),
+        localDirty:
+          syncedHash !== undefined && contentHash(local, this.config.mediaUrls) !== syncedHash
+      })
+      if (!trash) continue
+      // Drop the hash first: the trash upsert fires the delete hook, and a
+      // missing entry keeps it from queueing a redundant cloud DELETE.
+      delete this.config.pushed[local.id]
+      this.writeConfig()
+      this.meetings.upsert({ id: local.id, trashedAt: new Date().toISOString() } as MeetingRecord)
+      changed = true
+    }
+    return changed
+  }
+
   /**
    * Upload attachments referenced by this meeting's markdown that haven't
    * been uploaded yet (name → URL cached in config). Images over the API's
@@ -415,6 +602,26 @@ export class SyncService {
       console.error('[sync] could not persist config:', error)
     }
   }
+}
+
+interface RemoteMeeting {
+  id?: unknown
+  title?: unknown
+  createdAt?: unknown
+  updatedAt?: unknown
+  startedAt?: unknown
+  endedAt?: unknown
+  calendarEventId?: unknown
+  rawNotesMarkdown?: unknown
+  enhancedMarkdown?: unknown
+  segments?: Array<{
+    channel?: unknown
+    speaker?: unknown
+    text?: unknown
+    startMs?: unknown
+    endMs?: unknown
+    confidence?: unknown
+  }>
 }
 
 const MEDIA_REF = /doodle-media:\/\/([a-z0-9.-]+)/g

@@ -47,6 +47,7 @@ import {
   type NotesTemplateInfo
 } from '../shared/notes-api'
 import {
+  MEETINGS_CHANGED_EVENT_CHANNEL,
   MEETINGS_DELETE_CHANNEL,
   MEETINGS_GET_CHANNEL,
   MEETINGS_LIST_CHANNEL,
@@ -249,6 +250,13 @@ const meetingsApi: MeetingsApi = {
 
   delete(id: string): Promise<void> {
     return ipcRenderer.invoke(MEETINGS_DELETE_CHANNEL, id) as Promise<void>
+  },
+  onChanged(cb) {
+    const listener = (): void => cb()
+    ipcRenderer.on(MEETINGS_CHANGED_EVENT_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(MEETINGS_CHANGED_EVENT_CHANNEL, listener)
+    }
   }
 }
 

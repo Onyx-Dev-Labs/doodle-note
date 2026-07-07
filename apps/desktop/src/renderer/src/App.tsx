@@ -88,6 +88,9 @@ function App(): React.JSX.Element {
     setHomeRefresh((n) => n + 1)
   }, [])
 
+  // Cloud pull can add/update meetings while Home is on screen.
+  useEffect(() => window.meetings.onChanged(refreshHome), [refreshHome])
+
   // Windows: the main process asks the renderer to run audio capture
   // (Chromium mic + WASAPI loopback). macOS never sends these messages.
   useEffect(() => {
