@@ -22,7 +22,7 @@ export const LOCAL_MODELS: LocalModelSpec[] = [
   {
     id: 'qwen3-4b-instruct',
     label: 'Fast',
-    description: 'Qwen3 4B — quick notes on any Apple Silicon Mac',
+    description: 'Qwen3 4B — quick notes on everyday hardware',
     sizeGB: 2.4,
     minRamGB: 8,
     uri: 'hf:unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M'

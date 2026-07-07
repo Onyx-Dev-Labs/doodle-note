@@ -46,10 +46,15 @@ for (const name of artifacts) {
   const file = path.join(releaseDir, name)
   const size = statSync(file).size
   process.stdout.write(`uploading ${name} (${(size / 1024 / 1024).toFixed(1)} MB)… `)
+  // Manifests (latest*.yml) get a short CDN TTL — the default is 30 days,
+  // which froze the feed and made "Check for updates" report stale versions.
+  // Versioned artifacts are immutable, so the long default is fine there.
+  const isManifest = name.endsWith('.yml')
   const blob = await put(`updates/${name}`, createReadStream(file), {
     access: 'public',
     addRandomSuffix: false,
-    allowOverwrite: true
+    allowOverwrite: true,
+    ...(isManifest ? { cacheControlMaxAge: 60 } : {})
   })
   console.log(blob.url)
 }

@@ -468,7 +468,7 @@ export default function ModelsView({
         <div>
           <h2>Settings</h2>
           <p className="models-sub">
-            Local-first by default — nothing leaves this Mac unless you turn it on.
+            Local-first by default — nothing leaves this computer unless you turn it on.
           </p>
         </div>
       </header>
@@ -505,7 +505,7 @@ export default function ModelsView({
             <section className="keys-section">
               <h3>On-device model</h3>
               <p className="models-sub">
-                DoodleNote polishes your meeting notes with a model that runs entirely on this Mac
+                DoodleNote polishes your meeting notes with a model that runs entirely on this computer
                 {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
                 machine.
               </p>
@@ -951,7 +951,7 @@ export default function ModelsView({
             <section className="keys-section calendar-section">
               <h3>Sync with cloud</h3>
               <p className="models-sub">
-                Off by default — your meetings live only on this Mac. Turn it on to push meetings,
+                Off by default — your meetings live only on this computer. Turn it on to push meetings,
                 transcripts, and notes to your DoodleNote workspace so you can browse and share them
                 on the web.
               </p>
@@ -1051,7 +1051,7 @@ export default function ModelsView({
               <h3>AI keys (optional)</h3>
               <p className="models-sub">
                 On-device is the default and needs no account. Add your own API key only if you want
-                cloud-quality notes — the key is encrypted with the macOS keychain and never shown
+                cloud-quality notes — the key is encrypted with your system keychain and never shown
                 again.
               </p>
 
