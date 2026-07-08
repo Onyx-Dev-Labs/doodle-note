@@ -1,13 +1,4 @@
-import {
-  index,
-  integer,
-  jsonb,
-  pgTable,
-  real,
-  text,
-  timestamp,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 import { organization, user } from "./auth-schema";
 
@@ -108,3 +99,22 @@ export const syncDevices = pgTable(
   },
   (table) => [index("sync_devices_user_id_idx").on(table.userId)],
 );
+
+/**
+ * Per-user cloud-sync billing. A user syncs when grandfathered (had a
+ * linked device before billing launched) or their Stripe subscription is
+ * trialing/active. No row = never subscribed.
+ */
+export const subscriptions = pgTable("subscriptions", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").unique(),
+  stripeSubscriptionId: text("stripe_subscription_id").unique(),
+  /** Stripe subscription status (trialing/active/past_due/canceled/...). */
+  status: text("status").notNull().default("none"),
+  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+  grandfathered: boolean("grandfathered").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});

@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { and, eq, getDb, member, organization, syncDevices } from "@repo/db";
 
 import { auth } from "@/lib/auth";
+import { entitlementFor } from "@/lib/billing";
 import { hashToken, mintToken } from "@/lib/sync-auth";
 
 /**
@@ -16,6 +17,17 @@ export async function POST(request: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  }
+
+  // Cloud sync is the paid feature — linking a device requires entitlement
+  // (grandfathered, trialing, or active). The approval page turns this 402
+  // into a "start your free trial" checkout hand-off.
+  const entitlement = await entitlementFor(session.user.id);
+  if (!entitlement.entitled) {
+    return NextResponse.json(
+      { error: "Subscription required", needsSubscription: true },
+      { status: 402 },
+    );
   }
 
   let body: { organizationId?: unknown; deviceName?: unknown };

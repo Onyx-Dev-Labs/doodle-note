@@ -1,7 +1,7 @@
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
-import { authenticateSyncRequest } from "@/lib/sync-auth";
+import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
 
 /** Keeps the JSON body under Vercel's request limit (base64 ≈ 4/3 size). */
 const MAX_BYTES = 3 * 1024 * 1024;
@@ -21,10 +21,9 @@ const MIME_BY_EXT: Record<string, string> = {
  * its markdown to the returned URL when pushing.
  */
 export async function POST(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
 
   let body: { name?: unknown; data?: unknown };
   try {
