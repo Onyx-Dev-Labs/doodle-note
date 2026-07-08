@@ -150,16 +150,23 @@ struct MeetingView: View {
                     Text("Your rough notes")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.stone)
-                    TextEditor(text: $meeting.roughNotes)
-                        .frame(minHeight: 120)
-                        .padding(8)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12).stroke(Color.sand)
-                        )
-                        .font(.body)
-                        .foregroundStyle(Color.ink)
+                    // A growing TextField (not TextEditor): TextEditor has its
+                    // own scroll view that fights the page ScrollView, so the
+                    // notes screen wouldn't scroll on the first touch. TextField
+                    // with a vertical axis grows to fit and never scrolls itself.
+                    TextField(
+                        "Jot your rough notes…",
+                        text: $meeting.roughNotes,
+                        axis: .vertical
+                    )
+                    .lineLimit(4...)
+                    .padding(12)
+                    .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12).stroke(Color.sand)
+                    )
+                    .font(.body)
+                    .foregroundStyle(Color.ink)
                 }
 
                 generateSection
