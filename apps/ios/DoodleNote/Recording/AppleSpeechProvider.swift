@@ -118,8 +118,17 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             inputBuilder = nil
         }
 
-        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-        await resultsTask?.value
+        // Both awaits are bounded: SpeechAnalyzer's finalize has wedged on a
+        // real device (assets mid-download), and a provider that can't finish
+        // pins the whole controller in .stopping. Losing the transcript tail
+        // beats losing the session.
+        if let analyzer {
+            await withTimeout(seconds: 4) { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+        }
+        if let resultsTask {
+            await withTimeout(seconds: 2) { await resultsTask.value }
+            resultsTask.cancel()
+        }
         eventsCont.finish()
         analyzer = nil
         converter = nil

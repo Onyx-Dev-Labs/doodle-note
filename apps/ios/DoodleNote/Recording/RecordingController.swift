@@ -6,6 +6,13 @@ import SwiftUI
 /// Owns one recording session: audio session config, the mic tap, the chosen
 /// transcription provider, and persistence of finalized segments into the
 /// meeting. One instance per MeetingView.
+///
+/// Hardened after the first real-device test bricked a session: every await
+/// in `start` is generation-guarded so a stop during preparation can never
+/// be resurrected by a resuming continuation, and `stop` bounds the
+/// provider drain with a timeout so the controller ALWAYS returns to idle —
+/// a hung SpeechAnalyzer finalize must never leave the UI in a dead state
+/// with the mic held open.
 @MainActor
 @Observable
 final class RecordingController {
@@ -26,6 +33,9 @@ final class RecordingController {
     private var provider: TranscriptionProvider?
     private var eventsTask: Task<Void, Never>?
 
+    /// Bumped by stop(); awaits inside start() abort when it moves past them.
+    private var generation = 0
+
     var isActive: Bool {
         switch state {
         case .preparing, .recording, .stopping: true
@@ -35,12 +45,16 @@ final class RecordingController {
 
     func start(meeting: Meeting, context: ModelContext) async {
         guard state == .idle || !isActive else { return }
+        let gen = generation
 
         state = .preparing("Requesting microphone…")
         guard await AVAudioApplication.requestRecordPermission() else {
-            state = .failed("Microphone access is off. Enable it in Settings → Privacy → Microphone.")
+            if gen == generation {
+                state = .failed("Microphone access is off. Enable it in Settings → Privacy → Microphone.")
+            }
             return
         }
+        guard gen == generation else { return } // stopped while prompting
 
         let engineChoice = TranscriptionEngine(
             rawValue: UserDefaults.standard.string(forKey: "transcriptionEngine") ?? "apple"
@@ -51,8 +65,12 @@ final class RecordingController {
         do {
             state = .preparing(engineChoice == .parakeet
                 ? "Loading Parakeet models (first run downloads ~440 MB)…"
-                : "Preparing transcription…")
+                : "Preparing transcription (first run downloads speech assets)…")
             try await provider.prepare()
+            guard gen == generation else { // stopped mid-download — stay dead
+                await provider.finish()
+                return
+            }
 
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .defaultToSpeaker])
@@ -61,6 +79,11 @@ final class RecordingController {
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             try await provider.start(inputFormat: format)
+            guard gen == generation else {
+                teardownAudio()
+                await provider.finish()
+                return
+            }
 
             input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
                 provider.ingest(buffer)
@@ -82,16 +105,30 @@ final class RecordingController {
             }
         } catch {
             teardownAudio()
-            state = .failed("Could not start recording: \(error.localizedDescription)")
+            if gen == generation {
+                state = .failed("Could not start recording: \(error.localizedDescription)")
+            }
         }
     }
 
     func stop(meeting: Meeting, context: ModelContext) async {
         guard state == .recording || isPreparing else { return }
+        // Invalidate any in-flight start continuation FIRST — whatever it was
+        // waiting on (asset download, engine spin-up) aborts at its next guard.
+        generation += 1
         state = .stopping
         teardownAudio()
-        await provider?.finish()
-        await eventsTask?.value
+
+        // The provider drain is best-effort with a hard bound: a wedged
+        // SpeechAnalyzer finalize loses the tail of the transcript, never
+        // the ability to stop. (The first device test hung here forever.)
+        if let provider {
+            await withTimeout(seconds: 5) { await provider.finish() }
+        }
+        if let eventsTask {
+            await withTimeout(seconds: 2) { await eventsTask.value }
+            eventsTask.cancel()
+        }
         eventsTask = nil
         provider = nil
         livePartial = ""
@@ -129,5 +166,18 @@ final class RecordingController {
                 print("[recording] \(message)")
             }
         }
+    }
+}
+
+/// Run an async operation but give up waiting after `seconds`. The operation
+/// itself is cancelled on timeout; either way this function returns.
+func withTimeout(seconds: Double, _ operation: @escaping @Sendable () async -> Void) async {
+    await withTaskGroup(of: Void.self) { group in
+        group.addTask { await operation() }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        }
+        await group.next() // whichever finishes first
+        group.cancelAll()
     }
 }
