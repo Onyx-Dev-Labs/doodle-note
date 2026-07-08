@@ -49,6 +49,21 @@ targets:
         product: FluidAudio
       - package: TwilioVoice
         product: TwilioVoice
+    info:
+      path: DoodleNote/Info.plist
+      properties:
+        CFBundleDisplayName: DoodleNote
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSMicrophoneUsageDescription: DoodleNote records your meetings so it can transcribe them on this device. Audio never leaves your phone.
+        NSSpeechRecognitionUsageDescription: DoodleNote transcribes your meetings entirely on this device.
+        NSCalendarsFullAccessUsageDescription: DoodleNote shows your upcoming meetings so you can start notes with one tap. Calendar data stays on your phone.
+        UIBackgroundModes: [audio]
+        # Account-link callback: Safari hands the sync token back via
+        # doodlenote://link?token=...
+        CFBundleURLTypes:
+          - CFBundleURLName: com.doodlenote.ios
+            CFBundleURLSchemes: [doodlenote]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios
@@ -59,12 +74,4 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "6.0"
-        GENERATE_INFOPLIST_FILE: true
-        INFOPLIST_KEY_CFBundleDisplayName: DoodleNote
-        INFOPLIST_KEY_UILaunchScreen_Generation: true
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: DoodleNote records your meetings so it can transcribe them on this device. Audio never leaves your phone.
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: DoodleNote transcribes your meetings entirely on this device.
-        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: DoodleNote shows your upcoming meetings so you can start notes with one tap. Calendar data stays on your phone.
-        INFOPLIST_KEY_UIBackgroundModes: audio
         SWIFT_EMIT_LOC_STRINGS: false

@@ -34,8 +34,20 @@ struct SyncSettingsSection: View {
                 Button {
                     Task { await sync.link() }
                 } label: {
-                    Label("Link to your DoodleNote account", systemImage: "icloud")
+                    HStack {
+                        Label(
+                            sync.isLinking
+                                ? "Finish signing in with Safari…"
+                                : "Link to your DoodleNote account",
+                            systemImage: "icloud"
+                        )
+                        if sync.isLinking {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
                 }
+                .disabled(sync.isLinking)
             }
         } header: {
             Text("Cloud sync")

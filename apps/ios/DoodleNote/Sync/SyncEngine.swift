@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import SwiftUI
 import CryptoKit
-import AuthenticationServices
+import UIKit
 
 /// Orchestrates cloud sync: device linking, push of locally-changed meetings,
 /// pull of remote changes, and deletion reconciliation. Mirrors the desktop
@@ -50,8 +50,17 @@ final class SyncEngine: NSObject {
 
     // MARK: Device linking
 
-    /// Opens the web approval flow. The link-device page redirects back to
-    /// doodlenote://link?token=dnsy_...&email=...&workspace=... on approval.
+    /// True while we've handed off to Safari and are waiting for the
+    /// doodlenote://link callback.
+    private(set) var isLinking = false
+    private var linkTimeoutTask: Task<Void, Never>?
+
+    /// Opens the account/approval flow in the real Safari app — same pattern
+    /// as desktop (system browser + callback). The /link-device page redirects
+    /// to doodlenote://link?token=dnsy_...&email=...&workspace=... on
+    /// approval, which lands in handleCallback via onOpenURL. Using Safari
+    /// instead of an in-app sheet keeps the user's existing web sessions and
+    /// avoids embedded-browser quirks.
     func link() async {
         lastError = nil
         var components = URLComponents(
@@ -62,25 +71,39 @@ final class SyncEngine: NSObject {
             URLQueryItem(name: "scheme", value: "doodlenote"),
             URLQueryItem(name: "name", value: UIDevice.current.name),
         ]
+        guard let url = components.url else { return }
 
-        do {
-            let callback = try await startWebAuth(url: components.url!)
-            let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        isLinking = true
+        await UIApplication.shared.open(url)
 
-            guard let token = item("token"), token.hasPrefix("dnsy_") else {
-                lastError = "Linking failed: no token returned."
-                return
-            }
-            Keychain.save(key: .syncToken, value: token)
-            linkedEmail = item("email")
-            workspaceName = item("workspace")
-            pullCursor = nil
-        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            // User dismissed the sheet — not an error.
-        } catch {
-            lastError = "Linking failed: \(error.localizedDescription)"
+        // Give the user 5 minutes to finish in Safari (matches desktop).
+        linkTimeoutTask?.cancel()
+        linkTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(300))
+            guard let self, !Task.isCancelled, self.isLinking else { return }
+            self.isLinking = false
         }
+    }
+
+    /// Callback from Safari (doodlenote://link?token=...). Wired in
+    /// DoodleNoteApp via onOpenURL; safe to receive even on cold launch.
+    func handleCallback(_ url: URL) {
+        guard url.scheme == "doodlenote", url.host == "link" else { return }
+        linkTimeoutTask?.cancel()
+        isLinking = false
+
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func item(_ name: String) -> String? { items.first { $0.name == name }?.value }
+
+        guard let token = item("token"), token.hasPrefix("dnsy_") else {
+            lastError = "Linking failed: no token returned."
+            return
+        }
+        Keychain.save(key: .syncToken, value: token)
+        linkedEmail = item("email")
+        workspaceName = item("workspace")
+        pullCursor = nil
+        lastError = nil
     }
 
     func unlink() {
@@ -89,26 +112,9 @@ final class SyncEngine: NSObject {
         workspaceName = nil
         pullCursor = nil
         pendingDeletes = []
+        pendingFolderDeletes = []
         lastError = nil
         lastSyncedAt = nil
-    }
-
-    private func startWebAuth(url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(
-                url: url,
-                callback: .customScheme("doodlenote")
-            ) { callbackURL, error in
-                if let callbackURL {
-                    continuation.resume(returning: callbackURL)
-                } else {
-                    continuation.resume(throwing: error ?? URLError(.cancelled))
-                }
-            }
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = false
-            session.start()
-        }
     }
 
     // MARK: Deletion queue
@@ -380,15 +386,6 @@ final class SyncEngine: NSObject {
     }
 }
 
-extension SyncEngine: ASWebAuthenticationPresentationContextProviding {
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        MainActor.assumeIsolated {
-            UIApplication.shared.connectedScenes
-                .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-                .first ?? ASPresentationAnchor()
-        }
-    }
-}
 
 private extension Array {
     func chunked(into size: Int) -> [[Element]] {
