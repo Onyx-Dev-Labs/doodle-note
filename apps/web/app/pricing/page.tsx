@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CheckoutButton } from "./checkout-button";
 import {
   buttonPrimary,
   DoodleStroke,
@@ -145,13 +146,8 @@ export default function PricingPage() {
             Your meetings on every device
           </p>
           <FeatureList items={SYNC_FEATURES} />
-          <div className="mt-7 flex flex-col items-center gap-2 sm:items-start">
-            <Link href="/login" className={buttonPrimary}>
-              Get started
-            </Link>
-            <p className="text-xs text-stone">
-              Free during early access — billing starts when Sync leaves beta.
-            </p>
+          <div className="mt-7">
+            <CheckoutButton />
           </div>
         </section>
 

@@ -54,6 +54,25 @@ export function LinkDeviceForm({
       body: JSON.stringify({ organizationId, deviceName }),
     });
     const body = await response.json();
+    if (response.status === 402 && body.needsSubscription) {
+      // Cloud sync is subscription-backed: hand off to Stripe Checkout
+      // (15-day free trial), then return here to finish linking.
+      const checkout = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          next: window.location.pathname + window.location.search,
+        }),
+      });
+      const checkoutBody = await checkout.json();
+      setPending(false);
+      if (checkout.ok && typeof checkoutBody.url === "string") {
+        window.location.href = checkoutBody.url;
+      } else {
+        setError(checkoutBody.error ?? "Could not start checkout");
+      }
+      return;
+    }
     setPending(false);
     if (!response.ok) {
       setError(body.error ?? "Could not link the device");

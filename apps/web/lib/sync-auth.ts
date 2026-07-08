@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import { NextResponse } from "next/server";
 import { eq, getDb, organization, syncDevices } from "@repo/db";
+
+import { entitlementFor } from "@/lib/billing";
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -50,4 +53,38 @@ export async function authenticateSyncRequest(
     .catch(() => {});
 
   return device;
+}
+
+/**
+ * Device auth + billing in one step for data-moving sync routes. Returns
+ * the device, or a ready-made 402 when the owner's subscription lapsed —
+ * the desktop surfaces the message verbatim. (/api/sync/ping stays
+ * ungated so clients can tell "no network" from "needs subscription".)
+ */
+export async function authenticateEntitledSyncRequest(
+  request: Request,
+): Promise<
+  | { device: SyncDeviceAuth; response?: undefined }
+  | { device?: undefined; response: Response }
+> {
+  const device = await authenticateSyncRequest(request);
+  if (!device) {
+    return {
+      response: NextResponse.json({ error: "Invalid sync token" }, { status: 401 }),
+    };
+  }
+  const entitlement = await entitlementFor(device.userId);
+  if (!entitlement.entitled) {
+    return {
+      response: NextResponse.json(
+        {
+          error:
+            "Cloud sync needs an active subscription — manage billing at https://www.doodlenote.ai/pricing",
+          needsSubscription: true,
+        },
+        { status: 402 },
+      ),
+    };
+  }
+  return { device };
 }

@@ -502,7 +502,10 @@ export class SyncService {
           `${this.baseUrl}/api/sync/pull?since=${encodeURIComponent(cursor)}`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
-        if (!response.ok) throw new Error(`Pull failed (HTTP ${response.status})`)
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string }
+          throw new Error(body.error ?? `Pull failed (HTTP ${response.status})`)
+        }
         const body = (await response.json()) as {
           allIds?: unknown
           folders?: Array<{ id?: unknown; name?: unknown; createdAt?: unknown }>

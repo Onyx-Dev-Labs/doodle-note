@@ -10,7 +10,7 @@ import {
   transcriptSegments,
 } from "@repo/db";
 
-import { authenticateSyncRequest } from "@/lib/sync-auth";
+import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -61,10 +61,9 @@ function markdownEnvelope(markdown: unknown): { format: string; markdown: string
  * notes upsert. A meeting id owned by a different workspace is rejected.
  */
 export async function POST(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
 
   let body: { meetings?: unknown; folders?: unknown };
   try {
@@ -224,10 +223,9 @@ export async function POST(request: Request) {
 
 /** Meeting deletions propagate too: ids the desktop trashed or removed. */
 export async function DELETE(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
   let body: { ids?: unknown; folderIds?: unknown };
   try {
     body = await request.json();
