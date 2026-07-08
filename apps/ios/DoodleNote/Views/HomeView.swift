@@ -89,7 +89,11 @@ struct HomeView: View {
                     }
                 }
             }
-            .searchable(text: $searchText, prompt: "Search meetings, notes, transcripts")
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search meetings, notes, transcripts"
+            )
             .safeAreaInset(edge: .bottom) { bottomBar }
             .sheet(isPresented: $showFolders) {
                 FoldersDrawer(selectedFolderId: $selectedFolderId)
