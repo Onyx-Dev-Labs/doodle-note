@@ -121,7 +121,12 @@ struct MeetingView: View {
             Spacer()
 
             Button {
-                Task { await recorder.stop(meeting: meeting, context: context) }
+                Task {
+                    await recorder.stop(meeting: meeting, context: context)
+                    if SyncEngine.shared.isLinked {
+                        await SyncEngine.shared.syncNow(context: context)
+                    }
+                }
             } label: {
                 Label("Stop", systemImage: "stop.fill")
                     .font(.footnote.weight(.semibold))
@@ -238,6 +243,10 @@ struct MeetingView: View {
             // no real title — let the model name them from what was discussed.
             if meeting.calendarEventId == nil, isUntitled(meeting.title) {
                 await titleFromNotes(notes: notes)
+            }
+            // A fresh note is exactly what other devices are waiting for.
+            if SyncEngine.shared.isLinked {
+                await SyncEngine.shared.syncNow(context: context)
             }
         } catch {
             generationError = error.localizedDescription

@@ -111,7 +111,19 @@ struct HomeView: View {
                 Task {
                     await calendar.requestAndLoad()
                     await router.schedule(for: calendar.upcoming)
+                    if sync.isLinked { await sync.syncNow(context: context) }
                 }
+            }
+        }
+        .task(id: scenePhase) {
+            // Periodic sync while the app is foregrounded, so meetings from
+            // other devices show up without relaunching. Cancels when the
+            // scene leaves .active (task id change) or the view goes away.
+            guard scenePhase == .active, sync.isLinked else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s
+                if Task.isCancelled { break }
+                await sync.syncNow(context: context)
             }
         }
         .onChange(of: router.pendingStart) { _, pending in
