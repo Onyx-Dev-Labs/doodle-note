@@ -22,18 +22,23 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+            List {
+                Section {
                     titleRow
                     if calendar.access == .granted, !calendar.upcoming.isEmpty, searchText.isEmpty {
                         comingUpSection
                     }
-                    meetingsSection
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 90)
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                .listRowBackground(Color.cream)
+                .listRowSeparator(.hidden)
+
+                meetingsList
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Color.cream)
+            .environment(\.defaultMinListRowHeight, 0)
             .confirmationDialog(
                 "Move to folder",
                 isPresented: Binding(
@@ -245,32 +250,50 @@ struct HomeView: View {
         return groups.keys.sorted(by: >).map { (day: $0, meetings: groups[$0] ?? []) }
     }
 
-    @ViewBuilder
-    private var meetingsSection: some View {
+    // MARK: Meetings list (native List rows → real swipe, jank-free scroll)
+
+    @ViewBuilder private var meetingsList: some View {
         if visibleMeetings.isEmpty {
-            emptyState
+            Section {
+                emptyState
+                    .frame(maxWidth: .infinity)
+                    .listRowInsets(EdgeInsets(top: 48, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.cream)
+                    .listRowSeparator(.hidden)
+            }
         } else {
             ForEach(groupedByDay, id: \.day) { group in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(relativeDayLabel(group.day))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.stone)
+                Section {
                     ForEach(group.meetings) { meeting in
-                        SwipeableRow(
-                            onTap: { path.append(meeting) },
-                            onMove: { movingMeeting = meeting },
-                            onDelete: { deleteMeeting(meeting) }
-                        ) {
+                        Button { path.append(meeting) } label: {
                             MeetingRow(meeting: meeting)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color.cream)
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) { deleteMeeting(meeting) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            Button { movingMeeting = meeting } label: {
+                                Label("Move", systemImage: "folder")
+                            }
+                            .tint(Color.sage)
                         }
                         .contextMenu {
                             Button("Move to folder", systemImage: "folder") { movingMeeting = meeting }
-                            Button("Delete", systemImage: "trash", role: .destructive) {
-                                deleteMeeting(meeting)
-                            }
+                            Button("Delete", systemImage: "trash", role: .destructive) { deleteMeeting(meeting) }
                         }
                     }
+                } header: {
+                    Text(relativeDayLabel(group.day))
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.stone)
+                        .textCase(nil)
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                .listRowBackground(Color.cream)
             }
         }
     }
@@ -398,80 +421,3 @@ private struct MeetingRow: View {
 /// content to open; swipe to act. Only one row opens at a time via a shared
 /// binding would be ideal, but per-row state keeps it self-contained — a new
 /// swipe on another row leaves this one open until tapped, which is fine.
-struct SwipeableRow<Content: View>: View {
-    let onTap: () -> Void
-    let onMove: () -> Void
-    let onDelete: () -> Void
-    @ViewBuilder var content: Content
-
-    @State private var offset: CGFloat = 0
-    @State private var committed: CGFloat = 0
-    @State private var horizontalActive = false
-    private let actionsWidth: CGFloat = 140
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            content
-                .background(Color.cream)
-                .offset(x: offset)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if committed != 0 { reset() } else { onTap() }
-                }
-                .simultaneousGesture(
-                    // minimumDistance 30 + a horizontal-dominance gate lets the
-                    // ScrollView win vertical pans outright (no more "swipe twice
-                    // to scroll"); only a clearly sideways drag opens the row.
-                    DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                        .onChanged { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) * 1.5
-                            else { return }
-                            horizontalActive = true
-                            offset = min(0, max(-actionsWidth, committed + value.translation.width))
-                        }
-                        .onEnded { value in
-                            defer { horizontalActive = false }
-                            guard horizontalActive else { return }
-                            let opening = value.translation.width < -actionsWidth / 2
-                            let keepingOpen = committed != 0 && value.translation.width < actionsWidth / 2
-                            withAnimation(.snappy(duration: 0.22)) {
-                                committed = (opening || keepingOpen) ? -actionsWidth : 0
-                                offset = committed
-                            }
-                        }
-                )
-
-            // Drawn AFTER the content, so these win hit-testing in their strip
-            // (offset only shifts rendering, never the content's tap region).
-            if offset < -1 {
-                HStack(spacing: 8) {
-                    actionButton("Move", "folder", Color.sage) { reset(); onMove() }
-                    actionButton("Delete", "trash", Color(red: 0.66, green: 0.26, blue: 0.18)) { reset(); onDelete() }
-                }
-                .frame(width: actionsWidth)
-                .transition(.opacity)
-            }
-        }
-        .clipped()
-    }
-
-    private func actionButton(_ title: String, _ icon: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                Text(title).font(.caption2.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .foregroundStyle(.white)
-            .background(tint, in: RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func reset() {
-        withAnimation(.snappy(duration: 0.22)) {
-            committed = 0
-            offset = 0
-        }
-    }
-}
