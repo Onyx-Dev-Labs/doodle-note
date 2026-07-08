@@ -43,6 +43,13 @@
       "when": 1783460990611,
       "tag": "0005_aromatic_mongoose",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783516366575,
+      "tag": "0006_conscious_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

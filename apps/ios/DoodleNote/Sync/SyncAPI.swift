@@ -133,6 +133,30 @@ struct SyncAPI: Sendable {
         try await request("GET", "/api/voice/token")
     }
 
+    struct CallerIdState: Codable {
+        /// "none" | "pending" | "verified"
+        var status: String
+        var phoneNumber: String?
+        /// Present on POST while pending — the code to enter on Twilio's call.
+        var validationCode: String?
+    }
+
+    func callerIdStatus() async throws -> CallerIdState {
+        try await request("GET", "/api/voice/caller-id")
+    }
+
+    func requestCallerIdVerification(phoneNumber: String) async throws -> CallerIdState {
+        struct Body: Codable { var phoneNumber: String }
+        return try await request(
+            "POST", "/api/voice/caller-id", body: Body(phoneNumber: phoneNumber)
+        )
+    }
+
+    func deleteCallerId() async throws {
+        struct Response: Codable { var ok: Bool }
+        let _: Response = try await request("DELETE", "/api/voice/caller-id")
+    }
+
     // MARK: HTTP
 
     private func request<Response: Decodable>(

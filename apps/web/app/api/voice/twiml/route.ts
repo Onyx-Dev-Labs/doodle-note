@@ -1,3 +1,5 @@
+import { eq, getDb, verifiedCallerIds } from "@repo/db";
+
 import { twilioConfig, validTwilioSignature } from "@/lib/twilio";
 
 /**
@@ -31,8 +33,24 @@ export async function POST(request: Request) {
     return twiml(`<Response><Say>Invalid number.</Say></Response>`);
   }
 
+  // Calls arrive as client:<userId>; a user with a Verified Caller ID gets
+  // their own number displayed instead of the shared workspace number.
+  let callerId = config.callerId;
+  const from = params.get("From") ?? "";
+  if (from.startsWith("client:")) {
+    const userId = from.slice("client:".length);
+    const [row] = await getDb()
+      .select()
+      .from(verifiedCallerIds)
+      .where(eq(verifiedCallerIds.userId, userId))
+      .limit(1);
+    if (row?.status === "verified" && /^\+[1-9][0-9]{6,14}$/.test(row.phoneNumber)) {
+      callerId = row.phoneNumber;
+    }
+  }
+
   return twiml(
-    `<Response><Dial callerId="${config.callerId}" answerOnBridge="true"><Number>${to}</Number></Dial></Response>`,
+    `<Response><Dial callerId="${callerId}" answerOnBridge="true"><Number>${to}</Number></Dial></Response>`,
   );
 }
 

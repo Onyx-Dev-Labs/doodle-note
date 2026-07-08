@@ -52,6 +52,8 @@ struct SettingsView: View {
 
             SyncSettingsSection()
 
+            CallerIdSection()
+
             Section {
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")

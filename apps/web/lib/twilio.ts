@@ -77,6 +77,68 @@ export function voiceAccessToken(config: TwilioVoiceConfig, identity: string): s
   return `${signingInput}.${base64url(signature)}`;
 }
 
+const TWILIO_API = "https://api.twilio.com/2010-04-01";
+
+function restAuth(config: TwilioVoiceConfig): string {
+  return (
+    "Basic " +
+    Buffer.from(`${config.apiKeySid}:${config.apiKeySecret}`).toString("base64")
+  );
+}
+
+/**
+ * Starts Twilio's Verified Caller ID flow: Twilio immediately calls the
+ * number and the returned 6-digit code must be entered on that call's keypad.
+ */
+export async function createValidationRequest(
+  config: TwilioVoiceConfig,
+  phoneNumber: string,
+  friendlyName: string,
+): Promise<{ validationCode: string }> {
+  const response = await fetch(
+    `${TWILIO_API}/Accounts/${config.accountSid}/OutgoingCallerIds.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: restAuth(config),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        PhoneNumber: phoneNumber,
+        FriendlyName: friendlyName.slice(0, 64),
+      }),
+    },
+  );
+  const body = (await response.json()) as {
+    validation_code?: string;
+    message?: string;
+  };
+  if (!response.ok || !body.validation_code) {
+    throw new Error(body.message ?? `Twilio validation failed (${response.status})`);
+  }
+  return { validationCode: body.validation_code };
+}
+
+/**
+ * Returns the OutgoingCallerId SID if the number has completed verification
+ * on this Twilio account, else null.
+ */
+export async function findVerifiedCallerId(
+  config: TwilioVoiceConfig,
+  phoneNumber: string,
+): Promise<string | null> {
+  const query = new URLSearchParams({ PhoneNumber: phoneNumber });
+  const response = await fetch(
+    `${TWILIO_API}/Accounts/${config.accountSid}/OutgoingCallerIds.json?${query}`,
+    { headers: { Authorization: restAuth(config) } },
+  );
+  if (!response.ok) return null;
+  const body = (await response.json()) as {
+    outgoing_caller_ids?: Array<{ sid: string; phone_number: string }>;
+  };
+  return body.outgoing_caller_ids?.[0]?.sid ?? null;
+}
+
 /**
  * Validates X-Twilio-Signature on webhook requests: HMAC-SHA1 of the full URL
  * plus the POST params concatenated in sorted-key order, keyed by the account

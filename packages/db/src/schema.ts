@@ -118,3 +118,22 @@ export const subscriptions = pgTable("subscriptions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+/**
+ * Verified Caller ID for phone calls: a user proves ownership of their real
+ * number via Twilio's validation flow, and outbound DoodleNote calls then
+ * display it instead of the shared workspace number.
+ */
+export const verifiedCallerIds = pgTable("verified_caller_ids", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** E.164, e.g. +16145551234. */
+  phoneNumber: text("phone_number").notNull(),
+  /** "pending" until Twilio confirms the validation call; then "verified". */
+  status: text("status").notNull().default("pending"),
+  /** Twilio OutgoingCallerId SID once verified. */
+  outgoingCallerIdSid: text("outgoing_caller_id_sid"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});

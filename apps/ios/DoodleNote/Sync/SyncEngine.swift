@@ -138,6 +138,14 @@ final class SyncEngine: NSObject {
         return try await api.voiceToken()
     }
 
+    /// Verified Caller ID management — requires a linked account.
+    func callerIdAPI() throws -> SyncAPI {
+        guard let api else {
+            throw SyncAPI.SyncError.invalidToken
+        }
+        return api
+    }
+
     // MARK: Sync cycle
 
     func syncNow(context: ModelContext) async {
