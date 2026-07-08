@@ -60,6 +60,12 @@ final class Meeting {
         guard let startedAt, let endedAt else { return nil }
         return Int(endedAt.timeIntervalSince(startedAt) * 1000)
     }
+
+    /// Whole minutes, for lightweight list subtitles (dates only — never
+    /// touches the segments relationship, so it's cheap during scroll).
+    var durationMinutes: Int? {
+        durationMs.map { max(1, $0 / 60_000) }
+    }
 }
 
 /// A folder for organizing meetings. Synced (ids are shared with the cloud

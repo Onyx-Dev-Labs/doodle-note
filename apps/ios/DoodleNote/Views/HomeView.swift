@@ -242,7 +242,6 @@ struct HomeView: View {
                 meeting.displayTitle.lowercased().contains(query)
                     || meeting.roughNotes.lowercased().contains(query)
                     || (meeting.generatedNotes?.lowercased().contains(query) ?? false)
-                    || meeting.segments.contains { $0.text.lowercased().contains(query) }
             }
         }
         return result
@@ -403,8 +402,14 @@ private struct MeetingRow: View {
                     if meeting.generatedNotes != nil {
                         Label("Notes", systemImage: "sparkles")
                     }
-                    if !meeting.segments.isEmpty {
-                        Text("· \(meeting.segments.count) segments")
+                    // Duration comes from startedAt/endedAt — a couple of cheap
+                    // stored dates. Reading meeting.segments here faulted the
+                    // WHOLE transcript from disk on every row draw, which froze
+                    // scrolling (worse under List, which re-renders rows).
+                    if let minutes = meeting.durationMinutes {
+                        Text("· \(minutes)m")
+                    } else if meeting.startedAt != nil {
+                        Label("Recorded", systemImage: "waveform")
                     }
                 }
                 .font(.caption)
