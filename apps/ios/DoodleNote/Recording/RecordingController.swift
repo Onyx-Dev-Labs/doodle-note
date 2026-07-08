@@ -181,3 +181,28 @@ func withTimeout(seconds: Double, _ operation: @escaping @Sendable () async -> V
         group.cancelAll()
     }
 }
+
+/// Throwing variant: give the operation `seconds`, then throw a timeout so
+/// callers surface an actionable failure instead of waiting forever.
+func withThrowingTimeout<T: Sendable>(
+    seconds: Double,
+    _ operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw TimeoutError()
+        }
+        guard let first = try await group.next() else { throw TimeoutError() }
+        group.cancelAll()
+        return first
+    }
+}
+
+struct TimeoutError: LocalizedError {
+    var errorDescription: String? {
+        "Timed out. Check your internet connection and try again — the first "
+            + "recording needs to download speech assets."
+    }
+}
