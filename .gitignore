@@ -30,3 +30,7 @@ pgdata/
 apps/desktop/release/
 .vercel
 .env*.local
+
+# iOS build artifacts
+apps/ios/.build/
+apps/ios/DoodleNote.xcodeproj/xcuserdata/

@@ -23,11 +23,14 @@ function DialogCard({ children }: { children: React.ReactNode }) {
 
 export function LinkDeviceForm({
   port,
+  callbackScheme,
   deviceName,
   email,
   organizations,
 }: {
   port: number | null;
+  /** Custom URL scheme callback for mobile apps (e.g. "doodlenote"). */
+  callbackScheme?: string | null;
   deviceName: string;
   email: string;
   organizations: Array<{ id: string; name: string }>;
@@ -39,8 +42,10 @@ export function LinkDeviceForm({
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const hasCallback = Boolean(port || callbackScheme);
+
   async function handleApprove() {
-    if (!port) return;
+    if (!hasCallback) return;
     setError(null);
     setPending(true);
     const response = await fetch("/api/device/link", {
@@ -79,10 +84,12 @@ export function LinkDeviceForm({
       email: body.email,
       workspace: body.workspaceName,
     });
-    window.location.href = `http://127.0.0.1:${port}/callback?${params}`;
+    window.location.href = callbackScheme
+      ? `${callbackScheme}://link?${params}`
+      : `http://127.0.0.1:${port}/callback?${params}`;
   }
 
-  if (!port) {
+  if (!hasCallback) {
     return (
       <DialogCard>
         <h1 className="mt-4 font-display text-lg font-semibold text-ink">
@@ -103,8 +110,9 @@ export function LinkDeviceForm({
         Connect &ldquo;{deviceName}&rdquo;?
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-bark">
-        This computer will sync meetings, transcripts, and notes to the
-        workspace below, signed in as <strong>{email}</strong>.
+        This {callbackScheme ? "device" : "computer"} will sync meetings,
+        transcripts, and notes to the workspace below, signed in as{" "}
+        <strong>{email}</strong>.
       </p>
 
       {organizations.length > 1 && (
@@ -141,7 +149,11 @@ export function LinkDeviceForm({
           onClick={handleApprove}
           className={`mt-5 w-full ${buttonPrimary}`}
         >
-          {pending ? "Connecting…" : "Connect desktop app"}
+          {pending
+            ? "Connecting…"
+            : callbackScheme
+              ? "Connect this device"
+              : "Connect desktop app"}
         </button>
       )}
     </DialogCard>

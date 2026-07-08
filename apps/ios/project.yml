@@ -1,0 +1,70 @@
+# DoodleNote iOS — xcodegen project spec.
+# Regenerate the .xcodeproj with: xcodegen generate (run from this directory)
+name: DoodleNote
+options:
+  bundleIdPrefix: com.doodlenote
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio
+    exactVersion: 0.15.4
+  TwilioVoice:
+    url: https://github.com/twilio/twilio-voice-ios
+    from: 6.10.0
+schemes:
+  DoodleNote:
+    build:
+      targets:
+        DoodleNote: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - DoodleNoteUITests
+targets:
+  DoodleNoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - DoodleNoteUITests
+    dependencies:
+      - target: DoodleNote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios.uitests
+        DEVELOPMENT_TEAM: VTZW6K32K4
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "6.0"
+  DoodleNote:
+    type: application
+    platform: iOS
+    sources:
+      - DoodleNote
+    dependencies:
+      - package: FluidAudio
+        product: FluidAudio
+      - package: TwilioVoice
+        product: TwilioVoice
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios
+        PRODUCT_NAME: DoodleNote
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        DEVELOPMENT_TEAM: VTZW6K32K4
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_CFBundleDisplayName: DoodleNote
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: DoodleNote records your meetings so it can transcribe them on this device. Audio never leaves your phone.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: DoodleNote transcribes your meetings entirely on this device.
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: DoodleNote shows your upcoming meetings so you can start notes with one tap. Calendar data stays on your phone.
+        INFOPLIST_KEY_UIBackgroundModes: audio
+        SWIFT_EMIT_LOC_STRINGS: false

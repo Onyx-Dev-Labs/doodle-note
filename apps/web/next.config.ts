@@ -1,6 +1,16 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * Pin the monorepo root so Turbopack doesn't mis-infer it when this repo
+   * is checked out inside another (git worktrees under .claude/worktrees) —
+   * a wrong root breaks next/font resolution.
+   */
+  turbopack: {
+    root: path.join(__dirname, "..", ".."),
+  },
   /**
    * Next allows one dev server per dist dir; a second session (agent preview)
    * can set NEXT_DIST_DIR to run alongside the primary `pnpm dev` server.
