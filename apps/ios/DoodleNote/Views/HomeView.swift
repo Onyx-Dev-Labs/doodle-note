@@ -406,6 +406,7 @@ struct SwipeableRow<Content: View>: View {
 
     @State private var offset: CGFloat = 0
     @State private var committed: CGFloat = 0
+    @State private var horizontalActive = false
     private let actionsWidth: CGFloat = 140
 
     var body: some View {
@@ -417,13 +418,20 @@ struct SwipeableRow<Content: View>: View {
                 .onTapGesture {
                     if committed != 0 { reset() } else { onTap() }
                 }
-                .gesture(
-                    DragGesture(minimumDistance: 14)
+                .simultaneousGesture(
+                    // minimumDistance 30 + a horizontal-dominance gate lets the
+                    // ScrollView win vertical pans outright (no more "swipe twice
+                    // to scroll"); only a clearly sideways drag opens the row.
+                    DragGesture(minimumDistance: 30, coordinateSpace: .local)
                         .onChanged { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            guard abs(value.translation.width) > abs(value.translation.height) * 1.5
+                            else { return }
+                            horizontalActive = true
                             offset = min(0, max(-actionsWidth, committed + value.translation.width))
                         }
                         .onEnded { value in
+                            defer { horizontalActive = false }
+                            guard horizontalActive else { return }
                             let opening = value.translation.width < -actionsWidth / 2
                             let keepingOpen = committed != 0 && value.translation.width < actionsWidth / 2
                             withAnimation(.snappy(duration: 0.22)) {
