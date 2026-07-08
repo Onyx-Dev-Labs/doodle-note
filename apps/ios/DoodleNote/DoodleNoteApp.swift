@@ -19,10 +19,15 @@ struct DoodleNoteApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if hasOnboarded {
-                HomeView()
-            } else {
-                WelcomeView { hasOnboarded = true }
+            Group {
+                if hasOnboarded {
+                    HomeView()
+                } else {
+                    WelcomeView { hasOnboarded = true }
+                }
+            }
+            .onOpenURL { url in
+                SyncEngine.shared.handleCallback(url)
             }
         }
         .modelContainer(container)

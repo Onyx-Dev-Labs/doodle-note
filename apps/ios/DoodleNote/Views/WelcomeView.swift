@@ -6,7 +6,6 @@ struct WelcomeView: View {
     var onDone: () -> Void
 
     @State private var sync = SyncEngine.shared
-    @State private var linking = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,16 +45,13 @@ struct WelcomeView: View {
                 }
 
                 Button {
-                    linking = true
-                    Task {
-                        await sync.link()
-                        linking = false
-                        if sync.isLinked { onDone() }
-                    }
+                    Task { await sync.link() }
                 } label: {
                     HStack {
-                        if linking { ProgressView().tint(Color.ink) }
-                        Text("Sign in & sync my meetings")
+                        if sync.isLinking { ProgressView().tint(Color.ink) }
+                        Text(sync.isLinking
+                            ? "Finish signing in with Safari…"
+                            : "Sign in & sync my meetings")
                     }
                     .font(.headline)
                     .frame(maxWidth: .infinity)
@@ -64,7 +60,10 @@ struct WelcomeView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.sand))
                     .foregroundStyle(Color.ink)
                 }
-                .disabled(linking)
+                .disabled(sync.isLinking)
+                .onChange(of: sync.isLinked) { _, linked in
+                    if linked { onDone() }
+                }
 
                 if let error = sync.lastError {
                     Text(error)
