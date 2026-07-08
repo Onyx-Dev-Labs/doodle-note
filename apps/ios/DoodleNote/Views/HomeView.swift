@@ -130,7 +130,7 @@ struct HomeView: View {
             // scene leaves .active (task id change) or the view goes away.
             guard scenePhase == .active, sync.isLinked else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s
+                try? await Task.sleep(nanoseconds: 180_000_000_000) // 3 min
                 if Task.isCancelled { break }
                 await sync.syncNow(context: context)
             }
