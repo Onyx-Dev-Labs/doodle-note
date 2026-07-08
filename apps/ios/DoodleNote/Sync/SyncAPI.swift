@@ -40,9 +40,17 @@ struct SyncAPI: Sendable {
         var createdAt: String
         var startedAt: String?
         var endedAt: String?
+        var calendarEventId: String?
+        var folderId: String?
         var rawNotesMarkdown: String?
         var enhancedMarkdown: String?
         var segments: [PushSegment]
+    }
+
+    struct PushFolder: Codable {
+        var id: String
+        var name: String
+        var createdAt: String?
     }
 
     struct PushResult: Codable {
@@ -58,13 +66,22 @@ struct SyncAPI: Sendable {
         var updatedAt: String
         var startedAt: String?
         var endedAt: String?
+        var calendarEventId: String?
+        var folderId: String?
         var rawNotesMarkdown: String
         var enhancedMarkdown: String?
         var segments: [PushSegment]
     }
 
+    struct RemoteFolder: Codable {
+        var id: String
+        var name: String
+        var createdAt: String
+    }
+
     struct PullResponse: Codable {
         var allIds: [String]
+        var folders: [RemoteFolder]
         var changed: [RemoteMeeting]
         var hasMore: Bool
     }
@@ -86,10 +103,22 @@ struct SyncAPI: Sendable {
         return response.results
     }
 
-    func delete(ids: [String]) async throws {
-        struct Body: Codable { var ids: [String] }
+    func push(folders: [PushFolder]) async throws {
+        struct Body: Codable { var folders: [PushFolder] }
+        struct Response: Codable { var results: [PushResult]? }
+        let _: Response = try await request("POST", "/api/sync/push", body: Body(folders: folders))
+    }
+
+    func delete(ids: [String] = [], folderIds: [String] = []) async throws {
+        struct Body: Codable { var ids: [String]?; var folderIds: [String]? }
         struct Response: Codable { var ok: Bool; var deleted: Int }
-        let _: Response = try await request("DELETE", "/api/sync/push", body: Body(ids: ids))
+        let _: Response = try await request(
+            "DELETE", "/api/sync/push",
+            body: Body(
+                ids: ids.isEmpty ? nil : ids,
+                folderIds: folderIds.isEmpty ? nil : folderIds
+            )
+        )
     }
 
     func pull(since: String?) async throws -> PullResponse {

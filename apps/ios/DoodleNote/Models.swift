@@ -20,6 +20,11 @@ final class Meeting {
     var origin: String
     /// Content hash last accepted by the sync server; nil = never pushed.
     var lastPushedHash: String?
+    /// Calendar event this meeting was started from (EventKit identifier or
+    /// the id synced from other devices).
+    var calendarEventId: String?
+    /// Folder assignment; folders sync across devices.
+    var folderId: UUID?
     @Relationship(deleteRule: .cascade, inverse: \Segment.meeting)
     var segments: [Segment]
 
@@ -38,6 +43,8 @@ final class Meeting {
         self.templateId = templateId
         self.origin = origin
         self.lastPushedHash = nil
+        self.calendarEventId = nil
+        self.folderId = nil
         self.segments = []
     }
 
@@ -52,6 +59,25 @@ final class Meeting {
     var durationMs: Int? {
         guard let startedAt, let endedAt else { return nil }
         return Int(endedAt.timeIntervalSince(startedAt) * 1000)
+    }
+}
+
+/// A folder for organizing meetings. Synced (ids are shared with the cloud
+/// and other devices).
+@Model
+final class Folder {
+    @Attribute(.unique) var id: UUID
+    var name: String
+    var createdAt: Date
+    /// True once this folder has been seen by the sync server (pushed or
+    /// pulled) — drives remote-deletion reconciliation.
+    var synced: Bool
+
+    init(id: UUID = UUID(), name: String, createdAt: Date = .now, synced: Bool = false) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.synced = synced
     }
 }
 

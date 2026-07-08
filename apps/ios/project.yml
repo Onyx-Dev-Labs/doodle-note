@@ -60,5 +60,6 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_NSMicrophoneUsageDescription: DoodleNote records your meetings so it can transcribe them on this device. Audio never leaves your phone.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: DoodleNote transcribes your meetings entirely on this device.
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: DoodleNote shows your upcoming meetings so you can start notes with one tap. Calendar data stays on your phone.
         INFOPLIST_KEY_UIBackgroundModes: audio
         SWIFT_EMIT_LOC_STRINGS: false

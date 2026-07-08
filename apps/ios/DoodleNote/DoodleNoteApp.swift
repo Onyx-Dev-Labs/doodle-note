@@ -3,17 +3,27 @@ import SwiftData
 
 @main
 struct DoodleNoteApp: App {
+    @AppStorage("hasOnboarded") private var hasOnboarded = false
+
     let container: ModelContainer = {
         do {
-            return try ModelContainer(for: Meeting.self, Segment.self)
+            return try ModelContainer(for: Meeting.self, Segment.self, Folder.self)
         } catch {
             fatalError("Failed to create model container: \(error)")
         }
     }()
 
+    init() {
+        NotificationRouter.shared.configure()
+    }
+
     var body: some Scene {
         WindowGroup {
-            HomeView()
+            if hasOnboarded {
+                HomeView()
+            } else {
+                WelcomeView { hasOnboarded = true }
+            }
         }
         .modelContainer(container)
     }

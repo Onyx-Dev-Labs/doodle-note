@@ -9,6 +9,8 @@ final class SmokeTests: XCTestCase {
     @MainActor
     func testNewMeetingFlow() throws {
         let app = XCUIApplication()
+        // Skip onboarding and notification-permission prompts for the test.
+        app.launchArguments += ["-hasOnboarded", "YES", "-meetingNotifications", "NO"]
         app.launch()
 
         XCTAssertTrue(app.buttons["New meeting"].waitForExistence(timeout: 10))

@@ -34,6 +34,10 @@ final class SyncEngine: NSObject {
         get { UserDefaults.standard.stringArray(forKey: "sync.pendingDeletes") ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: "sync.pendingDeletes") }
     }
+    private var pendingFolderDeletes: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "sync.pendingFolderDeletes") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "sync.pendingFolderDeletes") }
+    }
 
     var isLinked: Bool { Keychain.read(key: .syncToken) != nil }
 
@@ -114,6 +118,10 @@ final class SyncEngine: NSObject {
         pendingDeletes = Array(Set(pendingDeletes + [meeting.id.uuidString.lowercased()]))
     }
 
+    func noteFolderDeleted(id: UUID) {
+        pendingFolderDeletes = Array(Set(pendingFolderDeletes + [id.uuidString.lowercased()]))
+    }
+
     // MARK: Sync cycle
 
     func syncNow(context: ModelContext) async {
@@ -124,6 +132,7 @@ final class SyncEngine: NSObject {
 
         do {
             try await pushDeletes(api: api)
+            try await pushFolders(api: api, context: context)
             try await pushDirty(api: api, context: context)
             try await pullChanges(api: api, context: context)
             lastSyncedAt = .now
@@ -134,9 +143,28 @@ final class SyncEngine: NSObject {
 
     private func pushDeletes(api: SyncAPI) async throws {
         let ids = pendingDeletes
-        guard !ids.isEmpty else { return }
-        try await api.delete(ids: ids)
+        let folderIds = pendingFolderDeletes
+        guard !ids.isEmpty || !folderIds.isEmpty else { return }
+        try await api.delete(ids: ids, folderIds: folderIds)
         pendingDeletes = []
+        pendingFolderDeletes = []
+    }
+
+    /// Folders are cheap (≤100): push the full local set every cycle; the
+    /// server upserts. Push-before-pull keeps local renames authoritative.
+    private func pushFolders(api: SyncAPI, context: ModelContext) async throws {
+        let folders = try context.fetch(FetchDescriptor<Folder>())
+        guard !folders.isEmpty else { return }
+        try await api.push(folders: folders.map {
+            SyncAPI.PushFolder(
+                id: $0.id.uuidString.lowercased(),
+                name: $0.name,
+                createdAt: isoString($0.createdAt)
+            )
+        })
+        for folder in folders {
+            folder.synced = true
+        }
     }
 
     private func pushDirty(api: SyncAPI, context: ModelContext) async throws {
@@ -161,10 +189,12 @@ final class SyncEngine: NSObject {
     private func pullChanges(api: SyncAPI, context: ModelContext) async throws {
         var cursor = pullCursor
         var latestAllIds: Set<String>?
+        var remoteFolders: [SyncAPI.RemoteFolder] = []
 
         for _ in 0..<40 {
             let page = try await api.pull(since: cursor)
             latestAllIds = Set(page.allIds.map { $0.lowercased() })
+            remoteFolders = page.folders
 
             for remote in page.changed {
                 apply(remote: remote, context: context)
@@ -173,6 +203,8 @@ final class SyncEngine: NSObject {
             if !page.hasMore { break }
         }
         pullCursor = cursor
+
+        applyFolders(remoteFolders, context: context)
 
         // Deletion reconciliation: a synced, non-dirty local meeting missing
         // from the cloud's complete id list was deleted remotely.
@@ -188,6 +220,40 @@ final class SyncEngine: NSObject {
             }
         }
         try? context.save()
+    }
+
+    /// Create/rename folders from the server's full list; remove local
+    /// synced folders the server no longer has. Runs after push, so local
+    /// renames have already won.
+    private func applyFolders(_ remote: [SyncAPI.RemoteFolder], context: ModelContext) {
+        let locals = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
+        let remoteById = Dictionary(
+            uniqueKeysWithValues: remote.compactMap { folder in
+                UUID(uuidString: folder.id).map { ($0, folder) }
+            }
+        )
+
+        for local in locals {
+            if let match = remoteById[local.id] {
+                if local.name != match.name { local.name = match.name }
+                local.synced = true
+            } else if local.synced {
+                for meeting in (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
+                where meeting.folderId == local.id {
+                    meeting.folderId = nil
+                }
+                context.delete(local)
+            }
+        }
+        let localIds = Set(locals.map(\.id))
+        for (id, folder) in remoteById where !localIds.contains(id) {
+            context.insert(Folder(
+                id: id,
+                name: folder.name,
+                createdAt: parseISO(folder.createdAt) ?? .now,
+                synced: true
+            ))
+        }
     }
 
     private func apply(remote: SyncAPI.RemoteMeeting, context: ModelContext) {
@@ -212,6 +278,8 @@ final class SyncEngine: NSObject {
         meeting.createdAt = parseISO(remote.createdAt) ?? meeting.createdAt
         meeting.startedAt = remote.startedAt.flatMap(parseISO)
         meeting.endedAt = remote.endedAt.flatMap(parseISO)
+        meeting.calendarEventId = remote.calendarEventId
+        meeting.folderId = remote.folderId.flatMap(UUID.init(uuidString:))
         meeting.roughNotes = remote.rawNotesMarkdown
         meeting.generatedNotes = remote.enhancedMarkdown
 
@@ -243,6 +311,8 @@ final class SyncEngine: NSObject {
             createdAt: isoString(meeting.createdAt),
             startedAt: meeting.startedAt.map(isoString),
             endedAt: meeting.endedAt.map(isoString),
+            calendarEventId: meeting.calendarEventId,
+            folderId: meeting.folderId?.uuidString.lowercased(),
             rawNotesMarkdown: meeting.roughNotes.isEmpty ? nil : meeting.roughNotes,
             enhancedMarkdown: meeting.generatedNotes,
             segments: meeting.sortedSegments.prefix(5000).map {
@@ -264,6 +334,8 @@ final class SyncEngine: NSObject {
             meeting.displayTitle,
             meeting.startedAt.map(isoString) ?? "",
             meeting.endedAt.map(isoString) ?? "",
+            meeting.calendarEventId ?? "",
+            meeting.folderId?.uuidString.lowercased() ?? "",
             meeting.roughNotes,
             meeting.generatedNotes ?? "",
         ]

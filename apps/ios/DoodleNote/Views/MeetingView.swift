@@ -6,10 +6,12 @@ struct MeetingView: View {
     var startRecordingOnAppear = false
 
     @Environment(\.modelContext) private var context
+    @Query(sort: \Folder.createdAt) private var folders: [Folder]
     @State private var recorder = RecordingController()
     @State private var tab: Tab = .notes
     @State private var isGenerating = false
     @State private var generationError: String?
+    @State private var showChat = false
 
     enum Tab: String, CaseIterable {
         case notes = "Notes"
@@ -38,6 +40,30 @@ struct MeetingView: View {
         }
         .background(Color.cream)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showChat = true
+                } label: {
+                    Label("Ask", systemImage: "sparkles")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Folder", selection: $meeting.folderId) {
+                        Text("No folder").tag(UUID?.none)
+                        ForEach(folders) { folder in
+                            Text(folder.name).tag(UUID?.some(folder.id))
+                        }
+                    }
+                } label: {
+                    Image(systemName: meeting.folderId == nil ? "folder" : "folder.fill")
+                }
+            }
+        }
+        .sheet(isPresented: $showChat) {
+            ChatView(scope: .meeting(meeting))
+        }
         .task {
             if startRecordingOnAppear, !recorder.isActive {
                 await recorder.start(meeting: meeting, context: context)

@@ -45,17 +45,28 @@ enum NotesError: LocalizedError {
 
 protocol NotesEngine {
     func generate(_ input: NotesInput) async throws -> String
+    /// One-shot completion — shared by note generation and "ask anything".
+    func respond(system: String, user: String) async throws -> String
 }
 
 enum NotesEngineFactory {
-    /// Same ordering as desktop: local model is the default; BYOK is opt-in.
-    static func make() -> NotesEngine {
-        let choice = NotesEngineChoice(
+    static var choice: NotesEngineChoice {
+        NotesEngineChoice(
             rawValue: UserDefaults.standard.string(forKey: "notesEngine") ?? "onDevice"
         ) ?? .onDevice
+    }
+
+    /// Character budget for prompt context — the on-device model's window is
+    /// small (~4K tokens); BYOK models are effectively unconstrained here.
+    static var contextBudgetChars: Int {
+        choice == .onDevice ? 6_000 : 200_000
+    }
+
+    /// Same ordering as desktop: local model is the default; BYOK is opt-in.
+    static func make() -> NotesEngine {
         switch choice {
-        case .onDevice: return FoundationModelsEngine()
-        case .byok: return AnthropicEngine()
+        case .onDevice: FoundationModelsEngine()
+        case .byok: AnthropicEngine()
         }
     }
 }
@@ -67,6 +78,19 @@ enum NotesEngineFactory {
 /// the transcript is head/tail-trimmed to fit.
 struct FoundationModelsEngine: NotesEngine {
     func generate(_ input: NotesInput) async throws -> String {
+        try await respond(
+            system: NotePrompt.systemPrompt(templateId: input.templateId),
+            user: NotePrompt.userMessage(
+                title: input.title,
+                roughNotes: input.roughNotes,
+                segments: input.segments,
+                durationMs: input.durationMs,
+                maxTranscriptChars: 6_000
+            )
+        )
+    }
+
+    func respond(system: String, user: String) async throws -> String {
         let model = SystemLanguageModel.default
         switch model.availability {
         case .available:
@@ -75,17 +99,8 @@ struct FoundationModelsEngine: NotesEngine {
             throw NotesError.onDeviceUnavailable(describe(reason))
         }
 
-        let session = LanguageModelSession(
-            instructions: NotePrompt.systemPrompt(templateId: input.templateId)
-        )
-        let message = NotePrompt.userMessage(
-            title: input.title,
-            roughNotes: input.roughNotes,
-            segments: input.segments,
-            durationMs: input.durationMs,
-            maxTranscriptChars: 6_000
-        )
-        let response = try await session.respond(to: message)
+        let session = LanguageModelSession(instructions: system)
+        let response = try await session.respond(to: user)
         let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw NotesError.emptyResponse }
         return text
@@ -113,20 +128,25 @@ struct AnthropicEngine: NotesEngine {
     static let defaultModel = "claude-opus-4-8"
 
     func generate(_ input: NotesInput) async throws -> String {
+        try await respond(
+            system: NotePrompt.systemPrompt(templateId: input.templateId),
+            user: NotePrompt.userMessage(
+                title: input.title,
+                roughNotes: input.roughNotes,
+                segments: input.segments,
+                durationMs: input.durationMs,
+                maxTranscriptChars: 300_000
+            )
+        )
+    }
+
+    func respond(system: String, user: String) async throws -> String {
         guard let apiKey = Keychain.read(key: .anthropicAPIKey), !apiKey.isEmpty else {
             throw NotesError.missingAPIKey
         }
         let model = UserDefaults.standard.string(forKey: "byokModel").flatMap {
             $0.isEmpty ? nil : $0
         } ?? Self.defaultModel
-
-        let message = NotePrompt.userMessage(
-            title: input.title,
-            roughNotes: input.roughNotes,
-            segments: input.segments,
-            durationMs: input.durationMs,
-            maxTranscriptChars: 300_000
-        )
 
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         request.httpMethod = "POST"
@@ -138,8 +158,8 @@ struct AnthropicEngine: NotesEngine {
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 4096,
-            "system": NotePrompt.systemPrompt(templateId: input.templateId),
-            "messages": [["role": "user", "content": message]],
+            "system": system,
+            "messages": [["role": "user", "content": user]],
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
