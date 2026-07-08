@@ -55,6 +55,33 @@ export function LoginForm({
     router.refresh();
   }
 
+  /**
+   * Social sign-in with visible failure: without this, an endpoint error or
+   * blocked redirect leaves the button silently dead (bit us inside the iOS
+   * app's sign-in sheet).
+   */
+  async function handleSocial(provider: "microsoft" | "google") {
+    setError(null);
+    setPending(true);
+    try {
+      const result = await authClient.signIn.social({
+        provider,
+        callbackURL: next,
+      });
+      if (result.error) {
+        setError(result.error.message ?? "Sign-in failed. Try again.");
+        setPending(false);
+        return;
+      }
+      // Success normally navigates away; if we're still here after a beat,
+      // re-enable the buttons rather than leaving the form stuck.
+      setTimeout(() => setPending(false), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in failed. Try again.");
+      setPending(false);
+    }
+  }
+
   return (
     <div className="w-full max-w-sm">
       <div className="mb-8 flex flex-col items-center text-center">
@@ -127,12 +154,8 @@ export function LoginForm({
       {microsoftEnabled && (
         <button
           type="button"
-          onClick={() =>
-            authClient.signIn.social({
-              provider: "microsoft",
-              callbackURL: next,
-            })
-          }
+          disabled={pending}
+          onClick={() => handleSocial("microsoft")}
           className={`mt-3 w-full ${buttonSecondary}`}
         >
           <MicrosoftLogo />
@@ -143,9 +166,8 @@ export function LoginForm({
       {googleEnabled && (
         <button
           type="button"
-          onClick={() =>
-            authClient.signIn.social({ provider: "google", callbackURL: next })
-          }
+          disabled={pending}
+          onClick={() => handleSocial("google")}
           className={`mt-3 w-full ${buttonSecondary}`}
         >
           Continue with Google
