@@ -394,43 +394,45 @@ struct SwipeableRow<Content: View>: View {
 
     @State private var offset: CGFloat = 0
     @State private var committed: CGFloat = 0
-    private let actionsWidth: CGFloat = 148
+    private let actionsWidth: CGFloat = 140
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            HStack(spacing: 8) {
-                actionButton("Move", "folder", Color.sage) {
-                    reset(); onMove()
-                }
-                actionButton("Delete", "trash", Color(red: 0.66, green: 0.26, blue: 0.18)) {
-                    reset(); onDelete()
-                }
-            }
-            .padding(.leading, 8)
-
             content
-                .background(Color.cream) // hide the actions until swiped
+                .background(Color.cream)
                 .offset(x: offset)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if committed != 0 { reset() } else { onTap() }
                 }
                 .gesture(
-                    DragGesture(minimumDistance: 12)
+                    DragGesture(minimumDistance: 14)
                         .onChanged { value in
-                            let proposed = committed + value.translation.width
-                            offset = min(0, max(-actionsWidth, proposed))
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            offset = min(0, max(-actionsWidth, committed + value.translation.width))
                         }
                         .onEnded { value in
-                            let open = value.translation.width < -actionsWidth / 2 || committed != 0
-                                && value.translation.width < actionsWidth / 2
+                            let opening = value.translation.width < -actionsWidth / 2
+                            let keepingOpen = committed != 0 && value.translation.width < actionsWidth / 2
                             withAnimation(.snappy(duration: 0.22)) {
-                                committed = open ? -actionsWidth : 0
+                                committed = (opening || keepingOpen) ? -actionsWidth : 0
                                 offset = committed
                             }
                         }
                 )
+
+            // Drawn AFTER the content, so these win hit-testing in their strip
+            // (offset only shifts rendering, never the content's tap region).
+            if offset < -1 {
+                HStack(spacing: 8) {
+                    actionButton("Move", "folder", Color.sage) { reset(); onMove() }
+                    actionButton("Delete", "trash", Color(red: 0.66, green: 0.26, blue: 0.18)) { reset(); onDelete() }
+                }
+                .frame(width: actionsWidth)
+                .transition(.opacity)
+            }
         }
+        .clipped()
     }
 
     private func actionButton(_ title: String, _ icon: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
@@ -439,8 +441,7 @@ struct SwipeableRow<Content: View>: View {
                 Image(systemName: icon)
                 Text(title).font(.caption2.weight(.semibold))
             }
-            .frame(width: 62)
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .foregroundStyle(.white)
             .background(tint, in: RoundedRectangle(cornerRadius: 12))
         }

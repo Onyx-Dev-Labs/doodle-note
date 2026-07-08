@@ -233,9 +233,36 @@ struct MeetingView: View {
             let notes = try await NotesEngineFactory.make().generate(input)
             meeting.generatedNotes = notes
             try? context.save()
+
+            // Ad-hoc meetings (not created from a calendar event) usually have
+            // no real title — let the model name them from what was discussed.
+            if meeting.calendarEventId == nil, isUntitled(meeting.title) {
+                await titleFromNotes(notes: notes)
+            }
         } catch {
             generationError = error.localizedDescription
         }
+    }
+
+    private func isUntitled(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t.isEmpty || t == "untitled meeting" || t == "new meeting"
+    }
+
+    /// One short title from the generated notes. Best-effort: a failure or an
+    /// odd response leaves the meeting titled as it was.
+    private func titleFromNotes(notes: String) async {
+        let engine = NotesEngineFactory.make()
+        let system = "You write a concise meeting title of 3 to 6 words. "
+            + "Reply with ONLY the title — no quotes, no punctuation at the end, no preamble."
+        let user = "Meeting notes:\n\n" + String(notes.prefix(1500))
+        guard let raw = try? await engine.respond(system: system, user: user) else { return }
+        let title = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.“”"))
+        guard !title.isEmpty, title.count <= 80 else { return }
+        meeting.title = title
+        try? context.save()
     }
 
     // MARK: Transcript tab
