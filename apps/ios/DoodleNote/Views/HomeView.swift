@@ -14,6 +14,7 @@ struct HomeView: View {
     @State private var sync = SyncEngine.shared
     @State private var selectedFolderId: UUID?
     @State private var showFolders = false
+    @State private var movingMeeting: Meeting?
     @State private var showGlobalChat = false
     @State private var showDialer = false
     @State private var searchText = ""
@@ -33,8 +34,28 @@ struct HomeView: View {
                 .padding(.bottom, 90)
             }
             .background(Color.cream)
+            .confirmationDialog(
+                "Move to folder",
+                isPresented: Binding(
+                    get: { movingMeeting != nil },
+                    set: { if !$0 { movingMeeting = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: movingMeeting
+            ) { meeting in
+                Button("My notes") { moveMeeting(meeting, to: nil) }
+                ForEach(folders) { folder in
+                    Button(folder.name) { moveMeeting(meeting, to: folder.id) }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
             .navigationDestination(for: Meeting.self) { meeting in
-                MeetingView(meeting: meeting, startRecordingOnAppear: meeting === autoRecordMeeting)
+                MeetingView(
+                    meeting: meeting,
+                    // Only a brand-new, never-recorded meeting auto-starts. Re-opening
+                    // a finished meeting to read its notes must NOT record again.
+                    startRecordingOnAppear: meeting === autoRecordMeeting && meeting.startedAt == nil
+                )
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -223,15 +244,17 @@ struct HomeView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.stone)
                     ForEach(group.meetings) { meeting in
-                        NavigationLink(value: meeting) {
+                        SwipeableRow(
+                            onTap: { path.append(meeting) },
+                            onMove: { movingMeeting = meeting },
+                            onDelete: { deleteMeeting(meeting) }
+                        ) {
                             MeetingRow(meeting: meeting)
                         }
-                        .buttonStyle(.plain)
                         .contextMenu {
+                            Button("Move to folder", systemImage: "folder") { movingMeeting = meeting }
                             Button("Delete", systemImage: "trash", role: .destructive) {
-                                SyncEngine.shared.noteDeleted(meeting: meeting)
-                                context.delete(meeting)
-                                try? context.save()
+                                deleteMeeting(meeting)
                             }
                         }
                     }
@@ -302,6 +325,19 @@ struct HomeView: View {
         .padding(.bottom, 4)
     }
 
+    private func deleteMeeting(_ meeting: Meeting) {
+        SyncEngine.shared.noteDeleted(meeting: meeting)
+        context.delete(meeting)
+        try? context.save()
+    }
+
+    private func moveMeeting(_ meeting: Meeting, to folderId: UUID?) {
+        // folderId is in the content hash, so this marks the meeting dirty;
+        // the next syncNow (foreground + periodic) carries it to the cloud.
+        meeting.folderId = folderId
+        try? context.save()
+    }
+
     private func startMeeting(title: String, calendarEventId: String?) {
         let meeting = Meeting(title: title)
         meeting.calendarEventId = calendarEventId
@@ -342,5 +378,79 @@ private struct MeetingRow: View {
         }
         .padding(12)
         .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// A row that reveals Move + Delete when swiped left, since the home list is
+/// a styled ScrollView (native List `.swipeActions` don't apply here). Tap the
+/// content to open; swipe to act. Only one row opens at a time via a shared
+/// binding would be ideal, but per-row state keeps it self-contained — a new
+/// swipe on another row leaves this one open until tapped, which is fine.
+struct SwipeableRow<Content: View>: View {
+    let onTap: () -> Void
+    let onMove: () -> Void
+    let onDelete: () -> Void
+    @ViewBuilder var content: Content
+
+    @State private var offset: CGFloat = 0
+    @State private var committed: CGFloat = 0
+    private let actionsWidth: CGFloat = 148
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 8) {
+                actionButton("Move", "folder", Color.sage) {
+                    reset(); onMove()
+                }
+                actionButton("Delete", "trash", Color(red: 0.66, green: 0.26, blue: 0.18)) {
+                    reset(); onDelete()
+                }
+            }
+            .padding(.leading, 8)
+
+            content
+                .background(Color.cream) // hide the actions until swiped
+                .offset(x: offset)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if committed != 0 { reset() } else { onTap() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { value in
+                            let proposed = committed + value.translation.width
+                            offset = min(0, max(-actionsWidth, proposed))
+                        }
+                        .onEnded { value in
+                            let open = value.translation.width < -actionsWidth / 2 || committed != 0
+                                && value.translation.width < actionsWidth / 2
+                            withAnimation(.snappy(duration: 0.22)) {
+                                committed = open ? -actionsWidth : 0
+                                offset = committed
+                            }
+                        }
+                )
+        }
+    }
+
+    private func actionButton(_ title: String, _ icon: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                Text(title).font(.caption2.weight(.semibold))
+            }
+            .frame(width: 62)
+            .frame(maxHeight: .infinity)
+            .foregroundStyle(.white)
+            .background(tint, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func reset() {
+        withAnimation(.snappy(duration: 0.22)) {
+            committed = 0
+            offset = 0
+        }
     }
 }
