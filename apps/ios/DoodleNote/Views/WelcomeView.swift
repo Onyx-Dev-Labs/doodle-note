@@ -11,9 +11,11 @@ struct WelcomeView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Image(systemName: "scribble.variable")
-                .font(.system(size: 56))
-                .foregroundStyle(Color.sage)
+            Image("Mascot")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 88, height: 88)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
             Wordmark(font: .largeTitle)
                 .padding(.top, 14)
 
