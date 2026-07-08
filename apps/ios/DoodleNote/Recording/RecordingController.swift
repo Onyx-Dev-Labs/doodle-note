@@ -85,9 +85,7 @@ final class RecordingController {
                 return
             }
 
-            input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-                provider.ingest(buffer)
-            }
+            Self.installMicTap(on: input, format: format, provider: provider)
             engine.prepare()
             try engine.start()
 
@@ -140,6 +138,22 @@ final class RecordingController {
     private var isPreparing: Bool {
         if case .preparing = state { return true }
         return false
+    }
+
+    /// The tap closure runs on a REALTIME audio thread. It must be created
+    /// in a nonisolated context: formed inside this @MainActor class it
+    /// inherits main-actor isolation, and Swift's runtime executor check
+    /// SIGTRAPs the process the moment the first buffer arrives off-main
+    /// (dispatch_assert_queue_fail — the +new crash on device). Providers
+    /// are internally synchronized; ingest is safe from any thread.
+    nonisolated private static func installMicTap(
+        on input: AVAudioInputNode,
+        format: AVAudioFormat,
+        provider: TranscriptionProvider
+    ) {
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            provider.ingest(buffer)
+        }
     }
 
     private func teardownAudio() {
