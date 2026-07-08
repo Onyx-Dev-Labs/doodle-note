@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var selectedFolderId: UUID?
     @State private var showFolders = false
     @State private var showGlobalChat = false
+    @State private var showDialer = false
     @State private var searchText = ""
     @State private var showAllUpcoming = false
 
@@ -46,6 +47,14 @@ struct HomeView: View {
                 }
                 ToolbarItem(placement: .principal) { Wordmark(font: .subheadline) }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showDialer = true
+                    } label: {
+                        Image(systemName: "phone")
+                            .foregroundStyle(Color.bark)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
                         SettingsView()
                     } label: {
@@ -61,6 +70,11 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showGlobalChat) {
                 ChatView(scope: .global)
+            }
+            .sheet(isPresented: $showDialer) {
+                DialerView { meeting in
+                    path.append(meeting)
+                }
             }
         }
         .tint(Color.sageDeep)

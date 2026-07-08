@@ -122,6 +122,22 @@ final class SyncEngine: NSObject {
         pendingFolderDeletes = Array(Set(pendingFolderDeletes + [id.uuidString.lowercased()]))
     }
 
+    // MARK: Voice token (phone calls)
+
+    struct VoiceToken: Codable {
+        var token: String
+        var identity: String
+    }
+
+    /// Fetches a telephony access token for outbound calls. Requires a linked
+    /// account (calls are an add-on tied to the workspace).
+    func voiceToken() async throws -> VoiceToken {
+        guard let api else {
+            throw SyncAPI.SyncError.invalidToken
+        }
+        return try await api.voiceToken()
+    }
+
     // MARK: Sync cycle
 
     func syncNow(context: ModelContext) async {

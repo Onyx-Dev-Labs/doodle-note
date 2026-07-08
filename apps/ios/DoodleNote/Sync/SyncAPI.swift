@@ -129,6 +129,10 @@ struct SyncAPI: Sendable {
         return try await request("GET", path)
     }
 
+    func voiceToken() async throws -> SyncEngine.VoiceToken {
+        try await request("GET", "/api/voice/token")
+    }
+
     // MARK: HTTP
 
     private func request<Response: Decodable>(

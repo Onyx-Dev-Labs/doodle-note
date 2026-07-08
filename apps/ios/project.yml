@@ -10,6 +10,9 @@ packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio
     exactVersion: 0.15.4
+  TwilioVoice:
+    url: https://github.com/twilio/twilio-voice-ios
+    from: 6.10.0
 schemes:
   DoodleNote:
     build:
@@ -44,6 +47,8 @@ targets:
     dependencies:
       - package: FluidAudio
         product: FluidAudio
+      - package: TwilioVoice
+        product: TwilioVoice
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios
