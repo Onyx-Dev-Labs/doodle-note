@@ -29,9 +29,15 @@ export default async function LinkDevicePage({
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) {
-    const query = new URLSearchParams({
-      next: `/link-device?port=${port ?? ""}&scheme=${scheme ?? ""}&name=${name ?? ""}`,
+    // Encode the inner params individually — a device name with spaces
+    // ("iPhone 17 Pro") otherwise lands raw in the login form's callbackURL,
+    // which Better Auth rejects with INVALID_CALLBACK_URL.
+    const inner = new URLSearchParams({
+      port: port ?? "",
+      scheme: scheme ?? "",
+      name: name ?? "",
     });
+    const query = new URLSearchParams({ next: `/link-device?${inner}` });
     redirect(`/login?${query}`);
   }
 

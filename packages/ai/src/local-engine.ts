@@ -129,7 +129,7 @@ export class LocalNotesEngine implements NotesEngine {
     let context: Awaited<ReturnType<LlamaModel['createContext']>>
     try {
       context = await this.model!.createContext({
-        contextSize: this.options.contextSize ?? 8192
+        contextSize: this.options.contextSize ?? 16384
       })
     } catch (err) {
       if (this.forceCpu) throw err
@@ -141,7 +141,7 @@ export class LocalNotesEngine implements NotesEngine {
       this.llama = null
       await this.prepare()
       context = await this.model!.createContext({
-        contextSize: this.options.contextSize ?? 8192
+        contextSize: this.options.contextSize ?? 16384
       })
     }
     try {
