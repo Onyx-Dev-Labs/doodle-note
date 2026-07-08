@@ -19,17 +19,23 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
   {
     id: 'general',
     label: 'General meeting',
-    description: 'Summary, notes by topic, decisions, action items',
+    description: 'Purpose, key takeaways, topics with rationale, next steps by owner',
     outputFormat: `Output format (markdown, nothing before or after it):
 # <meeting title>
 
-<1-2 sentence summary of what the meeting was about and its outcome>
+**Purpose:** <one line: why this meeting happened>
 
-## Notes
-<the substance, grouped under short bold topic lines following the meeting's flow; bullets, not paragraphs>
+## Key takeaways
+<3-6 bullets: the decisions and conclusions someone who skipped the meeting must know. Each bullet carries its concrete specifics (who, what, how much, by when) — not a vague theme.>
 
-## Decisions
-<bullet list of decisions actually made; ${OMIT}>
+## Topics
+<one short **bold heading** per major topic discussed, in meeting order, each followed by bullets. Where the discussion had this shape, capture it explicitly as sub-bullets: the problem, the decision or solution, and the rationale given. Keep every concrete detail — names, tools, products, dollar amounts, quantities, dates.>
+
+## Status updates
+<project-by-project status the attendees reported, one bullet each; ${OMIT}>
+
+## Next steps
+<grouped by owner: a **bold owner name** followed by that person's items; ${OMIT}>
 
 ## Action items
 <markdown checkboxes: - [ ] Owner — task (deadline if stated); ${OMIT}>`
