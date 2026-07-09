@@ -8,7 +8,8 @@
     "start": "next start --port 4040",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "auth-smoke": "tsx scripts/auth-smoke.ts"
+    "auth-smoke": "tsx scripts/auth-smoke.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@repo/db": "workspace:*",
@@ -18,7 +19,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
-    "stripe": "^22.3.0"
+    "stripe": "^22.3.0",
+    "@repo/agent-contract": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

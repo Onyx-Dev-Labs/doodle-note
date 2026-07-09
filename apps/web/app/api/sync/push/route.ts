@@ -27,6 +27,7 @@ interface PushSegment {
 interface PushMeeting {
   id: string;
   title: string;
+  kind?: "meeting" | "note";
   createdAt: string;
   startedAt?: string;
   endedAt?: string;
@@ -153,6 +154,7 @@ export async function POST(request: Request) {
       const row = {
         organizationId: device.organizationId,
         title: String(item.title ?? "").slice(0, 500) || "Untitled meeting",
+        kind: item.kind === "note" ? ("note" as const) : ("meeting" as const),
         status: "complete" as const,
         calendarEventId:
           typeof item.calendarEventId === "string"

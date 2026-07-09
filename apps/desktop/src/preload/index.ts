@@ -71,6 +71,18 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  AGENT_ACCESS_GET_CHANNEL,
+  AGENT_ACCESS_SET_CHANNEL,
+  CONNECTORS_CONFIGURE_GBRAIN_CHANNEL,
+  CONNECTORS_STATUS_CHANNEL,
+  CONNECTORS_STATUS_EVENT_CHANNEL,
+  CONNECTORS_SYNC_NOW_CHANNEL,
+  type AgentAccessStatus,
+  type ConnectorsStatus,
+  type GBrainConfigUpdate,
+  type IntegrationsApi
+} from '../shared/integrations-api'
+import {
   UPDATE_CHECK_CHANNEL,
   UPDATE_GET_STATE_CHANNEL,
   UPDATE_INSTALL_CHANNEL,
@@ -78,11 +90,7 @@ import {
   type UpdateApi,
   type UpdateState
 } from '../shared/update-api'
-import {
-  THEME_SET_SOURCE_CHANNEL,
-  type ThemeApi,
-  type ThemeSource
-} from '../shared/theme-api'
+import { THEME_SET_SOURCE_CHANNEL, type ThemeApi, type ThemeSource } from '../shared/theme-api'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -405,6 +413,35 @@ const detectApi: DetectApi = {
   }
 }
 
+const integrationsApi: IntegrationsApi = {
+  getAgentAccess(): Promise<AgentAccessStatus> {
+    return ipcRenderer.invoke(AGENT_ACCESS_GET_CHANNEL) as Promise<AgentAccessStatus>
+  },
+
+  setAgentAccess(enabled: boolean): Promise<AgentAccessStatus> {
+    return ipcRenderer.invoke(AGENT_ACCESS_SET_CHANNEL, enabled) as Promise<AgentAccessStatus>
+  },
+
+  getConnectors(): Promise<ConnectorsStatus> {
+    return ipcRenderer.invoke(CONNECTORS_STATUS_CHANNEL) as Promise<ConnectorsStatus>
+  },
+
+  configureGBrain(update: GBrainConfigUpdate): Promise<ConnectorsStatus> {
+    return ipcRenderer.invoke(
+      CONNECTORS_CONFIGURE_GBRAIN_CHANNEL,
+      update
+    ) as Promise<ConnectorsStatus>
+  },
+
+  connectorsSyncNow(): Promise<ConnectorsStatus> {
+    return ipcRenderer.invoke(CONNECTORS_SYNC_NOW_CHANNEL) as Promise<ConnectorsStatus>
+  },
+
+  onStatusChanged(cb: () => void): () => void {
+    return subscribe(CONNECTORS_STATUS_EVENT_CHANNEL, cb)
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
@@ -417,6 +454,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('detect', detectApi)
     contextBridge.exposeInMainWorld('themeNative', themeApi)
     contextBridge.exposeInMainWorld('updates', updateApi)
+    contextBridge.exposeInMainWorld('integrations', integrationsApi)
   } catch (error) {
     console.error(error)
   }
@@ -441,4 +479,6 @@ if (process.contextIsolated) {
   window.themeNative = themeApi
   // @ts-ignore (defined in index.d.ts)
   window.updates = updateApi
+  // @ts-ignore (defined in index.d.ts)
+  window.integrations = integrationsApi
 }

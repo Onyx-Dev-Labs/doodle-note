@@ -50,6 +50,13 @@
       "when": 1783516366575,
       "tag": "0006_conscious_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783624711777,
+      "tag": "0007_talented_raider",
+      "breakpoints": true
     }
   ]
 }

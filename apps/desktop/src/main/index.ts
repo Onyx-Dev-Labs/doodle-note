@@ -20,6 +20,8 @@ import { WinEngineHost } from './engine-host-win'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
+import { AgentAccessService } from './agent-access-service'
+import { ConnectorsService } from './connectors-service'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
@@ -258,7 +260,9 @@ app.whenReady().then(() => {
 
   // Persistent event log: every engine event, timestamped, so failed sessions
   // can be diagnosed from disk instead of reproduced. Token arrays collapse to
-  // a count to keep lines small; rotated when it grows past ~5MB.
+  // a count and spoken text to a length — transcript bodies are sensitive and
+  // never belong in logs; timings/counts are enough to debug a session.
+  // Rotated when it grows past ~5MB.
   const engineLogPath = join(app.getPath('userData'), 'engine-events.log')
   try {
     if (existsSync(engineLogPath) && statSync(engineLogPath).size > 5 * 1024 * 1024) {
@@ -269,9 +273,11 @@ app.whenReady().then(() => {
   }
   const logEngineEvent = (event: EngineEvent): void => {
     try {
-      const compact = JSON.stringify(event, (key, value) =>
-        key === 'tokens' && Array.isArray(value) ? `[${value.length} tokens]` : value
-      )
+      const compact = JSON.stringify(event, (key, value) => {
+        if (key === 'tokens' && Array.isArray(value)) return `[${value.length} tokens]`
+        if (key === 'text' && typeof value === 'string') return `[${value.length} chars]`
+        return value
+      })
       appendFileSync(engineLogPath, `${new Date().toISOString()} ${compact}\n`)
     } catch {
       // Never let logging interfere with the session.
@@ -386,7 +392,26 @@ app.whenReady().then(() => {
     broadcast
   )
   syncService.registerIpc()
-  meetingsService.onDidWrite = (change) => syncService.onMeetingsChanged(change.deletedId)
+
+  // Integrations: the local-MCP opt-in file and connector exports (GBrain
+  // et al). Both are off until the user enables them in Settings.
+  const agentAccessService = new AgentAccessService(join(app.getPath('userData'), 'meetings'))
+  agentAccessService.registerIpc()
+  const connectorsService = new ConnectorsService(
+    app.getPath('userData'),
+    meetingsService,
+    foldersService,
+    broadcast
+  )
+  connectorsService.registerIpc()
+
+  // Store writes fan out to cloud sync and connector dispatch. Meetings
+  // recorded on other devices arrive via sync pull, which also writes the
+  // store — so iOS meetings flow to connectors through this same hook.
+  meetingsService.onDidWrite = (change) => {
+    syncService.onMeetingsChanged(change.deletedId)
+    connectorsService.onMeetingsChanged()
+  }
   foldersService.onDidWrite = (change) => syncService.onFoldersChanged(change.deletedId)
 
   // Image attachments for the notes editor (doodle-media:// protocol).

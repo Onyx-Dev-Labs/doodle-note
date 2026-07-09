@@ -1,6 +1,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { agentTokens, desc, eq, getDb } from "@repo/db";
+
 import { auth } from "@/lib/auth";
 import { ensurePersonalWorkspace } from "@/lib/workspace";
 
@@ -45,6 +47,24 @@ export default async function WorkspacesPage() {
     }
   }
 
+  // The user's agent tokens (hosted-MCP access), newest first.
+  const tokenRows = await getDb()
+    .select({
+      id: agentTokens.id,
+      name: agentTokens.name,
+      createdAt: agentTokens.createdAt,
+      lastUsedAt: agentTokens.lastUsedAt,
+    })
+    .from(agentTokens)
+    .where(eq(agentTokens.userId, session.user.id))
+    .orderBy(desc(agentTokens.createdAt));
+  const agentTokenList = tokenRows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    createdAt: (t.createdAt ?? new Date()).toISOString(),
+    lastUsedAt: t.lastUsedAt ? t.lastUsedAt.toISOString() : null,
+  }));
+
   return (
     <WorkspacesPanel
       userEmail={session.user.email}
@@ -56,6 +76,7 @@ export default async function WorkspacesPage() {
       }))}
       members={members}
       invitations={invitations}
+      agentTokens={agentTokenList}
     />
   );
 }

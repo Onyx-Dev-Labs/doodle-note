@@ -173,21 +173,12 @@ export interface EngineExitEvent {
  * A contiguous stretch of one speaker's words, cut on pauses. The unit that
  * becomes a transcript_segments row in the database.
  */
-export interface TranscriptSegment {
-  id: string
-  channel: EngineChannel
-  speaker: 'You' | 'Them'
-  text: string
-  /** Milliseconds relative to this channel's stream start. */
-  startMs: number
-  endMs: number
-  /** Mean token confidence 0..1. */
-  confidence: number
-  /** Wall-clock ms (channel epoch + startMs); present once channel_start arrived. */
-  absoluteStartMs?: number
-  /** True when the segment was judged to be far-side audio bleeding into the mic. */
-  echo?: boolean
-}
+// The segment shape now lives in @repo/meetings-store (shared with the MCP
+// server and connectors); its MeetingChannel is the same 'mic' | 'system'
+// union as EngineChannel. Re-exported here so engine-facing code keeps its
+// existing import path.
+export type { TranscriptSegment } from '@repo/meetings-store/types'
+import type { TranscriptSegment } from '@repo/meetings-store/types'
 
 /** Newly completed segments (echo-flagged ones included; display layers filter). */
 export interface EngineSegmentsEvent {

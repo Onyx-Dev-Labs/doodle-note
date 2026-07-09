@@ -1,0 +1,31 @@
+{
+  "name": "doodle-note-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server exposing your local DoodleNote meetings, notes, and transcripts to AI agents.",
+  "type": "module",
+  "bin": {
+    "doodle-note-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" && chmod +x dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "@repo/agent-contract": "workspace:*",
+    "@repo/meetings-store": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

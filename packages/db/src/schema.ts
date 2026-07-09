@@ -26,6 +26,10 @@ export const meetings = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled meeting"),
+    /** "meeting" or standalone quick "note" (desktop's kind field). */
+    kind: text("kind", { enum: ["meeting", "note"] })
+      .notNull()
+      .default("meeting"),
     status: text("status", { enum: ["recording", "processing", "complete"] })
       .notNull()
       .default("complete"),
@@ -98,6 +102,30 @@ export const syncDevices = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
   (table) => [index("sync_devices_user_id_idx").on(table.userId)],
+);
+
+/**
+ * A revocable, READ-ONLY token for remote AI agents (the hosted MCP at
+ * /api/mcp). Same trust model as sync_devices: the plaintext `dnag_…` token
+ * is shown once at mint time and only its SHA-256 lives here. Deleting the
+ * row revokes access immediately.
+ */
+export const agentTokens = pgTable(
+  "agent_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenHash: text("token_hash").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull().default("Agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => [index("agent_tokens_user_id_idx").on(table.userId)],
 );
 
 /**
