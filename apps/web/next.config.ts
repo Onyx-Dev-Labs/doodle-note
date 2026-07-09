@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
    */
   distDir: process.env.NEXT_DIST_DIR || ".next",
   /** @repo/db ships raw TypeScript — let Next transpile it. */
-  transpilePackages: ["@repo/db"],
+  transpilePackages: ["@repo/db", "@repo/agent-contract"],
   /**
    * PGlite loads its WASM/data payloads relative to the module on disk, so it
    * must stay a native `require` instead of being bundled into the server

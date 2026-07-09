@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
+import type { AgentAccessStatus, ConnectorsStatus } from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
-import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon } from './icons'
+import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import type {
   CloudProvider,
@@ -133,13 +134,14 @@ function Toggle({
   )
 }
 
-export type SettingsSection = 'general' | 'calendar' | 'sync' | 'model'
+export type SettingsSection = 'general' | 'calendar' | 'sync' | 'model' | 'integrations'
 
 const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label: string }> = [
   { key: 'general', icon: <GearIcon size={15} />, label: 'General' },
   { key: 'calendar', icon: <CalendarIcon size={15} />, label: 'Calendar' },
   { key: 'sync', icon: <CloudIcon size={15} />, label: 'Cloud sync' },
-  { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' }
+  { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' },
+  { key: 'integrations', icon: <UsersIcon size={15} />, label: 'Integrations' }
 ]
 
 export default function ModelsView({
@@ -177,6 +179,60 @@ export default function ModelsView({
   /* ---- cloud sync ---- */
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [linkPending, setLinkPending] = useState(false)
+
+  /* ---- integrations: agent access + connectors ---- */
+  const [agentAccess, setAgentAccess] = useState<AgentAccessStatus | null>(null)
+  const [connectors, setConnectors] = useState<ConnectorsStatus | null>(null)
+  const [gbrainUrl, setGbrainUrl] = useState('')
+  const [gbrainKey, setGbrainKey] = useState('')
+  const [gbrainSaved, setGbrainSaved] = useState(false)
+  const [gbrainError, setGbrainError] = useState<string | null>(null)
+  const gbrainFormSeeded = useRef(false)
+
+  const adoptConnectors = useCallback((status: ConnectorsStatus) => {
+    setConnectors(status)
+    if (!gbrainFormSeeded.current && status.gbrain.endpointUrl) {
+      gbrainFormSeeded.current = true
+      setGbrainUrl(status.gbrain.endpointUrl)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!active) return
+    void window.integrations
+      .getAgentAccess()
+      .then(setAgentAccess)
+      .catch(() => setAgentAccess(null))
+    void window.integrations
+      .getConnectors()
+      .then(adoptConnectors)
+      .catch(() => setConnectors(null))
+  }, [active, adoptConnectors])
+
+  useEffect(
+    () =>
+      window.integrations.onStatusChanged(() => {
+        void window.integrations.getConnectors().then(adoptConnectors)
+      }),
+    [adoptConnectors]
+  )
+
+  const saveGBrain = async (enabled: boolean): Promise<void> => {
+    setGbrainError(null)
+    try {
+      const status = await window.integrations.configureGBrain({
+        enabled,
+        endpointUrl: gbrainUrl.trim(),
+        ...(gbrainKey.length > 0 ? { apiKey: gbrainKey } : {})
+      })
+      adoptConnectors(status)
+      setGbrainKey('')
+      setGbrainSaved(true)
+      setTimeout(() => setGbrainSaved(false), 2000)
+    } catch (err) {
+      setGbrainError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   /* ---- meeting detection ---- */
   const [detect, setDetect] = useState<DetectState | null>(null)
@@ -507,7 +563,8 @@ export default function ModelsView({
             <section className="keys-section">
               <h3>On-device model</h3>
               <p className="models-sub">
-                DoodleNote polishes your meeting notes with a model that runs entirely on this computer
+                DoodleNote polishes your meeting notes with a model that runs entirely on this
+                computer
                 {data ? ` (${data.ramGB} GB RAM)` : ''}. Download one once — nothing leaves your
                 machine.
               </p>
@@ -970,9 +1027,9 @@ export default function ModelsView({
             <section className="keys-section calendar-section">
               <h3>Sync with cloud</h3>
               <p className="models-sub">
-                Off by default — your meetings live only on this computer. Turn it on to push meetings,
-                transcripts, and notes to your DoodleNote workspace so you can browse and share them
-                on the web.
+                Off by default — your meetings live only on this computer. Turn it on to push
+                meetings, transcripts, and notes to your DoodleNote workspace so you can browse and
+                share them on the web.
               </p>
 
               {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
@@ -1063,6 +1120,123 @@ export default function ModelsView({
                 </div>
               )}
             </section>
+          )}
+
+          {section === 'integrations' && (
+            <>
+              <section className="keys-section calendar-section">
+                <h3>Agent access</h3>
+                <p className="models-sub">
+                  Let AI tools on this computer (Claude, Codex, and other MCP clients) read your
+                  meetings, notes, and transcripts. Read-only, off by default, and local — nothing
+                  is uploaded. Turning this off revokes access immediately.
+                </p>
+                {agentAccess === null ? (
+                  <span className="calendar-note">loading…</span>
+                ) : (
+                  <div className="cal-subcard">
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">
+                          Allow local AI agents to read meetings
+                        </span>
+                        <span className="cal-row-sub">
+                          {agentAccess.enabled
+                            ? `Enabled — MCP clients connect via the doodle-note-mcp server (config: ${agentAccess.configPath})`
+                            : 'Disabled — the doodle-note-mcp server refuses to start'}
+                        </span>
+                      </span>
+                      <Toggle
+                        checked={agentAccess.enabled}
+                        label="Allow local AI agents to read meetings"
+                        onChange={() => {
+                          void window.integrations
+                            .setAgentAccess(!agentAccess.enabled)
+                            .then(setAgentAccess)
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="keys-section calendar-section">
+                <h3>Second-brain export (GBrain)</h3>
+                <p className="models-sub">
+                  Send finished meetings — notes and transcript — to a GBrain ingestion endpoint as
+                  soon as their AI notes are generated. Off by default; the API key is encrypted
+                  with your system keychain.
+                </p>
+
+                {gbrainError && <div className="models-error">{gbrainError}</div>}
+
+                {connectors === null ? (
+                  <span className="calendar-note">loading…</span>
+                ) : (
+                  <>
+                    <div className="cal-subcard">
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Export finalized meetings</span>
+                          <span className="cal-row-sub">
+                            {connectors.gbrain.enabled
+                              ? connectors.gbrain.stats.failed > 0
+                                ? `${connectors.gbrain.stats.failed} failed — ${connectors.gbrain.stats.lastError ?? 'check the endpoint'}`
+                                : connectors.gbrain.stats.pending > 0
+                                  ? `${connectors.gbrain.stats.pending} waiting to send`
+                                  : connectors.gbrain.stats.delivered > 0
+                                    ? `${connectors.gbrain.stats.delivered} meeting${connectors.gbrain.stats.delivered === 1 ? '' : 's'} exported`
+                                    : 'Waiting for the first finalized meeting'
+                              : 'Paused — nothing is sent while this is off'}
+                          </span>
+                        </span>
+                        <Toggle
+                          checked={connectors.gbrain.enabled}
+                          label="Export finalized meetings to GBrain"
+                          onChange={() => void saveGBrain(!connectors.gbrain.enabled)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="key-form">
+                      <input
+                        type="url"
+                        placeholder="Ingestion endpoint URL (https://…)"
+                        value={gbrainUrl}
+                        onChange={(e) => setGbrainUrl(e.target.value)}
+                      />
+                      <input
+                        type="password"
+                        placeholder={
+                          connectors.gbrain.hasApiKey
+                            ? 'API key saved — enter to replace'
+                            : 'API key'
+                        }
+                        value={gbrainKey}
+                        onChange={(e) => setGbrainKey(e.target.value)}
+                      />
+                      <div className="calendar-actions">
+                        <button
+                          type="button"
+                          onClick={() => void saveGBrain(connectors.gbrain.enabled)}
+                        >
+                          {gbrainSaved ? 'Saved ✓' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!connectors.gbrain.enabled}
+                          onClick={() => {
+                            void window.integrations.connectorsSyncNow().then(adoptConnectors)
+                          }}
+                        >
+                          Export now
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+            </>
           )}
 
           {section === 'model' && (

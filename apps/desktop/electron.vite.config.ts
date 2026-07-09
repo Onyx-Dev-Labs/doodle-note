@@ -10,7 +10,11 @@ export default defineConfig({
     // EXTERNAL — it ships prebuilt binaries and is ESM-only with top-level
     // await, so it is loaded at runtime via a lazy import() from
     // node_modules instead of being bundled.
-    plugins: [externalizeDepsPlugin({ exclude: ['@repo/ai'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@repo/ai', '@repo/meetings-store', '@repo/connectors']
+      })
+    ],
     build: {
       rollupOptions: {
         // engine-win is the Windows ASR utilityProcess entry — built as its

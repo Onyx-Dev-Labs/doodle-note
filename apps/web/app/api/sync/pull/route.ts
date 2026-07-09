@@ -95,6 +95,7 @@ export async function GET(request: Request) {
     const note = notesByMeeting.get(m.id);
     return {
       id: m.id,
+      ...(m.kind === "note" ? { kind: "note" as const } : {}),
       title: m.title,
       createdAt: (m.createdAt ?? new Date()).toISOString(),
       updatedAt: (m.updatedAt ?? new Date()).toISOString(),

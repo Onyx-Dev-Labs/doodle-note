@@ -592,6 +592,7 @@ export class SyncService {
 
     const incoming: MeetingRecord = {
       id,
+      ...(remote.kind === 'note' ? { kind: 'note' as const } : {}),
       title: typeof remote.title === 'string' ? remote.title : '',
       createdAt: typeof remote.createdAt === 'string' ? remote.createdAt : new Date().toISOString(),
       ...(typeof remote.startedAt === 'string' ? { startedAt: remote.startedAt } : {}),
@@ -751,6 +752,7 @@ export class SyncService {
 
 interface RemoteMeeting {
   id?: unknown
+  kind?: unknown
   title?: unknown
   createdAt?: unknown
   updatedAt?: unknown
@@ -805,6 +807,7 @@ function contentHash(record: MeetingRecord, mediaUrls: Record<string, string>): 
 function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>): object {
   return {
     id: record.id,
+    ...(record.kind === 'note' ? { kind: 'note' } : {}),
     title: record.title,
     createdAt: record.createdAt,
     ...(record.startedAt ? { startedAt: record.startedAt } : {}),
