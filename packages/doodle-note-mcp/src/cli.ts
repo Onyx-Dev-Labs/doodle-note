@@ -3,7 +3,7 @@ import { ConfigError, loadConfig } from "./config";
 import { LocalMeetingSource } from "./local-source";
 import { createServer } from "./server";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 async function main(): Promise<void> {
   let config;

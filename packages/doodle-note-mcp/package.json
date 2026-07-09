@@ -1,7 +1,20 @@
 {
   "name": "doodle-note-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Read-only MCP server exposing your local DoodleNote meetings, notes, and transcripts to AI agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spinman-ITS/doodle-note.git",
+    "directory": "packages/doodle-note-mcp"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "doodlenote",
+    "meetings",
+    "transcripts"
+  ],
   "type": "module",
   "bin": {
     "doodle-note-mcp": "./dist/cli.js"
@@ -12,14 +25,13 @@
   "scripts": {
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/*.test.ts"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.0",
-    "@repo/agent-contract": "workspace:*",
-    "@repo/meetings-store": "workspace:*"
+    "test": "tsx --test src/*.test.ts",
+    "prepublishOnly": "pnpm test && pnpm build"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "@repo/agent-contract": "workspace:*",
+    "@repo/meetings-store": "workspace:*",
     "@types/node": "^22.19.1",
     "esbuild": "^0.25.0",
     "tsx": "^4.23.0",

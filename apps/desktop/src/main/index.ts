@@ -21,6 +21,7 @@ import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
 import { AgentAccessService } from './agent-access-service'
+import type { McpServerSpec } from '../shared/integrations-api'
 import { ConnectorsService } from './connectors-service'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
@@ -58,6 +59,19 @@ function resolveEngineBinary(): string {
     return join(process.resourcesPath, 'engine', 'engine')
   }
   return path.resolve(app.getAppPath(), '..', '..', 'engine', '.build', 'release', 'engine')
+}
+
+/**
+ * How MCP clients launch the bundled doodle-note-mcp server: the DoodleNote
+ * binary itself doubles as the Node runtime via ELECTRON_RUN_AS_NODE, so
+ * users need no Node install and no repo checkout. Bundled under
+ * Resources/mcp in the packaged app; the workspace build output in dev.
+ */
+function resolveMcpServerSpec(): McpServerSpec {
+  const script = app.isPackaged
+    ? join(process.resourcesPath, 'mcp', 'cli.js')
+    : path.resolve(app.getAppPath(), '..', '..', 'packages', 'doodle-note-mcp', 'dist', 'cli.js')
+  return { command: process.execPath, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } }
 }
 
 /**
@@ -395,7 +409,10 @@ app.whenReady().then(() => {
 
   // Integrations: the local-MCP opt-in file and connector exports (GBrain
   // et al). Both are off until the user enables them in Settings.
-  const agentAccessService = new AgentAccessService(join(app.getPath('userData'), 'meetings'))
+  const agentAccessService = new AgentAccessService(
+    join(app.getPath('userData'), 'meetings'),
+    resolveMcpServerSpec()
+  )
   agentAccessService.registerIpc()
   const connectorsService = new ConnectorsService(
     app.getPath('userData'),
