@@ -5,6 +5,13 @@ directories:
   output: release
 files:
   - out/**
+# The doodle-note-mcp server ships inside the app (all platforms) so MCP
+# clients launch it via the DoodleNote binary with ELECTRON_RUN_AS_NODE —
+# no Node install or repo checkout needed. Built by the package scripts
+# before electron-builder runs.
+extraResources:
+  - from: ../../packages/doodle-note-mcp/dist/cli.js
+    to: mcp/cli.js
 # Native addons load their binaries from real files on disk.
 asarUnpack:
   - "**/node_modules/node-llama-cpp/**"

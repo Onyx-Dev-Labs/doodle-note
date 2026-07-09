@@ -28,37 +28,36 @@ the same ids on every device and in cloud sync.
 
 ## Setup
 
+### One click (recommended)
+
 1. In DoodleNote: **Settings → Agent access → Enable**.
-2. Build once from the repo: `pnpm --filter doodle-note-mcp build` (emits `dist/cli.js`).
+2. Click **Connect** next to Claude Desktop, Claude Code, or Codex.
 
-**Claude Code**
+That's it. The server ships inside the DoodleNote app (the app binary doubles as
+its Node runtime via `ELECTRON_RUN_AS_NODE`), so there is nothing to install or
+build, and the buttons write the client configs for you. **Disconnect** removes
+the entry again. For any other MCP client, **Copy snippet** puts a ready-made
+`mcpServers` JSON entry on the clipboard.
 
-```bash
-claude mcp add doodle-note -- node /path/to/packages/doodle-note-mcp/dist/cli.js
-```
+### Manual
 
-**Claude Desktop** (`claude_desktop_config.json`)
+Any MCP client can launch the bundled server directly:
 
 ```json
 {
   "mcpServers": {
     "doodle-note": {
-      "command": "node",
-      "args": ["/path/to/packages/doodle-note-mcp/dist/cli.js"]
+      "command": "/Applications/DoodleNote.app/Contents/MacOS/DoodleNote",
+      "args": ["/Applications/DoodleNote.app/Contents/Resources/mcp/cli.js"],
+      "env": { "ELECTRON_RUN_AS_NODE": "1" }
     }
   }
 }
 ```
 
-**Codex** (`~/.codex/config.toml`)
-
-```toml
-[mcp_servers.doodle-note]
-command = "node"
-args = ["/path/to/packages/doodle-note-mcp/dist/cli.js"]
-```
-
-Once published to npm, `npx doodle-note-mcp` replaces the `node …/dist/cli.js` command.
+Working from a repo checkout instead? Build once with
+`pnpm --filter doodle-note-mcp build` and use `node …/packages/doodle-note-mcp/dist/cli.js`
+as the command. Once published to npm, `npx doodle-note-mcp` works too.
 
 ## Configuration
 

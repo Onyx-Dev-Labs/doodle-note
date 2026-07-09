@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
-import type { AgentAccessStatus, ConnectorsStatus } from '../../shared/integrations-api'
+import type {
+  AgentAccessStatus,
+  ConnectorsStatus,
+  McpClientId,
+  McpServerSpec
+} from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
@@ -182,6 +187,9 @@ export default function ModelsView({
 
   /* ---- integrations: agent access + connectors ---- */
   const [agentAccess, setAgentAccess] = useState<AgentAccessStatus | null>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
+  const [clientPending, setClientPending] = useState<string | null>(null)
+  const [commandCopied, setCommandCopied] = useState(false)
   const [connectors, setConnectors] = useState<ConnectorsStatus | null>(null)
   const [gbrainUrl, setGbrainUrl] = useState('')
   const [gbrainKey, setGbrainKey] = useState('')
@@ -216,6 +224,29 @@ export default function ModelsView({
       }),
     [adoptConnectors]
   )
+
+  const setClientConnected = async (id: McpClientId, connected: boolean): Promise<void> => {
+    setAgentError(null)
+    setClientPending(id)
+    try {
+      const status = connected
+        ? await window.integrations.connectClient(id)
+        : await window.integrations.disconnectClient(id)
+      setAgentAccess(status)
+    } catch (err) {
+      setAgentError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setClientPending(null)
+    }
+  }
+
+  const copyServerCommand = (server: McpServerSpec): void => {
+    const snippet = JSON.stringify({ mcpServers: { 'doodle-note': server } }, null, 2)
+    void navigator.clipboard.writeText(snippet).then(() => {
+      setCommandCopied(true)
+      setTimeout(() => setCommandCopied(false), 2000)
+    })
+  }
 
   const saveGBrain = async (enabled: boolean): Promise<void> => {
     setGbrainError(null)
@@ -1131,32 +1162,89 @@ export default function ModelsView({
                   meetings, notes, and transcripts. Read-only, off by default, and local — nothing
                   is uploaded. Turning this off revokes access immediately.
                 </p>
+                {agentError && <div className="models-error">{agentError}</div>}
                 {agentAccess === null ? (
                   <span className="calendar-note">loading…</span>
                 ) : (
-                  <div className="cal-subcard">
-                    <div className="cal-row">
-                      <span className="cal-row-main">
-                        <span className="cal-row-label">
-                          Allow local AI agents to read meetings
+                  <>
+                    <div className="cal-subcard">
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">
+                            Allow local AI agents to read meetings
+                          </span>
+                          <span className="cal-row-sub">
+                            {agentAccess.enabled
+                              ? 'Enabled — connect the apps below, or any MCP client'
+                              : 'Disabled — the doodle-note-mcp server refuses to start'}
+                          </span>
                         </span>
-                        <span className="cal-row-sub">
-                          {agentAccess.enabled
-                            ? `Enabled — MCP clients connect via the doodle-note-mcp server (config: ${agentAccess.configPath})`
-                            : 'Disabled — the doodle-note-mcp server refuses to start'}
-                        </span>
-                      </span>
-                      <Toggle
-                        checked={agentAccess.enabled}
-                        label="Allow local AI agents to read meetings"
-                        onChange={() => {
-                          void window.integrations
-                            .setAgentAccess(!agentAccess.enabled)
-                            .then(setAgentAccess)
-                        }}
-                      />
+                        <Toggle
+                          checked={agentAccess.enabled}
+                          label="Allow local AI agents to read meetings"
+                          onChange={() => {
+                            void window.integrations
+                              .setAgentAccess(!agentAccess.enabled)
+                              .then(setAgentAccess)
+                          }}
+                        />
+                      </div>
                     </div>
-                  </div>
+
+                    <div className="cal-subcard">
+                      {agentAccess.clients.map((client) => (
+                        <div className="cal-row" key={client.id}>
+                          <span className="cal-row-main">
+                            <span className="cal-row-label">{client.name}</span>
+                            <span className="cal-row-sub">
+                              {!client.installed
+                                ? 'Not detected on this computer'
+                                : client.connected
+                                  ? agentAccess.enabled
+                                    ? 'Connected — DoodleNote appears in its tools'
+                                    : 'Connected, but paused while agent access is off'
+                                  : agentAccess.enabled
+                                    ? 'One click adds DoodleNote to its MCP servers'
+                                    : 'Enable agent access above to connect'}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={
+                              !client.installed ||
+                              clientPending !== null ||
+                              (!client.connected && !agentAccess.enabled)
+                            }
+                            onClick={() => {
+                              void setClientConnected(client.id, !client.connected)
+                            }}
+                          >
+                            {clientPending === client.id
+                              ? '…'
+                              : client.connected
+                                ? 'Disconnect'
+                                : 'Connect'}
+                          </button>
+                        </div>
+                      ))}
+                      <div className="cal-row">
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Other MCP clients</span>
+                          <span className="cal-row-sub">
+                            Copy a ready-made config snippet — no build steps, the server ships
+                            inside DoodleNote
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          disabled={!agentAccess.enabled}
+                          onClick={() => copyServerCommand(agentAccess.server)}
+                        >
+                          {commandCopied ? 'Copied ✓' : 'Copy snippet'}
+                        </button>
+                      </div>
+                    </div>
+                  </>
                 )}
               </section>
 

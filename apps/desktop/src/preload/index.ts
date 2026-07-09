@@ -71,6 +71,8 @@ import {
   type FoldersApi
 } from '../shared/folders-api'
 import {
+  AGENT_ACCESS_CONNECT_CLIENT_CHANNEL,
+  AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL,
   AGENT_ACCESS_GET_CHANNEL,
   AGENT_ACCESS_SET_CHANNEL,
   CONNECTORS_CONFIGURE_GBRAIN_CHANNEL,
@@ -80,7 +82,8 @@ import {
   type AgentAccessStatus,
   type ConnectorsStatus,
   type GBrainConfigUpdate,
-  type IntegrationsApi
+  type IntegrationsApi,
+  type McpClientId
 } from '../shared/integrations-api'
 import {
   UPDATE_CHECK_CHANNEL,
@@ -420,6 +423,17 @@ const integrationsApi: IntegrationsApi = {
 
   setAgentAccess(enabled: boolean): Promise<AgentAccessStatus> {
     return ipcRenderer.invoke(AGENT_ACCESS_SET_CHANNEL, enabled) as Promise<AgentAccessStatus>
+  },
+
+  connectClient(id: McpClientId): Promise<AgentAccessStatus> {
+    return ipcRenderer.invoke(AGENT_ACCESS_CONNECT_CLIENT_CHANNEL, id) as Promise<AgentAccessStatus>
+  },
+
+  disconnectClient(id: McpClientId): Promise<AgentAccessStatus> {
+    return ipcRenderer.invoke(
+      AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL,
+      id
+    ) as Promise<AgentAccessStatus>
   },
 
   getConnectors(): Promise<ConnectorsStatus> {
