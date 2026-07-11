@@ -3,21 +3,25 @@ import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { WIN_MICMON_ARGS } from './win-micmon'
 import {
+  armedRingLabel,
   initialEndState,
   initialMicState,
+  initialRingEdgeState,
   markEnded,
   markPrompted,
   MEETING_END_DEBOUNCE_MS,
   meetingAppLabel,
-  meetingRingLabel,
+  meetingRingLabels,
   MIC_DEBOUNCE_MS,
   onCaptureMicEvent,
   onMicEvent,
+  onRingLabels,
   setSuppressed,
   shouldAutoStop,
   shouldPrompt,
   type MeetingEndState,
-  type MicPromptState
+  type MicPromptState,
+  type RingEdgeState
 } from './mic-watcher-logic'
 
 /** Crashed child restarts after this (engine updates, transient failures). */
@@ -61,6 +65,9 @@ export class MicWatcher {
    * recording started from a ring prompt auto-stop after exactly 12s.
    */
   private currentInputLabel: string | null = null
+
+  /** Output-edge tracker: idle meeting apps holding audio forever are noise. */
+  private ringEdge: RingEdgeState = initialRingEdgeState()
 
   /** Meeting-end watch, alive only while our own capture runs (suppressed). */
   private capturing = false
@@ -219,7 +226,8 @@ export class MicWatcher {
             const bundles = Array.isArray(event.bundles) ? event.bundles.map(String) : []
             const output = Array.isArray(event.outputBundles) ? event.outputBundles.map(String) : []
             const inputLabel = event.running ? meetingAppLabel(bundles) : null
-            const ringLabel = meetingRingLabel(output)
+            this.ringEdge = onRingLabels(this.ringEdge, meetingRingLabels(output))
+            const ringLabel = armedRingLabel(this.ringEdge)
             this.currentAppLabel = inputLabel ?? ringLabel
             this.currentInputLabel = inputLabel
             this.diag(

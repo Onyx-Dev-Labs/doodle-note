@@ -1,17 +1,21 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  armedRingLabel,
   initialEndState,
   initialMicState,
+  initialRingEdgeState,
   markEnded,
   markPrompted,
   MEETING_END_DEBOUNCE_MS,
   meetingAppLabel,
   meetingRingLabel,
+  meetingRingLabels,
   MIC_COOLDOWN_MS,
   MIC_DEBOUNCE_MS,
   onCaptureMicEvent,
   onMicEvent,
+  onRingLabels,
   setSuppressed,
   shouldAutoStop,
   shouldPrompt
@@ -143,5 +147,49 @@ describe('meetingRingLabel', () => {
     assert.equal(meetingRingLabel(['com.google.Chrome']), null) // YouTube ≠ meeting
     assert.equal(meetingRingLabel(['com.spotify.client']), null)
     assert.equal(meetingRingLabel([]), null)
+  })
+})
+
+describe('ring edge tracking', () => {
+  it('an app already holding output at watcher start never arms (idle Zoom)', () => {
+    // The 2026-07-11 incident: Zoom open in the background holds a permanent
+    // output session; every audio-client churn (TV app, Discord ding)
+    // re-evaluated it as "ringing" and re-prompted after each cooldown.
+    let s = onRingLabels(initialRingEdgeState(), meetingRingLabels(['us.zoom.xos']))
+    assert.equal(armedRingLabel(s), null)
+    // TV audio churns the client list for hours; Zoom persists throughout.
+    for (let i = 0; i < 50; i++) {
+      s = onRingLabels(s, meetingRingLabels(['us.zoom.xos']))
+    }
+    assert.equal(armedRingLabel(s), null)
+  })
+
+  it('output appearing after watcher start arms, and stays armed while present', () => {
+    let s = onRingLabels(initialRingEdgeState(), []) // quiet baseline
+    s = onRingLabels(s, meetingRingLabels(['us.zoom.xos'])) // real ring starts
+    assert.equal(armedRingLabel(s), 'Zoom')
+    s = onRingLabels(s, meetingRingLabels(['us.zoom.xos'])) // still ringing
+    assert.equal(armedRingLabel(s), 'Zoom')
+  })
+
+  it('a baseline app becomes armable once it has gone absent', () => {
+    let s = onRingLabels(initialRingEdgeState(), meetingRingLabels(['us.zoom.xos']))
+    s = onRingLabels(s, []) // Zoom quit / released output
+    s = onRingLabels(s, meetingRingLabels(['us.zoom.xos'])) // fresh ring later
+    assert.equal(armedRingLabel(s), 'Zoom')
+  })
+
+  it('a fresh ring arms even while another app is baseline noise', () => {
+    let s = onRingLabels(initialRingEdgeState(), meetingRingLabels(['us.zoom.xos']))
+    s = onRingLabels(s, meetingRingLabels(['us.zoom.xos', 'com.hnc.Discord.helper']))
+    assert.equal(armedRingLabel(s), 'Discord') // Discord edged in; Zoom still baseline
+    s = onRingLabels(s, meetingRingLabels(['us.zoom.xos']))
+    assert.equal(armedRingLabel(s), null) // Discord gone; back to baseline only
+  })
+
+  it('browsers never count as ring output', () => {
+    let s = onRingLabels(initialRingEdgeState(), [])
+    s = onRingLabels(s, meetingRingLabels(['com.google.Chrome']))
+    assert.equal(armedRingLabel(s), null)
   })
 })

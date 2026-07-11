@@ -72,6 +72,59 @@ export function meetingRingLabel(bundles: readonly string[]): string | null {
   return label === 'browser' ? null : label
 }
 
+/** Every distinct meeting-app label holding audio output (browsers excluded). */
+export function meetingRingLabels(bundles: readonly string[]): string[] {
+  const labels = new Set<string>()
+  for (const bundle of bundles) {
+    const lower = bundle.toLowerCase()
+    const match = MEETING_BUNDLE_PATTERNS.find((m) => lower.includes(m.pattern))
+    if (match && match.label !== 'browser') labels.add(match.label)
+  }
+  return [...labels]
+}
+
+/* ---- ring edge tracking (kills the idle-Zoom false positive) ---- */
+
+/**
+ * A ring must be an EDGE, not a state. An idle Zoom keeps a permanent audio
+ * output session, so "meeting app holds output" fired a fresh prompt every
+ * cooldown whenever anything (a TV app, a Discord ding) churned the audio
+ * client list. Only an app whose output NEWLY APPEARS counts as ringing;
+ * whatever was already holding output when watching began is baseline noise
+ * until it has gone absent once. A real call on an idle-open Zoom still
+ * prompts via the mic path seconds after joining.
+ */
+export interface RingEdgeState {
+  /** Labels present on the first observed event are baseline, never armed. */
+  sawFirstEvent: boolean
+  /** Ring labels currently holding output → armed (appeared via an edge)? */
+  present: ReadonlyMap<string, boolean>
+}
+
+export function initialRingEdgeState(): RingEdgeState {
+  return { sawFirstEvent: false, present: new Map() }
+}
+
+/** Apply one micmon event's set of output ring labels. */
+export function onRingLabels(state: RingEdgeState, labels: readonly string[]): RingEdgeState {
+  const present = new Map<string, boolean>()
+  for (const label of labels) {
+    const alreadyArmed = state.present.get(label)
+    // Sticky while continuously present; fresh appearances arm only after
+    // the first event (labels in the very first snapshot are baseline).
+    present.set(label, alreadyArmed ?? state.sawFirstEvent)
+  }
+  return { sawFirstEvent: true, present }
+}
+
+/** The label to treat as "ringing now", or null. */
+export function armedRingLabel(state: RingEdgeState): string | null {
+  for (const [label, armed] of state.present) {
+    if (armed) return label
+  }
+  return null
+}
+
 export interface MicPromptState {
   /** Epoch ms when the mic went busy; null while idle. */
   busySinceMs: number | null
