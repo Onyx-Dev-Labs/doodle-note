@@ -3,10 +3,13 @@ import Link from "next/link";
 
 import { AppleLogo, WindowsLogo } from "./logos";
 
-/** Update feed on Vercel Blob — publish-release.mjs uploads these. */
+/**
+ * Version-independent: /download/<platform> reads the live update manifest
+ * and redirects to the current installer, so these can never go stale.
+ */
 export const DOWNLOADS = {
-  mac: "/updates/DoodleNote-0.3.5-arm64-mac.zip",
-  win: "/updates/DoodleNote-0.3.4-setup.exe",
+  mac: "/download/mac",
+  win: "/download/win",
 };
 
 /* Shared control styles — keep every page speaking the same visual language. */
