@@ -168,6 +168,12 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
       }
     case 'channel_start':
       return base
+    case 'audio':
+      return {
+        ...base,
+        statusKind: 'done',
+        statusText: `audio saved (${Math.round(ev.durationMs / 1000)}s) → ${ev.path}`
+      }
     case 'done':
       return { ...base, statusKind: 'done', statusText: 'session complete' }
     case 'error':

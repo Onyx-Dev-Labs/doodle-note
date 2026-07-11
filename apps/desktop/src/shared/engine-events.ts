@@ -49,6 +49,15 @@ export interface EngineStartOptions {
   seconds?: number
   /** live only (macOS): CoreAudio UID of the mic to record from; omit = system default. */
   inputDevice?: string
+  /** live only: the meeting this session records into (keys audio persistence). */
+  meetingId?: string
+  /** live only: false disables saving the meeting audio (user setting). */
+  persistAudio?: boolean
+  /**
+   * live only: engine session directory for checkpoint audio. Set by the
+   * main process from meetingId + persistAudio — never by the renderer.
+   */
+  audioDir?: string
 }
 
 export interface EngineStartRequest {
@@ -128,6 +137,16 @@ export interface EngineDoneEvent {
   event: 'done'
 }
 
+/** The session's audio was merged and saved to disk (emitted before done). */
+export interface EngineAudioEvent {
+  event: 'audio'
+  /** Absolute path of the merged audio.m4a. */
+  path: string
+  durationMs: number
+  /** Wall-clock ms of the file's first frame; 0 when unknown. */
+  startEpochMs?: number
+}
+
 /** Live: wall-clock anchor for a channel's token timeline (first audio buffer). */
 export interface EngineChannelStartEvent {
   event: 'channel_start'
@@ -145,6 +164,7 @@ export type EngineSidecarEvent =
   | EngineErrorEvent
   | EngineDoneEvent
   | EngineChannelStartEvent
+  | EngineAudioEvent
 
 /* ---- Lifecycle events synthesized by the main process ---- */
 

@@ -55,6 +55,7 @@ enum LiveCommand {
             aec: options.values["aec"] == "on",
             seconds: options.values["seconds"].flatMap(Double.init),
             inputDevice: options.values["input-device"],
+            audioDir: options.values["audio-dir"],
             micManager: nil,
             systemManager: nil,
             stopper: stopper
@@ -87,6 +88,7 @@ enum LiveSession {
         aec: Bool,
         seconds: Double?,
         inputDevice: String? = nil,
+        audioDir: String? = nil,
         micManager: StreamingUnifiedAsrManager?,
         systemManager: StreamingUnifiedAsrManager?,
         stopper: Stopper
@@ -97,14 +99,40 @@ enum LiveSession {
             throw EngineError.usage("--source must be mic | system | both")
         }
 
+        // Audio persistence is best-effort: a failure to set it up (bad path,
+        // full disk) must never block transcription — the meeting matters more
+        // than the recording of it.
+        var sessionRecorder: SessionRecorder?
+        if let audioDir {
+            let channels = [wantMic ? "mic" : nil, wantSystem ? "system" : nil].compactMap { $0 }
+            do {
+                sessionRecorder = try SessionRecorder(
+                    directory: URL(fileURLWithPath: audioDir), channels: channels)
+            } catch {
+                Events.emit([
+                    "event": "status", "stage": "audio_save_failed",
+                    "reason": String(describing: error),
+                ])
+                Events.log("audio persistence unavailable (\(error)) — session continues without it")
+            }
+        }
+
         // Capture-first startup: pipelines are created WITHOUT loading models so
         // recording begins the moment permissions clear. Audio queues in each
         // pipeline's buffer stream while models load behind it — the host can
         // show "recording" immediately and no audio is lost.
         var micPipeline: ChannelPipeline?
         var systemPipeline: ChannelPipeline?
-        if wantMic { micPipeline = ChannelPipeline(channel: "mic", manager: micManager) }
-        if wantSystem { systemPipeline = ChannelPipeline(channel: "system", manager: systemManager) }
+        if wantMic {
+            micPipeline = ChannelPipeline(
+                channel: "mic", manager: micManager,
+                recorder: sessionRecorder?.recorder(for: "mic"))
+        }
+        if wantSystem {
+            systemPipeline = ChannelPipeline(
+                channel: "system", manager: systemManager,
+                recorder: sessionRecorder?.recorder(for: "system"))
+        }
 
         let micBox = MicCaptureBox()
         var systemCapture: SystemAudioCapture?
@@ -246,6 +274,24 @@ enum LiveSession {
         await systemCapture?.stop()
         await micPipeline?.finish()
         await systemPipeline?.finish()
+        if let sessionRecorder {
+            Events.emit(["event": "status", "stage": "saving_audio"])
+            do {
+                let saved = try sessionRecorder.finish()
+                Events.emit([
+                    "event": "audio",
+                    "path": saved.url.path,
+                    "durationMs": saved.durationMs,
+                    "startEpochMs": saved.startEpochMs,
+                ])
+            } catch {
+                Events.emit([
+                    "event": "status", "stage": "audio_save_failed",
+                    "reason": String(describing: error),
+                ])
+                Events.log("audio merge failed: \(error)")
+            }
+        }
         Events.emit(["event": "done"])
     }
 }
@@ -258,6 +304,7 @@ enum LiveSession {
 final class ChannelPipeline {
     let channel: String
     private let manager: StreamingUnifiedAsrManager
+    private let recorder: ChannelRecorder?
     private let bufferStream: AsyncStream<AVAudioPCMBuffer>
     private let bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation
     private var consumeTask: Task<Void, Never>?
@@ -267,10 +314,11 @@ final class ChannelPipeline {
 
     private let preloaded: Bool
 
-    init(channel: String, manager: StreamingUnifiedAsrManager? = nil) {
+    init(channel: String, manager: StreamingUnifiedAsrManager? = nil, recorder: ChannelRecorder? = nil) {
         self.channel = channel
         self.preloaded = manager != nil
         self.manager = manager ?? StreamingUnifiedAsrManager()
+        self.recorder = recorder
         (self.bufferStream, self.bufferContinuation) = AsyncStream.makeStream(of: AVAudioPCMBuffer.self)
     }
 
@@ -311,6 +359,9 @@ final class ChannelPipeline {
         } else {
             epochLock.unlock()
         }
+        // Both consumers only read: ASR via the stream, persistence on the
+        // recorder's own serial queue.
+        recorder?.write(buffer)
         bufferContinuation.yield(buffer)
     }
 

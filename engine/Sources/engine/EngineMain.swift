@@ -6,7 +6,7 @@ struct EngineMain {
         let args = Array(CommandLine.arguments.dropFirst())
         guard let command = args.first else {
             Events.error(
-                "usage: engine <transcribe|stream|live|info> [--file <path>] [--model v2|v3] [--realtime] [--source mic|system|both] [--seconds N]"
+                "usage: engine <transcribe|stream|live|merge-audio|info> [--file <path>] [--model v2|v3] [--realtime] [--source mic|system|both] [--seconds N] [--audio-dir <path>] [--dir <path>]"
             )
             exit(64)
         }
@@ -26,6 +26,20 @@ struct EngineMain {
                 MicMonitorCommand.run()
             case "serve":
                 try await ServeCommand.run(options)
+            case "merge-audio":
+                // Post-crash recovery: merge a session's leftover checkpoint
+                // chunks into audio.m4a — the same code path a clean stop runs.
+                guard let dir = options.values["dir"] else {
+                    throw EngineError.usage("merge-audio requires --dir <session audio directory>")
+                }
+                let saved = try SessionRecorder.mergeAndClean(directory: URL(fileURLWithPath: dir))
+                Events.emit([
+                    "event": "audio",
+                    "path": saved.url.path,
+                    "durationMs": saved.durationMs,
+                    "startEpochMs": saved.startEpochMs,
+                ])
+                Events.emit(["event": "done"])
             case "devices":
                 DevicesCommand.run()
             case "info":

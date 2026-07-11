@@ -17,6 +17,15 @@ import {
   type EngineStartRequest
 } from '../shared/engine-events'
 import {
+  AUDIO_CLEAR_ALL_CHANNEL,
+  AUDIO_DELETE_CHANNEL,
+  AUDIO_LIST_CHANNEL,
+  AUDIO_USAGE_CHANNEL,
+  type AudioApi,
+  type AudioPart,
+  type AudioUsage
+} from '../shared/audio-api'
+import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
   NOTES_ASK_CHANNEL,
   NOTES_ASK_GLOBAL_CHANNEL,
@@ -456,6 +465,24 @@ const integrationsApi: IntegrationsApi = {
   }
 }
 
+const audioApi: AudioApi = {
+  list(meetingId: string): Promise<AudioPart[]> {
+    return ipcRenderer.invoke(AUDIO_LIST_CHANNEL, meetingId) as Promise<AudioPart[]>
+  },
+
+  deleteFor(meetingId: string): Promise<void> {
+    return ipcRenderer.invoke(AUDIO_DELETE_CHANNEL, meetingId) as Promise<void>
+  },
+
+  clearAll(): Promise<void> {
+    return ipcRenderer.invoke(AUDIO_CLEAR_ALL_CHANNEL) as Promise<void>
+  },
+
+  usage(): Promise<AudioUsage> {
+    return ipcRenderer.invoke(AUDIO_USAGE_CHANNEL) as Promise<AudioUsage>
+  }
+}
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('engine', engineApi)
@@ -469,6 +496,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('themeNative', themeApi)
     contextBridge.exposeInMainWorld('updates', updateApi)
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
+    contextBridge.exposeInMainWorld('audio', audioApi)
   } catch (error) {
     console.error(error)
   }
@@ -495,4 +523,6 @@ if (process.contextIsolated) {
   window.updates = updateApi
   // @ts-ignore (defined in index.d.ts)
   window.integrations = integrationsApi
+  // @ts-ignore (defined in index.d.ts)
+  window.audio = audioApi
 }

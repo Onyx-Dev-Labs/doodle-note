@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AUDIO_PERSIST_STORAGE_KEY, type AudioUsage } from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
@@ -27,6 +28,12 @@ function lastSyncLabel(iso: string): string {
   const min = Math.round(ms / 60_000)
   if (min < 60) return `synced ${min} min ago`
   return `synced at ${new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 /**
@@ -196,6 +203,47 @@ export default function ModelsView({
   const [gbrainSaved, setGbrainSaved] = useState(false)
   const [gbrainError, setGbrainError] = useState<string | null>(null)
   const gbrainFormSeeded = useRef(false)
+
+  /* ---- meeting recordings (local audio) ---- */
+  const [persistAudio, setPersistAudio] = useState(
+    () => window.localStorage.getItem(AUDIO_PERSIST_STORAGE_KEY) !== 'off'
+  )
+  const [audioUsage, setAudioUsage] = useState<AudioUsage | null>(null)
+  const [audioClearing, setAudioClearing] = useState(false)
+
+  useEffect(() => {
+    if (!active) return
+    void window.audio
+      .usage()
+      .then(setAudioUsage)
+      .catch(() => setAudioUsage(null))
+  }, [active])
+
+  const togglePersistAudio = (): void => {
+    const next = !persistAudio
+    setPersistAudio(next)
+    if (next) window.localStorage.removeItem(AUDIO_PERSIST_STORAGE_KEY)
+    else window.localStorage.setItem(AUDIO_PERSIST_STORAGE_KEY, 'off')
+  }
+
+  const clearAllAudio = async (): Promise<void> => {
+    if (
+      !window.confirm(
+        'Delete every saved meeting recording on this Mac? Transcripts and notes are kept.'
+      )
+    ) {
+      return
+    }
+    setAudioClearing(true)
+    try {
+      await window.audio.clearAll()
+      setAudioUsage(await window.audio.usage())
+    } catch {
+      // usage refresh failure is cosmetic
+    } finally {
+      setAudioClearing(false)
+    }
+  }
 
   const adoptConnectors = useCallback((status: ConnectorsStatus) => {
     setConnectors(status)
@@ -1033,6 +1081,49 @@ export default function ModelsView({
                     )}
                   </div>
                 )}
+              </section>
+
+              <section className="keys-section">
+                <h3>Meeting recordings</h3>
+                <p className="models-sub">
+                  Recordings stay on this Mac — they are never uploaded, even with sync on.
+                </p>
+                <div className="cal-subcard">
+                  <div className="cal-row">
+                    <span className="cal-row-main">
+                      <span className="cal-row-label">Save meeting audio</span>
+                      <span className="cal-row-sub">
+                        Keep each meeting&rsquo;s recording so you can re-listen from the
+                        transcript. Turning this off affects future meetings only.
+                      </span>
+                    </span>
+                    <Toggle
+                      checked={persistAudio}
+                      label="Save meeting audio"
+                      onChange={togglePersistAudio}
+                    />
+                  </div>
+                  <div className="cal-row">
+                    <span className="cal-row-main">
+                      <span className="cal-row-label">Delete all recordings</span>
+                      <span className="cal-row-sub">
+                        {audioUsage && audioUsage.meetingCount > 0
+                          ? `${formatBytes(audioUsage.totalBytes)} across ${audioUsage.meetingCount} ${
+                              audioUsage.meetingCount === 1 ? 'meeting' : 'meetings'
+                            }`
+                          : 'No recordings saved yet'}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="pill-btn"
+                      disabled={audioClearing || !audioUsage || audioUsage.meetingCount === 0}
+                      onClick={() => void clearAllAudio()}
+                    >
+                      {audioClearing ? 'Deleting…' : 'Delete all'}
+                    </button>
+                  </div>
+                </div>
               </section>
 
               <section className="keys-section">

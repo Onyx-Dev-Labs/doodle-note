@@ -26,12 +26,18 @@ engine stream --file meeting.wav [--realtime]
     Feeds a file through the live streaming engine (Parakeet Unified) in
     0.25s chunks — same code path as live capture. Emits growing partials.
 
-engine live [--source mic|system|both] [--seconds N] [--aec off] [--input-device <uid>]
+engine live [--source mic|system|both] [--seconds N] [--aec off] [--input-device <uid>] [--audio-dir <path>]
     Live two-channel capture + transcription:
       mic    → "You"   (AVAudioEngine input tap)
       system → "Them"  (ScreenCaptureKit system audio — the other side of the call)
     Runs until --seconds or SIGINT/SIGTERM. Speaker separation between you and
     the far side comes from the capture topology, not diarization.
+
+    --audio-dir enables crash-safe audio persistence: each channel writes
+    rotating ~30s CAF checkpoints under <dir>/checkpoints/ while recording;
+    a clean stop merges them into <dir>/audio.m4a (AAC 16kHz, L=mic R=system,
+    epoch-aligned) and emits an `audio` event. Serve mode accepts the same
+    directory as "audioDir" on its start command.
 
     --input-device pins the mic channel to a CoreAudio device UID (from
     `engine devices`); omitted = system default input. A pinned device that
@@ -53,6 +59,12 @@ engine devices
     is a digital tap and is always clean. Residual bleed gets removed at
     segment-build time via cross-channel token-timestamp dedup (planned).
     Headphones make isolation perfect regardless.
+
+engine merge-audio --dir <path>
+    Post-crash recovery: merges a session directory's leftover checkpoint
+    chunks into audio.m4a (the same code path a clean stop runs), emits the
+    `audio` event, and deletes the checkpoints. A directory containing
+    checkpoints/ but no audio.m4a is exactly "a session that never finished".
 
 engine info
     Reports model cache locations and download state.
@@ -84,6 +96,7 @@ try/parse each line and skip failures.
 | `timings` | `tokens` [{`token`,`startSec`,`endSec`,`confidence`}], `channel` (live) | incremental per-token timestamps (stream/live) — the raw material for timestamped transcript segments |
 | `final` | `text`, `channel` (live), `confidence`/`audioSeconds`/`processingSeconds`/`speedup` (file modes), `sessionSeconds` (live) | end-of-run transcript per channel |
 | `error` | `message`, optional `channel` | non-fatal errors carry on; fatal ones precede exit |
+| `audio` | `path`, `durationMs`, `startEpochMs` | merged session audio saved (live with --audio-dir, and merge-audio); `startEpochMs` = wall-clock of the file's first frame, for transcript↔audio seek mapping |
 | `done` | — | live session fully finished |
 
 ## Verified results (2026-07-04, M-series, macOS 26.5)

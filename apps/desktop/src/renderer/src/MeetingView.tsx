@@ -10,6 +10,7 @@ import type {
   EngineInputDevice,
   TranscriptSegment
 } from '../../shared/engine-events'
+import { AUDIO_PERSIST_STORAGE_KEY, type AudioPart } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type {
@@ -222,6 +223,9 @@ export default function MeetingView({
   const [folders, setFolders] = useState<FolderRecord[]>([])
   const [folderId, setFolderId] = useState<string | null>(null)
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  const [audioParts, setAudioParts] = useState<AudioPart[]>([])
+  const [activePart, setActivePart] = useState(0)
+  const [playingSegId, setPlayingSegId] = useState<string | null>(null)
   const [inputDevices, setInputDevices] = useState<EngineInputDevice[]>([])
   const [inputDeviceUid, setInputDeviceUid] = useState<string>(
     () => window.localStorage.getItem(INPUT_DEVICE_STORAGE_KEY) ?? ''
@@ -239,6 +243,9 @@ export default function MeetingView({
   const autoOpenedRef = useRef(false)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
+  /** Seek (seconds) to apply once a newly selected part's metadata loads. */
+  const pendingSeekSecRef = useRef<number | null>(null)
   /** Mirrors chatThread so an in-flight ask reads the freshest history. */
   const chatThreadRef = useRef<MeetingChatEntry[]>([])
   const chatFeedRef = useRef<HTMLDivElement>(null)
@@ -412,6 +419,29 @@ export default function MeetingView({
     []
   )
 
+  /* ---- saved audio (local recordings; playback + transcript seek) ---- */
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = (): void => {
+      window.audio
+        .list(meetingId)
+        .then((parts) => {
+          if (!cancelled) setAudioParts(parts)
+        })
+        .catch(() => {})
+    }
+    refresh()
+    // The engine reports "audio" once a stopped session's recording merged.
+    const unsubscribe = window.engine.onEvent((ev) => {
+      if (ev.event === 'audio') refresh()
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [meetingId])
+
   /* ---- models / settings meta (drives the Enhance chip) ---- */
 
   const refreshNotesMeta = useCallback(() => {
@@ -578,6 +608,13 @@ export default function MeetingView({
     if (el) el.scrollTop = el.scrollHeight
   }, [allSegments, state.partials, transcriptOpen])
 
+  /* ---- playback follow-along: keep the highlighted row in view ---- */
+
+  useEffect(() => {
+    if (playingSegId === null) return
+    feedRef.current?.querySelector('.tp-playing')?.scrollIntoView({ block: 'nearest' })
+  }, [playingSegId])
+
   /* ---- chat autoscroll + hint timer cleanup ---- */
 
   useEffect(() => {
@@ -638,10 +675,60 @@ export default function MeetingView({
       inputDeviceUid && inputDevices.some((d) => d.uid === inputDeviceUid)
         ? inputDeviceUid
         : undefined
-    window.engine.start('live', undefined, { source: 'both', inputDevice: pinned })
+    window.engine.start('live', undefined, {
+      source: 'both',
+      inputDevice: pinned,
+      meetingId,
+      persistAudio: window.localStorage.getItem(AUDIO_PERSIST_STORAGE_KEY) !== 'off'
+    })
   }
 
   const stopRecording = (): void => window.engine.stop()
+
+  /* ---- playback: transcript ↔ audio sync ---- */
+
+  // Map a segment's wall-clock time onto (recording part, offset): the part
+  // is the latest one that started at or before the segment; the offset is
+  // the distance from that part's first frame.
+  const seekToSegment = (segment: TranscriptSegment): void => {
+    if (audioParts.length === 0) return
+    let partIndex = 0
+    let offsetSec = 0
+    const abs = segment.absoluteStartMs
+    if (typeof abs === 'number') {
+      for (let i = audioParts.length - 1; i >= 0; i--) {
+        if (audioParts[i]!.startEpochMs <= abs) {
+          partIndex = i
+          break
+        }
+      }
+      offsetSec = Math.max(0, (abs - audioParts[partIndex]!.startEpochMs) / 1000)
+    }
+    const el = audioRef.current
+    if (partIndex !== activePart || !el) {
+      pendingSeekSecRef.current = offsetSec
+      setActivePart(partIndex)
+      return
+    }
+    el.currentTime = offsetSec
+    void el.play()
+  }
+
+  // Highlight the transcript row the playhead is inside of.
+  const onPlayheadMoved = (): void => {
+    const part = audioParts[activePart]
+    const el = audioRef.current
+    if (!part || !el || el.paused) return
+    const epochMs = part.startEpochMs + el.currentTime * 1000
+    let current: string | null = null
+    for (const s of allSegments) {
+      const t = s.absoluteStartMs
+      if (typeof t !== 'number') continue
+      if (t > epochMs) break
+      current = s.id
+    }
+    setPlayingSegId(current)
+  }
 
   // Auto-start recording for meetings created via "+ New meeting": the page
   // loads already capturing (bars animate, stop button shown), so there is
@@ -1061,6 +1148,40 @@ export default function MeetingView({
               </button>
             </div>
           </div>
+          {audioParts.length > 0 && !capturing && (
+            <div className="tp-audio">
+              <audio
+                ref={audioRef}
+                controls
+                preload="metadata"
+                src={audioParts[Math.min(activePart, audioParts.length - 1)]?.url}
+                onLoadedMetadata={() => {
+                  const sec = pendingSeekSecRef.current
+                  const el = audioRef.current
+                  if (sec !== null && el) {
+                    pendingSeekSecRef.current = null
+                    el.currentTime = sec
+                    void el.play()
+                  }
+                }}
+                onTimeUpdate={onPlayheadMoved}
+                onEnded={() => {
+                  // Multi-part meetings (record → stop → record) play through.
+                  if (activePart < audioParts.length - 1) {
+                    pendingSeekSecRef.current = 0
+                    setActivePart(activePart + 1)
+                  } else {
+                    setPlayingSegId(null)
+                  }
+                }}
+              />
+              {audioParts.length > 1 && (
+                <span className="tp-audio-part">
+                  Part {Math.min(activePart, audioParts.length - 1) + 1}/{audioParts.length}
+                </span>
+              )}
+            </div>
+          )}
           <div className="tp-body" ref={feedRef}>
             {transcriptEmpty ? (
               <div className="tp-empty">
@@ -1076,7 +1197,23 @@ export default function MeetingView({
             ) : (
               <>
                 {allSegments.map((s) => (
-                  <div key={s.id} className={`tp-row tp-${s.channel}`}>
+                  <div
+                    key={s.id}
+                    className={[
+                      'tp-row',
+                      `tp-${s.channel}`,
+                      audioParts.length > 0 && !capturing ? 'tp-clickable' : '',
+                      playingSegId === s.id ? 'tp-playing' : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={
+                      audioParts.length > 0 && !capturing ? () => seekToSegment(s) : undefined
+                    }
+                    title={
+                      audioParts.length > 0 && !capturing ? 'Play the recording from here' : undefined
+                    }
+                  >
                     <span className="tp-speaker">{s.speaker}</span>
                     <span className="tp-text">{s.text}</span>
                     <span className="tp-time">

@@ -242,7 +242,8 @@ export class EngineProcess {
       const ok = this.serveWrite({
         cmd: 'start',
         source: opts.source ?? 'both',
-        inputDevice: opts.inputDevice ?? ''
+        inputDevice: opts.inputDevice ?? '',
+        audioDir: opts.audioDir ?? ''
       })
       if (ok) return
       this.serveSessionActive = false // fall through to the classic spawn
@@ -277,6 +278,7 @@ export class EngineProcess {
       args.push('--source', opts.source ?? 'both')
       args.push('--exit-on-stdin-close')
       if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
+      if (opts.audioDir) args.push('--audio-dir', opts.audioDir)
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }

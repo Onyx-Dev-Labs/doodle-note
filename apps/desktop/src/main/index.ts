@@ -13,6 +13,7 @@ import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'nod
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { AudioService } from './audio-service'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
@@ -100,9 +101,11 @@ function migrateDevUserData(): void {
 }
 
 // Must run before app ready: lets <img src="doodle-media://…"> load without
-// mixed-content blocking (the dev renderer is served over http).
+// mixed-content blocking (the dev renderer is served over http). doodle-audio
+// additionally needs stream support so <audio> can range-request recordings.
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'doodle-media', privileges: { secure: true, supportFetchAPI: true } }
+  { scheme: 'doodle-media', privileges: { secure: true, supportFetchAPI: true } },
+  { scheme: 'doodle-audio', privileges: { secure: true, supportFetchAPI: true, stream: true } }
 ])
 
 let notesService: NotesService | null = null
@@ -267,6 +270,21 @@ app.whenReady().then(() => {
     }
   )
 
+  // Saved meeting audio: session dirs for the engine's checkpoint recording,
+  // playback serving, crash recovery, deletion. Local-only — never synced.
+  const audioService = new AudioService(
+    join(app.getPath('userData'), 'audio'),
+    resolveEngineBinary()
+  )
+  audioService.registerIpc()
+  audioService.registerProtocol()
+  // Recover audio from sessions a crash cut short — after launch settles.
+  setTimeout(() => {
+    void audioService.recoverOrphans().catch((err) => {
+      console.error('[audio] orphan recovery failed:', err)
+    })
+  }, 10_000).unref()
+
   const session = new TranscriptSession(
     broadcastEngineEvent,
     join(app.getPath('userData'), 'sessions')
@@ -301,6 +319,7 @@ app.whenReady().then(() => {
   engine.onEvent((event) => {
     broadcastEngineEvent(event)
     session.handle(event)
+    if (event.event === 'audio') audioService.onAudioSaved(event)
     logEngineEvent(event)
   })
 
@@ -308,7 +327,16 @@ app.whenReady().then(() => {
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
     micWatcher.setSuppressed(true)
-    engine.start(request.command, request.filePath, request.opts)
+    const opts = { ...request.opts }
+    // Audio persistence: give the session a directory keyed by meeting; the
+    // capture host checkpoints into it and merges on stop (Swift engine on
+    // macOS, the main-process PCM tee on Windows). Renderer-set audioDir is
+    // ignored — main owns the location.
+    delete opts.audioDir
+    if (request.command === 'live' && opts.meetingId && opts.persistAudio !== false) {
+      opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
+    }
+    engine.start(request.command, request.filePath, opts)
   })
 
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
@@ -428,6 +456,8 @@ app.whenReady().then(() => {
   meetingsService.onDidWrite = (change) => {
     syncService.onMeetingsChanged(change.deletedId)
     connectorsService.onMeetingsChanged()
+    // A deleted meeting takes its recordings with it.
+    if (change.deletedId) audioService.deleteFor(change.deletedId)
   }
   foldersService.onDidWrite = (change) => syncService.onFoldersChanged(change.deletedId)
 

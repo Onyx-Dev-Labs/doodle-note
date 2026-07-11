@@ -43,6 +43,7 @@ enum ServeCommand {
                 let source = object["source"] as? String ?? "both"
                 let aec = (object["aec"] as? String) == "on"
                 let inputDevice = (object["inputDevice"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let audioDir = (object["audioDir"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let started = box.begin(stopper) {
                     do {
                         try await LiveSession.run(
@@ -50,6 +51,7 @@ enum ServeCommand {
                             aec: aec,
                             seconds: nil,
                             inputDevice: inputDevice,
+                            audioDir: audioDir,
                             micManager: micManager,
                             systemManager: systemManager,
                             stopper: stopper

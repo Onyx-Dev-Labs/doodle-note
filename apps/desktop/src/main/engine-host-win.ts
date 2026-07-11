@@ -8,6 +8,8 @@ import {
   type EngineStartOptions
 } from '../shared/engine-events'
 import type { EngineEventListener } from './engine-process'
+import { WinSessionRecorder } from './win-audio-recorder'
+import { join as joinPath } from 'node:path'
 
 const RESTART_DELAY_MS = 3_000
 
@@ -27,6 +29,8 @@ export class WinEngineHost {
   private restartTimer: NodeJS.Timeout | null = null
   private disposed = false
   private readonly listeners = new Set<EngineEventListener>()
+  /** Tees renderer PCM frames to disk when the session persists audio. */
+  private recorder: WinSessionRecorder | null = null
 
   constructor(private readonly broadcast: (channel: string, payload: unknown) => void) {}
 
@@ -63,6 +67,10 @@ export class WinEngineHost {
       if (this.sessionActive) {
         this.sessionActive = false
         this.stopCaptureInRenderer()
+        // Engine crashed mid-session: keep the checkpoint chunks on disk —
+        // next launch's orphan recovery merges them.
+        this.recorder?.abort()
+        this.recorder = null
         this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
       }
       if (!this.disposed) {
@@ -85,6 +93,26 @@ export class WinEngineHost {
     if (event.event === 'done') {
       this.sessionActive = false
       this.stopCaptureInRenderer()
+      // Merge the session's audio off the event path; the 'audio' event
+      // follows 'exit' here (order is not part of the contract — listeners
+      // react to each event independently).
+      const recorder = this.recorder
+      this.recorder = null
+      if (recorder) {
+        void recorder
+          .finish()
+          .then((saved) => {
+            if (saved) {
+              this.emit({
+                event: 'audio',
+                path: joinPath(recorder.dir, 'audio.wav'),
+                durationMs: saved.durationMs,
+                startEpochMs: saved.startEpochMs
+              })
+            }
+          })
+          .catch((err) => console.error('[win-audio] merge failed:', err))
+      }
       this.emit({ event: 'exit', code: 0, signal: null })
     }
   }
@@ -107,7 +135,10 @@ export class WinEngineHost {
     }
     if (this.sessionActive) {
       // Supersede: end the old session; its tail events stop at 'done'.
+      // Its unmerged audio stays on disk for orphan recovery.
       this.child.postMessage({ t: 'stop' })
+      this.recorder?.abort()
+      this.recorder = null
     }
     const source = opts.source ?? 'both'
     const channels = [
@@ -116,6 +147,7 @@ export class WinEngineHost {
     ].filter((c): c is string => c !== null)
 
     this.sessionActive = true
+    this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
     this.child.postMessage({ t: 'start', channels })
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'start', channels })
@@ -136,6 +168,7 @@ export class WinEngineHost {
   /** Renderer capture frames land here (via ENGINE_AUDIO_CHANNEL). */
   pushAudio(channel: string, samples: Float32Array): void {
     if (!this.sessionActive || !this.child) return
+    this.recorder?.write(channel, samples)
     this.child.postMessage({ t: 'audio', channel, samples })
   }
 
@@ -153,6 +186,9 @@ export class WinEngineHost {
   dispose(): void {
     this.disposed = true
     if (this.restartTimer) clearTimeout(this.restartTimer)
+    // Quit mid-recording: chunks stay for next-launch recovery.
+    this.recorder?.abort()
+    this.recorder = null
     this.child?.kill()
     this.child = null
     this.listeners.clear()
