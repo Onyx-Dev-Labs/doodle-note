@@ -259,7 +259,7 @@ importers:
         version: 5.9.3
 
   packages/doodle-note-mcp:
-    dependencies:
+    devDependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.17.0
         version: 1.29.0(zod@4.4.3)
@@ -269,7 +269,6 @@ importers:
       '@repo/meetings-store':
         specifier: workspace:*
         version: link:../meetings-store
-    devDependencies:
       '@types/node':
         specifier: ^22.19.1
         version: 22.20.0
