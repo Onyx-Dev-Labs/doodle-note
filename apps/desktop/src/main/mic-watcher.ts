@@ -53,6 +53,15 @@ export class MicWatcher {
   /** Friendly name of the meeting app behind the current busy stretch. */
   private currentAppLabel: string | null = null
 
+  /**
+   * Meeting app currently holding the MIC — input only, never ring/output.
+   * The end watch must be seeded from this and not from currentAppLabel:
+   * a Zoom that is only ringing (audio output) sets currentAppLabel, and
+   * seeding meetingSeen from it while Zoom never takes the mic made every
+   * recording started from a ring prompt auto-stop after exactly 12s.
+   */
+  private currentInputLabel: string | null = null
+
   /** Meeting-end watch, alive only while our own capture runs (suppressed). */
   private capturing = false
   private endState: MeetingEndState = initialEndState()
@@ -145,8 +154,11 @@ export class MicWatcher {
     this.resetEndWatch()
     // micmon only emits on CHANGES — if the meeting app already held the mic
     // when recording started (the normal case), seed the watch from the
-    // last-known state or the end edge would never arm.
-    if (suppressed && this.currentAppLabel !== null) {
+    // last-known INPUT state or the end edge would never arm. Ring-only
+    // evidence must not seed it (see currentInputLabel); a call that is
+    // still ringing arms the watch later, when the app takes the mic.
+    if (suppressed && this.currentInputLabel !== null) {
+      this.diag(`end-watch seeded: ${this.currentInputLabel} already on the mic`)
       this.endState = onCaptureMicEvent(this.endState, true, Date.now())
     }
   }
@@ -209,6 +221,7 @@ export class MicWatcher {
             const inputLabel = event.running ? meetingAppLabel(bundles) : null
             const ringLabel = meetingRingLabel(output)
             this.currentAppLabel = inputLabel ?? ringLabel
+            this.currentInputLabel = inputLabel
             this.diag(
               `event running=${event.running} in=[${bundles.join(',')}] out=[${output.join(',')}] ` +
                 `inputLabel=${inputLabel} ringLabel=${ringLabel} suppressed=${this.state.suppressed}`
@@ -305,6 +318,7 @@ export class MicWatcher {
         this.endTimer = null
         if (this.capturing && shouldAutoStop(this.endState, Date.now())) {
           this.endState = markEnded(this.endState)
+          this.diag('AUTO-STOP fired: meeting app off the mic past debounce')
           this.onMeetingEnded()
         }
       }, MEETING_END_DEBOUNCE_MS)
