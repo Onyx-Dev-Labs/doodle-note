@@ -1,0 +1,38 @@
+name: CI
+
+# Guard rail born from two production incidents: a package.json change
+# without a lockfile update passes locally (node_modules already present)
+# but kills every Vercel deploy with ERR_PNPM_OUTDATED_LOCKFILE — silently,
+# since nothing was watching deploy status. Fail the PR instead.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from package.json#packageManager
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The incident guard. --ignore-scripts skips native postinstalls
+      # (electron, llama.cpp, sherpa) that the checks below don't need —
+      # lockfile validation happens at resolution time regardless.
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Desktop typecheck
+        run: pnpm --filter desktop typecheck
+
+      - name: Desktop tests
+        run: pnpm --filter desktop test
+
+      - name: MCP server tests
+        run: pnpm --filter doodle-note-mcp test
