@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -21,12 +22,17 @@ import {
 import type { EngineAudioEvent } from '../shared/engine-events'
 import { isWinCheckpointDir, mergeWinSession } from './win-audio-recorder'
 
-/** Merged session audio: m4a from the Swift engine, wav from the Windows tee. */
-const AUDIO_FILES = ['audio.m4a', 'audio.wav'] as const
+/** Merged session audio: m4a from the Swift engine, wav from the Windows
+ *  tee, mp3/wav/m4a copied in by imports. */
+const AUDIO_FILES = ['audio.m4a', 'audio.wav', 'audio.mp3'] as const
 const AUDIO_MIME: Record<string, string> = {
   'audio.m4a': 'audio/mp4',
-  'audio.wav': 'audio/wav'
+  'audio.wav': 'audio/wav',
+  'audio.mp3': 'audio/mpeg'
 }
+
+/** Import formats we accept: Chromium plays them AND AVFoundation reads them. */
+export const IMPORTABLE_EXTENSIONS = ['wav', 'mp3', 'm4a'] as const
 
 /** The merged audio file present in a session dir, if any. */
 function audioFileIn(dir: string): string | null {
@@ -186,6 +192,41 @@ export class AudioService {
       })
     }
     return parts
+  }
+
+  /**
+   * Register an imported audio file as a meeting's playback part: copied
+   * (never moved — it's the user's file) into a fresh session dir. Returns
+   * false when the extension isn't importable.
+   */
+  addImportedPart(meetingId: string, sourcePath: string, durationMs: number): boolean {
+    if (!SAFE_MEETING_ID.test(meetingId)) return false
+    const ext = sourcePath.split('.').pop()?.toLowerCase() ?? ''
+    if (!(IMPORTABLE_EXTENSIONS as readonly string[]).includes(ext)) return false
+    const epoch = Date.now()
+    const dir = join(this.baseDir, meetingId, String(epoch))
+    try {
+      mkdirSync(dir, { recursive: true })
+      copyFileSync(sourcePath, join(dir, `audio.${ext}`))
+      this.writePartMeta(dir, epoch, durationMs)
+      return true
+    } catch (err) {
+      console.error('[audio] failed to store imported audio:', err)
+      rmSync(dir, { recursive: true, force: true })
+      return false
+    }
+  }
+
+  /** Parts with filesystem paths — for re-transcription, not the renderer. */
+  listPaths(meetingId: string): Array<{ path: string; startEpochMs: number }> {
+    return this.list(meetingId).map((part) => {
+      const url = new URL(part.url)
+      const [, session, file] = url.pathname.split('/')
+      return {
+        path: join(this.baseDir, url.host, session as string, file as string),
+        startEpochMs: part.startEpochMs
+      }
+    })
   }
 
   deleteFor(meetingId: string): void {

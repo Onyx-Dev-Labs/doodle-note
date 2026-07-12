@@ -14,6 +14,7 @@ import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { AudioService } from './audio-service'
+import { ImportService } from './import-service'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
@@ -368,6 +369,16 @@ app.whenReady().then(() => {
 
   notesService = new NotesService(app.getPath('userData'), broadcast, meetingsService)
   notesService.registerIpc()
+
+  // Audio import + re-transcription: batch engine runs in its own process,
+  // so a live recording session is never disturbed.
+  const importService = new ImportService(
+    resolveEngineBinary(),
+    meetingsService,
+    audioService,
+    broadcast
+  )
+  importService.registerIpc()
 
   const foldersService = new FoldersService(
     join(app.getPath('userData'), 'folders.json'),

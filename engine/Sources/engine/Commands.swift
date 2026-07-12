@@ -25,6 +25,16 @@ enum Commands {
         try await manager.loadModels(models)
         Events.emit(["event": "ready", "model": modelName])
 
+        // Segment-friendly mode for imports and re-transcription: stereo
+        // meeting recordings decode each channel separately (L = mic "You",
+        // R = system "Them" — our merge writes them that way), emitting the
+        // live protocol's per-channel timings/final events so hosts assemble
+        // transcript segments with the exact same code as live capture.
+        if options.values["channels"] == "split" {
+            try await transcribeSplit(url: url, manager: manager)
+            return
+        }
+
         var decoderState = try TdtDecoderState()
         let result = try await manager.transcribe(url, decoderState: &decoderState)
 
@@ -44,6 +54,86 @@ enum Commands {
             final["tokens"] = Timings.payload(timings)
         }
         Events.emit(final)
+    }
+
+    /// Decode each audio channel independently and emit per-channel events.
+    /// Mono inputs (imports) produce a single "mic" channel.
+    private static func transcribeSplit(url: URL, manager: AsrManager) async throws {
+        let file = try AVAudioFile(forReading: url)
+        let sourceFormat = file.processingFormat
+        let channelCount = min(Int(sourceFormat.channelCount), 2)
+        guard channelCount > 0, file.length > 0 else {
+            throw EngineError.internalError("audio file has no content: \(url.path)")
+        }
+        let channelNames = channelCount == 2 ? ["mic", "system"] : ["mic"]
+
+        guard
+            let monoFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: sourceFormat.sampleRate,
+                channels: 1, interleaved: false)
+        else { throw EngineError.internalError("could not create mono split format") }
+
+        // Blockwise read → split channels → resample each to the ASR's 16k
+        // mono. One converter per channel: they keep filter state across
+        // blocks, and interleaving two channels through one converter would
+        // smear samples across the block seams.
+        let converters = channelNames.map { _ in AudioConverter() }
+        var channelSamples: [[Float]] = Array(repeating: [], count: channelCount)
+        let blockFrames: AVAudioFrameCount = 1 << 19  // ~11s at 48k per read
+        guard let block = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: blockFrames)
+        else { throw EngineError.internalError("could not allocate read buffer") }
+
+        while file.framePosition < file.length {
+            try file.read(into: block, frameCount: blockFrames)
+            let frames = block.frameLength
+            guard frames > 0 else { break }
+            for channel in 0..<channelCount {
+                guard
+                    let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: frames),
+                    let source = block.floatChannelData?[channel],
+                    let target = mono.floatChannelData?[0]
+                else { continue }
+                mono.frameLength = frames
+                target.update(from: source, count: Int(frames))
+                channelSamples[channel].append(contentsOf: try converters[channel].resampleBuffer(mono))
+            }
+        }
+
+        let started = Date()
+        var audioSeconds: Double = 0
+        for (index, name) in channelNames.enumerated() {
+            Events.emit(["event": "status", "stage": "transcribing", "channel": name])
+            var decoderState = try TdtDecoderState()
+            let result = try await manager.transcribe(
+                channelSamples[index], decoderState: &decoderState)
+            audioSeconds = max(audioSeconds, Double(channelSamples[index].count) / AudioSupport.sampleRate)
+            // Tokens stream in bounded chunks — an hour of speech in one JSON
+            // line is unkind to line-buffered consumers.
+            if let timings = result.tokenTimings {
+                var offset = 0
+                while offset < timings.count {
+                    let end = min(offset + 1_000, timings.count)
+                    Events.emit([
+                        "event": "timings", "channel": name,
+                        "tokens": Timings.payload(Array(timings[offset..<end])),
+                    ])
+                    offset = end
+                }
+            }
+            Events.emit([
+                "event": "final",
+                "channel": name,
+                "text": result.text,
+                "confidence": Double(result.confidence),
+            ])
+        }
+        let processing = Date().timeIntervalSince(started)
+        Events.emit([
+            "event": "done",
+            "audioSeconds": audioSeconds,
+            "processingSeconds": processing,
+            "speedup": processing > 0 ? ((audioSeconds / processing) * 10).rounded() / 10 : 0,
+        ])
     }
 
     // MARK: - stream: live partials (Parakeet Unified, built for hours-long sessions)

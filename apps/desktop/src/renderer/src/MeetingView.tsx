@@ -232,6 +232,7 @@ export default function MeetingView({
   const [audioParts, setAudioParts] = useState<AudioPart[]>([])
   const [activePart, setActivePart] = useState(0)
   const [playingSegId, setPlayingSegId] = useState<string | null>(null)
+  const [retranscribing, setRetranscribing] = useState(false)
   const [inputDevices, setInputDevices] = useState<EngineInputDevice[]>([])
   const [inputDeviceUid, setInputDeviceUid] = useState<string>(
     () => window.localStorage.getItem(INPUT_DEVICE_STORAGE_KEY) ?? ''
@@ -743,6 +744,36 @@ export default function MeetingView({
     void el.play()
   }
 
+  // Rebuild the transcript from the saved recording with the current model.
+  // Notes are untouched; the segment list is replaced wholesale.
+  const runRetranscribe = async (): Promise<void> => {
+    if (retranscribing || capturing) return
+    if (
+      !window.confirm(
+        'Re-transcribe this meeting from its saved recording? The current transcript is replaced; your notes are kept.'
+      )
+    ) {
+      return
+    }
+    setRetranscribing(true)
+    try {
+      const result = await window.importer.retranscribe(meetingId)
+      if (result.error) {
+        dispatch({ event: 'error', message: result.error })
+        return
+      }
+      const record = await window.meetings.get(meetingId)
+      if (record) {
+        setSavedSegments(record.segments.filter((s) => !s.echo))
+        setSavedEcho(record.echoSuppressed)
+      }
+    } catch (err) {
+      dispatch({ event: 'error', message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setRetranscribing(false)
+    }
+  }
+
   // Highlight the transcript row the playhead is inside of.
   const onPlayheadMoved = (): void => {
     const part = audioParts[activePart]
@@ -1164,6 +1195,16 @@ export default function MeetingView({
           <div className="tp-head">
             <span className="tp-meta">{totalEcho > 0 ? `${totalEcho} echo suppressed` : ''}</span>
             <div className="tp-actions">
+              {audioParts.length > 0 && !capturing && (
+                <button
+                  type="button"
+                  onClick={() => void runRetranscribe()}
+                  disabled={retranscribing}
+                  title="Rebuild the transcript from the saved recording with the current model"
+                >
+                  {retranscribing ? 'Re-transcribing…' : 'Re-transcribe'}
+                </button>
+              )}
               <button type="button" onClick={copyTranscript} title="Copy transcript">
                 {copied ? '✓ Copied' : 'Copy'}
               </button>

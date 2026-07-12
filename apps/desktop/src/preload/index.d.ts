@@ -1,4 +1,5 @@
 import type { AudioApi } from '../shared/audio-api'
+import type { ImporterApi } from '../shared/import-api'
 import type { CalendarApi } from '../shared/calendar-api'
 import type { DetectApi } from '../shared/detect-api'
 import type { EngineApi } from '../shared/engine-events'
@@ -25,6 +26,7 @@ declare global {
     updates: UpdateApi
     integrations: IntegrationsApi
     audio: AudioApi
+    importer: ImporterApi
   }
 }
 

@@ -26,6 +26,15 @@ import {
   type AudioUsage
 } from '../shared/audio-api'
 import {
+  IMPORT_AUDIO_CHANNEL,
+  IMPORT_PROGRESS_CHANNEL,
+  IMPORT_RETRANSCRIBE_CHANNEL,
+  type ImporterApi,
+  type ImportProgress,
+  type ImportResult,
+  type RetranscribeResult
+} from '../shared/import-api'
+import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
   NOTES_ASK_CHANNEL,
   NOTES_ASK_GLOBAL_CHANNEL,
@@ -465,6 +474,20 @@ const integrationsApi: IntegrationsApi = {
   }
 }
 
+const importerApi: ImporterApi = {
+  importAudio(): Promise<ImportResult> {
+    return ipcRenderer.invoke(IMPORT_AUDIO_CHANNEL) as Promise<ImportResult>
+  },
+
+  retranscribe(meetingId: string): Promise<RetranscribeResult> {
+    return ipcRenderer.invoke(IMPORT_RETRANSCRIBE_CHANNEL, meetingId) as Promise<RetranscribeResult>
+  },
+
+  onProgress(cb: (progress: ImportProgress) => void): () => void {
+    return subscribe(IMPORT_PROGRESS_CHANNEL, cb)
+  }
+}
+
 const audioApi: AudioApi = {
   list(meetingId: string): Promise<AudioPart[]> {
     return ipcRenderer.invoke(AUDIO_LIST_CHANNEL, meetingId) as Promise<AudioPart[]>
@@ -497,6 +520,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('updates', updateApi)
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
     contextBridge.exposeInMainWorld('audio', audioApi)
+    contextBridge.exposeInMainWorld('importer', importerApi)
   } catch (error) {
     console.error(error)
   }
@@ -525,4 +549,6 @@ if (process.contextIsolated) {
   window.integrations = integrationsApi
   // @ts-ignore (defined in index.d.ts)
   window.audio = audioApi
+  // @ts-ignore (defined in index.d.ts)
+  window.importer = importerApi
 }

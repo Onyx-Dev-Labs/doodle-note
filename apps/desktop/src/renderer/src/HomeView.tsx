@@ -365,6 +365,21 @@ export default function HomeView({
   const [pickerFor, setPickerFor] = useState<string | null>(null)
   /** Transient share feedback: message shown as a toast under the topbar. */
   const [shareNotice, setShareNotice] = useState<string | null>(null)
+  /** 'idle' | 'running' | an error message. */
+  const [importState, setImportState] = useState<'idle' | 'running' | string>('idle')
+
+  const runImport = async (): Promise<void> => {
+    if (importState === 'running') return
+    setImportState('running')
+    try {
+      const result = await window.importer.importAudio()
+      setImportState('idle')
+      if (result.meetingId) onOpenMeeting(result.meetingId)
+      else if (result.error) setImportState(result.error)
+    } catch (err) {
+      setImportState(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   useEffect(() => {
     if (shareNotice === null) return
@@ -636,6 +651,15 @@ export default function HomeView({
         )}
         <button
           type="button"
+          className="pill-btn no-drag"
+          title="Import a wav, mp3, or m4a recording — transcribed on-device into a regular meeting"
+          disabled={importState === 'running'}
+          onClick={() => void runImport()}
+        >
+          {importState === 'running' ? 'Importing…' : '⤓ Import audio'}
+        </button>
+        <button
+          type="button"
           className="pill-btn new-note no-drag"
           title="A blank note — type freely, or hit record to mind-dump and generate notes"
           onClick={onNewNote}
@@ -650,6 +674,15 @@ export default function HomeView({
       {shareNotice !== null && (
         <div className="share-notice" role="status">
           {shareNotice}
+        </div>
+      )}
+
+      {importState !== 'idle' && importState !== 'running' && (
+        <div className="toast" role="alert">
+          <span>{importState}</span>
+          <button type="button" onClick={() => setImportState('idle')}>
+            ✕
+          </button>
         </div>
       )}
 
