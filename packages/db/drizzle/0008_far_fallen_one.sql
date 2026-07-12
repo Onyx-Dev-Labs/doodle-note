@@ -1,0 +1,1 @@
+ALTER TABLE "transcript_segments" ADD COLUMN "absolute_start_ms" bigint;

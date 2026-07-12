@@ -21,6 +21,8 @@ interface PushSegment {
   text: string;
   startMs: number;
   endMs: number;
+  /** Wall-clock epoch ms — the audio-playback seek anchor. */
+  absoluteStartMs?: number;
   confidence?: number;
 }
 
@@ -194,6 +196,11 @@ export async function POST(request: Request) {
           text: s.text.slice(0, 10_000),
           startMs: Math.round(s.startMs),
           endMs: Math.round(s.endMs),
+          absoluteStartMs:
+            typeof s.absoluteStartMs === "number" &&
+            Number.isFinite(s.absoluteStartMs)
+              ? Math.round(s.absoluteStartMs)
+              : null,
           confidence: Number.isFinite(s.confidence) ? s.confidence : null,
         }));
       if (segments.length > 0) {

@@ -113,6 +113,9 @@ export async function GET(request: Request) {
         text: s.text,
         startMs: s.startMs,
         endMs: s.endMs,
+        ...(s.absoluteStartMs !== null
+          ? { absoluteStartMs: s.absoluteStartMs }
+          : {}),
         ...(s.confidence !== null ? { confidence: s.confidence } : {}),
       })),
     };

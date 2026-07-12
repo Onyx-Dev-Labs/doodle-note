@@ -1,4 +1,4 @@
-import { boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 import { organization, user } from "./auth-schema";
 
@@ -60,6 +60,10 @@ export const transcriptSegments = pgTable(
     text: text("text").notNull(),
     startMs: integer("start_ms").notNull(),
     endMs: integer("end_ms").notNull(),
+    /** Wall-clock epoch ms of the segment start — the audio-playback seek
+     *  anchor. bigint: epoch ms overflows int4. Null on segments recorded
+     *  before this column existed (or from clients that don't send it). */
+    absoluteStartMs: bigint("absolute_start_ms", { mode: "number" }),
     confidence: real("confidence"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },

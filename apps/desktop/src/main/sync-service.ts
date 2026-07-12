@@ -561,6 +561,7 @@ export class SyncService {
       text: string
       startMs: number
       endMs: number
+      absoluteStartMs?: unknown
       confidence?: unknown
     }
     const segments: TranscriptSegment[] = (Array.isArray(remote.segments) ? remote.segments : [])
@@ -586,6 +587,9 @@ export class SyncService {
         text: s.text,
         startMs: Math.round(s.startMs),
         endMs: Math.round(s.endMs),
+        ...(typeof s.absoluteStartMs === 'number' && Number.isFinite(s.absoluteStartMs)
+          ? { absoluteStartMs: Math.round(s.absoluteStartMs) }
+          : {}),
         confidence:
           typeof s.confidence === 'number' && Number.isFinite(s.confidence) ? s.confidence : 0.9
       }))
@@ -768,6 +772,7 @@ interface RemoteMeeting {
     text?: unknown
     startMs?: unknown
     endMs?: unknown
+    absoluteStartMs?: unknown
     confidence?: unknown
   }>
 }
@@ -799,7 +804,15 @@ function contentHash(record: MeetingRecord, mediaUrls: Record<string, string>): 
     enhancedMarkdown: record.enhancedMarkdown
       ? rewriteMedia(record.enhancedMarkdown, mediaUrls)
       : null,
-    segments: record.segments.map((s) => [s.channel, s.speaker, s.text, s.startMs, s.endMs])
+    segments: record.segments.map((s) => [
+      s.channel,
+      s.speaker,
+      s.text,
+      s.startMs,
+      s.endMs,
+      // In the hash so meetings that gained anchors locally re-push once.
+      s.absoluteStartMs ?? null
+    ])
   }
   return createHash('sha256').update(JSON.stringify(projection)).digest('hex')
 }
@@ -829,6 +842,9 @@ function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>)
         text: s.text,
         startMs: s.startMs,
         endMs: s.endMs,
+        // The audio-playback seek anchor; without it, click-to-seek on a
+        // synced meeting degrades to the channel-relative approximation.
+        ...(typeof s.absoluteStartMs === 'number' ? { absoluteStartMs: s.absoluteStartMs } : {}),
         confidence: s.confidence
       }))
   }
