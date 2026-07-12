@@ -60,6 +60,9 @@ enum ServeCommand {
                         Events.emit(["event": "error", "message": "session failed: \(error)"])
                         Events.emit(["event": "done"])
                     }
+                    // A session that threw mid-setup can strand a running
+                    // capture; a clean one already emptied the registry.
+                    CaptureRegistry.shared.stopAll()
                     // Models stay loaded; transcription state clears for next time.
                     try? await micManager.reset()
                     try? await systemManager.reset()
@@ -79,6 +82,10 @@ enum ServeCommand {
 
         // stdin closed — host process is gone.
         Events.log("serve: stdin closed — host gone; draining session")
+        // Drop the OS taps immediately (see LiveCommand's watchdog): the drain
+        // may be seconds away from its own capture teardown, and a stranded
+        // SCStream leaves a stale Control Center attribution.
+        CaptureRegistry.shared.stopAll()
         box.stop()
         await box.awaitCurrent()
         exit(0)

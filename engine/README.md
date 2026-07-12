@@ -33,6 +33,13 @@ engine live [--source mic|system|both] [--seconds N] [--aec off] [--input-device
     Runs until --seconds or SIGINT/SIGTERM. Speaker separation between you and
     the far side comes from the capture topology, not diarization.
 
+    Signals: the first SIGINT/SIGTERM (or stdin closing, with
+    --exit-on-stdin-close) tears the OS capture taps down synchronously —
+    a process killed with an SCStream still capturing leaves a stale
+    "System Audio Recording" attribution in Control Center — then drains the
+    transcript and exits after `done`. A second signal skips the remaining
+    drain: it emits `done` and exits immediately. Serve mode behaves the same.
+
     --audio-dir enables crash-safe audio persistence: each channel writes
     rotating ~30s CAF checkpoints under <dir>/checkpoints/ while recording;
     a clean stop merges them into <dir>/audio.m4a (AAC 16kHz, L=mic R=system,
