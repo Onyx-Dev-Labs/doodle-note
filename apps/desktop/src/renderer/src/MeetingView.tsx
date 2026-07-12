@@ -84,6 +84,12 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       if (ev.stage === 'transcribing') {
         return { ...state, transcribing: true, statusText: '' }
       }
+      // The engine confirms a stop instantly with `finishing` — reflect it
+      // instantly, or the still-ticking timer makes stop look ignored and
+      // users hammer the button.
+      if (ev.stage === 'finishing' || ev.stage === 'saving_audio') {
+        return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
+      }
       return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
     }
     case 'ready':
@@ -240,6 +246,9 @@ export default function MeetingView({
   const stateRef = useRef(state)
   const startedAtRef = useRef<string | null>(null)
   const recordStartRef = useRef<number | null>(null)
+  /** Seconds recorded in EARLIER sessions of this meeting — Resume must not
+   *  restart the clock at 0 when the recording itself is cumulative. */
+  const elapsedBaseRef = useRef(0)
   const autoOpenedRef = useRef(false)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
@@ -399,7 +408,14 @@ export default function MeetingView({
           }
           if (prev.echoCount > 0) setSavedEcho((n) => n + prev.echoCount)
           recordStartRef.current = null
-          setElapsedSec(0)
+          // Resume continues the meeting clock: bank whatever the timer
+          // showed when the last session ended. Max, not assignment — on a
+          // freshly reopened meeting the display still reads 0 while the
+          // base was seeded from the saved parts.
+          setElapsedSec((shown) => {
+            elapsedBaseRef.current = Math.max(elapsedBaseRef.current, shown)
+            return shown
+          })
           if (!autoOpenedRef.current) {
             autoOpenedRef.current = true
             setTranscriptOpen(true)
@@ -427,7 +443,13 @@ export default function MeetingView({
       window.audio
         .list(meetingId)
         .then((parts) => {
-          if (!cancelled) setAudioParts(parts)
+          if (cancelled) return
+          setAudioParts(parts)
+          // Freshly (re)opened meeting: align the meeting clock with what's
+          // already recorded, so a Resume continues rather than restarts.
+          if (!ACTIVE_PHASES.includes(stateRef.current.phase)) {
+            elapsedBaseRef.current = parts.reduce((sum, p) => sum + p.durationMs, 0) / 1000
+          }
         })
         .catch(() => {})
     }
@@ -550,7 +572,8 @@ export default function MeetingView({
     if (phase !== 'recording') return
     if (recordStartRef.current === null) recordStartRef.current = Date.now()
     const started = recordStartRef.current
-    const tick = (): void => setElapsedSec((Date.now() - started) / 1000)
+    const base = elapsedBaseRef.current
+    const tick = (): void => setElapsedSec(base + (Date.now() - started) / 1000)
     tick()
     const interval = setInterval(tick, 1000)
     return () => clearInterval(interval)
@@ -1404,7 +1427,8 @@ export default function MeetingView({
                 type="button"
                 className="stop-btn"
                 onClick={stopRecording}
-                title="Stop recording"
+                disabled={phase === 'finishing'}
+                title={phase === 'finishing' ? 'Finishing up…' : 'Stop recording'}
                 aria-label="Stop recording"
               >
                 ■
