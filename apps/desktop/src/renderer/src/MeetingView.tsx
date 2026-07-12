@@ -690,12 +690,18 @@ export default function MeetingView({
   // Map a segment's wall-clock time onto (recording part, offset): the part
   // is the latest one that started at or before the segment; the offset is
   // the distance from that part's first frame.
+  //
+  // absoluteStartMs survives local recording but is STRIPPED by today's sync
+  // schema (no column), so any meeting that round-tripped through the cloud
+  // loses it. Fallback: a segment's channel-relative startMs is within the
+  // capture-start gap (≈1s) of its file position in the current part.
   const seekToSegment = (segment: TranscriptSegment): void => {
     if (audioParts.length === 0) return
-    let partIndex = 0
-    let offsetSec = 0
+    let partIndex = Math.min(activePart, audioParts.length - 1)
+    let offsetSec = Math.max(0, segment.startMs / 1000)
     const abs = segment.absoluteStartMs
     if (typeof abs === 'number') {
+      partIndex = 0
       for (let i = audioParts.length - 1; i >= 0; i--) {
         if (audioParts[i]!.startEpochMs <= abs) {
           partIndex = i
@@ -722,8 +728,8 @@ export default function MeetingView({
     const epochMs = part.startEpochMs + el.currentTime * 1000
     let current: string | null = null
     for (const s of allSegments) {
-      const t = s.absoluteStartMs
-      if (typeof t !== 'number') continue
+      // Same fallback as seekToSegment for sync-stripped segments.
+      const t = typeof s.absoluteStartMs === 'number' ? s.absoluteStartMs : part.startEpochMs + s.startMs
       if (t > epochMs) break
       current = s.id
     }
@@ -1153,7 +1159,11 @@ export default function MeetingView({
               <audio
                 ref={audioRef}
                 controls
-                preload="metadata"
+                // "auto", never "metadata": the metadata strategy loads 64KiB,
+                // aborts, and RESUMES on play — and Electron's protocol.handle
+                // corrupts resumed media loads (PIPELINE_ERROR_READ ~3.6s in).
+                // One continuous load of a small local file always works.
+                preload="auto"
                 src={audioParts[Math.min(activePart, audioParts.length - 1)]?.url}
                 onLoadedMetadata={() => {
                   const sec = pendingSeekSecRef.current

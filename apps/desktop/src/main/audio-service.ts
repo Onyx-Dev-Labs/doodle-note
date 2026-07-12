@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process'
 import {
-  createReadStream,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -10,7 +9,6 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { Readable } from 'node:stream'
 import { ipcMain, protocol } from 'electron'
 import {
   AUDIO_CLEAR_ALL_CHANNEL,
@@ -21,7 +19,6 @@ import {
   type AudioUsage
 } from '../shared/audio-api'
 import type { EngineAudioEvent } from '../shared/engine-events'
-import { parseByteRange } from './audio-range'
 import { isWinCheckpointDir, mergeWinSession } from './win-audio-recorder'
 
 /** Merged session audio: m4a from the Swift engine, wav from the Windows tee. */
@@ -79,6 +76,15 @@ export class AudioService {
   /** Call after app ready (protocol.handle requires it). */
   registerProtocol(): void {
     protocol.handle('doodle-audio', (request) => {
+      const respond = (response: Response): Response => {
+        if (process.env.DOODLE_AUDIO_DEBUG) {
+          console.log(
+            `[doodle-audio] ${request.method} ${request.url} range=${request.headers.get('range')} -> ` +
+              `${response.status} cr=${response.headers.get('content-range')} cl=${response.headers.get('content-length')}`
+          )
+        }
+        return response
+      }
       // doodle-audio://<meetingId>/<sessionEpochMs>/<audio.m4a|audio.wav>
       const url = new URL(request.url)
       const meetingId = url.host
@@ -89,39 +95,35 @@ export class AudioService {
         !file ||
         !(AUDIO_FILES as readonly string[]).includes(file)
       ) {
-        return new Response('bad audio path', { status: 400 })
+        return respond(new Response('bad audio path', { status: 400 }))
       }
       const path = join(this.baseDir, meetingId, session as string, file)
-      let size: number
-      try {
-        size = statSync(path).size
-      } catch {
-        return new Response('not found', { status: 404 })
+      if (!existsSync(path)) {
+        return respond(new Response('not found', { status: 404 }))
       }
 
-      const headers: Record<string, string> = {
-        'Content-Type': AUDIO_MIME[file] ?? 'application/octet-stream',
-        'Accept-Ranges': 'bytes'
+      // Always a 200 with the FULL file, never 206/Range — twice burned:
+      //  1. Readable.toWeb streams close early under GC (random mid-play
+      //     PIPELINE_ERROR_READ);
+      //  2. Correct 206 slices get spliced wrong by protocol.handle's media
+      //     glue — Chromium reads 64KiB of the first response, re-requests
+      //     from 65536, and the demuxer dies at the boundary (~3.6s in).
+      // Without Accept-Ranges Chromium buffers the whole (local, small)
+      // resource up front and every seek is served from its own cache.
+      let body: Buffer
+      try {
+        body = readFileSync(path)
+      } catch {
+        return respond(new Response('read failed', { status: 500 }))
       }
-      // Seeking: Chromium asks for byte ranges once it knows the file length.
-      const range = parseByteRange(request.headers.get('range'), size)
-      if (range === 'unsatisfiable') {
-        return new Response('bad range', {
-          status: 416,
-          headers: { 'Content-Range': `bytes */${size}` }
+      return respond(
+        new Response(body as unknown as BodyInit, {
+          headers: {
+            'Content-Type': AUDIO_MIME[file] ?? 'application/octet-stream',
+            'Content-Length': String(body.length)
+          }
         })
-      }
-      if (range) {
-        const { start, end } = range
-        headers['Content-Range'] = `bytes ${start}-${end}/${size}`
-        headers['Content-Length'] = String(end - start + 1)
-        return new Response(
-          Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream,
-          { status: 206, headers }
-        )
-      }
-      headers['Content-Length'] = String(size)
-      return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, { headers })
+      )
     })
   }
 
@@ -248,9 +250,17 @@ export class AudioService {
         if (!SAFE_SESSION_DIR.test(session)) continue
         const dir = join(this.baseDir, meeting, session)
         if (audioFileIn(dir) !== null) continue
-        if (!existsSync(join(dir, 'checkpoints'))) {
-          // Neither merged audio nor checkpoints: a session that never
-          // captured a frame (e.g. permissions denied). Just tidy up.
+        const checkpoints = join(dir, 'checkpoints')
+        let chunkCount = 0
+        try {
+          chunkCount = readdirSync(checkpoints).length
+        } catch {
+          // no checkpoints dir at all
+        }
+        if (chunkCount === 0) {
+          // No merged audio and no chunk data: a session that never captured
+          // a frame (permissions denied, instant stop). Just tidy up —
+          // leaving it would re-attempt "recovery" on every launch.
           rmSync(dir, { recursive: true, force: true })
           continue
         }

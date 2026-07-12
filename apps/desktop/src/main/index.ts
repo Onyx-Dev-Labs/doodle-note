@@ -100,6 +100,12 @@ function migrateDevUserData(): void {
   }
 }
 
+// Debugging affordance: DOODLE_DEBUG_PORT=9333 opens the Chrome DevTools
+// Protocol so playback/UI issues can be inspected in the running app.
+if (process.env.DOODLE_DEBUG_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.DOODLE_DEBUG_PORT)
+}
+
 // Must run before app ready: lets <img src="doodle-media://…"> load without
 // mixed-content blocking (the dev renderer is served over http). doodle-audio
 // additionally needs stream support so <audio> can range-request recordings.
