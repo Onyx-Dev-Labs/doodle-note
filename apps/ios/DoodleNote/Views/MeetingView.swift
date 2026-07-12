@@ -22,20 +22,26 @@ struct MeetingView: View {
         VStack(spacing: 0) {
             header
 
-            if recorder.isActive {
-                recordingBanner
-            }
+            if meeting.isNote {
+                // Quick note: just the editor — no recording chrome, no
+                // transcript tab (there is nothing to transcribe).
+                notesTab
+            } else {
+                if recorder.isActive {
+                    recordingBanner
+                }
 
-            Picker("View", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+                Picker("View", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
-            switch tab {
-            case .notes: notesTab
-            case .transcript: transcriptTab
+                switch tab {
+                case .notes: notesTab
+                case .transcript: transcriptTab
+                }
             }
         }
         .background(Color.cream)
@@ -78,7 +84,8 @@ struct MeetingView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            TextField("Untitled meeting", text: $meeting.title, axis: .vertical)
+            TextField(meeting.isNote ? "Untitled note" : "Untitled meeting",
+                      text: $meeting.title, axis: .vertical)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.ink)
                 .lineLimit(2)
@@ -147,7 +154,7 @@ struct MeetingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Your rough notes")
+                    Text(meeting.isNote ? "Your note" : "Your rough notes")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.stone)
                     // A growing TextField (not TextEditor): TextEditor has its
@@ -155,7 +162,7 @@ struct MeetingView: View {
                     // notes screen wouldn't scroll on the first touch. TextField
                     // with a vertical axis grows to fit and never scrolls itself.
                     TextField(
-                        "Jot your rough notes…",
+                        meeting.isNote ? "Write anything…" : "Jot your rough notes…",
                         text: $meeting.roughNotes,
                         axis: .vertical
                     )
@@ -169,7 +176,10 @@ struct MeetingView: View {
                     .foregroundStyle(Color.ink)
                 }
 
-                generateSection
+                // Notes have no transcript to merge — generation is meetings-only.
+                if !meeting.isNote {
+                    generateSection
+                }
 
                 if let notes = meeting.generatedNotes {
                     VStack(alignment: .leading, spacing: 6) {

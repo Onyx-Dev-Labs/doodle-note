@@ -37,6 +37,8 @@ struct SyncAPI: Sendable {
     struct PushMeeting: Codable {
         var id: String
         var title: String
+        /// "meeting" or "note" (standalone quick note); omitted = meeting.
+        var kind: String?
         var createdAt: String
         var startedAt: String?
         var endedAt: String?
@@ -62,6 +64,7 @@ struct SyncAPI: Sendable {
     struct RemoteMeeting: Codable {
         var id: String
         var title: String
+        var kind: String?
         var createdAt: String
         var updatedAt: String
         var startedAt: String?

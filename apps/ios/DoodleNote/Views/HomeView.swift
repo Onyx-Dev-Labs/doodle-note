@@ -348,8 +348,17 @@ struct HomeView: View {
                 .overlay(Capsule().stroke(Color.sand))
             }
 
-            Button {
-                startMeeting(title: "", calendarEventId: nil)
+            Menu {
+                Button {
+                    startMeeting(title: "", calendarEventId: nil)
+                } label: {
+                    Label("Record meeting", systemImage: "record.circle.fill")
+                }
+                Button {
+                    startNote()
+                } label: {
+                    Label("New note", systemImage: "square.and.pencil")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.title3.weight(.semibold))
@@ -357,7 +366,7 @@ struct HomeView: View {
                     .background(Color.sageDeep, in: Circle())
                     .foregroundStyle(Color.cream)
             }
-            .accessibilityLabel("New meeting")
+            .accessibilityLabel("New")
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
@@ -385,6 +394,15 @@ struct HomeView: View {
         autoRecordMeeting = meeting
         path.append(meeting)
     }
+
+    /// Standalone quick note — typing is its default, nothing records.
+    private func startNote() {
+        let note = Meeting(kind: "note")
+        note.folderId = selectedFolderId
+        context.insert(note)
+        try? context.save()
+        path.append(note)
+    }
 }
 
 private struct MeetingRow: View {
@@ -399,6 +417,9 @@ private struct MeetingRow: View {
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(meeting.createdAt, format: .dateTime.hour().minute())
+                    if meeting.isNote {
+                        Label("Note", systemImage: "square.and.pencil")
+                    }
                     if meeting.generatedNotes != nil {
                         Label("Notes", systemImage: "sparkles")
                     }

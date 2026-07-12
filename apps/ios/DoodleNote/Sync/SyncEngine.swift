@@ -319,6 +319,7 @@ final class SyncEngine: NSObject {
 
     private func update(meeting: Meeting, from remote: SyncAPI.RemoteMeeting, context: ModelContext) {
         meeting.title = remote.title
+        meeting.kind = remote.kind == "note" ? "note" : nil
         meeting.createdAt = parseISO(remote.createdAt) ?? meeting.createdAt
         meeting.startedAt = remote.startedAt.flatMap(parseISO)
         meeting.endedAt = remote.endedAt.flatMap(parseISO)
@@ -352,6 +353,7 @@ final class SyncEngine: NSObject {
         SyncAPI.PushMeeting(
             id: meeting.id.uuidString.lowercased(),
             title: meeting.displayTitle,
+            kind: meeting.isNote ? "note" : nil,
             createdAt: isoString(meeting.createdAt),
             startedAt: meeting.startedAt.map(isoString),
             endedAt: meeting.endedAt.map(isoString),
@@ -376,6 +378,7 @@ final class SyncEngine: NSObject {
     private func contentHash(of meeting: Meeting) -> String {
         var parts: [String] = [
             meeting.displayTitle,
+            meeting.kind ?? "",
             meeting.startedAt.map(isoString) ?? "",
             meeting.endedAt.map(isoString) ?? "",
             meeting.calendarEventId ?? "",
