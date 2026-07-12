@@ -36,3 +36,6 @@ jobs:
 
       - name: MCP server tests
         run: pnpm --filter doodle-note-mcp test
+
+      - name: Notes engine tests
+        run: pnpm --filter @repo/ai test

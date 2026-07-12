@@ -20,6 +20,7 @@ import {
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_TEMPLATES_CHANNEL,
+  NOTES_ENHANCE_PROGRESS_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
   NOTES_GET_SETTINGS_CHANNEL,
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
@@ -271,9 +272,15 @@ export class NotesService {
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
       const engine = this.pickEngine()
-      const result = await engine.generateNotes(input, (token) => {
-        this.broadcast(NOTES_ENHANCE_TOKEN_CHANNEL, { token })
-      })
+      const result = await engine.generateNotes(
+        input,
+        (token) => {
+          this.broadcast(NOTES_ENHANCE_TOKEN_CHANNEL, { token })
+        },
+        (progress) => {
+          this.broadcast(NOTES_ENHANCE_PROGRESS_CHANNEL, progress)
+        }
+      )
       return { markdown: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) }

@@ -23,6 +23,8 @@ export const NOTES_GLOBAL_CHAT_CLEAR_CHANNEL = 'notes:global-chat-clear'
 export const NOTES_DOWNLOAD_PROGRESS_CHANNEL = 'notes:download-progress'
 /** main → renderer: streamed tokens during an enhance run. */
 export const NOTES_ENHANCE_TOKEN_CHANNEL = 'notes:enhance-token'
+/** main → renderer: long-meeting condensation progress during enhance. */
+export const NOTES_ENHANCE_PROGRESS_CHANNEL = 'notes:enhance-progress'
 /** main → renderer: streamed tokens during an ask run. */
 export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
 /** main → renderer: streamed tokens during a cross-meeting ask run. */
@@ -167,6 +169,13 @@ export interface EnhanceTokenEvent {
   token: string
 }
 
+/** Long meetings condense in parts before the final write (map-reduce). */
+export interface EnhanceProgressEvent {
+  phase: 'condensing' | 'writing'
+  current?: number
+  total?: number
+}
+
 export interface AskTokenEvent {
   token: string
 }
@@ -189,6 +198,7 @@ export interface NotesApi {
   clearGlobalChat(): Promise<void>
   onDownloadProgress(cb: (ev: DownloadProgressEvent) => void): () => void
   onEnhanceToken(cb: (ev: EnhanceTokenEvent) => void): () => void
+  onEnhanceProgress(cb: (ev: EnhanceProgressEvent) => void): () => void
   onAskToken(cb: (ev: AskTokenEvent) => void): () => void
   onGlobalAskToken(cb: (ev: GlobalAskTokenEvent) => void): () => void
 }

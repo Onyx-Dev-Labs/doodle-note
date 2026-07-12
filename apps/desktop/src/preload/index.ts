@@ -42,6 +42,7 @@ import {
   NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
+  NOTES_ENHANCE_PROGRESS_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
   NOTES_GET_SETTINGS_CHANNEL,
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
@@ -56,6 +57,7 @@ import {
   type DownloadProgressEvent,
   type EnhanceRequest,
   type EnhanceResult,
+  type EnhanceProgressEvent,
   type EnhanceTokenEvent,
   type GlobalAskRequest,
   type GlobalAskResult,
@@ -260,6 +262,10 @@ const notesApi: NotesApi = {
 
   onEnhanceToken(cb: (ev: EnhanceTokenEvent) => void): () => void {
     return subscribe(NOTES_ENHANCE_TOKEN_CHANNEL, cb)
+  },
+
+  onEnhanceProgress(cb: (ev: EnhanceProgressEvent) => void): () => void {
+    return subscribe(NOTES_ENHANCE_PROGRESS_CHANNEL, cb)
   },
 
   onAskToken(cb: (ev: AskTokenEvent) => void): () => void {

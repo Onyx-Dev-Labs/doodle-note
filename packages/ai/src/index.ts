@@ -8,6 +8,7 @@ export type { CloudEngineOptions } from './cloud-engine'
 export { DEFAULT_MODELS_DIR, LocalNotesEngine } from './local-engine'
 export type { LocalEngineOptions } from './local-engine'
 export { buildMergeUserMessage, formatTranscript, MERGE_SYSTEM_PROMPT } from './prompt'
+export { chunkSegments, DEFAULT_SINGLE_PASS_CHARS, generateMeetingNotes } from './map-reduce'
 export type {
   AskAnswer,
   AskExchange,
@@ -15,6 +16,7 @@ export type {
   MergedNotes,
   MergeInput,
   MergeSegment,
-  NotesEngine
+  NotesEngine,
+  NotesProgress
 } from './types'
 export { NOTE_TEMPLATES, templateById, type NoteTemplate } from './templates'

@@ -48,6 +48,14 @@ export interface AskInput {
  */
 export type AskAnswer = MergedNotes
 
+/** Progress of a long-meeting notes run (map-reduce condensation). */
+export interface NotesProgress {
+  phase: 'condensing' | 'writing'
+  /** 1-based part counter, present while condensing. */
+  current?: number
+  total?: number
+}
+
 /**
  * A notes engine turns a meeting (rough notes + transcript) into polished
  * notes, and answers questions about it. Doodle Note ships two: the LOCAL
@@ -57,7 +65,18 @@ export type AskAnswer = MergedNotes
 export interface NotesEngine {
   id: string
   label: string
-  generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes>
+  /**
+   * Transcript budget (chars) for a single-pass merge; longer transcripts
+   * are condensed first (map-reduce.ts). Unset = the local-context default.
+   */
+  readonly singlePassThresholdChars?: number
+  /** One raw generation — the primitive the notes orchestration composes. */
+  runRaw(system: string, prompt: string, onToken?: (text: string) => void): Promise<MergedNotes>
+  generateNotes(
+    input: MergeInput,
+    onToken?: (text: string) => void,
+    onProgress?: (progress: NotesProgress) => void
+  ): Promise<MergedNotes>
   /** Answer a question grounded ONLY in this meeting's content. */
   askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer>
   /** Answer a question across many meetings' notes (Home-level chat). */

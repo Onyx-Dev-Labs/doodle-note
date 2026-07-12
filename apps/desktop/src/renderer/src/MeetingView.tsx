@@ -211,6 +211,8 @@ export default function MeetingView({
   const [docView, setDocView] = useState<'notes' | 'enhanced'>('notes')
   const [enhanceStatus, setEnhanceStatus] = useState<EnhanceStatus>('idle')
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
+  /** "Condensing part 2 of 5…" during long-meeting map-reduce; null = whimsy. */
+  const [enhanceProgressText, setEnhanceProgressText] = useState<string | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatThread, setChatThread] = useState<MeetingChatEntry[]>([])
@@ -432,6 +434,18 @@ export default function MeetingView({
     () =>
       window.notes.onAskToken(({ token }) => {
         setAskStreamed((s) => s + token)
+      }),
+    []
+  )
+
+  useEffect(
+    () =>
+      window.notes.onEnhanceProgress((progress) => {
+        setEnhanceProgressText(
+          progress.phase === 'condensing' && progress.total
+            ? `Long meeting — condensing part ${progress.current} of ${progress.total}…`
+            : null // writing phase: back to the regular doodling phrases
+        )
       }),
     []
   )
@@ -1166,7 +1180,7 @@ export default function MeetingView({
             )}
             {enhancedMarkdown !== null && enhanceStatus === 'running' && (
               <span className="chip-regen-status">
-                <DoodlingIndicator />
+                <DoodlingIndicator statusText={enhanceProgressText} />
               </span>
             )}
           </div>
@@ -1424,7 +1438,7 @@ export default function MeetingView({
             onClick={() => void runEnhance()}
           >
             {enhanceStatus === 'running' ? (
-              <DoodlingIndicator />
+              <DoodlingIndicator statusText={enhanceProgressText} />
             ) : (
               <>
                 <SparkleIcon size={14} /> Generate notes

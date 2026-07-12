@@ -30,7 +30,7 @@ function PawPrint({ size = 11 }: { size?: number }): React.JSX.Element {
   )
 }
 
-function DoodlingIndicator(): React.JSX.Element {
+function DoodlingIndicator({ statusText }: { statusText?: string | null }): React.JSX.Element {
   const [phrase, setPhrase] = useState(0)
 
   useEffect(() => {
@@ -54,9 +54,10 @@ function DoodlingIndicator(): React.JSX.Element {
           <PawPrint />
         </span>
       </span>
-      {/* key remount restarts the fade-in on every phrase change */}
-      <span className="doodling-phrase" key={phrase}>
-        {PHRASES[phrase]}
+      {/* key remount restarts the fade-in on every phrase change; concrete
+          progress (long-meeting condensation) overrides the whimsy */}
+      <span className="doodling-phrase" key={statusText ?? phrase}>
+        {statusText ?? PHRASES[phrase]}
       </span>
     </span>
   )

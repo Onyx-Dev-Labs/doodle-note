@@ -3,8 +3,8 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { ASK_SYSTEM_PROMPT, buildAskUserMessage } from './ask-prompt'
 import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
-import { buildMergeSystemPrompt, buildMergeUserMessage } from './prompt'
-import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine } from './types'
+import { generateMeetingNotes } from './map-reduce'
+import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine, NotesProgress } from './types'
 
 /**
  * The optional BYOK path: same merge, run against the user's own API key.
@@ -20,6 +20,9 @@ export interface CloudEngineOptions {
 export class CloudNotesEngine implements NotesEngine {
   readonly id: string
   readonly label: string
+  /** Frontier context windows dwarf the local 16K — condense only marathon
+   *  transcripts (~5+ hours of speech). */
+  readonly singlePassThresholdChars = 400_000
   private readonly options: CloudEngineOptions
 
   constructor(options: CloudEngineOptions) {
@@ -28,22 +31,26 @@ export class CloudNotesEngine implements NotesEngine {
     this.label = options.provider === 'anthropic' ? 'Anthropic (your key)' : 'OpenAI (your key)'
   }
 
-  async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
-    return this.runPrompt(buildMergeSystemPrompt(input.templateId), buildMergeUserMessage(input), onToken)
+  async generateNotes(
+    input: MergeInput,
+    onToken?: (text: string) => void,
+    onProgress?: (progress: NotesProgress) => void
+  ): Promise<MergedNotes> {
+    return generateMeetingNotes(this, input, onToken, onProgress)
   }
 
   async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
-    return this.runPrompt(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
+    return this.runRaw(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
   }
 
   async askAcrossMeetings(
     input: GlobalAskInput,
     onToken?: (text: string) => void
   ): Promise<AskAnswer> {
-    return this.runPrompt(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
+    return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
   }
 
-  private async runPrompt(
+  async runRaw(
     system: string,
     prompt: string,
     onToken?: (text: string) => void
