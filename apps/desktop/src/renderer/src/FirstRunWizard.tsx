@@ -29,6 +29,14 @@ export default function FirstRunWizard({
   onFinish: () => void
 }): React.JSX.Element {
   const [step, setStep] = useState<Step>('welcome')
+  const [isWindows, setIsWindows] = useState(false)
+
+  useEffect(() => {
+    void window.detect
+      .getState()
+      .then((state) => setIsWindows(state.platform === 'win32'))
+      .catch(() => {})
+  }, [])
 
   /* ---- engine step ---- */
   const [engine, setEngine] = useState<EngineState>({
@@ -175,25 +183,42 @@ export default function FirstRunWizard({
 
         {step === 'engine' && (
           <div className="wizard-body">
-            <h1 className="wizard-title">Transcription &amp; permissions</h1>
+            <h1 className="wizard-title">
+              {isWindows ? 'Transcription' : 'Transcription & permissions'}
+            </h1>
             <p className="wizard-sub">
-              macOS will ask for the <strong>microphone</strong> (your voice) and{' '}
-              <strong>screen &amp; system audio</strong> (the other side of the call). Meanwhile the
-              on-device transcription engine gets ready.
+              {isWindows ? (
+                <>
+                  The speech model downloads automatically in the background. Windows asks for
+                  microphone and screen-audio access when your first recording starts.
+                </>
+              ) : (
+                <>
+                  macOS will ask for the <strong>microphone</strong> (your voice) and{' '}
+                  <strong>screen &amp; system audio</strong> (the other side of the call).
+                  Meanwhile the on-device transcription engine gets ready.
+                </>
+              )}
             </p>
             <div className="wizard-rows">
+              {!isWindows && (
+                <div className="wizard-row">
+                  <span>Microphone access</span>
+                  <span className={engine.mic === false ? 'wz-bad' : 'wz-ok'}>
+                    {check(engine.mic)}
+                  </span>
+                </div>
+              )}
+              {!isWindows && (
+                <div className="wizard-row">
+                  <span>Screen &amp; system audio</span>
+                  <span className={engine.screen === false ? 'wz-bad' : 'wz-ok'}>
+                    {check(engine.screen)}
+                  </span>
+                </div>
+              )}
               <div className="wizard-row">
-                <span>Microphone access</span>
-                <span className={engine.mic === false ? 'wz-bad' : 'wz-ok'}>{check(engine.mic)}</span>
-              </div>
-              <div className="wizard-row">
-                <span>Screen &amp; system audio</span>
-                <span className={engine.screen === false ? 'wz-bad' : 'wz-ok'}>
-                  {check(engine.screen)}
-                </span>
-              </div>
-              <div className="wizard-row">
-                <span>{engine.detail}</span>
+                <span>{isWindows ? 'Speech model prepares automatically' : engine.detail}</span>
                 <span className={engine.status === 'error' ? 'wz-bad' : 'wz-ok'}>
                   {engine.status === 'ready' ? '✓' : engine.status === 'error' ? '✕' : '…'}
                 </span>
@@ -202,7 +227,7 @@ export default function FirstRunWizard({
                 <progress className="wizard-progress" value={engine.progress} max={1} />
               )}
             </div>
-            {(engine.mic === false || engine.screen === false) && (
+            {!isWindows && (engine.mic === false || engine.screen === false) && (
               <p className="wizard-hint">
                 Denied something? You can grant it later in System Settings → Privacy &amp;
                 Security — recording won&rsquo;t work until then.
