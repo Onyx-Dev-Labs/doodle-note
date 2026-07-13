@@ -3411,6 +3411,14 @@ button.fp-row:hover {
   margin-top: 2px;
   color: var(--accent-deep);
 }
+/* Icon-less bullet lists get the wizard's check treatment instead of
+   floating bare text lines. */
+.tour-checks li::before {
+  content: '✓';
+  color: var(--accent-deep);
+  font-weight: 700;
+  flex-shrink: 0;
+}
 .tour-actions-row {
   display: flex;
   flex-wrap: wrap;
