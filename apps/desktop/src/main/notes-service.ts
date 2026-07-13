@@ -63,8 +63,9 @@ const MAX_GLOBAL_HISTORY_SENT = 6
 interface StoredCloudSettings {
   provider: CloudProvider
   model?: string
-  /** base64 of safeStorage.encryptString(key). The plaintext never hits disk. */
-  apiKeyEncrypted: string
+  /** base64 of safeStorage.encryptString(key). The plaintext never hits
+   *  disk. Absent for Ollama, which needs no key. */
+  apiKeyEncrypted?: string
 }
 
 interface StoredSettings {
@@ -430,15 +431,16 @@ export class NotesService {
     }
   }
 
-  /** Local by default; cloud only when explicitly chosen AND a key is saved. */
+  /** Local by default; cloud only when explicitly chosen AND usable —
+   *  a readable key, or Ollama which needs none. */
   private pickEngine(): NotesEngine {
     const { engineChoice, cloud } = this.settings
     if (engineChoice === 'cloud' && cloud) {
-      const apiKey = this.decryptApiKey(cloud.apiKeyEncrypted)
-      if (apiKey) {
+      const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
+      if (apiKey || cloud.provider === 'ollama') {
         return new CloudNotesEngine({
           provider: cloud.provider,
-          apiKey,
+          apiKey: apiKey ?? '',
           ...(cloud.model ? { model: cloud.model } : {})
         })
       }
@@ -469,7 +471,8 @@ export class NotesService {
             cloud: {
               provider: cloud.provider,
               ...(cloud.model ? { model: cloud.model } : {}),
-              hasKey: Boolean(cloud.apiKeyEncrypted)
+              // "Usable", strictly speaking: Ollama is keyless by design.
+              hasKey: Boolean(cloud.apiKeyEncrypted) || cloud.provider === 'ollama'
             }
           }
         : {})
@@ -483,13 +486,14 @@ export class NotesService {
       this.settings.engineChoice = update.engineChoice
     }
 
+    const validProviders: CloudProvider[] = ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']
     if (update.cloud === null) {
       delete this.settings.cloud
     } else if (
       update.cloud &&
-      (update.cloud.provider === 'anthropic' || update.cloud.provider === 'openai')
+      validProviders.includes(update.cloud.provider as CloudProvider)
     ) {
-      const provider = update.cloud.provider
+      const provider = update.cloud.provider as CloudProvider
       const model =
         typeof update.cloud.model === 'string' && update.cloud.model.trim()
           ? update.cloud.model.trim()
@@ -508,8 +512,12 @@ export class NotesService {
         }
       }
 
-      if (apiKeyEncrypted) {
-        this.settings.cloud = { provider, ...(model ? { model } : {}), apiKeyEncrypted }
+      if (apiKeyEncrypted || provider === 'ollama') {
+        this.settings.cloud = {
+          provider,
+          ...(model ? { model } : {}),
+          ...(apiKeyEncrypted ? { apiKeyEncrypted } : {})
+        }
       } else {
         delete this.settings.cloud
       }

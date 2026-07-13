@@ -12,12 +12,13 @@ import type {
 import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
-import type {
-  CloudProvider,
-  EngineChoice,
-  NotesModelInfo,
-  NotesModelsResponse,
-  NotesSettingsView
+import {
+  CLOUD_PROVIDERS,
+  type CloudProvider,
+  type EngineChoice,
+  type NotesModelInfo,
+  type NotesModelsResponse,
+  type NotesSettingsView
 } from '../../shared/notes-api'
 import mascotUrl from './assets/mascot-square.png'
 
@@ -28,6 +29,15 @@ function lastSyncLabel(iso: string): string {
   const min = Math.round(ms / 60_000)
   if (min < 60) return `synced ${min} min ago`
   return `synced at ${new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+
+/** Placeholder model hints per provider (defaults live in @repo/ai). */
+const MODEL_PLACEHOLDERS: Record<CloudProvider, string> = {
+  anthropic: 'claude-sonnet-5',
+  openai: 'gpt-5',
+  groq: 'llama-3.3-70b-versatile',
+  openrouter: 'anthropic/claude-sonnet-4.5',
+  ollama: 'llama3.1'
 }
 
 function formatBytes(bytes: number): string {
@@ -1456,20 +1466,30 @@ export default function ModelsView({
                   value={provider}
                   onChange={(e) => setProvider(e.target.value as CloudProvider)}
                 >
-                  <option value="anthropic">Anthropic</option>
-                  <option value="openai">OpenAI</option>
+                  {CLOUD_PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
                 </select>
                 <input
                   type="text"
                   spellCheck={false}
-                  placeholder="model (optional, e.g. claude-sonnet-5)"
+                  placeholder={`model (optional, e.g. ${MODEL_PLACEHOLDERS[provider]})`}
                   value={cloudModel}
                   onChange={(e) => setCloudModel(e.target.value)}
                 />
                 <input
                   type="password"
-                  placeholder={settings?.cloud?.hasKey ? '••••••••  (key saved)' : 'API key'}
-                  value={apiKey}
+                  placeholder={
+                    provider === 'ollama'
+                      ? 'no key needed — uses localhost:11434'
+                      : settings?.cloud?.hasKey
+                        ? '••••••••  (key saved)'
+                        : 'API key'
+                  }
+                  disabled={provider === 'ollama'}
+                  value={provider === 'ollama' ? '' : apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
                 <button type="button" onClick={() => void saveCloudKey()}>

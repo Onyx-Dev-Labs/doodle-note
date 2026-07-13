@@ -16,6 +16,7 @@ import icon from '../../resources/icon.png?asset'
 import { AudioService } from './audio-service'
 import { ImportService } from './import-service'
 import { WizardService } from './wizard-service'
+import { ExportService } from './export-service'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
@@ -389,6 +390,10 @@ app.whenReady().then(() => {
   // First-run setup wizard: visible preflight + permission status.
   const wizardService = new WizardService(resolveEngineBinary(), broadcast)
   wizardService.registerIpc()
+
+  // Meeting export (Markdown / PDF).
+  const exportService = new ExportService(meetingsService)
+  exportService.registerIpc()
 
   const foldersService = new FoldersService(
     join(app.getPath('userData'), 'folders.json'),

@@ -30,7 +30,15 @@ export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
 /** main → renderer: streamed tokens during a cross-meeting ask run. */
 export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
-export type CloudProvider = 'anthropic' | 'openai'
+export type CloudProvider = 'anthropic' | 'openai' | 'groq' | 'openrouter' | 'ollama'
+
+export const CLOUD_PROVIDERS: ReadonlyArray<{ id: CloudProvider; label: string; keyOptional?: boolean }> = [
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'groq', label: 'Groq' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'ollama', label: 'Ollama (local)', keyOptional: true }
+]
 export type EngineChoice = 'local' | 'cloud'
 
 /** One catalog model + its state on this machine. */

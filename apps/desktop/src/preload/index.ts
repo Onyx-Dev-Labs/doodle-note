@@ -117,6 +117,12 @@ import {
 } from '../shared/update-api'
 import { THEME_SET_SOURCE_CHANNEL, type ThemeApi, type ThemeSource } from '../shared/theme-api'
 import {
+  EXPORT_MEETING_CHANNEL,
+  type ExporterApi,
+  type ExportFormat,
+  type ExportResult
+} from '../shared/export-api'
+import {
   WIZARD_PERMISSIONS_CHANNEL,
   WIZARD_PREFLIGHT_CHANNEL,
   WIZARD_PREFLIGHT_EVENT_CHANNEL,
@@ -505,6 +511,12 @@ const importerApi: ImporterApi = {
   }
 }
 
+const exporterApi: ExporterApi = {
+  exportMeeting(meetingId: string, format: ExportFormat): Promise<ExportResult> {
+    return ipcRenderer.invoke(EXPORT_MEETING_CHANNEL, meetingId, format) as Promise<ExportResult>
+  }
+}
+
 const wizardApi: WizardApi = {
   runPreflight(): Promise<WizardPreflightResult> {
     return ipcRenderer.invoke(WIZARD_PREFLIGHT_CHANNEL) as Promise<WizardPreflightResult>
@@ -557,6 +569,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('audio', audioApi)
     contextBridge.exposeInMainWorld('importer', importerApi)
     contextBridge.exposeInMainWorld('wizard', wizardApi)
+    contextBridge.exposeInMainWorld('exporter', exporterApi)
   } catch (error) {
     console.error(error)
   }
@@ -589,4 +602,6 @@ if (process.contextIsolated) {
   window.importer = importerApi
   // @ts-ignore (defined in index.d.ts)
   window.wizard = wizardApi
+  // @ts-ignore (defined in index.d.ts)
+  window.exporter = exporterApi
 }

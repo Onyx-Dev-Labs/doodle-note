@@ -368,6 +368,23 @@ export default function HomeView({
   /** 'idle' | 'running' | an error message. */
   const [importState, setImportState] = useState<'idle' | 'running' | string>('idle')
 
+  const exportMeeting = async (id: string, format: 'md' | 'pdf'): Promise<void> => {
+    setMenuFor(null)
+    try {
+      const result = await window.exporter.exportMeeting(id, format)
+      if (result.path) {
+        setShareNotice(`Exported to ${result.path}`)
+        setTimeout(() => setShareNotice(null), 4000)
+      } else if (result.error) {
+        setShareNotice(result.error)
+        setTimeout(() => setShareNotice(null), 5000)
+      }
+    } catch (err) {
+      setShareNotice(err instanceof Error ? err.message : String(err))
+      setTimeout(() => setShareNotice(null), 5000)
+    }
+  }
+
   const runImport = async (): Promise<void> => {
     if (importState === 'running') return
     setImportState('running')
@@ -822,6 +839,20 @@ export default function HomeView({
                             }}
                           >
                             Add to folder
+                          </button>
+                          <button
+                            type="button"
+                            title="Notes + transcript as one portable Markdown file"
+                            onClick={() => void exportMeeting(m.id, 'md')}
+                          >
+                            Export Markdown
+                          </button>
+                          <button
+                            type="button"
+                            title="Notes + transcript as a print-ready PDF"
+                            onClick={() => void exportMeeting(m.id, 'pdf')}
+                          >
+                            Export PDF
                           </button>
                           <div className="row-menu-sep" />
                           <button
