@@ -12,7 +12,8 @@ import MeetingView from './MeetingView'
 import ModelsView, { type SettingsSection } from './ModelsView'
 import OnboardingTour from './OnboardingTour'
 import mascotUrl from './assets/mascot-square.png'
-import { isOnboardingDone } from './lib/onboarding'
+import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
+import FirstRunWizard from './FirstRunWizard'
 import { startWinCapture, stopWinCapture } from './lib/win-capture'
 import {
   CalendarIcon,
@@ -56,6 +57,25 @@ function App(): React.JSX.Element {
   const [banner, setBanner] = useState<CalendarStartMeetingEvent | null>(null)
   // First launch opens the welcome tour; Settings → General can replay it.
   const [tourOpen, setTourOpen] = useState(() => !isOnboardingDone())
+  // The setup wizard (downloads + permissions) runs before the tour, and
+  // only for genuinely fresh installs — anyone with meetings predates it.
+  const [wizardOpen, setWizardOpen] = useState(
+    () => !isSetupWizardDone() && !isOnboardingDone()
+  )
+  useEffect(() => {
+    if (!wizardOpen) return
+    void window.meetings.list().then((list) => {
+      if (list.length > 0) {
+        markSetupWizardDone()
+        setWizardOpen(false)
+      }
+    })
+  }, [wizardOpen])
+  const closeWizard = (): void => {
+    markSetupWizardDone()
+    setWizardOpen(false)
+    setTourOpen(true) // hand off to the feature tour
+  }
   const [settingsJump, setSettingsJump] = useState<{ section: SettingsSection; n: number } | null>(
     null
   )
@@ -575,7 +595,9 @@ function App(): React.JSX.Element {
         </div>
       )}
 
-      {tourOpen && (
+      {wizardOpen && <FirstRunWizard onFinish={closeWizard} />}
+
+      {!wizardOpen && tourOpen && (
         <OnboardingTour
           calendar={calendar}
           onOpenModelSettings={() => {

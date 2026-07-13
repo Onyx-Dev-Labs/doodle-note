@@ -117,6 +117,15 @@ import {
 } from '../shared/update-api'
 import { THEME_SET_SOURCE_CHANNEL, type ThemeApi, type ThemeSource } from '../shared/theme-api'
 import {
+  WIZARD_PERMISSIONS_CHANNEL,
+  WIZARD_PREFLIGHT_CHANNEL,
+  WIZARD_PREFLIGHT_EVENT_CHANNEL,
+  type WizardApi,
+  type WizardPermissions,
+  type WizardPreflightEvent,
+  type WizardPreflightResult
+} from '../shared/wizard-api'
+import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
@@ -496,6 +505,20 @@ const importerApi: ImporterApi = {
   }
 }
 
+const wizardApi: WizardApi = {
+  runPreflight(): Promise<WizardPreflightResult> {
+    return ipcRenderer.invoke(WIZARD_PREFLIGHT_CHANNEL) as Promise<WizardPreflightResult>
+  },
+
+  getPermissions(): Promise<WizardPermissions> {
+    return ipcRenderer.invoke(WIZARD_PERMISSIONS_CHANNEL) as Promise<WizardPermissions>
+  },
+
+  onPreflightEvent(cb: (ev: WizardPreflightEvent) => void): () => void {
+    return subscribe(WIZARD_PREFLIGHT_EVENT_CHANNEL, cb)
+  }
+}
+
 const audioApi: AudioApi = {
   list(meetingId: string): Promise<AudioPart[]> {
     return ipcRenderer.invoke(AUDIO_LIST_CHANNEL, meetingId) as Promise<AudioPart[]>
@@ -533,6 +556,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
     contextBridge.exposeInMainWorld('audio', audioApi)
     contextBridge.exposeInMainWorld('importer', importerApi)
+    contextBridge.exposeInMainWorld('wizard', wizardApi)
   } catch (error) {
     console.error(error)
   }
@@ -563,4 +587,6 @@ if (process.contextIsolated) {
   window.audio = audioApi
   // @ts-ignore (defined in index.d.ts)
   window.importer = importerApi
+  // @ts-ignore (defined in index.d.ts)
+  window.wizard = wizardApi
 }

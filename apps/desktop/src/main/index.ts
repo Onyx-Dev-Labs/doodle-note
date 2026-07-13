@@ -15,6 +15,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { AudioService } from './audio-service'
 import { ImportService } from './import-service'
+import { WizardService } from './wizard-service'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
@@ -105,6 +106,11 @@ function migrateDevUserData(): void {
 // Protocol so playback/UI issues can be inspected in the running app.
 if (process.env.DOODLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DOODLE_DEBUG_PORT)
+}
+// Dev affordance: point userData somewhere else to exercise fresh-install
+// flows (the setup wizard) without touching the real profile.
+if (process.env.DOODLE_USER_DATA && !app.isPackaged) {
+  app.setPath('userData', process.env.DOODLE_USER_DATA)
 }
 
 // Must run before app ready: lets <img src="doodle-media://…"> load without
@@ -379,6 +385,10 @@ app.whenReady().then(() => {
     broadcast
   )
   importService.registerIpc()
+
+  // First-run setup wizard: visible preflight + permission status.
+  const wizardService = new WizardService(resolveEngineBinary(), broadcast)
+  wizardService.registerIpc()
 
   const foldersService = new FoldersService(
     join(app.getPath('userData'), 'folders.json'),
