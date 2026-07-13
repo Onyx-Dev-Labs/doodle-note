@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "description": "Doodle Note desktop app \u2014 spawns the Swift transcription sidecar and shows its live transcript stream",
   "main": "./out/main/index.js",
