@@ -20,8 +20,10 @@ import {
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
   AUDIO_LIST_CHANNEL,
+  AUDIO_READ_CHANNEL,
   AUDIO_USAGE_CHANNEL,
   type AudioApi,
+  type AudioFileData,
   type AudioPart,
   type AudioUsage
 } from '../shared/audio-api'
@@ -497,6 +499,10 @@ const importerApi: ImporterApi = {
 const audioApi: AudioApi = {
   list(meetingId: string): Promise<AudioPart[]> {
     return ipcRenderer.invoke(AUDIO_LIST_CHANNEL, meetingId) as Promise<AudioPart[]>
+  },
+
+  read(url: string): Promise<AudioFileData | null> {
+    return ipcRenderer.invoke(AUDIO_READ_CHANNEL, url) as Promise<AudioFileData | null>
   },
 
   deleteFor(meetingId: string): Promise<void> {

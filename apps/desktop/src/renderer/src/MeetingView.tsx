@@ -233,6 +233,14 @@ export default function MeetingView({
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [audioParts, setAudioParts] = useState<AudioPart[]>([])
   const [activePart, setActivePart] = useState(0)
+  /**
+   * The <audio> src is a BLOB of the recording, not the doodle-audio:// URL.
+   * Chromium's media loader through Electron custom protocols failed three
+   * different ways (CSP, resumed-load corruption, moov-at-end tail requests
+   * on large imports); fetching once into a fully random-access blob removes
+   * that entire machinery. Local files make the fetch near-instant.
+   */
+  const [playerSrc, setPlayerSrc] = useState<string | null>(null)
   const [playingSegId, setPlayingSegId] = useState<string | null>(null)
   const [retranscribing, setRetranscribing] = useState(false)
   const [inputDevices, setInputDevices] = useState<EngineInputDevice[]>([])
@@ -478,6 +486,36 @@ export default function MeetingView({
       unsubscribe()
     }
   }, [meetingId])
+
+  // Load the active part into a blob URL (see playerSrc for why). Bytes
+  // arrive over IPC — custom-protocol fetch is CORS-blocked from the app
+  // origin, and the media loader's own protocol path proved unreliable.
+  useEffect(() => {
+    const url = audioParts[Math.min(activePart, audioParts.length - 1)]?.url
+    if (!url) {
+      setPlayerSrc(null)
+      return
+    }
+    let objectUrl: string | null = null
+    let cancelled = false
+    window.audio
+      .read(url)
+      .then((data) => {
+        if (cancelled || !data) {
+          if (!cancelled) setPlayerSrc(null)
+          return
+        }
+        objectUrl = URL.createObjectURL(new Blob([data.bytes as BlobPart], { type: data.mime }))
+        setPlayerSrc(objectUrl)
+      })
+      .catch(() => {
+        if (!cancelled) setPlayerSrc(null)
+      })
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [audioParts, activePart])
 
   /* ---- models / settings meta (drives the Enhance chip) ---- */
 
@@ -1237,12 +1275,8 @@ export default function MeetingView({
               <audio
                 ref={audioRef}
                 controls
-                // "auto", never "metadata": the metadata strategy loads 64KiB,
-                // aborts, and RESUMES on play — and Electron's protocol.handle
-                // corrupts resumed media loads (PIPELINE_ERROR_READ ~3.6s in).
-                // One continuous load of a small local file always works.
                 preload="auto"
-                src={audioParts[Math.min(activePart, audioParts.length - 1)]?.url}
+                src={playerSrc ?? undefined}
                 onLoadedMetadata={() => {
                   const sec = pendingSeekSecRef.current
                   const el = audioRef.current

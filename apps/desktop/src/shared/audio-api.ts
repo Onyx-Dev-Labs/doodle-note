@@ -15,6 +15,8 @@ export const AUDIO_PERSIST_STORAGE_KEY = 'doodle.persistAudio'
 
 /** renderer → main (invoke): list a meeting's saved recordings. */
 export const AUDIO_LIST_CHANNEL = 'audio:list'
+/** renderer → main (invoke): read one recording's bytes for playback. */
+export const AUDIO_READ_CHANNEL = 'audio:read'
 /** renderer → main (invoke): delete one meeting's recordings. */
 export const AUDIO_DELETE_CHANNEL = 'audio:delete'
 /** renderer → main (invoke): delete every saved recording (Settings). */
@@ -37,9 +39,17 @@ export interface AudioUsage {
   meetingCount: number
 }
 
+/** A recording's raw bytes + MIME, for blob-based playback in the renderer. */
+export interface AudioFileData {
+  bytes: Uint8Array
+  mime: string
+}
+
 /** API surface exposed on `window.audio` by the preload script. */
 export interface AudioApi {
   list(meetingId: string): Promise<AudioPart[]>
+  /** Read a part (by its doodle-audio:// url) for playback; null = gone. */
+  read(url: string): Promise<AudioFileData | null>
   deleteFor(meetingId: string): Promise<void>
   clearAll(): Promise<void>
   usage(): Promise<AudioUsage>

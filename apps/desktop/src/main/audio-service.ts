@@ -15,7 +15,9 @@ import {
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
   AUDIO_LIST_CHANNEL,
+  AUDIO_READ_CHANNEL,
   AUDIO_USAGE_CHANNEL,
+  type AudioFileData,
   type AudioPart,
   type AudioUsage
 } from '../shared/audio-api'
@@ -72,11 +74,48 @@ export class AudioService {
     ipcMain.handle(AUDIO_LIST_CHANNEL, (_event, meetingId: unknown) =>
       this.list(String(meetingId ?? ''))
     )
+    // Playback bytes travel over IPC, not the protocol: Chromium's media
+    // loader through protocol.handle failed three different ways (resumed
+    // loads corrupted, tail requests for moov-at-end files, CORS on fetch).
+    // A structured-clone copy of a local file is fast and boring.
+    ipcMain.handle(AUDIO_READ_CHANNEL, (_event, url: unknown): AudioFileData | null => {
+      const resolved = this.resolvePartUrl(String(url ?? ''))
+      if (!resolved) return null
+      try {
+        return { bytes: readFileSync(resolved.path), mime: resolved.mime }
+      } catch {
+        return null
+      }
+    })
     ipcMain.handle(AUDIO_DELETE_CHANNEL, (_event, meetingId: unknown) =>
       this.deleteFor(String(meetingId ?? ''))
     )
     ipcMain.handle(AUDIO_CLEAR_ALL_CHANNEL, () => this.clearAll())
     ipcMain.handle(AUDIO_USAGE_CHANNEL, () => this.usage())
+  }
+
+  /** Validate a doodle-audio:// part URL; null unless it maps to a real file. */
+  private resolvePartUrl(raw: string): { path: string; mime: string } | null {
+    let url: URL
+    try {
+      url = new URL(raw)
+    } catch {
+      return null
+    }
+    if (url.protocol !== 'doodle-audio:') return null
+    const meetingId = url.host
+    const [, session, file] = url.pathname.split('/')
+    if (
+      !SAFE_MEETING_ID.test(meetingId) ||
+      !SAFE_SESSION_DIR.test(session ?? '') ||
+      !file ||
+      !(AUDIO_FILES as readonly string[]).includes(file)
+    ) {
+      return null
+    }
+    const path = join(this.baseDir, meetingId, session as string, file)
+    if (!existsSync(path)) return null
+    return { path, mime: AUDIO_MIME[file] ?? 'application/octet-stream' }
   }
 
   /** Call after app ready (protocol.handle requires it). */
