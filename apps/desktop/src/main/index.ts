@@ -47,6 +47,7 @@ import {
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
+  ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineEvent,
@@ -363,6 +364,11 @@ app.whenReady().then(() => {
   ipcMain.handle(ENGINE_LIST_DEVICES_CHANNEL, (): Promise<EngineInputDevice[]> => {
     return engine instanceof EngineProcess ? engine.listInputDevices() : Promise.resolve([])
   })
+  ipcMain.handle(ENGINE_TAP_SELFTEST_CHANNEL, () =>
+    engine instanceof EngineProcess
+      ? engine.tapSelfTest()
+      : { ok: false, reason: 'not available on this platform' }
+  )
   ipcMain.on(ENGINE_SET_INPUT_CHANNEL, (_event, uid: unknown) => {
     if (engine instanceof EngineProcess) {
       engine.setInputDevice(typeof uid === 'string' && uid.length > 0 ? uid : null)

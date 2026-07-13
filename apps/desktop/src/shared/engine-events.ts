@@ -25,6 +25,8 @@ export const ENGINE_STOP_CHANNEL = 'engine:stop'
 export const ENGINE_LIST_DEVICES_CHANNEL = 'engine:list-devices'
 /** renderer → main: switch the mic channel's input device (mid-session too). */
 export const ENGINE_SET_INPUT_CHANNEL = 'engine:set-input'
+/** renderer → main (invoke): verify the Core Audio tap hears audio. */
+export const ENGINE_TAP_SELFTEST_CHANNEL = 'engine:tap-selftest'
 
 /** One selectable audio input device (macOS: CoreAudio UID + name). */
 export interface EngineInputDevice {
@@ -58,6 +60,8 @@ export interface EngineStartOptions {
    * main process from meetingId + persistAudio — never by the renderer.
    */
   audioDir?: string
+  /** live only (macOS): system-audio capture backend; default 'sck'. */
+  systemBackend?: 'sck' | 'tap'
 }
 
 export interface EngineStartRequest {
@@ -232,6 +236,8 @@ export interface EngineApi {
   listInputDevices(): Promise<EngineInputDevice[]>
   /** Switch the mic input; applies live when a session is recording. null = system default. */
   setInputDevice(uid: string | null): void
+  /** Run the tap self-test (macOS): does the no-screen-permission backend hear audio? */
+  tapSelfTest(): Promise<{ ok: boolean; reason?: string }>
   /** Windows capture bridge (no-ops on macOS). */
   onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void
   sendAudio(channel: string, samples: Float32Array): void

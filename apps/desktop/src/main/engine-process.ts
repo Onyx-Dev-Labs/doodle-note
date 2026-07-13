@@ -207,6 +207,51 @@ export class EngineProcess {
     })
   }
 
+  /** Spawn `engine tap-selftest` and parse its verdict. */
+  tapSelfTest(): Promise<{ ok: boolean; reason?: string }> {
+    return new Promise((resolve) => {
+      if (!existsSync(this.binaryPath)) {
+        resolve({ ok: false, reason: 'engine binary not found' })
+        return
+      }
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(this.binaryPath, ['tap-selftest'], { stdio: ['ignore', 'pipe', 'ignore'] })
+      } catch (err) {
+        resolve({ ok: false, reason: String(err) })
+        return
+      }
+      let out = ''
+      const timeout = setTimeout(() => {
+        child.kill('SIGKILL')
+        resolve({ ok: false, reason: 'self-test timed out' })
+      }, 30_000)
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => {
+        out += chunk
+      })
+      child.on('error', () => {
+        clearTimeout(timeout)
+        resolve({ ok: false, reason: 'engine failed to start' })
+      })
+      child.on('close', () => {
+        clearTimeout(timeout)
+        for (const line of out.split('\n')) {
+          try {
+            const parsed = JSON.parse(line) as { event?: string; ok?: boolean; reason?: string }
+            if (parsed.event === 'tap_selftest') {
+              resolve({ ok: parsed.ok === true, ...(parsed.reason ? { reason: parsed.reason } : {}) })
+              return
+            }
+          } catch {
+            // not the verdict line
+          }
+        }
+        resolve({ ok: false, reason: 'no verdict from the engine' })
+      })
+    })
+  }
+
   /**
    * Point the mic channel at a different input device. Applies live when a
    * session is running (serve or classic spawn — both parse stdin commands);
@@ -243,7 +288,8 @@ export class EngineProcess {
         cmd: 'start',
         source: opts.source ?? 'both',
         inputDevice: opts.inputDevice ?? '',
-        audioDir: opts.audioDir ?? ''
+        audioDir: opts.audioDir ?? '',
+        systemBackend: opts.systemBackend ?? ''
       })
       if (ok) return
       this.serveSessionActive = false // fall through to the classic spawn
@@ -279,6 +325,7 @@ export class EngineProcess {
       args.push('--exit-on-stdin-close')
       if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
       if (opts.audioDir) args.push('--audio-dir', opts.audioDir)
+      if (opts.systemBackend) args.push('--system-backend', opts.systemBackend)
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }

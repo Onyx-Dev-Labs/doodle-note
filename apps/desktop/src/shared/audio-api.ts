@@ -13,6 +13,10 @@
  */
 export const AUDIO_PERSIST_STORAGE_KEY = 'doodle.persistAudio'
 
+/** 'tap' switches system-audio capture to the Core Audio process tap
+ *  (no screen-recording permission, macOS 14.2+, beta). Default: 'sck'. */
+export const SYSTEM_BACKEND_STORAGE_KEY = 'doodle.systemBackend'
+
 /** renderer → main (invoke): list a meeting's saved recordings. */
 export const AUDIO_LIST_CHANNEL = 'audio:list'
 /** renderer → main (invoke): read one recording's bytes for playback. */

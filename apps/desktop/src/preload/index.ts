@@ -6,6 +6,7 @@ import {
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
+  ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineCaptureControl,
@@ -191,6 +192,10 @@ const engineApi: EngineApi = {
 
   setInputDevice(uid: string | null): void {
     ipcRenderer.send(ENGINE_SET_INPUT_CHANNEL, uid)
+  },
+
+  tapSelfTest(): Promise<{ ok: boolean; reason?: string }> {
+    return ipcRenderer.invoke(ENGINE_TAP_SELFTEST_CHANNEL) as Promise<{ ok: boolean; reason?: string }>
   },
 
   onEvent(cb: (event: EngineEvent) => void): () => void {

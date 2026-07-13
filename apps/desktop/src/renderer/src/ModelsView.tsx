@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AUDIO_PERSIST_STORAGE_KEY, type AudioUsage } from '../../shared/audio-api'
+import { AUDIO_PERSIST_STORAGE_KEY, SYSTEM_BACKEND_STORAGE_KEY, type AudioUsage } from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
@@ -220,6 +220,39 @@ export default function ModelsView({
   )
   const [audioUsage, setAudioUsage] = useState<AudioUsage | null>(null)
   const [audioClearing, setAudioClearing] = useState(false)
+  const [tapEnabled, setTapEnabled] = useState(
+    () => window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) === 'tap'
+  )
+  const [tapTesting, setTapTesting] = useState(false)
+  const [tapNote, setTapNote] = useState<string | null>(null)
+
+  const toggleTapBackend = async (): Promise<void> => {
+    if (tapTesting) return
+    if (tapEnabled) {
+      window.localStorage.removeItem(SYSTEM_BACKEND_STORAGE_KEY)
+      setTapEnabled(false)
+      setTapNote(null)
+      return
+    }
+    // Enabling runs the self-test: without the System Audio Recording
+    // permission a tap records SILENCE, which must never pass as working.
+    setTapTesting(true)
+    setTapNote('Testing — macOS may ask to record system audio…')
+    try {
+      const result = await window.engine.tapSelfTest()
+      if (result.ok) {
+        window.localStorage.setItem(SYSTEM_BACKEND_STORAGE_KEY, 'tap')
+        setTapEnabled(true)
+        setTapNote('Working — future recordings skip the screen permission.')
+      } else {
+        setTapNote(result.reason ?? 'The self-test failed — staying on the standard capture.')
+      }
+    } catch (err) {
+      setTapNote(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTapTesting(false)
+    }
+  }
 
   useEffect(() => {
     if (!active) return
@@ -1111,6 +1144,24 @@ export default function ModelsView({
                       checked={persistAudio}
                       label="Save meeting audio"
                       onChange={togglePersistAudio}
+                    />
+                  </div>
+                  <div className="cal-row">
+                    <span className="cal-row-main">
+                      <span className="cal-row-label">
+                        Capture without screen permission{' '}
+                        <span className="model-note">beta</span>
+                      </span>
+                      <span className="cal-row-sub">
+                        {tapNote ??
+                          'Uses a Core Audio tap (macOS 14.2+) so DoodleNote never needs Screen Recording access. Enabling runs a quick self-test.'}
+                      </span>
+                    </span>
+                    <Toggle
+                      checked={tapEnabled}
+                      disabled={tapTesting}
+                      label="Capture system audio without screen permission"
+                      onChange={() => void toggleTapBackend()}
                     />
                   </div>
                   <div className="cal-row">

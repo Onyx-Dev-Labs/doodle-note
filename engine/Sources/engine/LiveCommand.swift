@@ -56,6 +56,7 @@ enum LiveCommand {
             seconds: options.values["seconds"].flatMap(Double.init),
             inputDevice: options.values["input-device"],
             audioDir: options.values["audio-dir"],
+            systemBackend: options.values["system-backend"],
             micManager: nil,
             systemManager: nil,
             stopper: stopper
@@ -89,6 +90,7 @@ enum LiveSession {
         seconds: Double?,
         inputDevice: String? = nil,
         audioDir: String? = nil,
+        systemBackend: String? = nil,
         micManager: StreamingUnifiedAsrManager?,
         systemManager: StreamingUnifiedAsrManager?,
         stopper: Stopper
@@ -135,12 +137,21 @@ enum LiveSession {
         }
 
         let micBox = MicCaptureBox()
-        var systemCapture: SystemAudioCapture?
+        var systemCapture: SystemCaptureBackend?
+        var usingTap = false
 
         if let pipeline = systemPipeline {
-            // Constructed before starting: this is where the screen/system-audio
-            // permission prompt fires on first run.
-            systemCapture = try await SystemAudioCapture(into: pipeline)
+            if systemBackend == "tap", #available(macOS 14.2, *) {
+                // Audio-only permission path; TCC prompt fires at start().
+                systemCapture = ProcessTapCapture(into: pipeline)
+                usingTap = true
+                Events.emit(["event": "status", "stage": "system_backend", "backend": "tap"])
+            } else {
+                // Constructed before starting: this is where the screen/system-
+                // audio permission prompt fires on first run.
+                systemCapture = try await SystemAudioCapture(into: pipeline)
+                Events.emit(["event": "status", "stage": "system_backend", "backend": "sck"])
+            }
         }
         if let pipeline = micPipeline {
             // Explicitly request mic access BEFORE touching the audio hardware:
@@ -204,7 +215,20 @@ enum LiveSession {
                 _ = micBox.swap(fallback)
             }
         }
-        try await systemCapture?.start()
+        do {
+            try await systemCapture?.start()
+        } catch where usingTap {
+            // The tap is opt-in/beta: any failure (permission denied, OS
+            // quirk) falls back to the proven SCK path instead of killing
+            // the meeting.
+            Events.log("tap backend failed (\(error)) — falling back to ScreenCaptureKit")
+            Events.emit(["event": "status", "stage": "system_backend", "backend": "sck", "fallback": true])
+            if let pipeline = systemPipeline {
+                let sck = try await SystemAudioCapture(into: pipeline)
+                try await sck.start()
+                systemCapture = sck
+            }
+        }
 
         // Capturing now — tell the host immediately (bars animate, timer runs).
         var ready: [String: Any] = ["event": "ready", "mode": "live"]
@@ -314,11 +338,20 @@ final class ChannelPipeline {
 
     private let preloaded: Bool
 
-    init(channel: String, manager: StreamingUnifiedAsrManager? = nil, recorder: ChannelRecorder? = nil) {
+    /** Diagnostics tap on incoming buffers (used by the tap self-test). */
+    private let probe: ((AVAudioPCMBuffer) -> Void)?
+
+    init(
+        channel: String,
+        manager: StreamingUnifiedAsrManager? = nil,
+        recorder: ChannelRecorder? = nil,
+        probe: ((AVAudioPCMBuffer) -> Void)? = nil
+    ) {
         self.channel = channel
         self.preloaded = manager != nil
         self.manager = manager ?? StreamingUnifiedAsrManager()
         self.recorder = recorder
+        self.probe = probe
         (self.bufferStream, self.bufferContinuation) = AsyncStream.makeStream(of: AVAudioPCMBuffer.self)
     }
 
@@ -361,6 +394,7 @@ final class ChannelPipeline {
         }
         // Both consumers only read: ASR via the stream, persistence on the
         // recorder's own serial queue.
+        probe?(buffer)
         recorder?.write(buffer)
         bufferContinuation.yield(buffer)
     }
@@ -558,9 +592,19 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     }
 }
 
-// MARK: - System audio capture (ScreenCaptureKit)
+// MARK: - System audio capture backends
 
-final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
+/// The far-side channel has two capture strategies: ScreenCaptureKit (works
+/// everywhere, needs the Screen & System Audio Recording permission) and the
+/// Core Audio process tap (audio-only permission, macOS 14.2+, opt-in until
+/// soaked). Sessions pick by the systemBackend option and fall back to SCK
+/// when the tap can't start.
+protocol SystemCaptureBackend: AnyObject {
+    func start() async throws
+    func stop() async
+}
+
+final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, SystemCaptureBackend {
     private let pipeline: ChannelPipeline
     private var stream: SCStream?
     private let converter = AudioConverter()

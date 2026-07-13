@@ -10,7 +10,7 @@ import type {
   EngineInputDevice,
   TranscriptSegment
 } from '../../shared/engine-events'
-import { AUDIO_PERSIST_STORAGE_KEY, type AudioPart } from '../../shared/audio-api'
+import { AUDIO_PERSIST_STORAGE_KEY, SYSTEM_BACKEND_STORAGE_KEY, type AudioPart } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type {
@@ -755,7 +755,10 @@ export default function MeetingView({
       source: 'both',
       inputDevice: pinned,
       meetingId,
-      persistAudio: window.localStorage.getItem(AUDIO_PERSIST_STORAGE_KEY) !== 'off'
+      persistAudio: window.localStorage.getItem(AUDIO_PERSIST_STORAGE_KEY) !== 'off',
+      // Beta: audio-only system capture (no screen permission); Settings-gated.
+      systemBackend:
+        window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) === 'tap' ? 'tap' : 'sck'
     })
   }
 
