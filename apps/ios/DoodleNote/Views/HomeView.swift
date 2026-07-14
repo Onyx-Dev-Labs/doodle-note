@@ -14,6 +14,7 @@ struct HomeView: View {
     @State private var sync = SyncEngine.shared
     @State private var selectedFolderId: UUID?
     @State private var showFolders = false
+    @State private var movingMeeting: Meeting?
     @State private var showGlobalChat = false
     @State private var showDialer = false
     @State private var searchText = ""
@@ -21,20 +22,45 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+            List {
+                Section {
                     titleRow
                     if calendar.access == .granted, !calendar.upcoming.isEmpty, searchText.isEmpty {
                         comingUpSection
                     }
-                    meetingsSection
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 90)
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+                .listRowBackground(Color.cream)
+                .listRowSeparator(.hidden)
+
+                meetingsList
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Color.cream)
+            .environment(\.defaultMinListRowHeight, 0)
+            .confirmationDialog(
+                "Move to folder",
+                isPresented: Binding(
+                    get: { movingMeeting != nil },
+                    set: { if !$0 { movingMeeting = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: movingMeeting
+            ) { meeting in
+                Button("My notes") { moveMeeting(meeting, to: nil) }
+                ForEach(folders) { folder in
+                    Button(folder.name) { moveMeeting(meeting, to: folder.id) }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
             .navigationDestination(for: Meeting.self) { meeting in
-                MeetingView(meeting: meeting, startRecordingOnAppear: meeting === autoRecordMeeting)
+                MeetingView(
+                    meeting: meeting,
+                    // Only a brand-new, never-recorded meeting auto-starts. Re-opening
+                    // a finished meeting to read its notes must NOT record again.
+                    startRecordingOnAppear: meeting === autoRecordMeeting && meeting.startedAt == nil
+                )
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -63,7 +89,11 @@ struct HomeView: View {
                     }
                 }
             }
-            .searchable(text: $searchText, prompt: "Search meetings, notes, transcripts")
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search meetings, notes, transcripts"
+            )
             .safeAreaInset(edge: .bottom) { bottomBar }
             .sheet(isPresented: $showFolders) {
                 FoldersDrawer(selectedFolderId: $selectedFolderId)
@@ -90,7 +120,19 @@ struct HomeView: View {
                 Task {
                     await calendar.requestAndLoad()
                     await router.schedule(for: calendar.upcoming)
+                    if sync.isLinked { await sync.syncNow(context: context) }
                 }
+            }
+        }
+        .task(id: scenePhase) {
+            // Periodic sync while the app is foregrounded, so meetings from
+            // other devices show up without relaunching. Cancels when the
+            // scene leaves .active (task id change) or the view goes away.
+            guard scenePhase == .active, sync.isLinked else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 180_000_000_000) // 3 min
+                if Task.isCancelled { break }
+                await sync.syncNow(context: context)
             }
         }
         .onChange(of: router.pendingStart) { _, pending in
@@ -200,7 +242,6 @@ struct HomeView: View {
                 meeting.displayTitle.lowercased().contains(query)
                     || meeting.roughNotes.lowercased().contains(query)
                     || (meeting.generatedNotes?.lowercased().contains(query) ?? false)
-                    || meeting.segments.contains { $0.text.lowercased().contains(query) }
             }
         }
         return result
@@ -212,30 +253,50 @@ struct HomeView: View {
         return groups.keys.sorted(by: >).map { (day: $0, meetings: groups[$0] ?? []) }
     }
 
-    @ViewBuilder
-    private var meetingsSection: some View {
+    // MARK: Meetings list (native List rows → real swipe, jank-free scroll)
+
+    @ViewBuilder private var meetingsList: some View {
         if visibleMeetings.isEmpty {
-            emptyState
+            Section {
+                emptyState
+                    .frame(maxWidth: .infinity)
+                    .listRowInsets(EdgeInsets(top: 48, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.cream)
+                    .listRowSeparator(.hidden)
+            }
         } else {
             ForEach(groupedByDay, id: \.day) { group in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(relativeDayLabel(group.day))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.stone)
+                Section {
                     ForEach(group.meetings) { meeting in
-                        NavigationLink(value: meeting) {
+                        Button { path.append(meeting) } label: {
                             MeetingRow(meeting: meeting)
                         }
                         .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("Delete", systemImage: "trash", role: .destructive) {
-                                SyncEngine.shared.noteDeleted(meeting: meeting)
-                                context.delete(meeting)
-                                try? context.save()
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowBackground(Color.cream)
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) { deleteMeeting(meeting) } label: {
+                                Label("Delete", systemImage: "trash")
                             }
+                            Button { movingMeeting = meeting } label: {
+                                Label("Move", systemImage: "folder")
+                            }
+                            .tint(Color.sage)
+                        }
+                        .contextMenu {
+                            Button("Move to folder", systemImage: "folder") { movingMeeting = meeting }
+                            Button("Delete", systemImage: "trash", role: .destructive) { deleteMeeting(meeting) }
                         }
                     }
+                } header: {
+                    Text(relativeDayLabel(group.day))
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.stone)
+                        .textCase(nil)
                 }
+                .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                .listRowBackground(Color.cream)
             }
         }
     }
@@ -287,8 +348,17 @@ struct HomeView: View {
                 .overlay(Capsule().stroke(Color.sand))
             }
 
-            Button {
-                startMeeting(title: "", calendarEventId: nil)
+            Menu {
+                Button {
+                    startMeeting(title: "", calendarEventId: nil)
+                } label: {
+                    Label("Record meeting", systemImage: "record.circle.fill")
+                }
+                Button {
+                    startNote()
+                } label: {
+                    Label("New note", systemImage: "square.and.pencil")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.title3.weight(.semibold))
@@ -296,10 +366,23 @@ struct HomeView: View {
                     .background(Color.sageDeep, in: Circle())
                     .foregroundStyle(Color.cream)
             }
-            .accessibilityLabel("New meeting")
+            .accessibilityLabel("New")
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
+    }
+
+    private func deleteMeeting(_ meeting: Meeting) {
+        SyncEngine.shared.noteDeleted(meeting: meeting)
+        context.delete(meeting)
+        try? context.save()
+    }
+
+    private func moveMeeting(_ meeting: Meeting, to folderId: UUID?) {
+        // folderId is in the content hash, so this marks the meeting dirty;
+        // the next syncNow (foreground + periodic) carries it to the cloud.
+        meeting.folderId = folderId
+        try? context.save()
     }
 
     private func startMeeting(title: String, calendarEventId: String?) {
@@ -310,6 +393,15 @@ struct HomeView: View {
         try? context.save()
         autoRecordMeeting = meeting
         path.append(meeting)
+    }
+
+    /// Standalone quick note — typing is its default, nothing records.
+    private func startNote() {
+        let note = Meeting(kind: "note")
+        note.folderId = selectedFolderId
+        context.insert(note)
+        try? context.save()
+        path.append(note)
     }
 }
 
@@ -325,11 +417,20 @@ private struct MeetingRow: View {
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(meeting.createdAt, format: .dateTime.hour().minute())
+                    if meeting.isNote {
+                        Label("Note", systemImage: "square.and.pencil")
+                    }
                     if meeting.generatedNotes != nil {
                         Label("Notes", systemImage: "sparkles")
                     }
-                    if !meeting.segments.isEmpty {
-                        Text("· \(meeting.segments.count) segments")
+                    // Duration comes from startedAt/endedAt — a couple of cheap
+                    // stored dates. Reading meeting.segments here faulted the
+                    // WHOLE transcript from disk on every row draw, which froze
+                    // scrolling (worse under List, which re-renders rows).
+                    if let minutes = meeting.durationMinutes {
+                        Text("· \(minutes)m")
+                    } else if meeting.startedAt != nil {
+                        Label("Recorded", systemImage: "waveform")
                     }
                 }
                 .font(.caption)
@@ -344,3 +445,9 @@ private struct MeetingRow: View {
         .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
     }
 }
+
+/// A row that reveals Move + Delete when swiped left, since the home list is
+/// a styled ScrollView (native List `.swipeActions` don't apply here). Tap the
+/// content to open; swipe to act. Only one row opens at a time via a shared
+/// binding would be ideal, but per-row state keeps it self-contained — a new
+/// swipe on another row leaves this one open until tapped, which is fine.

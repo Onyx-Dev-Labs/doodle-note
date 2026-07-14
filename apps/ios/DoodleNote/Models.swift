@@ -20,6 +20,9 @@ final class Meeting {
     var origin: String
     /// Content hash last accepted by the sync server; nil = never pushed.
     var lastPushedHash: String?
+    /// "meeting" (nil/default) or a standalone quick "note" — desktop's kind
+    /// field; syncs on the wire so notes stay notes across devices.
+    var kind: String?
     /// Calendar event this meeting was started from (EventKit identifier or
     /// the id synced from other devices).
     var calendarEventId: String?
@@ -28,16 +31,20 @@ final class Meeting {
     @Relationship(deleteRule: .cascade, inverse: \Segment.meeting)
     var segments: [Segment]
 
+    var isNote: Bool { kind == "note" }
+
     init(
         id: UUID = UUID(),
         title: String = "",
         createdAt: Date = .now,
         templateId: String = "general",
-        origin: String = "phone"
+        origin: String = "phone",
+        kind: String? = nil
     ) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
+        self.kind = kind
         self.roughNotes = ""
         self.generatedNotes = nil
         self.templateId = templateId
@@ -53,12 +60,20 @@ final class Meeting {
     }
 
     var displayTitle: String {
-        title.trimmingCharacters(in: .whitespaces).isEmpty ? "Untitled meeting" : title
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty { return trimmed }
+        return isNote ? "Untitled note" : "Untitled meeting"
     }
 
     var durationMs: Int? {
         guard let startedAt, let endedAt else { return nil }
         return Int(endedAt.timeIntervalSince(startedAt) * 1000)
+    }
+
+    /// Whole minutes, for lightweight list subtitles (dates only — never
+    /// touches the segments relationship, so it's cheap during scroll).
+    var durationMinutes: Int? {
+        durationMs.map { max(1, $0 / 60_000) }
     }
 }
 

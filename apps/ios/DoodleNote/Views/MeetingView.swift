@@ -22,20 +22,26 @@ struct MeetingView: View {
         VStack(spacing: 0) {
             header
 
-            if recorder.isActive {
-                recordingBanner
-            }
+            if meeting.isNote {
+                // Quick note: just the editor — no recording chrome, no
+                // transcript tab (there is nothing to transcribe).
+                notesTab
+            } else {
+                if recorder.isActive {
+                    recordingBanner
+                }
 
-            Picker("View", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+                Picker("View", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
-            switch tab {
-            case .notes: notesTab
-            case .transcript: transcriptTab
+                switch tab {
+                case .notes: notesTab
+                case .transcript: transcriptTab
+                }
             }
         }
         .background(Color.cream)
@@ -78,7 +84,8 @@ struct MeetingView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            TextField("Untitled meeting", text: $meeting.title, axis: .vertical)
+            TextField(meeting.isNote ? "Untitled note" : "Untitled meeting",
+                      text: $meeting.title, axis: .vertical)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.ink)
                 .lineLimit(2)
@@ -121,7 +128,12 @@ struct MeetingView: View {
             Spacer()
 
             Button {
-                Task { await recorder.stop(meeting: meeting, context: context) }
+                Task {
+                    await recorder.stop(meeting: meeting, context: context)
+                    if SyncEngine.shared.isLinked {
+                        await SyncEngine.shared.syncNow(context: context)
+                    }
+                }
             } label: {
                 Label("Stop", systemImage: "stop.fill")
                     .font(.footnote.weight(.semibold))
@@ -142,22 +154,32 @@ struct MeetingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Your rough notes")
+                    Text(meeting.isNote ? "Your note" : "Your rough notes")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.stone)
-                    TextEditor(text: $meeting.roughNotes)
-                        .frame(minHeight: 120)
-                        .padding(8)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12).stroke(Color.sand)
-                        )
-                        .font(.body)
-                        .foregroundStyle(Color.ink)
+                    // A growing TextField (not TextEditor): TextEditor has its
+                    // own scroll view that fights the page ScrollView, so the
+                    // notes screen wouldn't scroll on the first touch. TextField
+                    // with a vertical axis grows to fit and never scrolls itself.
+                    TextField(
+                        meeting.isNote ? "Write anything…" : "Jot your rough notes…",
+                        text: $meeting.roughNotes,
+                        axis: .vertical
+                    )
+                    .lineLimit(4...)
+                    .padding(12)
+                    .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12).stroke(Color.sand)
+                    )
+                    .font(.body)
+                    .foregroundStyle(Color.ink)
                 }
 
-                generateSection
+                // Notes have no transcript to merge — generation is meetings-only.
+                if !meeting.isNote {
+                    generateSection
+                }
 
                 if let notes = meeting.generatedNotes {
                     VStack(alignment: .leading, spacing: 6) {
@@ -233,9 +255,40 @@ struct MeetingView: View {
             let notes = try await NotesEngineFactory.make().generate(input)
             meeting.generatedNotes = notes
             try? context.save()
+
+            // Ad-hoc meetings (not created from a calendar event) usually have
+            // no real title — let the model name them from what was discussed.
+            if meeting.calendarEventId == nil, isUntitled(meeting.title) {
+                await titleFromNotes(notes: notes)
+            }
+            // A fresh note is exactly what other devices are waiting for.
+            if SyncEngine.shared.isLinked {
+                await SyncEngine.shared.syncNow(context: context)
+            }
         } catch {
             generationError = error.localizedDescription
         }
+    }
+
+    private func isUntitled(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t.isEmpty || t == "untitled meeting" || t == "new meeting"
+    }
+
+    /// One short title from the generated notes. Best-effort: a failure or an
+    /// odd response leaves the meeting titled as it was.
+    private func titleFromNotes(notes: String) async {
+        let engine = NotesEngineFactory.make()
+        let system = "You write a concise meeting title of 3 to 6 words. "
+            + "Reply with ONLY the title — no quotes, no punctuation at the end, no preamble."
+        let user = "Meeting notes:\n\n" + String(notes.prefix(1500))
+        guard let raw = try? await engine.respond(system: system, user: user) else { return }
+        let title = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.“”"))
+        guard !title.isEmpty, title.count <= 80 else { return }
+        meeting.title = title
+        try? context.save()
     }
 
     // MARK: Transcript tab

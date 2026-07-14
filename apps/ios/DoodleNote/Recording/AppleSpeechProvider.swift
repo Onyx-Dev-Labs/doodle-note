@@ -22,10 +22,30 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     func prepare() async throws {
+        // Fast path first: when this locale's assets are already on the
+        // device, skip AssetInventory entirely — the install-request path
+        // hung indefinitely on a real device and must only run when needed.
+        let installed = await SpeechTranscriber.installedLocales
+        let current = Locale.current
+        let match: (Locale) -> Bool = {
+            $0.identifier(.bcp47) == current.identifier(.bcp47)
+                || $0.language.languageCode == current.language.languageCode
+        }
+        if let ready = installed.first(where: match) ?? installed.first(where: {
+            $0.language.languageCode == Locale(identifier: "en-US").language.languageCode
+        }) {
+            self.transcriber = SpeechTranscriber(
+                locale: ready,
+                transcriptionOptions: [],
+                reportingOptions: [.volatileResults],
+                attributeOptions: [.audioTimeRange]
+            )
+            return
+        }
+
         let supported = await SpeechTranscriber.supportedLocales
         let locale =
-            supported.first { $0.identifier(.bcp47) == Locale.current.identifier(.bcp47) }
-            ?? supported.first { $0.language.languageCode == Locale.current.language.languageCode }
+            supported.first(where: match)
             ?? Locale(identifier: "en-US")
 
         let transcriber = SpeechTranscriber(
@@ -36,9 +56,13 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         )
         self.transcriber = transcriber
 
-        // Downloads the language assets if missing; no-op when installed.
+        // First run on this device: the language assets must download. Hard
+        // bound: surface a real error instead of pinning the session in
+        // "preparing" forever (which is what bricked the first device test).
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-            try await request.downloadAndInstall()
+            try await withThrowingTimeout(seconds: 120) {
+                try await request.downloadAndInstall()
+            }
         }
     }
 
@@ -118,8 +142,17 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             inputBuilder = nil
         }
 
-        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
-        await resultsTask?.value
+        // Both awaits are bounded: SpeechAnalyzer's finalize has wedged on a
+        // real device (assets mid-download), and a provider that can't finish
+        // pins the whole controller in .stopping. Losing the transcript tail
+        // beats losing the session.
+        if let analyzer {
+            await withTimeout(seconds: 4) { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+        }
+        if let resultsTask {
+            await withTimeout(seconds: 2) { await resultsTask.value }
+            resultsTask.cancel()
+        }
         eventsCont.finish()
         analyzer = nil
         converter = nil

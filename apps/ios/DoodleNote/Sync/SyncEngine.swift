@@ -199,7 +199,13 @@ final class SyncEngine: NSObject {
 
     private func pushDirty(api: SyncAPI, context: ModelContext) async throws {
         let meetings = try context.fetch(FetchDescriptor<Meeting>())
-        let dirty = meetings.filter { contentHash(of: $0) != $0.lastPushedHash }
+        // Hashing every transcript is CPU-heavy and this runs on @MainActor;
+        // yield every few meetings so an in-progress scroll isn't frozen.
+        var dirty: [Meeting] = []
+        for (i, meeting) in meetings.enumerated() {
+            if contentHash(of: meeting) != meeting.lastPushedHash { dirty.append(meeting) }
+            if i % 8 == 7 { await Task.yield() }
+        }
         guard !dirty.isEmpty else { return }
 
         for batch in dirty.chunked(into: 20) {
@@ -221,11 +227,13 @@ final class SyncEngine: NSObject {
         var latestAllIds: Set<String>?
         var remoteFolders: [SyncAPI.RemoteFolder] = []
 
+        var didChange = false
         for _ in 0..<40 {
             let page = try await api.pull(since: cursor)
             latestAllIds = Set(page.allIds.map { $0.lowercased() })
             remoteFolders = page.folders
 
+            if !page.changed.isEmpty { didChange = true }
             for remote in page.changed {
                 apply(remote: remote, context: context)
                 cursor = max(cursor ?? "", remote.updatedAt)
@@ -234,22 +242,28 @@ final class SyncEngine: NSObject {
         }
         pullCursor = cursor
 
+        if !remoteFolders.isEmpty { didChange = true }
         applyFolders(remoteFolders, context: context)
 
         // Deletion reconciliation: a synced, non-dirty local meeting missing
-        // from the cloud's complete id list was deleted remotely.
+        // from the cloud's complete id list was deleted remotely. Yields so
+        // this per-meeting hash scan doesn't freeze the UI.
         if let cloudIds = latestAllIds {
             let meetings = try context.fetch(FetchDescriptor<Meeting>())
-            for meeting in meetings {
+            for (i, meeting) in meetings.enumerated() {
                 let id = meeting.id.uuidString.lowercased()
                 let wasSynced = meeting.lastPushedHash != nil
                 let isDirty = contentHash(of: meeting) != meeting.lastPushedHash
                 if wasSynced, !isDirty, !cloudIds.contains(id) {
                     context.delete(meeting)
+                    didChange = true
                 }
+                if i % 8 == 7 { await Task.yield() }
             }
         }
-        try? context.save()
+        // Only save (and republish @Query → relist) when something changed —
+        // a no-op sync must not re-render the list mid-scroll.
+        if didChange { try? context.save() }
     }
 
     /// Create/rename folders from the server's full list; remove local
@@ -305,6 +319,7 @@ final class SyncEngine: NSObject {
 
     private func update(meeting: Meeting, from remote: SyncAPI.RemoteMeeting, context: ModelContext) {
         meeting.title = remote.title
+        meeting.kind = remote.kind == "note" ? "note" : nil
         meeting.createdAt = parseISO(remote.createdAt) ?? meeting.createdAt
         meeting.startedAt = remote.startedAt.flatMap(parseISO)
         meeting.endedAt = remote.endedAt.flatMap(parseISO)
@@ -338,6 +353,7 @@ final class SyncEngine: NSObject {
         SyncAPI.PushMeeting(
             id: meeting.id.uuidString.lowercased(),
             title: meeting.displayTitle,
+            kind: meeting.isNote ? "note" : nil,
             createdAt: isoString(meeting.createdAt),
             startedAt: meeting.startedAt.map(isoString),
             endedAt: meeting.endedAt.map(isoString),
@@ -362,6 +378,7 @@ final class SyncEngine: NSObject {
     private func contentHash(of meeting: Meeting) -> String {
         var parts: [String] = [
             meeting.displayTitle,
+            meeting.kind ?? "",
             meeting.startedAt.map(isoString) ?? "",
             meeting.endedAt.map(isoString) ?? "",
             meeting.calendarEventId ?? "",
