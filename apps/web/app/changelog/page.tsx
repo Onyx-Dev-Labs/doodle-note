@@ -9,6 +9,49 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.5",
+    date: "July 14, 2026",
+    highlights: [
+      "Mac: DoodleNote no longer needs the Screen Recording permission — system audio is captured with a Core Audio tap (macOS 14.2+), so setup only asks for microphone and system-audio access",
+      "Every recording checks the new capture is actually hearing audio and falls back to the old method automatically if it isn't",
+      "Prefer the old capture? Settings → General → Meeting recordings has the switch",
+    ],
+  },
+  {
+    version: "0.4.4",
+    date: "July 13, 2026",
+    highlights: [
+      "Export any meeting as Markdown or PDF from the note's ⋯ menu",
+      "Bring your own key: Groq, OpenRouter, and Ollama join OpenAI and Anthropic as notes-model providers — Ollama needs no key at all",
+    ],
+  },
+  {
+    version: "0.4.2",
+    date: "July 12, 2026",
+    highlights: [
+      "Long meetings get full-coverage notes — transcripts over ~40 minutes are condensed in parts so nothing in the middle is skipped anymore",
+      "First-run setup wizard: permissions, the transcription engine, and your notes model, all set up before your first meeting",
+    ],
+  },
+  {
+    version: "0.4.1",
+    date: "July 12, 2026",
+    highlights: [
+      "Import audio files (wav, mp3, m4a) from the home screen — DoodleNote transcribes them into a meeting",
+      "Re-transcribe any meeting from its saved recording",
+      "Recordings made by DoodleNote recover the You/Them speaker split on import",
+    ],
+  },
+  {
+    version: "0.4.0",
+    date: "July 11, 2026",
+    highlights: [
+      "Meeting audio is saved on your Mac (local only, never synced) — play it back from the transcript panel and click any line to jump there",
+      "Crash recovery: if DoodleNote quits mid-meeting, the recording is stitched back together on next launch",
+      "Stopping a recording responds instantly, and Resume continues the clock where it left off",
+    ],
+  },
+  {
     version: "0.3.5",
     date: "July 7, 2026",
     highlights: [
