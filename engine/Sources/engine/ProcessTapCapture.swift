@@ -126,14 +126,75 @@ final class ProcessTapCapture: SystemCaptureBackend {
     }
 }
 
+/// Inaudible proof-of-life for the tap: taps read each process's DIGITAL
+/// output stream before the mix, so an ultra-quiet tone (~-62 dB, silent on
+/// any speaker) still lands in the capture bit-for-bit. Permission-denied
+/// taps deliver exact zeros, so any nonzero peak means the tap is alive.
+@available(macOS 14.2, *)
+enum TapProbe {
+    /// Peak amplitude of the played tone; anything captured above
+    /// `threshold` (well over the zero floor, well under the tone) passes.
+    static let toneAmplitude: Float = 0.0008
+    static let threshold: Float = 0.00005
+
+    /// Play the probe tone for `seconds`. Inaudible by design — do NOT turn
+    /// this up; the beep annoyed real users and silence is the whole point.
+    static func playTone(seconds: Double) -> (AVAudioEngine, AVAudioPlayerNode)? {
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: nil)
+        engine.mainMixerNode.outputVolume = 1.0
+        let format = engine.mainMixerNode.outputFormat(forBus: 0)
+        let frames = AVAudioFrameCount(format.sampleRate * seconds)
+        guard let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
+        tone.frameLength = frames
+        for c in 0..<Int(format.channelCount) {
+            guard let data = tone.floatChannelData?[c] else { continue }
+            for i in 0..<Int(frames) {
+                data[i] = sinf(Float(i) * 2 * .pi * 440 / Float(format.sampleRate)) * toneAmplitude
+            }
+        }
+        do {
+            try engine.start()
+            player.scheduleBuffer(tone, completionHandler: nil)
+            player.play()
+            return (engine, player)
+        } catch {
+            Events.log("tap probe tone failed to play: \(error)")
+            return nil
+        }
+    }
+}
+
 /// `engine tap-selftest`: prove the tap actually HEARS something before the
-/// app trusts it. Without the audio-capture permission, taps don't fail —
-/// they deliver perfect digital silence, which must never be mistaken for a
-/// working meeting recorder. We play a quiet 440Hz blip through the default
-/// output and check the tap captures non-zero samples.
+/// app trusts it (silently — see TapProbe).
 @available(macOS 14.2, *)
 enum TapSelfTest {
+    struct Verdict {
+        let ok: Bool
+        let peak: Float
+        let reason: String?
+    }
+
+    /// Start a throwaway tap, play the inaudible probe, measure what it
+    /// heard. Shared by the CLI selftest and launch preflight.
+    static func measure() async -> Verdict {
+        await runMeasurement()
+    }
+
     static func run() async {
+        let verdict = await runMeasurement()
+        var payload: [String: Any] = [
+            "event": "tap_selftest",
+            "ok": verdict.ok,
+            "peak": Double(verdict.peak),
+        ]
+        if let reason = verdict.reason { payload["reason"] = reason }
+        Events.emit(payload)
+    }
+
+    private static func runMeasurement() async -> Verdict {
         final class Probe: @unchecked Sendable {
             private let lock = NSLock()
             private var peakValue: Float = 0
@@ -163,53 +224,23 @@ enum TapSelfTest {
         do {
             try await tap.start()
         } catch {
-            Events.emit(["event": "tap_selftest", "ok": false, "reason": String(describing: error)])
-            return
+            return Verdict(ok: false, peak: 0, reason: String(describing: error))
         }
 
-        // A soft tone the tap must hear (taps see per-process streams before
-        // the output mix, so even low volume registers clearly).
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: nil)
-        engine.mainMixerNode.outputVolume = 0.05
-        let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        let frames = AVAudioFrameCount(format.sampleRate * 1.2)
-        if let tone = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) {
-            tone.frameLength = frames
-            for c in 0..<Int(format.channelCount) {
-                guard let data = tone.floatChannelData?[c] else { continue }
-                for i in 0..<Int(frames) {
-                    data[i] = sinf(Float(i) * 2 * .pi * 440 / Float(format.sampleRate)) * 0.5
-                }
-            }
-            do {
-                try engine.start()
-                // completionHandler variant is the synchronous scheduling API
-                // (argless scheduleBuffer is async in newer overlays).
-                player.scheduleBuffer(tone, completionHandler: nil)
-                player.play()
-            } catch {
-                Events.log("selftest tone failed to play: \(error)")
-            }
-        }
+        let playback = TapProbe.playTone(seconds: 1.2)
 
         try? await Task.sleep(nanoseconds: 2_000_000_000)
-        player.stop()
-        engine.stop()
+        playback?.1.stop()
+        playback?.0.stop()
         await tap.stop()
 
-        let heard = probe.peak > 0.001
-        var payload: [String: Any] = [
-            "event": "tap_selftest",
-            "ok": heard,
-            "peak": Double(probe.peak),
-        ]
-        if !heard {
-            payload["reason"] =
-                "the tap captured only silence — System Audio Recording permission is likely missing"
-        }
-        Events.emit(payload)
+        let heard = probe.peak > TapProbe.threshold
+        return Verdict(
+            ok: heard,
+            peak: probe.peak,
+            reason: heard
+                ? nil
+                : "the tap captured only silence — System Audio Recording permission is likely missing"
+        )
     }
 }

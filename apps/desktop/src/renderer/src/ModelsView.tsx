@@ -221,36 +221,18 @@ export default function ModelsView({
   const [audioUsage, setAudioUsage] = useState<AudioUsage | null>(null)
   const [audioClearing, setAudioClearing] = useState(false)
   const [tapEnabled, setTapEnabled] = useState(
-    () => window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) === 'tap'
+    () => window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) !== 'sck'
   )
-  const [tapTesting, setTapTesting] = useState(false)
-  const [tapNote, setTapNote] = useState<string | null>(null)
 
-  const toggleTapBackend = async (): Promise<void> => {
-    if (tapTesting) return
+  // Default ON. Every tap session self-probes inaudibly and falls back to
+  // ScreenCaptureKit on its own, so no gating test is needed here.
+  const toggleTapBackend = (): void => {
     if (tapEnabled) {
-      window.localStorage.removeItem(SYSTEM_BACKEND_STORAGE_KEY)
+      window.localStorage.setItem(SYSTEM_BACKEND_STORAGE_KEY, 'sck')
       setTapEnabled(false)
-      setTapNote(null)
-      return
-    }
-    // Enabling runs the self-test: without the System Audio Recording
-    // permission a tap records SILENCE, which must never pass as working.
-    setTapTesting(true)
-    setTapNote('Testing — macOS may ask to record system audio…')
-    try {
-      const result = await window.engine.tapSelfTest()
-      if (result.ok) {
-        window.localStorage.setItem(SYSTEM_BACKEND_STORAGE_KEY, 'tap')
-        setTapEnabled(true)
-        setTapNote('Working — future recordings skip the screen permission.')
-      } else {
-        setTapNote(result.reason ?? 'The self-test failed — staying on the standard capture.')
-      }
-    } catch (err) {
-      setTapNote(err instanceof Error ? err.message : String(err))
-    } finally {
-      setTapTesting(false)
+    } else {
+      window.localStorage.removeItem(SYSTEM_BACKEND_STORAGE_KEY)
+      setTapEnabled(true)
     }
   }
 
@@ -1148,20 +1130,17 @@ export default function ModelsView({
                   </div>
                   <div className="cal-row">
                     <span className="cal-row-main">
-                      <span className="cal-row-label">
-                        Capture without screen permission{' '}
-                        <span className="model-note">beta</span>
-                      </span>
+                      <span className="cal-row-label">Capture without screen permission</span>
                       <span className="cal-row-sub">
-                        {tapNote ??
-                          'Uses a Core Audio tap (macOS 14.2+) so DoodleNote never needs Screen Recording access. Enabling runs a quick self-test.'}
+                        System audio is captured with a Core Audio tap (macOS 14.2+) — no Screen
+                        Recording access needed. Turn off to use the legacy ScreenCaptureKit
+                        capture instead.
                       </span>
                     </span>
                     <Toggle
                       checked={tapEnabled}
-                      disabled={tapTesting}
                       label="Capture system audio without screen permission"
-                      onChange={() => void toggleTapBackend()}
+                      onChange={toggleTapBackend}
                     />
                   </div>
                   <div className="cal-row">

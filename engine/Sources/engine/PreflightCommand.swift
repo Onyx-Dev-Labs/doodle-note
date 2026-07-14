@@ -14,12 +14,21 @@ enum PreflightCommand {
         let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
         Events.emit(["event": "status", "stage": "preflight_mic", "granted": micGranted])
 
-        do {
-            _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-            Events.emit(["event": "status", "stage": "preflight_screen", "granted": true])
-        } catch {
-            Events.emit(["event": "status", "stage": "preflight_screen", "granted": false])
-            Events.log("preflight: screen/system-audio not granted yet: \(error)")
+        // System audio: the tap needs only the audio-capture permission —
+        // preflight fires THAT prompt, so new users never see "screen
+        // recording". Pre-14.2 keeps the old ScreenCaptureKit poke.
+        if #available(macOS 14.2, *) {
+            let verdict = await TapSelfTest.measure()
+            Events.emit(["event": "status", "stage": "preflight_screen", "granted": verdict.ok])
+            if !verdict.ok { Events.log("preflight: system-audio tap not working yet: \(verdict.reason ?? "silent")") }
+        } else {
+            do {
+                _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                Events.emit(["event": "status", "stage": "preflight_screen", "granted": true])
+            } catch {
+                Events.emit(["event": "status", "stage": "preflight_screen", "granted": false])
+                Events.log("preflight: screen/system-audio not granted yet: \(error)")
+            }
         }
 
         do {

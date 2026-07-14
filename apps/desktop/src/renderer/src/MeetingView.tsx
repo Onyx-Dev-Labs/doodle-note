@@ -756,9 +756,10 @@ export default function MeetingView({
       inputDevice: pinned,
       meetingId,
       persistAudio: window.localStorage.getItem(AUDIO_PERSIST_STORAGE_KEY) !== 'off',
-      // Beta: audio-only system capture (no screen permission); Settings-gated.
+      // Default: audio-only tap (no screen permission). 'sck' is the
+      // Settings opt-out; the engine self-probes and falls back on its own.
       systemBackend:
-        window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) === 'tap' ? 'tap' : 'sck'
+        window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) === 'sck' ? 'sck' : 'tap'
     })
   }
 

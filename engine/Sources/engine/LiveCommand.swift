@@ -217,6 +217,32 @@ enum LiveSession {
         }
         do {
             try await systemCapture?.start()
+            // Liveness probe: a tap without the System Audio Recording
+            // permission does not fail — it records perfect silence. Play an
+            // INAUDIBLE tone (taps read digital pre-mix streams, so ~-62dB
+            // still registers exactly) and verify it arrives; deaf taps swap
+            // to ScreenCaptureKit before any of the meeting is lost. Runs
+            // while capture is already live and models are still cold.
+            if usingTap, #available(macOS 14.2, *), let pipeline = systemPipeline {
+                let playback = TapProbe.playTone(seconds: 1.5)
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                playback?.1.stop()
+                playback?.0.stop()
+                if pipeline.capturedPeak <= TapProbe.threshold {
+                    Events.log("tap probe heard nothing — permission likely missing; using ScreenCaptureKit")
+                    Events.emit([
+                        "event": "status", "stage": "system_backend", "backend": "sck",
+                        "fallback": true,
+                    ])
+                    await systemCapture?.stop()
+                    // Past this point failures are SCK's own — don't let the
+                    // tap catch below re-run the fallback a second time.
+                    usingTap = false
+                    let sck = try await SystemAudioCapture(into: pipeline)
+                    try await sck.start()
+                    systemCapture = sck
+                }
+            }
         } catch where usingTap {
             // The tap is opt-in/beta: any failure (permission denied, OS
             // quirk) falls back to the proven SCK path instead of killing
@@ -341,6 +367,16 @@ final class ChannelPipeline {
     /** Diagnostics tap on incoming buffers (used by the tap self-test). */
     private let probe: ((AVAudioPCMBuffer) -> Void)?
 
+    /** Running peak of everything ingested — the tap liveness check reads
+     *  this: a permission-denied tap delivers exact digital zeros. */
+    private let peakLock = NSLock()
+    private var peakValue: Float = 0
+    var capturedPeak: Float {
+        peakLock.lock()
+        defer { peakLock.unlock() }
+        return peakValue
+    }
+
     init(
         channel: String,
         manager: StreamingUnifiedAsrManager? = nil,
@@ -392,6 +428,21 @@ final class ChannelPipeline {
         } else {
             epochLock.unlock()
         }
+        // Track the peak cheaply for liveness checks.
+        var bufferPeak: Float = 0
+        for c in 0..<Int(buffer.format.channelCount) {
+            if let data = buffer.floatChannelData?[c] {
+                for i in 0..<Int(buffer.frameLength) {
+                    bufferPeak = max(bufferPeak, abs(data[i]))
+                }
+            }
+        }
+        if bufferPeak > 0 {
+            peakLock.lock()
+            peakValue = max(peakValue, bufferPeak)
+            peakLock.unlock()
+        }
+
         // Both consumers only read: ASR via the stream, persistence on the
         // recorder's own serial queue.
         probe?(buffer)

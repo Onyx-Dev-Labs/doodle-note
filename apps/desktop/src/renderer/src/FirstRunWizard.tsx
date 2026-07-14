@@ -195,8 +195,8 @@ export default function FirstRunWizard({
               ) : (
                 <>
                   macOS will ask for the <strong>microphone</strong> (your voice) and{' '}
-                  <strong>screen &amp; system audio</strong> (the other side of the call).
-                  Meanwhile the on-device transcription engine gets ready.
+                  <strong>system audio</strong> (the other side of the call) — no screen
+                  recording, ever. Meanwhile the on-device transcription engine gets ready.
                 </>
               )}
             </p>
@@ -211,7 +211,7 @@ export default function FirstRunWizard({
               )}
               {!isWindows && (
                 <div className="wizard-row">
-                  <span>Screen &amp; system audio</span>
+                  <span>System audio</span>
                   <span className={engine.screen === false ? 'wz-bad' : 'wz-ok'}>
                     {check(engine.screen)}
                   </span>
@@ -229,8 +229,9 @@ export default function FirstRunWizard({
             </div>
             {!isWindows && (engine.mic === false || engine.screen === false) && (
               <p className="wizard-hint">
-                Denied something? You can grant it later in System Settings → Privacy &amp;
-                Security — recording won&rsquo;t work until then.
+                Denied something? Grant it later in System Settings → Privacy &amp; Security →
+                Microphone / Screen &amp; System Audio Recording — recording won&rsquo;t work
+                until then.
               </p>
             )}
             <button
