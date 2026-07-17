@@ -4,8 +4,7 @@
  * feeds it micmon events and asks when the debounce timer lands.
  */
 
-/** Meeting-app audio must persist this long before we prompt — long enough
- *  to outlive chat dings (1-2s), short enough to land early in a ring. */
+/** Meeting-app microphone use must persist this long before we prompt. */
 export const MIC_DEBOUNCE_MS = 4_000
 /** After a prompt (or a dismissal), stay quiet this long. */
 export const MIC_COOLDOWN_MS = 5 * 60_000
@@ -61,68 +60,21 @@ export function meetingAppLabel(bundles: readonly string[]): string | null {
   return null
 }
 
-/**
- * Ring detection works on audio OUTPUT — an incoming call rings long before
- * the mic engages. Browsers are excluded here (any tab playing audio would
- * read as a meeting); only native meeting apps count, and the debounce
- * filters their short notification dings.
- */
-export function meetingRingLabel(bundles: readonly string[]): string | null {
-  const label = meetingAppLabel(bundles)
-  return label === 'browser' ? null : label
+export interface MeetingPromptSignals {
+  inputRunning: boolean
+  inputBundles: readonly string[]
+  outputBundles: readonly string[]
 }
-
-/** Every distinct meeting-app label holding audio output (browsers excluded). */
-export function meetingRingLabels(bundles: readonly string[]): string[] {
-  const labels = new Set<string>()
-  for (const bundle of bundles) {
-    const lower = bundle.toLowerCase()
-    const match = MEETING_BUNDLE_PATTERNS.find((m) => lower.includes(m.pattern))
-    if (match && match.label !== 'browser') labels.add(match.label)
-  }
-  return [...labels]
-}
-
-/* ---- ring edge tracking (kills the idle-Zoom false positive) ---- */
 
 /**
- * A ring must be an EDGE, not a state. An idle Zoom keeps a permanent audio
- * output session, so "meeting app holds output" fired a fresh prompt every
- * cooldown whenever anything (a TV app, a Discord ding) churned the audio
- * client list. Only an app whose output NEWLY APPEARS counts as ringing;
- * whatever was already holding output when watching began is baseline noise
- * until it has gone absent once. A real call on an idle-open Zoom still
- * prompts via the mic path seconds after joining.
+ * Return the app label that is strong enough to justify a recording prompt.
+ * Output activity is deliberately context-only: CoreAudio reports an open
+ * output session, not an actual incoming call, so Zoom Phone tones, Slack
+ * clips, Discord streams, and ordinary playback must never prompt alone.
  */
-export interface RingEdgeState {
-  /** Labels present on the first observed event are baseline, never armed. */
-  sawFirstEvent: boolean
-  /** Ring labels currently holding output → armed (appeared via an edge)? */
-  present: ReadonlyMap<string, boolean>
-}
-
-export function initialRingEdgeState(): RingEdgeState {
-  return { sawFirstEvent: false, present: new Map() }
-}
-
-/** Apply one micmon event's set of output ring labels. */
-export function onRingLabels(state: RingEdgeState, labels: readonly string[]): RingEdgeState {
-  const present = new Map<string, boolean>()
-  for (const label of labels) {
-    const alreadyArmed = state.present.get(label)
-    // Sticky while continuously present; fresh appearances arm only after
-    // the first event (labels in the very first snapshot are baseline).
-    present.set(label, alreadyArmed ?? state.sawFirstEvent)
-  }
-  return { sawFirstEvent: true, present }
-}
-
-/** The label to treat as "ringing now", or null. */
-export function armedRingLabel(state: RingEdgeState): string | null {
-  for (const [label, armed] of state.present) {
-    if (armed) return label
-  }
-  return null
+export function meetingPromptLabel(signals: MeetingPromptSignals): string | null {
+  if (!signals.inputRunning) return null
+  return meetingAppLabel(signals.inputBundles)
 }
 
 export interface MicPromptState {

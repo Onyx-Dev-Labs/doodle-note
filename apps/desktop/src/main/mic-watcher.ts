@@ -3,25 +3,20 @@ import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { WIN_MICMON_ARGS } from './win-micmon'
 import {
-  armedRingLabel,
   initialEndState,
   initialMicState,
-  initialRingEdgeState,
   markEnded,
   markPrompted,
   MEETING_END_DEBOUNCE_MS,
-  meetingAppLabel,
-  meetingRingLabels,
+  meetingPromptLabel,
   MIC_DEBOUNCE_MS,
   onCaptureMicEvent,
   onMicEvent,
-  onRingLabels,
   setSuppressed,
   shouldAutoStop,
   shouldPrompt,
   type MeetingEndState,
-  type MicPromptState,
-  type RingEdgeState
+  type MicPromptState
 } from './mic-watcher-logic'
 
 /** Crashed child restarts after this (engine updates, transient failures). */
@@ -38,12 +33,13 @@ interface MicWatcherConfig {
  * Ad-hoc meeting detection: watches which apps hold the microphone and
  * prompts when a meeting app keeps it open past the debounce — a
  * Zoom/Teams/Meet call that never made it onto the calendar. The signal
- * source is per-platform (same NDJSON contract): macOS runs the engine's
- * `micmon` command (CoreAudio process attribution); Windows runs a
- * PowerShell poll of the ConsentStore registry (win-micmon.ts). Ring
- * detection (audio OUTPUT) exists only in the macOS source. Decision logic
- * is pure and tested (mic-watcher-logic.ts); this class owns the child
- * process and timers.
+ * source is per-platform: macOS runs the engine's `micmon` command (CoreAudio
+ * process attribution); Windows runs a PowerShell poll of the ConsentStore
+ * registry (win-micmon.ts). Decision logic is pure and tested
+ * (mic-watcher-logic.ts); this class owns the child process and timers.
+ * macOS output activity is logged as context but never creates
+ * a prompt by itself because CoreAudio cannot distinguish a ring from normal
+ * playback within Zoom, Slack, Discord, or another meeting-shaped app.
  */
 export class MicWatcher {
   private config: MicWatcherConfig
@@ -65,9 +61,6 @@ export class MicWatcher {
    * recording started from a ring prompt auto-stop after exactly 12s.
    */
   private currentInputLabel: string | null = null
-
-  /** Output-edge tracker: idle meeting apps holding audio forever are noise. */
-  private ringEdge: RingEdgeState = initialRingEdgeState()
 
   /** Meeting-end watch, alive only while our own capture runs (suppressed). */
   private capturing = false
@@ -219,23 +212,24 @@ export class MicWatcher {
             outputBundles?: string[]
           }
           if (event.event === 'micmon' && typeof event.running === 'boolean') {
-            // Only capture by an actual meeting app counts as "busy" —
-            // dictation tools like FluidVoice must never prompt. Sustained
-            // meeting-app OUTPUT (an incoming call ringing) counts too, so
-            // the prompt lands before the call is even answered.
+            // Only microphone capture by an actual meeting app counts as
+            // "busy". Output remains useful diagnostic context, but an open
+            // output session is not proof of a call and must never prompt.
             const bundles = Array.isArray(event.bundles) ? event.bundles.map(String) : []
             const output = Array.isArray(event.outputBundles) ? event.outputBundles.map(String) : []
-            const inputLabel = event.running ? meetingAppLabel(bundles) : null
-            this.ringEdge = onRingLabels(this.ringEdge, meetingRingLabels(output))
-            const ringLabel = armedRingLabel(this.ringEdge)
-            this.currentAppLabel = inputLabel ?? ringLabel
+            const inputLabel = meetingPromptLabel({
+              inputRunning: event.running,
+              inputBundles: bundles,
+              outputBundles: output
+            })
+            this.currentAppLabel = inputLabel
             this.currentInputLabel = inputLabel
             this.diag(
               `event running=${event.running} in=[${bundles.join(',')}] out=[${output.join(',')}] ` +
-                `inputLabel=${inputLabel} ringLabel=${ringLabel} suppressed=${this.state.suppressed}`
+                `inputLabel=${inputLabel} outputOnlyIgnored=${inputLabel === null && output.length > 0} ` +
+                `suppressed=${this.state.suppressed}`
             )
-            this.handleMicEvent(inputLabel !== null || ringLabel !== null)
-            // The end watch keys on the MIC only — output lingers on dings.
+            this.handleMicEvent(inputLabel !== null)
             this.handleEndWatch(inputLabel !== null)
           }
         } catch {

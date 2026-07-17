@@ -264,8 +264,10 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Ad-hoc meeting detection: engine micmon watches for other apps holding
+  // Ad-hoc meeting detection: engine micmon watches for meeting apps holding
   // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
+  // Audio output alone is intentionally ignored: it cannot distinguish an
+  // incoming call from ordinary playback, notifications, or phone tones.
   const micWatcher = new MicWatcher(
     resolveEngineBinary(),
     app.getPath('userData'),
