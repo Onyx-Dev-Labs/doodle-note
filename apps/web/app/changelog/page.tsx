@@ -9,6 +9,13 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.7",
+    date: "August 1, 2026",
+    highlights: [
+      "Meeting action menus now stay above every note row, so Move to trash, exports, and folder actions cannot be obscured or intercepted by another meeting",
+    ],
+  },
+  {
     version: "0.4.6",
     date: "August 1, 2026",
     highlights: [

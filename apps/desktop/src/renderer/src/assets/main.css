@@ -760,7 +760,13 @@ a,
   margin-bottom: 18px;
 }
 
-.day-group.older {
+/* Fade the older row content without fading the group container itself.
+   Group-level opacity creates a stacking context that traps row popovers
+   underneath later date groups. */
+.day-group.older > .day-label,
+.day-group.older > .meeting-row > .row-icon,
+.day-group.older > .meeting-row > .row-main,
+.day-group.older > .meeting-row > .row-time {
   opacity: 0.78;
 }
 
@@ -780,6 +786,11 @@ a,
   padding: 9px 10px;
   border-radius: 10px;
   cursor: pointer;
+}
+
+/* The row owns any open menu/picker and must paint above every later row. */
+.meeting-row.actions-open {
+  z-index: 50;
 }
 
 .meeting-row:hover {
