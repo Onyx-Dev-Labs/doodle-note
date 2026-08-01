@@ -8,6 +8,8 @@
 export const MIC_DEBOUNCE_MS = 4_000
 /** After a prompt (or a dismissal), stay quiet this long. */
 export const MIC_COOLDOWN_MS = 5 * 60_000
+/** A short mic dropout/reconnect still belongs to the same meeting. */
+export const MIC_SESSION_GAP_MS = 2 * 60_000
 
 /**
  * Only mic capture by an actual meeting app counts — dictation tools
@@ -84,12 +86,20 @@ export interface MicPromptState {
   promptedThisSession: boolean
   /** Epoch ms of the last prompt, for the cooldown. */
   lastPromptMs: number
+  /** When the meeting app last released the mic; null while busy/unknown. */
+  idleSinceMs: number | null
   /** Our own capture is running — everything is ignored until it isn't. */
   suppressed: boolean
 }
 
 export function initialMicState(): MicPromptState {
-  return { busySinceMs: null, promptedThisSession: false, lastPromptMs: 0, suppressed: false }
+  return {
+    busySinceMs: null,
+    promptedThisSession: false,
+    lastPromptMs: 0,
+    idleSinceMs: null,
+    suppressed: false
+  }
 }
 
 /** Apply a micmon running=true/false transition. */
@@ -98,10 +108,20 @@ export function onMicEvent(state: MicPromptState, running: boolean, nowMs: numbe
   if (running) {
     // Already tracking this busy stretch — keep its original start.
     if (state.busySinceMs !== null) return state
-    return { ...state, busySinceMs: nowMs }
+    const sameSession =
+      state.promptedThisSession &&
+      state.idleSinceMs !== null &&
+      nowMs - state.idleSinceMs <= MIC_SESSION_GAP_MS
+    return {
+      ...state,
+      busySinceMs: nowMs,
+      idleSinceMs: null,
+      promptedThisSession: sameSession
+    }
   }
-  // Idle again: the next busy stretch may prompt anew (cooldown permitting).
-  return { ...state, busySinceMs: null, promptedThisSession: false }
+  // Repeated non-mic CoreAudio changes must not keep moving the idle edge.
+  if (state.busySinceMs === null) return state
+  return { ...state, busySinceMs: null, idleSinceMs: nowMs }
 }
 
 /**
@@ -110,8 +130,16 @@ export function onMicEvent(state: MicPromptState, running: boolean, nowMs: numbe
  * any activity to a prompt (the meeting app's mic use may simply continue).
  */
 export function setSuppressed(state: MicPromptState, suppressed: boolean): MicPromptState {
-  if (suppressed) return { ...state, suppressed: true, busySinceMs: null }
-  return { ...state, suppressed: false, busySinceMs: null, promptedThisSession: false }
+  if (suppressed) {
+    return { ...state, suppressed: true, busySinceMs: null, idleSinceMs: null }
+  }
+  return {
+    ...state,
+    suppressed: false,
+    busySinceMs: null,
+    idleSinceMs: null,
+    promptedThisSession: false
+  }
 }
 
 /** True when the debounced busy stretch should fire the prompt at nowMs. */

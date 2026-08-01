@@ -59,9 +59,7 @@ function App(): React.JSX.Element {
   const [tourOpen, setTourOpen] = useState(() => !isOnboardingDone())
   // The setup wizard (downloads + permissions) runs before the tour, and
   // only for genuinely fresh installs — anyone with meetings predates it.
-  const [wizardOpen, setWizardOpen] = useState(
-    () => !isSetupWizardDone() && !isOnboardingDone()
-  )
+  const [wizardOpen, setWizardOpen] = useState(() => !isSetupWizardDone() && !isOnboardingDone())
   useEffect(() => {
     if (!wizardOpen) return
     void window.meetings.list().then((list) => {
@@ -213,7 +211,9 @@ function App(): React.JSX.Element {
   useEffect(
     () =>
       window.calendar.onStartMeeting((ev) => {
-        if (ev.action === 'start') {
+        if (ev.action === 'dismiss') {
+          setBanner(null)
+        } else if (ev.action === 'start') {
           // OS notification click: the one click already happened.
           void startCalendarMeeting(ev)
         } else {

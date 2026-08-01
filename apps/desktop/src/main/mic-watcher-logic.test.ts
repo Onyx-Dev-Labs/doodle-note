@@ -10,6 +10,7 @@ import {
   meetingPromptLabel,
   MIC_COOLDOWN_MS,
   MIC_DEBOUNCE_MS,
+  MIC_SESSION_GAP_MS,
   onCaptureMicEvent,
   onMicEvent,
   setSuppressed,
@@ -38,16 +39,34 @@ describe('mic-watcher-logic', () => {
     assert.equal(shouldPrompt(s, T0 + MIC_DEBOUNCE_MS + 60_000), false)
   })
 
-  it('idle resets the session but cooldown still applies', () => {
+  it('a short idle stays in the session and the cooldown still applies', () => {
     let s = onMicEvent(initialMicState(), true, T0)
     s = markPrompted(s, T0 + MIC_DEBOUNCE_MS)
     s = onMicEvent(s, false, T0 + 60_000) // hang up
     s = onMicEvent(s, true, T0 + 70_000) // new call right away
     assert.equal(shouldPrompt(s, T0 + 70_000 + MIC_DEBOUNCE_MS), false) // inside cooldown
-    const afterCooldown = T0 + MIC_DEBOUNCE_MS + MIC_COOLDOWN_MS
-    s = onMicEvent(s, false, afterCooldown - 20_000)
-    s = onMicEvent(s, true, afterCooldown - 10_000)
-    assert.equal(shouldPrompt(s, afterCooldown + 1), true)
+    // The same busy stretch remains quiet even after the wall-clock cooldown.
+    assert.equal(shouldPrompt(s, T0 + MIC_DEBOUNCE_MS + MIC_COOLDOWN_MS + 1), false)
+  })
+
+  it('does not re-prompt when the mic reconnects during the same meeting', () => {
+    let s = onMicEvent(initialMicState(), true, T0)
+    s = markPrompted(s, T0 + MIC_DEBOUNCE_MS)
+    // Drop late enough that the ordinary five-minute cooldown will expire
+    // before the reconnect; the session-gap guard must still keep it quiet.
+    s = onMicEvent(s, false, T0 + 4 * 60_000 + 30_000)
+    const reconnect = T0 + 4 * 60_000 + 30_000 + MIC_SESSION_GAP_MS - 1
+    s = onMicEvent(s, true, reconnect)
+    assert.equal(shouldPrompt(s, reconnect + MIC_DEBOUNCE_MS), false)
+  })
+
+  it('allows a later call after the reconnect window and cooldown', () => {
+    let s = onMicEvent(initialMicState(), true, T0)
+    s = markPrompted(s, T0 + MIC_DEBOUNCE_MS)
+    s = onMicEvent(s, false, T0 + 60_000)
+    const nextCall = T0 + MIC_DEBOUNCE_MS + MIC_COOLDOWN_MS + MIC_SESSION_GAP_MS
+    s = onMicEvent(s, true, nextCall)
+    assert.equal(shouldPrompt(s, nextCall + MIC_DEBOUNCE_MS), true)
   })
 
   it('short blips (Siri, dictation) never fire', () => {

@@ -120,10 +120,11 @@ export interface CalendarConfigUpdate {
 export interface CalendarStartMeetingEvent {
   /**
    * 'prompt' — show the in-app banner (watcher fired; the user hasn't acted).
-   * 'start'  — create the meeting and start recording now (the user clicked
-   *            the OS notification).
+   * 'start'   — create the meeting and start recording now (the user clicked
+   *             the OS notification).
+   * 'dismiss' — clear any visible prompt because recording started elsewhere.
    */
-  action: 'prompt' | 'start'
+  action: 'prompt' | 'start' | 'dismiss'
   /** Empty for ad-hoc (mic-detected) meetings — no calendar event to link. */
   eventId: string
   subject: string

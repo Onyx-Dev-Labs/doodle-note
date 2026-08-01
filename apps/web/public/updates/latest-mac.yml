@@ -1,8 +1,8 @@
-version: 0.4.5
+version: 0.4.6
 files:
-  - url: DoodleNote-0.4.5-arm64-mac.zip
-    sha512: c/9g4W30KOosBYoMpVsLflw5OvaeSzimwDj2OmYk2+77WOkpJLjmA6IR71LB1veiYVMZM20IaWdu9GhNMwU33w==
-    size: 168061778
-path: DoodleNote-0.4.5-arm64-mac.zip
-sha512: c/9g4W30KOosBYoMpVsLflw5OvaeSzimwDj2OmYk2+77WOkpJLjmA6IR71LB1veiYVMZM20IaWdu9GhNMwU33w==
-releaseDate: '2026-07-14T20:41:04.925Z'
+  - url: DoodleNote-0.4.6-arm64-mac.zip
+    sha512: GZiUQgTAYlUnVse1TkspNE9B5nwDiO26KEN+bwTbf+ZXCy+smyFkbi78IWcrnii6nL0SxKR55KU/EsqztRiZPQ==
+    size: 168027690
+path: DoodleNote-0.4.6-arm64-mac.zip
+sha512: GZiUQgTAYlUnVse1TkspNE9B5nwDiO26KEN+bwTbf+ZXCy+smyFkbi78IWcrnii6nL0SxKR55KU/EsqztRiZPQ==
+releaseDate: '2026-08-01T17:14:32.224Z'

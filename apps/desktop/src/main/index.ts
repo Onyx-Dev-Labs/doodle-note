@@ -343,6 +343,7 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_START_CHANNEL, (_event, request: EngineStartRequest) => {
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
+    if (request.command === 'live') calendarService?.setRecordingActive(true)
     micWatcher.setSuppressed(true)
     const opts = { ...request.opts }
     // Audio persistence: give the session a directory keyed by meeting; the
@@ -359,6 +360,7 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
     engine.stop()
     micWatcher.setSuppressed(false)
+    calendarService?.setRecordingActive(false)
   })
 
   // Mic input picker: device list + (mid-session) switching. macOS engine
@@ -507,7 +509,7 @@ app.whenReady().then(() => {
   mediaService.registerProtocol()
 
   // A fresh look at the app deserves fresh events (throttled inside).
-  app.on('browser-window-focus', () => calendarService?.onWindowFocus())
+  app.on('browser-window-focus', (_event, window) => calendarService?.onWindowFocus(window))
 
   createWindow()
 
