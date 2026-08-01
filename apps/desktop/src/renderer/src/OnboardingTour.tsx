@@ -170,9 +170,10 @@ function OnboardingTour({
           <div className="tour-body">
             <h2 className="tour-title">Recording a meeting</h2>
             <p className="tour-lede">
-              Hit <strong>+ New meeting</strong> and recording starts instantly. Talk normally — the
-              transcript builds live, labeling your mic &ldquo;You&rdquo; and the call audio
-              &ldquo;Them.&rdquo; Works with Zoom, Teams, Meet, or anything else that makes sound.
+              Choose <strong>New → New meeting</strong> and recording starts instantly. Talk
+              normally — the transcript builds live, labeling your mic &ldquo;You&rdquo; and the
+              call audio &ldquo;Them.&rdquo; Works with Zoom, Teams, Meet, or anything else that
+              makes sound.
             </p>
             {/* Each li body is ONE span: the li is a flex row (icon + text
                 elsewhere), and bare text nodes around a <strong> would each

@@ -262,10 +262,7 @@ export class NotesService {
       const segments = Array.isArray(request.segments) ? request.segments : []
       const kept = segments.filter((s) => !s.echo)
       const input: MergeInput = {
-        title:
-          typeof request.title === 'string' && request.title.trim()
-            ? request.title.trim()
-            : 'Untitled meeting',
+        title: typeof request.title === 'string' ? request.title.trim() : '',
         rawNotesMarkdown:
           typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),

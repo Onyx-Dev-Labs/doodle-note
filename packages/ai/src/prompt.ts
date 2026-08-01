@@ -60,7 +60,10 @@ export function buildMergeUserMessage(
   input: MergeInput,
   maxTranscriptChars = MAX_TRANSCRIPT_CHARS
 ): string {
-  const title = input.title?.trim() || 'Untitled meeting'
+  const title = input.title?.trim()
+  const titleBlock = title
+    ? `Title: ${title}`
+    : 'Title: (not provided)\nInfer a concise, descriptive title from the content and use it as the first # heading.'
   const rough = input.rawNotesMarkdown.trim() || '(the user took no rough notes)'
   let transcript =
     input.segments.length > 0 ? formatTranscript(input.segments) : '(no transcript captured)'
@@ -76,7 +79,7 @@ export function buildMergeUserMessage(
       ? `\nDuration: ${Math.round(input.durationMs / 60000)} minutes`
       : ''
 
-  return `Meeting: ${title}${duration}
+  return `${titleBlock}${duration}
 
 === USER'S ROUGH NOTES ===
 ${rough}
@@ -96,14 +99,17 @@ export function buildReduceUserMessage(
   condensedNotes: string,
   partCount: number
 ): string {
-  const title = input.title?.trim() || 'Untitled meeting'
+  const title = input.title?.trim()
+  const titleBlock = title
+    ? `Title: ${title}`
+    : 'Title: (not provided)\nInfer a concise, descriptive title from the content and use it as the first # heading.'
   const rough = input.rawNotesMarkdown.trim() || '(the user took no rough notes)'
   const duration =
     input.durationMs !== undefined
       ? `\nDuration: ${Math.round(input.durationMs / 60000)} minutes`
       : ''
 
-  return `Meeting: ${title}${duration}
+  return `${titleBlock}${duration}
 
 === USER'S ROUGH NOTES ===
 ${rough}

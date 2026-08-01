@@ -9,6 +9,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.8",
+    date: "August 1, 2026",
+    highlights: [
+      "Create a meeting, note, or audio import from one streamlined New menu",
+      "Empty new notes and meetings now ask whether to save, discard, or keep editing before they close",
+      "Untitled notes receive a useful title derived from their notes, transcript, or attachment context",
+      "Home stays focused on the last seven days, with older meetings available in manageable batches",
+    ],
+  },
+  {
     version: "0.4.7",
     date: "August 1, 2026",
     highlights: [
