@@ -26,8 +26,8 @@
 ## Release gates
 
 - [ ] Release PR reviewed
-- [ ] User authorizes merge and publication
-- [ ] Published artifact checksum matches the live update manifest
+- [x] User authorizes merge and publication
+- [x] Published artifact checksum matches the Blob update manifest
 
 Full desktop lint still reports eight pre-existing React hook errors in
 untouched `HomeView.tsx` and `MeetingView.tsx`. The v0.4.6 changed-file lint
