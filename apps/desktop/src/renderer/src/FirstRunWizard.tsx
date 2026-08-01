@@ -302,7 +302,10 @@ export default function FirstRunWizard({
             <img src={mascotUrl} alt="" className="wizard-mascot" />
             <h1 className="wizard-title">You&rsquo;re all set</h1>
             <ul className="wizard-props">
-              <li>Hit <strong>+ New meeting</strong> and DoodleNote records &amp; transcribes live</li>
+              <li>
+                Choose <strong>New → New meeting</strong> and DoodleNote records &amp; transcribes
+                live
+              </li>
               <li>Type rough notes during the call — <strong>Generate notes</strong> polishes them</li>
               <li>DoodleNote also offers to record when it notices you&rsquo;re on a call</li>
             </ul>

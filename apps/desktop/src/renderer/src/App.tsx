@@ -44,6 +44,8 @@ function App(): React.JSX.Element {
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
   const [autoRecordId, setAutoRecordId] = useState<string | null>(null)
+  /** Only manually-created documents get the empty save/discard decision. */
+  const [newDraftId, setNewDraftId] = useState<string | null>(null)
   const [homeRefresh, setHomeRefresh] = useState(0)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<HomeFilter>({ kind: 'all' })
@@ -121,8 +123,9 @@ function App(): React.JSX.Element {
     })
   }, [])
 
-  const openMeeting = useCallback((id: string) => {
+  const openMeeting = useCallback((id: string, isNewManualDraft = false) => {
     setMeetingId(id)
+    setNewDraftId(isNewManualDraft ? id : null)
     setView('editor')
   }, [])
 
@@ -150,7 +153,7 @@ function App(): React.JSX.Element {
       // meeting from the list never does. Quick notes never auto-record —
       // typing is their default, the rec pill is there when wanted.
       if (prefill?.kind !== 'note') setAutoRecordId(id)
-      openMeeting(id)
+      openMeeting(id, prefill?.calendarEventId === undefined)
     },
     [openMeeting]
   )
@@ -172,7 +175,7 @@ function App(): React.JSX.Element {
           return
         }
         await newMeeting({
-          title: ev.subject.trim() || 'Untitled meeting',
+          title: ev.subject.trim(),
           calendarEventId: ev.eventId
         })
       } catch {
@@ -237,6 +240,18 @@ function App(): React.JSX.Element {
     setView('home')
     setHomeRefresh((n) => n + 1)
   }, [])
+
+  const discardNewDraft = useCallback(
+    async (id: string): Promise<void> => {
+      await window.meetings.delete(id)
+      setAutoRecordId((current) => (current === id ? null : current))
+      setNewDraftId((current) => (current === id ? null : current))
+      setMeetingId((current) => (current === id ? null : current))
+      setView('home')
+      refreshHome()
+    },
+    [refreshHome]
+  )
 
   /** Sidebar navigation: pick what the Home list shows, then go there. */
   const selectFilter = useCallback(
@@ -588,7 +603,12 @@ function App(): React.JSX.Element {
             meetingId={meetingId}
             visible={view === 'editor'}
             autoRecord={meetingId === autoRecordId}
+            isNewDraft={meetingId === newDraftId}
             onAutoRecordStarted={() => setAutoRecordId(null)}
+            onDraftSettled={() =>
+              setNewDraftId((current) => (current === meetingId ? null : current))
+            }
+            onDiscardDraft={() => discardNewDraft(meetingId)}
             onBack={goHome}
             onOpenSettings={() => setView('settings')}
           />
