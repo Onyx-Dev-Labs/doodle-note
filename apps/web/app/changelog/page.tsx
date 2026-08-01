@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.6",
+    date: "August 1, 2026",
+    highlights: [
+      "Meeting prompts now appear only once: calendar reminders and live call detection coordinate instead of nudging you separately",
+      "Zoom Phone ringing, notification sounds, and other output-only activity no longer look like active meetings",
+      "Starting a recording clears any outstanding prompt, and background prompts no longer reappear as a second banner when you open DoodleNote",
+    ],
+  },
+  {
     version: "0.4.5",
     date: "July 14, 2026",
     highlights: [
