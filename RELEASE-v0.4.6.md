@@ -17,7 +17,7 @@
 - [x] Desktop Node and renderer typechecks
 - [x] Changed-file lint and formatting
 - [x] Production Electron build
-- [ ] Signed and notarized arm64 package
+- [x] Signed and notarized arm64 package
 - [ ] Live update feed reports 0.4.6
 - [ ] Installed application and running process report 0.4.6
 - [ ] Output-only Zoom Phone smoke test produces no prompt
@@ -32,3 +32,8 @@
 Full desktop lint still reports eight pre-existing React hook errors in
 untouched `HomeView.tsx` and `MeetingView.tsx`. The v0.4.6 changed-file lint
 has zero errors.
+
+Packaged artifact: `DoodleNote-0.4.6-arm64-mac.zip`  
+SHA-256: `d7c007947efbf61c9ddf38eaaddca20926de514059492389f68b1db91dba61aa`  
+Notarization: accepted (`a3d279cc-ca1a-4475-9534-8b66357b6a5c`)  
+Gatekeeper: accepted (`source=Notarized Developer ID`)
