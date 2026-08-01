@@ -20,6 +20,10 @@ export class PromptPanel {
   private window: BrowserWindow | null = null
   private closeTimer: NodeJS.Timeout | null = null
 
+  ownsWindow(window: BrowserWindow): boolean {
+    return this.window === window
+  }
+
   show(prompt: CalendarStartMeetingEvent, onAction: (action: 'start' | 'dismiss') => void): void {
     this.close() // one panel at a time; a newer prompt replaces an older one
 
@@ -100,8 +104,24 @@ function panelDataUrl(prompt: CalendarStartMeetingEvent): string {
   // Follows nativeTheme, which the renderer keeps in sync with the in-app pref.
   const dark = nativeTheme.shouldUseDarkColors
   const c = dark
-    ? { card: '#262922', border: '#3a3e33', ink: '#f0eee2', muted: '#93967f', go: '#8fb07a', goHover: '#aac996', goText: '#1d1f19' }
-    : { card: '#fdfcf8', border: '#e7e3d8', ink: '#26281f', muted: '#8a8d7f', go: '#7c9769', goHover: '#5f7a4e', goText: '#fff' }
+    ? {
+        card: '#262922',
+        border: '#3a3e33',
+        ink: '#f0eee2',
+        muted: '#93967f',
+        go: '#8fb07a',
+        goHover: '#aac996',
+        goText: '#1d1f19'
+      }
+    : {
+        card: '#fdfcf8',
+        border: '#e7e3d8',
+        ink: '#26281f',
+        muted: '#8a8d7f',
+        go: '#7c9769',
+        goHover: '#5f7a4e',
+        goText: '#fff'
+      }
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   * { margin: 0; box-sizing: border-box; -webkit-user-select: none; cursor: default; }
   body { font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; background: transparent; padding: 2px; }
