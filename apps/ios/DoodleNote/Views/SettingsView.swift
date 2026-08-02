@@ -58,7 +58,9 @@ struct SettingsView: View {
 
             SyncSettingsSection()
 
-            CallerIdSection()
+            if AppFeatures.phoneCalls {
+                CallerIdSection()
+            }
 
             Section {
                 LabeledContent("Version") {
