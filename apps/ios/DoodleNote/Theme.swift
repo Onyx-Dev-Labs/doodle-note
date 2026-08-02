@@ -10,9 +10,9 @@ extension Color {
     static let sand = adaptive(light: 0xE7E3D8, dark: 0x3A3E33)
     static let ink = adaptive(light: 0x26281F, dark: 0xF0EEE2)
     static let bark = adaptive(light: 0x3A3D33, dark: 0xCFCDBE)
-    static let stone = adaptive(light: 0x8A8D7F, dark: 0x93967F)
+    static let stone = adaptive(light: 0x686D61, dark: 0xA4A88F)
     static let sage = adaptive(light: 0x7C9769, dark: 0x8FB07A)
-    static let sageDeep = adaptive(light: 0x5F7A4E, dark: 0xAAC996)
+    static let sageDeep = adaptive(light: 0x526E43, dark: 0xAAC996)
     static let sageFill = adaptive(light: 0xE9EFE0, dark: 0x34402B)
 
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
@@ -43,5 +43,7 @@ struct Wordmark: View {
             Text("Note").foregroundStyle(Color.sage)
         }
         .font(font.weight(.bold))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("DoodleNote")
     }
 }

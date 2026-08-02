@@ -199,23 +199,22 @@ final class SyncEngine: NSObject {
 
     private func pushDirty(api: SyncAPI, context: ModelContext) async throws {
         let meetings = try context.fetch(FetchDescriptor<Meeting>())
-        // Hashing every transcript is CPU-heavy and this runs on @MainActor;
-        // yield every few meetings so an in-progress scroll isn't frozen.
-        var dirty: [Meeting] = []
-        for (i, meeting) in meetings.enumerated() {
-            if contentHash(of: meeting) != meeting.lastPushedHash { dirty.append(meeting) }
-            if i % 8 == 7 { await Task.yield() }
+        let preparedByID = await prepareMeetings(meetings)
+        let dirty = meetings.compactMap { meeting -> DirtyMeeting? in
+            guard let prepared = preparedByID[meeting.id],
+                  prepared.hash != meeting.lastPushedHash else { return nil }
+            return DirtyMeeting(meeting: meeting, prepared: prepared)
         }
         guard !dirty.isEmpty else { return }
 
         for batch in dirty.chunked(into: 20) {
-            let payload = batch.map { wireMeeting(from: $0) }
+            let payload = batch.map(\.prepared.wire)
             let results = try await api.push(meetings: payload)
             for result in results where result.ok {
-                if let meeting = batch.first(where: {
-                    $0.id.uuidString.lowercased() == result.id.lowercased()
+                if let item = batch.first(where: {
+                    $0.meeting.id.uuidString.lowercased() == result.id.lowercased()
                 }) {
-                    meeting.lastPushedHash = contentHash(of: meeting)
+                    item.meeting.lastPushedHash = item.prepared.hash
                 }
             }
         }
@@ -226,6 +225,9 @@ final class SyncEngine: NSObject {
         var cursor = pullCursor
         var latestAllIds: Set<String>?
         var remoteFolders: [SyncAPI.RemoteFolder] = []
+        let initialMeetings = try context.fetch(FetchDescriptor<Meeting>())
+        var localByID = Dictionary(uniqueKeysWithValues: initialMeetings.map { ($0.id, $0) })
+        var localHashes = await prepareMeetings(initialMeetings).mapValues(\.hash)
 
         var didChange = false
         for _ in 0..<40 {
@@ -234,8 +236,19 @@ final class SyncEngine: NSObject {
             remoteFolders = page.folders
 
             if !page.changed.isEmpty { didChange = true }
+            let remoteHashes = await prepareRemoteHashes(page.changed)
             for remote in page.changed {
-                apply(remote: remote, context: context)
+                guard let id = UUID(uuidString: remote.id), let remoteHash = remoteHashes[id] else {
+                    continue
+                }
+                apply(
+                    remote: remote,
+                    id: id,
+                    remoteHash: remoteHash,
+                    localByID: &localByID,
+                    localHashes: &localHashes,
+                    context: context
+                )
                 cursor = max(cursor ?? "", remote.updatedAt)
             }
             if !page.hasMore { break }
@@ -250,15 +263,15 @@ final class SyncEngine: NSObject {
         // this per-meeting hash scan doesn't freeze the UI.
         if let cloudIds = latestAllIds {
             let meetings = try context.fetch(FetchDescriptor<Meeting>())
-            for (i, meeting) in meetings.enumerated() {
+            let prepared = await prepareMeetings(meetings)
+            for meeting in meetings {
                 let id = meeting.id.uuidString.lowercased()
                 let wasSynced = meeting.lastPushedHash != nil
-                let isDirty = contentHash(of: meeting) != meeting.lastPushedHash
+                let isDirty = prepared[meeting.id]?.hash != meeting.lastPushedHash
                 if wasSynced, !isDirty, !cloudIds.contains(id) {
                     context.delete(meeting)
                     didChange = true
                 }
-                if i % 8 == 7 { await Task.yield() }
             }
         }
         // Only save (and republish @Query → relist) when something changed —
@@ -271,6 +284,7 @@ final class SyncEngine: NSObject {
     /// renames have already won.
     private func applyFolders(_ remote: [SyncAPI.RemoteFolder], context: ModelContext) {
         let locals = (try? context.fetch(FetchDescriptor<Folder>())) ?? []
+        let meetings = (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
         let remoteById = Dictionary(
             uniqueKeysWithValues: remote.compactMap { folder in
                 UUID(uuidString: folder.id).map { ($0, folder) }
@@ -282,8 +296,7 @@ final class SyncEngine: NSObject {
                 if local.name != match.name { local.name = match.name }
                 local.synced = true
             } else if local.synced {
-                for meeting in (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
-                where meeting.folderId == local.id {
+                for meeting in meetings where meeting.folderId == local.id {
                     meeting.folderId = nil
                 }
                 context.delete(local)
@@ -300,24 +313,35 @@ final class SyncEngine: NSObject {
         }
     }
 
-    private func apply(remote: SyncAPI.RemoteMeeting, context: ModelContext) {
-        guard let uuid = UUID(uuidString: remote.id) else { return }
-        let meetings = (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
-        let existing = meetings.first { $0.id == uuid }
-
+    private func apply(
+        remote: SyncAPI.RemoteMeeting,
+        id: UUID,
+        remoteHash: String,
+        localByID: inout [UUID: Meeting],
+        localHashes: inout [UUID: String],
+        context: ModelContext
+    ) {
+        let existing = localByID[id]
         if let existing {
             // Local edits win until pushed.
-            let isDirty = contentHash(of: existing) != existing.lastPushedHash
+            let isDirty = localHashes[id] != existing.lastPushedHash
             if isDirty { return }
-            update(meeting: existing, from: remote, context: context)
+            update(meeting: existing, from: remote, hash: remoteHash, context: context)
         } else {
-            let meeting = Meeting(id: uuid, origin: "cloud")
+            let meeting = Meeting(id: id, origin: "cloud")
             context.insert(meeting)
-            update(meeting: meeting, from: remote, context: context)
+            localByID[id] = meeting
+            update(meeting: meeting, from: remote, hash: remoteHash, context: context)
         }
+        localHashes[id] = remoteHash
     }
 
-    private func update(meeting: Meeting, from remote: SyncAPI.RemoteMeeting, context: ModelContext) {
+    private func update(
+        meeting: Meeting,
+        from remote: SyncAPI.RemoteMeeting,
+        hash: String,
+        context: ModelContext
+    ) {
         meeting.title = remote.title
         meeting.kind = remote.kind == "note" ? "note" : nil
         meeting.createdAt = parseISO(remote.createdAt) ?? meeting.createdAt
@@ -344,53 +368,64 @@ final class SyncEngine: NSObject {
             segment.meeting = meeting
             context.insert(segment)
         }
-        meeting.lastPushedHash = contentHash(of: meeting)
+        meeting.lastPushedHash = hash
     }
 
     // MARK: Helpers
 
-    private func wireMeeting(from meeting: Meeting) -> SyncAPI.PushMeeting {
-        SyncAPI.PushMeeting(
-            id: meeting.id.uuidString.lowercased(),
-            title: meeting.displayTitle,
-            kind: meeting.isNote ? "note" : nil,
-            createdAt: isoString(meeting.createdAt),
-            startedAt: meeting.startedAt.map(isoString),
-            endedAt: meeting.endedAt.map(isoString),
-            calendarEventId: meeting.calendarEventId,
-            folderId: meeting.folderId?.uuidString.lowercased(),
-            rawNotesMarkdown: meeting.roughNotes.isEmpty ? nil : meeting.roughNotes,
-            enhancedMarkdown: meeting.generatedNotes,
-            segments: meeting.sortedSegments.prefix(5000).map {
-                SyncAPI.PushSegment(
-                    channel: $0.channel == "system" ? "system" : "mic",
-                    speaker: $0.speaker,
-                    text: String($0.text.prefix(10_000)),
-                    startMs: $0.startMs,
-                    endMs: $0.endMs,
-                    confidence: $0.confidence
-                )
-            }
-        )
+    /// Capture SwiftData values quickly on the main actor, then do transcript
+    /// sorting, string joining, SHA-256, and payload construction off-main.
+    private func prepareMeetings(_ meetings: [Meeting]) async -> [UUID: PreparedMeeting] {
+        let snapshots = meetings.map { meeting in
+            MeetingSnapshot(
+                id: meeting.id,
+                title: meeting.displayTitle,
+                kind: meeting.kind,
+                createdAt: isoString(meeting.createdAt),
+                startedAt: meeting.startedAt.map(isoString),
+                endedAt: meeting.endedAt.map(isoString),
+                calendarEventId: meeting.calendarEventId,
+                folderId: meeting.folderId?.uuidString.lowercased(),
+                roughNotes: meeting.roughNotes,
+                generatedNotes: meeting.generatedNotes,
+                segments: meeting.segments.map(SegmentSnapshot.init)
+            )
+        }
+        return await Task.detached(priority: .utility) {
+            Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0.prepared()) })
+        }.value
     }
 
-    /// Local change-detection hash over the same fields the desktop hashes.
-    private func contentHash(of meeting: Meeting) -> String {
-        var parts: [String] = [
-            meeting.displayTitle,
-            meeting.kind ?? "",
-            meeting.startedAt.map(isoString) ?? "",
-            meeting.endedAt.map(isoString) ?? "",
-            meeting.calendarEventId ?? "",
-            meeting.folderId?.uuidString.lowercased() ?? "",
-            meeting.roughNotes,
-            meeting.generatedNotes ?? "",
-        ]
-        for segment in meeting.sortedSegments {
-            parts.append("\(segment.channel)|\(segment.speaker)|\(segment.text)|\(segment.startMs)|\(segment.endMs)")
-        }
-        let digest = SHA256.hash(data: Data(parts.joined(separator: "\u{1F}").utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+    private func prepareRemoteHashes(_ meetings: [SyncAPI.RemoteMeeting]) async -> [UUID: String] {
+        return await Task.detached(priority: .utility) {
+            let pairs: [(UUID, String)] = meetings.compactMap { remote -> (UUID, String)? in
+                guard let id = UUID(uuidString: remote.id) else { return nil }
+                let snapshot = MeetingSnapshot(
+                    id: id,
+                    title: remote.title,
+                    kind: remote.kind == "note" ? "note" : nil,
+                    createdAt: remote.createdAt,
+                    startedAt: remote.startedAt,
+                    endedAt: remote.endedAt,
+                    calendarEventId: remote.calendarEventId,
+                    folderId: remote.folderId?.lowercased(),
+                    roughNotes: remote.rawNotesMarkdown,
+                    generatedNotes: remote.enhancedMarkdown,
+                    segments: remote.segments.map {
+                        SegmentSnapshot(
+                            channel: $0.channel,
+                            speaker: $0.channel == "mic" ? "You" : "Them",
+                            text: $0.text,
+                            startMs: $0.startMs,
+                            endMs: $0.endMs,
+                            confidence: $0.confidence
+                        )
+                    }
+                )
+                return (id, snapshot.prepared().hash)
+            }
+            return Dictionary(uniqueKeysWithValues: pairs)
+        }.value
     }
 
     private func isoString(_ date: Date) -> String {
@@ -401,6 +436,106 @@ final class SyncEngine: NSObject {
         (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(string))
             ?? (try? Date.ISO8601FormatStyle().parse(string))
     }
+}
+
+private struct DirtyMeeting {
+    let meeting: Meeting
+    let prepared: PreparedMeeting
+}
+
+private struct SegmentSnapshot: Sendable {
+    let channel: String
+    let speaker: String
+    let text: String
+    let startMs: Int
+    let endMs: Int
+    let confidence: Double?
+
+    init(_ segment: Segment) {
+        channel = segment.channel
+        speaker = segment.speaker
+        text = segment.text
+        startMs = segment.startMs
+        endMs = segment.endMs
+        confidence = segment.confidence
+    }
+
+    init(
+        channel: String,
+        speaker: String,
+        text: String,
+        startMs: Int,
+        endMs: Int,
+        confidence: Double?
+    ) {
+        self.channel = channel
+        self.speaker = speaker
+        self.text = text
+        self.startMs = startMs
+        self.endMs = endMs
+        self.confidence = confidence
+    }
+}
+
+private struct MeetingSnapshot: Sendable {
+    let id: UUID
+    let title: String
+    let kind: String?
+    let createdAt: String
+    let startedAt: String?
+    let endedAt: String?
+    let calendarEventId: String?
+    let folderId: String?
+    let roughNotes: String
+    let generatedNotes: String?
+    let segments: [SegmentSnapshot]
+
+    func prepared() -> PreparedMeeting {
+        let sorted = segments.sorted { $0.startMs < $1.startMs }
+        var parts = [
+            title,
+            kind ?? "",
+            startedAt ?? "",
+            endedAt ?? "",
+            calendarEventId ?? "",
+            folderId ?? "",
+            roughNotes,
+            generatedNotes ?? "",
+        ]
+        parts.append(contentsOf: sorted.map {
+            "\($0.channel)|\($0.speaker)|\($0.text)|\($0.startMs)|\($0.endMs)"
+        })
+        let digest = SHA256.hash(data: Data(parts.joined(separator: "\u{1F}").utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        let wire = SyncAPI.PushMeeting(
+            id: id.uuidString.lowercased(),
+            title: title,
+            kind: kind == "note" ? "note" : nil,
+            createdAt: createdAt,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            calendarEventId: calendarEventId,
+            folderId: folderId,
+            rawNotesMarkdown: roughNotes.isEmpty ? nil : roughNotes,
+            enhancedMarkdown: generatedNotes,
+            segments: sorted.prefix(5000).map {
+                SyncAPI.PushSegment(
+                    channel: $0.channel == "system" ? "system" : "mic",
+                    speaker: $0.speaker,
+                    text: String($0.text.prefix(10_000)),
+                    startMs: $0.startMs,
+                    endMs: $0.endMs,
+                    confidence: $0.confidence
+                )
+            }
+        )
+        return PreparedMeeting(hash: hash, wire: wire)
+    }
+}
+
+private struct PreparedMeeting: Sendable {
+    let hash: String
+    let wire: SyncAPI.PushMeeting
 }
 
 

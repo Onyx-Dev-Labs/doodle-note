@@ -1,24 +1,26 @@
 import XCTest
 
-/// Smoke tests for the core loops. Run on the simulator where speech assets
-/// may be unavailable, so the recording test accepts either the recording
-/// banner or the failure banner — the assertion is that the flow never hangs
-/// or crashes.
+/// Smoke tests for the core loops. Speech assets are not deterministic in the
+/// simulator, so the recording test injects a known failure and verifies the
+/// recovery UI instead of silently accepting a timeout.
 final class SmokeTests: XCTestCase {
     @MainActor
-    private func launch() -> XCUIApplication {
+    private func launch(recordingMode: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
-        // Skip onboarding and notification-permission prompts for the test.
-        app.launchArguments += ["-hasOnboarded", "YES", "-meetingNotifications", "NO"]
+        // Use an in-memory store and skip onboarding for deterministic tests.
+        app.launchArguments += ["-uiTesting", "YES", "-hasOnboarded", "YES", "-meetingNotifications", "NO"]
+        if let recordingMode {
+            app.launchEnvironment["UITEST_RECORDING_MODE"] = recordingMode
+        }
         app.launch()
         return app
     }
 
-    /// Launch → + → Record meeting → recording starts (or fails gracefully)
-    /// → stop → notes editor is present.
+    /// Launch → + → Record meeting → visible failure/retry path → back without
+    /// leaving an empty draft behind.
     @MainActor
     func testNewMeetingFlow() throws {
-        let app = launch()
+        let app = launch(recordingMode: "failure")
 
         XCTAssertTrue(app.buttons["New"].waitForExistence(timeout: 10))
         app.buttons["New"].tap()
@@ -28,17 +30,15 @@ final class SmokeTests: XCTestCase {
         // Meeting view: the Notes/Transcript switcher must appear.
         XCTAssertTrue(app.buttons["Notes"].waitForExistence(timeout: 10))
 
-        // Recording either reaches the Stop button or surfaces an error;
-        // give asset download a generous window.
-        let stop = app.buttons["Stop"]
-        if stop.waitForExistence(timeout: 60) {
-            stop.tap()
-            XCTAssertTrue(stop.waitForNonExistence(timeout: 30))
-        }
+        // Simulator/device failures must be visible and recoverable. Never let
+        // this test fall through when neither Stop nor a failure state exists.
+        XCTAssertTrue(app.buttons["Retry recording"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Recording unavailable"].exists)
+        XCTAssertTrue(app.buttons["Open Settings"].exists)
 
-        // Notes tab content is reachable either way.
-        app.buttons["Notes"].tap()
-        XCTAssertTrue(app.staticTexts["Your rough notes"].waitForExistence(timeout: 5))
+        // Leaving a failed, untouched recording must not litter Home.
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts["Untitled meeting"].waitForNonExistence(timeout: 5))
     }
 
     /// Launch → + → New note → the plain editor appears with no recording
@@ -64,5 +64,23 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.textFields.containing(
             NSPredicate(format: "value CONTAINS %@", "Buy sage green paint")
         ).firstMatch.exists)
+
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts["Untitled note"].waitForExistence(timeout: 5))
+    }
+
+    /// Launch → + → New note → back without typing → no empty list item.
+    @MainActor
+    func testEmptyQuickNoteIsDiscarded() throws {
+        let app = launch()
+
+        XCTAssertTrue(app.buttons["New"].waitForExistence(timeout: 10))
+        app.buttons["New"].tap()
+        XCTAssertTrue(app.buttons["New note"].waitForExistence(timeout: 5))
+        app.buttons["New note"].tap()
+        XCTAssertTrue(app.staticTexts["Your note"].waitForExistence(timeout: 10))
+
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts["Untitled note"].waitForNonExistence(timeout: 5))
     }
 }

@@ -23,7 +23,7 @@ workspace.
   and `SyncEngine` (push-then-pull cycle, local-edits-win conflict rule,
   `allIds` deletion reconciliation — a simplified port of
   `apps/desktop/src/main/sync-service.ts`). Linking uses
-  `ASWebAuthenticationSession` → `/link-device?scheme=doodlenote` →
+  system Safari → `/link-device?scheme=doodlenote` →
   `doodlenote://link?token=…` (web-side support in
   `apps/web/app/link-device`).
 

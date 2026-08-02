@@ -7,7 +7,7 @@ struct MarkdownText: View {
     let markdown: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        LazyVStack(alignment: .leading, spacing: 6) {
             ForEach(Array(markdown.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
                 render(line: line)
             }

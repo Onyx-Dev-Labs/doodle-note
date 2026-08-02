@@ -6,6 +6,18 @@ struct DoodleNoteApp: App {
     @AppStorage("hasOnboarded") private var hasOnboarded = false
 
     let container: ModelContainer = {
+        if ProcessInfo.processInfo.arguments.contains("-uiTesting") {
+            let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+            do {
+                return try ModelContainer(
+                    for: Meeting.self, Segment.self, Folder.self,
+                    configurations: configuration
+                )
+            } catch {
+                fatalError("Failed to create UI-test model container: \(error)")
+            }
+        }
+
         do {
             return try ModelContainer(for: Meeting.self, Segment.self, Folder.self)
         } catch {

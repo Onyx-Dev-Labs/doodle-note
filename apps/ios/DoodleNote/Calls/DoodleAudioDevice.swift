@@ -202,7 +202,7 @@ final class DoodleAudioDevice: NSObject, AudioDevice, @unchecked Sendable {
     ) {
         guard let unit = audioUnit else { return }
         let byteCount = Int(frames) * 2
-        var buffer = AudioBuffer(
+        let buffer = AudioBuffer(
             mNumberChannels: 1,
             mDataByteSize: UInt32(byteCount),
             mData: malloc(byteCount)
@@ -223,7 +223,6 @@ final class DoodleAudioDevice: NSObject, AudioDevice, @unchecked Sendable {
         if let onCapturedAudio, let pcm = Self.makePCMBuffer(copying: data, frames: frames) {
             onCapturedAudio(pcm)
         }
-        _ = buffer
     }
 
     private static func makePCMBuffer(copying data: UnsafeMutableRawPointer, frames: UInt32) -> AVAudioPCMBuffer? {

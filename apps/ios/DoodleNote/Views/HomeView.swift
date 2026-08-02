@@ -4,11 +4,13 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @Query(sort: \Meeting.createdAt, order: .reverse) private var meetings: [Meeting]
     @Query(sort: \Folder.createdAt) private var folders: [Folder]
 
     @State private var path: [Meeting] = []
-    @State private var autoRecordMeeting: Meeting?
+    @State private var autoRecordMeetingID: UUID?
+    @State private var draftMeetingIDs: Set<UUID> = []
     @State private var calendar = CalendarService.shared
     @State private var router = NotificationRouter.shared
     @State private var sync = SyncEngine.shared
@@ -25,8 +27,15 @@ struct HomeView: View {
             List {
                 Section {
                     titleRow
-                    if calendar.access == .granted, !calendar.upcoming.isEmpty, searchText.isEmpty {
-                        comingUpSection
+                    if searchText.isEmpty {
+                        switch calendar.access {
+                        case .unknown:
+                            calendarAccessCard
+                        case .denied:
+                            calendarDeniedCard
+                        case .granted:
+                            if !calendar.upcoming.isEmpty { comingUpSection }
+                        }
                     }
                 }
                 .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
@@ -59,7 +68,12 @@ struct HomeView: View {
                     meeting: meeting,
                     // Only a brand-new, never-recorded meeting auto-starts. Re-opening
                     // a finished meeting to read its notes must NOT record again.
-                    startRecordingOnAppear: meeting === autoRecordMeeting && meeting.startedAt == nil
+                    startRecordingOnAppear: meeting.id == autoRecordMeetingID && meeting.startedAt == nil,
+                    discardEmptyDraftOnExit: draftMeetingIDs.contains(meeting.id),
+                    onDraftResolved: {
+                        draftMeetingIDs.remove(meeting.id)
+                        if autoRecordMeetingID == meeting.id { autoRecordMeetingID = nil }
+                    }
                 )
             }
             .toolbar {
@@ -70,6 +84,7 @@ struct HomeView: View {
                         Image(systemName: selectedFolderId == nil ? "folder" : "folder.fill")
                             .foregroundStyle(Color.bark)
                     }
+                    .accessibilityLabel("Folders")
                 }
                 ToolbarItem(placement: .principal) { Wordmark(font: .subheadline) }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -79,6 +94,7 @@ struct HomeView: View {
                         Image(systemName: "phone")
                             .foregroundStyle(Color.bark)
                     }
+                    .accessibilityLabel("Phone calls")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -87,12 +103,13 @@ struct HomeView: View {
                         Image(systemName: "gearshape")
                             .foregroundStyle(Color.bark)
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search meetings, notes, transcripts"
+                prompt: "Search meetings and notes"
             )
             .safeAreaInset(edge: .bottom) { bottomBar }
             .sheet(isPresented: $showFolders) {
@@ -109,7 +126,8 @@ struct HomeView: View {
         }
         .tint(Color.sageDeep)
         .task {
-            await calendar.requestAndLoad()
+            await calendar.refresh(promptIfNeeded: false)
+            await router.refreshAuthorization()
             await router.schedule(for: calendar.upcoming)
             if sync.isLinked {
                 await sync.syncNow(context: context)
@@ -118,7 +136,8 @@ struct HomeView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task {
-                    await calendar.requestAndLoad()
+                    await calendar.refresh(promptIfNeeded: false)
+                    await router.refreshAuthorization()
                     await router.schedule(for: calendar.upcoming)
                     if sync.isLinked { await sync.syncNow(context: context) }
                 }
@@ -146,7 +165,7 @@ struct HomeView: View {
 
     private var titleRow: some View {
         Text(selectedFolderName ?? "My notes")
-            .font(.system(size: 34, weight: .medium, design: .serif))
+            .font(.system(.largeTitle, design: .serif).weight(.medium))
             .foregroundStyle(Color.ink)
             .padding(.top, 4)
     }
@@ -156,6 +175,65 @@ struct HomeView: View {
     }
 
     // MARK: Coming up
+
+    private var calendarAccessCard: some View {
+        integrationCard(
+            icon: "calendar.badge.plus",
+            title: "See upcoming meetings",
+            message: "Connect your calendar to start notes from the right meeting with one tap.",
+            actionTitle: "Connect calendar"
+        ) {
+            Task {
+                await calendar.refresh(promptIfNeeded: true)
+                await router.schedule(for: calendar.upcoming)
+            }
+        }
+    }
+
+    private var calendarDeniedCard: some View {
+        integrationCard(
+            icon: "calendar.badge.exclamationmark",
+            title: "Calendar access is off",
+            message: "DoodleNote still works without it. You can enable access in Settings anytime.",
+            actionTitle: "Open Settings"
+        ) {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            openURL(url)
+        }
+    }
+
+    private func integrationCard(
+        icon: String,
+        title: String,
+        message: String,
+        actionTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(Color.sageDeep)
+                .frame(width: 36, height: 36)
+                .background(Color.sageFill, in: RoundedRectangle(cornerRadius: 10))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.ink)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(Color.bark)
+                Button(actionTitle, action: action)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.sageDeep)
+                    .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.card, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.sand))
+    }
 
     private var comingUpSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -312,11 +390,11 @@ struct HomeView: View {
             Image(systemName: searchText.isEmpty ? "waveform.badge.mic" : "magnifyingglass")
                 .font(.system(size: 44))
                 .foregroundStyle(Color.sage)
-            Text(searchText.isEmpty ? "No meetings yet" : "No matches")
+            Text(searchText.isEmpty ? "No notes yet" : "No matches")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.ink)
             if searchText.isEmpty {
-                Text("Tap the + button when you sit down with someone. DoodleNote records, transcribes on your phone, and writes the notes.")
+                Text("Use the + button to record a meeting or jot down a quick note. DoodleNote transcribes recordings and helps write the notes.")
                     .font(.subheadline)
                     .foregroundStyle(Color.bark)
                     .multilineTextAlignment(.center)
@@ -391,7 +469,8 @@ struct HomeView: View {
         meeting.folderId = selectedFolderId
         context.insert(meeting)
         try? context.save()
-        autoRecordMeeting = meeting
+        autoRecordMeetingID = meeting.id
+        draftMeetingIDs.insert(meeting.id)
         path.append(meeting)
     }
 
@@ -401,6 +480,7 @@ struct HomeView: View {
         note.folderId = selectedFolderId
         context.insert(note)
         try? context.save()
+        draftMeetingIDs.insert(note.id)
         path.append(note)
     }
 }
@@ -445,9 +525,3 @@ private struct MeetingRow: View {
         .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
     }
 }
-
-/// A row that reveals Move + Delete when swiped left, since the home list is
-/// a styled ScrollView (native List `.swipeActions` don't apply here). Tap the
-/// content to open; swipe to act. Only one row opens at a time via a shared
-/// binding would be ideal, but per-row state keeps it self-contained — a new
-/// swipe on another row leaves this one open until tapped, which is fine.
