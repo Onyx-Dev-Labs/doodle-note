@@ -87,14 +87,16 @@ struct HomeView: View {
                     .accessibilityLabel("Folders")
                 }
                 ToolbarItem(placement: .principal) { Wordmark(font: .subheadline) }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showDialer = true
-                    } label: {
-                        Image(systemName: "phone")
-                            .foregroundStyle(Color.bark)
+                if AppFeatures.phoneCalls {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showDialer = true
+                        } label: {
+                            Image(systemName: "phone")
+                                .foregroundStyle(Color.bark)
+                        }
+                        .accessibilityLabel("Phone calls")
                     }
-                    .accessibilityLabel("Phone calls")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -119,8 +121,10 @@ struct HomeView: View {
                 ChatView(scope: .global)
             }
             .sheet(isPresented: $showDialer) {
-                DialerView { meeting in
-                    path.append(meeting)
+                if AppFeatures.phoneCalls {
+                    DialerView { meeting in
+                        path.append(meeting)
+                    }
                 }
             }
         }

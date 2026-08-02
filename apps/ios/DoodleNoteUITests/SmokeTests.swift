@@ -83,4 +83,17 @@ final class SmokeTests: XCTestCase {
         app.buttons["Back"].tap()
         XCTAssertTrue(app.staticTexts["Untitled note"].waitForNonExistence(timeout: 5))
     }
+
+    /// The unfinished phone-call recorder must not be discoverable in the MVP.
+    @MainActor
+    func testPhoneCallsAreHiddenForMVP() throws {
+        let app = launch()
+
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Phone calls"].exists)
+
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Caller ID"].exists)
+    }
 }
