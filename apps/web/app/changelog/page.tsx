@@ -9,6 +9,13 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.9",
+    date: "August 2, 2026",
+    highlights: [
+      "The Mac app icon now fills its rounded shape cleanly, with no pale side gutters",
+    ],
+  },
+  {
     version: "0.4.8",
     date: "August 1, 2026",
     highlights: [
