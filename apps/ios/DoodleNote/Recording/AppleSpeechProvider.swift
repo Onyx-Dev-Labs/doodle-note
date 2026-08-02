@@ -120,16 +120,10 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         guard let converted = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else {
             return
         }
-        var fed = false
         var conversionError: NSError?
+        let source = ConverterInput(buffer: buffer)
         converter.convert(to: converted, error: &conversionError) { _, status in
-            if fed {
-                status.pointee = .noDataNow
-                return nil
-            }
-            fed = true
-            status.pointee = .haveData
-            return buffer
+            source.next(status: status)
         }
         if conversionError == nil, converted.frameLength > 0 {
             inputBuilder.yield(AnalyzerInput(buffer: converted))
@@ -156,6 +150,31 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         eventsCont.finish()
         analyzer = nil
         converter = nil
+    }
+}
+
+/// AVAudioConverter's input closure is `@Sendable`, while AVAudioPCMBuffer is
+/// not. This synchronized ownership box makes the one-shot handoff explicit
+/// and avoids capturing mutable local state across concurrency domains.
+private final class ConverterInput: @unchecked Sendable {
+    private let lock = NSLock()
+    private let buffer: AVAudioPCMBuffer
+    private var hasProvidedBuffer = false
+
+    init(buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+
+    func next(status: UnsafeMutablePointer<AVAudioConverterInputStatus>) -> AVAudioBuffer? {
+        lock.withLock {
+            guard !hasProvidedBuffer else {
+                status.pointee = .noDataNow
+                return nil
+            }
+            hasProvidedBuffer = true
+            status.pointee = .haveData
+            return buffer
+        }
     }
 }
 

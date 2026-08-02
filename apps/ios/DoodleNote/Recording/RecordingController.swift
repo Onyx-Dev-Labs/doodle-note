@@ -47,6 +47,11 @@ final class RecordingController {
         guard state == .idle || !isActive else { return }
         let gen = generation
 
+        if ProcessInfo.processInfo.environment["UITEST_RECORDING_MODE"] == "failure" {
+            state = .failed("Recording is unavailable in this simulator test. Try again on a device.")
+            return
+        }
+
         state = .preparing("Requesting microphone…")
         guard await AVAudioApplication.requestRecordPermission() else {
             if gen == generation {
@@ -130,7 +135,7 @@ final class RecordingController {
         eventsTask = nil
         provider = nil
         livePartial = ""
-        meeting.endedAt = .now
+        if meeting.startedAt != nil { meeting.endedAt = .now }
         try? context.save()
         state = .idle
     }
@@ -186,13 +191,24 @@ final class RecordingController {
 /// Run an async operation but give up waiting after `seconds`. The operation
 /// itself is cancelled on timeout; either way this function returns.
 func withTimeout(seconds: Double, _ operation: @escaping @Sendable () async -> Void) async {
-    await withTaskGroup(of: Void.self) { group in
-        group.addTask { await operation() }
-        group.addTask {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    let operationTask = Task { await operation() }
+    await withTaskCancellationHandler {
+        await withCheckedContinuation { continuation in
+            let gate = TimeoutGate()
+            Task {
+                await operationTask.value
+                if gate.claim() { continuation.resume() }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if gate.claim() {
+                    operationTask.cancel()
+                    continuation.resume()
+                }
+            }
         }
-        await group.next() // whichever finishes first
-        group.cancelAll()
+    } onCancel: {
+        operationTask.cancel()
     }
 }
 
@@ -202,15 +218,41 @@ func withThrowingTimeout<T: Sendable>(
     seconds: Double,
     _ operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw TimeoutError()
+    let operationTask = Task { try await operation() }
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+            let gate = TimeoutGate()
+            Task {
+                do {
+                    let result = try await operationTask.value
+                    if gate.claim() { continuation.resume(returning: result) }
+                } catch {
+                    if gate.claim() { continuation.resume(throwing: error) }
+                }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if gate.claim() {
+                    operationTask.cancel()
+                    continuation.resume(throwing: TimeoutError())
+                }
+            }
         }
-        guard let first = try await group.next() else { throw TimeoutError() }
-        group.cancelAll()
-        return first
+    } onCancel: {
+        operationTask.cancel()
+    }
+}
+
+private final class TimeoutGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+
+    func claim() -> Bool {
+        lock.withLock {
+            guard !finished else { return false }
+            finished = true
+            return true
+        }
     }
 }
 

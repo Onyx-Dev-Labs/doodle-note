@@ -23,8 +23,23 @@ schemes:
     test:
       config: Debug
       targets:
+        - DoodleNoteTests
         - DoodleNoteUITests
 targets:
+  DoodleNoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - DoodleNoteTests
+    dependencies:
+      - target: DoodleNote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios.tests
+        DEVELOPMENT_TEAM: VTZW6K32K4
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "6.0"
   DoodleNoteUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -53,6 +68,8 @@ targets:
       path: DoodleNote/Info.plist
       properties:
         CFBundleDisplayName: DoodleNote
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSMicrophoneUsageDescription: DoodleNote records your meetings so it can transcribe them on this device. Audio never leaves your phone.
@@ -68,7 +85,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios
         PRODUCT_NAME: DoodleNote
-        MARKETING_VERSION: 0.1.0
+        MARKETING_VERSION: 0.4.8
         CURRENT_PROJECT_VERSION: 1
         DEVELOPMENT_TEAM: VTZW6K32K4
         CODE_SIGN_STYLE: Automatic

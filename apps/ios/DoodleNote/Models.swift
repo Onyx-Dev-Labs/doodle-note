@@ -65,6 +65,25 @@ final class Meeting {
         return isNote ? "Untitled note" : "Untitled meeting"
     }
 
+    var hasMeaningfulContent: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !roughNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !(generatedNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            || !segments.isEmpty
+            || startedAt != nil
+    }
+
+    /// Content that can actually be sent to the note generator. A title or a
+    /// recording timestamp keeps a meeting from being discarded, but neither
+    /// gives the generator useful source material.
+    var hasNoteSourceContent: Bool {
+        !roughNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !(generatedNotes?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            || !segments.isEmpty
+    }
+
+    var isEmptyDraft: Bool { !hasMeaningfulContent }
+
     var durationMs: Int? {
         guard let startedAt, let endedAt else { return nil }
         return Int(endedAt.timeIntervalSince(startedAt) * 1000)
