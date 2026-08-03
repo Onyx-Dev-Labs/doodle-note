@@ -104,8 +104,11 @@ jobs:
           process.exit(0)
           '@ | Set-Content -Path $script -Encoding UTF8
           $env:ELECTRON_RUN_AS_NODE = "1"
-          & (Join-Path $appDir "DoodleNote.exe") $script $appDir
-          if ($LASTEXITCODE -ne 0) { throw "Packaged native module smoke failed" }
+          $output = & (Join-Path $appDir "DoodleNote.exe") $script $appDir 2>&1 | Out-String
+          Write-Host $output
+          if ($output -notmatch "Packaged sherpa and llama native modules loaded successfully") {
+            throw "Packaged native module smoke did not reach the success sentinel"
+          }
 
       - name: Verify Windows artifacts and signature state
         shell: pwsh
