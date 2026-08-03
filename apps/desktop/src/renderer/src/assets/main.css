@@ -158,6 +158,7 @@ a,
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
   border-right: 1px solid var(--border);
   padding: 0 10px 12px;
   min-height: 0;
