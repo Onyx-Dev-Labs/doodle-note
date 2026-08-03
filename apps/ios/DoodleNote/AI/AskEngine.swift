@@ -82,7 +82,7 @@ enum AskEngine {
         var used = 0
         var omitted = 0
 
-        for meeting in meetings.sorted(by: { $0.createdAt > $1.createdAt }) {
+        for meeting in prioritizedGlobalMeetings(meetings, question: question) {
             let date = meeting.createdAt.formatted(.iso8601.year().month().day())
             let notes = bestNotes(for: meeting)
             let section = "=== MEETING: \(meeting.displayTitle) — \(date) ===\n\(notes)"
@@ -107,6 +107,72 @@ enum AskEngine {
         return try await NotesEngineFactory.make().respond(
             system: globalSystemPrompt,
             user: sections.joined(separator: "\n\n")
+        )
+    }
+
+    /// A global question is often really asking for one customer or meeting.
+    /// Put title matches first and exclude unrelated recent notes so the small
+    /// on-device context window contains the meeting the user actually named.
+    /// This also prevents one unrelated note from making Apple's language
+    /// classifier reject the entire mixed prompt.
+    @MainActor
+    static func prioritizedGlobalMeetings(_ meetings: [Meeting], question: String) -> [Meeting] {
+        let recent = meetings.sorted(by: { $0.createdAt > $1.createdAt })
+        let terms = searchTerms(in: question)
+        guard !terms.isEmpty else { return recent }
+
+        struct Match {
+            let meeting: Meeting
+            let titleHits: Int
+            let noteHits: Int
+            let recentIndex: Int
+
+            var score: Int { titleHits * 100 + noteHits * 10 }
+        }
+
+        let matches = recent.enumerated().compactMap { index, meeting -> Match? in
+            let title = normalizedSearchText(meeting.displayTitle)
+            let notes = normalizedSearchText(bestNotes(for: meeting))
+            let titleHits = terms.count(where: { title.contains($0) })
+            let noteHits = terms.count(where: { notes.contains($0) })
+            guard titleHits > 0 || noteHits > 0 else { return nil }
+            return Match(
+                meeting: meeting,
+                titleHits: titleHits,
+                noteHits: noteHits,
+                recentIndex: index
+            )
+        }
+        guard !matches.isEmpty else { return recent }
+
+        // When the user names a meeting/customer, notes-only matches are
+        // distracting and can consume the entire local-model context budget.
+        let candidates = matches.contains(where: { $0.titleHits > 0 })
+            ? matches.filter { $0.titleHits > 0 }
+            : matches
+        return candidates.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.recentIndex < $1.recentIndex
+        }.map(\.meeting)
+    }
+
+    private static let genericQuestionTerms: Set<String> = [
+        "about", "action", "actions", "anything", "are", "did", "does", "dos", "for",
+        "from", "how", "into", "item", "items", "list", "meeting", "meetings", "mine",
+        "my", "open", "our", "recent", "tell", "the", "this", "todo", "todos", "was",
+        "were", "what", "when", "where", "which", "who", "with", "you", "your",
+    ]
+
+    private static func searchTerms(in question: String) -> [String] {
+        normalizedSearchText(question)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 3 && !genericQuestionTerms.contains($0) }
+    }
+
+    private static func normalizedSearchText(_ text: String) -> String {
+        text.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
         )
     }
 

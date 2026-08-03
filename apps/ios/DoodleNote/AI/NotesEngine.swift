@@ -25,6 +25,8 @@ enum NotesEngineChoice: String, CaseIterable, Identifiable {
 
 enum NotesError: LocalizedError {
     case onDeviceUnavailable(String)
+    case onDeviceUnsupportedLocale
+    case onDeviceUnsupportedLanguage
     case missingAPIKey
     case apiFailure(String)
     case emptyResponse
@@ -33,6 +35,10 @@ enum NotesError: LocalizedError {
         switch self {
         case .onDeviceUnavailable(let reason):
             "The on-device model isn't available: \(reason) You can add an Anthropic API key in Settings instead."
+        case .onDeviceUnsupportedLocale:
+            "Apple's on-device model doesn't support this iPhone's current language and region. Match the iPhone and Apple Intelligence languages, or choose Anthropic in Settings."
+        case .onDeviceUnsupportedLanguage:
+            "Apple's on-device model couldn't process the language in these notes. Try asking about one meeting, or choose Anthropic in Settings."
         case .missingAPIKey:
             "Add your Anthropic API key in Settings to generate notes with a cloud model."
         case .apiFailure(let detail):
@@ -98,9 +104,17 @@ struct FoundationModelsEngine: NotesEngine {
         case .unavailable(let reason):
             throw NotesError.onDeviceUnavailable(describe(reason))
         }
+        guard model.supportsLocale() else {
+            throw NotesError.onDeviceUnsupportedLocale
+        }
 
         let session = LanguageModelSession(instructions: system)
-        let response = try await session.respond(to: user)
+        let response: LanguageModelSession.Response<String>
+        do {
+            response = try await session.respond(to: user)
+        } catch LanguageModelSession.GenerationError.unsupportedLanguageOrLocale {
+            throw NotesError.onDeviceUnsupportedLanguage
+        }
         let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw NotesError.emptyResponse }
         return text
