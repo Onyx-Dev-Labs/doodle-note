@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { downloadArtifactFromManifest } from "../lib/download-artifact";
+import {
+  downloadArtifactFromManifest,
+  downloadManifestForPlatform,
+} from "../lib/download-artifact";
 
 const macManifest = `version: 0.4.10
 files:
@@ -16,7 +19,7 @@ test("website Mac downloads use the version-matched DMG", () => {
   );
 });
 
-test("Windows downloads continue using the updater manifest path", () => {
+test("Windows downloads use the installer path from their selected manifest", () => {
   assert.equal(
     downloadArtifactFromManifest(
       "win",
@@ -24,6 +27,12 @@ test("Windows downloads continue using the updater manifest path", () => {
     ),
     "DoodleNote-0.4.10-setup.exe",
   );
+});
+
+test("Windows website downloads use the beta manifest, not the updater feed", () => {
+  assert.equal(downloadManifestForPlatform("win"), "latest-beta.yml");
+  assert.equal(downloadManifestForPlatform("mac"), "latest-mac.yml");
+  assert.equal(downloadManifestForPlatform("linux"), null);
 });
 
 test("malformed or unsafe versions never become redirect targets", () => {

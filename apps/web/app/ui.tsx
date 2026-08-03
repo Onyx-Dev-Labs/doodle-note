@@ -4,8 +4,9 @@ import Link from "next/link";
 import { AppleLogo, WindowsLogo } from "./logos";
 
 /**
- * Version-independent: /download/<platform> reads the live update manifest
- * and redirects to the current installer, so these can never go stale.
+ * Version-independent: /download/<platform> reads the live platform download
+ * manifest and redirects to the current installer, so these can never go stale.
+ * The Windows website manifest remains separate from its production updater.
  */
 export const DOWNLOADS = {
   mac: "/download/mac",

@@ -7,6 +7,10 @@ const publishScript = readFileSync(
   new URL('../../scripts/publish-release.mjs', import.meta.url),
   'utf8'
 )
+const windowsBetaPublishScript = readFileSync(
+  new URL('../../scripts/publish-windows-beta.mjs', import.meta.url),
+  'utf8'
+)
 const brandScript = readFileSync(
   new URL('../../scripts/build-brand-assets.sh', import.meta.url),
   'utf8'
@@ -83,6 +87,13 @@ test('CI builds and retains a real Windows installer', () => {
   assert.match(ciWorkflow, /Get-AuthenticodeSignature/)
   assert.match(ciWorkflow, /actions\/upload-artifact@v4/)
   assert.match(desktopPackage, /release:win[\s\S]*verify-windows-signature\.ps1/)
+})
+
+test('Windows website betas cannot replace the production updater feed', () => {
+  assert.match(desktopPackage, /publish:win-beta[\s\S]*publish-windows-beta\.mjs/)
+  assert.match(windowsBetaPublishScript, /-beta-setup\.exe/)
+  assert.match(windowsBetaPublishScript, /put\('updates\/latest-beta\.yml'/)
+  assert.doesNotMatch(windowsBetaPublishScript, /put\('updates\/latest\.yml'/)
 })
 
 test('macOS-only settings are gated out of the Windows UI', () => {
