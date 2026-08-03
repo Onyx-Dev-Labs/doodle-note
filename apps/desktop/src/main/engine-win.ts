@@ -29,6 +29,8 @@ interface AudioMessage {
   t: 'audio'
   channel: string
   samples: Float32Array
+  /** Batch imports use an acknowledgement for IPC backpressure. */
+  sequence?: number
 }
 
 type InMessage =
@@ -75,7 +77,12 @@ function download(url: string, dest: string, onPct: (pct: number) => void): Prom
     const follow = (target: string, redirects: number): void => {
       if (redirects > 5) return reject(new Error('Too many redirects'))
       httpsGet(target, (res) => {
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if (
+          res.statusCode &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
           res.resume()
           return follow(res.headers.location, redirects + 1)
         }
@@ -193,7 +200,10 @@ class ChannelPipeline {
     }
     const now = Date.now()
     const text = joinedText(result)
-    if ((force || now - this.lastPartialAt > PARTIAL_THROTTLE_MS) && text !== this.lastPartialText) {
+    if (
+      (force || now - this.lastPartialAt > PARTIAL_THROTTLE_MS) &&
+      text !== this.lastPartialText
+    ) {
       this.lastPartialAt = now
       this.lastPartialText = text
       emit({ event: 'partial', channel: this.channel, text })
@@ -283,6 +293,9 @@ port.on('message', (message: Electron.MessageEvent) => {
       const pipeline = pipelines.get(data.channel)
       if (pipeline && data.samples instanceof Float32Array && data.samples.length > 0) {
         pipeline.ingest(data.samples)
+      }
+      if (typeof data.sequence === 'number') {
+        port.postMessage({ t: 'ack', sequence: data.sequence })
       }
       break
     }

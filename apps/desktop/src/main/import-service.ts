@@ -13,7 +13,11 @@ import {
   type RetranscribeResult
 } from '../shared/import-api'
 import { AudioService, IMPORTABLE_EXTENSIONS } from './audio-service'
-import { transcribeFileToSegments, type BatchProgress } from './import-logic'
+import {
+  transcribeFileToSegments,
+  type BatchProgress,
+  type BatchTranscription
+} from './import-logic'
 
 /** Sanity ceiling — a 2GB "audio file" is a mistake, not a meeting. */
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024
@@ -33,7 +37,11 @@ export class ImportService {
     private readonly enginePath: string,
     private readonly meetings: MeetingFileStore,
     private readonly audio: AudioService,
-    private readonly broadcast: (channel: string, payload: unknown) => void
+    private readonly broadcast: (channel: string, payload: unknown) => void,
+    private readonly platformTranscriber?: (
+      filePath: string,
+      onProgress?: (progress: BatchProgress) => void
+    ) => Promise<BatchTranscription>
   ) {}
 
   registerIpc(): void {
@@ -62,7 +70,7 @@ export class ImportService {
 
   async importAudio(): Promise<ImportResult> {
     if (this.busy) return { error: 'Another import is still running — one at a time.' }
-    if (!existsSync(this.enginePath)) {
+    if (!this.platformTranscriber && !existsSync(this.enginePath)) {
       return { error: 'The transcription engine is not available on this platform yet.' }
     }
     const picked = await dialog.showOpenDialog(BrowserWindow.getAllWindows()[0]!, {
@@ -88,11 +96,7 @@ export class ImportService {
     const meetingId = randomUUID()
     try {
       this.progress({ kind: 'import', meetingId, stage: 'starting' })
-      const result = await transcribeFileToSegments(
-        this.enginePath,
-        filePath,
-        this.toBatchProgress('import', meetingId)
-      )
+      const result = await this.transcribe(filePath, this.toBatchProgress('import', meetingId))
       const kept = result.segments.filter((s) => !s.echo)
       if (kept.length === 0) {
         return { error: 'No speech was found in that file.' }
@@ -121,7 +125,7 @@ export class ImportService {
 
   async retranscribe(meetingId: string): Promise<RetranscribeResult> {
     if (this.busy) return { error: 'Another import is still running — one at a time.' }
-    if (!existsSync(this.enginePath)) {
+    if (!this.platformTranscriber && !existsSync(this.enginePath)) {
       return { error: 'The transcription engine is not available on this platform yet.' }
     }
     const record = this.meetings.get(meetingId)
@@ -137,8 +141,7 @@ export class ImportService {
       let echoSuppressed = 0
       for (const part of parts) {
         this.progress({ kind: 'retranscribe', meetingId, stage: 'starting' })
-        const result = await transcribeFileToSegments(
-          this.enginePath,
+        const result = await this.transcribe(
           part.path,
           this.toBatchProgress('retranscribe', meetingId)
         )
@@ -169,5 +172,14 @@ export class ImportService {
     } finally {
       this.busy = false
     }
+  }
+
+  private transcribe(
+    filePath: string,
+    onProgress: (progress: BatchProgress) => void
+  ): Promise<BatchTranscription> {
+    return this.platformTranscriber
+      ? this.platformTranscriber(filePath, onProgress)
+      : transcribeFileToSegments(this.enginePath, filePath, onProgress)
   }
 }

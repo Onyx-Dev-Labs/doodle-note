@@ -97,7 +97,7 @@ function landingPage(title: string, message: string): string {
     message +
     '</p>' +
     '<div style="margin-top:30px;font-size:12px;color:#b4b6a8">Local &amp; private &middot; ' +
-    'your calendar stays on your Mac</div>' +
+    'your calendar stays on your computer</div>' +
     '</div></body></html>'
   )
 }

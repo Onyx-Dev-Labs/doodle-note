@@ -10,6 +10,7 @@ import {
 import type { EngineEventListener } from './engine-process'
 import { WinSessionRecorder } from './win-audio-recorder'
 import { join as joinPath } from 'node:path'
+import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 
 const RESTART_DELAY_MS = 3_000
 
@@ -29,6 +30,12 @@ export class WinEngineHost {
   private restartTimer: NodeJS.Timeout | null = null
   private disposed = false
   private readonly listeners = new Set<EngineEventListener>()
+  private readonly warmupListeners = new Set<(event: WizardPreflightEvent) => void>()
+  private readonly warmupWaiters = new Set<(result: WizardPreflightResult) => void>()
+  private lastWarmupEvent: WizardPreflightEvent = { stage: 'models' }
+  private warmupResult: WizardPreflightResult | null = null
+  private inputDevice: string | undefined
+  private activeChannels: string[] = []
   /** Tees renderer PCM frames to disk when the session persists audio. */
   private recorder: WinSessionRecorder | null = null
 
@@ -85,7 +92,30 @@ export class WinEngineHost {
   private handleEngineEvent(event: Record<string, unknown>): void {
     if (event.event === 'status' && event.stage === 'serve_ready') {
       this.ready = true
+      this.finishWarmup({ ok: true, micGranted: false, screenGranted: false }, { stage: 'ready' })
       return
+    }
+    if (!this.ready && !this.sessionActive) {
+      if (event.event === 'download' && typeof event.progress === 'number') {
+        this.emitWarmup({ stage: 'download', progress: event.progress })
+      } else if (
+        event.event === 'status' &&
+        (event.stage === 'downloading_model' ||
+          event.stage === 'extracting_model' ||
+          event.stage === 'serve_loading_models')
+      ) {
+        this.emitWarmup(
+          event.stage === 'downloading_model'
+            ? { stage: 'download', progress: 0 }
+            : { stage: 'models' }
+        )
+      } else if (event.event === 'error') {
+        const message = String(event.message ?? 'Windows transcription engine failed to start')
+        this.finishWarmup(
+          { ok: false, micGranted: false, screenGranted: false, error: message },
+          { stage: 'error', message }
+        )
+      }
     }
     // Model download/boot progress is host-side noise, not session traffic.
     if (!this.sessionActive) return
@@ -147,10 +177,16 @@ export class WinEngineHost {
     ].filter((c): c is string => c !== null)
 
     this.sessionActive = true
+    this.activeChannels = channels
+    this.inputDevice = opts.inputDevice
     this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
     this.child.postMessage({ t: 'start', channels })
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'start', channels })
+    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
+      action: 'start',
+      channels,
+      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
+    })
   }
 
   stop(): void {
@@ -179,6 +215,48 @@ export class WinEngineHost {
     this.stop()
   }
 
+  /** Windows renderer owns microphone capture, so device switches are sent there. */
+  setInputDevice(uid: string | null): void {
+    this.inputDevice = uid ?? undefined
+    if (!this.sessionActive || !this.activeChannels.includes('mic')) return
+    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
+      action: 'switch-input',
+      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
+    })
+  }
+
+  /** Wait for the Windows speech model and native recognizer to be ready. */
+  preflight(onEvent?: (event: WizardPreflightEvent) => void): Promise<WizardPreflightResult> {
+    if (onEvent) {
+      onEvent(this.lastWarmupEvent)
+      this.warmupListeners.add(onEvent)
+    }
+    if (this.warmupResult) {
+      if (onEvent) this.warmupListeners.delete(onEvent)
+      return Promise.resolve(this.warmupResult)
+    }
+    return new Promise((resolve) => {
+      const finish = (result: WizardPreflightResult): void => {
+        if (onEvent) this.warmupListeners.delete(onEvent)
+        resolve(result)
+      }
+      this.warmupWaiters.add(finish)
+    })
+  }
+
+  private emitWarmup(event: WizardPreflightEvent): void {
+    this.lastWarmupEvent = event
+    for (const listener of this.warmupListeners) listener(event)
+  }
+
+  private finishWarmup(result: WizardPreflightResult, event: WizardPreflightEvent): void {
+    if (this.warmupResult) return
+    this.warmupResult = result
+    this.emitWarmup(event)
+    for (const resolve of this.warmupWaiters) resolve(result)
+    this.warmupWaiters.clear()
+  }
+
   private stopCaptureInRenderer(): void {
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop' })
   }
@@ -192,6 +270,8 @@ export class WinEngineHost {
     this.child?.kill()
     this.child = null
     this.listeners.clear()
+    this.warmupListeners.clear()
+    this.warmupWaiters.clear()
   }
 
   private emit(event: EngineEvent): void {

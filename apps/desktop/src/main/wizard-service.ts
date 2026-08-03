@@ -20,7 +20,10 @@ import {
 export class WizardService {
   constructor(
     private readonly enginePath: string,
-    private readonly broadcast: (channel: string, payload: unknown) => void
+    private readonly broadcast: (channel: string, payload: unknown) => void,
+    private readonly platformPreflight?: (
+      onEvent: (event: WizardPreflightEvent) => void
+    ) => Promise<WizardPreflightResult>
   ) {}
 
   registerIpc(): void {
@@ -43,11 +46,12 @@ export class WizardService {
   }
 
   private runPreflight(): Promise<WizardPreflightResult> {
+    if (this.platformPreflight) return this.platformPreflight((event) => this.emit(event))
     return new Promise((resolve) => {
       if (!existsSync(this.enginePath)) {
-        // Windows: no Swift engine; model download happens on first record.
-        this.emit({ stage: 'ready' })
-        resolve({ ok: true, micGranted: false, screenGranted: false })
+        const error = 'The transcription engine is not available on this platform.'
+        this.emit({ stage: 'error', message: error })
+        resolve({ ok: false, micGranted: false, screenGranted: false, error })
         return
       }
       let child: ReturnType<typeof spawn>
@@ -86,7 +90,13 @@ export class WizardService {
           buffer = buffer.slice(newline + 1)
           newline = buffer.indexOf('\n')
           if (line.length === 0) continue
-          let ev: { event?: string; stage?: string; granted?: boolean; progress?: number; message?: string }
+          let ev: {
+            event?: string
+            stage?: string
+            granted?: boolean
+            progress?: number
+            message?: string
+          }
           try {
             ev = JSON.parse(line)
           } catch {
