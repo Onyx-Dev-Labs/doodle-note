@@ -22,9 +22,9 @@
   --color-sand: #e7e3d8;
   --color-ink: #26281f;
   --color-bark: #3a3d33;
-  --color-stone: #8a8d7f;
-  --color-sage: #7c9769;
-  --color-sage-deep: #5f7a4e;
+  --color-stone: #6f7367;
+  --color-sage: #708c5c;
+  --color-sage-deep: #506941;
   --color-sage-fill: #e9efe0;
 }
 
@@ -37,7 +37,7 @@
     --color-sand: #3a3e33;
     --color-ink: #f0eee2;
     --color-bark: #cfcdbe;
-    --color-stone: #93967f;
+    --color-stone: #aeb19d;
     --color-sage: #8fb07a;
     --color-sage-deep: #aac996;
     --color-sage-fill: #34402b;
@@ -54,7 +54,28 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+button,
+a,
+input,
+select,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline-color: var(--color-sage-deep);
+}
+
+.transcript-row {
+  content-visibility: auto;
+  contain-intrinsic-size: 76px;
 }
 
 /* Landing page: ruled notepad paper (hero demo card). */

@@ -1,4 +1,4 @@
-import { bigint, boolean, index, integer, jsonb, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 import { organization, user } from "./auth-schema";
 
@@ -40,6 +40,12 @@ export const meetings = pgTable(
     }),
     /** Public share-link token; null = not shared. */
     shareToken: text("share_token").unique(),
+    /** Optional expiry for a public share link. Null means no expiry. */
+    shareExpiresAt: timestamp("share_expires_at", { withTimezone: true }),
+    /** Sharing notes does not have to expose the full transcript. */
+    shareIncludeTranscript: boolean("share_include_transcript")
+      .notNull()
+      .default(false),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -85,6 +91,69 @@ export const notes = pgTable("notes", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+/** A user's private star, independent of the meeting's workspace. */
+export const meetingStars = pgTable(
+  "meeting_stars",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("meeting_stars_meeting_user_uidx").on(
+      table.meetingId,
+      table.userId,
+    ),
+    index("meeting_stars_user_id_idx").on(table.userId),
+  ],
+);
+
+/** Workspace-scoped labels used to organize meetings beyond one folder. */
+export const meetingTags = pgTable(
+  "meeting_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("meeting_tags_organization_name_uidx").on(
+      table.organizationId,
+      table.name,
+    ),
+    index("meeting_tags_organization_id_idx").on(table.organizationId),
+  ],
+);
+
+export const meetingTagLinks = pgTable(
+  "meeting_tag_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => meetingTags.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("meeting_tag_links_meeting_tag_uidx").on(
+      table.meetingId,
+      table.tagId,
+    ),
+    index("meeting_tag_links_meeting_id_idx").on(table.meetingId),
+  ],
+);
+
 /**
  * A linked desktop app. The plaintext token is shown once during the
  * link-device flow and held by the desktop (safeStorage-encrypted); only its
@@ -102,6 +171,9 @@ export const syncDevices = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     deviceName: text("device_name").notNull().default("Desktop"),
+    platform: text("platform", { enum: ["desktop", "ios", "unknown"] })
+      .notNull()
+      .default("unknown"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   },
