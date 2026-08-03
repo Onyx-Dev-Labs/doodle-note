@@ -32,6 +32,7 @@ import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
+import { MAIN_WINDOW_SIZE } from './window-sizing'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -146,10 +147,10 @@ function broadcastEngineEvent(event: EngineEvent): void {
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 760,
-    minWidth: 980,
-    minHeight: 680,
+    width: MAIN_WINDOW_SIZE.defaultWidth,
+    height: MAIN_WINDOW_SIZE.defaultHeight,
+    minWidth: MAIN_WINDOW_SIZE.minWidth,
+    minHeight: MAIN_WINDOW_SIZE.minHeight,
     // Matches the active palette so launch never flashes the wrong color.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
