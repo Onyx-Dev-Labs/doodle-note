@@ -19,6 +19,8 @@ final class ProcessTapCapture: SystemCaptureBackend {
     private var ioProcID: AudioDeviceIOProcID?
     private var tapFormat: AVAudioFormat?
     private let queue = DispatchQueue(label: "engine.tap-audio")
+    private let stopLock = NSLock()
+    private var stoppedOnce = false
 
     init(into pipeline: ChannelPipeline) {
         self.pipeline = pipeline
@@ -100,12 +102,26 @@ final class ProcessTapCapture: SystemCaptureBackend {
             cleanup()
             throw EngineError.internalError("tap device start failed (\(status))")
         }
+        CaptureRegistry.shared.register(self) { [weak self] in self?.stopSync() }
         Events.emit([
             "event": "status", "stage": "permission_granted", "permission": "system_audio",
         ])
     }
 
     func stop() async {
+        stopSync()
+    }
+
+    /// Core Audio's process-tap teardown is synchronous. Make it idempotent so
+    /// normal session completion and signal-time CaptureRegistry cleanup can
+    /// race without double-destroying the IOProc, aggregate device, or tap.
+    private func stopSync() {
+        stopLock.lock()
+        let alreadyStopped = stoppedOnce
+        stoppedOnce = true
+        stopLock.unlock()
+        guard !alreadyStopped else { return }
+        CaptureRegistry.shared.unregister(self)
         cleanup()
     }
 

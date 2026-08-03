@@ -12,6 +12,21 @@ import type {
 export type EngineEventListener = (event: EngineEvent) => void
 
 /**
+ * How long dispose() waits for a finishing session to exit on its own before
+ * escalating to SIGTERM/SIGKILL. Killing the engine mid-finish can strand its
+ * ScreenCaptureKit teardown, which leaves a stale "System Audio Recording"
+ * attribution in Control Center after the app is gone.
+ */
+export const FINISHING_EXIT_GRACE_MS = 4_000
+
+/**
+ * CaptureRegistry's synchronous ScreenCaptureKit stop is bounded at three
+ * seconds. Keep the host's SIGKILL fallback beyond that bound so escalation
+ * cannot interrupt the teardown it is meant to protect.
+ */
+export const CAPTURE_TEARDOWN_GRACE_MS = 4_000
+
+/**
  * Shape produced by spawn(..., { stdio: ['pipe', 'pipe', 'pipe'] }).
  * stdin stays open but unused: it's the engine's parent-death watchdog — if
  * this process dies or hot-restarts, the OS closes the pipe and the engine
@@ -40,8 +55,14 @@ export class EngineProcess {
   private serveSessionActive = false
   private serveRestartTimer: NodeJS.Timeout | null = null
   private disposed = false
+  /** True from the engine's "finishing" status until the session ends. */
+  private sessionFinishing = false
 
-  constructor(private readonly binaryPath: string) {}
+  constructor(
+    private readonly binaryPath: string,
+    /** Overridable for tests; production uses the default. */
+    private readonly finishingGraceMs = FINISHING_EXIT_GRACE_MS
+  ) {}
 
   /**
    * Launch the persistent engine. Models load once here; live sessions then
@@ -240,7 +261,10 @@ export class EngineProcess {
           try {
             const parsed = JSON.parse(line) as { event?: string; ok?: boolean; reason?: string }
             if (parsed.event === 'tap_selftest') {
-              resolve({ ok: parsed.ok === true, ...(parsed.reason ? { reason: parsed.reason } : {}) })
+              resolve({
+                ok: parsed.ok === true,
+                ...(parsed.reason ? { reason: parsed.reason } : {})
+              })
               return
             }
           } catch {
@@ -414,9 +438,12 @@ export class EngineProcess {
    * Hard-discard the current child when a new run supersedes it (or on app
    * quit): detach listeners first so the old child's tail events can't leak
    * into the new run, then kill. Reports the stop synthetically since the
-   * real close event can no longer reach anyone.
+   * real close event can no longer reach anyone. A session caught mid-finish
+   * gets `graceMs` to exit on its own first: killing the engine during the
+   * finishing drain can strand its ScreenCaptureKit teardown (stale "System
+   * Audio Recording" attribution in Control Center).
    */
-  private discard(): void {
+  private discard(graceMs = 0): void {
     if (!this.child) return
     const child = this.child
     this.child = null
@@ -425,12 +452,31 @@ export class EngineProcess {
     child.stdout.removeAllListeners()
     child.stderr.removeAllListeners()
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM')
-      const forceKill = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-      }, 2000)
-      forceKill.unref()
-      child.once('close', () => clearTimeout(forceKill))
+      const alive = (): boolean => child.exitCode === null && child.signalCode === null
+      const escalate = (): void => {
+        if (!alive()) return
+        child.kill('SIGTERM')
+        const forceKill = setTimeout(() => {
+          if (alive()) child.kill('SIGKILL')
+        }, CAPTURE_TEARDOWN_GRACE_MS)
+        forceKill.unref()
+        child.once('close', () => clearTimeout(forceKill))
+      }
+      if (graceMs > 0) {
+        // Closing stdin tells the engine the host is going away (its
+        // --exit-on-stdin-close watchdog); it drops its capture taps at once
+        // and exits cleanly, usually well inside the grace window.
+        try {
+          child.stdin.end()
+        } catch {
+          // stdin already gone — the escalation timer still bounds the exit.
+        }
+        const grace = setTimeout(escalate, graceMs)
+        grace.unref()
+        child.once('close', () => clearTimeout(grace))
+      } else {
+        escalate()
+      }
     }
     this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
   }
@@ -448,7 +494,17 @@ export class EngineProcess {
       child.removeAllListeners()
       child.stdout.removeAllListeners()
       child.stderr.removeAllListeners()
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      if (child.exitCode === null && child.signalCode === null) {
+        // SIGTERM first: the engine's signal handler tears its capture taps
+        // down synchronously; an immediate SIGKILL would strand the
+        // ScreenCaptureKit tap (stale Control Center attribution).
+        child.kill('SIGTERM')
+        const forceKill = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+        }, CAPTURE_TEARDOWN_GRACE_MS)
+        forceKill.unref()
+        child.once('close', () => clearTimeout(forceKill))
+      }
     }
     if (!this.disposed) {
       this.serveRestartTimer = setTimeout(() => this.startServe(), 1_000)
@@ -456,7 +512,10 @@ export class EngineProcess {
     }
   }
 
-  /** Kill the sidecars on app shutdown. */
+  /**
+   * Kill the sidecars on app shutdown. A session still finishing gets a grace
+   * window to complete its capture teardown before we escalate to signals.
+   */
   dispose(): void {
     this.disposed = true
     if (this.serveRestartTimer) clearTimeout(this.serveRestartTimer)
@@ -465,7 +524,7 @@ export class EngineProcess {
     if (serve && serve.exitCode === null && serve.signalCode === null) {
       serve.stdin.end() // its stdin watchdog exits it cleanly
     }
-    this.discard()
+    this.discard(this.sessionFinishing ? this.finishingGraceMs : 0)
     this.listeners.clear()
   }
 
@@ -508,6 +567,15 @@ export class EngineProcess {
   }
 
   private emit(event: EngineEvent): void {
+    // Track the finishing window (stop acknowledged → session end) so dispose
+    // knows when a kill would cut the engine's capture teardown short.
+    if (event.event === 'status') {
+      if (event.stage === 'finishing' || event.stage === 'saving_audio') {
+        this.sessionFinishing = true
+      }
+    } else if (event.event === 'started' || event.event === 'done' || event.event === 'exit') {
+      this.sessionFinishing = false
+    }
     for (const listener of this.listeners) listener(event)
   }
 }

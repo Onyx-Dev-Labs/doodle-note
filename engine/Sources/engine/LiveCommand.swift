@@ -46,6 +46,10 @@ enum LiveCommand {
                     }
                 }
                 Events.log("stdin closed — host process gone; finishing session")
+                // Drop the OS taps immediately — during model warm-up the drain
+                // can't reach its own capture teardown for many seconds, and a
+                // dead host means nobody needs the tail audio anyway.
+                CaptureRegistry.shared.stopAll()
                 StopController.shared.stop()
             }.start()
         }
@@ -504,6 +508,9 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     private var captureSession: AVCaptureSession?
     private let captureQueue = DispatchQueue(label: "engine.mic-audio")
     private let converter = AudioConverter()
+    private let stopLock = NSLock()
+    private var stoppedOnce = false
+    private var usingAEC = false
 
     init(into pipeline: ChannelPipeline, enableAEC: Bool, deviceUID: String? = nil) {
         self.pipeline = pipeline
@@ -521,7 +528,9 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
         if enableAEC {
             do {
                 try startEngineWithAEC()
+                usingAEC = true
                 Events.emit(["event": "status", "stage": "aec_enabled", "channel": "mic"])
+                CaptureRegistry.shared.register(self) { [weak self] in self?.stop() }
                 return
             } catch {
                 Events.log("AEC engine start failed — retrying without echo cancellation: \(error)")
@@ -542,6 +551,7 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
                     + "(check the input device in System Settings → Sound): \(error)"
             )
         }
+        CaptureRegistry.shared.register(self) { [weak self] in self?.stop() }
     }
 
     private func startCaptureSession() throws {
@@ -632,11 +642,19 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     }
 
     func stop() {
+        // Idempotent: the session drain and CaptureRegistry.stopAll() (the
+        // signal-time teardown) may both call this, from different threads.
+        stopLock.lock()
+        let alreadyStopped = stoppedOnce
+        stoppedOnce = true
+        stopLock.unlock()
+        guard !alreadyStopped else { return }
+        CaptureRegistry.shared.unregister(self)
         if let session = captureSession {
             session.stopRunning()
             captureSession = nil
         }
-        if enableAEC {
+        if usingAEC {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
@@ -658,6 +676,7 @@ protocol SystemCaptureBackend: AnyObject {
 final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, SystemCaptureBackend {
     private let pipeline: ChannelPipeline
     private var stream: SCStream?
+    private let streamLock = NSLock()
     private let converter = AudioConverter()
     private let sampleQueue = DispatchQueue(label: "engine.system-audio")
 
@@ -690,11 +709,36 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
 
     func start() async throws {
         try await stream?.startCapture()
+        // Registered only once capture is live: from here on, a process that
+        // dies without stopCapture strands the tap's "System Audio Recording"
+        // attribution in Control Center.
+        CaptureRegistry.shared.register(self) { [weak self] in self?.stopSync() }
     }
 
     func stop() async {
-        try? await stream?.stopCapture()
+        guard let stream = takeStream() else { return }
+        try? await stream.stopCapture()
+    }
+
+    /// Synchronous stop for signal-time teardown: blocks (bounded) until the
+    /// OS confirms the tap is down, so an exit()/SIGKILL moments later can't
+    /// strand it.
+    func stopSync() {
+        guard let stream = takeStream() else { return }
+        let stopped = DispatchSemaphore(value: 0)
+        stream.stopCapture { _ in stopped.signal() }
+        _ = stopped.wait(timeout: .now() + 3)
+    }
+
+    /// Hands the stream to exactly one stopper — the drain and the signal
+    /// handler can race here.
+    private func takeStream() -> SCStream? {
+        streamLock.lock()
+        let taken = stream
         stream = nil
+        streamLock.unlock()
+        if taken != nil { CaptureRegistry.shared.unregister(self) }
+        return taken
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -799,9 +843,63 @@ final class StopController: @unchecked Sendable {
         for sig in [SIGINT, SIGTERM] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
-            source.setEventHandler { [weak self] in self?.stop() }
+            source.setEventHandler { [weak self] in self?.handleSignal() }
             source.resume()
             signalSources.append(source)
         }
+    }
+
+    private func handleSignal() {
+        lock.lock()
+        let alreadyStopping = stopped
+        lock.unlock()
+        // Drop the OS taps first, synchronously: hosts escalate SIGTERM to
+        // SIGKILL, and dying with an SCStream still capturing leaves a stale
+        // "System Audio Recording" attribution in Control Center.
+        CaptureRegistry.shared.stopAll()
+        if alreadyStopping {
+            // Repeat signal: the host is done waiting for the drain. Capture
+            // is already down — acknowledge with a final event and go.
+            Events.emit(["event": "done"])
+            exit(0)
+        }
+        stop()
+    }
+}
+
+// MARK: - Live capture registry (signal-time teardown)
+
+/// Process-wide set of live OS captures (mic AVCaptureSession / AVAudioEngine,
+/// system SCStream). Normal stop paths tear these down as part of the session
+/// drain, but that drain can be many seconds of ASR decode away; the registry
+/// lets signal handlers and the stdin watchdog drop every tap synchronously
+/// before the process exits (or is SIGKILLed by an impatient host).
+final class CaptureRegistry: @unchecked Sendable {
+    static let shared = CaptureRegistry()
+
+    private let lock = NSLock()
+    private var stops: [ObjectIdentifier: () -> Void] = [:]
+
+    /// `stop` must be synchronous and idempotent — it can run concurrently
+    /// with (or after) the owner's normal teardown.
+    func register(_ owner: AnyObject, stop: @escaping () -> Void) {
+        lock.lock()
+        stops[ObjectIdentifier(owner)] = stop
+        lock.unlock()
+    }
+
+    func unregister(_ owner: AnyObject) {
+        lock.lock()
+        stops.removeValue(forKey: ObjectIdentifier(owner))
+        lock.unlock()
+    }
+
+    /// Synchronously stop every registered capture. Idempotent.
+    func stopAll() {
+        lock.lock()
+        let pending = Array(stops.values)
+        stops.removeAll()
+        lock.unlock()
+        pending.forEach { $0() }
     }
 }
