@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const desktopDir = path.join(here, '..')
-const releaseDir = path.join(desktopDir, 'release')
+const releaseDir = process.env.WINDOWS_RELEASE_DIR ?? path.join(desktopDir, 'release')
 
 if (!process.env.BLOB_READ_WRITE_TOKEN) {
   const envLocal =
