@@ -3,17 +3,17 @@
 ## Included
 
 - [x] Include the compact 800 × 560 desktop window minimum merged in PR #55
-- [ ] Invalidate the stale macOS application-icon cache on update
-- [ ] Deliver one native meeting notification while retaining the in-app action banner
+- [x] Invalidate the stale macOS application-icon cache on update
+- [x] Deliver one native meeting notification while retaining the in-app action banner
 - [x] Bump the desktop version from 0.4.9 to 0.4.10
-- [ ] Add the v0.4.10 changelog entry
+- [x] Add the v0.4.10 changelog entry
 
 ## Verification
 
-- [ ] Prompt-delivery regression tests
-- [ ] Desktop test suite
-- [ ] Desktop typecheck
-- [ ] Production Electron build
+- [x] Prompt-delivery regression tests
+- [x] Desktop test suite
+- [x] Desktop typecheck
+- [x] Production Electron build
 - [ ] Packaged Info.plist references the versioned icon resource
 - [ ] Signed and notarized arm64 package
 - [ ] Compact-window visual smoke test
