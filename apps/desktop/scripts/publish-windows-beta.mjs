@@ -11,7 +11,8 @@ const desktopDir = path.join(here, '..')
 const releaseDir = path.join(desktopDir, 'release')
 
 if (!process.env.BLOB_READ_WRITE_TOKEN) {
-  const envLocal = path.join(desktopDir, '..', '..', '.env.local')
+  const envLocal =
+    process.env.BLOB_ENV_FILE ?? path.join(desktopDir, '..', '..', '.env.local')
   try {
     const text = readFileSync(envLocal, 'utf8')
     const match = text.match(/^BLOB_READ_WRITE_TOKEN="?([^"\n]+)"?$/m)
@@ -21,7 +22,9 @@ if (!process.env.BLOB_READ_WRITE_TOKEN) {
   }
 }
 if (!process.env.BLOB_READ_WRITE_TOKEN) {
-  throw new Error('BLOB_READ_WRITE_TOKEN not set (vercel env pull refreshes .env.local)')
+  throw new Error(
+    'BLOB_READ_WRITE_TOKEN not set (vercel env pull refreshes .env.local; BLOB_ENV_FILE can select another env file)'
+  )
 }
 
 const { version } = JSON.parse(readFileSync(path.join(desktopDir, 'package.json'), 'utf8'))
