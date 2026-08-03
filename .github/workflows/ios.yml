@@ -1,0 +1,54 @@
+name: iOS
+
+on:
+  pull_request:
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
+
+jobs:
+  unit-tests:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: apps/ios
+        run: xcodegen generate
+
+      - name: Run iOS unit tests
+        working-directory: apps/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IOS_RUNTIME_ID=$(xcrun simctl list runtimes available -j | jq -r \
+            '[.runtimes[] | select(.isAvailable and (.name | startswith("iOS")))] | last | .identifier')
+          IPHONE_DEVICE_TYPE=$(xcrun simctl list devicetypes -j | jq -r \
+            '([.devicetypes[] | select(.name == "iPhone 17 Pro")] | first | .identifier) // ([.devicetypes[] | select(.name | startswith("iPhone"))] | first | .identifier)')
+
+          test -n "$IOS_RUNTIME_ID"
+          test -n "$IPHONE_DEVICE_TYPE"
+
+          SIMULATOR_UDID=$(xcrun simctl create "DoodleNote CI" "$IPHONE_DEVICE_TYPE" "$IOS_RUNTIME_ID")
+          trap 'xcrun simctl shutdown "$SIMULATOR_UDID" || true; xcrun simctl delete "$SIMULATOR_UDID" || true' EXIT
+
+          xcrun simctl boot "$SIMULATOR_UDID"
+          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+
+          xcodebuild test \
+            -project DoodleNote.xcodeproj \
+            -scheme DoodleNote \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -only-testing:DoodleNoteTests \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=""

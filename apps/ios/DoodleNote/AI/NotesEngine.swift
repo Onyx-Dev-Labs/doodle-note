@@ -25,6 +25,9 @@ enum NotesEngineChoice: String, CaseIterable, Identifiable {
 
 enum NotesError: LocalizedError {
     case onDeviceUnavailable(String)
+    case onDeviceUnsupportedLocale
+    case onDeviceUnsupportedLanguage
+    case onDeviceContextTooLarge
     case missingAPIKey
     case apiFailure(String)
     case emptyResponse
@@ -33,6 +36,12 @@ enum NotesError: LocalizedError {
         switch self {
         case .onDeviceUnavailable(let reason):
             "The on-device model isn't available: \(reason) You can add an Anthropic API key in Settings instead."
+        case .onDeviceUnsupportedLocale:
+            "Apple's on-device model doesn't support this iPhone's current language and region. Match the iPhone and Apple Intelligence languages, or choose Anthropic in Settings."
+        case .onDeviceUnsupportedLanguage:
+            "Apple's on-device model couldn't process the language in these notes. Try asking about one meeting, or choose Anthropic in Settings."
+        case .onDeviceContextTooLarge:
+            "That question needs more meeting context than Apple's on-device model can process at once. Narrow the question or choose Anthropic in Settings."
         case .missingAPIKey:
             "Add your Anthropic API key in Settings to generate notes with a cloud model."
         case .apiFailure(let detail):
@@ -46,7 +55,13 @@ enum NotesError: LocalizedError {
 protocol NotesEngine {
     func generate(_ input: NotesInput) async throws -> String
     /// One-shot completion — shared by note generation and "ask anything".
-    func respond(system: String, user: String) async throws -> String
+    func respond(system: String, user: String, maxResponseTokens: Int?) async throws -> String
+}
+
+extension NotesEngine {
+    func respond(system: String, user: String) async throws -> String {
+        try await respond(system: system, user: user, maxResponseTokens: nil)
+    }
 }
 
 enum NotesEngineFactory {
@@ -90,7 +105,7 @@ struct FoundationModelsEngine: NotesEngine {
         )
     }
 
-    func respond(system: String, user: String) async throws -> String {
+    func respond(system: String, user: String, maxResponseTokens: Int?) async throws -> String {
         let model = SystemLanguageModel.default
         switch model.availability {
         case .available:
@@ -98,9 +113,32 @@ struct FoundationModelsEngine: NotesEngine {
         case .unavailable(let reason):
             throw NotesError.onDeviceUnavailable(describe(reason))
         }
+        guard model.supportsLocale() else {
+            throw NotesError.onDeviceUnsupportedLocale
+        }
+
+        if #available(iOS 26.4, *), let maxResponseTokens {
+            let instructionTokens = try? await model.tokenCount(for: Instructions(system))
+            let promptTokens = try? await model.tokenCount(for: Prompt(user))
+            if let instructionTokens, let promptTokens,
+               instructionTokens + promptTokens + maxResponseTokens > model.contextSize
+            {
+                throw NotesError.onDeviceContextTooLarge
+            }
+        }
 
         let session = LanguageModelSession(instructions: system)
-        let response = try await session.respond(to: user)
+        let response: LanguageModelSession.Response<String>
+        do {
+            response = try await session.respond(
+                to: user,
+                options: GenerationOptions(maximumResponseTokens: maxResponseTokens)
+            )
+        } catch LanguageModelSession.GenerationError.unsupportedLanguageOrLocale {
+            throw NotesError.onDeviceUnsupportedLanguage
+        } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+            throw NotesError.onDeviceContextTooLarge
+        }
         let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw NotesError.emptyResponse }
         return text
@@ -140,7 +178,7 @@ struct AnthropicEngine: NotesEngine {
         )
     }
 
-    func respond(system: String, user: String) async throws -> String {
+    func respond(system: String, user: String, maxResponseTokens: Int?) async throws -> String {
         guard let apiKey = Keychain.read(key: .anthropicAPIKey), !apiKey.isEmpty else {
             throw NotesError.missingAPIKey
         }
@@ -157,7 +195,7 @@ struct AnthropicEngine: NotesEngine {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": maxResponseTokens ?? 4096,
             "system": system,
             "messages": [["role": "user", "content": user]],
         ]
