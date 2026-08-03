@@ -224,7 +224,7 @@ export class SyncService {
             const port = typeof address === 'object' && address ? address.port : 0
             const query = new URLSearchParams({
               port: String(port),
-              name: hostname().replace(/\.local$/, '') || 'Mac'
+              name: hostname().replace(/\.local$/, '') || 'Computer'
             })
             void shell.openExternal(`${this.baseUrl}/link-device?${query}`)
           })

@@ -21,6 +21,7 @@ import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
 import { WinEngineHost } from './engine-host-win'
+import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
@@ -126,6 +127,7 @@ protocol.registerSchemesAsPrivileged([
 
 let notesService: NotesService | null = null
 let calendarService: CalendarService | null = null
+let winBatchTranscriber: WinBatchTranscriber | null = null
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -377,6 +379,8 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_SET_INPUT_CHANNEL, (_event, uid: unknown) => {
     if (engine instanceof EngineProcess) {
       engine.setInputDevice(typeof uid === 'string' && uid.length > 0 ? uid : null)
+    } else if (engine instanceof WinEngineHost) {
+      engine.setInputDevice(typeof uid === 'string' && uid.length > 0 ? uid : null)
     }
   })
 
@@ -388,18 +392,30 @@ app.whenReady().then(() => {
   notesService = new NotesService(app.getPath('userData'), broadcast, meetingsService)
   notesService.registerIpc()
 
+  if (engine instanceof WinEngineHost) {
+    winBatchTranscriber = new WinBatchTranscriber((onEvent) => engine.preflight(onEvent))
+    winBatchTranscriber.registerIpc()
+  }
+
   // Audio import + re-transcription: batch engine runs in its own process,
   // so a live recording session is never disturbed.
   const importService = new ImportService(
     resolveEngineBinary(),
     meetingsService,
     audioService,
-    broadcast
+    broadcast,
+    winBatchTranscriber
+      ? (filePath, onProgress) => winBatchTranscriber!.transcribe(filePath, onProgress)
+      : undefined
   )
   importService.registerIpc()
 
   // First-run setup wizard: visible preflight + permission status.
-  const wizardService = new WizardService(resolveEngineBinary(), broadcast)
+  const wizardService = new WizardService(
+    resolveEngineBinary(),
+    broadcast,
+    engine instanceof WinEngineHost ? (onEvent) => engine.preflight(onEvent) : undefined
+  )
   wizardService.registerIpc()
 
   // Meeting export (Markdown / PDF).
@@ -539,6 +555,7 @@ app.on('will-quit', () => {
   engine.dispose()
   void notesService?.dispose()
   calendarService?.dispose()
+  winBatchTranscriber?.dispose()
 })
 
 app.on('window-all-closed', () => {

@@ -10,7 +10,12 @@ import type {
   EngineInputDevice,
   TranscriptSegment
 } from '../../shared/engine-events'
-import { AUDIO_PERSIST_STORAGE_KEY, SYSTEM_BACKEND_STORAGE_KEY, type AudioPart } from '../../shared/audio-api'
+import { listWinInputDevices } from './lib/win-capture'
+import {
+  AUDIO_PERSIST_STORAGE_KEY,
+  SYSTEM_BACKEND_STORAGE_KEY,
+  type AudioPart
+} from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import type {
@@ -104,7 +109,11 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       return { ...state, phase: 'recording', statusText: '' }
     case 'partial':
       if (!active || !ev.channel) return state
-      return { ...state, transcribing: true, partials: { ...state.partials, [ev.channel]: ev.text } }
+      return {
+        ...state,
+        transcribing: true,
+        partials: { ...state.partials, [ev.channel]: ev.text }
+      }
     case 'segments': {
       // Never attribute segments to a meeting whose view didn't run a session.
       if (state.phase === 'idle') return state
@@ -728,28 +737,25 @@ export default function MeetingView({
 
   /* ---- actions ---- */
 
-  // Mic picker: [] where unsupported (Windows), which hides the control.
   // Refreshed when the picker gains focus so plugging in a mic just works.
+  // macOS asks the native engine; Windows asks Chromium, which owns capture.
   const refreshInputDevices = useCallback(async (): Promise<void> => {
     try {
-      setInputDevices(await window.engine.listInputDevices())
+      const platform = await window.detect.getState()
+      setInputDevices(
+        platform.platform === 'win32'
+          ? await listWinInputDevices()
+          : await window.engine.listInputDevices()
+      )
     } catch {
       setInputDevices([])
     }
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    window.engine
-      .listInputDevices()
-      .then((devices) => {
-        if (!cancelled) setInputDevices(devices)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    const timer = window.setTimeout(() => void refreshInputDevices(), 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshInputDevices])
 
   const changeInputDevice = (uid: string): void => {
     setInputDeviceUid(uid)
@@ -861,7 +867,8 @@ export default function MeetingView({
     let current: string | null = null
     for (const s of allSegments) {
       // Same fallback as seekToSegment for sync-stripped segments.
-      const t = typeof s.absoluteStartMs === 'number' ? s.absoluteStartMs : part.startEpochMs + s.startMs
+      const t =
+        typeof s.absoluteStartMs === 'number' ? s.absoluteStartMs : part.startEpochMs + s.startMs
       if (t > epochMs) break
       current = s.id
     }
@@ -1251,8 +1258,8 @@ export default function MeetingView({
         <div className="toast" role="status">
           <span>
             Recording ended, but no speech was transcribed on either channel. Try again speaking
-            near the mic (or with meeting audio playing) — if it keeps happening, the Developer
-            view shows the raw engine events.
+            near the mic (or with meeting audio playing) — if it keeps happening, the Developer view
+            shows the raw engine events.
           </span>
           <button type="button" onClick={() => setEmptyNotice(false)}>
             ✕
@@ -1331,11 +1338,17 @@ export default function MeetingView({
                 type="button"
                 className="chip chip-regen"
                 disabled={!canEnhance}
-                title={!modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'}
+                title={
+                  !modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'
+                }
                 aria-label="Regenerate notes"
                 onClick={() => void runEnhance()}
               >
-                {enhanceStatus === 'running' ? <span className="spinner" aria-hidden="true" /> : '↻'}
+                {enhanceStatus === 'running' ? (
+                  <span className="spinner" aria-hidden="true" />
+                ) : (
+                  '↻'
+                )}
               </button>
             )}
             {enhancedMarkdown !== null && !capturing && (
@@ -1470,7 +1483,9 @@ export default function MeetingView({
                       audioParts.length > 0 && !capturing ? () => seekToSegment(s) : undefined
                     }
                     title={
-                      audioParts.length > 0 && !capturing ? 'Play the recording from here' : undefined
+                      audioParts.length > 0 && !capturing
+                        ? 'Play the recording from here'
+                        : undefined
                     }
                   >
                     <span className="tp-speaker">{s.speaker}</span>
@@ -1698,16 +1713,19 @@ export default function MeetingView({
               onFocus={() => void refreshInputDevices()}
             >
               <option value="">
-                Default{(() => {
+                Default
+                {(() => {
                   const def = inputDevices.find((d) => d.isDefault)
                   return def ? ` — ${def.name}` : ''
                 })()}
               </option>
-              {inputDevices.map((device) => (
-                <option key={device.uid} value={device.uid}>
-                  {device.name}
-                </option>
-              ))}
+              {inputDevices
+                .filter((device) => device.uid !== 'default')
+                .map((device) => (
+                  <option key={device.uid} value={device.uid}>
+                    {device.name}
+                  </option>
+                ))}
             </select>
           </label>
         )}

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AUDIO_PERSIST_STORAGE_KEY, SYSTEM_BACKEND_STORAGE_KEY, type AudioUsage } from '../../shared/audio-api'
+import {
+  AUDIO_PERSIST_STORAGE_KEY,
+  SYSTEM_BACKEND_STORAGE_KEY,
+  type AudioUsage
+} from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
@@ -254,7 +258,7 @@ export default function ModelsView({
   const clearAllAudio = async (): Promise<void> => {
     if (
       !window.confirm(
-        'Delete every saved meeting recording on this Mac? Transcripts and notes are kept.'
+        'Delete every saved meeting recording on this computer? Transcripts and notes are kept.'
       )
     ) {
       return
@@ -862,22 +866,24 @@ export default function ModelsView({
 
                   <div className="cal-subcard">
                     <div className="cal-subcard-head">Display</div>
-                    <div className="cal-row">
-                      <span className="cal-row-icon">
-                        <MenuBarIcon />
-                      </span>
-                      <span className="cal-row-main">
-                        <span className="cal-row-label">Show upcoming meetings in menu bar</span>
-                        <span className="cal-row-sub">
-                          Display your next meeting and time until it starts in the macOS menu bar
+                    {detect?.platform === 'darwin' && (
+                      <div className="cal-row">
+                        <span className="cal-row-icon">
+                          <MenuBarIcon />
                         </span>
-                      </span>
-                      <Toggle
-                        checked={calState.prefs.showMenuBar}
-                        label="Show upcoming meetings in menu bar"
-                        onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
-                      />
-                    </div>
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                          <span className="cal-row-sub">
+                            Display your next meeting and time until it starts in the macOS menu bar
+                          </span>
+                        </span>
+                        <Toggle
+                          checked={calState.prefs.showMenuBar}
+                          label="Show upcoming meetings in menu bar"
+                          onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
+                        />
+                      </div>
+                    )}
                     <div className="cal-row">
                       <span className="cal-row-icon">
                         <PeopleIcon />
@@ -1111,7 +1117,7 @@ export default function ModelsView({
               <section className="keys-section">
                 <h3>Meeting recordings</h3>
                 <p className="models-sub">
-                  Recordings stay on this Mac — they are never uploaded, even with sync on.
+                  Recordings stay on this computer — they are never uploaded, even with sync on.
                 </p>
                 <div className="cal-subcard">
                   <div className="cal-row">
@@ -1128,21 +1134,23 @@ export default function ModelsView({
                       onChange={togglePersistAudio}
                     />
                   </div>
-                  <div className="cal-row">
-                    <span className="cal-row-main">
-                      <span className="cal-row-label">Capture without screen permission</span>
-                      <span className="cal-row-sub">
-                        System audio is captured with a Core Audio tap (macOS 14.2+) — no Screen
-                        Recording access needed. Turn off to use the legacy ScreenCaptureKit
-                        capture instead.
+                  {detect?.platform === 'darwin' && (
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Capture without screen permission</span>
+                        <span className="cal-row-sub">
+                          System audio is captured with a Core Audio tap (macOS 14.2+) — no Screen
+                          Recording access needed. Turn off to use the legacy ScreenCaptureKit
+                          capture instead.
+                        </span>
                       </span>
-                    </span>
-                    <Toggle
-                      checked={tapEnabled}
-                      label="Capture system audio without screen permission"
-                      onChange={toggleTapBackend}
-                    />
-                  </div>
+                      <Toggle
+                        checked={tapEnabled}
+                        label="Capture system audio without screen permission"
+                        onChange={toggleTapBackend}
+                      />
+                    </div>
+                  )}
                   <div className="cal-row">
                     <span className="cal-row-main">
                       <span className="cal-row-label">Delete all recordings</span>

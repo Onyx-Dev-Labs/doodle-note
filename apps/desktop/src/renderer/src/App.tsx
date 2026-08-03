@@ -14,7 +14,8 @@ import OnboardingTour from './OnboardingTour'
 import mascotUrl from './assets/mascot-square.png'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
-import { startWinCapture, stopWinCapture } from './lib/win-capture'
+import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
+import { decodeWinBatchAudio } from './lib/win-batch-decode'
 import {
   CalendarIcon,
   FolderIcon,
@@ -116,10 +117,18 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.engine.onCaptureControl((control) => {
       if (control.action === 'start') {
-        void startWinCapture(control.channels ?? ['mic', 'system'])
+        void startWinCapture(control.channels ?? ['mic', 'system'], control.inputDevice)
+      } else if (control.action === 'switch-input') {
+        void switchWinInputDevice(control.inputDevice)
       } else {
         stopWinCapture()
       }
+    })
+  }, [])
+
+  useEffect(() => {
+    return window.engine.onBatchControl((control) => {
+      if (control.action === 'decode') void decodeWinBatchAudio(control.jobId)
     })
   }, [])
 

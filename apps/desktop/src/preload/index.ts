@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   ENGINE_AUDIO_CHANNEL,
+  ENGINE_BATCH_CONTROL_CHANNEL,
+  ENGINE_BATCH_DATA_CHANNEL,
+  ENGINE_BATCH_READ_CHANNEL,
   ENGINE_CAPTURE_CONTROL_CHANNEL,
   ENGINE_CAPTURE_ERROR_CHANNEL,
   ENGINE_EVENT_CHANNEL,
@@ -10,6 +13,8 @@ import {
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineCaptureControl,
+  type EngineBatchControl,
+  type EngineBatchMessage,
   type EngineApi,
   type EngineCommand,
   type EngineEvent,
@@ -195,7 +200,10 @@ const engineApi: EngineApi = {
   },
 
   tapSelfTest(): Promise<{ ok: boolean; reason?: string }> {
-    return ipcRenderer.invoke(ENGINE_TAP_SELFTEST_CHANNEL) as Promise<{ ok: boolean; reason?: string }>
+    return ipcRenderer.invoke(ENGINE_TAP_SELFTEST_CHANNEL) as Promise<{
+      ok: boolean
+      reason?: string
+    }>
   },
 
   onEvent(cb: (event: EngineEvent) => void): () => void {
@@ -224,6 +232,25 @@ const engineApi: EngineApi = {
 
   reportCaptureError(message: string): void {
     ipcRenderer.send(ENGINE_CAPTURE_ERROR_CHANNEL, message)
+  },
+
+  onBatchControl(cb: (control: EngineBatchControl) => void): () => void {
+    const listener = (_event: IpcRendererEvent, control: EngineBatchControl): void => {
+      cb(control)
+    }
+    ipcRenderer.on(ENGINE_BATCH_CONTROL_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(ENGINE_BATCH_CONTROL_CHANNEL, listener)
+    }
+  },
+
+  async readBatchAudio(jobId: string): Promise<ArrayBuffer> {
+    const bytes = (await ipcRenderer.invoke(ENGINE_BATCH_READ_CHANNEL, jobId)) as Uint8Array
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  },
+
+  sendBatchMessage(message: EngineBatchMessage): Promise<void> {
+    return ipcRenderer.invoke(ENGINE_BATCH_DATA_CHANNEL, message) as Promise<void>
   }
 }
 

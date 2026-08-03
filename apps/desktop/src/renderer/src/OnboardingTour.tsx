@@ -194,7 +194,7 @@ function OnboardingTour({
                 <span>
                   {isWindows
                     ? 'The speech model finishes downloading on first launch — the first recording may take a moment'
-                    : 'Everything you saved during recording — audio included — stays on this Mac'}
+                    : 'Everything you saved during recording — audio included — stays on this computer'}
                 </span>
               </li>
             </ul>

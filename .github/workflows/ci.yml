@@ -39,3 +39,58 @@ jobs:
 
       - name: Notes engine tests
         run: pnpm --filter @repo/ai test
+
+  # A Linux typecheck cannot prove that Electron packaged the Windows native
+  # addons. Build the actual NSIS updater on every PR and retain it for native
+  # Windows smoke testing. CSC_LINK/CSC_KEY_PASSWORD sign it automatically
+  # once the repository's Authenticode certificate secrets are configured.
+  windows-package:
+    runs-on: windows-latest
+    env:
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install with Windows native dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Desktop typecheck
+        run: pnpm --filter desktop typecheck
+
+      - name: Desktop tests
+        run: pnpm --filter desktop test
+
+      - name: Build Windows installer
+        run: pnpm --filter desktop package:win
+
+      - name: Verify Windows artifacts and signature state
+        shell: pwsh
+        run: |
+          $manifest = "apps/desktop/release/latest.yml"
+          if (-not (Test-Path $manifest)) { throw "latest.yml was not generated" }
+          $installer = Get-ChildItem "apps/desktop/release/DoodleNote-*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not generated" }
+          if (-not (Test-Path "$($installer.FullName).blockmap")) { throw "Updater blockmap was not generated" }
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($env:CSC_LINK -and $signature.Status -ne "Valid") {
+            throw "Signing credentials were supplied but the installer signature is $($signature.Status)"
+          }
+          Write-Host "Installer: $($installer.Name)"
+          Write-Host "Authenticode: $($signature.Status)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doodlenote-windows-${{ github.sha }}
+          path: |
+            apps/desktop/release/DoodleNote-*-setup.exe
+            apps/desktop/release/DoodleNote-*-setup.exe.blockmap
+            apps/desktop/release/latest.yml
+          retention-days: 7

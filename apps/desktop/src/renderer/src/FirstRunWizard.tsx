@@ -93,7 +93,6 @@ export default function FirstRunWizard({
       )
     })
     return unsubscribe
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on entering the step
   }, [step])
 
   /* ---- notes model step ---- */
@@ -168,9 +167,11 @@ export default function FirstRunWizard({
               Welcome to <span className="wz-ink">Doodle</span>
               <span className="wz-sage">Note</span>
             </h1>
-            <p className="wizard-sub">Meeting notes that write themselves — all on your Mac.</p>
+            <p className="wizard-sub">
+              Meeting notes that write themselves — right on your computer.
+            </p>
             <ul className="wizard-props">
-              <li>No bot joins your calls — DoodleNote listens right on your Mac</li>
+              <li>No bot joins your calls — DoodleNote listens right on your computer</li>
               <li>Transcription and AI notes run on-device. Nothing leaves your machine</li>
               <li>Works offline, no account needed</li>
             </ul>
@@ -189,14 +190,14 @@ export default function FirstRunWizard({
             <p className="wizard-sub">
               {isWindows ? (
                 <>
-                  The speech model downloads automatically in the background. Windows asks for
-                  microphone and screen-audio access when your first recording starts.
+                  DoodleNote is downloading and validating the Windows speech model now. Microphone
+                  and system-audio access are requested when your first recording starts.
                 </>
               ) : (
                 <>
                   macOS will ask for the <strong>microphone</strong> (your voice) and{' '}
-                  <strong>system audio</strong> (the other side of the call) — no screen
-                  recording, ever. Meanwhile the on-device transcription engine gets ready.
+                  <strong>system audio</strong> (the other side of the call) — no screen recording,
+                  ever. Meanwhile the on-device transcription engine gets ready.
                 </>
               )}
             </p>
@@ -218,7 +219,7 @@ export default function FirstRunWizard({
                 </div>
               )}
               <div className="wizard-row">
-                <span>{isWindows ? 'Speech model prepares automatically' : engine.detail}</span>
+                <span>{engine.detail}</span>
                 <span className={engine.status === 'error' ? 'wz-bad' : 'wz-ok'}>
                   {engine.status === 'ready' ? '✓' : engine.status === 'error' ? '✕' : '…'}
                 </span>
@@ -230,8 +231,8 @@ export default function FirstRunWizard({
             {!isWindows && (engine.mic === false || engine.screen === false) && (
               <p className="wizard-hint">
                 Denied something? Grant it later in System Settings → Privacy &amp; Security →
-                Microphone / Screen &amp; System Audio Recording — recording won&rsquo;t work
-                until then.
+                Microphone / Screen &amp; System Audio Recording — recording won&rsquo;t work until
+                then.
               </p>
             )}
             <button
@@ -250,7 +251,7 @@ export default function FirstRunWizard({
             <h1 className="wizard-title">Notes model</h1>
             <p className="wizard-sub">
               After a meeting, DoodleNote merges your rough notes with the transcript into polished
-              notes — by default with a model that runs entirely on this Mac.
+              notes — by default with a model that runs entirely on this computer.
             </p>
             {alreadyActive || notesState === 'done' ? (
               <div className="wizard-rows">
@@ -285,8 +286,8 @@ export default function FirstRunWizard({
             ) : (
               <p className="wizard-hint">
                 {models === null
-                  ? 'Checking this Mac…'
-                  : 'This Mac is short on RAM for the on-device model — use your own API key instead.'}
+                  ? 'Checking this computer…'
+                  : 'This computer is short on RAM for the on-device model — use your own API key instead.'}
               </p>
             )}
             <button type="button" className="wizard-link" onClick={() => setStep('done')}>
@@ -306,7 +307,9 @@ export default function FirstRunWizard({
                 Choose <strong>New → New meeting</strong> and DoodleNote records &amp; transcribes
                 live
               </li>
-              <li>Type rough notes during the call — <strong>Generate notes</strong> polishes them</li>
+              <li>
+                Type rough notes during the call — <strong>Generate notes</strong> polishes them
+              </li>
               <li>DoodleNote also offers to record when it notices you&rsquo;re on a call</li>
             </ul>
             <button type="button" className="wizard-cta" onClick={onFinish}>
