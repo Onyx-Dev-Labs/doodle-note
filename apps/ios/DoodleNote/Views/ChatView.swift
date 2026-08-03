@@ -166,8 +166,9 @@ struct ChatView: View {
             case .meeting(let meeting):
                 answer = try await AskEngine.ask(meeting: meeting, question: question, history: history)
             case .global:
-                var descriptor = FetchDescriptor<Meeting>(sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
-                descriptor.fetchLimit = 25
+                let descriptor = FetchDescriptor<Meeting>(
+                    sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+                )
                 let meetings = (try? context.fetch(descriptor)) ?? []
                 answer = try await AskEngine.askGlobal(meetings: meetings, question: question, history: history)
             }
