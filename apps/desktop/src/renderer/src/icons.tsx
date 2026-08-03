@@ -119,6 +119,15 @@ export function MicIcon({ size }: { size?: number }): React.JSX.Element {
   )
 }
 
+export function ImportIcon({ size }: { size?: number }): React.JSX.Element {
+  return (
+    <Icon {...(size !== undefined ? { size } : {})}>
+      <path d="M12 3v12M7 10l5 5 5-5" />
+      <path d="M5 21h14a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2" />
+    </Icon>
+  )
+}
+
 export function UsersIcon({ size }: { size?: number }): React.JSX.Element {
   return (
     <Icon {...(size !== undefined ? { size } : {})}>

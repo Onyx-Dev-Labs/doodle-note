@@ -1,5 +1,7 @@
 import type { AudioApi } from '../shared/audio-api'
 import type { ImporterApi } from '../shared/import-api'
+import type { WizardApi } from '../shared/wizard-api'
+import type { ExporterApi } from '../shared/export-api'
 import type { CalendarApi } from '../shared/calendar-api'
 import type { DetectApi } from '../shared/detect-api'
 import type { EngineApi } from '../shared/engine-events'
@@ -27,6 +29,8 @@ declare global {
     integrations: IntegrationsApi
     audio: AudioApi
     importer: ImporterApi
+    wizard: WizardApi
+    exporter: ExporterApi
   }
 }
 

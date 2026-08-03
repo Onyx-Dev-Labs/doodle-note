@@ -1,3 +1,6 @@
+import type { EngineInputDevice } from '../../../shared/engine-events'
+import { mapWindowsInputDevices } from '../../../shared/win-audio-utils'
+
 /**
  * Windows audio capture, in the renderer where Chromium does the heavy
  * lifting: microphone via getUserMedia (with Chromium's AEC scrubbing the
@@ -11,18 +14,22 @@
  */
 
 interface ChannelCapture {
+  channel: string
   stream: MediaStream
   context: AudioContext
 }
 
 let captures: ChannelCapture[] = []
+let activeInputDevice: string | undefined
 
-export async function startWinCapture(channels: string[]): Promise<void> {
+export async function startWinCapture(channels: string[], inputDevice?: string): Promise<void> {
   stopWinCapture()
+  activeInputDevice = inputDevice
   try {
     if (channels.includes('mic')) {
       const mic = await navigator.mediaDevices.getUserMedia({
         audio: {
+          ...(inputDevice && inputDevice !== 'default' ? { deviceId: { exact: inputDevice } } : {}),
           channelCount: 1,
           echoCancellation: true, // scrubs speaker bleed out of "You"
           noiseSuppression: true,
@@ -70,13 +77,45 @@ function pump(stream: MediaStream, channel: string): ChannelCapture {
   source.connect(processor)
   processor.connect(mute)
   mute.connect(context.destination) // ScriptProcessor only runs when routed
-  return { stream, context }
+  return { channel, stream, context }
+}
+
+export async function listWinInputDevices(): Promise<EngineInputDevice[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return []
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return mapWindowsInputDevices(devices)
+}
+
+/** Replace only the microphone stream; system loopback keeps flowing. */
+export async function switchWinInputDevice(inputDevice?: string): Promise<void> {
+  const current = captures.find((capture) => capture.channel === 'mic')
+  if (!current || inputDevice === activeInputDevice) return
+  try {
+    const replacement = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        ...(inputDevice && inputDevice !== 'default' ? { deviceId: { exact: inputDevice } } : {}),
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    })
+    const next = pump(replacement, 'mic')
+    stopCapture(current)
+    captures = captures.map((capture) => (capture === current ? next : capture))
+    activeInputDevice = inputDevice
+  } catch (error) {
+    console.error('[win-capture] could not switch microphones:', error)
+  }
+}
+
+function stopCapture(capture: ChannelCapture): void {
+  for (const track of capture.stream.getTracks()) track.stop()
+  void capture.context.close().catch(() => {})
 }
 
 export function stopWinCapture(): void {
-  for (const capture of captures) {
-    for (const track of capture.stream.getTracks()) track.stop()
-    void capture.context.close().catch(() => {})
-  }
+  for (const capture of captures) stopCapture(capture)
   captures = []
+  activeInputDevice = undefined
 }

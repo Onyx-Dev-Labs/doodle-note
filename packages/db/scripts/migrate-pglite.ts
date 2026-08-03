@@ -6,7 +6,8 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 
 const here = import.meta.dirname;
-const db = drizzle(new PGlite(join(here, "..", ".pglite")));
+const dataDir = process.env.PGLITE_DATA_DIR ?? join(here, "..", ".pglite");
+const db = drizzle(new PGlite(dataDir));
 await migrate(db, { migrationsFolder: join(here, "..", "drizzle") });
 console.log("pglite migrations applied");
 await (db.$client as PGlite).close();

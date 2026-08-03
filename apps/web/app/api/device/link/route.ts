@@ -30,7 +30,11 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { organizationId?: unknown; deviceName?: unknown };
+  let body: {
+    organizationId?: unknown;
+    deviceName?: unknown;
+    platform?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -38,6 +42,12 @@ export async function POST(request: Request) {
   }
   const organizationId = String(body.organizationId ?? "");
   const deviceName = String(body.deviceName ?? "Desktop").slice(0, 80);
+  const requestedPlatform = String(body.platform ?? "unknown");
+  const platform = (["desktop", "ios"] as const).includes(
+    requestedPlatform as "desktop" | "ios",
+  )
+    ? (requestedPlatform as "desktop" | "ios")
+    : "unknown";
 
   const db = getDb();
   const membership = await db
@@ -65,6 +75,7 @@ export async function POST(request: Request) {
     userId: session.user.id,
     organizationId,
     deviceName,
+    platform,
   });
 
   return NextResponse.json({

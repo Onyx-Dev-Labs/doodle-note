@@ -7,8 +7,18 @@ import type {
   NotesModelsResponse,
   NotesSettingsView
 } from '../../shared/notes-api'
+import { isGenericDraftTitle } from '../../shared/draft-lifecycle'
+import { meetingHistoryWindow } from '../../shared/meeting-history'
 import FolderPicker from './FolderPicker'
-import { CheckSquareIcon, DocIcon, FolderIcon, PencilIcon, TrashIcon } from './icons'
+import {
+  CheckSquareIcon,
+  DocIcon,
+  FolderIcon,
+  ImportIcon,
+  PencilIcon,
+  TrashIcon,
+  UsersIcon
+} from './icons'
 import { markdownToHtml } from './lib/markdown'
 import mascotUrl from './assets/mascot-square.png'
 
@@ -18,6 +28,8 @@ export type HomeFilter = { kind: 'all' } | { kind: 'trash' } | { kind: 'folder';
 /** Canned question behind the "☑ List recent todos" chip. */
 const RECENT_TODOS_QUESTION =
   "List my outstanding action items from recent meetings, grouped by meeting (newest first), keeping each item's owner."
+
+const OLDER_HISTORY_BATCH = 30
 
 function startOfDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
@@ -363,13 +375,33 @@ export default function HomeView({
   /** Meeting id whose ⋯ menu is open, and whose folder picker is open. */
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [pickerFor, setPickerFor] = useState<string | null>(null)
+  const [newMenuOpen, setNewMenuOpen] = useState(false)
+  const [olderHistory, setOlderHistory] = useState({ scope: '', count: 0 })
   /** Transient share feedback: message shown as a toast under the topbar. */
   const [shareNotice, setShareNotice] = useState<string | null>(null)
   /** 'idle' | 'running' | an error message. */
   const [importState, setImportState] = useState<'idle' | 'running' | string>('idle')
 
+  const exportMeeting = async (id: string, format: 'md' | 'pdf'): Promise<void> => {
+    setMenuFor(null)
+    try {
+      const result = await window.exporter.exportMeeting(id, format)
+      if (result.path) {
+        setShareNotice(`Exported to ${result.path}`)
+        setTimeout(() => setShareNotice(null), 4000)
+      } else if (result.error) {
+        setShareNotice(result.error)
+        setTimeout(() => setShareNotice(null), 5000)
+      }
+    } catch (err) {
+      setShareNotice(err instanceof Error ? err.message : String(err))
+      setTimeout(() => setShareNotice(null), 5000)
+    }
+  }
+
   const runImport = async (): Promise<void> => {
     if (importState === 'running') return
+    setNewMenuOpen(false)
     setImportState('running')
     try {
       const result = await window.importer.importAudio()
@@ -419,6 +451,26 @@ export default function HomeView({
   const inTrash = filter.kind === 'trash'
   /** The ask bar lives in 'all' and 'folder' views, never in the trash. */
   const askVisible = !inTrash
+
+  // The New menu is a top-level action surface: outside click and Escape
+  // dismiss it without affecting any row action menu.
+  useEffect(() => {
+    if (!newMenuOpen) return
+    const onDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('.new-menu-popover') || target?.closest('.new-menu-trigger')) return
+      setNewMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setNewMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [newMenuOpen])
 
   // Close the ⋯ menu on any outside click or Escape. (FolderPicker manages
   // its own dismissal the same way.)
@@ -539,19 +591,19 @@ export default function HomeView({
 
   /** Full-text hits for the current query (id → matched field); null while
    *  the query is empty. Debounced main-process scan. */
-  const [searchHits, setSearchHits] = useState<Map<string, MeetingSearchHit['field']> | null>(null)
+  const [searchResult, setSearchResult] = useState<{
+    query: string
+    hits: Map<string, MeetingSearchHit['field']>
+  } | null>(null)
 
   useEffect(() => {
     const q = search.trim()
-    if (q.length === 0) {
-      setSearchHits(null)
-      return
-    }
+    if (q.length === 0) return
     let cancelled = false
     const timer = setTimeout(() => {
       void window.meetings.search(q).then((hits) => {
         if (cancelled) return
-        setSearchHits(new Map(hits.map((h) => [h.id, h.field])))
+        setSearchResult({ query: q, hits: new Map(hits.map((h) => [h.id, h.field])) })
       })
     }, 150)
     return () => {
@@ -560,6 +612,8 @@ export default function HomeView({
     }
   }, [search])
 
+  const searchHits = searchResult?.query === search.trim() ? searchResult.hits : null
+
   const visible = useMemo(() => {
     const all = meetings ?? []
     if (filter.kind === 'trash') return all.filter((m) => Boolean(m.trashedAt))
@@ -567,17 +621,36 @@ export default function HomeView({
     return filter.kind === 'folder' ? live.filter((m) => m.folderId === filter.id) : live
   }, [meetings, filter])
 
-  const groups = useMemo(() => {
+  const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
-    const filtered = visible.filter((m) => {
+    return visible.filter((m) => {
       if (query.length === 0) return true
       // Instant title match keeps typing snappy; the async full-text hits
       // widen the net to notes and transcripts as they arrive.
       if ((m.title || 'New meeting').toLowerCase().includes(query)) return true
       return searchHits?.has(m.id) ?? false
     })
+  }, [visible, search, searchHits])
+
+  const historyScope =
+    filter.kind === 'folder' ? `folder:${filter.id}:${search}` : `${filter.kind}:${search}`
+  const olderVisibleCount = olderHistory.scope === historyScope ? olderHistory.count : 0
+
+  const history = useMemo(() => {
+    if (filter.kind !== 'all' || search.trim().length > 0) {
+      return {
+        displayed: filtered,
+        totalOlder: 0,
+        hiddenOlder: 0,
+        shownOlder: 0
+      }
+    }
+    return meetingHistoryWindow(filtered, { olderVisibleCount })
+  }, [filtered, filter, search, olderVisibleCount])
+
+  const groups = useMemo(() => {
     const out: Array<{ label: string; items: MeetingSummary[]; older: boolean }> = []
-    for (const m of filtered) {
+    for (const m of history.displayed) {
       const label = dayLabel(m.createdAt)
       const last = out[out.length - 1]
       if (last && last.label === label) {
@@ -587,7 +660,7 @@ export default function HomeView({
       }
     }
     return out
-  }, [visible, search, searchHits])
+  }, [history.displayed])
 
   /* ---- mutations (upsert/delete, then let App refetch) ---- */
 
@@ -639,7 +712,8 @@ export default function HomeView({
   const trashedCount = (meetings ?? []).filter((m) => m.trashedAt).length
   const isLoaded = meetings !== null
   const noneInView = isLoaded && visible.length === 0
-  const noMatches = isLoaded && visible.length > 0 && groups.length === 0
+  const noMatches =
+    isLoaded && search.trim().length > 0 && visible.length > 0 && filtered.length === 0
 
   return (
     <div className={askVisible ? 'home has-ask' : 'home'}>
@@ -649,26 +723,75 @@ export default function HomeView({
             Empty trash
           </button>
         )}
-        <button
-          type="button"
-          className="pill-btn no-drag"
-          title="Import a wav, mp3, or m4a recording — transcribed on-device into a regular meeting"
-          disabled={importState === 'running'}
-          onClick={() => void runImport()}
-        >
-          {importState === 'running' ? 'Importing…' : '⤓ Import audio'}
-        </button>
-        <button
-          type="button"
-          className="pill-btn new-note no-drag"
-          title="A blank note — type freely, or hit record to mind-dump and generate notes"
-          onClick={onNewNote}
-        >
-          + New note
-        </button>
-        <button type="button" className="pill-btn new-meeting no-drag" onClick={onNewMeeting}>
-          + New meeting
-        </button>
+        <div className="new-menu-wrap no-drag">
+          <button
+            type="button"
+            className="pill-btn new-menu-trigger"
+            aria-haspopup="menu"
+            aria-expanded={newMenuOpen}
+            onClick={() => {
+              setMenuFor(null)
+              setPickerFor(null)
+              setNewMenuOpen((open) => !open)
+            }}
+          >
+            + New{' '}
+            <span className="new-menu-chevron" aria-hidden="true">
+              ⌄
+            </span>
+          </button>
+          {newMenuOpen && (
+            <div className="new-menu-popover" role="menu" aria-label="Create or import">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setNewMenuOpen(false)
+                  onNewMeeting()
+                }}
+              >
+                <span className="new-menu-icon">
+                  <UsersIcon size={16} />
+                </span>
+                <span>
+                  <strong>New meeting</strong>
+                  <small>Start recording and transcribing</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setNewMenuOpen(false)
+                  onNewNote()
+                }}
+              >
+                <span className="new-menu-icon">
+                  <PencilIcon size={16} />
+                </span>
+                <span>
+                  <strong>New note</strong>
+                  <small>Open a blank note</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={importState === 'running'}
+                title="Import a wav, mp3, or m4a recording"
+                onClick={() => void runImport()}
+              >
+                <span className="new-menu-icon">
+                  <ImportIcon size={16} />
+                </span>
+                <span>
+                  <strong>{importState === 'running' ? 'Importing…' : 'Import audio'}</strong>
+                  <small>Transcribe an existing recording</small>
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {shareNotice !== null && (
@@ -718,7 +841,7 @@ export default function HomeView({
                     <span className="wm-note">Note</span>
                   </span>
                 </span>
-                <p>No meetings yet — hit + New meeting</p>
+                <p>No meetings yet — choose New → New meeting</p>
               </div>
             )}
             {noneInView && filter.kind === 'folder' && (
@@ -726,6 +849,18 @@ export default function HomeView({
             )}
             {noneInView && inTrash && <div className="home-empty-line">Trash is empty</div>}
             {noMatches && <div className="home-empty-line">No meetings match “{search}”</div>}
+            {filter.kind === 'all' && search.trim().length === 0 && !noneInView && (
+              <div className="history-heading">
+                <h2>Recent notes</h2>
+                <span>Last 7 days</span>
+              </div>
+            )}
+            {filter.kind === 'all' &&
+              search.trim().length === 0 &&
+              history.displayed.length === 0 &&
+              history.totalOlder > 0 && (
+                <div className="home-empty-line">Nothing saved in the last 7 days</div>
+              )}
             {groups.map((group) => (
               <section key={group.label} className={group.older ? 'day-group older' : 'day-group'}>
                 <div className="day-label">{group.label}</div>
@@ -756,7 +891,11 @@ export default function HomeView({
                       </span>
                       <span className="row-main">
                         <span className="row-title">
-                          {m.title.trim() || (m.kind === 'note' ? 'New note' : 'New meeting')}
+                          {isGenericDraftTitle(m.title)
+                            ? m.kind === 'note'
+                              ? 'New note'
+                              : 'New meeting'
+                            : m.title.trim()}
                         </span>
                         <span className="row-sub">
                           {m.kind === 'note' ? 'Note' : 'Me'}
@@ -823,6 +962,20 @@ export default function HomeView({
                           >
                             Add to folder
                           </button>
+                          <button
+                            type="button"
+                            title="Notes + transcript as one portable Markdown file"
+                            onClick={() => void exportMeeting(m.id, 'md')}
+                          >
+                            Export Markdown
+                          </button>
+                          <button
+                            type="button"
+                            title="Notes + transcript as a print-ready PDF"
+                            onClick={() => void exportMeeting(m.id, 'pdf')}
+                          >
+                            Export PDF
+                          </button>
                           <div className="row-menu-sep" />
                           <button
                             type="button"
@@ -848,6 +1001,35 @@ export default function HomeView({
                 })}
               </section>
             ))}
+            {filter.kind === 'all' && search.trim().length === 0 && history.totalOlder > 0 && (
+              <div className="history-controls">
+                {history.hiddenOlder > 0 && (
+                  <button
+                    type="button"
+                    className="history-more"
+                    onClick={() =>
+                      setOlderHistory({
+                        scope: historyScope,
+                        count: olderVisibleCount + OLDER_HISTORY_BATCH
+                      })
+                    }
+                  >
+                    {history.shownOlder === 0
+                      ? `Show older notes (${history.hiddenOlder})`
+                      : `Load more (${history.hiddenOlder} remaining)`}
+                  </button>
+                )}
+                {history.shownOlder > 0 && (
+                  <button
+                    type="button"
+                    className="history-recent"
+                    onClick={() => setOlderHistory({ scope: historyScope, count: 0 })}
+                  >
+                    Show recent only
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

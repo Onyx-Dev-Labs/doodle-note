@@ -9,7 +9,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "merge-smoke": "tsx scripts/merge-smoke.ts",
-    "global-ask-smoke": "tsx scripts/global-ask-smoke.ts"
+    "global-ask-smoke": "tsx scripts/global-ask-smoke.ts",
+    "test": "tsx --test src/*.test.ts",
+    "long-meeting-smoke": "tsx scripts/long-meeting-smoke.ts"
   },
   "dependencies": {
     "ai": "^7.0.15",

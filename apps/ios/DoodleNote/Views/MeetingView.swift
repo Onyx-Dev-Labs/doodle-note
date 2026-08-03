@@ -4,8 +4,11 @@ import SwiftData
 struct MeetingView: View {
     @Bindable var meeting: Meeting
     var startRecordingOnAppear = false
+    var discardEmptyDraftOnExit = false
+    var onDraftResolved: (() -> Void)?
 
     @Environment(\.modelContext) private var context
+    @Environment(\.openURL) private var openURL
     @Query(sort: \Folder.createdAt) private var folders: [Folder]
     @State private var recorder = RecordingController()
     @State private var tab: Tab = .notes
@@ -22,20 +25,24 @@ struct MeetingView: View {
         VStack(spacing: 0) {
             header
 
-            if recorder.isActive {
-                recordingBanner
-            }
+            if meeting.isNote {
+                // Quick note: just the editor — no recording chrome, no
+                // transcript tab (there is nothing to transcribe).
+                notesTab
+            } else {
+                recordingControls
 
-            Picker("View", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+                Picker("View", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
 
-            switch tab {
-            case .notes: notesTab
-            case .transcript: transcriptTab
+                switch tab {
+                case .notes: notesTab
+                case .transcript: transcriptTab
+                }
             }
         }
         .background(Color.cream)
@@ -59,6 +66,7 @@ struct MeetingView: View {
                 } label: {
                     Image(systemName: meeting.folderId == nil ? "folder" : "folder.fill")
                 }
+                .accessibilityLabel("Move to folder")
             }
         }
         .sheet(isPresented: $showChat) {
@@ -70,15 +78,19 @@ struct MeetingView: View {
             }
         }
         .onDisappear {
-            if recorder.isActive {
-                Task { await recorder.stop(meeting: meeting, context: context) }
+            Task {
+                if recorder.isActive {
+                    await recorder.stop(meeting: meeting, context: context)
+                }
+                resolveDraftOnExit()
             }
         }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            TextField("Untitled meeting", text: $meeting.title, axis: .vertical)
+            TextField(meeting.isNote ? "Untitled note" : "Untitled meeting",
+                      text: $meeting.title, axis: .vertical)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.ink)
                 .lineLimit(2)
@@ -93,47 +105,96 @@ struct MeetingView: View {
 
     // MARK: Recording
 
-    private var recordingBanner: some View {
-        HStack(spacing: 10) {
-            switch recorder.state {
-            case .preparing(let status):
-                ProgressView().tint(Color.sageDeep)
-                Text(status)
-                    .font(.footnote)
-                    .foregroundStyle(Color.bark)
-                    .lineLimit(2)
-            case .recording:
-                Circle()
-                    .fill(.red)
-                    .frame(width: 10, height: 10)
-                if let started = recorder.recordingStartedAt {
-                    ElapsedTimeText(since: started)
-                        .font(.footnote.monospacedDigit().weight(.medium))
-                        .foregroundStyle(Color.ink)
+    @ViewBuilder private var recordingControls: some View {
+        switch recorder.state {
+        case .idle:
+            recordingBar(
+                icon: "record.circle",
+                message: meeting.startedAt == nil ? "Ready to record" : "Recording finished"
+            ) {
+                if meeting.startedAt == nil {
+                    Button("Start recording") { Task { await startRecording() } }
+                        .buttonStyle(RecordingActionButtonStyle())
+                        .accessibilityIdentifier("recording.start")
                 }
-                Text("Recording")
-                    .font(.footnote)
-                    .foregroundStyle(Color.bark)
-            default:
+            }
+        case .preparing(let status):
+            recordingBar(icon: "waveform", message: status, showsProgress: true) {
+                Button("Cancel") {
+                    Task { await recorder.stop(meeting: meeting, context: context) }
+                }
+                .buttonStyle(RecordingActionButtonStyle())
+                .accessibilityIdentifier("recording.cancel")
+            }
+        case .recording:
+            recordingBar(icon: "record.circle.fill", message: "Recording", isRecording: true) {
+                Button("Stop") { Task { await stopRecording() } }
+                    .buttonStyle(RecordingActionButtonStyle())
+                    .accessibilityIdentifier("recording.stop")
+            }
+        case .stopping:
+            recordingBar(icon: "stop.circle", message: "Finishing transcript…", showsProgress: true) {
                 EmptyView()
             }
-
-            Spacer()
-
-            Button {
-                Task { await recorder.stop(meeting: meeting, context: context) }
-            } label: {
-                Label("Stop", systemImage: "stop.fill")
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Recording unavailable", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Color.bark)
+                HStack(spacing: 10) {
+                    Button("Retry recording") { Task { await startRecording() } }
+                        .buttonStyle(RecordingActionButtonStyle())
+                        .accessibilityIdentifier("recording.retry")
+                    Button("Open Settings") {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        openURL(url)
+                    }
                     .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.ink, in: Capsule())
-                    .foregroundStyle(Color.cream)
+                }
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(.orange.opacity(0.45)))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("recording.failed")
+        }
+    }
+
+    private func recordingBar<Actions: View>(
+        icon: String,
+        message: String,
+        showsProgress: Bool = false,
+        isRecording: Bool = false,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        HStack(spacing: 10) {
+            if showsProgress {
+                ProgressView().tint(Color.sageDeep)
+            } else {
+                Image(systemName: icon)
+                    .foregroundStyle(isRecording ? Color.red : Color.sageDeep)
+            }
+            if isRecording, let started = recorder.recordingStartedAt {
+                ElapsedTimeText(since: started)
+                    .font(.footnote.monospacedDigit().weight(.medium))
+                    .foregroundStyle(Color.ink)
+            }
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(Color.bark)
+                .lineLimit(2)
+            Spacer()
+            actions()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color.sageFill)
+        .accessibilityIdentifier("recording.status")
     }
 
     // MARK: Notes tab
@@ -142,22 +203,32 @@ struct MeetingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Your rough notes")
+                    Text(meeting.isNote ? "Your note" : "Your rough notes")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Color.stone)
-                    TextEditor(text: $meeting.roughNotes)
-                        .frame(minHeight: 120)
-                        .padding(8)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12).stroke(Color.sand)
-                        )
-                        .font(.body)
-                        .foregroundStyle(Color.ink)
+                    // A growing TextField (not TextEditor): TextEditor has its
+                    // own scroll view that fights the page ScrollView, so the
+                    // notes screen wouldn't scroll on the first touch. TextField
+                    // with a vertical axis grows to fit and never scrolls itself.
+                    TextField(
+                        meeting.isNote ? "Write anything…" : "Jot your rough notes…",
+                        text: $meeting.roughNotes,
+                        axis: .vertical
+                    )
+                    .lineLimit(4...)
+                    .padding(12)
+                    .background(Color.card, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12).stroke(Color.sand)
+                    )
+                    .font(.body)
+                    .foregroundStyle(Color.ink)
                 }
 
-                generateSection
+                // Notes have no transcript to merge — generation is meetings-only.
+                if !meeting.isNote {
+                    generateSection
+                }
 
                 if let notes = meeting.generatedNotes {
                     VStack(alignment: .leading, spacing: 6) {
@@ -198,7 +269,7 @@ struct MeetingView: View {
                     .background(Color.sageDeep, in: Capsule())
                     .foregroundStyle(Color.cream)
                 }
-                .disabled(isGenerating || recorder.isActive)
+                .disabled(isGenerating || recorder.isActive || !meeting.hasNoteSourceContent)
 
                 Picker("Template", selection: $meeting.templateId) {
                     ForEach(NotePrompt.templates) { template in
@@ -233,16 +304,47 @@ struct MeetingView: View {
             let notes = try await NotesEngineFactory.make().generate(input)
             meeting.generatedNotes = notes
             try? context.save()
+
+            // Ad-hoc meetings (not created from a calendar event) usually have
+            // no real title — let the model name them from what was discussed.
+            if meeting.calendarEventId == nil, isUntitled(meeting.title) {
+                await titleFromNotes(notes: notes)
+            }
+            // A fresh note is exactly what other devices are waiting for.
+            if SyncEngine.shared.isLinked {
+                await SyncEngine.shared.syncNow(context: context)
+            }
         } catch {
             generationError = error.localizedDescription
         }
+    }
+
+    private func isUntitled(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t.isEmpty || t == "untitled meeting" || t == "new meeting"
+    }
+
+    /// One short title from the generated notes. Best-effort: a failure or an
+    /// odd response leaves the meeting titled as it was.
+    private func titleFromNotes(notes: String) async {
+        let engine = NotesEngineFactory.make()
+        let system = "You write a concise meeting title of 3 to 6 words. "
+            + "Reply with ONLY the title — no quotes, no punctuation at the end, no preamble."
+        let user = "Meeting notes:\n\n" + String(notes.prefix(1500))
+        guard let raw = try? await engine.respond(system: system, user: user) else { return }
+        let title = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'.“”"))
+        guard !title.isEmpty, title.count <= 80 else { return }
+        meeting.title = title
+        try? context.save()
     }
 
     // MARK: Transcript tab
 
     private var transcriptTab: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 10) {
                 if meeting.segments.isEmpty && recorder.livePartial.isEmpty {
                     Text(recorder.isActive
                         ? "Listening…"
@@ -279,6 +381,37 @@ struct MeetingView: View {
             .padding(16)
         }
         .defaultScrollAnchor(.bottom)
+    }
+
+    private func startRecording() async {
+        await recorder.start(meeting: meeting, context: context)
+    }
+
+    private func stopRecording() async {
+        await recorder.stop(meeting: meeting, context: context)
+        if SyncEngine.shared.isLinked {
+            await SyncEngine.shared.syncNow(context: context)
+        }
+    }
+
+    private func resolveDraftOnExit() {
+        guard discardEmptyDraftOnExit else { return }
+        if meeting.isEmptyDraft {
+            context.delete(meeting)
+            try? context.save()
+        }
+        onDraftResolved?()
+    }
+}
+
+private struct RecordingActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.ink.opacity(configuration.isPressed ? 0.75 : 1), in: Capsule())
+            .foregroundStyle(Color.cream)
     }
 }
 

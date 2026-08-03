@@ -15,10 +15,13 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { AudioService } from './audio-service'
 import { ImportService } from './import-service'
+import { WizardService } from './wizard-service'
+import { ExportService } from './export-service'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
 import { WinEngineHost } from './engine-host-win'
+import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
@@ -30,6 +33,7 @@ import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
+import { MAIN_WINDOW_SIZE } from './window-sizing'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -45,6 +49,7 @@ import {
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
+  ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineEvent,
@@ -106,6 +111,11 @@ function migrateDevUserData(): void {
 if (process.env.DOODLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DOODLE_DEBUG_PORT)
 }
+// Dev affordance: point userData somewhere else to exercise fresh-install
+// flows (the setup wizard) without touching the real profile.
+if (process.env.DOODLE_USER_DATA && !app.isPackaged) {
+  app.setPath('userData', process.env.DOODLE_USER_DATA)
+}
 
 // Must run before app ready: lets <img src="doodle-media://…"> load without
 // mixed-content blocking (the dev renderer is served over http). doodle-audio
@@ -117,6 +127,7 @@ protocol.registerSchemesAsPrivileged([
 
 let notesService: NotesService | null = null
 let calendarService: CalendarService | null = null
+let winBatchTranscriber: WinBatchTranscriber | null = null
 
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -138,10 +149,10 @@ function broadcastEngineEvent(event: EngineEvent): void {
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 760,
-    minWidth: 980,
-    minHeight: 680,
+    width: MAIN_WINDOW_SIZE.defaultWidth,
+    height: MAIN_WINDOW_SIZE.defaultHeight,
+    minWidth: MAIN_WINDOW_SIZE.minWidth,
+    minHeight: MAIN_WINDOW_SIZE.minHeight,
     // Matches the active palette so launch never flashes the wrong color.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
@@ -256,8 +267,10 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Ad-hoc meeting detection: engine micmon watches for other apps holding
+  // Ad-hoc meeting detection: engine micmon watches for meeting apps holding
   // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
+  // Audio output alone is intentionally ignored: it cannot distinguish an
+  // incoming call from ordinary playback, notifications, or phone tones.
   const micWatcher = new MicWatcher(
     resolveEngineBinary(),
     app.getPath('userData'),
@@ -333,6 +346,7 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_START_CHANNEL, (_event, request: EngineStartRequest) => {
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
+    if (request.command === 'live') calendarService?.setRecordingActive(true)
     micWatcher.setSuppressed(true)
     const opts = { ...request.opts }
     // Audio persistence: give the session a directory keyed by meeting; the
@@ -349,6 +363,7 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
     engine.stop()
     micWatcher.setSuppressed(false)
+    calendarService?.setRecordingActive(false)
   })
 
   // Mic input picker: device list + (mid-session) switching. macOS engine
@@ -356,8 +371,15 @@ app.whenReady().then(() => {
   ipcMain.handle(ENGINE_LIST_DEVICES_CHANNEL, (): Promise<EngineInputDevice[]> => {
     return engine instanceof EngineProcess ? engine.listInputDevices() : Promise.resolve([])
   })
+  ipcMain.handle(ENGINE_TAP_SELFTEST_CHANNEL, () =>
+    engine instanceof EngineProcess
+      ? engine.tapSelfTest()
+      : { ok: false, reason: 'not available on this platform' }
+  )
   ipcMain.on(ENGINE_SET_INPUT_CHANNEL, (_event, uid: unknown) => {
     if (engine instanceof EngineProcess) {
+      engine.setInputDevice(typeof uid === 'string' && uid.length > 0 ? uid : null)
+    } else if (engine instanceof WinEngineHost) {
       engine.setInputDevice(typeof uid === 'string' && uid.length > 0 ? uid : null)
     }
   })
@@ -370,15 +392,35 @@ app.whenReady().then(() => {
   notesService = new NotesService(app.getPath('userData'), broadcast, meetingsService)
   notesService.registerIpc()
 
+  if (engine instanceof WinEngineHost) {
+    winBatchTranscriber = new WinBatchTranscriber((onEvent) => engine.preflight(onEvent))
+    winBatchTranscriber.registerIpc()
+  }
+
   // Audio import + re-transcription: batch engine runs in its own process,
   // so a live recording session is never disturbed.
   const importService = new ImportService(
     resolveEngineBinary(),
     meetingsService,
     audioService,
-    broadcast
+    broadcast,
+    winBatchTranscriber
+      ? (filePath, onProgress) => winBatchTranscriber!.transcribe(filePath, onProgress)
+      : undefined
   )
   importService.registerIpc()
+
+  // First-run setup wizard: visible preflight + permission status.
+  const wizardService = new WizardService(
+    resolveEngineBinary(),
+    broadcast,
+    engine instanceof WinEngineHost ? (onEvent) => engine.preflight(onEvent) : undefined
+  )
+  wizardService.registerIpc()
+
+  // Meeting export (Markdown / PDF).
+  const exportService = new ExportService(meetingsService)
+  exportService.registerIpc()
 
   const foldersService = new FoldersService(
     join(app.getPath('userData'), 'folders.json'),
@@ -484,7 +526,7 @@ app.whenReady().then(() => {
   mediaService.registerProtocol()
 
   // A fresh look at the app deserves fresh events (throttled inside).
-  app.on('browser-window-focus', () => calendarService?.onWindowFocus())
+  app.on('browser-window-focus', (_event, window) => calendarService?.onWindowFocus(window))
 
   createWindow()
 
@@ -513,6 +555,7 @@ app.on('will-quit', () => {
   engine.dispose()
   void notesService?.dispose()
   calendarService?.dispose()
+  winBatchTranscriber?.dispose()
 })
 
 app.on('window-all-closed', () => {

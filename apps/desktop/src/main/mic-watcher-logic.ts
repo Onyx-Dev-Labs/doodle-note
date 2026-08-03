@@ -4,11 +4,12 @@
  * feeds it micmon events and asks when the debounce timer lands.
  */
 
-/** Meeting-app audio must persist this long before we prompt — long enough
- *  to outlive chat dings (1-2s), short enough to land early in a ring. */
+/** Meeting-app microphone use must persist this long before we prompt. */
 export const MIC_DEBOUNCE_MS = 4_000
 /** After a prompt (or a dismissal), stay quiet this long. */
 export const MIC_COOLDOWN_MS = 5 * 60_000
+/** A short mic dropout/reconnect still belongs to the same meeting. */
+export const MIC_SESSION_GAP_MS = 2 * 60_000
 
 /**
  * Only mic capture by an actual meeting app counts — dictation tools
@@ -61,68 +62,21 @@ export function meetingAppLabel(bundles: readonly string[]): string | null {
   return null
 }
 
-/**
- * Ring detection works on audio OUTPUT — an incoming call rings long before
- * the mic engages. Browsers are excluded here (any tab playing audio would
- * read as a meeting); only native meeting apps count, and the debounce
- * filters their short notification dings.
- */
-export function meetingRingLabel(bundles: readonly string[]): string | null {
-  const label = meetingAppLabel(bundles)
-  return label === 'browser' ? null : label
+export interface MeetingPromptSignals {
+  inputRunning: boolean
+  inputBundles: readonly string[]
+  outputBundles: readonly string[]
 }
-
-/** Every distinct meeting-app label holding audio output (browsers excluded). */
-export function meetingRingLabels(bundles: readonly string[]): string[] {
-  const labels = new Set<string>()
-  for (const bundle of bundles) {
-    const lower = bundle.toLowerCase()
-    const match = MEETING_BUNDLE_PATTERNS.find((m) => lower.includes(m.pattern))
-    if (match && match.label !== 'browser') labels.add(match.label)
-  }
-  return [...labels]
-}
-
-/* ---- ring edge tracking (kills the idle-Zoom false positive) ---- */
 
 /**
- * A ring must be an EDGE, not a state. An idle Zoom keeps a permanent audio
- * output session, so "meeting app holds output" fired a fresh prompt every
- * cooldown whenever anything (a TV app, a Discord ding) churned the audio
- * client list. Only an app whose output NEWLY APPEARS counts as ringing;
- * whatever was already holding output when watching began is baseline noise
- * until it has gone absent once. A real call on an idle-open Zoom still
- * prompts via the mic path seconds after joining.
+ * Return the app label that is strong enough to justify a recording prompt.
+ * Output activity is deliberately context-only: CoreAudio reports an open
+ * output session, not an actual incoming call, so Zoom Phone tones, Slack
+ * clips, Discord streams, and ordinary playback must never prompt alone.
  */
-export interface RingEdgeState {
-  /** Labels present on the first observed event are baseline, never armed. */
-  sawFirstEvent: boolean
-  /** Ring labels currently holding output → armed (appeared via an edge)? */
-  present: ReadonlyMap<string, boolean>
-}
-
-export function initialRingEdgeState(): RingEdgeState {
-  return { sawFirstEvent: false, present: new Map() }
-}
-
-/** Apply one micmon event's set of output ring labels. */
-export function onRingLabels(state: RingEdgeState, labels: readonly string[]): RingEdgeState {
-  const present = new Map<string, boolean>()
-  for (const label of labels) {
-    const alreadyArmed = state.present.get(label)
-    // Sticky while continuously present; fresh appearances arm only after
-    // the first event (labels in the very first snapshot are baseline).
-    present.set(label, alreadyArmed ?? state.sawFirstEvent)
-  }
-  return { sawFirstEvent: true, present }
-}
-
-/** The label to treat as "ringing now", or null. */
-export function armedRingLabel(state: RingEdgeState): string | null {
-  for (const [label, armed] of state.present) {
-    if (armed) return label
-  }
-  return null
+export function meetingPromptLabel(signals: MeetingPromptSignals): string | null {
+  if (!signals.inputRunning) return null
+  return meetingAppLabel(signals.inputBundles)
 }
 
 export interface MicPromptState {
@@ -132,12 +86,20 @@ export interface MicPromptState {
   promptedThisSession: boolean
   /** Epoch ms of the last prompt, for the cooldown. */
   lastPromptMs: number
+  /** When the meeting app last released the mic; null while busy/unknown. */
+  idleSinceMs: number | null
   /** Our own capture is running — everything is ignored until it isn't. */
   suppressed: boolean
 }
 
 export function initialMicState(): MicPromptState {
-  return { busySinceMs: null, promptedThisSession: false, lastPromptMs: 0, suppressed: false }
+  return {
+    busySinceMs: null,
+    promptedThisSession: false,
+    lastPromptMs: 0,
+    idleSinceMs: null,
+    suppressed: false
+  }
 }
 
 /** Apply a micmon running=true/false transition. */
@@ -146,10 +108,20 @@ export function onMicEvent(state: MicPromptState, running: boolean, nowMs: numbe
   if (running) {
     // Already tracking this busy stretch — keep its original start.
     if (state.busySinceMs !== null) return state
-    return { ...state, busySinceMs: nowMs }
+    const sameSession =
+      state.promptedThisSession &&
+      state.idleSinceMs !== null &&
+      nowMs - state.idleSinceMs <= MIC_SESSION_GAP_MS
+    return {
+      ...state,
+      busySinceMs: nowMs,
+      idleSinceMs: null,
+      promptedThisSession: sameSession
+    }
   }
-  // Idle again: the next busy stretch may prompt anew (cooldown permitting).
-  return { ...state, busySinceMs: null, promptedThisSession: false }
+  // Repeated non-mic CoreAudio changes must not keep moving the idle edge.
+  if (state.busySinceMs === null) return state
+  return { ...state, busySinceMs: null, idleSinceMs: nowMs }
 }
 
 /**
@@ -158,8 +130,16 @@ export function onMicEvent(state: MicPromptState, running: boolean, nowMs: numbe
  * any activity to a prompt (the meeting app's mic use may simply continue).
  */
 export function setSuppressed(state: MicPromptState, suppressed: boolean): MicPromptState {
-  if (suppressed) return { ...state, suppressed: true, busySinceMs: null }
-  return { ...state, suppressed: false, busySinceMs: null, promptedThisSession: false }
+  if (suppressed) {
+    return { ...state, suppressed: true, busySinceMs: null, idleSinceMs: null }
+  }
+  return {
+    ...state,
+    suppressed: false,
+    busySinceMs: null,
+    idleSinceMs: null,
+    promptedThisSession: false
+  }
 }
 
 /** True when the debounced busy stretch should fire the prompt at nowMs. */

@@ -20,6 +20,13 @@ export type EngineEventListener = (event: EngineEvent) => void
 export const FINISHING_EXIT_GRACE_MS = 4_000
 
 /**
+ * CaptureRegistry's synchronous ScreenCaptureKit stop is bounded at three
+ * seconds. Keep the host's SIGKILL fallback beyond that bound so escalation
+ * cannot interrupt the teardown it is meant to protect.
+ */
+export const CAPTURE_TEARDOWN_GRACE_MS = 4_000
+
+/**
  * Shape produced by spawn(..., { stdio: ['pipe', 'pipe', 'pipe'] }).
  * stdin stays open but unused: it's the engine's parent-death watchdog — if
  * this process dies or hot-restarts, the OS closes the pipe and the engine
@@ -221,6 +228,54 @@ export class EngineProcess {
     })
   }
 
+  /** Spawn `engine tap-selftest` and parse its verdict. */
+  tapSelfTest(): Promise<{ ok: boolean; reason?: string }> {
+    return new Promise((resolve) => {
+      if (!existsSync(this.binaryPath)) {
+        resolve({ ok: false, reason: 'engine binary not found' })
+        return
+      }
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(this.binaryPath, ['tap-selftest'], { stdio: ['ignore', 'pipe', 'ignore'] })
+      } catch (err) {
+        resolve({ ok: false, reason: String(err) })
+        return
+      }
+      let out = ''
+      const timeout = setTimeout(() => {
+        child.kill('SIGKILL')
+        resolve({ ok: false, reason: 'self-test timed out' })
+      }, 30_000)
+      child.stdout?.setEncoding('utf8')
+      child.stdout?.on('data', (chunk: string) => {
+        out += chunk
+      })
+      child.on('error', () => {
+        clearTimeout(timeout)
+        resolve({ ok: false, reason: 'engine failed to start' })
+      })
+      child.on('close', () => {
+        clearTimeout(timeout)
+        for (const line of out.split('\n')) {
+          try {
+            const parsed = JSON.parse(line) as { event?: string; ok?: boolean; reason?: string }
+            if (parsed.event === 'tap_selftest') {
+              resolve({
+                ok: parsed.ok === true,
+                ...(parsed.reason ? { reason: parsed.reason } : {})
+              })
+              return
+            }
+          } catch {
+            // not the verdict line
+          }
+        }
+        resolve({ ok: false, reason: 'no verdict from the engine' })
+      })
+    })
+  }
+
   /**
    * Point the mic channel at a different input device. Applies live when a
    * session is running (serve or classic spawn — both parse stdin commands);
@@ -257,7 +312,8 @@ export class EngineProcess {
         cmd: 'start',
         source: opts.source ?? 'both',
         inputDevice: opts.inputDevice ?? '',
-        audioDir: opts.audioDir ?? ''
+        audioDir: opts.audioDir ?? '',
+        systemBackend: opts.systemBackend ?? ''
       })
       if (ok) return
       this.serveSessionActive = false // fall through to the classic spawn
@@ -293,6 +349,7 @@ export class EngineProcess {
       args.push('--exit-on-stdin-close')
       if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
       if (opts.audioDir) args.push('--audio-dir', opts.audioDir)
+      if (opts.systemBackend) args.push('--system-backend', opts.systemBackend)
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }
@@ -401,7 +458,7 @@ export class EngineProcess {
         child.kill('SIGTERM')
         const forceKill = setTimeout(() => {
           if (alive()) child.kill('SIGKILL')
-        }, 2000)
+        }, CAPTURE_TEARDOWN_GRACE_MS)
         forceKill.unref()
         child.once('close', () => clearTimeout(forceKill))
       }
@@ -444,7 +501,7 @@ export class EngineProcess {
         child.kill('SIGTERM')
         const forceKill = setTimeout(() => {
           if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-        }, 2000)
+        }, CAPTURE_TEARDOWN_GRACE_MS)
         forceKill.unref()
         child.once('close', () => clearTimeout(forceKill))
       }

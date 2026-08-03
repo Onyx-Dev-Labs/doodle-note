@@ -73,7 +73,7 @@ function startLive(
 const sawFinishing = (events: EngineEvent[]): boolean =>
   events.some((e) => e.event === 'status' && e.stage === 'finishing')
 
-describe('EngineProcess dispose', () => {
+describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => {
   it('lets a finishing session exit cleanly without any signal', async () => {
     const { binary, log } = fakeEngine(
       [

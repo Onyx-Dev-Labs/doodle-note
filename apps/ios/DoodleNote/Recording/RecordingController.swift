@@ -6,6 +6,13 @@ import SwiftUI
 /// Owns one recording session: audio session config, the mic tap, the chosen
 /// transcription provider, and persistence of finalized segments into the
 /// meeting. One instance per MeetingView.
+///
+/// Hardened after the first real-device test bricked a session: every await
+/// in `start` is generation-guarded so a stop during preparation can never
+/// be resurrected by a resuming continuation, and `stop` bounds the
+/// provider drain with a timeout so the controller ALWAYS returns to idle —
+/// a hung SpeechAnalyzer finalize must never leave the UI in a dead state
+/// with the mic held open.
 @MainActor
 @Observable
 final class RecordingController {
@@ -26,6 +33,9 @@ final class RecordingController {
     private var provider: TranscriptionProvider?
     private var eventsTask: Task<Void, Never>?
 
+    /// Bumped by stop(); awaits inside start() abort when it moves past them.
+    private var generation = 0
+
     var isActive: Bool {
         switch state {
         case .preparing, .recording, .stopping: true
@@ -35,12 +45,21 @@ final class RecordingController {
 
     func start(meeting: Meeting, context: ModelContext) async {
         guard state == .idle || !isActive else { return }
+        let gen = generation
+
+        if ProcessInfo.processInfo.environment["UITEST_RECORDING_MODE"] == "failure" {
+            state = .failed("Recording is unavailable in this simulator test. Try again on a device.")
+            return
+        }
 
         state = .preparing("Requesting microphone…")
         guard await AVAudioApplication.requestRecordPermission() else {
-            state = .failed("Microphone access is off. Enable it in Settings → Privacy → Microphone.")
+            if gen == generation {
+                state = .failed("Microphone access is off. Enable it in Settings → Privacy → Microphone.")
+            }
             return
         }
+        guard gen == generation else { return } // stopped while prompting
 
         let engineChoice = TranscriptionEngine(
             rawValue: UserDefaults.standard.string(forKey: "transcriptionEngine") ?? "apple"
@@ -51,8 +70,12 @@ final class RecordingController {
         do {
             state = .preparing(engineChoice == .parakeet
                 ? "Loading Parakeet models (first run downloads ~440 MB)…"
-                : "Preparing transcription…")
+                : "Preparing transcription (first run downloads speech assets)…")
             try await provider.prepare()
+            guard gen == generation else { // stopped mid-download — stay dead
+                await provider.finish()
+                return
+            }
 
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .defaultToSpeaker])
@@ -61,10 +84,13 @@ final class RecordingController {
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             try await provider.start(inputFormat: format)
-
-            input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-                provider.ingest(buffer)
+            guard gen == generation else {
+                teardownAudio()
+                await provider.finish()
+                return
             }
+
+            Self.installMicTap(on: input, format: format, provider: provider)
             engine.prepare()
             try engine.start()
 
@@ -82,20 +108,34 @@ final class RecordingController {
             }
         } catch {
             teardownAudio()
-            state = .failed("Could not start recording: \(error.localizedDescription)")
+            if gen == generation {
+                state = .failed("Could not start recording: \(error.localizedDescription)")
+            }
         }
     }
 
     func stop(meeting: Meeting, context: ModelContext) async {
         guard state == .recording || isPreparing else { return }
+        // Invalidate any in-flight start continuation FIRST — whatever it was
+        // waiting on (asset download, engine spin-up) aborts at its next guard.
+        generation += 1
         state = .stopping
         teardownAudio()
-        await provider?.finish()
-        await eventsTask?.value
+
+        // The provider drain is best-effort with a hard bound: a wedged
+        // SpeechAnalyzer finalize loses the tail of the transcript, never
+        // the ability to stop. (The first device test hung here forever.)
+        if let provider {
+            await withTimeout(seconds: 5) { await provider.finish() }
+        }
+        if let eventsTask {
+            await withTimeout(seconds: 2) { await eventsTask.value }
+            eventsTask.cancel()
+        }
         eventsTask = nil
         provider = nil
         livePartial = ""
-        meeting.endedAt = .now
+        if meeting.startedAt != nil { meeting.endedAt = .now }
         try? context.save()
         state = .idle
     }
@@ -103,6 +143,22 @@ final class RecordingController {
     private var isPreparing: Bool {
         if case .preparing = state { return true }
         return false
+    }
+
+    /// The tap closure runs on a REALTIME audio thread. It must be created
+    /// in a nonisolated context: formed inside this @MainActor class it
+    /// inherits main-actor isolation, and Swift's runtime executor check
+    /// SIGTRAPs the process the moment the first buffer arrives off-main
+    /// (dispatch_assert_queue_fail — the +new crash on device). Providers
+    /// are internally synchronized; ingest is safe from any thread.
+    nonisolated private static func installMicTap(
+        on input: AVAudioInputNode,
+        format: AVAudioFormat,
+        provider: TranscriptionProvider
+    ) {
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            provider.ingest(buffer)
+        }
     }
 
     private func teardownAudio() {
@@ -129,5 +185,80 @@ final class RecordingController {
                 print("[recording] \(message)")
             }
         }
+    }
+}
+
+/// Run an async operation but give up waiting after `seconds`. The operation
+/// itself is cancelled on timeout; either way this function returns.
+func withTimeout(seconds: Double, _ operation: @escaping @Sendable () async -> Void) async {
+    let operationTask = Task { await operation() }
+    await withTaskCancellationHandler {
+        await withCheckedContinuation { continuation in
+            let gate = TimeoutGate()
+            Task {
+                await operationTask.value
+                if gate.claim() { continuation.resume() }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if gate.claim() {
+                    operationTask.cancel()
+                    continuation.resume()
+                }
+            }
+        }
+    } onCancel: {
+        operationTask.cancel()
+    }
+}
+
+/// Throwing variant: give the operation `seconds`, then throw a timeout so
+/// callers surface an actionable failure instead of waiting forever.
+func withThrowingTimeout<T: Sendable>(
+    seconds: Double,
+    _ operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    let operationTask = Task { try await operation() }
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+            let gate = TimeoutGate()
+            Task {
+                do {
+                    let result = try await operationTask.value
+                    if gate.claim() { continuation.resume(returning: result) }
+                } catch {
+                    if gate.claim() { continuation.resume(throwing: error) }
+                }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if gate.claim() {
+                    operationTask.cancel()
+                    continuation.resume(throwing: TimeoutError())
+                }
+            }
+        }
+    } onCancel: {
+        operationTask.cancel()
+    }
+}
+
+private final class TimeoutGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+
+    func claim() -> Bool {
+        lock.withLock {
+            guard !finished else { return false }
+            finished = true
+            return true
+        }
+    }
+}
+
+struct TimeoutError: LocalizedError {
+    var errorDescription: String? {
+        "Timed out. Check your internet connection and try again — the first "
+            + "recording needs to download speech assets."
     }
 }

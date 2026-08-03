@@ -31,14 +31,16 @@ const globalForDb = globalThis as typeof globalThis & { __repoDbClient?: Db };
  *
  * - If DATABASE_URL is set, connects to Neon over HTTP (@neondatabase/serverless).
  * - Otherwise falls back to a local PGlite instance persisted at
- *   packages/db/.pglite/ so everything runs without a Neon database.
+ *   PGLITE_DATA_DIR (or packages/db/.pglite/) so everything runs without Neon.
  */
 export function getDb(): Db {
   if (!globalForDb.__repoDbClient) {
     const url = process.env.DATABASE_URL;
+    const pgliteDataDir =
+      process.env.PGLITE_DATA_DIR ?? path.join(packageRoot, ".pglite");
     globalForDb.__repoDbClient = url
       ? drizzleNeon(neon(url), { schema: fullSchema })
-      : drizzlePglite(new PGlite(path.join(packageRoot, ".pglite")), { schema: fullSchema });
+      : drizzlePglite(new PGlite(pgliteDataDir), { schema: fullSchema });
   }
   return globalForDb.__repoDbClient;
 }

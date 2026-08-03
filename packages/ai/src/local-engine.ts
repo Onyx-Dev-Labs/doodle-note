@@ -3,8 +3,8 @@ import path from 'node:path'
 import type { Llama, LlamaModel } from 'node-llama-cpp'
 import { ASK_SYSTEM_PROMPT, buildAskUserMessage } from './ask-prompt'
 import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
-import { buildMergeSystemPrompt, buildMergeUserMessage } from './prompt'
-import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine } from './types'
+import { generateMeetingNotes } from './map-reduce'
+import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine, NotesProgress } from './types'
 
 /**
  * node-llama-cpp is ESM-only *with top-level await*, so it cannot be
@@ -98,26 +98,30 @@ export class LocalNotesEngine implements NotesEngine {
     }
   }
 
-  async generateNotes(input: MergeInput, onToken?: (text: string) => void): Promise<MergedNotes> {
-    return this.runPrompt(buildMergeSystemPrompt(input.templateId), buildMergeUserMessage(input), onToken)
+  async generateNotes(
+    input: MergeInput,
+    onToken?: (text: string) => void,
+    onProgress?: (progress: NotesProgress) => void
+  ): Promise<MergedNotes> {
+    return generateMeetingNotes(this, input, onToken, onProgress)
   }
 
   async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
-    return this.runPrompt(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
+    return this.runRaw(ASK_SYSTEM_PROMPT, buildAskUserMessage(input), onToken)
   }
 
   async askAcrossMeetings(
     input: GlobalAskInput,
     onToken?: (text: string) => void
   ): Promise<AskAnswer> {
-    return this.runPrompt(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
+    return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
   }
 
   /**
    * One generation against the loaded model. Fresh context per call: no state
    * bleeds between runs, and the model weights stay loaded across calls.
    */
-  private async runPrompt(
+  async runRaw(
     systemPrompt: string,
     userMessage: string,
     onToken?: (text: string) => void

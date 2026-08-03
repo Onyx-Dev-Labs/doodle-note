@@ -1,25 +1,26 @@
 import { NextResponse } from "next/server";
 
+import {
+  downloadArtifactFromManifest,
+  downloadManifestForPlatform,
+} from "@/lib/download-artifact";
+
 /**
  * Never-drifting download links: /download/mac and /download/win resolve the
- * CURRENT installer from the same electron-updater manifests the apps use
- * (public/updates/latest-mac.yml / latest.yml) and 302 to it. Born from an
- * incident where the landing page hardcoded versioned artifact names and
- * quietly served 0.3.5 after 0.3.6 shipped — a manifest and this redirect
- * can no longer disagree.
+ * CURRENT website version from a platform-specific manifest and 302 to its
+ * installer. macOS gets the matching DMG from the production feed. Windows
+ * uses latest-beta.yml so an unsigned beta can be tested without changing the
+ * production updater feed in latest.yml. Born from an incident where the
+ * landing page hardcoded versioned artifact names and quietly served 0.3.5
+ * after 0.3.6 shipped — a manifest and this redirect cannot disagree.
  */
-
-const MANIFESTS: Record<string, string> = {
-  mac: "latest-mac.yml",
-  win: "latest.yml",
-};
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ platform: string }> },
 ) {
   const { platform } = await params;
-  const manifest = MANIFESTS[platform];
+  const manifest = downloadManifestForPlatform(platform);
   if (!manifest) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -32,11 +33,9 @@ export async function GET(
   if (!upstream.ok) {
     return NextResponse.json({ error: "Manifest unavailable" }, { status: 502 });
   }
-  // electron-updater manifests are trivially line-shaped; `path:` names the
-  // primary artifact. No YAML dependency needed.
-  const match = /^path:\s*(\S+)\s*$/m.exec(await upstream.text());
-  if (!match) {
+  const artifact = downloadArtifactFromManifest(platform, await upstream.text());
+  if (!artifact) {
     return NextResponse.json({ error: "Malformed manifest" }, { status: 502 });
   }
-  return NextResponse.redirect(new URL(`/updates/${match[1]}`, request.url), 302);
+  return NextResponse.redirect(new URL(`/updates/${artifact}`, request.url), 302);
 }

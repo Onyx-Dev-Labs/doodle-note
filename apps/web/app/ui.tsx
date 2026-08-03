@@ -4,8 +4,9 @@ import Link from "next/link";
 import { AppleLogo, WindowsLogo } from "./logos";
 
 /**
- * Version-independent: /download/<platform> reads the live update manifest
- * and redirects to the current installer, so these can never go stale.
+ * Version-independent: /download/<platform> reads the live platform download
+ * manifest and redirects to the current installer, so these can never go stale.
+ * The Windows website manifest remains separate from its production updater.
  */
 export const DOWNLOADS = {
   mac: "/download/mac",
@@ -14,7 +15,7 @@ export const DOWNLOADS = {
 
 /* Shared control styles — keep every page speaking the same visual language. */
 export const inputClass =
-  "w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink outline-none placeholder:text-stone focus:border-sage";
+  "w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink placeholder:text-stone focus-visible:border-sage focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sage-deep";
 
 export const buttonPrimary =
   "inline-flex items-center justify-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-cream transition-opacity hover:opacity-85 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage-deep";

@@ -12,11 +12,34 @@ export const ENGINE_CAPTURE_CONTROL_CHANNEL = 'engine:capture-control'
 export const ENGINE_AUDIO_CHANNEL = 'engine:audio'
 /** renderer → main (Windows): capture could not start (permissions etc.). */
 export const ENGINE_CAPTURE_ERROR_CHANNEL = 'engine:capture-error'
+/** main → renderer (Windows): decode an imported file with Chromium's media stack. */
+export const ENGINE_BATCH_CONTROL_CHANNEL = 'engine:batch-control'
+/** renderer → main (Windows): decoded PCM lifecycle for an imported file. */
+export const ENGINE_BATCH_DATA_CHANNEL = 'engine:batch-data'
+/** renderer → main (invoke, Windows): read the file assigned to a batch job. */
+export const ENGINE_BATCH_READ_CHANNEL = 'engine:batch-read'
 
 export interface EngineCaptureControl {
-  action: 'start' | 'stop'
+  action: 'start' | 'stop' | 'switch-input'
   channels?: string[]
+  inputDevice?: string
 }
+
+export interface EngineBatchControl {
+  action: 'decode'
+  jobId: string
+}
+
+export type EngineBatchMessage =
+  | {
+      type: 'begin'
+      jobId: string
+      channels: EngineChannel[]
+      audioSeconds: number
+    }
+  | { type: 'audio'; jobId: string; channel: EngineChannel; samples: Float32Array }
+  | { type: 'end'; jobId: string }
+  | { type: 'error'; jobId: string; message: string }
 
 export const ENGINE_EVENT_CHANNEL = 'engine:event'
 export const ENGINE_START_CHANNEL = 'engine:start'
@@ -25,6 +48,8 @@ export const ENGINE_STOP_CHANNEL = 'engine:stop'
 export const ENGINE_LIST_DEVICES_CHANNEL = 'engine:list-devices'
 /** renderer → main: switch the mic channel's input device (mid-session too). */
 export const ENGINE_SET_INPUT_CHANNEL = 'engine:set-input'
+/** renderer → main (invoke): verify the Core Audio tap hears audio. */
+export const ENGINE_TAP_SELFTEST_CHANNEL = 'engine:tap-selftest'
 
 /** One selectable audio input device (macOS: CoreAudio UID + name). */
 export interface EngineInputDevice {
@@ -58,6 +83,8 @@ export interface EngineStartOptions {
    * main process from meetingId + persistAudio — never by the renderer.
    */
   audioDir?: string
+  /** live only (macOS): system-audio capture backend; default 'sck'. */
+  systemBackend?: 'sck' | 'tap'
 }
 
 export interface EngineStartRequest {
@@ -232,8 +259,14 @@ export interface EngineApi {
   listInputDevices(): Promise<EngineInputDevice[]>
   /** Switch the mic input; applies live when a session is recording. null = system default. */
   setInputDevice(uid: string | null): void
+  /** Run the tap self-test (macOS): does the no-screen-permission backend hear audio? */
+  tapSelfTest(): Promise<{ ok: boolean; reason?: string }>
   /** Windows capture bridge (no-ops on macOS). */
   onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void
   sendAudio(channel: string, samples: Float32Array): void
   reportCaptureError(message: string): void
+  /** Windows imported-audio decoder bridge (no events are sent on macOS). */
+  onBatchControl(cb: (control: EngineBatchControl) => void): () => void
+  readBatchAudio(jobId: string): Promise<ArrayBuffer>
+  sendBatchMessage(message: EngineBatchMessage): Promise<void>
 }

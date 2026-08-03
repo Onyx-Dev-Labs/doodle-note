@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
-import { ensurePersonalWorkspace } from "@/lib/workspace";
+import { getAppWorkspace } from "@/lib/app-workspace";
 
 import { LinkDeviceForm } from "./link-device-form";
 
@@ -41,10 +41,8 @@ export default async function LinkDevicePage({
     redirect(`/login?${query}`);
   }
 
-  await ensurePersonalWorkspace(session.user.id);
-  const organizations = await auth.api.listOrganizations({
-    headers: requestHeaders,
-  });
+  const workspace = await getAppWorkspace(requestHeaders);
+  const organizations = workspace?.organizations ?? [];
 
   const portNum = Number(port);
   const validPort =
@@ -58,6 +56,7 @@ export default async function LinkDevicePage({
       <LinkDeviceForm
         port={validPort}
         callbackScheme={validScheme}
+        personalOrganizationId={workspace?.personal.id ?? null}
         deviceName={(name ?? "Desktop").slice(0, 80)}
         email={session.user.email}
         organizations={organizations.map((org) => ({

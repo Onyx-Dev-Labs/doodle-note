@@ -1,14 +1,20 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   ENGINE_AUDIO_CHANNEL,
+  ENGINE_BATCH_CONTROL_CHANNEL,
+  ENGINE_BATCH_DATA_CHANNEL,
+  ENGINE_BATCH_READ_CHANNEL,
   ENGINE_CAPTURE_CONTROL_CHANNEL,
   ENGINE_CAPTURE_ERROR_CHANNEL,
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
+  ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineCaptureControl,
+  type EngineBatchControl,
+  type EngineBatchMessage,
   type EngineApi,
   type EngineCommand,
   type EngineEvent,
@@ -20,8 +26,10 @@ import {
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
   AUDIO_LIST_CHANNEL,
+  AUDIO_READ_CHANNEL,
   AUDIO_USAGE_CHANNEL,
   type AudioApi,
+  type AudioFileData,
   type AudioPart,
   type AudioUsage
 } from '../shared/audio-api'
@@ -42,6 +50,7 @@ import {
   NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
+  NOTES_ENHANCE_PROGRESS_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
   NOTES_GET_SETTINGS_CHANNEL,
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
@@ -56,6 +65,7 @@ import {
   type DownloadProgressEvent,
   type EnhanceRequest,
   type EnhanceResult,
+  type EnhanceProgressEvent,
   type EnhanceTokenEvent,
   type GlobalAskRequest,
   type GlobalAskResult,
@@ -112,6 +122,21 @@ import {
   type UpdateState
 } from '../shared/update-api'
 import { THEME_SET_SOURCE_CHANNEL, type ThemeApi, type ThemeSource } from '../shared/theme-api'
+import {
+  EXPORT_MEETING_CHANNEL,
+  type ExporterApi,
+  type ExportFormat,
+  type ExportResult
+} from '../shared/export-api'
+import {
+  WIZARD_PERMISSIONS_CHANNEL,
+  WIZARD_PREFLIGHT_CHANNEL,
+  WIZARD_PREFLIGHT_EVENT_CHANNEL,
+  type WizardApi,
+  type WizardPermissions,
+  type WizardPreflightEvent,
+  type WizardPreflightResult
+} from '../shared/wizard-api'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -174,6 +199,13 @@ const engineApi: EngineApi = {
     ipcRenderer.send(ENGINE_SET_INPUT_CHANNEL, uid)
   },
 
+  tapSelfTest(): Promise<{ ok: boolean; reason?: string }> {
+    return ipcRenderer.invoke(ENGINE_TAP_SELFTEST_CHANNEL) as Promise<{
+      ok: boolean
+      reason?: string
+    }>
+  },
+
   onEvent(cb: (event: EngineEvent) => void): () => void {
     const listener = (_event: IpcRendererEvent, engineEvent: EngineEvent): void => {
       cb(engineEvent)
@@ -200,6 +232,25 @@ const engineApi: EngineApi = {
 
   reportCaptureError(message: string): void {
     ipcRenderer.send(ENGINE_CAPTURE_ERROR_CHANNEL, message)
+  },
+
+  onBatchControl(cb: (control: EngineBatchControl) => void): () => void {
+    const listener = (_event: IpcRendererEvent, control: EngineBatchControl): void => {
+      cb(control)
+    }
+    ipcRenderer.on(ENGINE_BATCH_CONTROL_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(ENGINE_BATCH_CONTROL_CHANNEL, listener)
+    }
+  },
+
+  async readBatchAudio(jobId: string): Promise<ArrayBuffer> {
+    const bytes = (await ipcRenderer.invoke(ENGINE_BATCH_READ_CHANNEL, jobId)) as Uint8Array
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  },
+
+  sendBatchMessage(message: EngineBatchMessage): Promise<void> {
+    return ipcRenderer.invoke(ENGINE_BATCH_DATA_CHANNEL, message) as Promise<void>
   }
 }
 
@@ -260,6 +311,10 @@ const notesApi: NotesApi = {
 
   onEnhanceToken(cb: (ev: EnhanceTokenEvent) => void): () => void {
     return subscribe(NOTES_ENHANCE_TOKEN_CHANNEL, cb)
+  },
+
+  onEnhanceProgress(cb: (ev: EnhanceProgressEvent) => void): () => void {
+    return subscribe(NOTES_ENHANCE_PROGRESS_CHANNEL, cb)
   },
 
   onAskToken(cb: (ev: AskTokenEvent) => void): () => void {
@@ -488,9 +543,33 @@ const importerApi: ImporterApi = {
   }
 }
 
+const exporterApi: ExporterApi = {
+  exportMeeting(meetingId: string, format: ExportFormat): Promise<ExportResult> {
+    return ipcRenderer.invoke(EXPORT_MEETING_CHANNEL, meetingId, format) as Promise<ExportResult>
+  }
+}
+
+const wizardApi: WizardApi = {
+  runPreflight(): Promise<WizardPreflightResult> {
+    return ipcRenderer.invoke(WIZARD_PREFLIGHT_CHANNEL) as Promise<WizardPreflightResult>
+  },
+
+  getPermissions(): Promise<WizardPermissions> {
+    return ipcRenderer.invoke(WIZARD_PERMISSIONS_CHANNEL) as Promise<WizardPermissions>
+  },
+
+  onPreflightEvent(cb: (ev: WizardPreflightEvent) => void): () => void {
+    return subscribe(WIZARD_PREFLIGHT_EVENT_CHANNEL, cb)
+  }
+}
+
 const audioApi: AudioApi = {
   list(meetingId: string): Promise<AudioPart[]> {
     return ipcRenderer.invoke(AUDIO_LIST_CHANNEL, meetingId) as Promise<AudioPart[]>
+  },
+
+  read(url: string): Promise<AudioFileData | null> {
+    return ipcRenderer.invoke(AUDIO_READ_CHANNEL, url) as Promise<AudioFileData | null>
   },
 
   deleteFor(meetingId: string): Promise<void> {
@@ -521,6 +600,8 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
     contextBridge.exposeInMainWorld('audio', audioApi)
     contextBridge.exposeInMainWorld('importer', importerApi)
+    contextBridge.exposeInMainWorld('wizard', wizardApi)
+    contextBridge.exposeInMainWorld('exporter', exporterApi)
   } catch (error) {
     console.error(error)
   }
@@ -551,4 +632,8 @@ if (process.contextIsolated) {
   window.audio = audioApi
   // @ts-ignore (defined in index.d.ts)
   window.importer = importerApi
+  // @ts-ignore (defined in index.d.ts)
+  window.wizard = wizardApi
+  // @ts-ignore (defined in index.d.ts)
+  window.exporter = exporterApi
 }

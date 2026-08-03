@@ -9,6 +9,100 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.11",
+    date: "August 3, 2026",
+    highlights: [
+      "The Mac app icon now uses the same edge-to-edge sage background as iPhone, without black side gutters",
+      "The matching mascot inside DoodleNote now uses the corrected opaque artwork too",
+      "Website Mac downloads now open a familiar drag-to-Applications installer",
+    ],
+  },
+  {
+    version: "0.4.10",
+    date: "August 3, 2026",
+    highlights: [
+      "Resize the Mac app down to a compact 800 × 560 window for smaller screens and side-by-side setups",
+      "Meeting prompts now send one native Mac notification while keeping the Start taking notes action available inside DoodleNote",
+      "The corrected full-bleed app icon now refreshes reliably after an in-place update",
+    ],
+  },
+  {
+    version: "0.4.9",
+    date: "August 2, 2026",
+    highlights: [
+      "The Mac app icon now fills its rounded shape cleanly, with no pale side gutters",
+    ],
+  },
+  {
+    version: "0.4.8",
+    date: "August 1, 2026",
+    highlights: [
+      "Create a meeting, note, or audio import from one streamlined New menu",
+      "Empty new notes and meetings now ask whether to save, discard, or keep editing before they close",
+      "Untitled notes receive a useful title derived from their notes, transcript, or attachment context",
+      "Home stays focused on the last seven days, with older meetings available in manageable batches",
+    ],
+  },
+  {
+    version: "0.4.7",
+    date: "August 1, 2026",
+    highlights: [
+      "Meeting action menus now stay above every note row, so Move to trash, exports, and folder actions cannot be obscured or intercepted by another meeting",
+    ],
+  },
+  {
+    version: "0.4.6",
+    date: "August 1, 2026",
+    highlights: [
+      "Meeting prompts now appear only once: calendar reminders and live call detection coordinate instead of nudging you separately",
+      "Zoom Phone ringing, notification sounds, and other output-only activity no longer look like active meetings",
+      "Starting a recording clears any outstanding prompt, and background prompts no longer reappear as a second banner when you open DoodleNote",
+    ],
+  },
+  {
+    version: "0.4.5",
+    date: "July 14, 2026",
+    highlights: [
+      "Mac: DoodleNote no longer needs the Screen Recording permission — system audio is captured with a Core Audio tap (macOS 14.2+), so setup only asks for microphone and system-audio access",
+      "Every recording checks the new capture is actually hearing audio and falls back to the old method automatically if it isn't",
+      "Prefer the old capture? Settings → General → Meeting recordings has the switch",
+    ],
+  },
+  {
+    version: "0.4.4",
+    date: "July 13, 2026",
+    highlights: [
+      "Export any meeting as Markdown or PDF from the note's ⋯ menu",
+      "Bring your own key: Groq, OpenRouter, and Ollama join OpenAI and Anthropic as notes-model providers — Ollama needs no key at all",
+    ],
+  },
+  {
+    version: "0.4.2",
+    date: "July 12, 2026",
+    highlights: [
+      "Long meetings get full-coverage notes — transcripts over ~40 minutes are condensed in parts so nothing in the middle is skipped anymore",
+      "First-run setup wizard: permissions, the transcription engine, and your notes model, all set up before your first meeting",
+    ],
+  },
+  {
+    version: "0.4.1",
+    date: "July 12, 2026",
+    highlights: [
+      "Import audio files (wav, mp3, m4a) from the home screen — DoodleNote transcribes them into a meeting",
+      "Re-transcribe any meeting from its saved recording",
+      "Recordings made by DoodleNote recover the You/Them speaker split on import",
+    ],
+  },
+  {
+    version: "0.4.0",
+    date: "July 11, 2026",
+    highlights: [
+      "Meeting audio is saved on your Mac (local only, never synced) — play it back from the transcript panel and click any line to jump there",
+      "Crash recovery: if DoodleNote quits mid-meeting, the recording is stitched back together on next launch",
+      "Stopping a recording responds instantly, and Resume continues the clock where it left off",
+    ],
+  },
+  {
     version: "0.3.5",
     date: "July 7, 2026",
     highlights: [

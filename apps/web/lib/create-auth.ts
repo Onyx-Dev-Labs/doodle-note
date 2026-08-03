@@ -4,6 +4,8 @@ import { organization } from "better-auth/plugins";
 
 import { fullSchema, type Db } from "@repo/db";
 
+import { sendWorkspaceInvitationEmail } from "./invitation-email";
+
 /**
  * Obviously-dev-only fallback so local dev works without any env setup.
  * Never rely on this outside of local development.
@@ -69,7 +71,12 @@ export function createAuth(db: Db) {
       enabled: true,
     },
     socialProviders: socialProviders(),
-    plugins: [organization()],
+    plugins: [
+      organization({
+        cancelPendingInvitationsOnReInvite: true,
+        sendInvitationEmail: sendWorkspaceInvitationEmail,
+      }),
+    ],
   });
 }
 

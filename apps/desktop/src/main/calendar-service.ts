@@ -51,6 +51,13 @@ import {
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
 import { GoogleCalendarClient } from './google-calendar'
 import type { PromptPanel } from './prompt-panel'
+import {
+  coordinatePrompt,
+  initialPromptCoordinatorState,
+  planPromptDelivery,
+  setPromptRecording,
+  type PromptCoordinatorState
+} from './prompt-coordinator'
 
 /** Delegated Graph permissions; offline_access keeps the refresh token. */
 const SCOPES = ['User.Read', 'Calendars.Read', 'offline_access']
@@ -77,16 +84,20 @@ function landingPage(title: string, message: string): string {
     '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>DoodleNote</title></head>' +
-    '<body style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;' +
+    "<body style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;" +
     'background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;' +
     'height:100vh;margin:0">' +
     '<div style="text-align:center;max-width:440px;padding:0 24px">' +
     '<div style="font-size:19px;font-weight:700;letter-spacing:-0.01em;margin-bottom:26px">' +
     '<span style="color:#26281f">Doodle</span><span style="color:#7c9769">Note</span></div>' +
-    '<h2 style="margin:0 0 10px;font-family:ui-serif,Georgia,serif;font-size:26px">' + title + '</h2>' +
-    '<p style="color:#8a8d7f;line-height:1.55;margin:0">' + message + '</p>' +
+    '<h2 style="margin:0 0 10px;font-family:ui-serif,Georgia,serif;font-size:26px">' +
+    title +
+    '</h2>' +
+    '<p style="color:#8a8d7f;line-height:1.55;margin:0">' +
+    message +
+    '</p>' +
     '<div style="margin-top:30px;font-size:12px;color:#b4b6a8">Local &amp; private &middot; ' +
-    'your calendar stays on your Mac</div>' +
+    'your calendar stays on your computer</div>' +
     '</div></body></html>'
   )
 }
@@ -169,6 +180,7 @@ export class CalendarService {
   private lastSyncIso: string | undefined
   private lastError: string | undefined
   private notified: Record<string, string>
+  private promptState: PromptCoordinatorState
 
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private watchTimer: ReturnType<typeof setInterval> | null = null
@@ -196,6 +208,13 @@ export class CalendarService {
     this.config = settings.config
     this.prefs = settings.prefs
     this.notified = this.loadNotified()
+    this.promptState = initialPromptCoordinatorState(
+      Object.fromEntries(
+        Object.entries(this.notified)
+          .map(([id, iso]) => [`calendar:${id}`, Date.parse(iso)] as const)
+          .filter((entry) => Number.isFinite(entry[1]))
+      )
+    )
     const cache = this.loadEventCache()
     this.rawEvents = cache.events
     this.calendars = cache.calendars ?? []
@@ -265,7 +284,13 @@ export class CalendarService {
   }
 
   /** App-level focus hook: refresh, but never hammer Graph on tab-outs. */
-  onWindowFocus(): void {
+  onWindowFocus(window?: BrowserWindow): void {
+    // Clicking the floating panel focuses that panel long enough for its links
+    // to fire; do not close it out from underneath the user's click.
+    if (window && this.promptPanel?.ownsWindow(window)) return
+    // A background prompt owns the floating panel only. Closing it here avoids
+    // turning one detection into a panel followed by a second in-app banner.
+    this.promptPanel?.close()
     void this.ready.then(() => {
       if (!this.account) return
       const last = this.lastSyncIso ? Date.parse(this.lastSyncIso) : 0
@@ -278,6 +303,21 @@ export class CalendarService {
     this.disposed = true
     this.stopTimers()
     this.destroyTray()
+    this.promptPanel?.close()
+  }
+
+  /** Recording is a global prompt suppression state, regardless of how the
+   *  meeting was started. Clear any outstanding surface immediately. */
+  setRecordingActive(recording: boolean): void {
+    this.promptState = setPromptRecording(this.promptState, recording)
+    if (!recording) return
+    this.promptPanel?.close()
+    this.broadcast(CALENDAR_START_MEETING_CHANNEL, {
+      action: 'dismiss',
+      eventId: '',
+      subject: '',
+      startIso: new Date().toISOString()
+    } satisfies CalendarStartMeetingEvent)
   }
 
   /* ---- state ---- */
@@ -814,38 +854,60 @@ export class CalendarService {
   }
 
   /**
-   * Fan a "meeting is starting" prompt out to every attention channel: the
-   * in-app banner (guaranteed when the window is visible), the OS
-   * notification and dock bounce (best-effort), and — when the main window
-   * is closed or buried — the floating prompt panel. Also the entry point
-   * for ad-hoc mic-detected prompts (MicWatcher).
+   * Deliver one deduplicated meeting prompt. The renderer keeps a persistent
+   * action banner, while one external surface gets the user's attention: a
+   * native notification when supported, or the floating panel as fallback.
+   * Also the entry point for ad-hoc mic-detected prompts (MicWatcher).
    */
-  deliverPrompt(payload: CalendarStartMeetingEvent): void {
-    // One surface per prompt — stacking channels put the macOS notification
-    // on top of our own panel (both live top-right). Focused window gets the
-    // in-app banner; otherwise the floating panel (it has the Take-notes
-    // button); the OS notification only when the panel can't be shown.
-    this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
-    try {
-      app.dock?.bounce('informational')
-    } catch {
-      // Not on macOS, or no dock — the banner already covers it.
+  deliverPrompt(requested: CalendarStartMeetingEvent): void {
+    const nowMs = Date.now()
+    const decision = coordinatePrompt(this.promptState, requested, this.visibleEvents(), nowMs)
+    this.promptState = decision.state
+    if (!decision.prompt) return
+    const payload = decision.prompt
+
+    // A mic signal correlated to a calendar event owns that event's one prompt,
+    // so the 30-second calendar watcher must not deliver it again later.
+    if (payload.eventId && this.notified[payload.eventId] === undefined) {
+      this.notified[payload.eventId] = new Date(nowMs).toISOString()
+      this.saveNotified()
     }
-    const window = BrowserWindow.getAllWindows()[0]
+
+    const window = BrowserWindow.getAllWindows().find(
+      (candidate) => !this.promptPanel?.ownsWindow(candidate)
+    )
     const bannerVisible = window !== undefined && window.isVisible() && window.isFocused()
-    if (bannerVisible) return
-    if (this.promptPanel) {
-      this.promptPanel.show(payload, (action) => {
-        if (action === 'start') this.actOnPromptStart(payload)
+    const plan = planPromptDelivery(
+      window !== undefined,
+      bannerVisible,
+      Notification.isSupported(),
+      this.promptPanel !== undefined
+    )
+    if (plan.banner) {
+      this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
+    }
+    if (plan.external === 'notification') {
+      this.showNotification(payload, () => {
+        const stillBackground = window === undefined || !window.isVisible() || !window.isFocused()
+        if (stillBackground) this.showPromptPanel(payload)
       })
-    } else {
-      this.showNotification(payload)
+    } else if (plan.external === 'panel') {
+      this.showPromptPanel(payload)
+    }
+  }
+
+  private showPromptPanel(prompt: CalendarStartMeetingEvent): void {
+    if (this.promptPanel) {
+      this.promptPanel.show(prompt, (action) => {
+        if (action === 'start') this.actOnPromptStart(prompt)
+      })
     }
   }
 
   /** One click anywhere = meeting created + recording (renderer handles it). */
   private actOnPromptStart(prompt: CalendarStartMeetingEvent): void {
     const payload = { ...prompt, action: 'start' as const }
+    this.promptPanel?.close()
     const hadWindow = BrowserWindow.getAllWindows().length > 0
     this.focusWindow()
     if (hadWindow) {
@@ -860,23 +922,30 @@ export class CalendarService {
     }
   }
 
-  private showNotification(prompt: CalendarStartMeetingEvent): void {
+  private showNotification(prompt: CalendarStartMeetingEvent, onFailure?: () => void): void {
+    let failed = false
+    const failOnce = (error?: unknown): void => {
+      if (failed) return
+      failed = true
+      if (error !== undefined) console.error('[calendar] notification failed:', error)
+      onFailure?.()
+    }
     try {
-      if (!Notification.isSupported()) return
+      if (!Notification.isSupported()) {
+        failOnce('Native notifications are not supported')
+        return
+      }
       const notification = new Notification({
-        title: prompt.adHoc
-          ? 'Looks like you’re on a call'
-          : `${prompt.subject} is starting`,
+        title: prompt.adHoc ? 'Looks like you’re on a call' : `${prompt.subject} is starting`,
         body: 'Click to start taking notes'
       })
+      notification.once('failed', (_event, error) => failOnce(error))
       notification.on('click', () => {
         this.actOnPromptStart(prompt)
       })
       notification.show()
     } catch (err) {
-      // Notifications can be unreliable (e.g. unsigned dev builds) — the
-      // in-app banner is the guaranteed path.
-      console.error('[calendar] notification failed:', err)
+      failOnce(err)
     }
   }
 

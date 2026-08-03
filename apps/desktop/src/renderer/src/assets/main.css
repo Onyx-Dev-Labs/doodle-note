@@ -158,6 +158,7 @@ a,
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
   border-right: 1px solid var(--border);
   padding: 0 10px 12px;
   min-height: 0;
@@ -429,6 +430,8 @@ a,
   justify-content: flex-end;
   gap: 10px;
   padding: 0 24px;
+  position: relative;
+  z-index: 60;
 }
 
 .pill-btn {
@@ -445,6 +448,89 @@ a,
   border-color: var(--accent);
   color: var(--accent-deep);
   box-shadow: var(--shadow-pill);
+}
+
+/* One calm creation entry point; the three workflows stay one click away. */
+.new-menu-wrap {
+  position: relative;
+}
+
+.new-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 82px;
+  justify-content: center;
+}
+
+.new-menu-chevron {
+  color: var(--muted);
+  font-size: 12px;
+  transform: translateY(-1px);
+}
+
+.new-menu-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  width: 270px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-panel);
+  z-index: 70;
+}
+
+.new-menu-popover button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  color: var(--body);
+  text-align: left;
+}
+
+.new-menu-popover button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.new-menu-popover button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.new-menu-popover button > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.new-menu-popover strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.new-menu-popover small {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.new-menu-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--accent-deep);
+  background: var(--sage-fill);
 }
 
 .pill-btn.pill-danger {
@@ -756,11 +842,71 @@ a,
   margin-top: 4px;
 }
 
+.history-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 10px 10px;
+}
+
+.history-heading h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.history-heading span {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.history-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 0 22px;
+}
+
+.history-controls button {
+  padding: 7px 13px;
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+
+.history-more {
+  color: var(--accent-deep);
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.history-more:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-pill);
+}
+
+.history-recent {
+  color: var(--muted);
+}
+
+.history-recent:hover {
+  color: var(--ink);
+  background: var(--fill);
+}
+
 .day-group {
   margin-bottom: 18px;
 }
 
-.day-group.older {
+/* Fade the older row content without fading the group container itself.
+   Group-level opacity creates a stacking context that traps row popovers
+   underneath later date groups. */
+.day-group.older > .day-label,
+.day-group.older > .meeting-row > .row-icon,
+.day-group.older > .meeting-row > .row-main,
+.day-group.older > .meeting-row > .row-time {
   opacity: 0.78;
 }
 
@@ -780,6 +926,11 @@ a,
   padding: 9px 10px;
   border-radius: 10px;
   cursor: pointer;
+}
+
+/* The row owns any open menu/picker and must paint above every later row. */
+.meeting-row.actions-open {
+  z-index: 50;
 }
 
 .meeting-row:hover {
@@ -3313,6 +3464,92 @@ button.fp-row:hover {
 
 /* ---- first-run welcome tour ---- */
 
+/* Empty-new-draft exit decision. It is intentionally above every editor
+   flyout and row action surface so nothing can compete with the choice. */
+.draft-exit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(30, 32, 24, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.draft-exit-dialog {
+  width: min(430px, calc(100vw - 48px));
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-panel);
+}
+
+.draft-exit-dialog h2 {
+  margin: 0 0 8px;
+  font-family: var(--serif);
+  font-size: 21px;
+  color: var(--ink);
+}
+
+.draft-exit-dialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.draft-exit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.draft-exit-actions button {
+  padding: 7px 13px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.draft-exit-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.draft-exit-cancel {
+  margin-right: auto;
+  color: var(--muted);
+}
+
+.draft-exit-cancel:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--fill);
+}
+
+.draft-exit-discard {
+  color: var(--danger);
+  background: var(--card);
+}
+
+.draft-exit-discard:hover:not(:disabled) {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.draft-exit-save {
+  color: #fff;
+  background: var(--accent-deep);
+  border-color: var(--accent-deep) !important;
+}
+
+.draft-exit-save:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
 .tour-overlay {
   position: fixed;
   inset: 0;
@@ -3410,6 +3647,14 @@ button.fp-row:hover {
   flex-shrink: 0;
   margin-top: 2px;
   color: var(--accent-deep);
+}
+/* Icon-less bullet lists get the wizard's check treatment instead of
+   floating bare text lines. */
+.tour-checks li::before {
+  content: '✓';
+  color: var(--accent-deep);
+  font-weight: 700;
+  flex-shrink: 0;
 }
 .tour-actions-row {
   display: flex;
@@ -3595,3 +3840,168 @@ button.fp-row:hover {
     transform: none;
   }
 }
+
+/* ---- first-run setup wizard ---- */
+
+.wizard-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.wizard-card {
+  position: relative;
+  width: min(520px, calc(100% - 48px));
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-panel);
+  padding: 34px 38px 28px;
+  text-align: center;
+}
+
+.wizard-steps {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.wizard-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.wizard-dot.on {
+  background: var(--accent-deep);
+}
+
+.wizard-dot.done {
+  background: color-mix(in srgb, var(--accent-deep) 45%, transparent);
+}
+
+.wizard-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.wizard-mascot {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+}
+
+.wizard-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 26px;
+  color: var(--ink);
+}
+
+.wz-ink { color: var(--ink); }
+.wz-sage { color: var(--accent-deep); }
+
+.wizard-sub {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 400px;
+}
+
+.wizard-props {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--body);
+  max-width: 380px;
+}
+
+.wizard-props li::before {
+  content: '✓  ';
+  color: var(--accent-deep);
+  font-weight: 700;
+}
+
+.wizard-rows {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.wizard-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13.5px;
+  color: var(--body);
+  text-align: left;
+}
+
+.wz-ok { color: var(--accent-deep); font-weight: 600; }
+.wz-bad { color: #b4543a; font-weight: 600; }
+
+.wizard-progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--accent-deep);
+}
+
+.wizard-cta {
+  margin-top: 6px;
+  padding: 10px 26px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--card);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wizard-cta:disabled {
+  opacity: 0.55;
+}
+
+.wizard-link {
+  font-size: 12.5px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.wizard-link:hover { color: var(--ink); }
+
+.wizard-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--faint);
+  max-width: 380px;
+}
+
+.wizard-skip {
+  position: absolute;
+  right: 16px;
+  top: 12px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.wizard-skip:hover { color: var(--ink); }

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AUDIO_PERSIST_STORAGE_KEY, type AudioUsage } from '../../shared/audio-api'
+import {
+  AUDIO_PERSIST_STORAGE_KEY,
+  SYSTEM_BACKEND_STORAGE_KEY,
+  type AudioUsage
+} from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { SyncStatus } from '../../shared/sync-api'
@@ -12,12 +16,13 @@ import type {
 import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
-import type {
-  CloudProvider,
-  EngineChoice,
-  NotesModelInfo,
-  NotesModelsResponse,
-  NotesSettingsView
+import {
+  CLOUD_PROVIDERS,
+  type CloudProvider,
+  type EngineChoice,
+  type NotesModelInfo,
+  type NotesModelsResponse,
+  type NotesSettingsView
 } from '../../shared/notes-api'
 import mascotUrl from './assets/mascot-square.png'
 
@@ -28,6 +33,15 @@ function lastSyncLabel(iso: string): string {
   const min = Math.round(ms / 60_000)
   if (min < 60) return `synced ${min} min ago`
   return `synced at ${new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+
+/** Placeholder model hints per provider (defaults live in @repo/ai). */
+const MODEL_PLACEHOLDERS: Record<CloudProvider, string> = {
+  anthropic: 'claude-sonnet-5',
+  openai: 'gpt-5',
+  groq: 'llama-3.3-70b-versatile',
+  openrouter: 'anthropic/claude-sonnet-4.5',
+  ollama: 'llama3.1'
 }
 
 function formatBytes(bytes: number): string {
@@ -210,6 +224,21 @@ export default function ModelsView({
   )
   const [audioUsage, setAudioUsage] = useState<AudioUsage | null>(null)
   const [audioClearing, setAudioClearing] = useState(false)
+  const [tapEnabled, setTapEnabled] = useState(
+    () => window.localStorage.getItem(SYSTEM_BACKEND_STORAGE_KEY) !== 'sck'
+  )
+
+  // Default ON. Every tap session self-probes inaudibly and falls back to
+  // ScreenCaptureKit on its own, so no gating test is needed here.
+  const toggleTapBackend = (): void => {
+    if (tapEnabled) {
+      window.localStorage.setItem(SYSTEM_BACKEND_STORAGE_KEY, 'sck')
+      setTapEnabled(false)
+    } else {
+      window.localStorage.removeItem(SYSTEM_BACKEND_STORAGE_KEY)
+      setTapEnabled(true)
+    }
+  }
 
   useEffect(() => {
     if (!active) return
@@ -229,7 +258,7 @@ export default function ModelsView({
   const clearAllAudio = async (): Promise<void> => {
     if (
       !window.confirm(
-        'Delete every saved meeting recording on this Mac? Transcripts and notes are kept.'
+        'Delete every saved meeting recording on this computer? Transcripts and notes are kept.'
       )
     ) {
       return
@@ -837,22 +866,24 @@ export default function ModelsView({
 
                   <div className="cal-subcard">
                     <div className="cal-subcard-head">Display</div>
-                    <div className="cal-row">
-                      <span className="cal-row-icon">
-                        <MenuBarIcon />
-                      </span>
-                      <span className="cal-row-main">
-                        <span className="cal-row-label">Show upcoming meetings in menu bar</span>
-                        <span className="cal-row-sub">
-                          Display your next meeting and time until it starts in the macOS menu bar
+                    {detect?.platform === 'darwin' && (
+                      <div className="cal-row">
+                        <span className="cal-row-icon">
+                          <MenuBarIcon />
                         </span>
-                      </span>
-                      <Toggle
-                        checked={calState.prefs.showMenuBar}
-                        label="Show upcoming meetings in menu bar"
-                        onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
-                      />
-                    </div>
+                        <span className="cal-row-main">
+                          <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                          <span className="cal-row-sub">
+                            Display your next meeting and time until it starts in the macOS menu bar
+                          </span>
+                        </span>
+                        <Toggle
+                          checked={calState.prefs.showMenuBar}
+                          label="Show upcoming meetings in menu bar"
+                          onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
+                        />
+                      </div>
+                    )}
                     <div className="cal-row">
                       <span className="cal-row-icon">
                         <PeopleIcon />
@@ -1086,7 +1117,7 @@ export default function ModelsView({
               <section className="keys-section">
                 <h3>Meeting recordings</h3>
                 <p className="models-sub">
-                  Recordings stay on this Mac — they are never uploaded, even with sync on.
+                  Recordings stay on this computer — they are never uploaded, even with sync on.
                 </p>
                 <div className="cal-subcard">
                   <div className="cal-row">
@@ -1103,6 +1134,23 @@ export default function ModelsView({
                       onChange={togglePersistAudio}
                     />
                   </div>
+                  {detect?.platform === 'darwin' && (
+                    <div className="cal-row">
+                      <span className="cal-row-main">
+                        <span className="cal-row-label">Capture without screen permission</span>
+                        <span className="cal-row-sub">
+                          System audio is captured with a Core Audio tap (macOS 14.2+) — no Screen
+                          Recording access needed. Turn off to use the legacy ScreenCaptureKit
+                          capture instead.
+                        </span>
+                      </span>
+                      <Toggle
+                        checked={tapEnabled}
+                        label="Capture system audio without screen permission"
+                        onChange={toggleTapBackend}
+                      />
+                    </div>
+                  )}
                   <div className="cal-row">
                     <span className="cal-row-main">
                       <span className="cal-row-label">Delete all recordings</span>
@@ -1456,20 +1504,30 @@ export default function ModelsView({
                   value={provider}
                   onChange={(e) => setProvider(e.target.value as CloudProvider)}
                 >
-                  <option value="anthropic">Anthropic</option>
-                  <option value="openai">OpenAI</option>
+                  {CLOUD_PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
                 </select>
                 <input
                   type="text"
                   spellCheck={false}
-                  placeholder="model (optional, e.g. claude-sonnet-5)"
+                  placeholder={`model (optional, e.g. ${MODEL_PLACEHOLDERS[provider]})`}
                   value={cloudModel}
                   onChange={(e) => setCloudModel(e.target.value)}
                 />
                 <input
                   type="password"
-                  placeholder={settings?.cloud?.hasKey ? '••••••••  (key saved)' : 'API key'}
-                  value={apiKey}
+                  placeholder={
+                    provider === 'ollama'
+                      ? 'no key needed — uses localhost:11434'
+                      : settings?.cloud?.hasKey
+                        ? '••••••••  (key saved)'
+                        : 'API key'
+                  }
+                  disabled={provider === 'ollama'}
+                  value={provider === 'ollama' ? '' : apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
                 <button type="button" onClick={() => void saveCloudKey()}>

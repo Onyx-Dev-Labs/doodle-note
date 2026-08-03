@@ -25,7 +25,7 @@ struct SyncAPI: Sendable {
 
     // MARK: Wire shapes (match apps/web/app/api/sync routes)
 
-    struct PushSegment: Codable {
+    struct PushSegment: Codable, Sendable {
         var channel: String
         var speaker: String
         var text: String
@@ -34,9 +34,11 @@ struct SyncAPI: Sendable {
         var confidence: Double?
     }
 
-    struct PushMeeting: Codable {
+    struct PushMeeting: Codable, Sendable {
         var id: String
         var title: String
+        /// "meeting" or "note" (standalone quick note); omitted = meeting.
+        var kind: String?
         var createdAt: String
         var startedAt: String?
         var endedAt: String?
@@ -47,21 +49,22 @@ struct SyncAPI: Sendable {
         var segments: [PushSegment]
     }
 
-    struct PushFolder: Codable {
+    struct PushFolder: Codable, Sendable {
         var id: String
         var name: String
         var createdAt: String?
     }
 
-    struct PushResult: Codable {
+    struct PushResult: Codable, Sendable {
         var id: String
         var ok: Bool
         var error: String?
     }
 
-    struct RemoteMeeting: Codable {
+    struct RemoteMeeting: Codable, Sendable {
         var id: String
         var title: String
+        var kind: String?
         var createdAt: String
         var updatedAt: String
         var startedAt: String?
@@ -73,13 +76,13 @@ struct SyncAPI: Sendable {
         var segments: [PushSegment]
     }
 
-    struct RemoteFolder: Codable {
+    struct RemoteFolder: Codable, Sendable {
         var id: String
         var name: String
         var createdAt: String
     }
 
-    struct PullResponse: Codable {
+    struct PullResponse: Codable, Sendable {
         var allIds: [String]
         var folders: [RemoteFolder]
         var changed: [RemoteMeeting]

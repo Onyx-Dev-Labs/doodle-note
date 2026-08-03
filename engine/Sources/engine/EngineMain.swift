@@ -40,6 +40,17 @@ struct EngineMain {
                     "startEpochMs": saved.startEpochMs,
                 ])
                 Events.emit(["event": "done"])
+            case "tap-selftest":
+                // Verify the Core Audio tap actually hears audio (silence =
+                // the System Audio Recording permission is missing).
+                if #available(macOS 14.2, *) {
+                    await TapSelfTest.run()
+                } else {
+                    Events.emit([
+                        "event": "tap_selftest", "ok": false,
+                        "reason": "requires macOS 14.2 or later",
+                    ])
+                }
             case "devices":
                 DevicesCommand.run()
             case "info":

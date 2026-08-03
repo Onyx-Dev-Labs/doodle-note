@@ -24,6 +24,7 @@ function DialogCard({ children }: { children: React.ReactNode }) {
 export function LinkDeviceForm({
   port,
   callbackScheme,
+  personalOrganizationId,
   deviceName,
   email,
   organizations,
@@ -31,12 +32,13 @@ export function LinkDeviceForm({
   port: number | null;
   /** Custom URL scheme callback for mobile apps (e.g. "doodlenote"). */
   callbackScheme?: string | null;
+  personalOrganizationId: string | null;
   deviceName: string;
   email: string;
   organizations: Array<{ id: string; name: string }>;
 }) {
   const [organizationId, setOrganizationId] = useState(
-    organizations[0]?.id ?? "",
+    personalOrganizationId ?? organizations[0]?.id ?? "",
   );
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
@@ -51,7 +53,11 @@ export function LinkDeviceForm({
     const response = await fetch("/api/device/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ organizationId, deviceName }),
+      body: JSON.stringify({
+        organizationId,
+        deviceName,
+        platform: callbackScheme ? "ios" : "desktop",
+      }),
     });
     const body = await response.json();
     if (response.status === 402 && body.needsSubscription) {
@@ -114,6 +120,13 @@ export function LinkDeviceForm({
         transcripts, and notes to the workspace below, signed in as{" "}
         <strong>{email}</strong>.
       </p>
+
+      {organizationId === personalOrganizationId && (
+        <p className="mt-3 rounded-lg bg-sage-fill px-3 py-2 text-xs leading-relaxed text-sage-deep">
+          Personal is private to you. You can deliberately move individual
+          meetings into a shared workspace later.
+        </p>
+      )}
 
       {organizations.length > 1 && (
         <label className="mt-4 block text-sm text-bark">

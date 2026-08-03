@@ -170,20 +170,32 @@ function OnboardingTour({
           <div className="tour-body">
             <h2 className="tour-title">Recording a meeting</h2>
             <p className="tour-lede">
-              Hit <strong>+ New meeting</strong> and recording starts instantly. Talk normally — the
-              transcript builds live, labeling your mic &ldquo;You&rdquo; and the call audio
-              &ldquo;Them.&rdquo; Works with Zoom, Teams, Meet, or anything else that makes sound.
+              Choose <strong>New → New meeting</strong> and recording starts instantly. Talk
+              normally — the transcript builds live, labeling your mic &ldquo;You&rdquo; and the
+              call audio &ldquo;Them.&rdquo; Works with Zoom, Teams, Meet, or anything else that
+              makes sound.
             </p>
-            <ul className="tour-points">
-              <li>Take rough notes while you talk — bullets, fragments, half-thoughts are fine</li>
+            {/* Each li body is ONE span: the li is a flex row (icon + text
+                elsewhere), and bare text nodes around a <strong> would each
+                become their own flex column. */}
+            <ul className="tour-points tour-checks">
               <li>
-                When the meeting ends, <strong>Generate notes</strong> merges your notes with the
-                transcript into a clean summary
+                <span>
+                  Take rough notes while you talk — bullets, fragments, half-thoughts are fine
+                </span>
               </li>
               <li>
-                {isWindows
-                  ? 'First recording asks for microphone permission, and the speech model finishes downloading on first launch'
-                  : 'First recording asks for microphone and system-audio permission — one-time macOS prompts'}
+                <span>
+                  When the meeting ends, <strong>Generate notes</strong> merges your notes with the
+                  transcript into a clean summary
+                </span>
+              </li>
+              <li>
+                <span>
+                  {isWindows
+                    ? 'The speech model finishes downloading on first launch — the first recording may take a moment'
+                    : 'Everything you saved during recording — audio included — stays on this computer'}
+                </span>
               </li>
             </ul>
           </div>

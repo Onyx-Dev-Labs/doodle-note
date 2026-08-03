@@ -1,10 +1,11 @@
 {
   "name": "desktop",
-  "version": "0.4.0",
+  "version": "0.4.11",
   "private": true,
   "description": "Doodle Note desktop app \u2014 spawns the Swift transcription sidecar and shows its live transcript stream",
   "main": "./out/main/index.js",
   "scripts": {
+    "brand:build": "./scripts/build-brand-assets.sh",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
@@ -17,7 +18,8 @@
     "package": "pnpm --filter doodle-note-mcp build && electron-vite build && APPLE_KEYCHAIN_PROFILE=doodlenote-notary electron-builder --mac",
     "package:win": "pnpm --filter doodle-note-mcp build && electron-vite build && electron-builder --win --x64",
     "release": "pnpm package && node scripts/publish-release.mjs --mac",
-    "release:win": "pnpm package:win && node scripts/publish-release.mjs --win"
+    "release:win": "pnpm package:win && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-signature.ps1 && node scripts/publish-release.mjs --win",
+    "publish:win-beta": "node scripts/publish-windows-beta.mjs"
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",

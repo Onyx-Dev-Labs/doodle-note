@@ -17,6 +17,13 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     /// Set when the user taps "Start notes" on a notification; HomeView
     /// observes this and opens a recording meeting.
     var pendingStart: PendingStart?
+    private(set) var authorization: Authorization = .unknown
+
+    enum Authorization: Equatable {
+        case unknown
+        case granted
+        case denied
+    }
 
     private static let categoryId = "MEETING_START"
     private static let actionId = "START_NOTES"
@@ -37,16 +44,41 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
         center.setNotificationCategories([category])
     }
 
+    func refreshAuthorization() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        authorization = Self.authorization(from: settings.authorizationStatus)
+    }
+
+    /// Requests notification access after the user explicitly enables meeting
+    /// reminders, then schedules the current calendar snapshot.
+    func requestAuthorizationAndSchedule(for events: [UpcomingEvent]) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        await refreshAuthorization()
+        guard granted || authorization == .granted else { return false }
+        await schedule(for: events)
+        return true
+    }
+
+    func disableNotifications() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+    }
+
     /// Reschedules one notification per upcoming event (next 24h), replacing
-    /// the previous schedule. Call after each calendar load.
+    /// the previous schedule. Never prompts; prompting belongs to an explicit
+    /// user action in Settings.
     func schedule(for events: [UpcomingEvent]) async {
         let center = UNUserNotificationCenter.current()
-        guard UserDefaults.standard.object(forKey: "meetingNotifications") as? Bool ?? true else {
+        guard UserDefaults.standard.bool(forKey: "meetingNotifications") else {
             center.removeAllPendingNotificationRequests()
             return
         }
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        guard granted else { return }
+        let settings = await center.notificationSettings()
+        authorization = Self.authorization(from: settings.authorizationStatus)
+        guard authorization == .granted else {
+            center.removeAllPendingNotificationRequests()
+            return
+        }
 
         center.removeAllPendingNotificationRequests()
         for event in events {
@@ -67,6 +99,15 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
                 trigger: trigger
             )
             try? await center.add(request)
+        }
+    }
+
+    private static func authorization(from status: UNAuthorizationStatus) -> Authorization {
+        switch status {
+        case .authorized, .provisional, .ephemeral: .granted
+        case .denied: .denied
+        case .notDetermined: .unknown
+        @unknown default: .unknown
         }
     }
 
