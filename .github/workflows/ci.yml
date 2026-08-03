@@ -99,6 +99,9 @@ jobs:
           if (!llama) throw new Error('CPU llama addon is missing')
           require(llama)
           console.log('Packaged sherpa and llama native modules loaded successfully')
+          // Match the app's native-addon shutdown workaround: after proving
+          // both addons loaded, do not run llama's fragile process teardown.
+          process.exit(0)
           '@ | Set-Content -Path $script -Encoding UTF8
           $env:ELECTRON_RUN_AS_NODE = "1"
           & (Join-Path $appDir "DoodleNote.exe") $script $appDir
