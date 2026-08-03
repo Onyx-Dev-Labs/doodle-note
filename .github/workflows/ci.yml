@@ -71,6 +71,39 @@ jobs:
       - name: Build Windows installer
         run: pnpm --filter desktop package:win
 
+      - name: Smoke packaged Windows native modules
+        shell: pwsh
+        run: |
+          $appDir = (Resolve-Path "apps/desktop/release/win-unpacked").Path
+          $script = Join-Path $env:RUNNER_TEMP "doodlenote-native-smoke.cjs"
+          @'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = process.argv[2]
+          const unpacked = path.join(root, 'resources', 'app.asar.unpacked', 'node_modules')
+          const sherpa = require(path.join(unpacked, 'sherpa-onnx-node'))
+          if (typeof sherpa.OnlineRecognizer !== 'function') {
+            throw new Error('sherpa-onnx OnlineRecognizer did not load')
+          }
+          function find(rootDir, wanted) {
+            for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+              const file = path.join(rootDir, entry.name)
+              if (entry.isDirectory()) {
+                const found = find(file, wanted)
+                if (found) return found
+              } else if (entry.name === wanted) return file
+            }
+            return null
+          }
+          const llama = find(path.join(unpacked, '@node-llama-cpp', 'win-x64'), 'llama-addon.node')
+          if (!llama) throw new Error('CPU llama addon is missing')
+          require(llama)
+          console.log('Packaged sherpa and llama native modules loaded successfully')
+          '@ | Set-Content -Path $script -Encoding UTF8
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          & (Join-Path $appDir "DoodleNote.exe") $script $appDir
+          if ($LASTEXITCODE -ne 0) { throw "Packaged native module smoke failed" }
+
       - name: Verify Windows artifacts and signature state
         shell: pwsh
         run: |

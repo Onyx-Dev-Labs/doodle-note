@@ -78,6 +78,8 @@ test('Windows builds an x64 NSIS updater with the Windows icon and native engine
 test('CI builds and retains a real Windows installer', () => {
   assert.match(ciWorkflow, /windows-package:[\s\S]*runs-on:\s*windows-latest/)
   assert.match(ciWorkflow, /pnpm --filter desktop package:win/)
+  assert.match(ciWorkflow, /Smoke packaged Windows native modules/)
+  assert.match(ciWorkflow, /sherpa and llama native modules loaded successfully/)
   assert.match(ciWorkflow, /Get-AuthenticodeSignature/)
   assert.match(ciWorkflow, /actions\/upload-artifact@v4/)
   assert.match(desktopPackage, /release:win[\s\S]*verify-windows-signature\.ps1/)
