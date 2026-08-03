@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 /**
  * The "generating notes" state, on brand: a trot of paw prints padding
  * across the pill while short doodle-flavored phrases rotate underneath the
- * cursor — DoodleNote is named for Sean's Labradoodle/Goldendoodle and the
+ * cursor — DoodleNote's doodle-dog mascot and the
  * doodles everyone leaves in the margins of real notepads. Replaces the raw
  * streamed-word counter (which was noise, not progress).
  */

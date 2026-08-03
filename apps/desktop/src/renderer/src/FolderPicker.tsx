@@ -4,7 +4,7 @@ import type { MeetingSummary } from '../../shared/meetings-api'
 import { FolderIcon, LockIcon } from './icons'
 
 /**
- * Granola-style "Add to folder" popover: search field, "My notes" + folder
+ * DoodleNote "Add to folder" popover: search field, "My notes" + folder
  * rows with counts of non-trashed meetings, and an inline "New folder" row.
  * Shared by the Home-row ⋯ menu and the editor's folder chip. It fetches its
  * own data on open; the caller owns the actual assignment (upsert) via

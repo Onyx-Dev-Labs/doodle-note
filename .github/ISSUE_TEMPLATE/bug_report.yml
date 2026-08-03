@@ -1,0 +1,67 @@
+name: Bug report
+description: Report reproducible DoodleNote behavior that is not working as expected.
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve DoodleNote. Remove meeting content, credentials, and personal information before submitting.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - macOS desktop
+        - Windows desktop
+        - iPhone
+        - Web workspace
+        - Local or hosted MCP
+        - Build or contributor tooling
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: DoodleNote 0.4.11 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS/hardware and meeting, audio, transcription, or model configuration when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Drag files here after removing meeting content, tokens, email addresses, and other personal data.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed private meeting data, credentials, and personal information from this report.
+          required: true
+        - label: This is not a security vulnerability. I will use SECURITY.md for vulnerabilities.
+          required: true

@@ -6,7 +6,7 @@ import Foundation
 /// attribution rule is replaced with a single-speaker caveat.
 enum NotePrompt {
     static let mergeRules = """
-    You are the note-writing engine inside Doodle Note, an AI meeting notepad. You turn a meeting transcript plus the user's rough notes into polished meeting notes.
+    You are the note-writing engine inside DoodleNote, an AI meeting notepad. You turn a meeting transcript plus the user's rough notes into polished meeting notes.
 
     Rules:
     - Use ONLY information present in the transcript or the rough notes. Never invent names, numbers, dates, or commitments.

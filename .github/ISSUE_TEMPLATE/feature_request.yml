@@ -1,0 +1,50 @@
+name: Feature request
+description: Propose a focused improvement to DoodleNote.
+title: '[Feature]: '
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - macOS desktop
+        - Windows desktop
+        - iPhone
+        - Web workspace
+        - Local or hosted MCP
+        - Build or contributor tooling
+        - Cross-platform
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem or contributor friction should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result, not only a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and data flow
+      description: Would this capture, store, transmit, sync, or share any new data?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I may be able to help implement this change.

@@ -2,7 +2,7 @@
   "name": "desktop",
   "version": "0.4.11",
   "private": true,
-  "description": "Doodle Note desktop app \u2014 spawns the Swift transcription sidecar and shows its live transcript stream",
+  "description": "DoodleNote desktop app \u2014 private local capture, transcription, and AI meeting notes",
   "main": "./out/main/index.js",
   "scripts": {
     "brand:build": "./scripts/build-brand-assets.sh",

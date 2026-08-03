@@ -10,8 +10,7 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "engine:build": "swift build -c release --package-path engine",
-    "engine:test": "swift test --package-path engine"
+    "engine:build": "swift build -c release --package-path engine"
   },
   "devDependencies": {
     "turbo": "^2.5.0"

@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DoodleNote web workspace
 
-## Getting Started
+The Next.js application powers the public website and DoodleNote's optional cloud features: authentication, device linking, meeting sync, shared links, team workspaces, billing, and hosted read-only agent access.
 
-First, run the development server:
+Local-first desktop and iPhone capture do not depend on this app. Users opt into cloud features separately.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Run locally
+
+From the repository root:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter web dev
 ```
 
-Open [http://localhost:4040](http://localhost:4040) with your browser to see the result.
+Open [http://localhost:4040](http://localhost:4040).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+No external service is required for the basic local development path:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- the database falls back to PGlite under `packages/db/.pglite/` when `DATABASE_URL` is unset;
+- authentication uses an explicit insecure development fallback when `BETTER_AUTH_SECRET` is unset;
+- OAuth, email delivery, billing, and voice features remain disabled until their complete environment-variable groups are present.
 
-## Learn More
+## Optional environment variables
 
-To learn more about Next.js, take a look at the following resources:
+| Feature                           | Variables                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Hosted database                   | `DATABASE_URL`                                                                                                                       |
+| Auth origin and production secret | `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`                                                                                              |
+| Microsoft sign-in                 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`                                                                                     |
+| Google sign-in                    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                                           |
+| Workspace invitations             | `RESEND_API_KEY`, `INVITATION_FROM_EMAIL`                                                                                            |
+| Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`                                                                      |
+| Voice features                    | `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_CALLER_ID`, `TWILIO_AUTH_TOKEN` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Store local values in a gitignored `.env.local`. Do not commit production credentials or copy real account/meeting data into tests.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Commands
 
-## Deploy on Vercel
+```sh
+pnpm --filter web dev
+pnpm --filter web typecheck
+pnpm --filter web test
+pnpm --filter web build
+pnpm --filter web auth-smoke
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The current Next.js version may differ from older App Router examples. Read `apps/web/AGENTS.md` and the installed framework documentation before changing framework APIs.

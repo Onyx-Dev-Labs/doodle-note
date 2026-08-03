@@ -21,7 +21,7 @@ function loadNodeLlamaCpp(): Promise<NodeLlamaCpp> {
 }
 
 /**
- * The default Doodle Note engine: an on-device model downloaded during
+ * The default DoodleNote engine: an on-device model downloaded during
  * onboarding and run in-process (llama.cpp with Metal). No account, no API
  * key, nothing leaves the machine.
  */

@@ -2,7 +2,7 @@ import FluidAudio
 import Foundation
 
 /// Persistent engine: load the ASR models ONCE, then run capture sessions on
-/// demand — recording starts Granola-instant instead of paying the per-spawn
+/// demand — recording starts immediately instead of paying the per-spawn
 /// model warm-up. NDJSON commands on stdin:
 ///   {"cmd":"start","source":"both","aec":"off"}
 ///   {"cmd":"stop"}
