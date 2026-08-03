@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { asc, eq, getDb, meetings, notes, transcriptSegments } from "@repo/db";
+import { and, asc, eq, getDb, meetings, notes, sql, transcriptSegments } from "@repo/db";
 
-import { markdownOf, MeetingBody } from "../../meeting-body";
+import { MeetingBody } from "../../meeting-body";
+import { markdownOf } from "@/lib/meeting-content";
 import { navPillClass, SiteHeader, Wordmark } from "../../ui";
 
 export const metadata = { title: "Shared meeting — DoodleNote" };
@@ -22,7 +23,12 @@ export default async function SharePage({
   const meetingRows = await db
     .select()
     .from(meetings)
-    .where(eq(meetings.shareToken, token))
+    .where(
+      and(
+        eq(meetings.shareToken, token),
+        sql`(${meetings.shareExpiresAt} is null or ${meetings.shareExpiresAt} > current_timestamp)`,
+      ),
+    )
     .limit(1);
   const meeting = meetingRows[0];
   if (!meeting) notFound();
@@ -35,12 +41,14 @@ export default async function SharePage({
   const enhanced = markdownOf(noteRows[0]?.enhancedContent);
   const raw = markdownOf(noteRows[0]?.rawContent);
 
-  const segments = await db
-    .select()
-    .from(transcriptSegments)
-    .where(eq(transcriptSegments.meetingId, meeting.id))
-    .orderBy(asc(transcriptSegments.startMs))
-    .limit(5000);
+  const segments = meeting.shareIncludeTranscript
+    ? await db
+        .select()
+        .from(transcriptSegments)
+        .where(eq(transcriptSegments.meetingId, meeting.id))
+        .orderBy(asc(transcriptSegments.startMs))
+        .limit(5000)
+    : [];
 
   const when = meeting.startedAt ?? meeting.createdAt;
 
@@ -71,11 +79,19 @@ export default async function SharePage({
             })}
           </p>
         )}
+        <p className="mt-3 rounded-lg bg-sage-fill px-3 py-2 text-xs text-sage-deep">
+          Shared read-only
+          {meeting.shareExpiresAt
+            ? ` · Link expires ${meeting.shareExpiresAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+            : " · Link does not expire"}
+          {!meeting.shareIncludeTranscript ? " · Transcript not included" : ""}
+        </p>
 
         <MeetingBody
           markdown={enhanced ?? raw}
           segments={segments}
           emptyText="No notes on this meeting yet."
+          showTranscript={meeting.shareIncludeTranscript}
         />
       </main>
 

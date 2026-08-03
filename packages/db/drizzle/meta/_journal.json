@@ -64,6 +64,13 @@
       "when": 1783820602525,
       "tag": "0008_far_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785692066283,
+      "tag": "0009_mature_juggernaut",
+      "breakpoints": true
     }
   ]
 }

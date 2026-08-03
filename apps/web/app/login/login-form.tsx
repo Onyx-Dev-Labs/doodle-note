@@ -129,35 +129,44 @@ export function LoginForm({
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         {mode === "sign-up" && (
-          <input
-            type="text"
-            required
-            autoComplete="name"
-            placeholder="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={inputClass}
-          />
+          <label className="text-xs font-medium text-bark">
+            Name
+            <input
+              type="text"
+              required
+              autoComplete="name"
+              placeholder="Your name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={`mt-1 ${inputClass}`}
+            />
+          </label>
         )}
-        <input
-          type="email"
-          required
-          autoComplete="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className={inputClass}
-        />
-        <input
-          type="password"
-          required
-          minLength={8}
-          autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className={inputClass}
-        />
+        <label className="text-xs font-medium text-bark">
+          Email
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={`mt-1 ${inputClass}`}
+          />
+        </label>
+        <label className="text-xs font-medium text-bark">
+          Password
+          <input
+            type="password"
+            required
+            minLength={8}
+            autoComplete={mode === "sign-up" ? "new-password" : "current-password"}
+            placeholder="At least 8 characters"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={`mt-1 ${inputClass}`}
+          />
+        </label>
 
         {error && (
           <p role="alert" className="text-sm text-red-700">

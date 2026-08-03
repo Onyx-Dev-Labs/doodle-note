@@ -77,6 +77,28 @@ async function main(): Promise<void> {
     },
   });
 
+  await db
+    .update(schema.meetings)
+    .set({
+      shareToken: "0123456789abcdef0123456789abcdef",
+      shareExpiresAt: new Date("2030-01-01T00:00:00Z"),
+      shareIncludeTranscript: false,
+    })
+    .where(eq(schema.meetings.id, meeting.id));
+  await db.insert(schema.meetingStars).values({
+    meetingId: meeting.id,
+    userId: "user_smoke",
+  });
+  const [tag] = await db
+    .insert(schema.meetingTags)
+    .values({ organizationId: "org_smoke", name: "launch" })
+    .returning();
+  if (!tag) throw new Error("tag insert returned no row");
+  await db.insert(schema.meetingTagLinks).values({
+    meetingId: meeting.id,
+    tagId: tag.id,
+  });
+
   const rows = await db
     .select({
       meetingTitle: schema.meetings.title,
@@ -100,8 +122,38 @@ async function main(): Promise<void> {
     throw new Error(`unexpected join result: ${JSON.stringify(rows)}`);
   }
 
+  const [controls] = await db
+    .select({
+      shareToken: schema.meetings.shareToken,
+      includeTranscript: schema.meetings.shareIncludeTranscript,
+      starredBy: schema.meetingStars.userId,
+      tag: schema.meetingTags.name,
+    })
+    .from(schema.meetings)
+    .innerJoin(
+      schema.meetingStars,
+      eq(schema.meetingStars.meetingId, schema.meetings.id),
+    )
+    .innerJoin(
+      schema.meetingTagLinks,
+      eq(schema.meetingTagLinks.meetingId, schema.meetings.id),
+    )
+    .innerJoin(
+      schema.meetingTags,
+      eq(schema.meetingTags.id, schema.meetingTagLinks.tagId),
+    )
+    .where(eq(schema.meetings.id, meeting.id));
+  if (
+    controls?.shareToken !== "0123456789abcdef0123456789abcdef" ||
+    controls.includeTranscript !== false ||
+    controls.starredBy !== "user_smoke" ||
+    controls.tag !== "launch"
+  ) {
+    throw new Error(`unexpected cloud controls: ${JSON.stringify(controls)}`);
+  }
+
   console.log(
-    `smoke OK: meeting "${first.meetingTitle}" (${first.meetingStatus}) round-tripped ${rows.length} transcript segments + 1 note through in-memory PGlite`,
+    `smoke OK: meeting "${first.meetingTitle}" (${first.meetingStatus}) round-tripped ${rows.length} transcript segments + notes, secure sharing, a star, and a tag through in-memory PGlite`,
   );
 
   await client.close();

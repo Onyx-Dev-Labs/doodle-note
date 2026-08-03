@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { eq, getDb, member, organization } from "@repo/db";
+import { and, eq, getDb, member, organization, sql } from "@repo/db";
 
 /**
  * Every user gets a "Personal" workspace so the app never opens empty.
- * Idempotent: returns the user's first workspace if one already exists.
+ * Idempotent: returns the user's dedicated Personal workspace if it exists.
+ * A team workspace must never accidentally become the user's private default.
  */
 export async function ensurePersonalWorkspace(
   userId: string,
@@ -19,7 +20,12 @@ export async function ensurePersonalWorkspace(
     })
     .from(member)
     .innerJoin(organization, eq(organization.id, member.organizationId))
-    .where(eq(member.userId, userId))
+    .where(
+      and(
+        eq(member.userId, userId),
+        sql`${organization.slug} like 'personal-%'`,
+      ),
+    )
     .limit(1);
   if (existing[0]) return existing[0];
 
