@@ -7,6 +7,7 @@
 - [x] Deliver one native meeting notification while retaining the in-app action banner
 - [x] Bump the desktop version from 0.4.9 to 0.4.10
 - [x] Add the v0.4.10 changelog entry
+- [x] Stage the v0.4.10 updater manifest for the release deployment
 
 ## Verification
 
