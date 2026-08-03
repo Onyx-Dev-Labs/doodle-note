@@ -14,9 +14,9 @@
 - [x] Desktop test suite
 - [x] Desktop typecheck
 - [x] Production Electron build
-- [ ] Packaged Info.plist references the versioned icon resource
-- [ ] Signed and notarized arm64 package
-- [ ] Compact-window visual smoke test
+- [x] Packaged Info.plist references the versioned icon resource
+- [x] Signed and notarized arm64 package with the Swift transcription engine
+- [x] Compact-window visual smoke test from the unchanged PR #55 implementation
 - [ ] Native-notification smoke test
 
 ## Release gates
@@ -34,3 +34,15 @@
   macOS retained the previous artwork in its application-icon cache.
 - The public updater feed still reports v0.4.9, so the window-resize change in PR #55
   has not yet reached installed clients.
+
+## Package
+
+- Artifact: `DoodleNote-0.4.10-arm64-mac.zip`
+- Size: `170890800` bytes
+- SHA-256: `ae4ef04cc9db8f18d17ec3e6a10344ab1d48a02139ae1ecfedea5aa2c03468a5`
+- SHA-512: `kQmOK2+HmUbyiJUIEtS67AWQ3h0c0j3+xhCFQ4EvFNM4tDhVn7Om9wz7bAIsrglhkCBMyDlIp1JawBpmDOlPTw==`
+- Developer ID: `SEAN INMAN (VTZW6K32K4)`
+- Gatekeeper: `accepted` (`Notarized Developer ID`)
+- Stapled notarization ticket: validated
+- Packaged icon: `CFBundleIconFile = doodlenote-full-bleed.icns`
+- Packaged engine: arm64 Mach-O executable present
