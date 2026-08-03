@@ -19,7 +19,14 @@ export interface PromptDecision {
   matchedCalendarEventId?: string
 }
 
-export type PromptSurface = 'banner' | 'panel' | 'notification'
+export type ExternalPromptSurface = 'panel' | 'notification'
+
+export interface PromptDeliveryPlan {
+  /** Keep the action available inside DoodleNote whenever a renderer exists. */
+  banner: boolean
+  /** Use one OS-level attention surface for this already-deduplicated event. */
+  external: ExternalPromptSurface | null
+}
 
 export function initialPromptCoordinatorState(
   deliveredAt: Readonly<Record<string, number>> = {}
@@ -34,13 +41,25 @@ export function setPromptRecording(
   return { ...state, recording }
 }
 
-/** Choose exactly one visible attention surface for a delivered prompt. */
-export function choosePromptSurface(
+/**
+ * Keep the in-app action banner as persistent state, then choose one external
+ * attention surface. Native notifications are preferred; the floating panel
+ * remains a fallback for platforms/builds where they are unavailable.
+ */
+export function planPromptDelivery(
+  hasWindow: boolean,
   windowFocusedAndVisible: boolean,
+  notificationSupported: boolean,
   hasPanel: boolean
-): PromptSurface {
-  if (windowFocusedAndVisible) return 'banner'
-  return hasPanel ? 'panel' : 'notification'
+): PromptDeliveryPlan {
+  return {
+    banner: hasWindow,
+    external: notificationSupported
+      ? 'notification'
+      : !windowFocusedAndVisible && hasPanel
+        ? 'panel'
+        : null
+  }
 }
 
 /**

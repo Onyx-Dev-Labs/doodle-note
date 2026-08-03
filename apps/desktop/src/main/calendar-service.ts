@@ -52,9 +52,9 @@ import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
 import { GoogleCalendarClient } from './google-calendar'
 import type { PromptPanel } from './prompt-panel'
 import {
-  choosePromptSurface,
   coordinatePrompt,
   initialPromptCoordinatorState,
+  planPromptDelivery,
   setPromptRecording,
   type PromptCoordinatorState
 } from './prompt-coordinator'
@@ -854,11 +854,10 @@ export class CalendarService {
   }
 
   /**
-   * Fan a "meeting is starting" prompt out to every attention channel: the
-   * in-app banner (guaranteed when the window is visible), the OS
-   * notification and dock bounce (best-effort), and — when the main window
-   * is closed or buried — the floating prompt panel. Also the entry point
-   * for ad-hoc mic-detected prompts (MicWatcher).
+   * Deliver one deduplicated meeting prompt. The renderer keeps a persistent
+   * action banner, while one external surface gets the user's attention: a
+   * native notification when supported, or the floating panel as fallback.
+   * Also the entry point for ad-hoc mic-detected prompts (MicWatcher).
    */
   deliverPrompt(requested: CalendarStartMeetingEvent): void {
     const nowMs = Date.now()
@@ -874,24 +873,34 @@ export class CalendarService {
       this.saveNotified()
     }
 
-    try {
-      app.dock?.bounce('informational')
-    } catch {
-      // Not on macOS, or no dock — the banner already covers it.
-    }
     const window = BrowserWindow.getAllWindows().find(
       (candidate) => !this.promptPanel?.ownsWindow(candidate)
     )
     const bannerVisible = window !== undefined && window.isVisible() && window.isFocused()
-    const surface = choosePromptSurface(bannerVisible, this.promptPanel !== undefined)
-    if (surface === 'banner') {
+    const plan = planPromptDelivery(
+      window !== undefined,
+      bannerVisible,
+      Notification.isSupported(),
+      this.promptPanel !== undefined
+    )
+    if (plan.banner) {
       this.broadcast(CALENDAR_START_MEETING_CHANNEL, payload)
-    } else if (surface === 'panel' && this.promptPanel) {
-      this.promptPanel.show(payload, (action) => {
-        if (action === 'start') this.actOnPromptStart(payload)
+    }
+    if (plan.external === 'notification') {
+      this.showNotification(payload, () => {
+        const stillBackground = window === undefined || !window.isVisible() || !window.isFocused()
+        if (stillBackground) this.showPromptPanel(payload)
       })
-    } else {
-      this.showNotification(payload)
+    } else if (plan.external === 'panel') {
+      this.showPromptPanel(payload)
+    }
+  }
+
+  private showPromptPanel(prompt: CalendarStartMeetingEvent): void {
+    if (this.promptPanel) {
+      this.promptPanel.show(prompt, (action) => {
+        if (action === 'start') this.actOnPromptStart(prompt)
+      })
     }
   }
 
@@ -913,21 +922,30 @@ export class CalendarService {
     }
   }
 
-  private showNotification(prompt: CalendarStartMeetingEvent): void {
+  private showNotification(prompt: CalendarStartMeetingEvent, onFailure?: () => void): void {
+    let failed = false
+    const failOnce = (error?: unknown): void => {
+      if (failed) return
+      failed = true
+      if (error !== undefined) console.error('[calendar] notification failed:', error)
+      onFailure?.()
+    }
     try {
-      if (!Notification.isSupported()) return
+      if (!Notification.isSupported()) {
+        failOnce('Native notifications are not supported')
+        return
+      }
       const notification = new Notification({
         title: prompt.adHoc ? 'Looks like you’re on a call' : `${prompt.subject} is starting`,
         body: 'Click to start taking notes'
       })
+      notification.once('failed', (_event, error) => failOnce(error))
       notification.on('click', () => {
         this.actOnPromptStart(prompt)
       })
       notification.show()
     } catch (err) {
-      // Notifications can be unreliable (e.g. unsigned dev builds) — the
-      // in-app banner is the guaranteed path.
-      console.error('[calendar] notification failed:', err)
+      failOnce(err)
     }
   }
 

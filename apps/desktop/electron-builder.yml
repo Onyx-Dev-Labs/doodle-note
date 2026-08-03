@@ -25,6 +25,11 @@ mac:
   extraResources:
     - from: ../../engine/.build/release/engine
       to: engine/engine
+    # Keep the full-bleed artwork under a new bundle resource name. macOS can
+    # retain an app icon across in-place auto-updates when CFBundleIconFile
+    # keeps pointing at icon.icns, even though the file contents changed.
+    - from: resources/icon.icns
+      to: doodlenote-full-bleed.icns
   # pnpm supportedArchitectures installs every platform's native binaries so
   # cross-builds work; each platform ships only its own.
   files:
@@ -53,6 +58,7 @@ mac:
   # (fine for local installs — notarize before distributing to others).
   notarize: true
   extendInfo:
+    CFBundleIconFile: doodlenote-full-bleed.icns
     NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
     NSAudioCaptureUsageDescription: DoodleNote captures meeting audio (the other side of your call) to transcribe it on-device.
 win:

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { CalendarEvent, CalendarStartMeetingEvent } from '../shared/calendar-api'
 import {
-  choosePromptSurface,
   coordinatePrompt,
   initialPromptCoordinatorState,
+  planPromptDelivery,
   setPromptRecording
 } from './prompt-coordinator'
 
@@ -112,10 +112,30 @@ describe('prompt coordination', () => {
   })
 })
 
-describe('prompt surface selection', () => {
-  it('uses exactly one attention surface', () => {
-    assert.equal(choosePromptSurface(true, true), 'banner')
-    assert.equal(choosePromptSurface(false, true), 'panel')
-    assert.equal(choosePromptSurface(false, false), 'notification')
+describe('prompt delivery planning', () => {
+  it('pairs one native notification with the persistent in-app action', () => {
+    assert.deepEqual(planPromptDelivery(true, true, true, true), {
+      banner: true,
+      external: 'notification'
+    })
+    assert.deepEqual(planPromptDelivery(true, false, true, true), {
+      banner: true,
+      external: 'notification'
+    })
+  })
+
+  it('uses the floating panel only when native notifications are unavailable', () => {
+    assert.deepEqual(planPromptDelivery(true, false, false, true), {
+      banner: true,
+      external: 'panel'
+    })
+    assert.deepEqual(planPromptDelivery(true, true, false, true), {
+      banner: true,
+      external: null
+    })
+    assert.deepEqual(planPromptDelivery(false, false, false, true), {
+      banner: false,
+      external: 'panel'
+    })
   })
 })

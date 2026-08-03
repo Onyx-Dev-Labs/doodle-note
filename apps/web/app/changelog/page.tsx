@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.10",
+    date: "August 3, 2026",
+    highlights: [
+      "Resize the Mac app down to a compact 800 × 560 window for smaller screens and side-by-side setups",
+      "Meeting prompts now send one native Mac notification while keeping the Start taking notes action available inside DoodleNote",
+      "The corrected full-bleed app icon now refreshes reliably after an in-place update",
+    ],
+  },
+  {
     version: "0.4.9",
     date: "August 2, 2026",
     highlights: [
