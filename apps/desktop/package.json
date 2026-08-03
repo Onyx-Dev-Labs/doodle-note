@@ -1,10 +1,11 @@
 {
   "name": "desktop",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "private": true,
   "description": "Doodle Note desktop app \u2014 spawns the Swift transcription sidecar and shows its live transcript stream",
   "main": "./out/main/index.js",
   "scripts": {
+    "brand:build": "./scripts/build-brand-assets.sh",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",

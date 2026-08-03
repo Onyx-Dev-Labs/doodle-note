@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.11",
+    date: "August 3, 2026",
+    highlights: [
+      "The Mac app icon now uses the same edge-to-edge sage background as iPhone, without black side gutters",
+      "The matching mascot inside DoodleNote now uses the corrected opaque artwork too",
+      "Website Mac downloads now open a familiar drag-to-Applications installer",
+    ],
+  },
+  {
     version: "0.4.10",
     date: "August 3, 2026",
     highlights: [

@@ -24,28 +24,39 @@ if (!process.env.BLOB_READ_WRITE_TOKEN) {
   process.exit(1)
 }
 
-// Publishes update artifacts from release/: mac (latest-mac.yml + zips)
+// Publishes release artifacts from release/: mac (latest-mac.yml + ZIP
+// updater + DMG website installer)
 // and/or windows (latest.yml + exe + blockmap). Pass --mac / --win to limit
-// the upload to one platform; default is both.
+// the upload to one platform; default is both. --dmg-only backfills the
+// website installer without replacing an already-live updater ZIP/manifest.
 const flags = process.argv.slice(2)
-const wantMac = flags.includes('--mac') || !flags.includes('--win')
-const wantWin = flags.includes('--win') || !flags.includes('--mac')
+const dmgOnly = flags.includes('--dmg-only')
+const wantMac = dmgOnly || flags.includes('--mac') || !flags.includes('--win')
+const wantWin = !dmgOnly && (flags.includes('--win') || !flags.includes('--mac'))
 // Only the CURRENT version's artifacts upload — older ones are already on
 // the feed and immutable. (Re-uploading history burned ~600MB per release
 // and tripped a stream-reuse bug in the upload client's retry path.)
 const { version } = JSON.parse(
   readFileSync(path.join(here, '..', 'package.json'), 'utf8')
 )
+const isDmgArtifact = (name) => name.endsWith('.dmg') && name.includes(version)
 const isMacArtifact = (name) =>
   name === 'latest-mac.yml' ||
-  (name.endsWith('.zip') && name.includes('mac') && name.includes(version))
+  ((name.endsWith('.zip') || name.endsWith('.dmg')) &&
+    name.includes(version) &&
+    (name.endsWith('.dmg') || name.includes('mac')))
 const isWinArtifact = (name) =>
   name === 'latest.yml' ||
   ((name.endsWith('.exe') || name.endsWith('.exe.blockmap')) && name.includes(version))
-const artifacts = readdirSync(releaseDir).filter(
-  (name) => (wantMac && isMacArtifact(name)) || (wantWin && isWinArtifact(name))
-)
-if (!artifacts.includes('latest-mac.yml') && !artifacts.includes('latest.yml')) {
+const artifacts = readdirSync(releaseDir).filter((name) => {
+  if (dmgOnly) return isDmgArtifact(name)
+  return (wantMac && isMacArtifact(name)) || (wantWin && isWinArtifact(name))
+})
+if (dmgOnly && artifacts.length === 0) {
+  console.error('no version-matched DMG found — run pnpm package first')
+  process.exit(1)
+}
+if (!dmgOnly && !artifacts.includes('latest-mac.yml') && !artifacts.includes('latest.yml')) {
   console.error('no update manifest found — run pnpm package (mac) or package:win first')
   process.exit(1)
 }
