@@ -1531,7 +1531,7 @@ button.fp-row:hover {
 
 /* ---- floating bottom pill bar ---- */
 
-/* Granola layout: [record pill] [ask-anything input filling the middle].
+/* DoodleNote layout: [record pill] [ask-anything input filling the middle].
    The bar needs a real width for the input's flex: 1 to mean anything. */
 .bottom-bar {
   position: absolute;
@@ -3102,7 +3102,7 @@ button.fp-row:hover {
   font-style: italic;
 }
 
-/* generate-notes CTA (Granola-style centered button above the pill bar) */
+/* generate-notes CTA (centered button above the pill bar) */
 .generate-cta-wrap {
   position: absolute;
   left: 50%;

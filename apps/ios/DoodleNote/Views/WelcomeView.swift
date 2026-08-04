@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// First-run onboarding. Unlike Granola, no account is required — the whole
+/// First-run onboarding. No account is required — the whole
 /// notepad runs on-device; signing in is only for cloud sync.
 struct WelcomeView: View {
     var onDone: () -> Void

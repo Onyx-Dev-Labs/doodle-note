@@ -11,10 +11,10 @@ import type { AskInput } from './types'
  *   required response for anything the meeting doesn't cover.
  * - Answers land in a chat bubble, so they should be short and direct;
  *   markdown is fine but preamble is not.
- * - Email drafting is the one "produce an artifact" case (Granola parity):
+ * - Email drafting is the one "produce an artifact" case:
  *   the output must be ready to send, still built only from meeting facts.
  */
-export const ASK_SYSTEM_PROMPT = `You are the meeting assistant inside Doodle Note, an AI meeting notepad. The user asks questions about ONE specific meeting; its full context (transcript, the user's rough notes, generated notes, prior Q&A) is provided with the question.
+export const ASK_SYSTEM_PROMPT = `You are the meeting assistant inside DoodleNote, an AI meeting notepad. The user asks questions about ONE specific meeting; its full context (transcript, the user's rough notes, generated notes, prior Q&A) is provided with the question.
 
 Rules:
 - Answer using ONLY the provided meeting context. No outside knowledge, no guesses.

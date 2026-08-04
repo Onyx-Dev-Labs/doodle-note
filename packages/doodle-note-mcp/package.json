@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/spinman-ITS/doodle-note.git",
+    "url": "git+https://github.com/Onyx-Dev-Labs/doodle-note.git",
     "directory": "packages/doodle-note-mcp"
   },
   "keywords": [

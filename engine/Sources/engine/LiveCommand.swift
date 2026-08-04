@@ -167,7 +167,7 @@ enum LiveSession {
             guard granted else {
                 throw EngineError.internalError(
                     "Microphone permission denied. Open System Settings → Privacy & Security → Microphone, "
-                        + "enable it for the app running Doodle Note (Electron during development), then try again."
+                        + "enable it for the app running DoodleNote (Electron during development), then try again."
                 )
             }
             Events.emit(["event": "status", "stage": "permission_granted", "permission": "microphone"])

@@ -2,7 +2,7 @@ import { templateById } from './templates'
 import type { MergeInput, MergeSegment } from './types'
 
 /**
- * The note-merge prompt — Doodle Note's core product surface.
+ * The note-merge prompt — DoodleNote's core product surface.
  *
  * Design intents:
  * - The user's rough notes signal what THEY cared about; the transcript is
@@ -13,7 +13,7 @@ import type { MergeInput, MergeSegment } from './types'
  * - Markdown out, no preamble, so the result can be dropped straight into
  *   the editor.
  */
-const MERGE_RULES = `You are the note-writing engine inside Doodle Note, an AI meeting notepad. You turn a meeting transcript plus the user's rough notes into polished meeting notes.
+const MERGE_RULES = `You are the note-writing engine inside DoodleNote, an AI meeting notepad. You turn a meeting transcript plus the user's rough notes into polished meeting notes.
 
 Rules:
 - Use ONLY information present in the transcript or the rough notes. Never invent names, numbers, dates, or commitments.

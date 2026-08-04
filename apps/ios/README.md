@@ -44,7 +44,9 @@ xcodebuild -project DoodleNote.xcodeproj -scheme DoodleNote \
 ```
 
 Or open `DoodleNote.xcodeproj` in Xcode and run. Signing is automatic with the
-team set in `project.yml`.
+team set in `project.yml`. Outside contributors can build the simulator with
+code signing disabled; a physical-device build requires selecting their own
+development team locally.
 
 ## Notes
 

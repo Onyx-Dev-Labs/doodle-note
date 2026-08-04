@@ -58,7 +58,7 @@ export interface NotesProgress {
 
 /**
  * A notes engine turns a meeting (rough notes + transcript) into polished
- * notes, and answers questions about it. Doodle Note ships two: the LOCAL
+ * notes, and answers questions about it. DoodleNote ships two: the LOCAL
  * engine (default — an on-device model downloaded during onboarding) and
  * cloud engines behind the user's own API key (optional, added in settings).
  */

@@ -155,7 +155,7 @@ export function markPrompted(state: MicPromptState, nowMs: number): MicPromptSta
   return { ...state, promptedThisSession: true, lastPromptMs: nowMs }
 }
 
-/* ---- meeting-end watch (auto-stop recording, Granola-style) ---- */
+/* ---- meeting-end watch (automatic recording stop) ---- */
 
 /**
  * The meeting app must stay OFF the mic this long before we call the meeting

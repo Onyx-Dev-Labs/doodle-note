@@ -3,10 +3,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { safeStorage, shell } from 'electron'
-import {
-  BUILT_IN_GOOGLE_CLIENT_ID,
-  BUILT_IN_GOOGLE_CLIENT_SECRET
-} from '../shared/google-app'
+import { BUILT_IN_GOOGLE_CLIENT_ID } from '../shared/google-app'
 import type { CalendarAccount, CalendarEvent, CalendarInfo } from '../shared/calendar-api'
 
 const SCOPES = 'openid email https://www.googleapis.com/auth/calendar.readonly'
@@ -231,7 +228,6 @@ async function tokenRequest(params: Record<string, string>): Promise<TokenRespon
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       client_id: BUILT_IN_GOOGLE_CLIENT_ID,
-      client_secret: BUILT_IN_GOOGLE_CLIENT_SECRET,
       ...params
     })
   })

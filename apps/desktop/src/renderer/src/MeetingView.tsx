@@ -200,7 +200,7 @@ function imageFilesFrom(list: FileList | null | undefined): File[] {
   return Array.from(list ?? []).filter((f) => f.type.startsWith('image/'))
 }
 
-/** The Granola-shaped note editor: title, chips, page-wide TipTap doc,
+/** DoodleNote's note editor: title, chips, page-wide TipTap doc,
  *  floating record/enhance bar and the transcript flyout. */
 export default function MeetingView({
   meetingId,
@@ -628,7 +628,7 @@ export default function MeetingView({
     }
   }, [tplMenuOpen])
 
-  /* ---- auto-stop when the meeting app hangs up (Granola-style) ---- */
+  /* ---- auto-stop when the meeting app hangs up ---- */
 
   const [autoStopped, setAutoStopped] = useState(false)
   const capturingRef = useRef(false)
@@ -916,7 +916,7 @@ export default function MeetingView({
       setEnhanceError(result.error ?? 'Enhance failed with no output')
       return
     }
-    // Granola-style footer: when the meeting lives in the cloud too, the
+    // Cloud-aware footer: when the meeting lives in the cloud too, the
     // notes link to its web page (full transcript + chat). Skipped while
     // sync is off — local-first notes carry no dead links.
     let markdown = result.markdown
@@ -979,7 +979,7 @@ export default function MeetingView({
     </div>
   )
 
-  // Granola-style: notes appear on their own after the meeting ends. Waits
+  // Notes appear on their own after the meeting ends. Waits
   // for the stop to settle (capturing false, segments folded) and the model
   // to be ready; skips silently when there is nothing to write from.
   useEffect(() => {
