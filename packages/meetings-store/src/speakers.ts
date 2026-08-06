@@ -8,6 +8,10 @@
  * system = the far side). `speakerId` is a stable identity key derived from
  * the channel today and from diarization clusters later. `speaker` is only a
  * cached display label — `participants` wins whenever it knows the id.
+ *
+ * Dependency-free on purpose: the renderer imports this module directly
+ * (`@repo/meetings-store/speakers`) because the package barrel pulls in the
+ * node:fs-backed store, which cannot load in a browser context.
  */
 
 import type {

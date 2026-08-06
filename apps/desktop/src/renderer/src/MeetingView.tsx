@@ -25,9 +25,9 @@ import {
   renameSpeaker,
   speakerIdOf,
   speakerLabel,
-  withSelfParticipant,
-  type MeetingParticipant
-} from '@repo/meetings-store'
+  withSelfParticipant
+} from '@repo/meetings-store/speakers'
+import type { MeetingParticipant } from '@repo/meetings-store/types'
 import type {
   NotesModelsResponse,
   NotesSettingsView,

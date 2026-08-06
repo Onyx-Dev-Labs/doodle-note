@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./speakers": "./src/speakers.ts",
     "./types": "./src/types.ts"
   },
   "scripts": {
