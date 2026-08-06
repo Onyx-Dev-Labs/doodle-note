@@ -87,6 +87,7 @@ export class CloudMeetingSource implements MeetingSource {
     if (!row) return null;
     const segmentRows = await this.db
       .select({
+        channel: transcriptSegments.channel,
         speaker: transcriptSegments.speaker,
         text: transcriptSegments.text,
         startMs: transcriptSegments.startMs,
@@ -96,7 +97,7 @@ export class CloudMeetingSource implements MeetingSource {
       .where(eq(transcriptSegments.meetingId, meetingId))
       .orderBy(asc(transcriptSegments.startMs));
     const segments = segmentRows.map((s) => ({
-      speaker: s.speaker === "Them" ? ("Them" as const) : ("You" as const),
+      speaker: s.speaker || (s.channel === "mic" ? "You" : "Them"),
       text: s.text,
       start_ms: s.startMs,
       end_ms: s.endMs,

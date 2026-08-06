@@ -1,8 +1,17 @@
 /** A transcript segment as produced by the desktop segment pipeline. */
 export interface MergeSegment {
-  speaker: 'You' | 'Them'
+  /** Display label: a real name when known, else 'You' / 'Them'. */
+  speaker: string
   text: string
   startMs: number
+}
+
+/** A named speaker the prompts should attribute by name. */
+export interface SpeakerInfo {
+  /** The exact label used on transcript lines. */
+  label: string
+  /** True for the DoodleNote user (the note-taker). */
+  isSelf: boolean
 }
 
 /** Everything the note-merge needs about one meeting. */
@@ -11,6 +20,8 @@ export interface MergeInput {
   /** The user's rough notes, as markdown (TipTap serializes to this). */
   rawNotesMarkdown: string
   segments: MergeSegment[]
+  /** Known speakers behind the transcript labels; absent = You/Them only. */
+  speakers?: SpeakerInfo[]
   durationMs?: number
   /** Note template shaping the output (see templates.ts); default "general". */
   templateId?: string
@@ -37,6 +48,8 @@ export interface AskInput {
   /** AI-generated notes, when an Enhance run already happened. */
   enhancedMarkdown?: string | null
   segments: MergeSegment[]
+  /** Known speakers behind the transcript labels; absent = You/Them only. */
+  speakers?: SpeakerInfo[]
   /** Prior exchanges in this conversation (oldest first). */
   history: AskExchange[]
   question: string

@@ -10,6 +10,8 @@ function timestamp(ms: number): string {
 
 export interface TranscriptSegmentRow {
   id: string;
+  /** Ground truth for "is this the user"; the speaker label may be a name. */
+  channel?: string | null;
   speaker: string;
   startMs: number;
   text: string;
@@ -123,7 +125,7 @@ export function MeetingBody({
                 >
                   <span
                     className={
-                      segment.speaker === "You"
+                      (segment.channel ?? (segment.speaker === "You" ? "mic" : "system")) === "mic"
                         ? "font-semibold text-sage-deep"
                         : "font-semibold text-ink"
                     }

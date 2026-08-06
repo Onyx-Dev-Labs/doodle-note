@@ -8,6 +8,7 @@
  */
 
 import type { TranscriptSegment } from './engine-events'
+import type { MeetingParticipant } from '@repo/meetings-store/types'
 
 export const NOTES_MODELS_CHANNEL = 'notes:models'
 export const NOTES_TEMPLATES_CHANNEL = 'notes:templates'
@@ -71,6 +72,8 @@ export interface ActivateModelResult {
 export interface NotesSettingsView {
   engineChoice: EngineChoice
   activeLocalModelId?: string
+  /** The user's own name, used to label their transcript lines. */
+  profileName?: string
   cloud?: {
     provider: CloudProvider
     model?: string
@@ -83,6 +86,8 @@ export interface NotesSettingsView {
 /** Partial update; omitted fields are left untouched. */
 export interface NotesSettingsUpdate {
   engineChoice?: EngineChoice
+  /** The user's own name; empty string clears it back to "You". */
+  profileName?: string
   /**
    * Cloud config: `null` clears it; `apiKey` (write-only) replaces the
    * stored key when non-empty, otherwise the existing key is kept.
@@ -98,6 +103,8 @@ export interface EnhanceRequest {
   title: string
   rawNotesMarkdown: string
   segments: TranscriptSegment[]
+  /** Known speaker names; segment labels are resolved against these. */
+  participants?: MeetingParticipant[]
   /** Note template shaping the output; default "general". */
   templateId?: string
 }
@@ -129,6 +136,8 @@ export interface AskRequest {
   rawNotesMarkdown: string
   enhancedMarkdown?: string | null
   segments: TranscriptSegment[]
+  /** Known speaker names; segment labels are resolved against these. */
+  participants?: MeetingParticipant[]
   /** Prior exchanges in this meeting's chat (oldest first). */
   history: AskExchange[]
   question: string

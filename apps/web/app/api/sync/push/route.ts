@@ -192,7 +192,8 @@ export async function POST(request: Request) {
         .map((s) => ({
           meetingId: id,
           channel: s.channel,
-          speaker: String(s.speaker ?? "").slice(0, 40) || "You",
+          speaker:
+            String(s.speaker ?? "").slice(0, 40) || (s.channel === "mic" ? "You" : "Them"),
           text: s.text.slice(0, 10_000),
           startMs: Math.round(s.startMs),
           endMs: Math.round(s.endMs),

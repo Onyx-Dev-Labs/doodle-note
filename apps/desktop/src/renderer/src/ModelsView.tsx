@@ -196,6 +196,11 @@ export default function ModelsView({
   const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  /** The user's own name; labels their lines instead of "You". */
+  const [profileName, setProfileName] = useState('')
+  const [profileSaved, setProfileSaved] = useState(false)
+  const profileSeeded = useRef(false)
+
   const [provider, setProvider] = useState<CloudProvider>('anthropic')
   const [cloudModel, setCloudModel] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -542,6 +547,10 @@ export default function ModelsView({
       .getSettings()
       .then((view) => {
         setSettings(view)
+        if (!profileSeeded.current) {
+          profileSeeded.current = true
+          setProfileName(view.profileName ?? '')
+        }
         // Seed the cloud form once from saved settings.
         if (!cloudFormSeeded.current && view.cloud) {
           cloudFormSeeded.current = true
@@ -571,6 +580,14 @@ export default function ModelsView({
     setDownloading(null)
     if (!result.ok) setError(result.error ?? 'activation failed')
     refresh()
+  }
+
+  const saveProfileName = async (): Promise<void> => {
+    const view = await window.notes.setSettings({ profileName })
+    setSettings(view)
+    setProfileName(view.profileName ?? '')
+    setProfileSaved(true)
+    setTimeout(() => setProfileSaved(false), 2000)
   }
 
   const chooseEngine = async (choice: EngineChoice): Promise<void> => {
@@ -957,6 +974,30 @@ export default function ModelsView({
 
           {section === 'general' && (
             <>
+              <section className="keys-section">
+                <h3>Your name</h3>
+                <p className="models-sub">
+                  Used to label your own lines in transcripts and notes. Everyone else stays
+                  &ldquo;Them&rdquo; until you name them in the transcript.
+                </p>
+                <div className="key-form">
+                  <input
+                    type="text"
+                    spellCheck={false}
+                    placeholder="e.g. Sean Inman"
+                    value={profileName}
+                    maxLength={40}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void saveProfileName()
+                    }}
+                  />
+                  <button type="button" className="pill-btn" onClick={() => void saveProfileName()}>
+                    {profileSaved ? 'Saved' : 'Save'}
+                  </button>
+                </div>
+              </section>
+
               <section className="keys-section">
                 <h3>Appearance</h3>
                 <div className="theme-seg" role="radiogroup" aria-label="Appearance">

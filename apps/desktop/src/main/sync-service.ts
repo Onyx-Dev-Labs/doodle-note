@@ -5,6 +5,7 @@ import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain, safeStorage, shell } from 'electron'
 import type { TranscriptSegment } from '../shared/engine-events'
+import { defaultSpeakerId, defaultSpeakerLabel, sanitizeSpeakerName } from '@repo/meetings-store'
 import { MEETINGS_CHANGED_EVENT_CHANNEL, type MeetingRecord } from '../shared/meetings-api'
 import {
   SYNC_CONNECT_CHANNEL,
@@ -578,12 +579,11 @@ export class SyncService {
         // Segment ids are local-only (the cloud stores its own); synthesize.
         id: `${id}-pull-${index}`,
         channel: s.channel,
+        // Names assigned on another device arrive as free text; keep them.
         speaker:
-          s.speaker === 'You' || s.speaker === 'Them'
-            ? s.speaker
-            : s.channel === 'mic'
-              ? ('You' as const)
-              : ('Them' as const),
+          (typeof s.speaker === 'string' ? sanitizeSpeakerName(s.speaker) : '') ||
+          defaultSpeakerLabel(s.channel),
+        speakerId: defaultSpeakerId(s.channel),
         text: s.text,
         startMs: Math.round(s.startMs),
         endMs: Math.round(s.endMs),
