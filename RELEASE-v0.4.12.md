@@ -18,16 +18,16 @@
 
 ## Verification
 
-- [ ] Frozen-lockfile dependency install
-- [ ] Workspace typecheck
-- [ ] Full workspace test suite
-- [ ] Swift transcription engine release build
-- [ ] Production Electron package
-- [ ] Packaged application reports version 0.4.12
-- [ ] Signed and notarized arm64 package with the Swift transcription engine
-- [ ] Strict code-signature, Gatekeeper, and stapled-ticket validation
-- [ ] Updater ZIP and website DMG checksums recorded
-- [ ] Updater manifest references only version-matched v0.4.12 artifacts
+- [x] Frozen-lockfile dependency install
+- [x] Workspace typecheck (8 packages)
+- [x] Full workspace test suite (197 passing, 0 failing, 0 skipped after native packaging dependencies were available)
+- [x] Swift transcription engine release build
+- [x] Production Electron and web builds
+- [x] Packaged application reports version 0.4.12
+- [x] Signed and notarized arm64 package with the Swift transcription engine
+- [x] Strict code-signature, Gatekeeper, and stapled-ticket validation
+- [x] Updater ZIP and website DMG checksums recorded
+- [x] Updater manifest references only version-matched v0.4.12 artifacts
 
 ## Release gates
 
@@ -40,9 +40,14 @@
 
 ## Package
 
-- Updater artifact: pending
-- Website installer: pending
+- Updater artifact: `DoodleNote-0.4.12-arm64-mac.zip`
+- Updater size: `170317348` bytes
+- Updater SHA-256: `6438a7d996467b73c519ce202fd7d43c33fd96aa2f79b8ef02ff4d3619ed605f`
+- Website installer: `DoodleNote-0.4.12-arm64.dmg`
+- Website installer size: `172215086` bytes
+- Website installer SHA-256: `6acdeee9767ec731597d6c546553d3b264319b57612d54ec7039bba97bb71d4d`
 - Developer ID: `SEAN INMAN (VTZW6K32K4)`
-- Gatekeeper: pending
-- Stapled notarization ticket: pending
-- Packaged engine: pending
+- Apple notarization submission: `777c1a68-d8e7-45cf-b3f0-4e44b4a25d76` (`Accepted`)
+- Gatekeeper: `accepted` (`Notarized Developer ID`)
+- Stapled notarization ticket: validated
+- Packaged engine: arm64 Mach-O executable present
