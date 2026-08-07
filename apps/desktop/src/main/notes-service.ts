@@ -11,6 +11,7 @@ import {
   type MergeInput,
   type NotesEngine
 } from '@repo/ai'
+import { labelSegments, sanitizeSpeakerName, speakerInfos } from '@repo/meetings-store'
 import {
   NOTES_ACTIVATE_MODEL_CHANNEL,
   NOTES_ASK_CHANNEL,
@@ -71,6 +72,8 @@ interface StoredCloudSettings {
 interface StoredSettings {
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
+  /** The user's own name, shown instead of "You" on their transcript lines. */
+  profileName?: string
   cloud?: StoredCloudSettings
 }
 
@@ -259,13 +262,17 @@ export class NotesService {
     }
     this.enhanceBusy = true
     try {
-      const segments = Array.isArray(request.segments) ? request.segments : []
+      const segments = labelSegments(
+        Array.isArray(request.segments) ? request.segments : [],
+        request.participants
+      )
       const kept = segments.filter((s) => !s.echo)
       const input: MergeInput = {
         title: typeof request.title === 'string' ? request.title.trim() : '',
         rawNotesMarkdown:
           typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
+        speakers: speakerInfos(kept, request.participants),
         ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
@@ -301,7 +308,10 @@ export class NotesService {
       const question = typeof request.question === 'string' ? request.question.trim() : ''
       if (!question) return { error: 'Ask a question first.' }
 
-      const segments = Array.isArray(request.segments) ? request.segments : []
+      const segments = labelSegments(
+        Array.isArray(request.segments) ? request.segments : [],
+        request.participants
+      )
       const kept = segments.filter((s) => !s.echo)
       const history = (Array.isArray(request.history) ? request.history : []).filter(
         (h) => h && typeof h.question === 'string' && typeof h.answer === 'string'
@@ -317,6 +327,7 @@ export class NotesService {
           ? { enhancedMarkdown: request.enhancedMarkdown }
           : {}),
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
+        speakers: speakerInfos(kept, request.participants),
         history: history.map((h) => ({ question: h.question, answer: h.answer })),
         question
       }
@@ -459,10 +470,11 @@ export class NotesService {
   /* ---- settings ---- */
 
   private settingsView(): NotesSettingsView {
-    const { engineChoice, activeLocalModelId, cloud } = this.settings
+    const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
       ...(activeLocalModelId ? { activeLocalModelId } : {}),
+      ...(profileName ? { profileName } : {}),
       ...(cloud
         ? {
             cloud: {
@@ -481,6 +493,12 @@ export class NotesService {
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
+    }
+
+    if (typeof update.profileName === 'string') {
+      const name = sanitizeSpeakerName(update.profileName)
+      if (name) this.settings.profileName = name
+      else delete this.settings.profileName
     }
 
     const validProviders: CloudProvider[] = ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']
@@ -545,6 +563,10 @@ export class NotesService {
         LOCAL_MODELS.some((m) => m.id === raw.activeLocalModelId)
       ) {
         settings.activeLocalModelId = raw.activeLocalModelId
+      }
+      if (typeof raw.profileName === 'string') {
+        const name = sanitizeSpeakerName(raw.profileName)
+        if (name) settings.profileName = name
       }
       const cloud = raw.cloud
       if (

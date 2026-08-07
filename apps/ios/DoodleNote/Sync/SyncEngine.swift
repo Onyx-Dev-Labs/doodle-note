@@ -358,8 +358,7 @@ final class SyncEngine: NSObject {
         for wire in remote.segments {
             let segment = Segment(
                 channel: wire.channel,
-                // Desktop convention: mic = the note-taker, system = the other side.
-                speaker: wire.channel == "mic" ? "You" : "Them",
+                speaker: speakerLabel(for: wire),
                 text: wire.text,
                 startMs: wire.startMs,
                 endMs: wire.endMs,
@@ -414,7 +413,7 @@ final class SyncEngine: NSObject {
                     segments: remote.segments.map {
                         SegmentSnapshot(
                             channel: $0.channel,
-                            speaker: $0.channel == "mic" ? "You" : "Them",
+                            speaker: speakerLabel(for: $0),
                             text: $0.text,
                             startMs: $0.startMs,
                             endMs: $0.endMs,
@@ -441,6 +440,15 @@ final class SyncEngine: NSObject {
 private struct DirtyMeeting {
     let meeting: Meeting
     let prepared: PreparedMeeting
+}
+
+/// A speaker may have been named on another device (calendar, context, or a
+/// manual rename), so the remote label wins. Falls back to the desktop
+/// convention: mic = the note-taker, system = the other side.
+private func speakerLabel(for wire: SyncAPI.PushSegment) -> String {
+    let named = wire.speaker.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !named.isEmpty { return named }
+    return wire.channel == "mic" ? "You" : "Them"
 }
 
 private struct SegmentSnapshot: Sendable {

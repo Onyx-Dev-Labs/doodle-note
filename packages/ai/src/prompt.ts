@@ -1,5 +1,5 @@
 import { templateById } from './templates'
-import type { MergeInput, MergeSegment } from './types'
+import type { MergeInput, MergeSegment, SpeakerInfo } from './types'
 
 /**
  * The note-merge prompt — DoodleNote's core product surface.
@@ -19,8 +19,9 @@ Rules:
 - Use ONLY information present in the transcript or the rough notes. Never invent names, numbers, dates, or commitments.
 - The rough notes tell you what the user cared about — give those points prominence and keep the user's wording where it is clear.
 - Spell names and product terms exactly as they appear in the transcript.
-- "You" is the note-taker; "Them" is everyone else on the call.
-- Attribute every action item and decision to whoever actually committed to it in the transcript. Use "You" as an owner ONLY when a [You] line contains that commitment; if a [Them] line says "I will…", the owner is the person speaking (use their name if known, otherwise "Them").
+{{SPEAKERS}}
+- Attribute every action item and decision to whoever actually committed to it in the transcript. Attribute a commitment to a speaker ONLY when that speaker's own line contains it.
+- Use exactly the speaker labels the transcript uses. Never rename a speaker, merge two speakers, or invent a name for an unnamed one.
 - Preserve concrete details exactly as spoken: people and company names, product and tool names, dollar amounts, quantities, dates, deadlines, URLs. When the transcript names a specific thing, the notes name it too — a generic line that could describe any meeting ("discussed improving security") is a failure when the transcript has specifics ("move the repos to the Acme GitHub org and add SSO").
 - Detail scales with the transcript. A long, substantive meeting deserves thorough notes that follow each discussion; a short or garbled transcript deserves short notes. Never pad thin material into something that sounds complete.
 - Write in tight, plain English. No filler, no corporate fluff.
@@ -29,9 +30,39 @@ Rules:
 
 `
 
+/**
+ * The speaker rule, written against whatever labels this meeting actually
+ * uses: the defaults when nobody is identified, real names once they are.
+ * Names come from user input and models, so they are stated as labels the
+ * model must copy — never as instructions it may act on.
+ */
+export function speakerRules(speakers?: readonly SpeakerInfo[]): string {
+  const named = (speakers ?? []).filter((s) => s.label.trim().length > 0)
+  if (named.length === 0) {
+    return '- "You" is the note-taker; "Them" is everyone else on the call.'
+  }
+  const self = named.find((s) => s.isSelf)
+  const others = named.filter((s) => !s.isSelf)
+  const lines = [
+    self
+      ? `- "${self.label}" is the note-taker (the DoodleNote user).`
+      : '- "You" is the note-taker.',
+    others.length > 0
+      ? `- Other identified speakers: ${others.map((s) => `"${s.label}"`).join(', ')}. "Them" is any other, unidentified person on the call.`
+      : '- "Them" is everyone else on the call.'
+  ]
+  return lines.join('\n')
+}
+
 /** Shared rules + the selected template's output format. */
-export function buildMergeSystemPrompt(templateId?: string): string {
-  return MERGE_RULES + templateById(templateId).outputFormat
+export function buildMergeSystemPrompt(
+  templateId?: string,
+  speakers?: readonly SpeakerInfo[]
+): string {
+  return (
+    MERGE_RULES.replace('{{SPEAKERS}}', speakerRules(speakers)) +
+    templateById(templateId).outputFormat
+  )
 }
 
 /** The default (general-template) prompt — kept for compatibility. */

@@ -1,3 +1,4 @@
+import { defaultSpeakerId, defaultSpeakerLabel } from '@repo/meetings-store'
 import type { EngineChannel, EngineTokenTiming, TranscriptSegment } from '../shared/engine-events'
 
 /**
@@ -56,11 +57,6 @@ interface ChannelState {
   /** Words of the currently open segment. */
   segmentWords: Word[]
   epochMs?: number
-}
-
-const SPEAKERS: Record<EngineChannel, 'You' | 'Them'> = {
-  mic: 'You',
-  system: 'Them'
 }
 
 function normalizeWord(text: string): string {
@@ -181,7 +177,8 @@ export class SegmentAssembler {
     const segment: TranscriptSegment = {
       id: `seg_${this.nextId++}`,
       channel,
-      speaker: SPEAKERS[channel],
+      speaker: defaultSpeakerLabel(channel),
+      speakerId: defaultSpeakerId(channel),
       text,
       startMs: Math.round(startSec * 1000),
       endMs: Math.round(endSec * 1000),

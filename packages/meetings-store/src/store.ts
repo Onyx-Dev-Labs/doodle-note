@@ -6,6 +6,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import {
+  defaultSpeakerLabel,
+  labelSegments,
+  normalizeParticipants,
+  sanitizeSpeakerName,
+  speakerIdOf,
+} from "./speakers";
 import type {
   MeetingChatEntry,
   MeetingRecord,
@@ -159,6 +166,10 @@ export class MeetingFileStore {
 
 /** Fill defaults so every stored/returned record has the full shape. */
 export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
+  const participants = normalizeParticipants(raw.participants);
+  const segments = Array.isArray(raw.segments)
+    ? (raw.segments as TranscriptSegment[]).map(normalizeSegment)
+    : [];
   return {
     id: raw.id,
     // Only "note" is stored; anything else normalizes to the meeting default.
@@ -179,9 +190,8 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     ...(typeof raw.templateId === "string" && raw.templateId.length > 0
       ? { templateId: raw.templateId }
       : {}),
-    segments: Array.isArray(raw.segments)
-      ? (raw.segments as TranscriptSegment[])
-      : [],
+    ...(participants.length > 0 ? { participants } : {}),
+    segments: labelSegments(segments, participants),
     echoSuppressed:
       typeof raw.echoSuppressed === "number" ? raw.echoSuppressed : 0,
     ...(Array.isArray(raw.chat) ? { chat: raw.chat.filter(isChatEntry) } : {}),
@@ -199,6 +209,22 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
       ? { calendarEventId: raw.calendarEventId }
       : {}),
   };
+}
+
+/**
+ * Speaker fields are the only part of a segment other processes can widen:
+ * give every segment a stable id and a non-empty label so readers never see
+ * a blank speaker.
+ */
+function normalizeSegment(segment: TranscriptSegment): TranscriptSegment {
+  const speakerId = speakerIdOf(segment);
+  const speaker =
+    (typeof segment.speaker === "string"
+      ? sanitizeSpeakerName(segment.speaker)
+      : "") || defaultSpeakerLabel(segment.channel);
+  return segment.speakerId === speakerId && segment.speaker === speaker
+    ? segment
+    : { ...segment, speakerId, speaker };
 }
 
 function isIsoString(value: unknown): value is string {

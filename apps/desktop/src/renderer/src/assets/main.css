@@ -1966,6 +1966,38 @@ button.fp-row:hover {
   color: var(--muted);
 }
 
+/* The speaker name doubles as the rename control: quiet until hovered. */
+.tp-speaker-btn {
+  background: none;
+  border: 0;
+  padding: 2px 0 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tp-speaker-btn:hover {
+  text-decoration: underline dotted;
+}
+
+.tp-speaker-input {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--body);
+}
+
 .tp-text {
   color: var(--body);
 }

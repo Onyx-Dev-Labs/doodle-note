@@ -11,7 +11,14 @@ export type MeetingChannel = "mic" | "system";
 export interface TranscriptSegment {
   id: string;
   channel: MeetingChannel;
-  speaker: "You" | "Them";
+  /**
+   * Display label for whoever spoke: a real name once known, otherwise the
+   * channel default ("You" / "Them"). `speakerId` is the stable identity —
+   * renaming a speaker rewrites every label sharing that id.
+   */
+  speaker: string;
+  /** Stable speaker key; absent on segments recorded before speaker ids. */
+  speakerId?: string;
   text: string;
   /** Milliseconds relative to this channel's stream start. */
   startMs: number;
@@ -22,6 +29,24 @@ export interface TranscriptSegment {
   absoluteStartMs?: number;
   /** True when the segment was judged to be far-side audio bleeding into the mic. */
   echo?: boolean;
+}
+
+/** How a participant's name was established (weakest to strongest). */
+export type ParticipantSource =
+  | "self"
+  | "calendar"
+  | "context"
+  | "dictionary"
+  | "manual";
+
+/** One identified person in a meeting; `id` matches `TranscriptSegment.speakerId`. */
+export interface MeetingParticipant {
+  id: string;
+  name: string;
+  email?: string;
+  source: ParticipantSource;
+  /** 0..1 confidence in the name; manual assignments are 1. */
+  confidence: number;
 }
 
 /** One persisted "ask anything" exchange. */
@@ -58,6 +83,8 @@ export interface MeetingRecord {
   templateId?: string;
   /** Interleaved You/Them transcript segments (echo-flagged ones excluded). */
   segments: TranscriptSegment[];
+  /** Known speakers, keyed by the ids segments carry; absent = nobody named. */
+  participants?: MeetingParticipant[];
   /** How many echo segments were suppressed across the session(s). */
   echoSuppressed: number;
   /** "Ask anything" conversation for this meeting, oldest first. */

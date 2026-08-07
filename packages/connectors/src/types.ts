@@ -28,7 +28,8 @@ export interface FinalizedMeetingEvent {
   };
   transcript: {
     segments: Array<{
-      speaker: "You" | "Them";
+      /** Display label: a real name when known, else "You" / "Them". */
+      speaker: string;
       text: string;
       start_ms: number;
       end_ms: number;
