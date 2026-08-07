@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.12",
+    date: "August 7, 2026",
+    highlights: [
+      "Add your name in Settings so your side of transcripts is labeled consistently instead of You",
+      "Rename the other speaker once and apply that name throughout the entire meeting transcript",
+      "Generated meeting notes and Ask now use the resolved speaker names when attributing what people said",
+    ],
+  },
+  {
     version: "0.4.11",
     date: "August 3, 2026",
     highlights: [
