@@ -26,12 +26,16 @@ Confirmed against `Onyx-Dev-Labs/doodle-note` on 2026-08-25:
 | GitHub Releases are empty | README links to them; `gh release` list is empty. Consumer downloads live on [doodlenote.ai](https://www.doodlenote.ai) |
 
 You do not need a second “free edition” codebase. The free product is the
-desktop and iPhone apps in this repo, running locally.
+desktop and iPhone apps in this repo, running locally. The **$10 Sync
+plan stays**. It is the optional official backup and multi-device copy
+of notes you already sell; open-sourcing does not remove it.
 
 ## Recommended model
 
-**Open-source the whole monorepo under MIT. Charge for official hosted
-Sync at doodlenote.ai.**
+**Open-source the whole monorepo under MIT. Keep charging $10 / user /
+month for official hosted Sync at doodlenote.ai.** The local app is
+free forever. Sync is optional: only people who want a cloud backup,
+another device, or the web library pay.
 
 ```text
 Free (MIT, no account)
@@ -55,12 +59,18 @@ absent, entitlement checks pass. That is the honest self-host path.
 You do not have to make Docker-compose day-one, but you should not
 block people who clone and run the web app themselves.
 
-### Why not split “OSS app” vs “proprietary cloud”
+### Why not hide the sync *source* (this is not “drop the $10 plan”)
+
+Keep the paid Sync product. Do not move `apps/web` into a private
+repo or a closed “pro” tree.
 
 - The monorepo already contains desktop, iOS, engine, **and** the
   Next.js sync server, billing, and workspaces under one MIT license.
-- Splitting now would be a large, trust-damaging refactor. Contributors
-  would see “the interesting server is closed.”
+- Customers still pay DoodleNote $10 / user / month for *your* hosted
+  backup, storage, and support. That charge is an API entitlement
+  (`402` + `needsSubscription`), not a secret codebase.
+- Hiding the server would be a large, trust-damaging refactor.
+  Contributors would see “the interesting server is closed.”
 - Privacy is the product. An inspectable sync server is a feature of
   that pitch, not a liability.
 - A well-funded clone of a $10 notes-sync API is unlikely to beat
