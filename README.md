@@ -34,7 +34,7 @@ DoodleNote captures your microphone and the other side of a call on your compute
 | iPhone          | In development | Native SwiftUI app targeting iOS 26; full recording verification requires a physical device.                          |
 | Web workspace   | In development | Next.js app for account linking, sync, sharing, workspaces, and hosted agent access.                                  |
 
-The repository moves quickly. See [GitHub Releases](https://github.com/Onyx-Dev-Labs/doodle-note/releases) and the versioned release checklists for exact shipped status.
+Signed desktop downloads are published at [doodlenote.ai](https://www.doodlenote.ai). Versioned release checklists in this repository (`RELEASE-v*.md`) record what shipped.
 
 ## Repository map
 
@@ -107,7 +107,12 @@ Recording and consent laws vary by location and organization. You are responsibl
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities through the private process in [SECURITY.md](SECURITY.md).
 
 Brand assets and usage notes live in [docs/BRAND.md](docs/BRAND.md).
+The DoodleNote name and mascot are reserved; see [TRADEMARK.md](TRADEMARK.md).
 
 ## License
 
-DoodleNote is available under the [MIT License](LICENSE).
+DoodleNote is available under the [MIT License](LICENSE). The local
+apps are free forever. Official cloud Sync at
+[doodlenote.ai](https://www.doodlenote.ai) is an optional paid backup
+and multi-device service ($10 / user / month). See
+[docs/OPEN-SOURCE.md](docs/OPEN-SOURCE.md).
