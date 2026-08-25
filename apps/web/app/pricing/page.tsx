@@ -5,6 +5,7 @@ import {
   buttonPrimary,
   DoodleStroke,
   DownloadButtons,
+  GITHUB_REPO,
   navLinkClass,
   navPillClass,
   SiteFooter,
@@ -54,6 +55,10 @@ const FAQ = [
     q: "Do I need a ChatGPT or Claude subscription?",
     a: "No. DoodleNote downloads a local model in-app that writes your notes for free. If you prefer a frontier model, you can plug in your own OpenAI or Anthropic API key.",
   },
+  {
+    q: "Is DoodleNote open source?",
+    a: "Yes. The whole monorepo — desktop, iPhone, and the sync server — is MIT at github.com/Onyx-Dev-Labs/doodle-note. Official hosted Sync at doodlenote.ai is still $10 / user / month. Forks must not use the DoodleNote name or mascot.",
+  },
 ];
 
 function FeatureList({ items }: { items: string[] }) {
@@ -83,6 +88,14 @@ export default function PricingPage() {
             <Link href="/changelog" className={navLinkClass}>
               What&rsquo;s new
             </Link>
+            <a
+              href={GITHUB_REPO}
+              className={navLinkClass}
+              rel="noreferrer"
+              target="_blank"
+            >
+              GitHub
+            </a>
             <Link href="/login" className={navPillClass}>
               Sign in
             </Link>
