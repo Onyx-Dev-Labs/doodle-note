@@ -110,4 +110,7 @@ Brand assets and usage notes live in [docs/BRAND.md](docs/BRAND.md).
 
 ## License
 
-DoodleNote is available under the [MIT License](LICENSE).
+DoodleNote is available under the [MIT License](LICENSE). The local
+apps are free; official cloud sync is a paid hosted service. See
+[docs/OPEN-SOURCE.md](docs/OPEN-SOURCE.md) for the open-source model,
+trademark notes, and public-repository launch checklist.
