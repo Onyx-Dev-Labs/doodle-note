@@ -102,17 +102,21 @@ Protect the name and mascot separately (see Trademark below).
 
 Say this in public, because the code already says it:
 
-1. **The notepad is free.** Recording, transcription, and note
-   generation run on the user’s machine. No meeting caps.
-2. **Sync is optional infrastructure.** $10 / user / month pays for
-   DoodleNote’s servers and storage, not for unlocking local notes.
+1. **The notepad is free, and stays free.** Recording, transcription,
+   and note generation run on the user’s machine. No account. No
+   meeting caps.
+2. **$10 Sync is optional backup and multi-device copy.** People pay
+   only if they want DoodleNote to keep a hosted copy of their notes
+   (sync, web library, share links, workspaces). Local notes never
+   require this.
 3. **Canceling Sync does not delete local notes.** Entitlement is
    enforced on device-link and sync routes (`402` +
    `needsSubscription`), not on the local store.
 
 Do not put local transcription, local models, or the Electron/iOS
 capture loop behind a paywall later. That would contradict both the
-pricing page and the open-source promise.
+pricing page and the open-source promise. The $10 plan remains the
+paid cloud backup; it is not removed by going public.
 
 ## Trademark is the real lock
 
