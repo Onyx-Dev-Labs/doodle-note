@@ -33,7 +33,23 @@ No external service is required for the basic local development path:
 | Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`                                                                      |
 | Voice features                    | `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_CALLER_ID`, `TWILIO_AUTH_TOKEN` |
 
-Store local values in a gitignored `.env.local`. Do not commit production credentials or copy real account/meeting data into tests.
+A commented template is in [`.env.example`](.env.example). Store local
+values in a gitignored `.env.local`. Do not commit production
+credentials or copy real account/meeting data into tests.
+
+## Self-hosting Sync
+
+The same app can sync devices against a server you run. Local
+development already does this with PGlite when `DATABASE_URL` is
+unset. For a durable self-hosted instance you typically set
+`DATABASE_URL` and `BETTER_AUTH_SECRET` (and Blob/OAuth if you need
+those features).
+
+Official **$10 / user / month** Sync billing is the doodlenote.ai
+hosted product (Stripe). When Stripe keys are absent, entitlement
+checks pass so a self-hosted copy does not require DoodleNote's paid
+plan. This repository does not ship a production Docker Compose stack
+yet.
 
 ## Commands
 

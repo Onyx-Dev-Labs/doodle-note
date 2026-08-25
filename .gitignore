@@ -16,6 +16,7 @@ engine/.swiftpm/
 .env
 .env.*
 !.env.example
+!apps/web/.env.example
 
 # local data
 *.db

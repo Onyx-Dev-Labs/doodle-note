@@ -44,7 +44,11 @@ jobs:
   # addons. Build the actual NSIS updater on every PR and retain it for native
   # Windows smoke testing. CSC_LINK/CSC_KEY_PASSWORD sign it automatically
   # once the repository's Authenticode certificate secrets are configured.
+  # Same-repo PRs and pushes to main only. Fork PRs still get the Ubuntu
+  # typecheck/test job; they must not produce a downloadable installer
+  # artifact from untrusted code.
   windows-package:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     env:
       CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
