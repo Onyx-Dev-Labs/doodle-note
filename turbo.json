@@ -20,7 +20,8 @@
     "TWILIO_API_KEY_SID",
     "TWILIO_AUTH_TOKEN",
     "TWILIO_CALLER_ID",
-    "TWILIO_TWIML_APP_SID"
+    "TWILIO_TWIML_APP_SID",
+    "VERCEL_URL"
   ],
   "tasks": {
     "build": {

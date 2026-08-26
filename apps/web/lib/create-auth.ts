@@ -5,7 +5,7 @@ import { organization } from "better-auth/plugins";
 import { fullSchema, type Db } from "@repo/db";
 
 import { sendWorkspaceInvitationEmail } from "./invitation-email";
-import { resolveAuthSecret } from "./runtime-config";
+import { resolveAuthBaseUrl, resolveAuthSecret } from "./runtime-config";
 
 const googleEnabled = () =>
   Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -51,7 +51,7 @@ export function createAuth(db: Db) {
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema: fullSchema }),
     secret: resolveAuthSecret(),
-    baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:4040",
+    baseURL: resolveAuthBaseUrl(),
     emailAndPassword: {
       enabled: true,
     },

@@ -26,6 +26,17 @@ export function resolveAuthSecret(
   return DEV_ONLY_SECRET;
 }
 
+export function resolveAuthBaseUrl(
+  env: RuntimeEnvironment = process.env,
+): string {
+  if (env.BETTER_AUTH_URL) return env.BETTER_AUTH_URL;
+  if (env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
+  if (env.NODE_ENV === "production") {
+    throw new Error("BETTER_AUTH_URL is required in production");
+  }
+  return "http://localhost:4040";
+}
+
 /**
  * Hosted production requires the complete Stripe configuration. A production
  * deployment may bypass billing only by explicitly declaring itself a

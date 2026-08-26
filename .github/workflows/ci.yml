@@ -22,6 +22,7 @@ jobs:
     env:
       # Public CI-only values. Production uses deployment-managed secrets.
       BETTER_AUTH_SECRET: ci-only-auth-secret-not-used-outside-actions
+      BETTER_AUTH_URL: http://localhost:4040
       DOODLENOTE_SELF_HOSTED: "true"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveAuthSecret, resolveBillingMode } from "../lib/runtime-config";
+import {
+  resolveAuthBaseUrl,
+  resolveAuthSecret,
+  resolveBillingMode,
+} from "../lib/runtime-config";
 
 test("production auth requires an explicit secret", () => {
   assert.throws(
@@ -19,6 +23,31 @@ test("production auth requires an explicit secret", () => {
 
 test("development auth retains the documented zero-config fallback", () => {
   assert.match(resolveAuthSecret({ NODE_ENV: "development" }), /dev-only/);
+  assert.equal(
+    resolveAuthBaseUrl({ NODE_ENV: "development" }),
+    "http://localhost:4040",
+  );
+});
+
+test("production auth requires an explicit or Vercel deployment URL", () => {
+  assert.throws(
+    () => resolveAuthBaseUrl({ NODE_ENV: "production" }),
+    /BETTER_AUTH_URL is required in production/,
+  );
+  assert.equal(
+    resolveAuthBaseUrl({
+      NODE_ENV: "production",
+      BETTER_AUTH_URL: "https://sync.example.com",
+    }),
+    "https://sync.example.com",
+  );
+  assert.equal(
+    resolveAuthBaseUrl({
+      NODE_ENV: "production",
+      VERCEL_URL: "preview.example.vercel.app",
+    }),
+    "https://preview.example.vercel.app",
+  );
 });
 
 test("hosted production requires the complete Stripe group", () => {
