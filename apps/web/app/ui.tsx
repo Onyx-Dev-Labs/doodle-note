@@ -70,21 +70,21 @@ export function BrandLockup({
   priority?: boolean;
 }) {
   return (
-    <div className="flex shrink-0 flex-col items-start gap-1">
-      <Link href="/" className="flex items-center gap-2.5">
-        <Image
-          src="/mascot.png"
-          alt=""
-          width={compact ? 30 : 34}
-          height={compact ? 30 : 34}
-          className="rounded-lg"
-          priority={priority}
-          unoptimized
-        />
+    <Link href="/" className="flex shrink-0 items-start gap-2.5">
+      <Image
+        src="/mascot.png"
+        alt=""
+        width={compact ? 30 : 34}
+        height={compact ? 30 : 34}
+        className="rounded-lg"
+        priority={priority}
+        unoptimized
+      />
+      <span className="flex flex-col items-start gap-1 pt-0.5">
         <Wordmark size={compact ? "text-base" : "text-lg"} />
-      </Link>
-      <BuilderAttribution compact={compact} />
-    </div>
+        <BuilderAttribution compact={compact} />
+      </span>
+    </Link>
   );
 }
 
