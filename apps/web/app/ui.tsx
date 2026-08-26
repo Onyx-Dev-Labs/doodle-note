@@ -14,6 +14,7 @@ export const DOWNLOADS = {
 };
 
 export const GITHUB_REPO = "https://github.com/Onyx-Dev-Labs/doodle-note";
+export const ONYX_URL = "https://onyxdev.io";
 
 /* Shared control styles — keep every page speaking the same visual language. */
 export const inputClass =
@@ -40,22 +41,58 @@ export function Wordmark({ size = "text-lg" }: { size?: string }) {
   );
 }
 
-/** Marketing-page header. Pass `nav` to swap the right side per page. */
-export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
+function BuilderAttribution({ compact = false }: { compact?: boolean }) {
   return (
-    <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-5">
+    <p
+      className={`whitespace-nowrap font-normal leading-none tracking-normal text-stone ${
+        compact ? "text-[11px]" : "text-xs"
+      }`}
+    >
+      built by{" "}
+      <a
+        href={ONYX_URL}
+        className="rounded-[2px] text-bark underline decoration-bark/60 underline-offset-2 transition hover:text-sage-deep hover:decoration-sage-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage-deep"
+        rel="noreferrer"
+        target="_blank"
+      >
+        Onyx Dev Labs
+      </a>
+    </p>
+  );
+}
+
+/** Logo, wordmark, and builder attribution — matches other Onyx product sites. */
+export function BrandLockup({
+  compact = false,
+  priority = false,
+}: {
+  compact?: boolean;
+  priority?: boolean;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col items-start gap-1">
       <Link href="/" className="flex items-center gap-2.5">
         <Image
           src="/mascot.png"
           alt=""
-          width={34}
-          height={34}
+          width={compact ? 30 : 34}
+          height={compact ? 30 : 34}
           className="rounded-lg"
-          priority
+          priority={priority}
           unoptimized
         />
-        <Wordmark />
+        <Wordmark size={compact ? "text-base" : "text-lg"} />
       </Link>
+      <BuilderAttribution compact={compact} />
+    </div>
+  );
+}
+
+/** Marketing-page header. Pass `nav` to swap the right side per page. */
+export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
+  return (
+    <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-5">
+      <BrandLockup priority />
       <nav className="flex items-center gap-1 sm:gap-2">
         {nav ?? (
           <>
@@ -84,7 +121,7 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-sand">
       <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-between gap-3 px-6 py-6 text-sm text-stone sm:flex-row">
-        <Wordmark size="text-sm" />
+        <BrandLockup compact />
         <nav className="flex items-center gap-5">
           <Link href="/pricing" className="hover:text-ink">
             Pricing
