@@ -26,7 +26,8 @@ export async function sendWorkspaceInvitationEmail(data: {
     return;
   }
 
-  const origin = process.env.BETTER_AUTH_URL ?? "http://localhost:4040";
+  const origin = process.env.BETTER_AUTH_URL
+    ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:4040");
   const inviteUrl = new URL(`/invite/${data.id}`, origin).toString();
   const organizationName = html(data.organization.name);
   const inviterName = html(data.inviter.user.name || data.inviter.user.email);

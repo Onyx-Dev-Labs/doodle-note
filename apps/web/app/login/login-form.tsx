@@ -95,7 +95,12 @@ export function LoginForm({
         callbackURL: next,
       });
       if (result.error) {
-        setError(result.error.message ?? "Sign-in failed. Try again.");
+        const detail =
+          result.error.message ??
+          ("code" in result.error && typeof result.error.code === "string"
+            ? result.error.code
+            : null);
+        setError(detail ?? "Sign-in failed. Try again.");
         setPending(false);
         return;
       }

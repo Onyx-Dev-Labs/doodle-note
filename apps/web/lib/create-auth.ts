@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { nextCookies } from "better-auth/next-js";
 import { organization } from "better-auth/plugins";
 
 import { fullSchema, type Db } from "@repo/db";
@@ -11,6 +12,23 @@ import { sendWorkspaceInvitationEmail } from "./invitation-email";
  * Never rely on this outside of local development.
  */
 const DEV_ONLY_SECRET = "dev-only-insecure-better-auth-secret-change-me";
+
+/** Production canonical site; social OAuth callbacks must match this origin. */
+const PRODUCTION_ORIGINS = [
+  "https://www.doodlenote.ai",
+  "https://doodlenote.ai",
+];
+
+function resolveBaseURL(): string {
+  if (process.env.BETTER_AUTH_URL) return process.env.BETTER_AUTH_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:4040";
+}
+
+function trustedOrigins(): string[] {
+  const base = resolveBaseURL();
+  return [...new Set([base, ...PRODUCTION_ORIGINS, "http://localhost:4040"])];
+}
 
 function resolveSecret(): string {
   const secret = process.env.BETTER_AUTH_SECRET;
@@ -66,7 +84,8 @@ export function createAuth(db: Db) {
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema: fullSchema }),
     secret: resolveSecret(),
-    baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:4040",
+    baseURL: resolveBaseURL(),
+    trustedOrigins: trustedOrigins(),
     emailAndPassword: {
       enabled: true,
     },
@@ -76,9 +95,11 @@ export function createAuth(db: Db) {
         cancelPendingInvitationsOnReInvite: true,
         sendInvitationEmail: sendWorkspaceInvitationEmail,
       }),
+      // Required for Next.js App Router — sets session cookies on OAuth return.
+      nextCookies(),
     ],
   });
 }
 
 export type Auth = ReturnType<typeof createAuth>;
-export { googleEnabled, microsoftEnabled };
+export { googleEnabled, microsoftEnabled, resolveBaseURL };
