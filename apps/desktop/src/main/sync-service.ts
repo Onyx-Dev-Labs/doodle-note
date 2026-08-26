@@ -637,6 +637,11 @@ export class SyncService {
 
   /** Soft-trash synced meetings whose cloud copy disappeared. */
   private applyCloudDeletions(cloudIds: Set<string>): boolean {
+    // Push runs before pull, but never reconcile against an empty cloud id
+    // list while meetings are still queued — that trashed entire libraries
+    // when link + sync raced on a fresh workspace.
+    if (cloudIds.size === 0 && this.pendingMeetings().length > 0) return false
+
     let changed = false
     for (const local of this.meetings.readAll()) {
       const syncedHash = this.config.pushed[local.id]
