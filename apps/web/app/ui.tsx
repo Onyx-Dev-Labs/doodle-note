@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { AppleLogo, WindowsLogo } from "./logos";
+import { AppleLogo, GitHubLogo, WindowsLogo } from "./logos";
 
 /**
  * Version-independent: /download/<platform> reads the live platform download
@@ -31,6 +31,20 @@ export const navLinkClass =
 
 export const navPillClass =
   "rounded-md border border-sand bg-card px-3.5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-sage-fill";
+
+export function GitHubNavLink({ className }: { className?: string }) {
+  return (
+    <a
+      href={GITHUB_REPO}
+      className={`inline-flex items-center justify-center ${className ?? navLinkClass}`}
+      rel="noreferrer"
+      target="_blank"
+      aria-label="DoodleNote on GitHub"
+    >
+      <GitHubLogo />
+    </a>
+  );
+}
 
 export function Wordmark({ size = "text-lg" }: { size?: string }) {
   return (
@@ -139,14 +153,7 @@ export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
             <Link href="/pricing" className={navLinkClass}>
               Pricing
             </Link>
-            <a
-              href={GITHUB_REPO}
-              className={navLinkClass}
-              rel="noreferrer"
-              target="_blank"
-            >
-              GitHub
-            </a>
+            <GitHubNavLink />
             <Link href="/login" className={navPillClass}>
               Sign in
             </Link>
@@ -169,14 +176,7 @@ export function SiteFooter() {
           <Link href="/changelog" className="hover:text-ink">
             What&rsquo;s new
           </Link>
-          <a
-            href={GITHUB_REPO}
-            className="hover:text-ink"
-            rel="noreferrer"
-            target="_blank"
-          >
-            GitHub
-          </a>
+          <GitHubNavLink className="rounded-md px-1.5 py-1.5 text-bark transition-colors hover:bg-sage-fill hover:text-ink" />
           <Link href="/login" className="hover:text-ink">
             Sign in
           </Link>
