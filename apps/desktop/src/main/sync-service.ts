@@ -26,6 +26,7 @@ import {
   rewriteMedia,
   syncableSegments
 } from './sync-content-hash'
+import { EMPTY_SYNC_CONFIG, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
 import {
   decideFolderPull,
   decidePullAction,
@@ -42,27 +43,6 @@ const PUSH_INTERVAL_MS = 5 * 60_000
 /** Pull pages are capped server-side; this bounds a runaway loop. */
 const MAX_PULL_PAGES = 40
 const STARTUP_SYNC_DELAY_MS = 5_000
-
-interface SyncConfig {
-  enabled: boolean
-  /** safeStorage-encrypted sync token, base64. */
-  tokenEnc?: string
-  email?: string
-  workspaceName?: string
-  lastSyncAt?: string
-  /** meetingId → content hash at last successful sync (push OR pull). */
-  pushed: Record<string, string>
-  /** updatedAt high-water mark of the last pull. */
-  pullCursor?: string
-  /** folderId → name at last successful sync (either direction). */
-  syncedFolders: Record<string, string>
-  /** Local folders deleted whose cloud copy still needs removing. */
-  pendingFolderDeletes: string[]
-  /** attachment file name → public blob URL (uploaded once, reused). */
-  mediaUrls: Record<string, string>
-  /** Local meetings deleted/trashed whose cloud copy still needs removing. */
-  pendingDeletes: string[]
-}
 
 /**
  * Two-way desktop ↔ cloud sync. Local storage stays the source of truth
@@ -259,14 +239,7 @@ export class SyncService {
     this.linkServer?.close()
     this.linkServer = null
     this.linking = false
-    this.config = {
-      enabled: false,
-      pushed: {},
-      mediaUrls: {},
-      pendingDeletes: [],
-      syncedFolders: {},
-      pendingFolderDeletes: []
-    }
+    this.config = { ...EMPTY_SYNC_CONFIG }
     this.writeConfig()
     this.lastError = undefined
     this.emitStatus()
@@ -733,39 +706,9 @@ export class SyncService {
   private readConfig(): SyncConfig {
     try {
       const raw = JSON.parse(readFileSync(this.configPath, 'utf8')) as Partial<SyncConfig>
-      return {
-        enabled: raw.enabled === true,
-        ...(typeof raw.tokenEnc === 'string' ? { tokenEnc: raw.tokenEnc } : {}),
-        ...(typeof raw.email === 'string' ? { email: raw.email } : {}),
-        ...(typeof raw.workspaceName === 'string' ? { workspaceName: raw.workspaceName } : {}),
-        ...(typeof raw.lastSyncAt === 'string' ? { lastSyncAt: raw.lastSyncAt } : {}),
-        pushed:
-          raw.pushed && typeof raw.pushed === 'object'
-            ? (raw.pushed as Record<string, string>)
-            : {},
-        mediaUrls:
-          raw.mediaUrls && typeof raw.mediaUrls === 'object'
-            ? (raw.mediaUrls as Record<string, string>)
-            : {},
-        pendingDeletes: Array.isArray(raw.pendingDeletes) ? raw.pendingDeletes.map(String) : [],
-        syncedFolders:
-          raw.syncedFolders && typeof raw.syncedFolders === 'object'
-            ? (raw.syncedFolders as Record<string, string>)
-            : {},
-        pendingFolderDeletes: Array.isArray(raw.pendingFolderDeletes)
-          ? raw.pendingFolderDeletes.map(String)
-          : [],
-        ...(typeof raw.pullCursor === 'string' ? { pullCursor: raw.pullCursor } : {})
-      }
+      return parseSyncConfigFromRaw(raw)
     } catch {
-      return {
-        enabled: false,
-        pushed: {},
-        mediaUrls: {},
-        pendingDeletes: [],
-        syncedFolders: {},
-        pendingFolderDeletes: []
-      }
+      return { ...EMPTY_SYNC_CONFIG }
     }
   }
 
