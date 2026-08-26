@@ -65,25 +65,65 @@ function BuilderAttribution({ compact = false }: { compact?: boolean }) {
 export function BrandLockup({
   compact = false,
   priority = false,
+  href = "/",
+  layout = "horizontal",
+  iconSize,
+  wordmarkSize,
+  className = "",
+  textClassName = "",
 }: {
   compact?: boolean;
   priority?: boolean;
+  href?: string;
+  layout?: "horizontal" | "stacked";
+  iconSize?: number;
+  wordmarkSize?: string;
+  className?: string;
+  textClassName?: string;
 }) {
+  const size = iconSize ?? (compact ? 30 : 34);
+  const wmSize = wordmarkSize ?? (compact ? "text-base" : "text-lg");
+  const iconClass = layout === "stacked" ? "rounded-xl" : "rounded-lg";
+  const textStack = (
+    <span
+      className={`flex flex-col gap-1 ${
+        layout === "stacked" ? "items-center" : "items-start pt-0.5"
+      } ${textClassName}`}
+    >
+      <Wordmark size={wmSize} />
+      <BuilderAttribution compact={compact} />
+    </span>
+  );
+
+  if (layout === "stacked") {
+    return (
+      <Link href={href} className={`flex flex-col items-center gap-3 ${className}`}>
+        <Image
+          src="/mascot.png"
+          alt=""
+          width={size}
+          height={size}
+          className={iconClass}
+          priority={priority}
+          unoptimized
+        />
+        {textStack}
+      </Link>
+    );
+  }
+
   return (
-    <Link href="/" className="flex shrink-0 items-start gap-2.5">
+    <Link href={href} className={`flex shrink-0 items-start gap-2.5 ${className}`}>
       <Image
         src="/mascot.png"
         alt=""
-        width={compact ? 30 : 34}
-        height={compact ? 30 : 34}
-        className="rounded-lg"
+        width={size}
+        height={size}
+        className={iconClass}
         priority={priority}
         unoptimized
       />
-      <span className="flex flex-col items-start gap-1 pt-0.5">
-        <Wordmark size={compact ? "text-base" : "text-lg"} />
-        <BuilderAttribution compact={compact} />
-      </span>
+      {textStack}
     </Link>
   );
 }

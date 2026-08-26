@@ -16,4 +16,20 @@ test("marketing brand lockup includes Onyx builder attribution", () => {
   assert.match(uiSource, /export function BrandLockup/);
   assert.match(uiSource, /<BrandLockup priority \/>/);
   assert.match(uiSource, /<BrandLockup compact \/>/);
+  assert.match(uiSource, /layout\?: "horizontal" \| "stacked"/);
+});
+
+test("app and login surfaces use the shared brand lockup", () => {
+  const appHeader = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../app/app/app-header.tsx"),
+    "utf8",
+  );
+  const loginForm = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../app/login/login-form.tsx"),
+    "utf8",
+  );
+
+  assert.match(appHeader, /<BrandLockup[\s\S]*href="\/app"/);
+  assert.match(loginForm, /layout="stacked"/);
+  assert.match(loginForm, /<BrandLockup/);
 });
