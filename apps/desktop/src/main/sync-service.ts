@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { hostname } from 'node:os'
@@ -21,6 +20,12 @@ import {
 import type { FolderRecord } from '../shared/folders-api'
 import type { FoldersService } from './folders-service'
 import type { MeetingsService } from './meetings-service'
+import {
+  contentHash,
+  mediaRefs,
+  rewriteMedia,
+  syncableSegments
+} from './sync-content-hash'
 import {
   decideFolderPull,
   decidePullAction,
@@ -393,7 +398,16 @@ export class SyncService {
           body: JSON.stringify({ meetings: [toPushMeeting(record, this.config.mediaUrls)] })
         })
         if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as { error?: string }
+          const body = (await response.json().catch(() => ({}))) as {
+            error?: string
+            needsSubscription?: boolean
+          }
+          if (response.status === 402 && body.needsSubscription) {
+            throw new Error(
+              body.error ??
+                'Cloud sync needs an active subscription — manage billing at https://www.doodlenote.ai/pricing'
+            )
+          }
           throw new Error(body.error ?? `Sync failed (HTTP ${response.status})`)
         }
         const body = (await response.json()) as {
@@ -504,7 +518,16 @@ export class SyncService {
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as { error?: string }
+          const body = (await response.json().catch(() => ({}))) as {
+            error?: string
+            needsSubscription?: boolean
+          }
+          if (response.status === 402 && body.needsSubscription) {
+            throw new Error(
+              body.error ??
+                'Cloud sync needs an active subscription — manage billing at https://www.doodlenote.ai/pricing'
+            )
+          }
           throw new Error(body.error ?? `Pull failed (HTTP ${response.status})`)
         }
         const body = (await response.json()) as {
@@ -731,7 +754,8 @@ export class SyncService {
             : {},
         pendingFolderDeletes: Array.isArray(raw.pendingFolderDeletes)
           ? raw.pendingFolderDeletes.map(String)
-          : []
+          : [],
+        ...(typeof raw.pullCursor === 'string' ? { pullCursor: raw.pullCursor } : {})
       }
     } catch {
       return {
@@ -777,46 +801,6 @@ interface RemoteMeeting {
   }>
 }
 
-const MEDIA_REF = /doodle-media:\/\/([a-z0-9.-]+)/g
-
-/** Attachment names referenced in the meeting's markdown. */
-function mediaRefs(record: MeetingRecord): string[] {
-  const text = `${record.rawNotesMarkdown}\n${record.enhancedMarkdown ?? ''}`
-  return [...new Set([...text.matchAll(MEDIA_REF)].map((m) => m[1]!))]
-}
-
-/** Local doodle-media:// refs → public blob URLs (only those uploaded). */
-function rewriteMedia(markdown: string, mediaUrls: Record<string, string>): string {
-  return markdown.replace(MEDIA_REF, (whole, name: string) => mediaUrls[name] ?? whole)
-}
-
-/** Stable hash of everything the push carries — change detection. Includes
- *  the media rewrite so a late-arriving upload URL triggers a re-push. */
-function contentHash(record: MeetingRecord, mediaUrls: Record<string, string>): string {
-  const projection = {
-    title: record.title,
-    createdAt: record.createdAt,
-    startedAt: record.startedAt ?? null,
-    endedAt: record.endedAt ?? null,
-    calendarEventId: record.calendarEventId ?? null,
-    folderId: record.folderId ?? null,
-    rawNotesMarkdown: rewriteMedia(record.rawNotesMarkdown, mediaUrls),
-    enhancedMarkdown: record.enhancedMarkdown
-      ? rewriteMedia(record.enhancedMarkdown, mediaUrls)
-      : null,
-    segments: record.segments.map((s) => [
-      s.channel,
-      s.speaker,
-      s.text,
-      s.startMs,
-      s.endMs,
-      // In the hash so meetings that gained anchors locally re-push once.
-      s.absoluteStartMs ?? null
-    ])
-  }
-  return createHash('sha256').update(JSON.stringify(projection)).digest('hex')
-}
-
 function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>): object {
   return {
     id: record.id,
@@ -833,19 +817,16 @@ function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>)
     ...(record.enhancedMarkdown
       ? { enhancedMarkdown: rewriteMedia(record.enhancedMarkdown, mediaUrls) }
       : {}),
-    // Echo-flagged segments are far-side bleed the UI hides — don't sync them.
-    segments: record.segments
-      .filter((s) => !s.echo)
-      .map((s) => ({
-        channel: s.channel,
-        speaker: s.speaker,
-        text: s.text,
-        startMs: s.startMs,
-        endMs: s.endMs,
-        // The audio-playback seek anchor; without it, click-to-seek on a
-        // synced meeting degrades to the channel-relative approximation.
-        ...(typeof s.absoluteStartMs === 'number' ? { absoluteStartMs: s.absoluteStartMs } : {}),
-        confidence: s.confidence
-      }))
+    segments: syncableSegments(record).map((s) => ({
+      channel: s.channel,
+      speaker: s.speaker,
+      text: s.text,
+      startMs: s.startMs,
+      endMs: s.endMs,
+      // The audio-playback seek anchor; without it, click-to-seek on a
+      // synced meeting degrades to the channel-relative approximation.
+      ...(typeof s.absoluteStartMs === 'number' ? { absoluteStartMs: s.absoluteStartMs } : {}),
+      confidence: s.confidence
+    }))
   }
 }
