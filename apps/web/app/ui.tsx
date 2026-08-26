@@ -13,6 +13,8 @@ export const DOWNLOADS = {
   win: "/download/win",
 };
 
+export const GITHUB_REPO = "https://github.com/Onyx-Dev-Labs/doodle-note";
+
 /* Shared control styles — keep every page speaking the same visual language. */
 export const inputClass =
   "w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink placeholder:text-stone focus-visible:border-sage focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sage-deep";
@@ -60,6 +62,14 @@ export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
             <Link href="/pricing" className={navLinkClass}>
               Pricing
             </Link>
+            <a
+              href={GITHUB_REPO}
+              className={navLinkClass}
+              rel="noreferrer"
+              target="_blank"
+            >
+              GitHub
+            </a>
             <Link href="/login" className={navPillClass}>
               Sign in
             </Link>
@@ -82,6 +92,14 @@ export function SiteFooter() {
           <Link href="/changelog" className="hover:text-ink">
             What&rsquo;s new
           </Link>
+          <a
+            href={GITHUB_REPO}
+            className="hover:text-ink"
+            rel="noreferrer"
+            target="_blank"
+          >
+            GitHub
+          </a>
           <Link href="/login" className="hover:text-ink">
             Sign in
           </Link>

@@ -18,7 +18,7 @@ const REASONS = [
   },
   {
     title: "Free, without a catch",
-    body: "Unlimited meetings, transcripts, AI notes, and search on your device — no account required. Pay only if you want your notes synced across devices.",
+    body: "Unlimited meetings, transcripts, AI notes, and search on your device — no account required. The apps are MIT open source. Pay only if you want your notes synced across devices.",
   },
 ];
 
