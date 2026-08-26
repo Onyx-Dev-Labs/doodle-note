@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.13",
+    date: "August 26, 2026",
+    highlights: [
+      "Cloud sync no longer re-pulls your entire library on every app restart",
+      "Sync reconciliation waits for the first cloud snapshot before trashing local meetings that look missing",
+      "Connecting DoodleNote to the cloud on doodlenote.ai sign-in is more reliable again",
+    ],
+  },
+  {
     version: "0.4.12",
     date: "August 7, 2026",
     highlights: [
