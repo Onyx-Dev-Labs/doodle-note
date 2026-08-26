@@ -1,12 +1,15 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
-import { buttonPrimary, buttonSecondary, inputClass, Wordmark } from "../ui";
+import {
+  BrandLockup,
+  buttonPrimary,
+  buttonSecondary,
+  inputClass,
+} from "../ui";
 
 type Mode = "sign-in" | "sign-up";
 
@@ -108,18 +111,13 @@ export function LoginForm({
   return (
     <div className="w-full max-w-sm">
       <div className="mb-8 flex flex-col items-center text-center">
-        <Link href="/" className="flex flex-col items-center gap-3">
-          <Image
-            src="/mascot.png"
-            alt=""
-            width={48}
-            height={48}
-            className="rounded-xl"
-            priority
-            unoptimized
-          />
-          <Wordmark size="text-xl" />
-        </Link>
+        <BrandLockup
+          href="/"
+          layout="stacked"
+          iconSize={48}
+          wordmarkSize="text-xl"
+          priority
+        />
         <p className="mt-2 text-sm text-stone">
           {mode === "sign-in"
             ? "Sign in to your workspace"

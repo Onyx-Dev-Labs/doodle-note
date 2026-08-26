@@ -1,10 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { Wordmark } from "../ui";
+import { BrandLockup } from "../ui";
 import { SignOutButton } from "./sign-out-button";
 
 const navItems = [
@@ -26,22 +25,14 @@ export function AppHeader({
   return (
     <header className="sticky top-0 z-30 border-b border-sand bg-cream/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-3 py-3 sm:gap-4 sm:px-6">
-        <Link
+        <BrandLockup
           href="/app"
-          className="flex shrink-0 items-center gap-2.5 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sage-deep"
-        >
-          <Image
-            src="/mascot.png"
-            alt=""
-            width={28}
-            height={28}
-            className="rounded-lg"
-            unoptimized
-          />
-          <span className="hidden min-[480px]:inline">
-            <Wordmark size="text-base" />
-          </span>
-        </Link>
+          compact
+          iconSize={28}
+          wordmarkSize="text-base"
+          textClassName="hidden min-[480px]:flex"
+          className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sage-deep"
+        />
 
         <nav aria-label="Primary" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto sm:gap-1">
           {navItems.map((item) => {
