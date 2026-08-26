@@ -2,15 +2,28 @@ packages:
   - "apps/*"
   - "packages/*"
 
+ignoredBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver
+
 # Build scripts are blocked by default in pnpm 10; electron needs its
 # postinstall to download the runtime binary.
 onlyBuiltDependencies:
   - electron
 
-ignoredBuiltDependencies:
-  - esbuild
-  - sharp
-  - unrs-resolver
+# Security floors for transitive packages whose direct parents have not yet
+# released compatible patched dependency ranges. Keep these selectors narrow
+# and remove them when the parent packages absorb the fixes.
+overrides:
+  esbuild@<=0.24.2: 0.25.0
+  js-yaml@>=4.0.0 <4.3.1: 4.3.1
+  nanoid@>=3.0.0 <3.3.18: 3.3.18
+  postcss@<=8.5.22: 8.5.23
+  sharp@<0.35.0: 0.35.0
+  tar@>=7.0.0 <=7.5.20: 7.5.21
+  undici@>=6.0.0 <6.28.0: 6.28.0
+  undici@>=7.0.0 <7.29.0: 7.29.0
 
 # Cross-building the Windows app from macOS: pnpm must also install the
 # win32-x64 platform binaries (sherpa-onnx, node-llama-cpp) so
@@ -18,10 +31,10 @@ ignoredBuiltDependencies:
 # build machines — omitting it starved them of platform binaries
 # (lightningcss.linux-x64-gnu) and broke web deploys.
 supportedArchitectures:
+  cpu:
+    - arm64
+    - x64
   os:
     - darwin
     - win32
     - linux
-  cpu:
-    - arm64
-    - x64

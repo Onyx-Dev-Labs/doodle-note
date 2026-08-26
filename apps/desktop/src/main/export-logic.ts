@@ -54,4 +54,3 @@ export function buildExportHtml(record: MeetingRecord, markdown: string): string
     a { color: #55703f; }
   </style></head><body>${markdownToHtml(markdown)}</body></html>`
 }
-

@@ -1,11 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import type { MeetingFileStore } from '@repo/meetings-store'
-import {
-  EXPORT_MEETING_CHANNEL,
-  type ExportFormat,
-  type ExportResult
-} from '../shared/export-api'
+import { EXPORT_MEETING_CHANNEL, type ExportFormat, type ExportResult } from '../shared/export-api'
 import { buildExportHtml, buildExportMarkdown } from './export-logic'
 
 /**
@@ -18,10 +14,7 @@ export class ExportService {
 
   registerIpc(): void {
     ipcMain.handle(EXPORT_MEETING_CHANNEL, (_event, meetingId: unknown, format: unknown) =>
-      this.exportMeeting(
-        String(meetingId ?? ''),
-        format === 'pdf' ? 'pdf' : 'md'
-      )
+      this.exportMeeting(String(meetingId ?? ''), format === 'pdf' ? 'pdf' : 'md')
     )
   }
 

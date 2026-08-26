@@ -5,22 +5,7 @@ import { organization } from "better-auth/plugins";
 import { fullSchema, type Db } from "@repo/db";
 
 import { sendWorkspaceInvitationEmail } from "./invitation-email";
-
-/**
- * Obviously-dev-only fallback so local dev works without any env setup.
- * Never rely on this outside of local development.
- */
-const DEV_ONLY_SECRET = "dev-only-insecure-better-auth-secret-change-me";
-
-function resolveSecret(): string {
-  const secret = process.env.BETTER_AUTH_SECRET;
-  if (secret) return secret;
-  console.warn(
-    "[auth] BETTER_AUTH_SECRET is not set — using an insecure dev-only secret. " +
-      "Set BETTER_AUTH_SECRET before deploying.",
-  );
-  return DEV_ONLY_SECRET;
-}
+import { resolveAuthSecret } from "./runtime-config";
 
 const googleEnabled = () =>
   Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -65,7 +50,7 @@ function socialProviders() {
 export function createAuth(db: Db) {
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema: fullSchema }),
-    secret: resolveSecret(),
+    secret: resolveAuthSecret(),
     baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:4040",
     emailAndPassword: {
       enabled: true,

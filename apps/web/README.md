@@ -42,14 +42,15 @@ credentials or copy real account/meeting data into tests.
 The same app can sync devices against a server you run. Local
 development already does this with PGlite when `DATABASE_URL` is
 unset. For a durable self-hosted instance you typically set
-`DATABASE_URL` and `BETTER_AUTH_SECRET` (and Blob/OAuth if you need
-those features).
+`DATABASE_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, and
+`DOODLENOTE_SELF_HOSTED=true` (and Blob/OAuth if you need those features).
 
 Official **$10 / user / month** Sync billing is the doodlenote.ai
-hosted product (Stripe). When Stripe keys are absent, entitlement
-checks pass so a self-hosted copy does not require DoodleNote's paid
-plan. This repository does not ship a production Docker Compose stack
-yet.
+hosted product (Stripe). The explicit self-hosted flag bypasses that
+entitlement gate. Official production fails closed when the Stripe
+configuration is missing or incomplete. This repository does not ship
+a production Docker Compose stack yet; see
+[`SELF-HOSTING.md`](../../SELF-HOSTING.md).
 
 ## Commands
 

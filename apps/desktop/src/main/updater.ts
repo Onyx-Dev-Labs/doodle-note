@@ -52,10 +52,7 @@ export function initAutoUpdater(
     // it), so the hard-exit workaround doesn't protect this path — unload
     // the model first, bounded so a hung dispose can't block the update.
     try {
-      await Promise.race([
-        beforeInstall?.(),
-        new Promise((resolve) => setTimeout(resolve, 3_000))
-      ])
+      await Promise.race([beforeInstall?.(), new Promise((resolve) => setTimeout(resolve, 3_000))])
     } catch {
       // install regardless
     }

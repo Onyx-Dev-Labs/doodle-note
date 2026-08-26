@@ -2,7 +2,6 @@ import Link from "next/link";
 
 import { CheckoutButton } from "./checkout-button";
 import {
-  buttonPrimary,
   DoodleStroke,
   DownloadButtons,
   GITHUB_REPO,

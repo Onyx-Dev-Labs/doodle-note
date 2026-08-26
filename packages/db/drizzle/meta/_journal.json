@@ -71,6 +71,13 @@
       "when": 1785692066283,
       "tag": "0009_mature_juggernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787759196463,
+      "tag": "0010_tiny_bromley",
+      "breakpoints": true
     }
   ]
 }

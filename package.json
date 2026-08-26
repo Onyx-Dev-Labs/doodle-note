@@ -1,6 +1,16 @@
 {
   "name": "doodle-note",
   "private": true,
+  "description": "Privacy-first, local-first meeting capture and AI notes.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Onyx-Dev-Labs/doodle-note.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Onyx-Dev-Labs/doodle-note/issues"
+  },
+  "homepage": "https://www.doodlenote.ai",
   "packageManager": "pnpm@10.33.2",
   "engines": {
     "node": ">=22"

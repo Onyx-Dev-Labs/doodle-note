@@ -120,6 +120,4 @@ export function docToMarkdown(doc: JSONContent | null | undefined): string {
  * javascript:/http: URLs (e.g. from a pasted markdown doc) inert.
  */
 
-export { markdownToHtml } from "../../../shared/markdown-html"
-
-
+export { markdownToHtml } from '../../../shared/markdown-html'

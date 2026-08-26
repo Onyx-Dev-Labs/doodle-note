@@ -1,0 +1,14 @@
+# Default maintainers
+* @seaninman @alectribble
+
+# Security, identity, customer data, billing, and deployment boundaries
+/.github/ @seaninman @alectribble
+/apps/web/app/api/ @seaninman @alectribble
+/apps/web/lib/auth.ts @seaninman @alectribble
+/apps/web/lib/create-auth.ts @seaninman @alectribble
+/apps/web/lib/runtime-config.ts @seaninman @alectribble
+/apps/web/lib/billing.ts @seaninman @alectribble
+/apps/web/lib/sync-auth.ts @seaninman @alectribble
+/packages/db/drizzle/ @seaninman @alectribble
+/apps/desktop/electron-builder.yml @seaninman @alectribble
+/apps/desktop/scripts/ @seaninman @alectribble

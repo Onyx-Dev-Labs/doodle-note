@@ -285,6 +285,9 @@ export default function MeetingView({
   const [inputDeviceUid, setInputDeviceUid] = useState<string>(
     () => window.localStorage.getItem(INPUT_DEVICE_STORAGE_KEY) ?? ''
   )
+  const [templates, setTemplates] = useState<NotesTemplateInfo[]>([])
+  const [templateId, setTemplateId] = useState('general')
+  const [tplMenuOpen, setTplMenuOpen] = useState(false)
 
   const roughMarkdownRef = useRef('')
   const titleValueRef = useRef('')
@@ -423,7 +426,6 @@ export default function MeetingView({
       setSavedEcho(record.echoSuppressed)
       startedAtRef.current = record.startedAt ?? null
       setTemplateId(record.templateId ?? 'general')
-      templateIdRef.current = record.templateId ?? 'general'
       setFolderId(record.folderId ?? null)
       if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
       if (Array.isArray(record.chat) && record.chat.length > 0) {
@@ -538,6 +540,8 @@ export default function MeetingView({
   useEffect(() => {
     const url = audioParts[Math.min(activePart, audioParts.length - 1)]?.url
     if (!url) {
+      // Resetting derived media state is the purpose of this synchronization.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPlayerSrc(null)
       return
     }
@@ -611,11 +615,6 @@ export default function MeetingView({
 
   /* ---- note templates ---- */
 
-  const [templates, setTemplates] = useState<NotesTemplateInfo[]>([])
-  const [templateId, setTemplateId] = useState('general')
-  const templateIdRef = useRef('general')
-  const [tplMenuOpen, setTplMenuOpen] = useState(false)
-
   useEffect(() => {
     void window.notes
       .templates()
@@ -646,7 +645,10 @@ export default function MeetingView({
 
   const [autoStopped, setAutoStopped] = useState(false)
   const capturingRef = useRef(false)
-  capturingRef.current = capturing
+
+  useEffect(() => {
+    capturingRef.current = capturing
+  }, [capturing])
 
   /** Meeting ended → after the capture settles, generate notes on their own. */
   const pendingAutoGenRef = useRef(false)
@@ -729,6 +731,8 @@ export default function MeetingView({
   // A session that ends with zero transcript is otherwise indistinguishable
   // from success ("I hit stop and nothing happened") — say so explicitly.
   useEffect(() => {
+    // This notice intentionally follows the reducer's completed phase.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (phase === 'starting' || phase === 'recording') setEmptyNotice(false)
     else if (phase === 'ended' && allSegments.length === 0) setEmptyNotice(true)
   }, [phase, allSegments.length])
@@ -736,6 +740,8 @@ export default function MeetingView({
   // When the session ends, tuck the transcript panel away so the Generate
   // notes CTA takes the stage (it renders in the space the panel covers).
   useEffect(() => {
+    // Closing the transient panel is the intended response to the phase change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (phase === 'ended') setTranscriptOpen(false)
   }, [phase])
 
@@ -935,7 +941,7 @@ export default function MeetingView({
   const modelReady = cloudReady || anyDownloaded
   const canEnhance = allSegments.length > 0 && modelReady && enhanceStatus !== 'running'
 
-  const runEnhance = async (): Promise<void> => {
+  const runEnhance = async (selectedTemplateId = templateId): Promise<void> => {
     if (!editor || enhanceStatus === 'running') return
     refreshNotesMeta()
     setEnhanceError(null)
@@ -951,7 +957,7 @@ export default function MeetingView({
       rawNotesMarkdown: roughMarkdownRef.current,
       segments: allSegments,
       participants: roster,
-      templateId: templateIdRef.current
+      templateId: selectedTemplateId
     })
     if (result.error !== undefined || result.markdown === undefined) {
       setEnhanceStatus('error')
@@ -997,10 +1003,9 @@ export default function MeetingView({
   /** Pick a template: remember it on the meeting and (re)generate with it. */
   const chooseTemplate = (id: string): void => {
     setTemplateId(id)
-    templateIdRef.current = id
     setTplMenuOpen(false)
     persist({ templateId: id })
-    void runEnhance()
+    void runEnhance(id)
   }
 
   const templateMenu = (
@@ -1029,6 +1034,8 @@ export default function MeetingView({
     if (enhanceStatus === 'running') return
     if (allSegments.length === 0 || !modelReady) return
     pendingAutoGenRef.current = false
+    // Auto-generation is the intended side effect of a completed capture.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void runEnhance()
   })
 
