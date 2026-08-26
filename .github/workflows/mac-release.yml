@@ -1,0 +1,85 @@
+name: Mac release
+
+# Builds, signs, notarizes, and publishes the Mac updater feed.
+# Required repo secrets:
+#   BLOB_READ_WRITE_TOKEN
+#   MAC_CSC_LINK (base64 .p12) + MAC_CSC_KEY_PASSWORD
+#   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
+# Or run locally on a signed Mac: cd apps/desktop && pnpm release
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    if: github.repository == 'Onyx-Dev-Labs/doodle-note'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Swift transcription engine
+        run: swift build -c release --package-path engine
+
+      - name: Build brand assets
+        run: pnpm --filter desktop brand:build
+
+      - name: Package Mac app (signed + notarized)
+        run: |
+          pnpm --filter doodle-note-mcp build
+          pnpm --filter desktop exec electron-vite build
+          pnpm --filter desktop exec electron-builder --mac
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Publish updater feed to Blob
+        run: node apps/desktop/scripts/publish-release.mjs --mac
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doodlenote-mac-${{ github.sha }}
+          path: |
+            apps/desktop/release/DoodleNote-*.zip
+            apps/desktop/release/DoodleNote-*.dmg
+            apps/desktop/release/latest-mac.yml
+          retention-days: 14
+
+      - name: Open PR to stage updater manifest on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./apps/desktop/package.json').version")
+          BRANCH="chore/stage-v${VERSION}-updater-manifest"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add apps/web/public/updates/latest-mac.yml
+          if git diff --staged --quiet; then
+            echo "latest-mac.yml unchanged — manifest may already be staged"
+            exit 0
+          fi
+          git commit -m "chore: stage v${VERSION} updater manifest"
+          git push --force origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: stage v${VERSION} updater manifest" \
+            --body "Automated manifest from the Mac release workflow. Merge to make Check for Updates report v${VERSION}."
