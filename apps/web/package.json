@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "auth-smoke": "node --conditions=react-server --import tsx scripts/auth-smoke.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts scripts/*.test.mjs"
   },
   "dependencies": {
     "@repo/agent-contract": "workspace:*",
