@@ -27,6 +27,10 @@ updates:
       day: monday
       time: "09:15"
       timezone: America/Chicago
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: swift
     directory: /engine
