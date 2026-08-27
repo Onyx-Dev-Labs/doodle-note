@@ -9,6 +9,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.14",
+    date: "August 27, 2026",
+    highlights: [
+      "Remove the retired G Brain export from Settings and the desktop application",
+      "Keep Claude Desktop, Claude Code, Codex, and other MCP agent integrations available",
+    ],
+  },
+  {
     version: "0.4.13",
     date: "August 26, 2026",
     highlights: [
