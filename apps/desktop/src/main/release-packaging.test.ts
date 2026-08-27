@@ -92,7 +92,7 @@ test('CI builds and retains a real Windows installer', () => {
   assert.match(ciWorkflow, /Smoke packaged Windows native modules/)
   assert.match(ciWorkflow, /sherpa and llama native modules loaded successfully/)
   assert.match(ciWorkflow, /Get-AuthenticodeSignature/)
-  assert.match(ciWorkflow, /actions\/upload-artifact@[0-9a-f]{40}\s+# v4/)
+  assert.match(ciWorkflow, /actions\/upload-artifact@[0-9a-f]{40}\s+# v7\.0\.1/)
   assert.match(desktopPackage, /release:win[\s\S]*verify-windows-signature\.ps1/)
 })
 
