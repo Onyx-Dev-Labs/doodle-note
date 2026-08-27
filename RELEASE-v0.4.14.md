@@ -10,16 +10,16 @@
 
 ## Verification
 
-- [ ] Frozen-lockfile dependency install
-- [ ] Workspace typecheck
-- [ ] Full test suite
-- [ ] Production Electron and web builds
-- [ ] Production dependency audit
-- [ ] Packaged application reports version 0.4.14
-- [ ] Signed and notarized arm64 package with the Swift transcription engine
-- [ ] Strict code-signature, Gatekeeper, and stapled-ticket validation
-- [ ] Updater ZIP and website DMG checksums recorded
-- [ ] Updater manifest references only version-matched v0.4.14 artifacts
+- [x] Frozen-lockfile dependency install
+- [x] Workspace typecheck
+- [x] Full test suite
+- [x] Production Electron and web builds
+- [x] Production dependency audit
+- [x] Packaged application reports version 0.4.14
+- [x] Signed and notarized arm64 package with the Swift transcription engine
+- [x] Strict code-signature, Gatekeeper, and stapled-ticket validation
+- [x] Updater ZIP and website DMG checksums recorded
+- [x] Updater manifest references only version-matched v0.4.14 artifacts
 
 ## Release gates
 
@@ -34,3 +34,7 @@
 
 - Updater artifact: `DoodleNote-0.4.14-arm64-mac.zip`
 - Website installer: `DoodleNote-0.4.14-arm64.dmg`
+- Updater ZIP SHA-256: `197682d7ca9a95d2dbe7bf6fefd119222554f74b41c592991d78203882b2d9aa`
+- Website DMG SHA-256: `3eb847d994234c50f1d8e65d101cf22e396346808bcc3754aad071168e5c9fc0`
+- App notarization submission: `93d44e96-e47c-440e-bf8c-7b4731fe2bdf`
+- DMG notarization submission: `c9c3aa76-9264-43cd-aa6a-70568d362939`
