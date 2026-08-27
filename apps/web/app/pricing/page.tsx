@@ -4,7 +4,7 @@ import { CheckoutButton } from "./checkout-button";
 import {
   DoodleStroke,
   DownloadButtons,
-  GITHUB_REPO,
+  GitHubNavLink,
   navLinkClass,
   navPillClass,
   SiteFooter,
@@ -87,14 +87,7 @@ export default function PricingPage() {
             <Link href="/changelog" className={navLinkClass}>
               What&rsquo;s new
             </Link>
-            <a
-              href={GITHUB_REPO}
-              className={navLinkClass}
-              rel="noreferrer"
-              target="_blank"
-            >
-              GitHub
-            </a>
+            <GitHubNavLink />
             <Link href="/login" className={navPillClass}>
               Sign in
             </Link>
