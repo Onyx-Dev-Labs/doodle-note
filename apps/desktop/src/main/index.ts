@@ -27,7 +27,6 @@ import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { MediaService } from './media-service'
 import { AgentAccessService } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
-import { ConnectorsService } from './connectors-service'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
@@ -494,27 +493,16 @@ app.whenReady().then(() => {
   )
   syncService.registerIpc()
 
-  // Integrations: the local-MCP opt-in file and connector exports (GBrain
-  // et al). Both are off until the user enables them in Settings.
+  // Integrations: local MCP access remains off until enabled in Settings.
   const agentAccessService = new AgentAccessService(
     join(app.getPath('userData'), 'meetings'),
     resolveMcpServerSpec()
   )
   agentAccessService.registerIpc()
-  const connectorsService = new ConnectorsService(
-    app.getPath('userData'),
-    meetingsService,
-    foldersService,
-    broadcast
-  )
-  connectorsService.registerIpc()
 
-  // Store writes fan out to cloud sync and connector dispatch. Meetings
-  // recorded on other devices arrive via sync pull, which also writes the
-  // store — so iOS meetings flow to connectors through this same hook.
+  // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
     syncService.onMeetingsChanged(change.deletedId)
-    connectorsService.onMeetingsChanged()
     // A deleted meeting takes its recordings with it.
     if (change.deletedId) audioService.deleteFor(change.deletedId)
   }

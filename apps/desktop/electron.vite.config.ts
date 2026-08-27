@@ -12,7 +12,7 @@ export default defineConfig({
     // node_modules instead of being bundled.
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@repo/ai', '@repo/meetings-store', '@repo/connectors']
+        exclude: ['@repo/ai', '@repo/meetings-store']
       })
     ],
     build: {
