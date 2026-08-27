@@ -99,21 +99,31 @@ export function BrandLockup({
   const wmSize = wordmarkSize ?? (compact ? "text-base" : "text-lg");
   const iconClass = layout === "stacked" ? "rounded-xl" : "rounded-lg";
   const textStack = (
-    <span
+    <div
       className={`flex flex-col gap-1 ${
         layout === "stacked" ? "items-center" : "items-start pt-0.5"
       } ${textClassName}`}
     >
-      <Wordmark size={wmSize} />
-      <BuilderAttribution compact={compact} />
-    </span>
-  );
-
-  if (layout === "stacked") {
-    return (
       <Link
         href={href}
-        className={`flex flex-col items-center gap-3 ${className}`}
+        className="rounded-[2px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage-deep"
+      >
+        <Wordmark size={wmSize} />
+      </Link>
+      <BuilderAttribution compact={compact} />
+    </div>
+  );
+
+  return (
+    <div
+      className={`flex shrink-0 ${
+        layout === "stacked" ? "flex-col items-center gap-3" : "items-start gap-2.5"
+      } ${className}`}
+    >
+      <Link
+        href={href}
+        aria-label="DoodleNote home"
+        className="shrink-0 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage-deep"
       >
         <Image
           src="/mascot.png"
@@ -124,27 +134,9 @@ export function BrandLockup({
           priority={priority}
           unoptimized
         />
-        {textStack}
       </Link>
-    );
-  }
-
-  return (
-    <Link
-      href={href}
-      className={`flex shrink-0 items-start gap-2.5 ${className}`}
-    >
-      <Image
-        src="/mascot.png"
-        alt=""
-        width={size}
-        height={size}
-        className={iconClass}
-        priority={priority}
-        unoptimized
-      />
       {textStack}
-    </Link>
+    </div>
   );
 }
 
