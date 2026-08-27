@@ -11,6 +11,7 @@
     "./testing": "./src/testing.ts"
   },
   "scripts": {
+    "auth:backfill-identities": "tsx scripts/backfill-account-identities.ts",
     "generate": "drizzle-kit generate",
     "smoke": "tsx scripts/smoke.ts",
     "test": "tsx --test src/*.test.ts",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.31.10",
+    "jose": "^6.2.10",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3"
   }
