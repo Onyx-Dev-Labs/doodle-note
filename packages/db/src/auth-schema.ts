@@ -1,8 +1,8 @@
 /**
  * Better Auth tables (user/session/account/verification + organization plugin).
  *
- * Generated with `npx auth@1.6.23 generate` (the Better Auth CLI) against the
- * installed better-auth version — regenerate rather than hand-editing when the
+ * Generated with the Better Auth CLI against the installed Better Auth
+ * version. Regenerate rather than hand-editing when the
  * auth config changes. Kept separate from the product schema in ./schema.ts;
  * Better Auth's `organization` table is the source of truth for team
  * membership, while the legacy `workspaces` table remains untouched for now.
@@ -65,14 +65,20 @@ export const account = pgTable(
     accessTokenExpiresAt: timestamp("access_token_expires_at"),
     refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
     scope: text("scope"),
-    issuer: text("issuer"),
+    issuer: text("issuer").notNull(),
     password: text("password"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index("account_userId_idx").on(table.userId)],
+  (table) => [
+    index("account_userId_idx").on(table.userId),
+    uniqueIndex("account_issuer_accountId_uidx").on(
+      table.issuer,
+      table.accountId,
+    ),
+  ],
 );
 
 export const verification = pgTable(
