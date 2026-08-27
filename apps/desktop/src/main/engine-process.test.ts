@@ -32,7 +32,7 @@ function fakeEngine(body: string): { binary: string; log: string } {
     [
       '#!/usr/bin/env node',
       "const fs = require('node:fs')",
-      `const log = (m) => fs.appendFileSync(${JSON.stringify(log)}, m + '\\n')`,
+      "const log = (m) => fs.appendFileSync(process.argv[1] + '.log', m + '\\n')",
       'const emit = (o) => console.log(JSON.stringify(o))',
       // Never linger past the test run.
       "setTimeout(() => { log('gave-up'); process.exit(3) }, 15000)",
