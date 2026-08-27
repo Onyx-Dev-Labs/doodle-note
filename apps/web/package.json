@@ -8,19 +8,20 @@
     "start": "next start --port 4040",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "auth-smoke": "tsx scripts/auth-smoke.ts",
+    "auth-smoke": "node --conditions=react-server --import tsx scripts/auth-smoke.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@repo/agent-contract": "workspace:*",
     "@repo/db": "workspace:*",
-    "@vercel/blob": "^2.5.0",
-    "better-auth": "^1.6.23",
-    "next": "16.2.10",
+    "@vercel/blob": "^2.8.0",
+    "better-auth": "^1.7.1",
+    "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
-    "stripe": "^22.3.0",
-    "@repo/agent-contract": "workspace:*"
+    "server-only": "^0.0.1",
+    "stripe": "^22.3.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,7 +29,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^5"

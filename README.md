@@ -3,7 +3,7 @@
     <img src="apps/desktop/resources/doodlenote-logo.png" alt="DoodleNote — Think it. Doodle it. Done." width="420">
   </a>
 
-  <p><strong>Private, local-first meeting capture and AI notes. No meeting bot required.</strong></p>
+  <p><strong>Privacy-first, local-first meeting capture and AI notes. No meeting bot required.</strong></p>
 
   <p>
     <a href="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/ci.yml/badge.svg"></a>
@@ -13,7 +13,7 @@
   </p>
 </div>
 
-DoodleNote captures your microphone and the other side of a call on your computer, transcribes the conversation on-device, and combines the transcript with your rough notes into a useful meeting record. Audio stays on your device unless you explicitly choose to sync or share.
+DoodleNote captures your microphone and the other side of a call on your computer, transcribes the conversation on-device, and combines the transcript with your rough notes into a useful meeting record. Audio stays on your device. Optional Sync uploads the meeting content you choose, but not the recording audio.
 
 ## Why DoodleNote
 
@@ -24,6 +24,15 @@ DoodleNote captures your microphone and the other side of a call on your compute
 - **Capture at the right moment.** Calendar and microphone-aware prompts help you start and stop recordings without stacking notifications.
 - **Optional cloud features.** Sync across devices, share selected meetings, and collaborate in workspaces when you opt in.
 - **Agent access under your control.** An opt-in, read-only MCP server lets compatible AI tools search local notes and transcripts.
+
+## Get DoodleNote
+
+Download the current signed desktop builds from
+[doodlenote.ai](https://www.doodlenote.ai). The macOS app supports Apple
+Silicon on macOS 14 or later. The Windows 10/11 build is currently beta.
+
+The local app is free, requires no DoodleNote account, and does not impose
+meeting limits. Hosted Sync is optional and costs $10 per user per month.
 
 ## Project status
 
@@ -78,6 +87,11 @@ pnpm --filter web dev
 
 The web app works locally without cloud credentials by using PGlite and a development-only auth secret. Optional integrations are disabled until their environment variables are configured; see [apps/web/README.md](apps/web/README.md).
 
+For a durable production deployment of the Sync server, follow
+[SELF-HOSTING.md](SELF-HOSTING.md). Production installations require an
+explicit authentication secret and must either configure Stripe or declare
+themselves self-hosted.
+
 For native iPhone setup, see [apps/ios/README.md](apps/ios/README.md). For the engine protocol and commands, see [engine/README.md](engine/README.md).
 
 ## Verification
@@ -89,8 +103,12 @@ pnpm --filter desktop typecheck
 pnpm --filter desktop test
 pnpm --filter doodle-note-mcp test
 pnpm --filter @repo/ai test
+pnpm --filter @repo/db test
 pnpm --filter web typecheck
 pnpm --filter web test
+pnpm --filter web build
+pnpm lint
+pnpm audit --prod --audit-level=low
 pnpm engine:build
 ```
 
@@ -106,6 +124,8 @@ Recording and consent laws vary by location and organization. You are responsibl
 
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities through the private process in [SECURITY.md](SECURITY.md).
 
+For product and community support boundaries, see [SUPPORT.md](SUPPORT.md).
+
 Brand assets and usage notes live in [docs/BRAND.md](docs/BRAND.md).
 The DoodleNote name and mascot are reserved; see [TRADEMARK.md](TRADEMARK.md).
 
@@ -116,3 +136,7 @@ apps are free forever. Official cloud Sync at
 [doodlenote.ai](https://www.doodlenote.ai) is an optional paid backup
 and multi-device service ($10 / user / month). See
 [docs/OPEN-SOURCE.md](docs/OPEN-SOURCE.md).
+
+Libraries, speech models, and optional local AI models retain their own
+licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before
+redistributing a build.

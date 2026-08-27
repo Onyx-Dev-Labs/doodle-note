@@ -20,12 +20,7 @@ import {
 import type { FolderRecord } from '../shared/folders-api'
 import type { FoldersService } from './folders-service'
 import type { MeetingsService } from './meetings-service'
-import {
-  contentHash,
-  mediaRefs,
-  rewriteMedia,
-  syncableSegments
-} from './sync-content-hash'
+import { contentHash, mediaRefs, rewriteMedia, syncableSegments } from './sync-content-hash'
 import { EMPTY_SYNC_CONFIG, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
 import {
   decideFolderPull,

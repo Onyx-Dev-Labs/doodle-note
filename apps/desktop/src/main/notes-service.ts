@@ -504,10 +504,7 @@ export class NotesService {
     const validProviders: CloudProvider[] = ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']
     if (update.cloud === null) {
       delete this.settings.cloud
-    } else if (
-      update.cloud &&
-      validProviders.includes(update.cloud.provider as CloudProvider)
-    ) {
+    } else if (update.cloud && validProviders.includes(update.cloud.provider as CloudProvider)) {
       const provider = update.cloud.provider as CloudProvider
       const model =
         typeof update.cloud.model === 'string' && update.cloud.model.trim()

@@ -38,9 +38,7 @@ export function parseSyncConfigFromRaw(raw: Partial<SyncConfig>): SyncConfig {
     ...(typeof raw.workspaceName === 'string' ? { workspaceName: raw.workspaceName } : {}),
     ...(typeof raw.lastSyncAt === 'string' ? { lastSyncAt: raw.lastSyncAt } : {}),
     pushed:
-      raw.pushed && typeof raw.pushed === 'object'
-        ? (raw.pushed as Record<string, string>)
-        : {},
+      raw.pushed && typeof raw.pushed === 'object' ? (raw.pushed as Record<string, string>) : {},
     mediaUrls:
       raw.mediaUrls && typeof raw.mediaUrls === 'object'
         ? (raw.mediaUrls as Record<string, string>)

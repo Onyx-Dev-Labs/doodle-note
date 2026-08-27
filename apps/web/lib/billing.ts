@@ -1,12 +1,15 @@
 import Stripe from "stripe";
 import { eq, getDb, subscriptions } from "@repo/db";
 
+import { resolveBillingMode } from "./runtime-config";
+
 /**
  * Cloud-sync billing: $10/month per user, 15-day trial for everyone (card
  * up front), users with a linked device before launch grandfathered free.
  *
- * DORMANT WITHOUT KEYS: when STRIPE_SECRET_KEY is unset, every entitlement
- * check passes — the feature ships dark and flips on when the env lands.
+ * Local development and explicitly self-hosted installations bypass official
+ * DoodleNote billing. Hosted production fails closed unless the full Stripe
+ * configuration is present.
  */
 
 export const TRIAL_DAYS = 15;
@@ -14,8 +17,7 @@ export const TRIAL_DAYS = 15;
 let stripeClient: Stripe | null = null;
 
 export function billingEnabled(): boolean {
-  return typeof process.env.STRIPE_SECRET_KEY === "string" &&
-    process.env.STRIPE_SECRET_KEY.length > 0;
+  return resolveBillingMode() === "stripe";
 }
 
 export function getStripe(): Stripe {
@@ -28,7 +30,7 @@ export function getStripe(): Stripe {
 
 export interface Entitlement {
   entitled: boolean;
-  /** Why: grandfathered | trialing | active | disabled (no keys) | none | lapsed */
+  /** Why: grandfathered | trialing | active | self-hosted | development | configuration_error | none | lapsed */
   reason: string;
   /** ISO date the current paid/trial period ends, when known. */
   periodEnd?: string;
@@ -39,7 +41,16 @@ export interface Entitlement {
 const SERVING_STATUSES = new Set(["trialing", "active", "past_due"]);
 
 export async function entitlementFor(userId: string): Promise<Entitlement> {
-  if (!billingEnabled()) return { entitled: true, reason: "disabled" };
+  const mode = resolveBillingMode();
+  if (mode === "self-hosted" || mode === "development") {
+    return { entitled: true, reason: mode };
+  }
+  if (mode === "misconfigured") {
+    console.error(
+      "[billing] Production billing is incomplete. Configure Stripe or set DOODLENOTE_SELF_HOSTED=true.",
+    );
+    return { entitled: false, reason: "configuration_error" };
+  }
   const db = getDb();
   const rows = await db
     .select()

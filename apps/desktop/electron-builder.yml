@@ -12,6 +12,8 @@ files:
 extraResources:
   - from: ../../packages/doodle-note-mcp/dist/cli.js
     to: mcp/cli.js
+  - from: ../../packages/doodle-note-mcp/package.json
+    to: mcp/package.json
 # Native addons load their binaries from real files on disk.
 asarUnpack:
   - "**/node_modules/node-llama-cpp/**"

@@ -1,5 +1,28 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL",
+    "BLOB_READ_WRITE_TOKEN",
+    "DATABASE_URL",
+    "DOODLENOTE_SELF_HOSTED",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "INVITATION_FROM_EMAIL",
+    "MICROSOFT_CLIENT_ID",
+    "MICROSOFT_CLIENT_SECRET",
+    "RESEND_API_KEY",
+    "STRIPE_PRICE_ID",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_API_KEY_SECRET",
+    "TWILIO_API_KEY_SID",
+    "TWILIO_AUTH_TOKEN",
+    "TWILIO_CALLER_ID",
+    "TWILIO_TWIML_APP_SID",
+    "VERCEL_URL"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

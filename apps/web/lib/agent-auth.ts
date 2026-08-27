@@ -78,6 +78,14 @@ export async function authenticateEntitledAgentRequest(
   }
   const entitlement = await entitlementFor(agent.userId);
   if (!entitlement.entitled) {
+    if (entitlement.reason === "configuration_error") {
+      return {
+        response: NextResponse.json(
+          { error: "Hosted agent access is unavailable because billing is not configured" },
+          { status: 503 },
+        ),
+      };
+    }
     return {
       response: NextResponse.json(
         {

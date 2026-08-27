@@ -17,7 +17,7 @@ Open [http://localhost:4040](http://localhost:4040).
 
 No external service is required for the basic local development path:
 
-- the database falls back to PGlite under `packages/db/.pglite/` when `DATABASE_URL` is unset;
+- the database falls back to PGlite under `packages/db/.pglite/` when `DATABASE_URL` is unset in development;
 - authentication uses an explicit insecure development fallback when `BETTER_AUTH_SECRET` is unset;
 - OAuth, email delivery, billing, and voice features remain disabled until their complete environment-variable groups are present.
 
@@ -41,15 +41,17 @@ credentials or copy real account/meeting data into tests.
 
 The same app can sync devices against a server you run. Local
 development already does this with PGlite when `DATABASE_URL` is
-unset. For a durable self-hosted instance you typically set
-`DATABASE_URL` and `BETTER_AUTH_SECRET` (and Blob/OAuth if you need
-those features).
+unset. Production fails closed without a durable database. For a
+self-hosted instance set `DATABASE_URL`, `BETTER_AUTH_URL`,
+`BETTER_AUTH_SECRET`, and
+`DOODLENOTE_SELF_HOSTED=true` (and Blob/OAuth if you need those features).
 
 Official **$10 / user / month** Sync billing is the doodlenote.ai
-hosted product (Stripe). When Stripe keys are absent, entitlement
-checks pass so a self-hosted copy does not require DoodleNote's paid
-plan. This repository does not ship a production Docker Compose stack
-yet.
+hosted product (Stripe). The explicit self-hosted flag bypasses that
+entitlement gate. Official production fails closed when the Stripe
+configuration is missing or incomplete. This repository does not ship
+a production Docker Compose stack yet; see
+[`SELF-HOSTING.md`](../../SELF-HOSTING.md).
 
 ## Commands
 
@@ -59,6 +61,7 @@ pnpm --filter web typecheck
 pnpm --filter web test
 pnpm --filter web build
 pnpm --filter web auth-smoke
+pnpm --filter @repo/db test
 ```
 
 The current Next.js version may differ from older App Router examples. Read `apps/web/AGENTS.md` and the installed framework documentation before changing framework APIs.

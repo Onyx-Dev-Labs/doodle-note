@@ -37,6 +37,13 @@ test('macOS packages the corrected icon under a cache-busting resource name', ()
   assert.match(builderConfig, /CFBundleIconFile:\s*doodlenote-opaque-v0411\.icns/)
 })
 
+test('packaged MCP server retains its ES module metadata', () => {
+  assert.match(
+    builderConfig,
+    /from:\s*\.\.\/\.\.\/packages\/doodle-note-mcp\/package\.json\s+to:\s*mcp\/package\.json/
+  )
+})
+
 test('desktop and in-app mascot artwork use the opaque sage master', () => {
   const master = new URL('../../resources/icon-master.png', import.meta.url)
   const iPhoneIcon = new URL(
@@ -85,7 +92,7 @@ test('CI builds and retains a real Windows installer', () => {
   assert.match(ciWorkflow, /Smoke packaged Windows native modules/)
   assert.match(ciWorkflow, /sherpa and llama native modules loaded successfully/)
   assert.match(ciWorkflow, /Get-AuthenticodeSignature/)
-  assert.match(ciWorkflow, /actions\/upload-artifact@v4/)
+  assert.match(ciWorkflow, /actions\/upload-artifact@[0-9a-f]{40}\s+# v4/)
   assert.match(desktopPackage, /release:win[\s\S]*verify-windows-signature\.ps1/)
 })
 

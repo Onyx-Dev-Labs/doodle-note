@@ -9,18 +9,28 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    env:
+      # Public CI-only values. Production uses deployment-managed secrets.
+      DOODLENOTE_SELF_HOSTED: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4 # version comes from package.json#packageManager
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
 
       # The incident guard. --ignore-scripts skips native postinstalls
       # (electron, llama.cpp, sherpa) that the checks below don't need —
@@ -40,6 +50,27 @@ jobs:
       - name: Notes engine tests
         run: pnpm --filter @repo/ai test
 
+      - name: Database configuration tests
+        run: pnpm --filter @repo/db test
+
+      - name: Web typecheck
+        run: pnpm --filter web typecheck
+
+      - name: Web tests
+        run: pnpm --filter web test
+
+      - name: Web authentication smoke
+        run: pnpm --filter web auth-smoke
+
+      - name: Web production build
+        run: pnpm --filter web build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Production dependency audit
+        run: pnpm audit --prod --audit-level=low
+
   # A Linux typecheck cannot prove that Electron packaged the Windows native
   # addons. Build the actual NSIS updater on every PR and retain it for native
   # Windows smoke testing. CSC_LINK/CSC_KEY_PASSWORD sign it automatically
@@ -54,14 +85,14 @@ jobs:
       CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
 
       - name: Install with Windows native dependencies
         run: pnpm install --frozen-lockfile
@@ -129,7 +160,7 @@ jobs:
           Write-Host "Installer: $($installer.Name)"
           Write-Host "Authenticode: $($signature.Status)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: doodlenote-windows-${{ github.sha }}
           path: |

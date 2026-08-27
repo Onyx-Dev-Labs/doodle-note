@@ -12,9 +12,34 @@ const record: MeetingRecord = {
   enhancedMarkdown: '## Decisions\n- Budget approved at **$250,000**',
   echoSuppressed: 1,
   segments: [
-    { id: 's1', channel: 'mic', speaker: 'You', text: 'Hello there', startMs: 5000, endMs: 7000, confidence: 0.9 },
-    { id: 's2', channel: 'system', speaker: 'Them', text: 'Hi!', startMs: 9000, endMs: 9500, confidence: 0.9 },
-    { id: 's3', channel: 'mic', speaker: 'You', text: 'echo line', startMs: 9100, endMs: 9400, confidence: 0.9, echo: true }
+    {
+      id: 's1',
+      channel: 'mic',
+      speaker: 'You',
+      text: 'Hello there',
+      startMs: 5000,
+      endMs: 7000,
+      confidence: 0.9
+    },
+    {
+      id: 's2',
+      channel: 'system',
+      speaker: 'Them',
+      text: 'Hi!',
+      startMs: 9000,
+      endMs: 9500,
+      confidence: 0.9
+    },
+    {
+      id: 's3',
+      channel: 'mic',
+      speaker: 'You',
+      text: 'echo line',
+      startMs: 9100,
+      endMs: 9400,
+      confidence: 0.9,
+      echo: true
+    }
   ]
 }
 
@@ -33,7 +58,10 @@ test('markdown export falls back to rough notes when no enhanced', () => {
 })
 
 test('html export escapes the title and renders the markdown', () => {
-  const html = buildExportHtml({ ...record, title: 'A <b>sneaky</b> title' }, buildExportMarkdown(record))
+  const html = buildExportHtml(
+    { ...record, title: 'A <b>sneaky</b> title' },
+    buildExportMarkdown(record)
+  )
   assert.match(html, /A &lt;b&gt;sneaky&lt;\/b&gt; title/)
   assert.match(html, /<h2>Decisions<\/h2>/)
   assert.match(html, /<strong>\$250,000<\/strong>/)

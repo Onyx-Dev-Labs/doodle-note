@@ -22,7 +22,10 @@ test('mono import: real speech becomes mic-channel segments', { skip: !available
     const result = await transcribeFileToSegments(ENGINE, file)
     assert.ok(result.segments.length >= 1, 'produced segments')
     assert.ok(result.audioSeconds > 0)
-    const text = result.segments.map((s) => s.text).join(' ').toLowerCase()
+    const text = result.segments
+      .map((s) => s.text)
+      .join(' ')
+      .toLowerCase()
     assert.match(text, /deployment/)
     assert.match(text, /errors/)
     for (const segment of result.segments) {
@@ -45,11 +48,24 @@ test('stereo re-transcription: channels keep their speakers', { skip: !available
     execFileSync('say', ['-o', left, 'We should review the budget together'])
     execFileSync('say', ['-o', right, 'The invoices were sent to the client yesterday'])
     const stereo = join(dir, 'stereo.wav')
-    execFileSync('swift', [join(__dirname, '..', '..', 'test-fixtures', 'make-stereo.swift'), left, right, stereo])
+    execFileSync('swift', [
+      join(__dirname, '..', '..', 'test-fixtures', 'make-stereo.swift'),
+      left,
+      right,
+      stereo
+    ])
 
     const result = await transcribeFileToSegments(ENGINE, stereo)
-    const micText = result.segments.filter((s) => s.channel === 'mic' && !s.echo).map((s) => s.text).join(' ').toLowerCase()
-    const systemText = result.segments.filter((s) => s.channel === 'system' && !s.echo).map((s) => s.text).join(' ').toLowerCase()
+    const micText = result.segments
+      .filter((s) => s.channel === 'mic' && !s.echo)
+      .map((s) => s.text)
+      .join(' ')
+      .toLowerCase()
+    const systemText = result.segments
+      .filter((s) => s.channel === 'system' && !s.echo)
+      .map((s) => s.text)
+      .join(' ')
+      .toLowerCase()
     assert.match(micText, /budget/)
     assert.match(systemText, /invoices/)
     assert.doesNotMatch(micText, /invoices/)

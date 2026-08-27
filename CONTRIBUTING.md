@@ -53,6 +53,8 @@ pnpm --filter web typecheck
 pnpm --filter web test
 pnpm --filter doodle-note-mcp test
 pnpm --filter @repo/ai test
+pnpm lint
+pnpm audit --prod --audit-level=low
 pnpm engine:build
 ```
 

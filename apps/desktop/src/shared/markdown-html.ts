@@ -18,10 +18,7 @@ const IMAGE_LINE = /^!\[([^\]]*)\]\((doodle-media:\/\/[a-z0-9.-]+)\)$/
 function inlineHtml(s: string): string {
   let out = escapeHtml(s)
   // Links: http(s) only — anything else stays literal text.
-  out = out.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    '<a href="$2" rel="noreferrer">$1</a>'
-  )
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" rel="noreferrer">$1</a>')
   out = out.replace(/`([^`]+)`/g, '<code>$1</code>')
   out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
   out = out.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')

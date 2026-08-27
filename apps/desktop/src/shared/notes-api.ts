@@ -33,7 +33,11 @@ export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
 export type CloudProvider = 'anthropic' | 'openai' | 'groq' | 'openrouter' | 'ollama'
 
-export const CLOUD_PROVIDERS: ReadonlyArray<{ id: CloudProvider; label: string; keyOptional?: boolean }> = [
+export const CLOUD_PROVIDERS: ReadonlyArray<{
+  id: CloudProvider
+  label: string
+  keyOptional?: boolean
+}> = [
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'openai', label: 'OpenAI' },
   { id: 'groq', label: 'Groq' },

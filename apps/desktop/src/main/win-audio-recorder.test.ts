@@ -3,14 +3,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import {
-  isWinCheckpointDir,
-  mergeWinSession,
-  WinSessionRecorder
-} from './win-audio-recorder'
+import { isWinCheckpointDir, mergeWinSession, WinSessionRecorder } from './win-audio-recorder'
 
 function tempDir(name: string): string {
-  const dir = join(tmpdir(), `win-audio-test-${name}-${process.pid}-${Math.random().toString(36).slice(2)}`)
+  const dir = join(
+    tmpdir(),
+    `win-audio-test-${name}-${process.pid}-${Math.random().toString(36).slice(2)}`
+  )
   mkdirSync(dir, { recursive: true })
   return dir
 }

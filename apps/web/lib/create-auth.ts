@@ -6,12 +6,7 @@ import { organization } from "better-auth/plugins";
 import { fullSchema, type Db } from "@repo/db";
 
 import { sendWorkspaceInvitationEmail } from "./invitation-email";
-
-/**
- * Obviously-dev-only fallback so local dev works without any env setup.
- * Never rely on this outside of local development.
- */
-const DEV_ONLY_SECRET = "dev-only-insecure-better-auth-secret-change-me";
+import { resolveAuthBaseUrl, resolveAuthSecret } from "./runtime-config";
 
 /** Production canonical site; social OAuth callbacks must match this origin. */
 const PRODUCTION_ORIGINS = [
@@ -19,25 +14,9 @@ const PRODUCTION_ORIGINS = [
   "https://doodlenote.ai",
 ];
 
-function resolveBaseURL(): string {
-  if (process.env.BETTER_AUTH_URL) return process.env.BETTER_AUTH_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:4040";
-}
-
 function trustedOrigins(): string[] {
-  const base = resolveBaseURL();
+  const base = resolveAuthBaseUrl();
   return [...new Set([base, ...PRODUCTION_ORIGINS, "http://localhost:4040"])];
-}
-
-function resolveSecret(): string {
-  const secret = process.env.BETTER_AUTH_SECRET;
-  if (secret) return secret;
-  console.warn(
-    "[auth] BETTER_AUTH_SECRET is not set — using an insecure dev-only secret. " +
-      "Set BETTER_AUTH_SECRET before deploying.",
-  );
-  return DEV_ONLY_SECRET;
 }
 
 const googleEnabled = () =>
@@ -83,8 +62,8 @@ function socialProviders() {
 export function createAuth(db: Db) {
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema: fullSchema }),
-    secret: resolveSecret(),
-    baseURL: resolveBaseURL(),
+    secret: resolveAuthSecret(),
+    baseURL: resolveAuthBaseUrl(),
     trustedOrigins: trustedOrigins(),
     emailAndPassword: {
       enabled: true,
@@ -102,4 +81,8 @@ export function createAuth(db: Db) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
-export { googleEnabled, microsoftEnabled, resolveBaseURL };
+export {
+  googleEnabled,
+  microsoftEnabled,
+  resolveAuthBaseUrl as resolveBaseURL,
+};
