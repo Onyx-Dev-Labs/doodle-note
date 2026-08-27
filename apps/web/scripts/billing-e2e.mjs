@@ -12,8 +12,10 @@
  * metadata) and drives our REAL webhook route with properly signed events.
  */
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import Stripe from "stripe";
+import { billingTestIdentity, stripeCheckoutUrl } from "./billing-e2e-utils.mjs";
 
 const BASE = "http://localhost:4040";
 const here = import.meta.dirname;
@@ -25,8 +27,7 @@ const PRICE_ID = env("STRIPE_PRICE_ID");
 const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 if (!PRICE_ID || !WEBHOOK_SECRET) throw new Error("Stripe env missing in .env.local");
 
-const stamp = Math.random().toString(36).slice(2, 8);
-const EMAIL = `billing-e2e-${stamp}@example.com`;
+const { email: EMAIL, password: PASSWORD } = billingTestIdentity();
 let cookie = "";
 let pass = 0;
 const check = (name, ok, detail = "") => {
@@ -60,7 +61,7 @@ const call = async (path, options = {}) => {
 {
   const { res } = await call("/api/auth/sign-up/email", {
     method: "POST",
-    body: JSON.stringify({ email: EMAIL, password: `Pw!${stamp}${stamp}`, name: "Billing E2E" }),
+    body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: "Billing E2E" }),
   });
   check("sign-up", res.ok, EMAIL);
 }
@@ -96,12 +97,9 @@ let customerId = null;
     method: "POST",
     body: JSON.stringify({ next: "/app" }),
   });
-  check(
-    "checkout session",
-    res.ok && typeof body?.url === "string" && body.url.includes("checkout.stripe.com"),
-    body?.url?.slice(0, 48),
-  );
-  const page = await fetch(body.url);
+  const checkoutUrl = stripeCheckoutUrl(body?.url);
+  check("checkout session", res.ok && checkoutUrl !== null, checkoutUrl?.origin);
+  const page = await fetch(checkoutUrl);
   check("hosted checkout page loads", page.ok, `HTTP ${page.status}`);
   // ensureCustomer persisted the mapping — find the customer for later steps.
   // customers.list filters by exact email with no search-index lag.
@@ -129,7 +127,7 @@ let subscription = null;
 
 const deliverWebhook = async (type, object) => {
   const payload = JSON.stringify({
-    id: `evt_e2e_${Math.random().toString(36).slice(2, 10)}`,
+    id: `evt_e2e_${randomUUID()}`,
     object: "event",
     type,
     data: { object },

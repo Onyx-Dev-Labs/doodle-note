@@ -3,13 +3,15 @@
  * looks up by lookup_key/url before creating. Run once per mode:
  *
  *   STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-setup.mjs   # test mode
- *   STRIPE_SECRET_KEY=sk_live_… node scripts/stripe-setup.mjs   # go-live
+ *   STRIPE_SECRET_KEY=sk_live_… \
+ *     STRIPE_WEBHOOK_SECRET_OUTPUT=/secure/new-file.env \
+ *     node scripts/stripe-setup.mjs                            # go-live
  *
- * Prints the env vars to set (Vercel prod + root .env.local):
- *   STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET (webhook secret prints ONCE —
- *   it cannot be fetched again later).
+ * Prints non-secret configuration. When a live webhook must be created, its
+ * one-time secret is written to a new owner-only file and never printed.
  */
 import Stripe from "stripe";
+import { reserveSecretEnvFile } from "./secure-secret-output.mjs";
 
 const key = process.env.STRIPE_SECRET_KEY;
 if (!key) {
@@ -39,24 +41,53 @@ if (!price) {
 }
 
 // Webhook endpoint (skipped in test mode — use `stripe listen` locally).
-let webhookLine = "";
+let webhookSecretPath = "";
 if (mode === "LIVE") {
   const existing = (await stripe.webhookEndpoints.list({ limit: 100 })).data.find(
     (e) => e.url === WEBHOOK_URL,
   );
   if (existing) {
-    console.log(`webhook exists: ${existing.id} (secret not retrievable — reuse the saved one)`);
+    console.log(`webhook exists: ${existing.id} (secret not retrievable; reuse the saved one)`);
   } else {
-    const endpoint = await stripe.webhookEndpoints.create({
-      url: WEBHOOK_URL,
-      enabled_events: [
-        "customer.subscription.created",
-        "customer.subscription.updated",
-        "customer.subscription.deleted",
-        "checkout.session.completed",
-      ],
-    });
-    webhookLine = `STRIPE_WEBHOOK_SECRET=${endpoint.secret}`;
+    const output = process.env.STRIPE_WEBHOOK_SECRET_OUTPUT;
+    if (!output) {
+      throw new Error(
+        "Set STRIPE_WEBHOOK_SECRET_OUTPUT to a new secure file before creating the live webhook",
+      );
+    }
+    const reservation = reserveSecretEnvFile(output);
+    let endpoint;
+    try {
+      endpoint = await stripe.webhookEndpoints.create({
+        url: WEBHOOK_URL,
+        enabled_events: [
+          "customer.subscription.created",
+          "customer.subscription.updated",
+          "customer.subscription.deleted",
+          "checkout.session.completed",
+        ],
+      });
+    } catch (error) {
+      reservation.abort();
+      throw error;
+    }
+
+    try {
+      if (!endpoint.secret) throw new Error("Stripe did not return the new webhook secret");
+      reservation.write("STRIPE_WEBHOOK_SECRET", endpoint.secret);
+    } catch (error) {
+      reservation.abort();
+      try {
+        await stripe.webhookEndpoints.del(endpoint.id);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `Could not persist the webhook secret or remove webhook ${endpoint.id}`,
+        );
+      }
+      throw error;
+    }
+    webhookSecretPath = reservation.path;
     console.log(`created webhook ${endpoint.id}`);
   }
 } else {
@@ -64,6 +95,6 @@ if (mode === "LIVE") {
 }
 
 console.log(`\n--- env for ${mode} ---`);
-console.log(`STRIPE_SECRET_KEY=${key.slice(0, 12)}…  (already have it)`);
+console.log("STRIPE_SECRET_KEY=<already supplied>");
 console.log(`STRIPE_PRICE_ID=${price.id}`);
-if (webhookLine) console.log(webhookLine);
+if (webhookSecretPath) console.log(`STRIPE_WEBHOOK_SECRET written to ${webhookSecretPath}`);
