@@ -39,7 +39,8 @@ General product support, feature requests, and non-sensitive bugs belong in the 
 
 ## Deployment safety
 
-Production web deployments must set a unique `BETTER_AUTH_SECRET`. Official
+Production web deployments must set `DATABASE_URL`, `BETTER_AUTH_URL`, and a
+unique `BETTER_AUTH_SECRET`. Official
 hosted production must also configure the complete Stripe environment group;
 self-hosted production must explicitly set `DOODLENOTE_SELF_HOSTED=true`.
 Missing or incomplete production configuration fails closed by design.

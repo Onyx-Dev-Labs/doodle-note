@@ -111,7 +111,10 @@ export function BrandLockup({
 
   if (layout === "stacked") {
     return (
-      <Link href={href} className={`flex flex-col items-center gap-3 ${className}`}>
+      <Link
+        href={href}
+        className={`flex flex-col items-center gap-3 ${className}`}
+      >
         <Image
           src="/mascot.png"
           alt=""
@@ -127,7 +130,10 @@ export function BrandLockup({
   }
 
   return (
-    <Link href={href} className={`flex shrink-0 items-start gap-2.5 ${className}`}>
+    <Link
+      href={href}
+      className={`flex shrink-0 items-start gap-2.5 ${className}`}
+    >
       <Image
         src="/mascot.png"
         alt=""
@@ -169,19 +175,25 @@ export function SiteFooter() {
     <footer className="border-t border-sand">
       <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-between gap-3 px-6 py-6 text-sm text-stone sm:flex-row">
         <BrandLockup compact />
-        <nav className="flex items-center gap-5">
+        <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
           <Link href="/pricing" className="hover:text-ink">
             Pricing
           </Link>
           <Link href="/changelog" className="hover:text-ink">
             What&rsquo;s new
           </Link>
+          <Link href="/privacy" className="hover:text-ink">
+            Privacy
+          </Link>
+          <Link href="/terms" className="hover:text-ink">
+            Terms
+          </Link>
           <GitHubNavLink className="rounded-md px-1.5 py-1.5 text-bark transition-colors hover:bg-sage-fill hover:text-ink" />
           <Link href="/login" className="hover:text-ink">
             Sign in
           </Link>
         </nav>
-        <span>Local-first. Your meetings never leave your device.</span>
+        <span>Local-first. Cloud only when you opt in.</span>
       </div>
     </footer>
   );

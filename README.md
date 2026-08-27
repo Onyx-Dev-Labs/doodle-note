@@ -13,7 +13,7 @@
   </p>
 </div>
 
-DoodleNote captures your microphone and the other side of a call on your computer, transcribes the conversation on-device, and combines the transcript with your rough notes into a useful meeting record. Audio stays on your device unless you explicitly choose to sync or share.
+DoodleNote captures your microphone and the other side of a call on your computer, transcribes the conversation on-device, and combines the transcript with your rough notes into a useful meeting record. Audio stays on your device. Optional Sync uploads the meeting content you choose, but not the recording audio.
 
 ## Why DoodleNote
 
@@ -103,6 +103,7 @@ pnpm --filter desktop typecheck
 pnpm --filter desktop test
 pnpm --filter doodle-note-mcp test
 pnpm --filter @repo/ai test
+pnpm --filter @repo/db test
 pnpm --filter web typecheck
 pnpm --filter web test
 pnpm --filter web build

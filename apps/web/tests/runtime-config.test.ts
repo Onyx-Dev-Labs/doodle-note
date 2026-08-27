@@ -50,6 +50,15 @@ test("production auth requires an explicit or Vercel deployment URL", () => {
   );
 });
 
+test("a Next.js production build does not require live auth credentials", () => {
+  const env = {
+    NODE_ENV: "production",
+    NEXT_PHASE: "phase-production-build",
+  };
+  assert.match(resolveAuthSecret(env), /dev-only-insecure/);
+  assert.equal(resolveAuthBaseUrl(env), "http://localhost:4040");
+});
+
 test("hosted production requires the complete Stripe group", () => {
   assert.equal(resolveBillingMode({ NODE_ENV: "production" }), "misconfigured");
   assert.equal(

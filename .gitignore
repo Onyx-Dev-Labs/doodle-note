@@ -3,6 +3,7 @@ node_modules/
 
 # builds
 .next/
+.next-agent/
 dist/
 out/
 .turbo/

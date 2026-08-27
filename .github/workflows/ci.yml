@@ -21,18 +21,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Public CI-only values. Production uses deployment-managed secrets.
-      BETTER_AUTH_SECRET: ci-only-auth-secret-not-used-outside-actions
-      BETTER_AUTH_URL: http://localhost:4040
       DOODLENOTE_SELF_HOSTED: "true"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
 
       # The incident guard. --ignore-scripts skips native postinstalls
       # (electron, llama.cpp, sherpa) that the checks below don't need —
@@ -51,6 +49,9 @@ jobs:
 
       - name: Notes engine tests
         run: pnpm --filter @repo/ai test
+
+      - name: Database configuration tests
+        run: pnpm --filter @repo/db test
 
       - name: Web typecheck
         run: pnpm --filter web typecheck
@@ -86,12 +87,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
 
       - name: Install with Windows native dependencies
         run: pnpm install --frozen-lockfile

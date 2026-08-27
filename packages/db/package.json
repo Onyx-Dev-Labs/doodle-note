@@ -13,6 +13,7 @@
   "scripts": {
     "generate": "drizzle-kit generate",
     "smoke": "tsx scripts/smoke.ts",
+    "test": "tsx --test src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

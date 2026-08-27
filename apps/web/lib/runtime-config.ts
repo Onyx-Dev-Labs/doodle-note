@@ -2,6 +2,10 @@ type RuntimeEnvironment = Record<string, string | undefined>;
 
 const DEV_ONLY_SECRET = "dev-only-insecure-better-auth-secret-change-me";
 
+function isProductionBuild(env: RuntimeEnvironment): boolean {
+  return env.NEXT_PHASE === "phase-production-build";
+}
+
 export type BillingMode =
   | "stripe"
   | "self-hosted"
@@ -17,12 +21,14 @@ export function resolveAuthSecret(
 ): string {
   const secret = env.BETTER_AUTH_SECRET;
   if (secret) return secret;
-  if (env.NODE_ENV === "production") {
+  if (env.NODE_ENV === "production" && !isProductionBuild(env)) {
     throw new Error("BETTER_AUTH_SECRET is required in production");
   }
-  console.warn(
-    "[auth] BETTER_AUTH_SECRET is not set - using an insecure dev-only secret.",
-  );
+  if (!isProductionBuild(env)) {
+    console.warn(
+      "[auth] BETTER_AUTH_SECRET is not set - using an insecure dev-only secret.",
+    );
+  }
   return DEV_ONLY_SECRET;
 }
 
@@ -31,7 +37,7 @@ export function resolveAuthBaseUrl(
 ): string {
   if (env.BETTER_AUTH_URL) return env.BETTER_AUTH_URL;
   if (env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
-  if (env.NODE_ENV === "production") {
+  if (env.NODE_ENV === "production" && !isProductionBuild(env)) {
     throw new Error("BETTER_AUTH_URL is required in production");
   }
   return "http://localhost:4040";

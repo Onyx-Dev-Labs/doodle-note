@@ -37,6 +37,13 @@ test('macOS packages the corrected icon under a cache-busting resource name', ()
   assert.match(builderConfig, /CFBundleIconFile:\s*doodlenote-opaque-v0411\.icns/)
 })
 
+test('packaged MCP server retains its ES module metadata', () => {
+  assert.match(
+    builderConfig,
+    /from:\s*\.\.\/\.\.\/packages\/doodle-note-mcp\/package\.json\s+to:\s*mcp\/package\.json/
+  )
+})
+
 test('desktop and in-app mascot artwork use the opaque sage master', () => {
   const master = new URL('../../resources/icon-master.png', import.meta.url)
   const iPhoneIcon = new URL(
