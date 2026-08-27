@@ -103,13 +103,7 @@ import {
   AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL,
   AGENT_ACCESS_GET_CHANNEL,
   AGENT_ACCESS_SET_CHANNEL,
-  CONNECTORS_CONFIGURE_GBRAIN_CHANNEL,
-  CONNECTORS_STATUS_CHANNEL,
-  CONNECTORS_STATUS_EVENT_CHANNEL,
-  CONNECTORS_SYNC_NOW_CHANNEL,
   type AgentAccessStatus,
-  type ConnectorsStatus,
-  type GBrainConfigUpdate,
   type IntegrationsApi,
   type McpClientId
 } from '../shared/integrations-api'
@@ -507,25 +501,6 @@ const integrationsApi: IntegrationsApi = {
       AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL,
       id
     ) as Promise<AgentAccessStatus>
-  },
-
-  getConnectors(): Promise<ConnectorsStatus> {
-    return ipcRenderer.invoke(CONNECTORS_STATUS_CHANNEL) as Promise<ConnectorsStatus>
-  },
-
-  configureGBrain(update: GBrainConfigUpdate): Promise<ConnectorsStatus> {
-    return ipcRenderer.invoke(
-      CONNECTORS_CONFIGURE_GBRAIN_CHANNEL,
-      update
-    ) as Promise<ConnectorsStatus>
-  },
-
-  connectorsSyncNow(): Promise<ConnectorsStatus> {
-    return ipcRenderer.invoke(CONNECTORS_SYNC_NOW_CHANNEL) as Promise<ConnectorsStatus>
-  },
-
-  onStatusChanged(cb: () => void): () => void {
-    return subscribe(CONNECTORS_STATUS_EVENT_CHANNEL, cb)
   }
 }
 

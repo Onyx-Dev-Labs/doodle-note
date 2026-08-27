@@ -31,9 +31,6 @@ importers:
       '@repo/ai':
         specifier: workspace:*
         version: link:../../packages/ai
-      '@repo/connectors':
-        specifier: workspace:*
-        version: link:../../packages/connectors
       '@repo/meetings-store':
         specifier: workspace:*
         version: link:../../packages/meetings-store
@@ -217,22 +214,6 @@ importers:
       node-llama-cpp:
         specifier: ^3.20.0
         version: 3.20.0(typescript@5.9.3)
-    devDependencies:
-      '@types/node':
-        specifier: ^22.19.1
-        version: 22.20.0
-      tsx:
-        specifier: ^4.23.0
-        version: 4.23.0
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
-  packages/connectors:
-    dependencies:
-      '@repo/meetings-store':
-        specifier: workspace:*
-        version: link:../meetings-store
     devDependencies:
       '@types/node':
         specifier: ^22.19.1
