@@ -55,6 +55,7 @@ export function resolveBillingMode(
 
   const stripeValues = [
     env.STRIPE_SECRET_KEY,
+    env.STRIPE_ACCOUNT_ID,
     env.STRIPE_PRICE_ID,
     env.STRIPE_WEBHOOK_SECRET,
   ];

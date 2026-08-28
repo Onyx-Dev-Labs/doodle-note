@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { eq, getDb, subscriptions } from "@repo/db";
 
 import { auth } from "@/lib/auth";
-import { billingEnabled, getStripe } from "@/lib/billing";
+import { billingEnabled, getVerifiedStripe } from "@/lib/billing";
 
 /** Stripe Billing Portal: update card, cancel, view invoices. */
 export async function POST(request: Request) {
@@ -26,9 +26,18 @@ export async function POST(request: Request) {
   }
 
   const origin = process.env.BETTER_AUTH_URL ?? new URL(request.url).origin;
-  const portal = await getStripe().billingPortal.sessions.create({
-    customer: customerId,
-    return_url: `${origin}/app`,
-  });
-  return NextResponse.json({ url: portal.url });
+  try {
+    const stripe = await getVerifiedStripe();
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${origin}/app`,
+    });
+    return NextResponse.json({ url: portal.url });
+  } catch {
+    console.error("[billing] Could not create a Stripe Customer Portal session");
+    return NextResponse.json(
+      { error: "Billing management is temporarily unavailable" },
+      { status: 502 },
+    );
+  }
 }

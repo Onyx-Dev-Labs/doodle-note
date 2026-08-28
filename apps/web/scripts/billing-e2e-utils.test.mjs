@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { billingTestIdentity, stripeCheckoutUrl } from "./billing-e2e-utils.mjs";
+import {
+  billingBaseUrl,
+  billingTestIdentity,
+  stripeCheckoutUrl,
+} from "./billing-e2e-utils.mjs";
 
 describe("billing E2E helpers", () => {
   it("creates independent, non-predictable test credentials", () => {
@@ -34,5 +38,17 @@ describe("billing E2E helpers", () => {
     ];
 
     for (const value of rejected) assert.equal(stripeCheckoutUrl(value), null, value);
+  });
+
+  it("accepts an explicit HTTPS preview or local development base URL", () => {
+    assert.equal(billingBaseUrl(), "http://localhost:4040");
+    assert.equal(
+      billingBaseUrl("https://preview.example.com/path"),
+      "https://preview.example.com",
+    );
+    assert.throws(
+      () => billingBaseUrl("http://preview.example.com"),
+      /BILLING_E2E_BASE_URL/,
+    );
   });
 });

@@ -1,6 +1,7 @@
 /**
- * Billing end-to-end against a local dev server (port 4040) with Stripe
- * TEST keys in apps/web/.env.local. Exercises the whole loop:
+ * Billing end-to-end against a local dev server or BILLING_E2E_BASE_URL with
+ * Stripe TEST values in the process environment or apps/web/.env.local.
+ * Exercises the whole loop:
  *
  *   sign-up → status(none) → checkout session minted → trial subscription
  *   created in Stripe → SIGNED webhook delivered → status(trialing) →
@@ -11,16 +12,22 @@
  * the same subscription the checkout would (same price, same trial, same
  * metadata) and drives our REAL webhook route with properly signed events.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import Stripe from "stripe";
-import { billingTestIdentity, stripeCheckoutUrl } from "./billing-e2e-utils.mjs";
+import {
+  billingBaseUrl,
+  billingTestIdentity,
+  stripeCheckoutUrl,
+} from "./billing-e2e-utils.mjs";
 
-const BASE = "http://localhost:4040";
 const here = import.meta.dirname;
-const envText = readFileSync(join(here, "..", ".env.local"), "utf8");
-const env = (key) => envText.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim();
+const envPath = join(here, "..", ".env.local");
+const envText = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+const env = (key) =>
+  process.env[key] ?? envText.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim();
+const BASE = billingBaseUrl(env("BILLING_E2E_BASE_URL"));
 
 const stripe = new Stripe(env("STRIPE_SECRET_KEY"));
 const PRICE_ID = env("STRIPE_PRICE_ID");

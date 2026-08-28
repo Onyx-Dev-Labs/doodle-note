@@ -1,11 +1,22 @@
+import { createHash } from "node:crypto";
+
 import Stripe from "stripe";
 import { eq, getDb, subscriptions } from "@repo/db";
 
+import {
+  checkoutBlocked,
+  entitlementFrom,
+  selectEffectiveSubscription,
+  subscriptionUsesPrice,
+  type Entitlement,
+} from "./billing-state";
 import { resolveBillingMode } from "./runtime-config";
+
+export type { Entitlement, EntitlementReason } from "./billing-state";
 
 /**
  * Cloud-sync billing: $10/month per user, 15-day trial for everyone (card
- * up front). Entitlement comes from an active Stripe subscription only.
+ * up front), with existing legacy access preserved until a separate migration.
  *
  * Local development and explicitly self-hosted installations bypass official
  * DoodleNote billing. Hosted production fails closed unless the full Stripe
@@ -15,6 +26,7 @@ import { resolveBillingMode } from "./runtime-config";
 export const TRIAL_DAYS = 15;
 
 let stripeClient: Stripe | null = null;
+let verifiedStripe: Promise<Stripe> | null = null;
 
 export function billingEnabled(): boolean {
   return resolveBillingMode() === "stripe";
@@ -28,29 +40,36 @@ export function getStripe(): Stripe {
   return stripeClient;
 }
 
-export interface Entitlement {
-  entitled: boolean;
-  /** Why: trialing | active | self-hosted | development | configuration_error | none | lapsed */
-  reason: string;
-  /** ISO date the current paid/trial period ends, when known. */
-  periodEnd?: string;
+/** Confirm the secret key belongs to the explicitly configured Stripe account. */
+export async function getVerifiedStripe(): Promise<Stripe> {
+  if (!verifiedStripe) {
+    const stripe = getStripe();
+    const expectedAccountId = process.env.STRIPE_ACCOUNT_ID;
+    verifiedStripe = stripe.accounts
+      .retrieveCurrent()
+      .then((account) => {
+        if (!expectedAccountId || account.id !== expectedAccountId) {
+          throw new Error("Stripe account does not match STRIPE_ACCOUNT_ID");
+        }
+        return stripe;
+      })
+      .catch((error: unknown) => {
+        verifiedStripe = null;
+        throw error;
+      });
+  }
+  return verifiedStripe;
 }
-
-/** Statuses Stripe considers "keep serving". past_due gets a grace pass so a
- *  failed card doesn't cut sync mid-retry cycle; Stripe cancels it for us. */
-const SERVING_STATUSES = new Set(["trialing", "active", "past_due"]);
 
 export async function entitlementFor(userId: string): Promise<Entitlement> {
   const mode = resolveBillingMode();
-  if (mode === "self-hosted" || mode === "development") {
-    return { entitled: true, reason: mode };
-  }
   if (mode === "misconfigured") {
     console.error(
       "[billing] Production billing is incomplete. Configure Stripe or set DOODLENOTE_SELF_HOSTED=true.",
     );
-    return { entitled: false, reason: "configuration_error" };
   }
+  if (mode !== "stripe") return entitlementFrom(mode);
+
   const db = getDb();
   const rows = await db
     .select()
@@ -58,17 +77,7 @@ export async function entitlementFor(userId: string): Promise<Entitlement> {
     .where(eq(subscriptions.userId, userId))
     .limit(1);
   const sub = rows[0];
-  if (!sub) return { entitled: false, reason: "none" };
-  if (SERVING_STATUSES.has(sub.status)) {
-    return {
-      entitled: true,
-      reason: sub.status,
-      ...(sub.currentPeriodEnd
-        ? { periodEnd: sub.currentPeriodEnd.toISOString() }
-        : {}),
-    };
-  }
-  return { entitled: false, reason: sub.status === "none" ? "none" : "lapsed" };
+  return entitlementFrom(mode, sub);
 }
 
 /** Create-or-fetch the Stripe customer for a user, persisting the mapping. */
@@ -85,10 +94,16 @@ export async function ensureCustomer(
   const existing = rows[0];
   if (existing?.stripeCustomerId) return existing.stripeCustomerId;
 
-  const customer = await getStripe().customers.create({
-    email,
-    metadata: { doodlenoteUserId: userId },
-  });
+  const stripe = await getVerifiedStripe();
+  const customer = await stripe.customers.create(
+    {
+      email,
+      metadata: { doodlenoteUserId: userId },
+    },
+    {
+      idempotencyKey: `doodlenote-customer-${createHash("sha256").update(userId).digest("hex")}`,
+    },
+  );
   await db
     .insert(subscriptions)
     .values({ userId, stripeCustomerId: customer.id, status: "none" })
@@ -122,13 +137,18 @@ export async function recordSubscription(sub: Stripe.Subscription): Promise<void
   }
 
   const periodEnd = sub.items.data[0]?.current_period_end;
+  const configuredPriceId = process.env.STRIPE_PRICE_ID;
+  const status =
+    configuredPriceId && subscriptionUsesPrice(sub, configuredPriceId)
+      ? sub.status
+      : "invalid_price";
   await db
     .insert(subscriptions)
     .values({
       userId: targetUserId,
       stripeCustomerId: customerId,
       stripeSubscriptionId: sub.id,
-      status: sub.status,
+      status,
       currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
     })
     .onConflictDoUpdate({
@@ -136,9 +156,59 @@ export async function recordSubscription(sub: Stripe.Subscription): Promise<void
       set: {
         stripeCustomerId: customerId,
         stripeSubscriptionId: sub.id,
-        status: sub.status,
+        status,
         currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
         updatedAt: new Date(),
       },
     });
+}
+
+/**
+ * Re-read the customer's current Stripe subscriptions for every lifecycle
+ * event. Stripe can deliver events more than once and out of order, so the
+ * event body alone is not authoritative enough to overwrite current access.
+ */
+export async function reconcileSubscription(
+  incoming: Stripe.Subscription,
+): Promise<void> {
+  const customerId =
+    typeof incoming.customer === "string"
+      ? incoming.customer
+      : incoming.customer.id;
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!priceId) throw new Error("STRIPE_PRICE_ID is not set");
+
+  const stripe = await getVerifiedStripe();
+  const current = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+  await recordSubscription(
+    selectEffectiveSubscription(current.data, priceId) ?? incoming,
+  );
+}
+
+/** Return the current configured-Price subscription when Checkout must stop. */
+export async function blockingSubscriptionForCustomer(
+  customerId: string,
+): Promise<Stripe.Subscription | undefined> {
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!priceId) throw new Error("STRIPE_PRICE_ID is not set");
+
+  const stripe = await getVerifiedStripe();
+  const current = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 100,
+  });
+  const subscription = selectEffectiveSubscription(current.data, priceId);
+  if (!subscription) return undefined;
+
+  const entitlement = entitlementFrom("stripe", {
+    status: subscription.status,
+    grandfathered: false,
+    currentPeriodEnd: null,
+  });
+  return checkoutBlocked(entitlement) ? subscription : undefined;
 }

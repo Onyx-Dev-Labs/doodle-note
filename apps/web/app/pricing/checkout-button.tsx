@@ -3,13 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { buttonPrimary } from "../ui";
-
-type BillingView =
-  | { kind: "loading" }
-  | { kind: "signed-out" }
-  | { kind: "disabled" } // Stripe env incomplete — checkout unavailable
-  | { kind: "start-trial" }
-  | { kind: "subscribed"; reason: string };
+import {
+  billingViewFromStatus,
+  type BillingView,
+} from "./billing-view";
 
 /**
  * The Sync plan's call to action, state-aware: signed-out visitors go to
@@ -26,14 +23,11 @@ export function CheckoutButton() {
     fetch("/api/billing/status")
       .then(async (res) => {
         if (cancelled) return;
-        const body = await res.json();
-        if (!body.billingEnabled) setView({ kind: "disabled" });
-        else if (body.reason === "signed-out") setView({ kind: "signed-out" });
-        else if (body.entitled) setView({ kind: "subscribed", reason: body.reason });
-        else setView({ kind: "start-trial" });
+        const body = await res.json().catch(() => null);
+        setView(billingViewFromStatus(res.ok, body));
       })
       .catch(() => {
-        if (!cancelled) setView({ kind: "signed-out" });
+        if (!cancelled) setView({ kind: "error" });
       });
     return () => {
       cancelled = true;
@@ -54,11 +48,27 @@ export function CheckoutButton() {
         window.location.href = body.url;
         return;
       }
+      if (body.manageBilling === true) {
+        setView({ kind: "subscribed", reason: "billing_attention" });
+      }
       setError(body.error ?? "Something went wrong — try again.");
     } catch {
       setError("Something went wrong — try again.");
     }
     setBusy(false);
+  }
+
+  if (view.kind === "legacy-access") {
+    return (
+      <div className="flex flex-col items-center gap-2 sm:items-start">
+        <a href="/app" className={buttonPrimary}>
+          Open DoodleNote
+        </a>
+        <p className="text-xs text-stone">
+          Sync access is already active for this account.
+        </p>
+      </div>
+    );
   }
 
   if (view.kind === "subscribed") {
@@ -75,7 +85,9 @@ export function CheckoutButton() {
         <p className="text-xs text-stone">
           {view.reason === "trialing"
             ? "You're on the free trial."
-            : "Your subscription is active."}
+            : view.reason === "past_due" || view.reason === "billing_attention"
+              ? "Your billing needs attention."
+              : "Your subscription is active."}
         </p>
         {error && <p className="text-xs text-red-700">{error}</p>}
       </div>
@@ -89,7 +101,24 @@ export function CheckoutButton() {
           Get started
         </a>
         <p className="text-xs text-stone">
-          Billing is temporarily unavailable — try again soon.
+          Billing is temporarily unavailable. Try again soon.
+        </p>
+      </div>
+    );
+  }
+
+  if (view.kind === "error") {
+    return (
+      <div className="flex flex-col items-center gap-2 sm:items-start">
+        <button
+          type="button"
+          className={buttonPrimary}
+          onClick={() => window.location.reload()}
+        >
+          Try again
+        </button>
+        <p role="alert" className="text-xs text-red-700">
+          We could not check billing status. No subscription was started.
         </p>
       </div>
     );
@@ -116,7 +145,11 @@ export function CheckoutButton() {
         disabled={busy || view.kind === "loading"}
         onClick={() => void go("checkout")}
       >
-        {busy ? "Opening checkout…" : "Start your 15-day free trial"}
+        {busy
+          ? "Opening checkout…"
+          : view.kind === "loading"
+            ? "Checking billing…"
+            : "Start your 15-day free trial"}
       </button>
       <p className="text-xs text-stone">
         Card up front, cancel anytime. Beta code? Enter it at checkout.

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 
-import { billingEnabled, getStripe, recordSubscription } from "@/lib/billing";
+import {
+  billingEnabled,
+  getStripe,
+  getVerifiedStripe,
+  reconcileSubscription,
+} from "@/lib/billing";
 
 /**
  * Stripe → us. Subscription lifecycle events keep the subscriptions table
@@ -30,15 +35,16 @@ export async function POST(request: Request) {
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
-      await recordSubscription(event.data.object);
+      await reconcileSubscription(event.data.object);
       break;
     case "checkout.session.completed": {
       // The subscription events above carry the real state; this is just a
       // safety net for the brief window before they arrive.
       const session = event.data.object;
       if (typeof session.subscription === "string") {
-        const sub = await getStripe().subscriptions.retrieve(session.subscription);
-        await recordSubscription(sub);
+        const stripe = await getVerifiedStripe();
+        const sub = await stripe.subscriptions.retrieve(session.subscription);
+        await reconcileSubscription(sub);
       }
       break;
     }
