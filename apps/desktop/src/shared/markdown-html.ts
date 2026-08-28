@@ -2,6 +2,11 @@
  * Markdown → inert HTML, shared by the renderer (enhanced-notes panel) and
  * the main process (PDF export). Input is escaped before any tags are
  * added, so the output is safe to inject.
+ *
+ * Two outputs share the same parser:
+ * - `markdownToHtml` — display/export HTML (disabled checkboxes, plain lists)
+ * - `markdownToEditorHtml` — TipTap `setContent` hydrate HTML (`data-type`
+ *   taskList / taskItem so to-dos survive reopen)
  */
 
 export function escapeHtml(s: string): string {
@@ -26,29 +31,38 @@ function inlineHtml(s: string): string {
   return out
 }
 
+type ListKind = 'ul' | 'ol' | 'taskList'
+
+type MarkdownHtmlMode = 'display' | 'editor'
+
 /**
- * Minimal markdown renderer for the enhanced-notes panel: #/##/### headings,
- * bullets, checkboxes, ordered lists, blockquotes, fences, hr, paragraphs.
- * Input is escaped before any tags are added, so the output is inert HTML.
+ * Minimal markdown renderer: #/##/### headings, bullets, checkboxes, ordered
+ * lists, blockquotes, fences, hr, paragraphs. Input is escaped before any
+ * tags are added, so the output is inert HTML.
  */
-export function markdownToHtml(md: string): string {
+function renderMarkdownHtml(md: string, mode: MarkdownHtmlMode): string {
   const out: string[] = []
-  let listTag: 'ul' | 'ol' | null = null
+  let listKind: ListKind | null = null
   let inCode = false
   const codeLines: string[] = []
 
   const closeList = (): void => {
-    if (listTag) {
-      out.push(`</${listTag}>`)
-      listTag = null
+    if (listKind === 'taskList') {
+      out.push('</ul>')
+    } else if (listKind) {
+      out.push(`</${listKind}>`)
     }
+    listKind = null
   }
-  const openList = (tag: 'ul' | 'ol'): void => {
-    if (listTag !== tag) {
-      closeList()
-      out.push(`<${tag}>`)
-      listTag = tag
+  const openList = (kind: ListKind): void => {
+    if (listKind === kind) return
+    closeList()
+    if (kind === 'taskList') {
+      out.push('<ul data-type="taskList">')
+    } else {
+      out.push(`<${kind}>`)
     }
+    listKind = kind
   }
 
   for (const rawLine of md.split('\n')) {
@@ -85,11 +99,19 @@ export function markdownToHtml(md: string): string {
     }
     const task = /^\s*[-*]\s+\[([ xX])\]\s+(.*)$/.exec(line)
     if (task) {
-      openList('ul')
       const checked = task[1]!.toLowerCase() === 'x'
-      out.push(
-        `<li class="task"><input type="checkbox" disabled${checked ? ' checked' : ''}> ${inlineHtml(task[2]!)}</li>`
-      )
+      const body = inlineHtml(task[2]!)
+      if (mode === 'editor') {
+        openList('taskList')
+        out.push(
+          `<li data-type="taskItem" data-checked="${checked ? 'true' : 'false'}"><p>${body}</p></li>`
+        )
+      } else {
+        openList('ul')
+        out.push(
+          `<li class="task"><input type="checkbox" disabled${checked ? ' checked' : ''}> ${body}</li>`
+        )
+      }
       continue
     }
     const bullet = /^\s*[-*]\s+(.*)$/.exec(line)
@@ -128,4 +150,17 @@ export function markdownToHtml(md: string): string {
   }
   closeList()
   return out.join('\n')
+}
+
+/** Display/export HTML (Ask answers, PDF). Task lines use disabled checkboxes. */
+export function markdownToHtml(md: string): string {
+  return renderMarkdownHtml(md, 'display')
+}
+
+/**
+ * TipTap editor hydrate HTML. Task lines become `ul[data-type=taskList]` /
+ * `li[data-type=taskItem]` so reopen preserves interactive to-dos.
+ */
+export function markdownToEditorHtml(md: string): string {
+  return renderMarkdownHtml(md, 'editor')
 }
