@@ -12,19 +12,19 @@
 
 ## Verification
 
-- [ ] Frozen-lockfile dependency install
-- [ ] Swift transcription engine release build
-- [ ] Workspace typecheck
-- [ ] Full desktop test suite
-- [ ] Desktop lint
-- [ ] Production Electron and web builds
-- [ ] Production dependency audit
-- [ ] Packaged application reports version 0.4.16
-- [ ] Developer ID signature and hardened runtime validation
-- [ ] App notarization and stapled-ticket validation
-- [ ] Final DMG signature, notarization, stapling, and Gatekeeper validation
-- [ ] Updater ZIP and website DMG checksums recorded
-- [ ] Updater manifest references only version-matched v0.4.16 artifacts
+- [x] Frozen-lockfile dependency install
+- [x] Swift transcription engine release build
+- [x] Workspace typecheck
+- [x] Full workspace test suite: 220 tests passed
+- [x] Desktop lint
+- [x] Production Electron, web, and MCP builds
+- [x] Production dependency audit: no known vulnerabilities
+- [x] Packaged application reports version 0.4.16
+- [x] Developer ID signature and hardened runtime validation
+- [x] App notarization and stapled-ticket validation
+- [x] Final DMG signature, notarization, stapling, and Gatekeeper validation
+- [x] Updater ZIP and website DMG checksums recorded
+- [x] Updater manifest references only version-matched v0.4.16 artifacts
 
 ## Release gates
 
@@ -40,7 +40,7 @@
 
 - Updater artifact: `DoodleNote-0.4.16-arm64-mac.zip`
 - Website installer: `DoodleNote-0.4.16-arm64.dmg`
-- Updater ZIP SHA-256: pending
-- Website DMG SHA-256: pending
-- App notarization submission: pending
-- DMG notarization submission: pending
+- Updater ZIP SHA-256: `4ce66c7b54f10afb4f9221af6da7a68c7effdf7f89d5192b3246183f5fb5d60b`
+- Website DMG SHA-256: `06434cc947b4618f188075f847e357463480fab6510b5fce56da76009a4f0942`
+- App notarization submission: `b7b1bf42-27ca-4495-948c-2236b93a77fa` (Accepted)
+- DMG notarization submission: `4db73b9e-ee89-44f4-ac90-c24854eb5b3a` (Accepted)
