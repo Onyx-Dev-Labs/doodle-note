@@ -134,11 +134,8 @@ export default function PricingPage() {
         {/* Sync */}
         <section className="mt-16">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="flex items-baseline gap-2.5 font-display text-2xl font-semibold tracking-tight text-ink">
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
               Sync
-              <span className="rounded-full bg-sage-fill px-2.5 py-0.5 text-xs font-medium text-sage-deep">
-                Early access
-              </span>
             </h2>
             <p className="font-display text-2xl font-semibold tracking-tight text-ink">
               $10{" "}

@@ -205,9 +205,10 @@ export const agentTokens = pgTable(
 );
 
 /**
- * Per-user cloud-sync billing. A user syncs when grandfathered (had a
- * linked device before billing launched) or their Stripe subscription is
- * trialing/active. No row = never subscribed.
+ * Per-user cloud-sync billing. A user syncs when their Stripe subscription
+ * is trialing, active, or past_due (grace). The grandfathered column is
+ * retained for historical rows but no longer grants Sync access. No row =
+ * never subscribed.
  */
 export const subscriptions = pgTable("subscriptions", {
   userId: text("user_id")

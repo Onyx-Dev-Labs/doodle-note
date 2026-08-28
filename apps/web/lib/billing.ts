@@ -5,7 +5,7 @@ import { resolveBillingMode } from "./runtime-config";
 
 /**
  * Cloud-sync billing: $10/month per user, 15-day trial for everyone (card
- * up front), users with a linked device before launch grandfathered free.
+ * up front). Entitlement comes from an active Stripe subscription only.
  *
  * Local development and explicitly self-hosted installations bypass official
  * DoodleNote billing. Hosted production fails closed unless the full Stripe
@@ -30,7 +30,7 @@ export function getStripe(): Stripe {
 
 export interface Entitlement {
   entitled: boolean;
-  /** Why: grandfathered | trialing | active | self-hosted | development | configuration_error | none | lapsed */
+  /** Why: trialing | active | self-hosted | development | configuration_error | none | lapsed */
   reason: string;
   /** ISO date the current paid/trial period ends, when known. */
   periodEnd?: string;
@@ -59,7 +59,6 @@ export async function entitlementFor(userId: string): Promise<Entitlement> {
     .limit(1);
   const sub = rows[0];
   if (!sub) return { entitled: false, reason: "none" };
-  if (sub.grandfathered) return { entitled: true, reason: "grandfathered" };
   if (SERVING_STATUSES.has(sub.status)) {
     return {
       entitled: true,

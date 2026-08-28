@@ -7,16 +7,14 @@ import { buttonPrimary } from "../ui";
 type BillingView =
   | { kind: "loading" }
   | { kind: "signed-out" }
-  | { kind: "disabled" } // billing not enabled yet — early access continues
+  | { kind: "disabled" } // Stripe env incomplete — checkout unavailable
   | { kind: "start-trial" }
-  | { kind: "subscribed"; reason: string }
-  | { kind: "grandfathered" };
+  | { kind: "subscribed"; reason: string };
 
 /**
  * The Sync plan's call to action, state-aware: signed-out visitors go to
  * login, new users to Stripe Checkout (15-day trial), subscribers to the
- * billing portal, and grandfathered accounts get a thank-you instead of
- * a checkout.
+ * billing portal.
  */
 export function CheckoutButton() {
   const [view, setView] = useState<BillingView>({ kind: "loading" });
@@ -31,7 +29,6 @@ export function CheckoutButton() {
         const body = await res.json();
         if (!body.billingEnabled) setView({ kind: "disabled" });
         else if (body.reason === "signed-out") setView({ kind: "signed-out" });
-        else if (body.reason === "grandfathered") setView({ kind: "grandfathered" });
         else if (body.entitled) setView({ kind: "subscribed", reason: body.reason });
         else setView({ kind: "start-trial" });
       })
@@ -64,14 +61,6 @@ export function CheckoutButton() {
     setBusy(false);
   }
 
-  if (view.kind === "grandfathered") {
-    return (
-      <p className="rounded-lg bg-sage-fill px-3 py-2 text-sm text-sage-deep">
-        You&rsquo;re an early supporter — Sync is free on your account, forever.
-      </p>
-    );
-  }
-
   if (view.kind === "subscribed") {
     return (
       <div className="flex flex-col items-center gap-2 sm:items-start">
@@ -100,7 +89,7 @@ export function CheckoutButton() {
           Get started
         </a>
         <p className="text-xs text-stone">
-          Free during early access — billing starts when Sync leaves beta.
+          Billing is temporarily unavailable — try again soon.
         </p>
       </div>
     );
