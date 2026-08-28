@@ -9,6 +9,13 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.15",
+    date: "August 28, 2026",
+    highlights: [
+      "Keep to-do checkboxes and checked state when reopening regular notes and meeting notes",
+    ],
+  },
+  {
     version: "0.4.14",
     date: "August 27, 2026",
     highlights: [
