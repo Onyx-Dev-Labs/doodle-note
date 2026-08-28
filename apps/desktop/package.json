@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "0.4.14",
+  "version": "0.4.16",
   "private": true,
   "description": "DoodleNote desktop app for privacy-first local capture, transcription, and AI meeting notes",
   "main": "./out/main/index.js",
