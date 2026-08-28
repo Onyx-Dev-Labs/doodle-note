@@ -42,6 +42,7 @@ import {
   type NotesSettingsView
 } from '../shared/notes-api'
 import type { MeetingRecord } from '../shared/meetings-api'
+import { isStoredCloudProvider } from '../shared/meeting-recovery'
 import type { MeetingsService } from './meetings-service'
 
 /**
@@ -568,14 +569,16 @@ export class NotesService {
       const cloud = raw.cloud
       if (
         cloud &&
-        (cloud.provider === 'anthropic' || cloud.provider === 'openai') &&
-        typeof cloud.apiKeyEncrypted === 'string' &&
-        cloud.apiKeyEncrypted.length > 0
+        isStoredCloudProvider(cloud.provider) &&
+        (cloud.provider === 'ollama' ||
+          (typeof cloud.apiKeyEncrypted === 'string' && cloud.apiKeyEncrypted.length > 0))
       ) {
         settings.cloud = {
           provider: cloud.provider,
           ...(typeof cloud.model === 'string' && cloud.model ? { model: cloud.model } : {}),
-          apiKeyEncrypted: cloud.apiKeyEncrypted
+          ...(typeof cloud.apiKeyEncrypted === 'string'
+            ? { apiKeyEncrypted: cloud.apiKeyEncrypted }
+            : {})
         }
       }
       return settings
