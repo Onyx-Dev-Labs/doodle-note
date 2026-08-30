@@ -84,9 +84,7 @@ test('save → hydrate HTML cycle preserves checkbox markers for TipTap', () => 
             content: [
               {
                 type: 'paragraph',
-                content: [
-                  { type: 'text', text: 'create client', marks: [{ type: 'bold' }] }
-                ]
+                content: [{ type: 'text', text: 'create client', marks: [{ type: 'bold' }] }]
               },
               {
                 type: 'taskList',
@@ -124,7 +122,7 @@ test('save → hydrate HTML cycle preserves checkbox markers for TipTap', () => 
     ]
   })
   assert.match(saved, /- \[x\] \*\*create client\*\*/)
-  assert.match(saved, /  - \[ \] setup syncro policy/)
+  assert.match(saved, / {2}- \[ \] setup syncro policy/)
   assert.match(saved, /- \[ \] add to CIPP/)
   assert.match(saved, /- plain note/)
 
