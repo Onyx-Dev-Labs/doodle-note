@@ -26,3 +26,24 @@ export function stripeCheckoutUrl(value) {
     return null;
   }
 }
+
+export function billingBaseUrl(value = "http://localhost:4040") {
+  try {
+    const url = new URL(value);
+    const localHttp =
+      url.protocol === "http:" &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    if (
+      (!localHttp && url.protocol !== "https:") ||
+      url.username !== "" ||
+      url.password !== ""
+    ) {
+      throw new Error("invalid");
+    }
+    return url.origin;
+  } catch {
+    throw new Error(
+      "BILLING_E2E_BASE_URL must be HTTPS or a credential-free localhost URL",
+    );
+  }
+}

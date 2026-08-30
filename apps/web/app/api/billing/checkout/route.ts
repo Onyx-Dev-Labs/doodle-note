@@ -2,7 +2,16 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
-import { billingEnabled, ensureCustomer, getStripe, TRIAL_DAYS } from "@/lib/billing";
+import {
+  billingEnabled,
+  blockingSubscriptionForCustomer,
+  ensureCustomer,
+  entitlementFor,
+  getVerifiedStripe,
+  recordSubscription,
+  TRIAL_DAYS,
+} from "@/lib/billing";
+import { checkoutBlocked, checkoutIdempotencyKey } from "@/lib/billing-state";
 
 /**
  * Start a cloud-sync subscription: hosted Stripe Checkout, $10/mo, 15-day
@@ -23,6 +32,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "STRIPE_PRICE_ID is not set" }, { status: 503 });
   }
 
+  const entitlement = await entitlementFor(session.user.id);
+  if (checkoutBlocked(entitlement)) {
+    return NextResponse.json(
+      {
+        error:
+          entitlement.reason === "grandfathered"
+            ? "Sync is already active for this account"
+            : "A subscription is already active or needs attention in billing",
+        manageBilling: entitlement.reason !== "grandfathered",
+      },
+      { status: 409 },
+    );
+  }
+
   let next = "/app";
   try {
     const body = (await request.json()) as { next?: unknown };
@@ -35,21 +58,69 @@ export async function POST(request: Request) {
   }
 
   const origin = process.env.BETTER_AUTH_URL ?? new URL(request.url).origin;
-  const customerId = await ensureCustomer(session.user.id, session.user.email);
 
-  const checkout = await getStripe().checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    subscription_data: {
-      trial_period_days: TRIAL_DAYS,
-      metadata: { doodlenoteUserId: session.user.id },
-    },
-    // BETADOODLENOTE (and future codes) get typed here.
-    allow_promotion_codes: true,
-    success_url: `${origin}${next}${next.includes("?") ? "&" : "?"}billing=success`,
-    cancel_url: `${origin}/pricing?billing=canceled`,
-  });
+  try {
+    const customerId = await ensureCustomer(session.user.id, session.user.email);
+    const stripe = await getVerifiedStripe();
+    const blockingSubscription = await blockingSubscriptionForCustomer(customerId);
+    if (blockingSubscription) {
+      await recordSubscription(blockingSubscription);
+      return NextResponse.json(
+        {
+          error: "A subscription is already active or needs attention in billing",
+          manageBilling: true,
+        },
+        { status: 409 },
+      );
+    }
 
-  return NextResponse.json({ url: checkout.url });
+    const openSessions = await stripe.checkout.sessions.list({
+      customer: customerId,
+      status: "open",
+      limit: 10,
+    });
+    const reusable = openSessions.data.find(
+      (candidate) =>
+        candidate.mode === "subscription" &&
+        candidate.client_reference_id === session.user.id &&
+        candidate.metadata?.doodlenotePriceId === priceId &&
+        typeof candidate.url === "string",
+    );
+    if (reusable?.url) return NextResponse.json({ url: reusable.url });
+
+    const checkout = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        client_reference_id: session.user.id,
+        metadata: {
+          doodlenoteUserId: session.user.id,
+          doodlenotePriceId: priceId,
+        },
+        line_items: [{ price: priceId, quantity: 1 }],
+        subscription_data: {
+          trial_period_days: TRIAL_DAYS,
+          metadata: { doodlenoteUserId: session.user.id },
+        },
+        // BETADOODLENOTE (and future codes) get typed here.
+        allow_promotion_codes: true,
+        success_url: `${origin}${next}${next.includes("?") ? "&" : "?"}billing=success`,
+        cancel_url: `${origin}/pricing?billing=canceled`,
+      },
+      {
+        idempotencyKey: checkoutIdempotencyKey(
+          session.user.id,
+          `${origin}${next}`,
+        ),
+      },
+    );
+
+    return NextResponse.json({ url: checkout.url });
+  } catch {
+    console.error("[billing] Could not create a Stripe Checkout session");
+    return NextResponse.json(
+      { error: "Checkout is temporarily unavailable" },
+      { status: 502 },
+    );
+  }
 }

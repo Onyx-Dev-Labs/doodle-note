@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   }
 
   // Cloud sync is the paid feature — linking a device requires entitlement
-  // (grandfathered, trialing, or active). The approval page turns this 402
+  // (grandfathered, trialing, active, or past_due). The approval page turns this 402
   // into a "start your free trial" checkout hand-off.
   const entitlement = await entitlementFor(session.user.id);
   if (!entitlement.entitled) {

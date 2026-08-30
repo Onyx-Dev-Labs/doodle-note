@@ -30,7 +30,7 @@ No external service is required for the basic local development path:
 | Microsoft sign-in                 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`                                                                                     |
 | Google sign-in                    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                                           |
 | Workspace invitations             | `RESEND_API_KEY`, `INVITATION_FROM_EMAIL`                                                                                            |
-| Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`                                                                      |
+| Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`                                                  |
 | Voice features                    | `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_CALLER_ID`, `TWILIO_AUTH_TOKEN` |
 
 A commented template is in [`.env.example`](.env.example). Store local
@@ -52,6 +52,38 @@ entitlement gate. Official production fails closed when the Stripe
 configuration is missing or incomplete. This repository does not ship
 a production Docker Compose stack yet; see
 [`SELF-HOSTING.md`](../../SELF-HOSTING.md).
+
+## Stripe test setup
+
+Provisioning requires the expected account ID so a valid key for the wrong
+Stripe account fails before it creates anything:
+
+```sh
+STRIPE_SECRET_KEY=<test-key> \
+STRIPE_ACCOUNT_ID=<expected-account-id> \
+node apps/web/scripts/stripe-setup.mjs
+```
+
+For a deployed test preview, also set `STRIPE_WEBHOOK_URL` to that preview's
+HTTPS `/api/billing/webhook` URL and set `STRIPE_WEBHOOK_SECRET_OUTPUT` to a
+new secure local file. The script writes the one-time signing secret with
+owner-only permissions and never prints it. Copy the resulting values into
+Preview-scoped hosting variables together with an isolated `DATABASE_URL`,
+`BETTER_AUTH_URL`, and `BETTER_AUTH_SECRET`. Do not reuse the production
+database or production Stripe values for preview QA.
+
+With the preview configured, run the integration check from a trusted local
+shell that holds the test Stripe values:
+
+```sh
+BILLING_E2E_BASE_URL=https://your-preview.example \
+pnpm --filter web exec node scripts/billing-e2e.mjs
+```
+
+The check creates an isolated test user and Stripe test subscription, verifies
+signed webhook entitlement and device linking, then cancels the subscription
+and verifies access is removed. Keep `.env.local` and generated secret files
+out of Git.
 
 ## Commands
 

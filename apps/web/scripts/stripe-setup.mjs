@@ -2,8 +2,16 @@
  * One-time Stripe provisioning for DoodleNote Cloud Sync. Idempotent —
  * looks up by lookup_key/url before creating. Run once per mode:
  *
- *   STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-setup.mjs   # test mode
+ *   STRIPE_SECRET_KEY=sk_test_… \
+ *     STRIPE_ACCOUNT_ID=acct_… \
+ *     node scripts/stripe-setup.mjs                            # test catalog
+ *   STRIPE_SECRET_KEY=sk_test_… \
+ *     STRIPE_ACCOUNT_ID=acct_… \
+ *     STRIPE_WEBHOOK_URL=https://preview.example/api/billing/webhook \
+ *     STRIPE_WEBHOOK_SECRET_OUTPUT=/secure/new-file.env \
+ *     node scripts/stripe-setup.mjs                            # test preview
  *   STRIPE_SECRET_KEY=sk_live_… \
+ *     STRIPE_ACCOUNT_ID=acct_… \
  *     STRIPE_WEBHOOK_SECRET_OUTPUT=/secure/new-file.env \
  *     node scripts/stripe-setup.mjs                            # go-live
  *
@@ -12,15 +20,32 @@
  */
 import Stripe from "stripe";
 import { reserveSecretEnvFile } from "./secure-secret-output.mjs";
+import {
+  assertExpectedAccount,
+  assertMonthlyPrice,
+  stripeKeyMode,
+  WEBHOOK_EVENTS,
+  webhookUrl,
+} from "./stripe-setup-utils.mjs";
 
 const key = process.env.STRIPE_SECRET_KEY;
 if (!key) {
-  console.error("Set STRIPE_SECRET_KEY (sk_test_… or sk_live_…)");
+  console.error("Set STRIPE_SECRET_KEY to a Stripe secret or restricted key");
   process.exit(1);
 }
 const stripe = new Stripe(key);
-const mode = key.startsWith("sk_live_") ? "LIVE" : "test";
-const WEBHOOK_URL = "https://www.doodlenote.ai/api/billing/webhook";
+const mode = stripeKeyMode(key);
+const expectedAccountId = process.env.STRIPE_ACCOUNT_ID;
+const account = await stripe.accounts.retrieveCurrent();
+assertExpectedAccount(account.id, expectedAccountId);
+console.log(`verified Stripe account ${account.id} (${mode})`);
+
+const requestedWebhookUrl =
+  process.env.STRIPE_WEBHOOK_URL ??
+  (mode === "LIVE" ? "https://www.doodlenote.ai/api/billing/webhook" : "");
+const targetWebhookUrl = requestedWebhookUrl
+  ? webhookUrl(requestedWebhookUrl).href
+  : null;
 const LOOKUP_KEY = "doodle-sync-monthly";
 
 // Price (creates its product inline) — found again by lookup_key on re-runs.
@@ -37,35 +62,42 @@ if (!price) {
   });
   console.log(`created price ${price.id} ($10/mo)`);
 } else {
+  assertMonthlyPrice(price);
   console.log(`price exists: ${price.id}`);
 }
 
-// Webhook endpoint (skipped in test mode — use `stripe listen` locally).
+// Create an explicitly targeted endpoint in either mode. Test mode remains
+// local-listener-only unless STRIPE_WEBHOOK_URL is deliberately supplied.
 let webhookSecretPath = "";
-if (mode === "LIVE") {
+if (targetWebhookUrl) {
   const existing = (await stripe.webhookEndpoints.list({ limit: 100 })).data.find(
-    (e) => e.url === WEBHOOK_URL,
+    (endpoint) => endpoint.url === targetWebhookUrl,
   );
   if (existing) {
+    const missingEvents = WEBHOOK_EVENTS.filter(
+      (event) =>
+        !existing.enabled_events.includes("*") &&
+        !existing.enabled_events.includes(event),
+    );
+    if (missingEvents.length) {
+      throw new Error(
+        `Webhook ${existing.id} is missing required events: ${missingEvents.join(", ")}`,
+      );
+    }
     console.log(`webhook exists: ${existing.id} (secret not retrievable; reuse the saved one)`);
   } else {
     const output = process.env.STRIPE_WEBHOOK_SECRET_OUTPUT;
     if (!output) {
       throw new Error(
-        "Set STRIPE_WEBHOOK_SECRET_OUTPUT to a new secure file before creating the live webhook",
+        "Set STRIPE_WEBHOOK_SECRET_OUTPUT to a new secure file before creating the webhook",
       );
     }
     const reservation = reserveSecretEnvFile(output);
     let endpoint;
     try {
       endpoint = await stripe.webhookEndpoints.create({
-        url: WEBHOOK_URL,
-        enabled_events: [
-          "customer.subscription.created",
-          "customer.subscription.updated",
-          "customer.subscription.deleted",
-          "checkout.session.completed",
-        ],
+        url: targetWebhookUrl,
+        enabled_events: WEBHOOK_EVENTS,
       });
     } catch (error) {
       reservation.abort();
@@ -91,10 +123,13 @@ if (mode === "LIVE") {
     console.log(`created webhook ${endpoint.id}`);
   }
 } else {
-  console.log("test mode: run `stripe listen --forward-to localhost:4040/api/billing/webhook`");
+  console.log(
+    "test mode without STRIPE_WEBHOOK_URL: use `stripe listen --forward-to localhost:4040/api/billing/webhook`",
+  );
 }
 
 console.log(`\n--- env for ${mode} ---`);
 console.log("STRIPE_SECRET_KEY=<already supplied>");
+console.log(`STRIPE_ACCOUNT_ID=${account.id}`);
 console.log(`STRIPE_PRICE_ID=${price.id}`);
 if (webhookSecretPath) console.log(`STRIPE_WEBHOOK_SECRET written to ${webhookSecretPath}`);

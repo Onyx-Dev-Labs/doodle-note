@@ -75,6 +75,16 @@ test("hosted production requires the complete Stripe group", () => {
       STRIPE_PRICE_ID: "price",
       STRIPE_WEBHOOK_SECRET: "webhook",
     }),
+    "misconfigured",
+  );
+  assert.equal(
+    resolveBillingMode({
+      NODE_ENV: "production",
+      STRIPE_SECRET_KEY: "secret",
+      STRIPE_ACCOUNT_ID: "acct_test",
+      STRIPE_PRICE_ID: "price",
+      STRIPE_WEBHOOK_SECRET: "webhook",
+    }),
     "stripe",
   );
 });
