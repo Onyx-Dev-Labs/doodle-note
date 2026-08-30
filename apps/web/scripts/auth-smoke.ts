@@ -5,7 +5,7 @@
  * PGlite database (all drizzle migrations applied), then exercises the server
  * API directly — no HTTP server:
  *
- *   sign up -> sign in -> create organization -> list organizations
+ *   sign up -> verify email -> auto sign in -> create organization -> list organizations
  *
  * Run with: pnpm --filter web auth-smoke
  */
@@ -14,6 +14,23 @@
 // in main) so the smoke run doesn't trip the dev-only-secret warning.
 process.env.BETTER_AUTH_SECRET ??= "gV3qLZ0e8kXnR5tYwB7uJ2mCa9PdF4hSiK6oQ1rTxE0="; // smoke-only
 process.env.BETTER_AUTH_URL ??= "http://localhost:4040";
+process.env.RESEND_API_KEY ??= "re_smoke_only";
+process.env.AUTH_FROM_EMAIL ??= "DoodleNote <no-reply@doodlenote.ai>";
+
+let verificationUrl: string | null = null;
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  if (input === "https://api.resend.com/emails") {
+    const payload = JSON.parse(String(init?.body)) as { text?: unknown };
+    const match =
+      typeof payload.text === "string"
+        ? payload.text.match(/https?:\/\/\S+/)
+        : null;
+    verificationUrl = match?.[0] ?? null;
+    return Response.json({ id: "smoke-email" });
+  }
+  return realFetch(input, init);
+};
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`auth smoke FAILED: ${message}`);
@@ -46,17 +63,35 @@ async function main(): Promise<void> {
   // 1. Sign up (email + password).
   const signUp = await auth.api.signUpEmail({
     body: { name: "Smoke Tester", email, password },
-  });
-  assert(signUp.user.email === email, `sign-up returned wrong email: ${signUp.user.email}`);
-
-  // 2. Sign in, capturing the session cookie for authenticated calls.
-  const signIn = await auth.api.signInEmail({
-    body: { email, password },
     returnHeaders: true,
   });
-  assert(signIn.response.user.email === email, "sign-in returned wrong user");
-  const cookie = toCookieHeader(signIn.headers);
-  assert(cookie.length > 0, "sign-in did not set a session cookie");
+  assert(
+    signUp.response.user.email === email,
+    `sign-up returned wrong email: ${signUp.response.user.email}`,
+  );
+  assert(
+    signUp.response.token === null,
+    "unverified sign-up unexpectedly created a session",
+  );
+  assert(
+    toCookieHeader(signUp.headers).length === 0,
+    "unverified sign-up set a session cookie",
+  );
+  assert(verificationUrl, "sign-up did not send a verification email");
+
+  // 2. Verify the email. The verification endpoint should create the session.
+  const token = new URL(verificationUrl).searchParams.get("token");
+  assert(token, "verification email did not include a token");
+  const verification = await auth.api.verifyEmail({
+    query: { token },
+    returnHeaders: true,
+  });
+  assert(
+    verification.response?.status === true,
+    "email verification did not succeed",
+  );
+  const cookie = toCookieHeader(verification.headers);
+  assert(cookie.length > 0, "email verification did not auto-sign in the user");
   const authedHeaders = new Headers({ cookie });
 
   // 3. Create an organization.
@@ -82,10 +117,11 @@ async function main(): Promise<void> {
   assert(org.slug === orgSlug, `listed org has wrong slug: ${org.slug}`);
 
   console.log(
-    `auth smoke OK: signed up + signed in ${email}, created organization "${org.name}" (${org.slug}), list returned exactly 1 — against fresh in-memory PGlite`,
+    `auth smoke OK: signed up + verified ${email}, auto-signed in, created organization "${org.name}" (${org.slug}), list returned exactly 1 — against fresh in-memory PGlite`,
   );
 
   await close();
+  globalThis.fetch = realFetch;
 }
 
 main().catch((error) => {

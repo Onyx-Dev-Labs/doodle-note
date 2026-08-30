@@ -12,6 +12,19 @@ export type BillingMode =
   | "development"
   | "misconfigured";
 
+export function resolveAuthEmailEnabled(
+  env: RuntimeEnvironment = process.env,
+): boolean {
+  const configured = Boolean(env.RESEND_API_KEY && env.AUTH_FROM_EMAIL);
+  if (configured) return true;
+  if (env.NODE_ENV === "production" && !isProductionBuild(env)) {
+    throw new Error(
+      "Production authentication requires RESEND_API_KEY and AUTH_FROM_EMAIL.",
+    );
+  }
+  return false;
+}
+
 /**
  * Local development stays zero-config, but a production server must never
  * start with a public, predictable session-signing secret.
