@@ -23,17 +23,18 @@ import { reserveSecretEnvFile } from "./secure-secret-output.mjs";
 import {
   assertExpectedAccount,
   assertMonthlyPrice,
+  stripeKeyMode,
   WEBHOOK_EVENTS,
   webhookUrl,
 } from "./stripe-setup-utils.mjs";
 
 const key = process.env.STRIPE_SECRET_KEY;
 if (!key) {
-  console.error("Set STRIPE_SECRET_KEY (sk_test_… or sk_live_…)");
+  console.error("Set STRIPE_SECRET_KEY to a Stripe secret or restricted key");
   process.exit(1);
 }
 const stripe = new Stripe(key);
-const mode = key.startsWith("sk_live_") ? "LIVE" : "test";
+const mode = stripeKeyMode(key);
 const expectedAccountId = process.env.STRIPE_ACCOUNT_ID;
 const account = await stripe.accounts.retrieveCurrent();
 assertExpectedAccount(account.id, expectedAccountId);

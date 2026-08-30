@@ -107,6 +107,19 @@ export function CheckoutButton() {
     );
   }
 
+  if (view.kind === "configuration-error") {
+    return (
+      <div className="flex flex-col items-center gap-2 sm:items-start">
+        <button type="button" className={buttonPrimary} disabled>
+          Billing unavailable
+        </button>
+        <p role="alert" className="text-xs text-red-700">
+          Cloud Sync billing is not configured correctly. Please try again later.
+        </p>
+      </div>
+    );
+  }
+
   if (view.kind === "error") {
     return (
       <div className="flex flex-col items-center gap-2 sm:items-start">

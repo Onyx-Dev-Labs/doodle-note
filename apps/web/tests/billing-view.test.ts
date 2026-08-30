@@ -12,7 +12,7 @@ describe("pricing billing status", () => {
     assert.deepEqual(billingViewFromStatus(true, null), { kind: "error" });
   });
 
-  it("keeps signed-out, disabled, trial, and subscription states explicit", () => {
+  it("keeps signed-out, disabled, configuration, trial, and subscription states explicit", () => {
     assert.deepEqual(
       billingViewFromStatus(true, {
         entitled: false,
@@ -25,6 +25,14 @@ describe("pricing billing status", () => {
       billingViewFromStatus(true, {
         entitled: false,
         reason: "configuration_error",
+        billingEnabled: false,
+      }),
+      { kind: "configuration-error" },
+    );
+    assert.deepEqual(
+      billingViewFromStatus(true, {
+        entitled: true,
+        reason: "development",
         billingEnabled: false,
       }),
       { kind: "disabled" },
@@ -44,6 +52,14 @@ describe("pricing billing status", () => {
         billingEnabled: true,
       }),
       { kind: "subscribed", reason: "trialing" },
+    );
+    assert.deepEqual(
+      billingViewFromStatus(true, {
+        entitled: true,
+        reason: "unexpected",
+        billingEnabled: true,
+      }),
+      { kind: "error" },
     );
   });
 

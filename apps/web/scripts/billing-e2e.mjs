@@ -21,6 +21,10 @@ import {
   billingTestIdentity,
   stripeCheckoutUrl,
 } from "./billing-e2e-utils.mjs";
+import {
+  assertExpectedAccount,
+  stripeKeyMode,
+} from "./stripe-setup-utils.mjs";
 
 const here = import.meta.dirname;
 const envPath = join(here, "..", ".env.local");
@@ -29,10 +33,16 @@ const env = (key) =>
   process.env[key] ?? envText.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim();
 const BASE = billingBaseUrl(env("BILLING_E2E_BASE_URL"));
 
-const stripe = new Stripe(env("STRIPE_SECRET_KEY"));
+const STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY");
+if (!STRIPE_SECRET_KEY || stripeKeyMode(STRIPE_SECRET_KEY) !== "test") {
+  throw new Error("Billing E2E requires a Stripe test-mode secret or restricted key");
+}
+const stripe = new Stripe(STRIPE_SECRET_KEY);
 const PRICE_ID = env("STRIPE_PRICE_ID");
 const WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET");
 if (!PRICE_ID || !WEBHOOK_SECRET) throw new Error("Stripe env missing in .env.local");
+const account = await stripe.accounts.retrieveCurrent();
+assertExpectedAccount(account.id, env("STRIPE_ACCOUNT_ID"));
 
 const { email: EMAIL, password: PASSWORD } = billingTestIdentity();
 let cookie = "";

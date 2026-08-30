@@ -88,8 +88,11 @@ export function subscriptionUsesPrice(
   subscription: Stripe.Subscription,
   priceId: string,
 ): boolean {
-  return subscription.items.data.some(
-    (item) => item.price.id === priceId && (item.quantity ?? 1) === 1,
+  const items = subscription.items.data;
+  return (
+    items.length === 1 &&
+    items[0]?.price.id === priceId &&
+    (items[0].quantity ?? 1) === 1
   );
 }
 

@@ -5,6 +5,12 @@ export const WEBHOOK_EVENTS = [
   "checkout.session.completed",
 ];
 
+export function stripeKeyMode(key) {
+  if (/^(?:sk|rk)_live_/.test(key)) return "LIVE";
+  if (/^(?:sk|rk)_test_/.test(key)) return "test";
+  throw new Error("STRIPE_SECRET_KEY must be a Stripe secret or restricted key");
+}
+
 export function assertExpectedAccount(actualAccountId, expectedAccountId) {
   if (!expectedAccountId) {
     throw new Error("Set STRIPE_ACCOUNT_ID to the exact intended Stripe account");

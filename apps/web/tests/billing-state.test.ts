@@ -163,6 +163,18 @@ describe("checkout and subscription reconciliation", () => {
     assert.equal(subscriptionUsesPrice(subscription("sub_2", "active", "price_other"), "price_sync"), false);
   });
 
+  it("rejects mixed-price and multi-seat subscriptions", () => {
+    const mixed = subscription("sub_mixed", "active");
+    mixed.items.data.push(
+      subscription("sub_other", "active", "price_other").items.data[0]!,
+    );
+    assert.equal(subscriptionUsesPrice(mixed, "price_sync"), false);
+
+    const multiSeat = subscription("sub_multi", "active");
+    multiSeat.items.data[0]!.quantity = 2;
+    assert.equal(subscriptionUsesPrice(multiSeat, "price_sync"), false);
+  });
+
   it("selects current serving state instead of a late terminal event", () => {
     const selected = selectEffectiveSubscription(
       [

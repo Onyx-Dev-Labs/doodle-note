@@ -4,10 +4,19 @@ import { describe, it } from "node:test";
 import {
   assertExpectedAccount,
   assertMonthlyPrice,
+  stripeKeyMode,
   webhookUrl,
 } from "./stripe-setup-utils.mjs";
 
 describe("Stripe provisioning guardrails", () => {
+  it("recognizes standard and restricted key modes", () => {
+    assert.equal(stripeKeyMode("sk_test_fixture"), "test");
+    assert.equal(stripeKeyMode("rk_test_fixture"), "test");
+    assert.equal(stripeKeyMode("sk_live_fixture"), "LIVE");
+    assert.equal(stripeKeyMode("rk_live_fixture"), "LIVE");
+    assert.throws(() => stripeKeyMode("not-a-stripe-key"), /secret or restricted/);
+  });
+
   it("requires the authenticated Stripe account to match the intended account", () => {
     assert.doesNotThrow(() => assertExpectedAccount("acct_expected", "acct_expected"));
     assert.throws(
