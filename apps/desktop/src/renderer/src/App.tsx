@@ -619,7 +619,10 @@ function App(): React.JSX.Element {
             }
             onDiscardDraft={() => discardNewDraft(meetingId)}
             onBack={goHome}
-            onOpenSettings={() => setView('settings')}
+            onOpenSettings={() => {
+              setSettingsJump({ section: 'model', n: Date.now() })
+              setView('settings')
+            }}
           />
         </div>
       )}

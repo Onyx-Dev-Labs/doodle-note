@@ -18,6 +18,7 @@ import {
 } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
+import { meetingPrimaryAction, transcriptCheckpointDelayMs } from '../../shared/meeting-recovery'
 import {
   defaultSpeakerId,
   defaultSpeakerLabel,
@@ -52,7 +53,7 @@ import {
   SparkleIcon,
   UsersIcon
 } from './icons'
-import { docToMarkdown, markdownToHtml } from './lib/markdown'
+import { docToMarkdown, markdownToEditorHtml, markdownToHtml } from './lib/markdown'
 
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
 
@@ -403,7 +404,8 @@ export default function MeetingView({
     (markdown: string, editable: boolean): void => {
       if (!editor) return
       applyingRef.current = true
-      editor.commands.setContent(markdownToHtml(markdown))
+      // TipTap task lists need data-type markers; display HTML would reopen as bullets.
+      editor.commands.setContent(markdownToEditorHtml(markdown))
       editor.setEditable(editable)
       applyingRef.current = false
     },
@@ -699,6 +701,16 @@ export default function MeetingView({
       ),
     [savedSegments, state.segments, roster]
   )
+  const transcriptCheckpointRef = useRef({
+    segments: allSegments,
+    echoSuppressed: savedEcho + state.echoCount
+  })
+  useEffect(() => {
+    transcriptCheckpointRef.current = {
+      segments: allSegments,
+      echoSuppressed: savedEcho + state.echoCount
+    }
+  }, [allSegments, savedEcho, state.echoCount])
 
   /** Assign a name once and apply it to every line that speaker owns. */
   const applyRename = useCallback(
@@ -714,19 +726,39 @@ export default function MeetingView({
   )
 
   useEffect(() => {
-    if (phase !== 'ended') return
-    if (sessionSaveTimerRef.current !== null) clearTimeout(sessionSaveTimerRef.current)
-    // No cleanup on unmount: the timeout only persists (no setState), so
-    // letting it fire after the view is gone still lands the final flush.
-    sessionSaveTimerRef.current = setTimeout(() => {
+    const delay = transcriptCheckpointDelayMs(phase, allSegments.length)
+    if (delay === null) {
+      if (sessionSaveTimerRef.current !== null) {
+        clearTimeout(sessionSaveTimerRef.current)
+        sessionSaveTimerRef.current = null
+      }
+      return
+    }
+    const saveTranscript = (): void => {
       sessionSaveTimerRef.current = null
+      const checkpoint = transcriptCheckpointRef.current
       persist({
-        segments: allSegments,
-        echoSuppressed: savedEcho + state.echoCount,
-        endedAt: new Date().toISOString()
+        segments: checkpoint.segments,
+        echoSuppressed: checkpoint.echoSuppressed,
+        ...(phase === 'ended' ? { endedAt: new Date().toISOString() } : {})
       })
-    }, 400)
-  }, [phase, allSegments, savedEcho, state.echoCount, persist])
+    }
+    if (delay === 0) {
+      if (sessionSaveTimerRef.current !== null) {
+        clearTimeout(sessionSaveTimerRef.current)
+        sessionSaveTimerRef.current = null
+      }
+      saveTranscript()
+      return
+    }
+    // Throttle rather than debounce. Continuous speech can add segments every
+    // second; resetting this timer on every segment would postpone the first
+    // crash-safe checkpoint indefinitely.
+    if (sessionSaveTimerRef.current !== null) return
+    sessionSaveTimerRef.current = setTimeout(() => {
+      saveTranscript()
+    }, delay)
+  }, [phase, allSegments.length, persist])
 
   // A session that ends with zero transcript is otherwise indistinguishable
   // from success ("I hit stop and nothing happened") — say so explicitly.
@@ -881,7 +913,9 @@ export default function MeetingView({
     if (retranscribing || capturing) return
     if (
       !window.confirm(
-        'Re-transcribe this meeting from its saved recording? The current transcript is replaced; your notes are kept.'
+        allSegments.length > 0
+          ? 'Re-transcribe this meeting from its saved recording? The current transcript is replaced; your notes are kept.'
+          : 'Transcribe this meeting from its saved recording? Your notes are kept.'
       )
     ) {
       return
@@ -940,6 +974,15 @@ export default function MeetingView({
   const cloudReady = settings?.engineChoice === 'cloud' && settings.cloud?.hasKey === true
   const modelReady = cloudReady || anyDownloaded
   const canEnhance = allSegments.length > 0 && modelReady && enhanceStatus !== 'running'
+  const primaryAction = meetingPrimaryAction({
+    capturing,
+    segmentCount: allSegments.length,
+    audioPartCount: audioParts.length,
+    modelReady,
+    enhancedPresent: enhancedMarkdown !== null,
+    generating: enhanceStatus === 'running',
+    retranscribing
+  })
 
   const runEnhance = async (selectedTemplateId = templateId): Promise<void> => {
     if (!editor || enhanceStatus === 'running') return
@@ -1705,35 +1748,61 @@ export default function MeetingView({
         </div>
       )}
 
-      {!capturing && allSegments.length > 0 && enhancedMarkdown === null && (
+      {primaryAction !== 'hidden' && (
         <div className="generate-cta-wrap tpl-anchor">
           <button
             type="button"
             className="generate-cta"
-            disabled={!canEnhance}
-            title={!modelReady ? 'Activate a notes model in Settings first' : 'Generate notes'}
-            onClick={() => void runEnhance()}
+            disabled={primaryAction === 'generating' || primaryAction === 'transcribing'}
+            title={
+              primaryAction === 'configure-model'
+                ? 'Choose a local model or connect an AI provider'
+                : primaryAction === 'transcribe' || primaryAction === 'transcribing'
+                  ? 'Build a transcript from the saved recording'
+                  : 'Generate notes'
+            }
+            onClick={() => {
+              if (primaryAction === 'configure-model') onOpenSettings()
+              else if (primaryAction === 'transcribe') void runRetranscribe()
+              else if (primaryAction === 'generate') void runEnhance()
+            }}
           >
             {enhanceStatus === 'running' ? (
               <DoodlingIndicator statusText={enhanceProgressText} />
+            ) : primaryAction === 'transcribing' ? (
+              <>
+                <span className="spinner" aria-hidden="true" /> Transcribing recording…
+              </>
+            ) : primaryAction === 'transcribe' ? (
+              <>
+                <SparkleIcon size={14} /> Transcribe recording
+              </>
+            ) : primaryAction === 'configure-model' ? (
+              <>
+                <SparkleIcon size={14} /> Set up notes model
+              </>
             ) : (
               <>
                 <SparkleIcon size={14} /> Generate notes
               </>
             )}
           </button>
-          <button
-            type="button"
-            className="generate-cta generate-cta-arrow"
-            disabled={!canEnhance}
-            title="Choose a note template"
-            aria-label="Choose a note template"
-            aria-expanded={tplMenuOpen}
-            onClick={() => setTplMenuOpen((o) => !o)}
-          >
-            ▾
-          </button>
-          {tplMenuOpen && templateMenu}
+          {(primaryAction === 'generate' || primaryAction === 'generating') && (
+            <>
+              <button
+                type="button"
+                className="generate-cta generate-cta-arrow"
+                disabled={!canEnhance}
+                title="Choose a note template"
+                aria-label="Choose a note template"
+                aria-expanded={tplMenuOpen}
+                onClick={() => setTplMenuOpen((o) => !o)}
+              >
+                ▾
+              </button>
+              {tplMenuOpen && templateMenu}
+            </>
+          )}
         </div>
       )}
 
