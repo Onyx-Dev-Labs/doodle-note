@@ -27,6 +27,21 @@ test('editor HTML separates task lists from plain bullets', () => {
   assert.match(html, /<ol>\n<li>Ordered<\/li>/)
 })
 
+test('editor HTML preserves nested task hierarchy', () => {
+  const html = markdownToEditorHtml(
+    '- [ ] create client in syncro\n  - [x] setup syncro policy\n- [ ] add huntress script'
+  )
+
+  assert.match(
+    html,
+    /<li data-type="taskItem" data-checked="false"><p>create client in syncro<\/p>\n<ul data-type="taskList">\n<li data-type="taskItem" data-checked="true"><p>setup syncro policy<\/p><\/li>\n<\/ul>\n<\/li>/
+  )
+  assert.match(
+    html,
+    /<\/li>\n<li data-type="taskItem" data-checked="false"><p>add huntress script<\/p><\/li>\n<\/ul>/
+  )
+})
+
 test('docToMarkdown serializes TipTap taskList JSON to GFM checkboxes', () => {
   const md = docToMarkdown({
     type: 'doc',
@@ -72,6 +87,21 @@ test('save → hydrate HTML cycle preserves checkbox markers for TipTap', () => 
                 content: [
                   { type: 'text', text: 'create client', marks: [{ type: 'bold' }] }
                 ]
+              },
+              {
+                type: 'taskList',
+                content: [
+                  {
+                    type: 'taskItem',
+                    attrs: { checked: false },
+                    content: [
+                      {
+                        type: 'paragraph',
+                        content: [{ type: 'text', text: 'setup syncro policy' }]
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           },
@@ -94,6 +124,7 @@ test('save → hydrate HTML cycle preserves checkbox markers for TipTap', () => 
     ]
   })
   assert.match(saved, /- \[x\] \*\*create client\*\*/)
+  assert.match(saved, /  - \[ \] setup syncro policy/)
   assert.match(saved, /- \[ \] add to CIPP/)
   assert.match(saved, /- plain note/)
 
@@ -102,6 +133,10 @@ test('save → hydrate HTML cycle preserves checkbox markers for TipTap', () => 
   assert.match(hydrate, /data-checked="true"/)
   assert.match(hydrate, /data-checked="false"/)
   assert.match(hydrate, /<strong>create client<\/strong>/)
+  assert.match(
+    hydrate,
+    /<strong>create client<\/strong><\/p>\n<ul data-type="taskList">\n<li data-type="taskItem" data-checked="false"><p>setup syncro policy<\/p><\/li>\n<\/ul>\n<\/li>/
+  )
   assert.match(hydrate, /<ul>\n<li>plain note<\/li>/)
 
   // Pre-fix display path would have dropped TipTap identity on reopen.
@@ -110,7 +145,7 @@ test('save → hydrate HTML cycle preserves checkbox markers for TipTap', () => 
 })
 
 test('editor HTML escapes untrusted markdown before tags', () => {
-  const html = markdownToEditorHtml('- [ ] <script>alert(1)</script>')
-  assert.match(html, /&lt;script&gt;/)
-  assert.doesNotMatch(html, /<script>/)
+  const html = markdownToEditorHtml('- [ ] <SCRIPT>alert(1)</SCRIPT>')
+  assert.match(html, /&lt;SCRIPT&gt;/)
+  assert.doesNotMatch(html, /<script>/i)
 })
