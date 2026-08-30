@@ -53,7 +53,7 @@ import {
   SparkleIcon,
   UsersIcon
 } from './icons'
-import { docToMarkdown, markdownToHtml } from './lib/markdown'
+import { docToMarkdown, markdownToEditorHtml, markdownToHtml } from './lib/markdown'
 
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
 
@@ -404,7 +404,8 @@ export default function MeetingView({
     (markdown: string, editable: boolean): void => {
       if (!editor) return
       applyingRef.current = true
-      editor.commands.setContent(markdownToHtml(markdown))
+      // TipTap task lists need data-type markers; display HTML would reopen as bullets.
+      editor.commands.setContent(markdownToEditorHtml(markdown))
       editor.setEditable(editable)
       applyingRef.current = false
     },
