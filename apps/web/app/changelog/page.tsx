@@ -9,6 +9,13 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.17",
+    date: "August 30, 2026",
+    highlights: [
+      "Keep to-do checkboxes, checked state, and nested task structure when reopening formatted notes",
+    ],
+  },
+  {
     version: "0.4.16",
     date: "August 28, 2026",
     highlights: [
