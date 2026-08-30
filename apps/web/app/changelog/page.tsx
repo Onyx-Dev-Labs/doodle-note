@@ -9,6 +9,23 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.16",
+    date: "August 28, 2026",
+    highlights: [
+      "Checkpoint transcripts during recording so an unexpected quit cannot erase an entire meeting transcript",
+      "Show Transcribe recording when saved audio needs its transcript rebuilt",
+      "Turn an unavailable Generate notes button into a direct Notes model setup action",
+      "Keep Groq, OpenRouter, and Ollama notes settings active after restarting DoodleNote",
+    ],
+  },
+  {
+    version: "0.4.15",
+    date: "August 28, 2026",
+    highlights: [
+      "Keep to-do checkboxes and checked state when reopening regular notes and meeting notes",
+    ],
+  },
+  {
     version: "0.4.14",
     date: "August 27, 2026",
     highlights: [
