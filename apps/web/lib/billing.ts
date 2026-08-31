@@ -177,12 +177,20 @@ export async function reconcileSubscription(
   userId: string | null;
   subscription: Stripe.Subscription;
 }> {
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!priceId) throw new Error("STRIPE_PRICE_ID is not set");
+  const hasDoodleNoteUserMarker = Object.prototype.hasOwnProperty.call(
+    incoming.metadata ?? {},
+    "doodlenoteUserId",
+  );
+  if (!hasDoodleNoteUserMarker && !subscriptionUsesPrice(incoming, priceId)) {
+    return { userId: null, subscription: incoming };
+  }
+
   const customerId =
     typeof incoming.customer === "string"
       ? incoming.customer
       : incoming.customer.id;
-  const priceId = process.env.STRIPE_PRICE_ID;
-  if (!priceId) throw new Error("STRIPE_PRICE_ID is not set");
 
   const stripe = await getVerifiedStripe();
   const current = await stripe.subscriptions.list({
