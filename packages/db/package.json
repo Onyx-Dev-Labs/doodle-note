@@ -23,7 +23,7 @@
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.4.0",
     "drizzle-kit": "^0.31.10",
     "jose": "^6.2.10",
     "tsx": "^4.23.0",

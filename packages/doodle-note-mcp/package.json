@@ -32,7 +32,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@repo/agent-contract": "workspace:*",
     "@repo/meetings-store": "workspace:*",
-    "@types/node": "^22.19.1",
+    "@types/node": "^26.4.0",
     "esbuild": "^0.25.0",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3"
