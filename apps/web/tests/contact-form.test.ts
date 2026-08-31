@@ -153,6 +153,7 @@ describe("DoodleNote contact form", () => {
     assert.match(email.text, /Question <b>with markup<\/b>/);
     assert.match(email.html, /Ada &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
     assert.match(email.html, /Question &lt;b&gt;with markup&lt;\/b&gt;/);
-    assert.doesNotMatch(email.html, /<script>|<b>with markup<\/b>/);
+    assert.ok(!email.html.toLowerCase().includes("<script"));
+    assert.ok(!email.html.includes("<b>with markup</b>"));
   });
 });
