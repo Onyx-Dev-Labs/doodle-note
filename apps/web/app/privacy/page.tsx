@@ -30,6 +30,10 @@ export default function PrivacyPage() {
             provider.
           </li>
           <li>
+            Contact-form details such as your name, email address, optional
+            company and phone number, and the message you send us.
+          </li>
+          <li>
             Workspace membership, invitations, linked devices, and security
             tokens.
           </li>
@@ -64,11 +68,12 @@ export default function PrivacyPage() {
       <LegalSection title="Optional providers">
         <p>
           Hosted features may use Vercel for application and object hosting,
-          Neon for PostgreSQL, Stripe for billing, Resend for invitation email,
-          Twilio for optional voice features, and Microsoft or Google for
-          sign-in and calendar access. If you choose an external AI provider,
-          the content you submit is sent to that provider under its terms. Local
-          AI and Ollama do not require DoodleNote to receive that content.
+          Neon for PostgreSQL, Stripe for billing, Resend for account,
+          invitation, billing, and contact-form email, Twilio for optional voice
+          features, and Microsoft or Google for sign-in and calendar access. If
+          you choose an external AI provider, the content you submit is sent to
+          that provider under its terms. Local AI and Ollama do not require
+          DoodleNote to receive that content.
         </p>
       </LegalSection>
 

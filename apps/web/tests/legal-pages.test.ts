@@ -12,8 +12,11 @@ function source(path: string): string {
 
 test("public footer links to privacy and terms without overstating local-only behavior", () => {
   const ui = source("ui.tsx");
+  assert.match(ui, /href="\/contact"/);
   assert.match(ui, /href="\/privacy"/);
   assert.match(ui, /href="\/terms"/);
+  assert.match(ui, /lg:flex-nowrap/);
+  assert.match(ui, /Local-first\. Cloud only when you opt in\.<\/span>/);
   assert.match(ui, /Cloud only when you opt in/);
   assert.doesNotMatch(ui, /Your meetings never leave your device/);
 });
@@ -22,6 +25,8 @@ test("privacy policy documents local, synced, shared, and deletion behavior", ()
   const privacy = source("privacy/page.tsx");
   assert.match(privacy, /does\s+not\s+upload meeting audio as part of Sync/);
   assert.match(privacy, /meeting titles, notes, transcripts/);
+  assert.match(privacy, /Contact-form details/);
+  assert.match(privacy, /contact-form email/);
   assert.match(privacy, /public\s+share\s+link/);
   assert.match(privacy, /request\s+account or other hosted-data/);
   assert.match(privacy, /permanently deletes the active cloud copy/);
