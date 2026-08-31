@@ -33,6 +33,6 @@
     "engine:build": "swift build -c release --package-path engine"
   },
   "devDependencies": {
-    "turbo": "^2.5.0"
+    "turbo": "^2.10.12"
   }
 }
