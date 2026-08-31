@@ -165,27 +165,30 @@ export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
 export function SiteFooter() {
   return (
     <footer className="border-t border-sand">
-      <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-between gap-3 px-6 py-6 text-sm text-stone sm:flex-row">
+      <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-5 px-6 py-6 text-sm text-stone lg:grid lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-8">
         <BrandLockup compact />
-        <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-          <Link href="/pricing" className="hover:text-ink">
+        <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 lg:flex-nowrap">
+          <Link href="/pricing" className="whitespace-nowrap hover:text-ink">
             Pricing
           </Link>
-          <Link href="/changelog" className="hover:text-ink">
+          <Link href="/changelog" className="whitespace-nowrap hover:text-ink">
             What&rsquo;s new
           </Link>
-          <Link href="/privacy" className="hover:text-ink">
+          <Link href="/contact" className="whitespace-nowrap hover:text-ink">
+            Contact
+          </Link>
+          <Link href="/privacy" className="whitespace-nowrap hover:text-ink">
             Privacy
           </Link>
-          <Link href="/terms" className="hover:text-ink">
+          <Link href="/terms" className="whitespace-nowrap hover:text-ink">
             Terms
           </Link>
           <GitHubNavLink className="rounded-md px-1.5 py-1.5 text-bark transition-colors hover:bg-sage-fill hover:text-ink" />
-          <Link href="/login" className="hover:text-ink">
+          <Link href="/login" className="whitespace-nowrap hover:text-ink">
             Sign in
           </Link>
         </nav>
-        <span>Local-first. Cloud only when you opt in.</span>
+        <span className="whitespace-nowrap text-center lg:text-right">Local-first. Cloud only when you opt in.</span>
       </div>
     </footer>
   );

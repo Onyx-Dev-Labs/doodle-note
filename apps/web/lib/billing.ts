@@ -115,7 +115,9 @@ export async function ensureCustomer(
 }
 
 /** Mirror a Stripe subscription event into our table. */
-export async function recordSubscription(sub: Stripe.Subscription): Promise<void> {
+export async function recordSubscription(
+  sub: Stripe.Subscription,
+): Promise<string | null> {
   const userId = sub.metadata?.doodlenoteUserId;
   const customerId =
     typeof sub.customer === "string" ? sub.customer : sub.customer.id;
@@ -133,7 +135,7 @@ export async function recordSubscription(sub: Stripe.Subscription): Promise<void
   }
   if (!targetUserId) {
     console.error("[billing] subscription event with unknown user", sub.id);
-    return;
+    return null;
   }
 
   const periodEnd = sub.items.data[0]?.current_period_end;
@@ -161,6 +163,7 @@ export async function recordSubscription(sub: Stripe.Subscription): Promise<void
         updatedAt: new Date(),
       },
     });
+  return targetUserId;
 }
 
 /**
@@ -170,13 +173,24 @@ export async function recordSubscription(sub: Stripe.Subscription): Promise<void
  */
 export async function reconcileSubscription(
   incoming: Stripe.Subscription,
-): Promise<void> {
+): Promise<{
+  userId: string | null;
+  subscription: Stripe.Subscription;
+}> {
+  const priceId = process.env.STRIPE_PRICE_ID;
+  if (!priceId) throw new Error("STRIPE_PRICE_ID is not set");
+  const hasDoodleNoteUserMarker = Object.prototype.hasOwnProperty.call(
+    incoming.metadata ?? {},
+    "doodlenoteUserId",
+  );
+  if (!hasDoodleNoteUserMarker && !subscriptionUsesPrice(incoming, priceId)) {
+    return { userId: null, subscription: incoming };
+  }
+
   const customerId =
     typeof incoming.customer === "string"
       ? incoming.customer
       : incoming.customer.id;
-  const priceId = process.env.STRIPE_PRICE_ID;
-  if (!priceId) throw new Error("STRIPE_PRICE_ID is not set");
 
   const stripe = await getVerifiedStripe();
   const current = await stripe.subscriptions.list({
@@ -184,9 +198,10 @@ export async function reconcileSubscription(
     status: "all",
     limit: 100,
   });
-  await recordSubscription(
-    selectEffectiveSubscription(current.data, priceId) ?? incoming,
-  );
+  const subscription =
+    selectEffectiveSubscription(current.data, priceId) ?? incoming;
+  const userId = await recordSubscription(subscription);
+  return { userId, subscription };
 }
 
 /** Return the current configured-Price subscription when Checkout must stop. */

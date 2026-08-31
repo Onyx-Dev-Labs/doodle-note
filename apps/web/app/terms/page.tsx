@@ -4,7 +4,7 @@ export const metadata = { title: "Terms of service | DoodleNote" };
 
 export default function TermsPage() {
   return (
-    <LegalPage title="Terms of service" updated="August 27, 2026">
+    <LegalPage title="Terms of service" updated="August 31, 2026">
       <p>
         These terms apply to the official DoodleNote website, signed apps, and
         hosted Sync service operated by Onyx Dev Labs. By creating an account or
@@ -56,8 +56,12 @@ export default function TermsPage() {
           The current official Sync price, trial period, taxes, and renewal
           terms are shown at checkout. Stripe processes payments. Subscriptions
           renew until canceled through the billing portal. Canceling stops
-          future renewals and does not remove meetings stored locally on your
-          devices.
+          future renewals. Cloud Sync remains available through the cancellation
+          date shown by Stripe. On that date, DoodleNote permanently deletes the
+          active cloud copy in your Personal workspace and disconnects your
+          linked Sync devices and hosted-agent tokens. Meetings, notes, and
+          recordings stored locally on your devices are not deleted.
+          Shared-workspace content is retained for the other workspace members.
         </p>
       </LegalSection>
 

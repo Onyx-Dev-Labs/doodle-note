@@ -6,7 +6,7 @@ export const metadata = { title: "Privacy policy | DoodleNote" };
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy policy" updated="August 27, 2026">
+    <LegalPage title="Privacy policy" updated="August 31, 2026">
       <p>
         DoodleNote is operated by Onyx Dev Labs. This policy explains how the
         DoodleNote apps, website, and optional hosted Sync service handle
@@ -28,6 +28,10 @@ export default function PrivacyPage() {
           <li>
             Account details such as your name, email address, and sign-in
             provider.
+          </li>
+          <li>
+            Contact-form details such as your name, email address, optional
+            company and phone number, and the message you send us.
           </li>
           <li>
             Workspace membership, invitations, linked devices, and security
@@ -64,11 +68,12 @@ export default function PrivacyPage() {
       <LegalSection title="Optional providers">
         <p>
           Hosted features may use Vercel for application and object hosting,
-          Neon for PostgreSQL, Stripe for billing, Resend for invitation email,
-          Twilio for optional voice features, and Microsoft or Google for
-          sign-in and calendar access. If you choose an external AI provider,
-          the content you submit is sent to that provider under its terms. Local
-          AI and Ollama do not require DoodleNote to receive that content.
+          Neon for PostgreSQL, Stripe for billing, Resend for account,
+          invitation, billing, and contact-form email, Twilio for optional voice
+          features, and Microsoft or Google for sign-in and calendar access. If
+          you choose an external AI provider, the content you submit is sent to
+          that provider under its terms. Local AI and Ollama do not require
+          DoodleNote to receive that content.
         </p>
       </LegalSection>
 
@@ -88,7 +93,26 @@ export default function PrivacyPage() {
           retained while needed to provide your account and Sync service, meet
           legal obligations, resolve disputes, and maintain security records.
           Deleting a synced meeting removes the active cloud record through the
-          normal sync process. To request account or hosted-data deletion, email
+          normal sync process.
+        </p>
+        <p>
+          When you schedule cancellation, Cloud Sync remains available through
+          the date Stripe shows in the billing portal. On that date, DoodleNote
+          permanently deletes the active cloud copy of meetings, transcripts,
+          notes, folders, tags, public share links, and attachments in your
+          Personal workspace and disconnects your linked Sync devices and
+          hosted-agent tokens. Local notes and recordings remain on your
+          devices. Content in shared workspaces is retained for the other
+          workspace members, while your access through the canceled subscription
+          ends. Encrypted provider backups may retain deleted records until they
+          age out through the provider&apos;s normal backup rotation, but those
+          records are not available through the service.
+        </p>
+        <p>
+          Billing, email-delivery, security, and deletion audit records may be
+          retained when required for legal, fraud-prevention, and operational
+          accountability purposes. To request account or other hosted-data
+          deletion, email
           <a
             className="ml-1 text-sage-deep underline"
             href="mailto:team@onyxdev.io"
