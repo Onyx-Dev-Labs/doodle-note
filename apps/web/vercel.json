@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/billing-lifecycle",
-      "schedule": "0 6 * * *"
+      "schedule": "0 * * * *"
     }
   ]
 }
