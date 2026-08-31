@@ -5,7 +5,9 @@ import { eq, subscriptions, user } from "@repo/db";
 import { createInMemoryDb, type InMemoryDb } from "@repo/db/testing";
 
 let mem: InMemoryDb;
-let recordSubscription: (subscription: Stripe.Subscription) => Promise<void>;
+let recordSubscription: (
+  subscription: Stripe.Subscription,
+) => Promise<string | null>;
 
 function subscription(priceId = "price_sync"): Stripe.Subscription {
   return {

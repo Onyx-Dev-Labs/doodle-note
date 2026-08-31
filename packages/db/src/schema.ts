@@ -224,6 +224,68 @@ export const subscriptions = pgTable("subscriptions", {
 });
 
 /**
+ * Durable, retryable deletion schedule for a subscriber's Personal workspace
+ * cloud copy. Stripe remains authoritative at execution time so a resumed or
+ * replacement subscription prevents an obsolete job from deleting data.
+ */
+export const billingDataDeletions = pgTable(
+  "billing_data_deletions",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    stripeSubscriptionId: text("stripe_subscription_id").notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    status: text("status", {
+      enum: ["pending", "completed", "canceled"],
+    })
+      .notNull()
+      .default("pending"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("billing_data_deletions_due_idx").on(
+      table.status,
+      table.scheduledFor,
+    ),
+  ],
+);
+
+/**
+ * Small transactional outbox for customer billing messages. Dedupe keys make
+ * Stripe webhook retries safe, while claimed_at prevents concurrent workers
+ * from sending the same message.
+ */
+export const billingNotifications = pgTable(
+  "billing_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["cancellation_scheduled", "cloud_sync_ended"],
+    }).notNull(),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("billing_notifications_dedupe_key_uidx").on(table.dedupeKey),
+    index("billing_notifications_pending_idx").on(table.sentAt, table.createdAt),
+  ],
+);
+
+/**
  * Verified Caller ID for phone calls: a user proves ownership of their real
  * number via Twilio's validation flow, and outbound DoodleNote calls then
  * display it instead of the shared workspace number.

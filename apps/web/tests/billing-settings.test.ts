@@ -81,7 +81,8 @@ describe("billing settings state", () => {
       {
         kind: "canceling",
         title: "Cancellation scheduled",
-        description: "Cloud Sync remains available until the cancellation date.",
+        description:
+          "Cloud Sync remains available until the cancellation date. That day, DoodleNote permanently deletes the active cloud copy in your Personal workspace and disconnects your linked Cloud Sync devices.",
         canManage: true,
         canStart: false,
       },
@@ -132,6 +133,13 @@ test("verification and subscription management surfaces stay discoverable and th
   assert.match(settingsNav, /\/app\/settings\/billing/);
   assert.match(portal, /configuration: portalConfigurationId/);
   assert.match(portal, /return_url: `\$\{origin\}\/app\/settings\/billing`/);
+
+  const billingPage = readFileSync(
+    join(root, "app/app/settings/billing/page.tsx"),
+    "utf8",
+  );
+  assert.match(billingPage, /permanently deletes the active cloud copy/);
+  assert.match(billingPage, /local\s+notes and recordings remain/);
 });
 
 test("dark verification card colors meet normal-text contrast", () => {

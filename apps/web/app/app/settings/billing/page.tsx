@@ -145,7 +145,11 @@ export default async function BillingSettingsPage() {
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-stone">
             Cancellation is completed in Stripe. Stripe shows when Cloud Sync
-            access will end before you confirm the change.
+            access will end before you confirm the change. On that date,
+            DoodleNote permanently deletes the active cloud copy in your Personal
+            workspace and disconnects linked Cloud Sync devices. Your local
+            notes and recordings remain on your devices. Shared-workspace data
+            is retained for the other workspace members.
           </p>
         </section>
       </div>
