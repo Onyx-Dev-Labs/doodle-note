@@ -18,15 +18,21 @@ process.env.RESEND_API_KEY ??= "re_smoke_only";
 process.env.AUTH_FROM_EMAIL ??= "DoodleNote <no-reply@doodlenote.ai>";
 
 let verificationUrl: string | null = null;
+let verificationHtml: string | null = null;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   if (input === "https://api.resend.com/emails") {
-    const payload = JSON.parse(String(init?.body)) as { text?: unknown };
+    const payload = JSON.parse(String(init?.body)) as {
+      html?: unknown;
+      text?: unknown;
+    };
     const match =
       typeof payload.text === "string"
         ? payload.text.match(/https?:\/\/\S+/)
         : null;
     verificationUrl = match?.[0] ?? null;
+    verificationHtml =
+      typeof payload.html === "string" ? payload.html : null;
     return Response.json({ id: "smoke-email" });
   }
   return realFetch(input, init);
@@ -78,6 +84,13 @@ async function main(): Promise<void> {
     "unverified sign-up set a session cookie",
   );
   assert(verificationUrl, "sign-up did not send a verification email");
+  assert(verificationHtml, "verification email did not include an HTML body");
+  assert(
+    verificationHtml.includes("DoodleNote mascot") &&
+      verificationHtml.includes("Verify my email") &&
+      verificationHtml.includes("Local-first. Cloud only when you opt in."),
+    "verification email did not include the branded DoodleNote content",
+  );
 
   // 2. Verify the email. The verification endpoint should create the session.
   const token = new URL(verificationUrl).searchParams.get("token");
