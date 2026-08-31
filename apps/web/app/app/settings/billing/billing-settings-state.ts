@@ -71,7 +71,8 @@ export function billingSettingsState(
     return {
       kind: "canceling",
       title: "Cancellation scheduled",
-      description: "Cloud Sync remains available until the cancellation date.",
+      description:
+        "Cloud Sync remains available until the cancellation date. That day, DoodleNote permanently deletes the active cloud copy in your Personal workspace and disconnects your linked Cloud Sync devices.",
       canManage: Boolean(subscription.stripeCustomerId),
       canStart: false,
     };
