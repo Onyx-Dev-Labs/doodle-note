@@ -1,22 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { buttonPrimary } from "../ui";
 import {
   billingViewFromStatus,
   type BillingView,
 } from "./billing-view";
+import {
+  shouldAutoStartTrialCheckout,
+  TRIAL_LOGIN_PATH,
+} from "./trial-flow";
 
 /**
  * The Sync plan's call to action, state-aware: signed-out visitors go to
  * login, new users to Stripe Checkout (15-day trial), subscribers to the
  * billing portal.
  */
-export function CheckoutButton() {
+export function CheckoutButton({
+  autoCheckout = false,
+}: {
+  autoCheckout?: boolean;
+}) {
   const [view, setView] = useState<BillingView>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoCheckoutAttempted = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +43,7 @@ export function CheckoutButton() {
     };
   }, []);
 
-  async function go(endpoint: "checkout" | "portal") {
+  const go = useCallback(async (endpoint: "checkout" | "portal") => {
     setBusy(true);
     setError(null);
     try {
@@ -56,7 +65,23 @@ export function CheckoutButton() {
       setError("Something went wrong — try again.");
     }
     setBusy(false);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (
+      !shouldAutoStartTrialCheckout({
+        requested: autoCheckout,
+        attempted: autoCheckoutAttempted.current,
+        viewKind: view.kind,
+      })
+    ) {
+      return;
+    }
+
+    autoCheckoutAttempted.current = true;
+    window.history.replaceState(null, "", "/pricing");
+    void go("checkout");
+  }, [autoCheckout, go, view.kind]);
 
   if (view.kind === "legacy-access") {
     return (
@@ -140,7 +165,7 @@ export function CheckoutButton() {
   if (view.kind === "signed-out") {
     return (
       <div className="flex flex-col items-center gap-2 sm:items-start">
-        <a href="/login?next=/pricing" className={buttonPrimary}>
+        <a href={TRIAL_LOGIN_PATH} className={buttonPrimary}>
           Start your 15-day free trial
         </a>
         <p className="text-xs text-stone">

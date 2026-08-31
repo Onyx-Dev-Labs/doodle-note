@@ -29,6 +29,7 @@ No external service is required for the basic local development path:
 | Auth origin and production secret | `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`                                                                                              |
 | Microsoft sign-in                 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`                                                                                     |
 | Google sign-in                    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                                           |
+| Account verification              | `RESEND_API_KEY`, `AUTH_FROM_EMAIL`                                                                                                  |
 | Workspace invitations             | `RESEND_API_KEY`, `INVITATION_FROM_EMAIL`                                                                                            |
 | Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`                                                  |
 | Voice features                    | `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_CALLER_ID`, `TWILIO_AUTH_TOKEN` |

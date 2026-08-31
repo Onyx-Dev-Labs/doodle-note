@@ -5,8 +5,13 @@ import { organization } from "better-auth/plugins";
 
 import { fullSchema, type Db } from "@repo/db";
 
+import { sendAuthVerificationEmail } from "./auth-email";
 import { sendWorkspaceInvitationEmail } from "./invitation-email";
-import { resolveAuthBaseUrl, resolveAuthSecret } from "./runtime-config";
+import {
+  resolveAuthBaseUrl,
+  resolveAuthEmailEnabled,
+  resolveAuthSecret,
+} from "./runtime-config";
 
 /** Production canonical site; social OAuth callbacks must match this origin. */
 const PRODUCTION_ORIGINS = [
@@ -60,6 +65,8 @@ function socialProviders() {
  * so smoke tests can construct an instance against a throwaway database.
  */
 export function createAuth(db: Db) {
+  const emailVerificationEnabled = resolveAuthEmailEnabled();
+
   return betterAuth({
     database: drizzleAdapter(db, { provider: "pg", schema: fullSchema }),
     secret: resolveAuthSecret(),
@@ -67,7 +74,17 @@ export function createAuth(db: Db) {
     trustedOrigins: trustedOrigins(),
     emailAndPassword: {
       enabled: true,
+      requireEmailVerification: emailVerificationEnabled,
     },
+    emailVerification: emailVerificationEnabled
+      ? {
+          sendVerificationEmail: sendAuthVerificationEmail,
+          sendOnSignUp: true,
+          sendOnSignIn: true,
+          autoSignInAfterVerification: true,
+          expiresIn: 60 * 60,
+        }
+      : undefined,
     socialProviders: socialProviders(),
     plugins: [
       organization({

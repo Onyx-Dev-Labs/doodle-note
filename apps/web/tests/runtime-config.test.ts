@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   resolveAuthBaseUrl,
+  resolveAuthEmailEnabled,
   resolveAuthSecret,
   resolveBillingMode,
 } from "../lib/runtime-config";
@@ -57,6 +58,30 @@ test("a Next.js production build does not require live auth credentials", () => 
   };
   assert.match(resolveAuthSecret(env), /dev-only-insecure/);
   assert.equal(resolveAuthBaseUrl(env), "http://localhost:4040");
+  assert.equal(resolveAuthEmailEnabled(env), false);
+});
+
+test("production auth requires a complete email delivery configuration", () => {
+  assert.throws(
+    () => resolveAuthEmailEnabled({ NODE_ENV: "production" }),
+    /RESEND_API_KEY and AUTH_FROM_EMAIL/,
+  );
+  assert.throws(
+    () =>
+      resolveAuthEmailEnabled({
+        NODE_ENV: "production",
+        RESEND_API_KEY: "secret",
+      }),
+    /RESEND_API_KEY and AUTH_FROM_EMAIL/,
+  );
+  assert.equal(
+    resolveAuthEmailEnabled({
+      NODE_ENV: "production",
+      RESEND_API_KEY: "secret",
+      AUTH_FROM_EMAIL: "DoodleNote <no-reply@doodlenote.ai>",
+    }),
+    true,
+  );
 });
 
 test("hosted production requires the complete Stripe group", () => {

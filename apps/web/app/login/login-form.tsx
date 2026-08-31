@@ -50,10 +50,12 @@ function MicrosoftLogo() {
 export function LoginForm({
   googleEnabled,
   microsoftEnabled,
+  emailVerificationEnabled,
   next = "/app",
 }: {
   googleEnabled: boolean;
   microsoftEnabled: boolean;
+  emailVerificationEnabled: boolean;
   next?: string;
 }) {
   const router = useRouter();
@@ -63,6 +65,10 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState<string | null>(null);
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(
+    null,
+  );
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -70,15 +76,53 @@ export function LoginForm({
     setPending(true);
     const result =
       mode === "sign-up"
-        ? await authClient.signUp.email({ name, email, password })
-        : await authClient.signIn.email({ email, password });
+        ? await authClient.signUp.email({
+            name,
+            email,
+            password,
+            callbackURL: next,
+          })
+        : await authClient.signIn.email({ email, password, callbackURL: next });
     setPending(false);
     if (result.error) {
+      const code =
+        "code" in result.error && typeof result.error.code === "string"
+          ? result.error.code
+          : null;
+      if (code === "EMAIL_NOT_VERIFIED") {
+        setVerificationEmail(email);
+        setVerificationMessage("We sent you a fresh verification link.");
+        return;
+      }
       setError(result.error.message ?? "Something went wrong");
+      return;
+    }
+    if (mode === "sign-up" && emailVerificationEnabled) {
+      setVerificationEmail(email);
+      setVerificationMessage("We sent you a verification link.");
       return;
     }
     router.push(next);
     router.refresh();
+  }
+
+  async function resendVerification() {
+    if (!verificationEmail) return;
+    setError(null);
+    setVerificationMessage(null);
+    setPending(true);
+    const result = await authClient.sendVerificationEmail({
+      email: verificationEmail,
+      callbackURL: next,
+    });
+    setPending(false);
+    if (result.error) {
+      setError(
+        result.error.message ?? "We could not send another verification email.",
+      );
+      return;
+    }
+    setVerificationMessage("A new verification link is on its way.");
   }
 
   /**
@@ -130,7 +174,54 @@ export function LoginForm({
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      {verificationEmail ? (
+        <div className="rounded-xl border border-sand bg-white p-5 text-center shadow-sm">
+          <h1 className="font-display text-xl font-semibold text-ink">
+            Check your email
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-stone">
+            Verify{" "}
+            <strong className="font-medium text-bark">
+              {verificationEmail}
+            </strong>
+            {next.includes("checkout=1")
+              ? " and we will continue to Stripe Checkout."
+              : " to finish signing in."}
+          </p>
+          {verificationMessage && (
+            <p role="status" className="mt-3 text-sm text-sage-deep">
+              {verificationMessage}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="mt-3 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void resendVerification()}
+            className={`mt-4 w-full ${buttonPrimary}`}
+          >
+            {pending ? "Sending…" : "Resend verification email"}
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              setVerificationEmail(null);
+              setVerificationMessage(null);
+              setError(null);
+            }}
+            className="mt-3 text-sm underline underline-offset-2 hover:text-ink"
+          >
+            Use a different email
+          </button>
+        </div>
+      ) : (
+        <>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         {mode === "sign-up" && (
           <label className="text-xs font-medium text-bark">
             Name
@@ -184,9 +275,9 @@ export function LoginForm({
               ? "Sign in"
               : "Create account"}
         </button>
-      </form>
+          </form>
 
-      {microsoftEnabled && (
+          {microsoftEnabled && (
         <button
           type="button"
           disabled={pending}
@@ -196,9 +287,9 @@ export function LoginForm({
           <MicrosoftLogo />
           Sign in with Microsoft
         </button>
-      )}
+          )}
 
-      {googleEnabled && (
+          {googleEnabled && (
         <button
           type="button"
           disabled={pending}
@@ -208,9 +299,9 @@ export function LoginForm({
           <GoogleLogo />
           Continue with Google
         </button>
-      )}
+          )}
 
-      <p className="mt-6 text-center text-sm text-stone">
+          <p className="mt-6 text-center text-sm text-stone">
         {mode === "sign-in" ? (
           <>
             No account?{" "}
@@ -240,7 +331,9 @@ export function LoginForm({
             </button>
           </>
         )}
-      </p>
+          </p>
+        </>
+      )}
     </div>
   );
 }

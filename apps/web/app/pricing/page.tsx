@@ -78,7 +78,13 @@ function FeatureList({ items }: { items: string[] }) {
   );
 }
 
-export default function PricingPage() {
+export default async function PricingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ checkout?: string }>;
+}) {
+  const { checkout } = await searchParams;
+
   return (
     <div className="flex flex-1 flex-col bg-cream text-bark">
       <SiteHeader
@@ -149,7 +155,7 @@ export default function PricingPage() {
           </p>
           <FeatureList items={SYNC_FEATURES} />
           <div className="mt-7">
-            <CheckoutButton />
+            <CheckoutButton autoCheckout={checkout === "1"} />
           </div>
         </section>
 

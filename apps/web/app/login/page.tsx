@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { googleEnabled, microsoftEnabled } from "@/lib/create-auth";
+import { resolveAuthEmailEnabled } from "@/lib/runtime-config";
 
 import { LoginForm } from "./login-form";
 
@@ -25,6 +26,7 @@ export default async function LoginPage({
       <LoginForm
         googleEnabled={googleEnabled()}
         microsoftEnabled={microsoftEnabled()}
+        emailVerificationEnabled={resolveAuthEmailEnabled()}
         next={nextPath}
       />
     </main>
