@@ -15,6 +15,48 @@
 
 DoodleNote captures your microphone and the other side of a call on your computer, transcribes the conversation on-device, and combines the transcript with your rough notes into a useful meeting record. Audio stays on your device. Optional Sync uploads the meeting content you choose, but not the recording audio.
 
+## See DoodleNote in action
+
+### Start private and local
+
+The Mac app introduces the local-first workflow before you record your first meeting. No bot joins the call, and cloud sync stays optional.
+
+<p align="center">
+  <img src="docs/images/screenshots/doodlenote-welcome.png" alt="DoodleNote welcome screen explaining local capture, summaries, and optional sync" width="900">
+</p>
+
+### Find every meeting and note
+
+The home screen keeps recent meetings, quick notes, folders, search, and upcoming calendar events in one place.
+
+<p align="center">
+  <img src="docs/images/screenshots/doodlenote-home.png" alt="DoodleNote home screen with recent meetings, notes, folders, and calendar connection" width="900">
+</p>
+
+### Review exactly what was said
+
+DoodleNote transcribes both sides locally, keeps speaker labels editable, and preserves timestamps for quick review.
+
+<p align="center">
+  <img src="docs/images/screenshots/doodlenote-transcript.png" alt="DoodleNote meeting transcript with named speakers and timestamps" width="900">
+</p>
+
+### Turn the conversation into useful notes
+
+Generate a polished summary with decisions, action items, owners, and the next meeting while keeping the original notes available.
+
+<p align="center">
+  <img src="docs/images/screenshots/doodlenote-enhanced-notes.png" alt="DoodleNote enhanced meeting notes with summary, decisions, and action items" width="900">
+</p>
+
+### Ask a follow-up question
+
+Ask about the open meeting and get an answer grounded only in its notes and transcript.
+
+<p align="center">
+  <img src="docs/images/screenshots/doodlenote-ask-anything.png" alt="DoodleNote answering a question using the current meeting" width="900">
+</p>
+
 ## Why DoodleNote
 
 - **No bot in the call.** Capture works from your side with any meeting app.
