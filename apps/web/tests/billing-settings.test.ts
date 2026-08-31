@@ -4,7 +4,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, test } from "node:test";
 
-import { billingSettingsState } from "../app/app/settings/billing/billing-settings-state";
+import {
+  billingSettingsState,
+  stripeCancellationDate,
+} from "../app/app/settings/billing/billing-settings-state";
 
 function relativeLuminance(hex: string): number {
   const channels = hex
@@ -64,6 +67,37 @@ describe("billing settings state", () => {
       canManage: false,
       canStart: true,
     });
+  });
+
+  it("shows a scheduled cancellation while access remains active", () => {
+    const cancellationDate = new Date("2026-09-14T00:00:00.000Z");
+    assert.deepEqual(
+      billingSettingsState(true, {
+        status: "trialing",
+        grandfathered: false,
+        stripeCustomerId: "cus_canceling",
+        cancellationDate,
+      }),
+      {
+        kind: "canceling",
+        title: "Cancellation scheduled",
+        description: "Cloud Sync remains available until the cancellation date.",
+        canManage: true,
+        canStart: false,
+      },
+    );
+  });
+
+  it("maps Stripe cancellation fields to the effective end date", () => {
+    assert.equal(
+      stripeCancellationDate(1_789_430_400, false)?.toISOString(),
+      "2026-09-15T00:00:00.000Z",
+    );
+    assert.equal(
+      stripeCancellationDate(null, true, 1_789_430_400)?.toISOString(),
+      "2026-09-15T00:00:00.000Z",
+    );
+    assert.equal(stripeCancellationDate(null, false, 1_789_430_400), null);
   });
 
   it("keeps legacy access outside Stripe billing", () => {

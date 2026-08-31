@@ -3,6 +3,7 @@ export type BillingSettingsKind =
   | "legacy"
   | "trialing"
   | "active"
+  | "canceling"
   | "attention"
   | "inactive";
 
@@ -10,6 +11,7 @@ export interface BillingSubscriptionSummary {
   status: string;
   grandfathered: boolean;
   stripeCustomerId: string | null;
+  cancellationDate?: Date | null;
 }
 
 export interface BillingSettingsState {
@@ -62,6 +64,19 @@ export function billingSettingsState(
     };
   }
 
+  if (
+    subscription.cancellationDate &&
+    (subscription.status === "trialing" || subscription.status === "active")
+  ) {
+    return {
+      kind: "canceling",
+      title: "Cancellation scheduled",
+      description: "Cloud Sync remains available until the cancellation date.",
+      canManage: Boolean(subscription.stripeCustomerId),
+      canStart: false,
+    };
+  }
+
   if (subscription.status === "trialing") {
     return {
       kind: "trialing",
@@ -93,4 +108,14 @@ export function billingSettingsState(
     canManage: Boolean(subscription.stripeCustomerId),
     canStart: false,
   };
+}
+
+export function stripeCancellationDate(
+  cancelAt: number | null,
+  cancelAtPeriodEnd: boolean,
+  currentPeriodEnd?: number | null,
+): Date | null {
+  const timestamp =
+    cancelAt ?? (cancelAtPeriodEnd ? currentPeriodEnd : null) ?? null;
+  return timestamp ? new Date(timestamp * 1000) : null;
 }
