@@ -19,6 +19,10 @@ updates:
         update-types:
           - patch
           - minor
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
