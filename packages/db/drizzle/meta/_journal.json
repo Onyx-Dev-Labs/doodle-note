@@ -85,6 +85,13 @@
       "when": 1787847414555,
       "tag": "0011_long_dormammu",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788184190594,
+      "tag": "0012_perfect_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

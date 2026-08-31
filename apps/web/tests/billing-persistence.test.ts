@@ -5,16 +5,24 @@ import { eq, subscriptions, user } from "@repo/db";
 import { createInMemoryDb, type InMemoryDb } from "@repo/db/testing";
 
 let mem: InMemoryDb;
-let recordSubscription: (subscription: Stripe.Subscription) => Promise<void>;
+let recordSubscription: (
+  subscription: Stripe.Subscription,
+) => Promise<string | null>;
+let reconcileSubscription: (
+  subscription: Stripe.Subscription,
+) => Promise<{ userId: string | null; subscription: Stripe.Subscription }>;
 
-function subscription(priceId = "price_sync"): Stripe.Subscription {
+function subscription(
+  priceId = "price_sync",
+  metadata: Stripe.Metadata = { doodlenoteUserId: "billing-user" },
+): Stripe.Subscription {
   return {
     id: "sub_fixture",
     object: "subscription",
     created: 1_800_000_000,
     status: "active",
     customer: "cus_fixture",
-    metadata: { doodlenoteUserId: "billing-user" },
+    metadata,
     items: {
       object: "list",
       data: [
@@ -42,7 +50,7 @@ before(async () => {
   process.env.STRIPE_PRICE_ID = "price_sync";
   mem = await createInMemoryDb();
   (globalThis as { __repoDbClient?: unknown }).__repoDbClient = mem.db;
-  ({ recordSubscription } = await import("../lib/billing"));
+  ({ recordSubscription, reconcileSubscription } = await import("../lib/billing"));
   await mem.db.insert(user).values({
     id: "billing-user",
     name: "Billing User",
@@ -81,5 +89,16 @@ describe("subscription persistence", () => {
       .where(eq(subscriptions.userId, "billing-user"))
       .limit(1);
     assert.equal(row[0]?.status, "invalid_price");
+  });
+
+  it("ignores another product's subscription before Stripe or database work", async () => {
+    const foreign = subscription("price_techstatus", {
+      techstatus_tenant_id: "tenant-fixture",
+    });
+
+    const result = await reconcileSubscription(foreign);
+
+    assert.equal(result.userId, null);
+    assert.equal(result.subscription, foreign);
   });
 });

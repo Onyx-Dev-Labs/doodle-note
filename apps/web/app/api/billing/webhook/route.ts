@@ -7,6 +7,7 @@ import {
   getVerifiedStripe,
   reconcileSubscription,
 } from "@/lib/billing";
+import { handleSubscriptionLifecycleEvent } from "@/lib/billing-lifecycle";
 
 /**
  * Stripe → us. Subscription lifecycle events keep the subscriptions table
@@ -34,9 +35,11 @@ export async function POST(request: Request) {
   switch (event.type) {
     case "customer.subscription.created":
     case "customer.subscription.updated":
-    case "customer.subscription.deleted":
-      await reconcileSubscription(event.data.object);
+    case "customer.subscription.deleted": {
+      const reconciled = await reconcileSubscription(event.data.object);
+      await handleSubscriptionLifecycleEvent(event, reconciled);
       break;
+    }
     case "checkout.session.completed": {
       // The subscription events above carry the real state; this is just a
       // safety net for the brief window before they arrive.
