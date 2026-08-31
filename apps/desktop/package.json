@@ -22,14 +22,14 @@
     "publish:win-beta": "node scripts/publish-windows-beta.mjs"
   },
   "dependencies": {
-    "@azure/msal-node": "^5.3.1",
+    "@azure/msal-node": "^5.6.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@repo/ai": "workspace:*",
     "@repo/meetings-store": "workspace:*",
     "@tiptap/extension-image": "^3.30.5",
     "electron-updater": "^6.8.9",
     "node-llama-cpp": "^3.20.0",
-    "sherpa-onnx-node": "^1.13.4"
+    "sherpa-onnx-node": "^1.13.6"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
@@ -40,8 +40,8 @@
     "@tiptap/react": "^3.30.5",
     "@tiptap/starter-kit": "^3.30.5",
     "@types/node": "^22.19.1",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "@vercel/blob": "^2.8.0",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^44.0.0",
@@ -52,13 +52,13 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "prettier": "^3.7.4",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
   },
   "optionalDependencies": {
-    "@node-llama-cpp/win-x64": "3.19.0"
+    "@node-llama-cpp/win-x64": "3.20.0"
   }
 }
