@@ -6,7 +6,7 @@ export const metadata = { title: "Privacy policy | DoodleNote" };
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy policy" updated="August 27, 2026">
+    <LegalPage title="Privacy policy" updated="August 31, 2026">
       <p>
         DoodleNote is operated by Onyx Dev Labs. This policy explains how the
         DoodleNote apps, website, and optional hosted Sync service handle
@@ -88,7 +88,26 @@ export default function PrivacyPage() {
           retained while needed to provide your account and Sync service, meet
           legal obligations, resolve disputes, and maintain security records.
           Deleting a synced meeting removes the active cloud record through the
-          normal sync process. To request account or hosted-data deletion, email
+          normal sync process.
+        </p>
+        <p>
+          When you schedule cancellation, Cloud Sync remains available through
+          the date Stripe shows in the billing portal. On that date, DoodleNote
+          permanently deletes the active cloud copy of meetings, transcripts,
+          notes, folders, tags, public share links, and attachments in your
+          Personal workspace and disconnects your linked Sync devices and
+          hosted-agent tokens. Local notes and recordings remain on your
+          devices. Content in shared workspaces is retained for the other
+          workspace members, while your access through the canceled subscription
+          ends. Encrypted provider backups may retain deleted records until they
+          age out through the provider&apos;s normal backup rotation, but those
+          records are not available through the service.
+        </p>
+        <p>
+          Billing, email-delivery, security, and deletion audit records may be
+          retained when required for legal, fraud-prevention, and operational
+          accountability purposes. To request account or other hosted-data
+          deletion, email
           <a
             className="ml-1 text-sage-deep underline"
             href="mailto:team@onyxdev.io"
