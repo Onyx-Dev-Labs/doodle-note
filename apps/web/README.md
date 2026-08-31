@@ -31,7 +31,7 @@ No external service is required for the basic local development path:
 | Google sign-in                    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                                                                           |
 | Account verification              | `RESEND_API_KEY`, `AUTH_FROM_EMAIL`                                                                                                  |
 | Workspace invitations             | `RESEND_API_KEY`, `INVITATION_FROM_EMAIL`                                                                                            |
-| Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`                                                  |
+| Billing                           | `STRIPE_SECRET_KEY`, `STRIPE_ACCOUNT_ID`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PORTAL_CONFIGURATION_ID`                |
 | Voice features                    | `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`, `TWILIO_TWIML_APP_SID`, `TWILIO_CALLER_ID`, `TWILIO_AUTH_TOKEN` |
 
 A commented template is in [`.env.example`](.env.example). Store local
@@ -50,8 +50,9 @@ self-hosted instance set `DATABASE_URL`, `BETTER_AUTH_URL`,
 Official **$10 / user / month** Sync billing is the doodlenote.ai
 hosted product (Stripe). The explicit self-hosted flag bypasses that
 entitlement gate. Official production fails closed when the Stripe
-configuration is missing or incomplete. This repository does not ship
-a production Docker Compose stack yet; see
+configuration is missing or incomplete. Portal sessions must use a dedicated
+DoodleNote Customer Portal configuration instead of the Stripe account default.
+This repository does not ship a production Docker Compose stack yet; see
 [`SELF-HOSTING.md`](../../SELF-HOSTING.md).
 
 ## Stripe test setup

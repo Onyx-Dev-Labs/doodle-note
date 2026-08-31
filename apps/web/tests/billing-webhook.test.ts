@@ -14,6 +14,7 @@ before(async () => {
   process.env.STRIPE_ACCOUNT_ID = "acct_fixture";
   process.env.STRIPE_PRICE_ID = "price_fixture";
   process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;
+  process.env.STRIPE_PORTAL_CONFIGURATION_ID = "bpc_fixture";
   ({ POST: post } = await import("../app/api/billing/webhook/route"));
 });
 
@@ -27,6 +28,7 @@ after(() => {
   delete process.env.STRIPE_ACCOUNT_ID;
   delete process.env.STRIPE_PRICE_ID;
   delete process.env.STRIPE_WEBHOOK_SECRET;
+  delete process.env.STRIPE_PORTAL_CONFIGURATION_ID;
 });
 
 function request(payload: string, signature: string) {

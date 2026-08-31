@@ -15,7 +15,7 @@ import {
 /**
  * The Sync plan's call to action, state-aware: signed-out visitors go to
  * login, new users to Stripe Checkout (15-day trial), subscribers to the
- * billing portal.
+ * in-app billing settings page.
  */
 export function CheckoutButton({
   autoCheckout = false,
@@ -43,11 +43,11 @@ export function CheckoutButton({
     };
   }, []);
 
-  const go = useCallback(async (endpoint: "checkout" | "portal") => {
+  const go = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/billing/${endpoint}`, {
+      const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ next: "/app" }),
@@ -60,9 +60,9 @@ export function CheckoutButton({
       if (body.manageBilling === true) {
         setView({ kind: "subscribed", reason: "billing_attention" });
       }
-      setError(body.error ?? "Something went wrong — try again.");
+      setError(body.error ?? "Something went wrong. Try again.");
     } catch {
-      setError("Something went wrong — try again.");
+      setError("Something went wrong. Try again.");
     }
     setBusy(false);
   }, []);
@@ -80,7 +80,7 @@ export function CheckoutButton({
 
     autoCheckoutAttempted.current = true;
     window.history.replaceState(null, "", "/pricing");
-    void go("checkout");
+    void go();
   }, [autoCheckout, go, view.kind]);
 
   if (view.kind === "legacy-access") {
@@ -99,14 +99,9 @@ export function CheckoutButton({
   if (view.kind === "subscribed") {
     return (
       <div className="flex flex-col items-center gap-2 sm:items-start">
-        <button
-          type="button"
-          className={buttonPrimary}
-          disabled={busy}
-          onClick={() => void go("portal")}
-        >
-          Manage billing
-        </button>
+        <a href="/app/settings/billing" className={buttonPrimary}>
+          Manage subscription
+        </a>
         <p className="text-xs text-stone">
           {view.reason === "trialing"
             ? "You're on the free trial."
@@ -181,7 +176,7 @@ export function CheckoutButton({
         type="button"
         className={buttonPrimary}
         disabled={busy || view.kind === "loading"}
-        onClick={() => void go("checkout")}
+        onClick={() => void go()}
       >
         {busy
           ? "Opening checkout…"

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const items = [
   ["/app/settings/sync", "Sync & devices"],
+  ["/app/settings/billing", "Billing"],
   ["/app/settings/workspace", "Workspace"],
   ["/app/settings/members", "Members"],
   ["/app/settings/invitations", "Invitations"],
