@@ -109,6 +109,7 @@ test("hosted production requires the complete Stripe group", () => {
       STRIPE_ACCOUNT_ID: "acct_test",
       STRIPE_PRICE_ID: "price",
       STRIPE_WEBHOOK_SECRET: "webhook",
+      STRIPE_PORTAL_CONFIGURATION_ID: "bpc_doodlenote",
     }),
     "stripe",
   );

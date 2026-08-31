@@ -14,6 +14,10 @@ export async function POST(request: Request) {
   if (!billingEnabled()) {
     return NextResponse.json({ error: "Billing is not enabled" }, { status: 503 });
   }
+  const portalConfigurationId = process.env.STRIPE_PORTAL_CONFIGURATION_ID;
+  if (!portalConfigurationId) {
+    return NextResponse.json({ error: "Billing is not enabled" }, { status: 503 });
+  }
 
   const rows = await getDb()
     .select({ customerId: subscriptions.stripeCustomerId })
@@ -30,7 +34,8 @@ export async function POST(request: Request) {
     const stripe = await getVerifiedStripe();
     const portal = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${origin}/app`,
+      configuration: portalConfigurationId,
+      return_url: `${origin}/app/settings/billing`,
     });
     return NextResponse.json({ url: portal.url });
   } catch {

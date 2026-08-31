@@ -175,7 +175,7 @@ export function LoginForm({
       </div>
 
       {verificationEmail ? (
-        <div className="rounded-xl border border-sand bg-white p-5 text-center shadow-sm">
+        <div className="rounded-xl border border-sand bg-card p-5 text-center text-bark shadow-sm">
           <h1 className="font-display text-xl font-semibold text-ink">
             Check your email
           </h1>

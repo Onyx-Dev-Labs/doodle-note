@@ -91,6 +91,12 @@ export function AppHeader({
               Workspace settings
             </Link>
             <Link
+              href="/app/settings/billing"
+              className="block rounded-md px-2 py-2 text-sm text-bark hover:bg-sage-fill hover:text-ink"
+            >
+              Billing
+            </Link>
+            <Link
               href="/app/settings/security"
               className="block rounded-md px-2 py-2 text-sm text-bark hover:bg-sage-fill hover:text-ink"
             >

@@ -71,6 +71,7 @@ export function resolveBillingMode(
     env.STRIPE_ACCOUNT_ID,
     env.STRIPE_PRICE_ID,
     env.STRIPE_WEBHOOK_SECRET,
+    env.STRIPE_PORTAL_CONFIGURATION_ID,
   ];
   if (stripeValues.every(Boolean)) return "stripe";
   if (stripeValues.some(Boolean)) return "misconfigured";
