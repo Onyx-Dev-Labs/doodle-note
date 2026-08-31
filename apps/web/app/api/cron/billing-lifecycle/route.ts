@@ -21,7 +21,7 @@ function authorized(request: Request): boolean {
 }
 
 /**
- * Daily safety worker. Stripe's terminal webhook normally performs the purge
+ * Hourly safety worker. Stripe's terminal webhook normally performs the purge
  * immediately; this route retries durable jobs and emails after transient
  * provider failures without trusting the browser or a customer session.
  */
