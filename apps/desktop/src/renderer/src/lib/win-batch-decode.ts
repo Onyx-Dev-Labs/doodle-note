@@ -47,11 +47,14 @@ export async function decodeWinBatchAudio(jobId: string): Promise<void> {
     }
     await window.engine.sendBatchMessage({ type: 'end', jobId })
   } catch (error) {
+    const detail = error instanceof Error && error.message.trim() ? ` ${error.message}` : ''
     await window.engine
       .sendBatchMessage({
         type: 'error',
         jobId,
-        message: error instanceof Error ? error.message : 'Could not decode that audio file.'
+        message:
+          'Could not decode an audio track from that file. It may have no audio or use an unsupported codec.' +
+          detail
       })
       .catch(() => {})
   } finally {

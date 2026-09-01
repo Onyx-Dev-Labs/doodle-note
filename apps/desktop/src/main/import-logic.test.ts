@@ -12,6 +12,7 @@ import { transcribeFileToSegments } from './import-logic'
  * it exercises is mac-only anyway.
  */
 const ENGINE = resolve(__dirname, '..', '..', '..', '..', 'engine', '.build', 'release', 'engine')
+const MAKE_MP4 = resolve(__dirname, '..', '..', 'test-fixtures', 'make-mp4.swift')
 const available = process.platform === 'darwin' && existsSync(ENGINE)
 
 test('mono import: real speech becomes mic-channel segments', { skip: !available }, async () => {
@@ -84,3 +85,43 @@ test('unreadable file rejects with a real error', { skip: !available }, async ()
     /file not found|no content|error/i
   )
 })
+
+test('MP4 video import extracts speech from its audio track', { skip: !available }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'import-mp4-'))
+  try {
+    const speech = join(dir, 'speech.aiff')
+    execFileSync('say', ['-o', speech, 'The deployment finished without any errors last night'])
+    const video = join(dir, 'meeting.mp4')
+    execFileSync('swift', [MAKE_MP4, video, speech])
+
+    const result = await transcribeFileToSegments(ENGINE, video)
+    const text = result.segments
+      .map((segment) => segment.text)
+      .join(' ')
+      .toLowerCase()
+    assert.match(text, /deployment/)
+    assert.match(text, /errors/)
+    assert.ok(result.audioSeconds > 0)
+    assert.ok(result.segments.every((segment) => segment.channel === 'mic'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test(
+  'MP4 video without audio fails before creating transcript segments',
+  { skip: !available },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'import-mp4-silent-'))
+    try {
+      const video = join(dir, 'silent.mp4')
+      execFileSync('swift', [MAKE_MP4, video])
+      await assert.rejects(
+        () => transcribeFileToSegments(ENGINE, video),
+        /no decodable audio track/i
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+)

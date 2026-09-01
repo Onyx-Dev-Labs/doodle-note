@@ -778,7 +778,7 @@ export default function HomeView({
                 type="button"
                 role="menuitem"
                 disabled={importState === 'running'}
-                title="Import a wav, mp3, or m4a recording"
+                title="Import a wav, mp3, m4a, or mp4 recording"
                 onClick={() => void runImport()}
               >
                 <span className="new-menu-icon">
