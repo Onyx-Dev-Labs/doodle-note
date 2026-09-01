@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.18",
+    date: "September 1, 2026",
+    highlights: [
+      "Import MP4 video recordings and transcribe their audio into a meeting",
+      "Play and seek imported MP4 recordings after restarting DoodleNote",
+      "Show a clear error when an MP4 has no supported audio track",
+    ],
+  },
+  {
     version: "0.4.17",
     date: "August 30, 2026",
     highlights: [
