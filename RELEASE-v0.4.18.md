@@ -20,18 +20,20 @@
 - [x] Workspace lint
 - [x] Production Electron, web, and MCP builds
 - [x] Production dependency audit: no known vulnerabilities
-- [ ] Packaged application reports version 0.4.18
-- [ ] Developer ID signature and hardened runtime validation
-- [ ] App notarization and stapled-ticket validation
-- [ ] Final DMG signature, notarization, stapling, and Gatekeeper validation
-- [ ] Updater ZIP and website DMG checksums recorded
-- [ ] Updater manifest references only version-matched v0.4.18 artifacts
+- [x] Packaged application reports version 0.4.18
+- [x] Developer ID signature and hardened runtime validation
+- [x] App notarization and stapled-ticket validation
+- [x] Final DMG signature, notarization, stapling, and Gatekeeper validation
+- [x] Mounted DMG contains the executable Swift engine and MP4 import code
+- [x] Updater ZIP and website DMG checksums recorded
+- [x] Updater manifest references only version-matched v0.4.18 artifacts
+- [x] Downloaded public Blob artifacts match the local SHA-256 checksums
 
 ## Release gates
 
 - [x] User authorized Alec review bypass, source merge, packaging, and publication
 - [x] Feature PR #113 checks passed and the PR merged into main
-- [ ] Post-merge CI and CodeQL passed on the feature merge commit
+- [x] Post-merge CI, CodeQL, and Windows packaging passed on the feature merge commit
 - [ ] Release PR has green required CI
 - [ ] Release PR merged into main using the authorized review bypass
 - [ ] Public update feed reports 0.4.18
@@ -44,7 +46,7 @@
 
 - Updater artifact: `DoodleNote-0.4.18-arm64-mac.zip`
 - Website installer: `DoodleNote-0.4.18-arm64.dmg`
-- Updater ZIP SHA-256: pending
-- Website DMG SHA-256: pending
-- App notarization submission: pending
-- DMG notarization submission: pending
+- Updater ZIP SHA-256: `45605766fe07cc9ba5b4d0c366897412db1dee35dccd57bef5ed8df046e30eaf`
+- Website DMG SHA-256: `debf8baf3dd82c835ecaae57f1148b663871a4c23615084cd2291358dd0754c4`
+- App notarization submission: `9cc5e972-dca8-47fc-81ca-ce175918b599` (Accepted)
+- DMG notarization submission: `563e3e92-7953-4014-9614-2460af58c713` (Accepted)
