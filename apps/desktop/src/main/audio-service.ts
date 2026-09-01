@@ -23,18 +23,9 @@ import {
 } from '../shared/audio-api'
 import type { EngineAudioEvent } from '../shared/engine-events'
 import { isWinCheckpointDir, mergeWinSession } from './win-audio-recorder'
+import { AUDIO_FILES, importedPlaybackFilename, playbackMime } from './import-media'
 
-/** Merged session audio: m4a from the Swift engine, wav from the Windows
- *  tee, mp3/wav/m4a copied in by imports. */
-const AUDIO_FILES = ['audio.m4a', 'audio.wav', 'audio.mp3'] as const
-const AUDIO_MIME: Record<string, string> = {
-  'audio.m4a': 'audio/mp4',
-  'audio.wav': 'audio/wav',
-  'audio.mp3': 'audio/mpeg'
-}
-
-/** Import formats we accept: Chromium plays them AND AVFoundation reads them. */
-export const IMPORTABLE_EXTENSIONS = ['wav', 'mp3', 'm4a'] as const
+export { IMPORTABLE_EXTENSIONS } from './import-media'
 
 /** The merged audio file present in a session dir, if any. */
 function audioFileIn(dir: string): string | null {
@@ -115,7 +106,7 @@ export class AudioService {
     }
     const path = join(this.baseDir, meetingId, session as string, file)
     if (!existsSync(path)) return null
-    return { path, mime: AUDIO_MIME[file] ?? 'application/octet-stream' }
+    return { path, mime: playbackMime(file) }
   }
 
   /** Call after app ready (protocol.handle requires it). */
@@ -130,7 +121,7 @@ export class AudioService {
         }
         return response
       }
-      // doodle-audio://<meetingId>/<sessionEpochMs>/<audio.m4a|audio.wav>
+      // doodle-audio://<meetingId>/<sessionEpochMs>/<supported playback file>
       const url = new URL(request.url)
       const meetingId = url.host
       const [, session, file] = url.pathname.split('/')
@@ -164,7 +155,7 @@ export class AudioService {
       return respond(
         new Response(body as unknown as BodyInit, {
           headers: {
-            'Content-Type': AUDIO_MIME[file] ?? 'application/octet-stream',
+            'Content-Type': playbackMime(file),
             'Content-Length': String(body.length)
           }
         })
@@ -234,19 +225,19 @@ export class AudioService {
   }
 
   /**
-   * Register an imported audio file as a meeting's playback part: copied
+   * Register an imported recording as a meeting's playback part: copied
    * (never moved — it's the user's file) into a fresh session dir. Returns
    * false when the extension isn't importable.
    */
   addImportedPart(meetingId: string, sourcePath: string, durationMs: number): boolean {
     if (!SAFE_MEETING_ID.test(meetingId)) return false
-    const ext = sourcePath.split('.').pop()?.toLowerCase() ?? ''
-    if (!(IMPORTABLE_EXTENSIONS as readonly string[]).includes(ext)) return false
+    const filename = importedPlaybackFilename(sourcePath)
+    if (filename === null) return false
     const epoch = Date.now()
     const dir = join(this.baseDir, meetingId, String(epoch))
     try {
       mkdirSync(dir, { recursive: true })
-      copyFileSync(sourcePath, join(dir, `audio.${ext}`))
+      copyFileSync(sourcePath, join(dir, filename))
       this.writePartMeta(dir, epoch, durationMs)
       return true
     } catch (err) {

@@ -43,7 +43,7 @@ interface ActiveJob {
 
 /**
  * Windows imported-audio transcription without an extra media binary.
- * Chromium decodes WAV/MP3/M4A in the renderer, resamples it to 16 kHz, and
+ * Chromium decodes WAV/MP3/M4A/MP4 in the renderer, resamples it to 16 kHz, and
  * streams PCM here. A dedicated sherpa utility process transcribes the file,
  * so importing never interrupts the persistent live-meeting engine.
  */

@@ -12,7 +12,8 @@ import {
   type ImportResult,
   type RetranscribeResult
 } from '../shared/import-api'
-import { AudioService, IMPORTABLE_EXTENSIONS } from './audio-service'
+import { AudioService } from './audio-service'
+import { IMPORTABLE_EXTENSIONS } from './import-media'
 import {
   transcribeFileToSegments,
   type BatchProgress,
@@ -94,6 +95,7 @@ export class ImportService {
 
     this.busy = true
     const meetingId = randomUUID()
+    let storedAudio = false
     try {
       this.progress({ kind: 'import', meetingId, stage: 'starting' })
       const result = await this.transcribe(filePath, this.toBatchProgress('import', meetingId))
@@ -103,7 +105,12 @@ export class ImportService {
       }
       this.progress({ kind: 'import', meetingId, stage: 'finishing' })
       // Audio part first so playback is ready the moment the meeting opens.
-      this.audio.addImportedPart(meetingId, filePath, Math.round(result.audioSeconds * 1000))
+      storedAudio = this.audio.addImportedPart(
+        meetingId,
+        filePath,
+        Math.round(result.audioSeconds * 1000)
+      )
+      if (!storedAudio) throw new Error('Could not save that recording for local playback.')
       const now = new Date()
       this.meetings.upsert({
         id: meetingId,
@@ -117,6 +124,7 @@ export class ImportService {
       })
       return { meetingId }
     } catch (err) {
+      if (storedAudio) this.audio.deleteFor(meetingId)
       return { error: err instanceof Error ? err.message : String(err) }
     } finally {
       this.busy = false

@@ -36,6 +36,21 @@ test('a meeting with transcript but no notes model offers model setup', () => {
   )
 })
 
+test('an imported meeting with a transcript and notes model offers Generate notes', () => {
+  assert.equal(
+    meetingPrimaryAction({
+      capturing: false,
+      segmentCount: 4,
+      audioPartCount: 1,
+      modelReady: true,
+      enhancedPresent: false,
+      generating: false,
+      retranscribing: false
+    }),
+    'generate'
+  )
+})
+
 test('live transcript segments are checkpointed before a normal stop', () => {
   assert.equal(transcriptCheckpointDelayMs('recording', 4), 1_000)
   assert.equal(transcriptCheckpointDelayMs('finishing', 4), 400)
