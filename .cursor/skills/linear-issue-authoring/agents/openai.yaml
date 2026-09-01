@@ -1,4 +1,0 @@
-interface:
-  display_name: "Linear Issue Authoring"
-  short_description: "Create deduplicated, claim-ready Linear issues."
-  default_prompt: "Use $linear-issue-authoring to research this request, search Linear and Git for existing work during research and again immediately before creation, create or update the minimum implementation-ready issue set with Agent Build Contract v1, leave ownership unassigned when no implementer is named, and rename the current Codex task to the confirmed primary issue. Do not implement the code."

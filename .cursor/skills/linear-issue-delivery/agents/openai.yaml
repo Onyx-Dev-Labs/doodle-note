@@ -1,4 +1,0 @@
-interface:
-  display_name: "Linear Issue Delivery"
-  short_description: "Claim and deliver Linear issues through reviewed PRs."
-  default_prompt: "Use $linear-issue-delivery to resolve the authenticated Linear user, verify or claim this implementation-ready issue without taking over another human's lane, execute it in an isolated worktree through verification and one pull request, and maintain evidence-based Linear statuses automatically. Do not merge or release without explicit approval."

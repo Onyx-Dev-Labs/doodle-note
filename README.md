@@ -69,9 +69,11 @@ Ask about the open meeting and get an answer grounded only in its notes and tran
 
 ## Get DoodleNote
 
-Download the current signed desktop builds from
-[doodlenote.ai](https://www.doodlenote.ai). The macOS app supports Apple
-Silicon on macOS 14 or later. The Windows 10/11 build is currently beta.
+Download the current desktop installers from
+[doodlenote.ai](https://www.doodlenote.ai). Official macOS releases support
+Apple Silicon on macOS 14 or later and are signed and notarized. The Windows
+10/11 build is currently beta. Its checked-in packaging configuration is
+unsigned, so Windows SmartScreen warns before installation.
 
 The local app is free, requires no DoodleNote account, and does not impose
 meeting limits. Hosted Sync is optional and costs $10 per user per month.
@@ -80,25 +82,26 @@ meeting limits. Hosted Sync is optional and costs $10 per user per month.
 
 | Surface         | Status         | Notes                                                                                                                 |
 | --------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
-| macOS desktop   | Supported      | Apple Silicon, macOS 14 or later; signed releases are distributed through [doodlenote.ai](https://www.doodlenote.ai). |
-| Windows desktop | Beta           | Windows 10/11, 64-bit; packaging and native-module smoke checks run in CI.                                            |
+| macOS desktop   | Supported      | Apple Silicon, macOS 14 or later; official releases distributed through [doodlenote.ai](https://www.doodlenote.ai) are signed and notarized. |
+| Windows desktop | Beta           | Windows 10/11, 64-bit; packaging and native-module smoke checks run in CI. The current checked-in configuration is unsigned, so SmartScreen warns. |
 | iPhone          | In development | Native SwiftUI app targeting iOS 26; full recording verification requires a physical device.                          |
 | Web workspace   | In development | Next.js app for account linking, sync, sharing, workspaces, and hosted agent access.                                  |
 
-Signed desktop downloads are published at [doodlenote.ai](https://www.doodlenote.ai). Versioned release checklists in this repository (`RELEASE-v*.md`) record what shipped.
+Public release history is available in [GitHub Releases](https://github.com/Onyx-Dev-Labs/doodle-note/releases) and the [DoodleNote changelog](https://www.doodlenote.ai/changelog). Maintainer release procedures are documented in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Repository map
 
 ```text
+.github/                 CI, CodeQL, iOS, and release workflows and community configuration
 apps/
   desktop/                Electron + React desktop application
   ios/                    Native SwiftUI iPhone application
   web/                    Next.js cloud workspace and public site
+docs/                    Brand, open-source, release, and screenshot documentation
 engine/                   Swift audio capture and on-device ASR sidecar
 packages/
-  ai/                     Local and cloud note-generation engines
   agent-contract/         Shared MCP tool schemas
-  connectors/             Optional export connectors
+  ai/                     Local and cloud note-generation engines
   db/                     Drizzle schema, migrations, Neon/PGlite clients
   doodle-note-mcp/        Opt-in read-only local MCP server
   meetings-store/         Shared meeting persistence contracts
