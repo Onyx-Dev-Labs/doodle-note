@@ -46,6 +46,14 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 ]
 export type EngineChoice = 'local' | 'cloud'
 
+/**
+ * Batch-transcription language mode. 'english' runs the fastest English-only
+ * model; 'multilingual' recognizes 25 European languages (Danish, German,
+ * French, …). Applies to imported recordings and re-transcription; live
+ * captions always use the English streaming model.
+ */
+export type TranscriptionLanguage = 'english' | 'multilingual'
+
 /** One catalog model + its state on this machine. */
 export interface NotesModelInfo {
   id: string
@@ -76,6 +84,7 @@ export interface ActivateModelResult {
 export interface NotesSettingsView {
   engineChoice: EngineChoice
   activeLocalModelId?: string
+  transcriptionLanguage: TranscriptionLanguage
   /** The user's own name, used to label their transcript lines. */
   profileName?: string
   cloud?: {
@@ -90,6 +99,7 @@ export interface NotesSettingsView {
 /** Partial update; omitted fields are left untouched. */
 export interface NotesSettingsUpdate {
   engineChoice?: EngineChoice
+  transcriptionLanguage?: TranscriptionLanguage
   /** The user's own name; empty string clears it back to "You". */
   profileName?: string
   /**

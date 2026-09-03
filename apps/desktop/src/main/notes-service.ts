@@ -39,7 +39,8 @@ import {
   type GlobalChatEntry,
   type NotesModelsResponse,
   type NotesSettingsUpdate,
-  type NotesSettingsView
+  type NotesSettingsView,
+  type TranscriptionLanguage
 } from '../shared/notes-api'
 import type { MeetingRecord } from '../shared/meetings-api'
 import { isStoredCloudProvider } from '../shared/meeting-recovery'
@@ -73,6 +74,8 @@ interface StoredCloudSettings {
 interface StoredSettings {
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
+  /** Absent means 'english', the pre-existing behavior. */
+  transcriptionLanguage?: TranscriptionLanguage
   /** The user's own name, shown instead of "You" on their transcript lines. */
   profileName?: string
   cloud?: StoredCloudSettings
@@ -470,10 +473,16 @@ export class NotesService {
 
   /* ---- settings ---- */
 
+  /** Engine model for batch transcription (import + re-transcribe). */
+  batchAsrModel(): 'v2' | 'v3' {
+    return this.settings.transcriptionLanguage === 'multilingual' ? 'v3' : 'v2'
+  }
+
   private settingsView(): NotesSettingsView {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
+      transcriptionLanguage: this.settings.transcriptionLanguage ?? 'english',
       ...(activeLocalModelId ? { activeLocalModelId } : {}),
       ...(profileName ? { profileName } : {}),
       ...(cloud
@@ -494,6 +503,13 @@ export class NotesService {
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
+    }
+
+    if (
+      update.transcriptionLanguage === 'english' ||
+      update.transcriptionLanguage === 'multilingual'
+    ) {
+      this.settings.transcriptionLanguage = update.transcriptionLanguage
     }
 
     if (typeof update.profileName === 'string') {
@@ -565,6 +581,9 @@ export class NotesService {
       if (typeof raw.profileName === 'string') {
         const name = sanitizeSpeakerName(raw.profileName)
         if (name) settings.profileName = name
+      }
+      if (raw.transcriptionLanguage === 'multilingual') {
+        settings.transcriptionLanguage = 'multilingual'
       }
       const cloud = raw.cloud
       if (

@@ -30,15 +30,25 @@ export interface BatchProgress {
  *  on first use can take a while on slow connections. */
 const TIMEOUT_MS = 30 * 60_000
 
+/** v2 is the engine's default English model; v3 recognizes 25 European languages. */
+export type BatchAsrModel = 'v2' | 'v3'
+
+export function batchTranscribeArgs(filePath: string, model?: BatchAsrModel): string[] {
+  const args = ['transcribe', '--file', filePath, '--channels', 'split']
+  if (model === 'v3') args.push('--model', 'v3')
+  return args
+}
+
 export function transcribeFileToSegments(
   enginePath: string,
   filePath: string,
-  onProgress?: (progress: BatchProgress) => void
+  onProgress?: (progress: BatchProgress) => void,
+  model?: BatchAsrModel
 ): Promise<BatchTranscription> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(enginePath, ['transcribe', '--file', filePath, '--channels', 'split'], {
+      child = spawn(enginePath, batchTranscribeArgs(filePath, model), {
         stdio: ['ignore', 'pipe', 'pipe']
       })
     } catch (err) {
