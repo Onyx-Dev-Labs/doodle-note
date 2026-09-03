@@ -16,6 +16,7 @@ import { AudioService } from './audio-service'
 import { IMPORTABLE_EXTENSIONS } from './import-media'
 import {
   transcribeFileToSegments,
+  type BatchAsrModel,
   type BatchProgress,
   type BatchTranscription
 } from './import-logic'
@@ -42,7 +43,9 @@ export class ImportService {
     private readonly platformTranscriber?: (
       filePath: string,
       onProgress?: (progress: BatchProgress) => void
-    ) => Promise<BatchTranscription>
+    ) => Promise<BatchTranscription>,
+    /** Engine model to batch-transcribe with; absent = engine default (v2). */
+    private readonly asrModel?: () => BatchAsrModel
   ) {}
 
   registerIpc(): void {
@@ -188,6 +191,6 @@ export class ImportService {
   ): Promise<BatchTranscription> {
     return this.platformTranscriber
       ? this.platformTranscriber(filePath, onProgress)
-      : transcribeFileToSegments(this.enginePath, filePath, onProgress)
+      : transcribeFileToSegments(this.enginePath, filePath, onProgress, this.asrModel?.())
   }
 }

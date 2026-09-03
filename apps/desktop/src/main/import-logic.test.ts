@@ -4,7 +4,33 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
-import { transcribeFileToSegments } from './import-logic'
+import { batchTranscribeArgs, transcribeFileToSegments } from './import-logic'
+
+test('batchTranscribeArgs: only multilingual (v3) overrides the engine default', () => {
+  assert.deepEqual(batchTranscribeArgs('/m.wav'), [
+    'transcribe',
+    '--file',
+    '/m.wav',
+    '--channels',
+    'split'
+  ])
+  assert.deepEqual(batchTranscribeArgs('/m.wav', 'v2'), [
+    'transcribe',
+    '--file',
+    '/m.wav',
+    '--channels',
+    'split'
+  ])
+  assert.deepEqual(batchTranscribeArgs('/m.wav', 'v3'), [
+    'transcribe',
+    '--file',
+    '/m.wav',
+    '--channels',
+    'split',
+    '--model',
+    'v3'
+  ])
+})
 
 /**
  * Integration test against the REAL engine binary and real speech (macOS

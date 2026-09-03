@@ -405,7 +405,8 @@ app.whenReady().then(() => {
     broadcast,
     winBatchTranscriber
       ? (filePath, onProgress) => winBatchTranscriber!.transcribe(filePath, onProgress)
-      : undefined
+      : undefined,
+    () => notesService?.batchAsrModel() ?? 'v2'
   )
   importService.registerIpc()
 
