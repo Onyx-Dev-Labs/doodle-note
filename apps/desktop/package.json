@@ -1,6 +1,6 @@
 {
   "name": "desktop",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "private": true,
   "description": "DoodleNote desktop app for privacy-first local capture, transcription, and AI meeting notes",
   "main": "./out/main/index.js",
@@ -12,7 +12,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
-    "test": "tsx --test src/main/*.test.ts",
+    "test": "tsx --test src/main/*.test.ts src/renderer/src/lib/*.test.ts",
     "lint": "eslint --cache .",
     "format": "prettier --write .",
     "package": "pnpm --filter doodle-note-mcp build && electron-vite build && APPLE_KEYCHAIN_PROFILE=doodlenote-notary electron-builder --mac",

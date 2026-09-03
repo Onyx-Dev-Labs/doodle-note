@@ -5,7 +5,7 @@ import {
   ENGINE_BATCH_DATA_CHANNEL,
   ENGINE_BATCH_READ_CHANNEL,
   ENGINE_CAPTURE_CONTROL_CHANNEL,
-  ENGINE_CAPTURE_ERROR_CHANNEL,
+  ENGINE_CAPTURE_STATUS_CHANNEL,
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
@@ -13,6 +13,7 @@ import {
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
   type EngineCaptureControl,
+  type EngineCaptureStatus,
   type EngineBatchControl,
   type EngineBatchMessage,
   type EngineApi,
@@ -220,12 +221,12 @@ const engineApi: EngineApi = {
     }
   },
 
-  sendAudio(channel: string, samples: Float32Array): void {
-    ipcRenderer.send(ENGINE_AUDIO_CHANNEL, { channel, samples })
+  sendAudio(sessionId: number, channel: string, samples: Float32Array): void {
+    ipcRenderer.send(ENGINE_AUDIO_CHANNEL, { sessionId, channel, samples })
   },
 
-  reportCaptureError(message: string): void {
-    ipcRenderer.send(ENGINE_CAPTURE_ERROR_CHANNEL, message)
+  reportCaptureStatus(status: EngineCaptureStatus): void {
+    ipcRenderer.send(ENGINE_CAPTURE_STATUS_CHANNEL, status)
   },
 
   onBatchControl(cb: (control: EngineBatchControl) => void): () => void {

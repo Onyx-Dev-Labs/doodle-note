@@ -10,8 +10,8 @@
 export const ENGINE_CAPTURE_CONTROL_CHANNEL = 'engine:capture-control'
 /** renderer → main (Windows): one 16k mono Float32 frame for a channel. */
 export const ENGINE_AUDIO_CHANNEL = 'engine:audio'
-/** renderer → main (Windows): capture could not start (permissions etc.). */
-export const ENGINE_CAPTURE_ERROR_CHANNEL = 'engine:capture-error'
+/** renderer → main (Windows): capture readiness, drain, and error acknowledgements. */
+export const ENGINE_CAPTURE_STATUS_CHANNEL = 'engine:capture-status'
 /** main → renderer (Windows): decode an imported file with Chromium's media stack. */
 export const ENGINE_BATCH_CONTROL_CHANNEL = 'engine:batch-control'
 /** renderer → main (Windows): decoded PCM lifecycle for an imported file. */
@@ -21,9 +21,15 @@ export const ENGINE_BATCH_READ_CHANNEL = 'engine:batch-read'
 
 export interface EngineCaptureControl {
   action: 'start' | 'stop' | 'switch-input'
+  /** Identifies one live capture so delayed callbacks cannot cross session boundaries. */
+  sessionId: number
   channels?: string[]
   inputDevice?: string
 }
+
+export type EngineCaptureStatus =
+  | { type: 'ready' | 'drained' | 'switch-complete'; sessionId: number }
+  | { type: 'error' | 'switch-error'; sessionId: number; message: string }
 
 export interface EngineBatchControl {
   action: 'decode'
@@ -263,8 +269,8 @@ export interface EngineApi {
   tapSelfTest(): Promise<{ ok: boolean; reason?: string }>
   /** Windows capture bridge (no-ops on macOS). */
   onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void
-  sendAudio(channel: string, samples: Float32Array): void
-  reportCaptureError(message: string): void
+  sendAudio(sessionId: number, channel: string, samples: Float32Array): void
+  reportCaptureStatus(status: EngineCaptureStatus): void
   /** Windows imported-audio decoder bridge (no events are sent on macOS). */
   onBatchControl(cb: (control: EngineBatchControl) => void): () => void
   readBatchAudio(jobId: string): Promise<ArrayBuffer>

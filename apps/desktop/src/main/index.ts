@@ -44,7 +44,7 @@ import { THEME_SET_SOURCE_CHANNEL } from '../shared/theme-api'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_AUDIO_CHANNEL,
-  ENGINE_CAPTURE_ERROR_CHANNEL,
+  ENGINE_CAPTURE_STATUS_CHANNEL,
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
@@ -53,6 +53,7 @@ import {
   ENGINE_STOP_CHANNEL,
   type EngineEvent,
   type EngineInputDevice,
+  type EngineCaptureStatus,
   type EngineStartRequest
 } from '../shared/engine-events'
 
@@ -247,14 +248,17 @@ app.whenReady().then(() => {
   }
 
   // Windows capture bridge: PCM frames + failure reports from the renderer.
-  ipcMain.on(ENGINE_AUDIO_CHANNEL, (_event, payload: { channel?: string; samples?: unknown }) => {
-    if (engine instanceof WinEngineHost && payload.samples instanceof Float32Array) {
-      engine.pushAudio(String(payload.channel ?? ''), payload.samples)
+  ipcMain.on(
+    ENGINE_AUDIO_CHANNEL,
+    (_event, payload: { sessionId?: unknown; channel?: string; samples?: unknown }) => {
+      if (engine instanceof WinEngineHost && payload.samples instanceof Float32Array) {
+        engine.pushAudio(Number(payload.sessionId), String(payload.channel ?? ''), payload.samples)
+      }
     }
-  })
-  ipcMain.on(ENGINE_CAPTURE_ERROR_CHANNEL, (_event, message: unknown) => {
-    if (engine instanceof WinEngineHost) {
-      engine.captureFailed(String(message ?? 'Audio capture failed'))
+  )
+  ipcMain.on(ENGINE_CAPTURE_STATUS_CHANNEL, (_event, payload: unknown) => {
+    if (engine instanceof WinEngineHost && payload && typeof payload === 'object') {
+      engine.captureStatus(payload as EngineCaptureStatus)
     }
   })
 

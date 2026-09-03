@@ -21,6 +21,7 @@ const ciWorkflow = readFileSync(
 )
 const modelsView = readFileSync(new URL('../renderer/src/ModelsView.tsx', import.meta.url), 'utf8')
 const desktopPackage = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
 function pngMetadata(url: URL): { width: number; height: number; colorType: number } {
   const png = readFileSync(url)
@@ -101,6 +102,7 @@ test('Windows website betas cannot replace the production updater feed', () => {
   assert.match(windowsBetaPublishScript, /-beta-setup\.exe/)
   assert.match(windowsBetaPublishScript, /put\('updates\/latest-beta\.yml'/)
   assert.doesNotMatch(windowsBetaPublishScript, /put\('updates\/latest\.yml'/)
+  assert.match(updaterSource, /applyUpdatePolicy\(autoUpdater\)/)
 })
 
 test('macOS-only settings are gated out of the Windows UI', () => {

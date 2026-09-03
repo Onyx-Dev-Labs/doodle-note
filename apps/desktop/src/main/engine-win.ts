@@ -18,6 +18,11 @@ import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { get as httpsGet } from 'node:https'
 import { join } from 'node:path'
+import {
+  WINDOWS_ASR_SAMPLE_RATE,
+  boundedTokenWindow,
+  finishOnlineStream
+} from './engine-win-finalize'
 
 const MODEL_NAME = 'sherpa-onnx-streaming-zipformer-en-2023-06-26'
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
@@ -27,6 +32,7 @@ const TOKEN_TAIL_SEC = 0.25
 
 interface AudioMessage {
   t: 'audio'
+  sessionId?: number
   channel: string
   samples: Float32Array
   /** Batch imports use an acknowledgement for IPC backpressure. */
@@ -35,9 +41,9 @@ interface AudioMessage {
 
 type InMessage =
   | { t: 'init'; modelsDir: string }
-  | { t: 'start'; channels: string[] }
+  | { t: 'start'; channels: string[]; sessionId?: number }
   | AudioMessage
-  | { t: 'stop' }
+  | { t: 'stop'; sessionId?: number }
 
 const port = process.parentPort
 
@@ -136,6 +142,7 @@ class ChannelPipeline {
   private lastPartialAt = 0
   private lastPartialText = ''
   private started = false
+  private realSamples = 0
   private readonly startedAtMs = Date.now()
 
   constructor(
@@ -146,11 +153,12 @@ class ChannelPipeline {
   }
 
   ingest(samples: Float32Array): void {
+    this.realSamples += samples.length
     if (!this.started) {
       this.started = true
       emit({ event: 'channel_start', channel: this.channel, epochMs: Date.now() })
     }
-    this.stream.acceptWaveform({ samples, sampleRate: 16000 })
+    this.stream.acceptWaveform({ samples, sampleRate: WINDOWS_ASR_SAMPLE_RATE })
     while (this.recognizer.isReady(this.stream)) {
       this.recognizer.decode(this.stream)
     }
@@ -159,10 +167,7 @@ class ChannelPipeline {
 
   finish(): void {
     try {
-      this.stream.inputFinished()
-      while (this.recognizer.isReady(this.stream)) {
-        this.recognizer.decode(this.stream)
-      }
+      finishOnlineStream(this.stream, this.recognizer)
       this.publish(true)
       const result = this.recognizer.getResult(this.stream)
       emit({
@@ -183,20 +188,23 @@ class ChannelPipeline {
     const timestamps = result.timestamps ?? []
     if (tokens.length > this.emittedTokens) {
       const fresh: Array<Record<string, unknown>> = []
+      const realAudioSeconds = this.realSamples / WINDOWS_ASR_SAMPLE_RATE
       for (let i = this.emittedTokens; i < tokens.length; i++) {
         const start = timestamps[i] ?? 0
         const end = timestamps[i + 1] ?? start + TOKEN_TAIL_SEC
+        const bounded = boundedTokenWindow(start, Math.max(end, start), realAudioSeconds)
+        if (!bounded) continue
         fresh.push({
           // sherpa marks word starts with ▁ — the segmenter's contract is a
           // leading space (same as the Parakeet engine).
           token: tokens[i]!.replace(/▁/g, ' '),
-          startSec: Math.round(start * 1000) / 1000,
-          endSec: Math.round(Math.max(end, start) * 1000) / 1000,
+          startSec: Math.round(bounded.startSec * 1000) / 1000,
+          endSec: Math.round(bounded.endSec * 1000) / 1000,
           confidence: 0.9
         })
       }
       this.emittedTokens = tokens.length
-      emit({ event: 'timings', channel: this.channel, tokens: fresh })
+      if (fresh.length > 0) emit({ event: 'timings', channel: this.channel, tokens: fresh })
     }
     const now = Date.now()
     const text = joinedText(result)
@@ -220,6 +228,7 @@ function joinedText(result: { text: string }): string {
 let recognizer: SherpaRecognizer | null = null
 let pipelines = new Map<string, ChannelPipeline>()
 let sessionActive = false
+let activeSessionId: number | null = null
 
 async function init(modelsDir: string): Promise<void> {
   try {
@@ -250,7 +259,7 @@ async function init(modelsDir: string): Promise<void> {
   }
 }
 
-function startSession(channels: string[]): void {
+function startSession(channels: string[], sessionId = 0): void {
   if (!recognizer) {
     emit({ event: 'error', message: 'engine is not ready yet' })
     emit({ event: 'done' })
@@ -261,6 +270,7 @@ function startSession(channels: string[]): void {
     return
   }
   sessionActive = true
+  activeSessionId = sessionId
   pipelines = new Map(
     channels.map((channel) => [channel, new ChannelPipeline(channel, recognizer!)])
   )
@@ -268,14 +278,15 @@ function startSession(channels: string[]): void {
   emit({ event: 'status', stage: 'transcribing' })
 }
 
-function stopSession(): void {
-  if (!sessionActive) return
+function stopSession(sessionId = 0): void {
+  if (!sessionActive || activeSessionId !== sessionId) return
   sessionActive = false
   emit({ event: 'status', stage: 'finishing' })
   for (const pipeline of pipelines.values()) {
     pipeline.finish()
   }
   pipelines = new Map()
+  activeSessionId = null
   emit({ event: 'done' })
 }
 
@@ -286,13 +297,14 @@ port.on('message', (message: Electron.MessageEvent) => {
       void init(data.modelsDir)
       break
     case 'start':
-      startSession(data.channels)
+      startSession(data.channels, data.sessionId)
       break
     case 'audio': {
-      if (!sessionActive) break
-      const pipeline = pipelines.get(data.channel)
-      if (pipeline && data.samples instanceof Float32Array && data.samples.length > 0) {
-        pipeline.ingest(data.samples)
+      if (sessionActive && activeSessionId === (data.sessionId ?? 0)) {
+        const pipeline = pipelines.get(data.channel)
+        if (pipeline && data.samples instanceof Float32Array && data.samples.length > 0) {
+          pipeline.ingest(data.samples)
+        }
       }
       if (typeof data.sequence === 'number') {
         port.postMessage({ t: 'ack', sequence: data.sequence })
@@ -300,7 +312,7 @@ port.on('message', (message: Electron.MessageEvent) => {
       break
     }
     case 'stop':
-      stopSession()
+      stopSession(data.sessionId)
       break
   }
 })

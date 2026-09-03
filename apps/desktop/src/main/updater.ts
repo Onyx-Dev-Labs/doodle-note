@@ -7,6 +7,7 @@ import {
   UPDATE_STATE_EVENT_CHANNEL,
   type UpdateState
 } from '../shared/update-api'
+import { applyUpdatePolicy } from './update-policy'
 
 const { autoUpdater } = updaterPkg
 
@@ -76,6 +77,7 @@ export function initAutoUpdater(
 
   if (!app.isPackaged) return
 
+  applyUpdatePolicy(autoUpdater)
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 

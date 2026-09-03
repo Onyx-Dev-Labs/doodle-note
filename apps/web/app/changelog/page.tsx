@@ -9,6 +9,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.19",
+    date: "September 4, 2026",
+    highlights: [
+      "Preserve the final spoken words when stopping a Windows recording",
+      "Prevent delayed microphone starts and switches from crossing recording sessions",
+      "Show recording readiness and microphone switch failures accurately on Windows",
+      "Route Windows beta update checks through the Windows beta release feed",
+    ],
+  },
+  {
     version: "0.4.18",
     date: "September 1, 2026",
     highlights: [
