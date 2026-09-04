@@ -100,7 +100,6 @@ test('CI builds and retains a real Windows installer', () => {
 test('Windows website betas cannot replace the production updater feed', () => {
   assert.match(desktopPackage, /publish:win-beta[\s\S]*publish-windows-beta\.mjs/)
   assert.match(windowsBetaPublishScript, /-beta-setup\.exe/)
-  assert.match(windowsBetaPublishScript, /put\('updates\/latest-beta\.yml'/)
   assert.doesNotMatch(windowsBetaPublishScript, /put\('updates\/latest\.yml'/)
   assert.match(updaterSource, /applyUpdatePolicy\(autoUpdater\)/)
 })

@@ -9,6 +9,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.20",
+    date: "September 4, 2026",
+    highlights: [
+      "Restore Check for updates for Windows beta installations",
+      "Replace internal updater diagnostics with a short, readable error message",
+    ],
+  },
+  {
     version: "0.4.19",
     date: "September 4, 2026",
     highlights: [

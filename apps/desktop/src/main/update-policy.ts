@@ -4,10 +4,14 @@ export interface UpdatePolicyTarget {
   allowDowngrade: boolean
 }
 
+export function publicUpdateErrorMessage(): string {
+  return 'Could not check for updates. Please try again.'
+}
+
 /**
- * Windows is currently distributed through the public beta feed
- * (`latest-beta.yml`). Other platforms retain electron-updater's configured
- * default channel.
+ * Windows is currently distributed through the public beta channel
+ * (`beta.yml`). Other platforms retain electron-updater's configured default
+ * channel.
  */
 export function applyUpdatePolicy(
   updater: UpdatePolicyTarget,

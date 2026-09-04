@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { applyUpdatePolicy, type UpdatePolicyTarget } from './update-policy'
+import {
+  applyUpdatePolicy,
+  publicUpdateErrorMessage,
+  type UpdatePolicyTarget
+} from './update-policy'
 
 function updaterPolicy(): UpdatePolicyTarget {
   return {
@@ -32,4 +36,11 @@ test('other platforms retain their configured update policy', () => {
     allowPrerelease: false,
     allowDowngrade: true
   })
+})
+
+test('updater failures do not expose internal HTTP or filesystem details', () => {
+  const message = publicUpdateErrorMessage()
+
+  assert.equal(message, 'Could not check for updates. Please try again.')
+  assert.doesNotMatch(message, /HttpError|AppData|app\.asar/)
 })
