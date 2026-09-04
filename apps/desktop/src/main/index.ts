@@ -398,6 +398,9 @@ app.whenReady().then(() => {
   if (engine instanceof WinEngineHost) {
     winBatchTranscriber = new WinBatchTranscriber((onEvent) => engine.preflight(onEvent))
     winBatchTranscriber.registerIpc()
+    engine.setFinalRefiner((filePath, onProgress) =>
+      winBatchTranscriber!.transcribe(filePath, onProgress)
+    )
   }
 
   // Audio import + re-transcription: batch engine runs in its own process,

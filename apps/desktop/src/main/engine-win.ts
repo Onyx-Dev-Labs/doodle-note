@@ -23,6 +23,7 @@ import {
   boundedTokenWindow,
   finishOnlineStream
 } from './engine-win-finalize'
+import { ensureWindowsWhisperModel, splitWhisperWindows } from './windows-whisper-model'
 
 const MODEL_NAME = 'sherpa-onnx-streaming-zipformer-en-2023-06-26'
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
@@ -40,7 +41,7 @@ interface AudioMessage {
 }
 
 type InMessage =
-  | { t: 'init'; modelsDir: string }
+  | { t: 'init'; modelsDir: string; quality?: 'live' | 'final' }
   | { t: 'start'; channels: string[]; sessionId?: number }
   | AudioMessage
   | { t: 'stop'; sessionId?: number }
@@ -124,6 +125,15 @@ function download(url: string, dest: string, onPct: (pct: number) => void): Prom
 
 interface SherpaModule {
   OnlineRecognizer: new (config: unknown) => SherpaRecognizer
+  OfflineRecognizer: new (config: unknown) => SherpaOfflineRecognizer
+}
+interface SherpaOfflineStream {
+  acceptWaveform(obj: { samples: Float32Array; sampleRate: number }): void
+}
+interface SherpaOfflineRecognizer {
+  createStream(): SherpaOfflineStream
+  decode(stream: SherpaOfflineStream): void
+  getResult(stream: SherpaOfflineStream): { text: string }
 }
 interface SherpaStream {
   acceptWaveform(obj: { samples: Float32Array; sampleRate: number }): void
@@ -134,6 +144,25 @@ interface SherpaRecognizer {
   isReady(stream: SherpaStream): boolean
   decode(stream: SherpaStream): void
   getResult(stream: SherpaStream): { text: string; tokens?: string[]; timestamps?: number[] }
+}
+
+function createOnlineRecognizer(sherpa: SherpaModule, dir: string): SherpaRecognizer {
+  return new sherpa.OnlineRecognizer({
+    featConfig: { sampleRate: 16000, featureDim: 80 },
+    modelConfig: {
+      transducer: {
+        encoder: join(dir, 'encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx'),
+        decoder: join(dir, 'decoder-epoch-99-avg-1-chunk-16-left-128.onnx'),
+        joiner: join(dir, 'joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx')
+      },
+      tokens: join(dir, 'tokens.txt'),
+      numThreads: 2,
+      provider: 'cpu',
+      modelType: 'zipformer2'
+    },
+    decodingMethod: 'greedy_search',
+    enableEndpoint: 0
+  })
 }
 
 class ChannelPipeline {
@@ -226,41 +255,59 @@ function joinedText(result: { text: string }): string {
 /* ---- session orchestration ---- */
 
 let recognizer: SherpaRecognizer | null = null
+let offlineRecognizer: SherpaOfflineRecognizer | null = null
+let quality: 'live' | 'final' = 'live'
 let pipelines = new Map<string, ChannelPipeline>()
+let offlineAudio = new Map<string, Float32Array[]>()
 let sessionActive = false
 let activeSessionId: number | null = null
 
-async function init(modelsDir: string): Promise<void> {
+async function init(modelsDir: string, requestedQuality: 'live' | 'final' = 'live'): Promise<void> {
   try {
-    const dir = await ensureModel(modelsDir)
+    quality = requestedQuality
+    const dir =
+      quality === 'final'
+        ? await ensureWindowsWhisperModel(modelsDir, (progress) =>
+            emit({ event: 'download', progress })
+          )
+        : await ensureModel(modelsDir)
     emit({ event: 'status', stage: 'serve_loading_models' })
     // Deferred require: the native addon must not load before it's needed.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const sherpa = require('sherpa-onnx-node') as SherpaModule
-    recognizer = new sherpa.OnlineRecognizer({
-      featConfig: { sampleRate: 16000, featureDim: 80 },
-      modelConfig: {
-        transducer: {
-          encoder: join(dir, 'encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx'),
-          decoder: join(dir, 'decoder-epoch-99-avg-1-chunk-16-left-128.onnx'),
-          joiner: join(dir, 'joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx')
-        },
-        tokens: join(dir, 'tokens.txt'),
-        numThreads: 2,
-        provider: 'cpu',
-        modelType: 'zipformer2'
-      },
-      decodingMethod: 'greedy_search',
-      enableEndpoint: 0
-    })
+    if (quality === 'final') {
+      offlineRecognizer = new sherpa.OfflineRecognizer({
+        featConfig: { sampleRate: 16000, featureDim: 80 },
+        modelConfig: {
+          whisper: {
+            encoder: join(dir, 'tiny.en-encoder.int8.onnx'),
+            decoder: join(dir, 'tiny.en-decoder.int8.onnx'),
+            language: 'en',
+            task: 'transcribe',
+            tailPaddings: -1
+          },
+          tokens: join(dir, 'tiny.en-tokens.txt'),
+          numThreads: 2,
+          provider: 'cpu',
+          debug: 0
+        }
+      })
+      recognizer = createOnlineRecognizer(sherpa, await ensureModel(modelsDir))
+    } else recognizer = createOnlineRecognizer(sherpa, dir)
     emit({ event: 'status', stage: 'serve_ready' })
   } catch (err) {
-    emit({ event: 'error', message: `engine init failed: ${String(err)}` })
+    emit({
+      event: 'error',
+      message:
+        quality === 'final'
+          ? 'The high-accuracy speech model could not be prepared. Check your connection and try again.'
+          : `engine init failed: ${String(err)}`
+    })
   }
 }
 
 function startSession(channels: string[], sessionId = 0): void {
-  if (!recognizer) {
+  if (quality === 'final' ? !offlineRecognizer : !recognizer) {
     emit({ event: 'error', message: 'engine is not ready yet' })
     emit({ event: 'done' })
     return
@@ -274,7 +321,8 @@ function startSession(channels: string[], sessionId = 0): void {
   pipelines = new Map(
     channels.map((channel) => [channel, new ChannelPipeline(channel, recognizer!)])
   )
-  emit({ event: 'ready', mode: 'live', channels })
+  offlineAudio = new Map(channels.map((channel) => [channel, []]))
+  emit({ event: 'ready', mode: quality, channels })
   emit({ event: 'status', stage: 'transcribing' })
 }
 
@@ -282,10 +330,40 @@ function stopSession(sessionId = 0): void {
   if (!sessionActive || activeSessionId !== sessionId) return
   sessionActive = false
   emit({ event: 'status', stage: 'finishing' })
-  for (const pipeline of pipelines.values()) {
-    pipeline.finish()
+  if (quality === 'final' && offlineRecognizer) {
+    for (const pipeline of pipelines.values()) pipeline.finish()
+    for (const [channel, chunks] of offlineAudio) {
+      const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+      const samples = new Float32Array(length)
+      let offset = 0
+      for (const chunk of chunks) {
+        samples.set(chunk, offset)
+        offset += chunk.length
+      }
+      if (samples.length === 0) continue
+      const text: string[] = []
+      for (const window of splitWhisperWindows(samples)) {
+        const stream = offlineRecognizer.createStream()
+        stream.acceptWaveform({
+          samples: window,
+          sampleRate: WINDOWS_ASR_SAMPLE_RATE
+        })
+        offlineRecognizer.decode(stream)
+        const windowText = joinedText(offlineRecognizer.getResult(stream))
+        if (windowText) text.push(windowText)
+      }
+      emit({
+        event: 'final',
+        channel,
+        text: text.join(' '),
+        audioSeconds: samples.length / WINDOWS_ASR_SAMPLE_RATE
+      })
+    }
+  } else {
+    for (const pipeline of pipelines.values()) pipeline.finish()
   }
   pipelines = new Map()
+  offlineAudio = new Map()
   activeSessionId = null
   emit({ event: 'done' })
 }
@@ -294,16 +372,16 @@ port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
   switch (data.t) {
     case 'init':
-      void init(data.modelsDir)
+      void init(data.modelsDir, data.quality)
       break
     case 'start':
       startSession(data.channels, data.sessionId)
       break
     case 'audio': {
       if (sessionActive && activeSessionId === (data.sessionId ?? 0)) {
-        const pipeline = pipelines.get(data.channel)
-        if (pipeline && data.samples instanceof Float32Array && data.samples.length > 0) {
-          pipeline.ingest(data.samples)
+        if (data.samples instanceof Float32Array && data.samples.length > 0) {
+          pipelines.get(data.channel)?.ingest(data.samples)
+          if (quality === 'final') offlineAudio.get(data.channel)?.push(data.samples)
         }
       }
       if (typeof data.sequence === 'number') {

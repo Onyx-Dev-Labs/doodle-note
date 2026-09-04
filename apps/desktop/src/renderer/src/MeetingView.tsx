@@ -113,6 +113,9 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       if (ev.stage === 'finishing' || ev.stage === 'saving_audio') {
         return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
       }
+      if (ev.stage === 'refining_transcript') {
+        return { ...state, phase: 'finishing', statusText: 'Improving transcript locally…' }
+      }
       return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
     }
     case 'ready':
@@ -134,6 +137,16 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       const merged = [...state.segments, ...kept].sort((a, b) => segmentTime(a) - segmentTime(b))
       return { ...state, segments: merged, echoCount: state.echoCount + echoDropped }
     }
+    case 'segments-replaced': {
+      if (!active) return state
+      const kept = ev.segments.filter((s) => !s.echo)
+      return {
+        ...state,
+        segments: kept.sort((a, b) => segmentTime(a) - segmentTime(b)),
+        echoCount: ev.segments.length - kept.length,
+        partials: {}
+      }
+    }
     case 'final':
       if (!active || !ev.channel) return state
       return {
@@ -145,6 +158,12 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
     case 'done':
       if (!active) return state
       return { ...state, phase: 'ended', statusText: '', partials: {} }
+    case 'download':
+      if (state.phase !== 'finishing') return state
+      return {
+        ...state,
+        statusText: `Preparing accurate transcript… ${Math.round(ev.progress * 100)}%`
+      }
     case 'session-saved':
       if (!active && state.phase !== 'ended') return state
       return { ...state, phase: 'ended', statusText: '', partials: {} }

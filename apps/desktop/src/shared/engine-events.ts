@@ -159,6 +159,12 @@ export interface EngineFinalEvent {
   tokens?: EngineTokenTiming[]
 }
 
+/** Windows: high-accuracy local text for each channel after live capture stops. */
+export interface EngineRefinedEvent {
+  event: 'refined'
+  transcripts: Array<{ channel: EngineChannel; text: string; audioSeconds?: number }>
+}
+
 export interface EngineErrorEvent {
   event: 'error'
   message: string
@@ -194,6 +200,7 @@ export type EngineSidecarEvent =
   | EnginePartialEvent
   | EngineTimingsEvent
   | EngineFinalEvent
+  | EngineRefinedEvent
   | EngineErrorEvent
   | EngineDoneEvent
   | EngineChannelStartEvent
@@ -246,11 +253,18 @@ export interface EngineSessionSavedEvent {
   segmentCount: number
 }
 
+/** Atomic replacement of the provisional live segments after local refinement. */
+export interface EngineSegmentsReplacedEvent {
+  event: 'segments-replaced'
+  segments: TranscriptSegment[]
+}
+
 export type EngineLifecycleEvent =
   | EngineStartedEvent
   | EngineSpawnErrorEvent
   | EngineExitEvent
   | EngineSegmentsEvent
+  | EngineSegmentsReplacedEvent
   | EngineSessionSavedEvent
 
 /** Everything the renderer can receive on ENGINE_EVENT_CHANNEL. */
