@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 
+import {
+  updateProxyRequestHeaders,
+  updateProxyResponseInit,
+} from "@/lib/update-proxy";
+
 /**
  * Update-feed proxy: serves latest*.yml manifests and installer artifacts
  * from the Blob store THROUGH the app's own domain. Born from an outage:
@@ -31,6 +36,7 @@ export async function GET(
 
   const upstream = await fetch(`${BLOB_BASE}/${encodeURIComponent(name)}`, {
     redirect: "follow",
+    headers: updateProxyRequestHeaders(request),
     // Manifests must be fresh; Next's fetch cache would defeat the 60s TTL.
     cache: "no-store",
   });
@@ -41,17 +47,5 @@ export async function GET(
     );
   }
 
-  const isManifest = name.endsWith(".yml");
-  const headers = new Headers({
-    "content-type":
-      upstream.headers.get("content-type") ?? "application/octet-stream",
-    // Versioned artifacts are immutable; manifests revalidate fast.
-    "cache-control": isManifest
-      ? "public, max-age=60"
-      : "public, max-age=31536000, immutable",
-  });
-  const length = upstream.headers.get("content-length");
-  if (length) headers.set("content-length", length);
-
-  return new NextResponse(upstream.body, { status: 200, headers });
+  return new NextResponse(upstream.body, updateProxyResponseInit(name, upstream));
 }
