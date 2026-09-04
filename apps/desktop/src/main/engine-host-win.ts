@@ -1,4 +1,6 @@
 import { join } from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import {
   ENGINE_CAPTURE_CONTROL_CHANNEL,
@@ -12,6 +14,7 @@ import type { EngineEventListener } from './engine-process'
 import { WinSessionRecorder } from './win-audio-recorder'
 import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
+import type { BatchProgress, BatchTranscription } from './import-logic'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
@@ -29,11 +32,13 @@ export class WinEngineHost {
   private child: UtilityProcess | null = null
   private ready = false
   private sessionActive = false
-  private captureState: 'idle' | 'starting' | 'capturing' | 'draining' | 'finishing' = 'idle'
+  private captureState: 'idle' | 'starting' | 'capturing' | 'draining' | 'finishing' | 'refining' =
+    'idle'
   private nextSessionId = 0
   private activeSessionId: number | null = null
   private workerStarted = false
   private drainTimer: NodeJS.Timeout | null = null
+  private workerFinishTimer: NodeJS.Timeout | null = null
   private restartTimer: NodeJS.Timeout | null = null
   private disposed = false
   private readonly listeners = new Set<EngineEventListener>()
@@ -45,6 +50,13 @@ export class WinEngineHost {
   private activeChannels: string[] = []
   /** Tees renderer PCM frames to disk when the session persists audio. */
   private recorder: WinSessionRecorder | null = null
+  private ephemeralAudioDir: string | null = null
+  private finalRefiner:
+    | ((
+        path: string,
+        onProgress?: (progress: BatchProgress) => void
+      ) => Promise<BatchTranscription>)
+    | null = null
 
   constructor(private readonly broadcast: (channel: string, payload: unknown) => void) {}
 
@@ -57,6 +69,15 @@ export class WinEngineHost {
 
   get running(): boolean {
     return this.sessionActive
+  }
+
+  setFinalRefiner(
+    refiner: (
+      path: string,
+      onProgress?: (progress: BatchProgress) => void
+    ) => Promise<BatchTranscription>
+  ): void {
+    this.finalRefiner = refiner
   }
 
   /** Fork the engine and load models (call once, after app ready). */
@@ -86,11 +107,14 @@ export class WinEngineHost {
         this.workerStarted = false
         if (this.drainTimer) clearTimeout(this.drainTimer)
         this.drainTimer = null
+        if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
+        this.workerFinishTimer = null
         if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
         // Engine crashed mid-session: keep the checkpoint chunks on disk —
         // next launch's orphan recovery merges them.
         this.recorder?.abort()
         this.recorder = null
+        this.removeEphemeralAudio()
         this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
       }
       if (!this.disposed) {
@@ -132,38 +156,80 @@ export class WinEngineHost {
     }
     // Model download/boot progress is host-side noise, not session traffic.
     if (!this.sessionActive) return
-    this.emit(event as unknown as EngineSidecarEvent)
     if (event.event === 'done') {
-      if (this.drainTimer) clearTimeout(this.drainTimer)
-      this.drainTimer = null
-      this.sessionActive = false
-      this.captureState = 'idle'
-      const sessionId = this.activeSessionId
-      this.activeSessionId = null
-      this.workerStarted = false
-      if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
-      // Merge the session's audio off the event path; the 'audio' event
-      // follows 'exit' here (order is not part of the contract — listeners
-      // react to each event independently).
-      const recorder = this.recorder
-      this.recorder = null
-      if (recorder) {
-        void recorder
-          .finish()
-          .then((saved) => {
-            if (saved) {
-              this.emit({
-                event: 'audio',
-                path: joinPath(recorder.dir, 'audio.wav'),
-                durationMs: saved.durationMs,
-                startEpochMs: saved.startEpochMs
-              })
-            }
-          })
-          .catch((err) => console.error('[win-audio] merge failed:', err))
-      }
-      this.emit({ event: 'exit', code: 0, signal: null })
+      if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
+      this.workerFinishTimer = null
+      void this.completeSession()
+      return
     }
+    this.emit(event as unknown as EngineSidecarEvent)
+  }
+
+  private async completeSession(): Promise<void> {
+    if (!this.sessionActive || this.captureState === 'refining') return
+    this.captureState = 'refining'
+    if (this.drainTimer) clearTimeout(this.drainTimer)
+    this.drainTimer = null
+    const sessionId = this.activeSessionId
+    if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
+    const recorder = this.recorder
+    this.recorder = null
+    let audioPath: string | null = null
+    try {
+      const saved = await recorder?.finish()
+      if (saved && recorder) {
+        audioPath = joinPath(recorder.dir, 'audio.wav')
+        if (!this.ephemeralAudioDir) {
+          this.emit({
+            event: 'audio',
+            path: audioPath,
+            durationMs: saved.durationMs,
+            startEpochMs: saved.startEpochMs
+          })
+        }
+      }
+    } catch (error) {
+      console.error('[win-audio] merge failed:', error)
+    }
+
+    if (audioPath && this.finalRefiner && !this.disposed) {
+      try {
+        const refinementPath = audioPath
+        this.emit({ event: 'status', stage: 'refining_transcript' })
+        const result = await this.finalRefiner(refinementPath, (progress) => {
+          if (progress.stage === 'downloading_model') {
+            this.emit({ event: 'download', progress: progress.progress ?? 0 })
+          } else if (progress.stage === 'transcribing') {
+            this.emit({ event: 'status', stage: 'refining_transcript' })
+          }
+        })
+        const transcripts = (['mic', 'system'] as const).flatMap((channel) => {
+          const text = result.segments
+            .filter((segment) => segment.channel === channel && !segment.echo)
+            .sort((a, b) => a.startMs - b.startMs)
+            .map((segment) => segment.text.trim())
+            .filter(Boolean)
+            .join(' ')
+          return text ? [{ channel, text, audioSeconds: result.audioSeconds }] : []
+        })
+        if (transcripts.length > 0) this.emit({ event: 'refined', transcripts })
+      } catch {
+        console.error('[win-asr] final refinement failed')
+        this.emit({
+          event: 'error',
+          message: 'High-accuracy refinement could not finish; the live transcript was kept.'
+        })
+      }
+    }
+
+    this.removeEphemeralAudio()
+    if (this.disposed || !this.sessionActive || this.activeSessionId !== sessionId) return
+    this.sessionActive = false
+    this.captureState = 'idle'
+    this.activeSessionId = null
+    this.workerStarted = false
+    this.emit({ event: 'done' })
+    this.emit({ event: 'exit', code: 0, signal: null })
   }
 
   start(command: EngineCommand, filePath?: string, opts: EngineStartOptions = {}): void {
@@ -201,7 +267,9 @@ export class WinEngineHost {
     this.workerStarted = false
     this.activeChannels = channels
     this.inputDevice = opts.inputDevice
-    this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
+    const audioDir = opts.audioDir ?? mkdtempSync(join(tmpdir(), 'doodlenote-asr-'))
+    this.ephemeralAudioDir = opts.audioDir ? null : audioDir
+    this.recorder = new WinSessionRecorder(audioDir)
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
       action: 'start',
@@ -238,12 +306,12 @@ export class WinEngineHost {
       this.handleEngineEvent({ event: 'done' })
       return
     }
-    const escalate = setTimeout(() => {
-      if (this.sessionActive && this.child) {
+    this.workerFinishTimer = setTimeout(() => {
+      if (this.sessionActive && this.captureState === 'finishing' && this.child) {
         this.child.kill() // exit handler synthesizes the session end
       }
     }, 15_000)
-    escalate.unref()
+    this.workerFinishTimer.unref()
   }
 
   /** Renderer capture frames land here (via ENGINE_AUDIO_CHANNEL). */
@@ -336,13 +404,21 @@ export class WinEngineHost {
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop', sessionId })
   }
 
+  private removeEphemeralAudio(): void {
+    if (!this.ephemeralAudioDir) return
+    rmSync(this.ephemeralAudioDir, { recursive: true, force: true })
+    this.ephemeralAudioDir = null
+  }
+
   dispose(): void {
     this.disposed = true
     if (this.restartTimer) clearTimeout(this.restartTimer)
     if (this.drainTimer) clearTimeout(this.drainTimer)
+    if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
     // Quit mid-recording: chunks stay for next-launch recovery.
     this.recorder?.abort()
     this.recorder = null
+    this.removeEphemeralAudio()
     this.child?.kill()
     this.child = null
     this.listeners.clear()

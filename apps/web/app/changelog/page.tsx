@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.21",
+    date: "September 4, 2026",
+    highlights: [
+      "Improve Windows transcript accuracy with a private, on-device final pass after recording",
+      "Keep live captions, speaker labels, timestamps, and saved audio while the final wording is refined",
+      "Use the same higher-accuracy Windows transcription path for imported recordings",
+    ],
+  },
+  {
     version: "0.4.20",
     date: "September 4, 2026",
     highlights: [

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
+import { reconcileRefinedTranscript } from './transcript-refinement'
 
 /**
  * Owns one live capture session: feeds engine timings through the
@@ -46,6 +47,14 @@ export class TranscriptSession {
         if (this.assembler && ev.channel) {
           this.finals[ev.channel] = ev.text
           this.publish(this.assembler.flush(ev.channel))
+        }
+        return
+      case 'refined':
+        if (this.assembler) {
+          this.publish(this.assembler.flush())
+          this.segments = reconcileRefinedTranscript(this.segments, ev.transcripts)
+          for (const transcript of ev.transcripts) this.finals[transcript.channel] = transcript.text
+          this.broadcast({ event: 'segments-replaced', segments: this.segments })
         }
         return
       case 'done':
