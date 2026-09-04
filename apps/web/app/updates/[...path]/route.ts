@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
+  isMultiRangeRequest,
   updateProxyRequestHeaders,
   updateProxyResponseInit,
 } from "@/lib/update-proxy";
@@ -32,6 +33,17 @@ export async function GET(
   const name = parts.join("/");
   if (parts.length !== 1 || !SAFE_NAME.test(name)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Vercel Blob accepts one range but treats a combined range as a full-file
+  // request. Reject combined ranges immediately so older electron-updater
+  // clients abandon the differential attempt and fall back to one full stream.
+  // New packages disable combined-range downloads in app-update.yml below.
+  if (isMultiRangeRequest(request.headers.get("range"))) {
+    return new NextResponse(null, {
+      status: 416,
+      headers: { "accept-ranges": "bytes" },
+    });
   }
 
   const upstream = await fetch(`${BLOB_BASE}/${encodeURIComponent(name)}`, {

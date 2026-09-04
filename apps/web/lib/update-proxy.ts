@@ -1,3 +1,7 @@
+export function isMultiRangeRequest(range: string | null): boolean {
+  return range?.includes(",") ?? false;
+}
+
 export function updateProxyRequestHeaders(request: Request): Headers {
   const headers = new Headers();
   const range = request.headers.get("range");

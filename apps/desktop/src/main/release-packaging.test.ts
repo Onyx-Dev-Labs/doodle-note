@@ -85,6 +85,7 @@ test('Windows builds an x64 NSIS updater with the Windows icon and native engine
   assert.match(builderConfig, /artifactName:\s*\$\{productName\}-\$\{version\}-setup\.\$\{ext\}/)
   assert.match(publishScript, /name === 'latest\.yml'/)
   assert.match(publishScript, /name\.endsWith\('\.exe\.blockmap'\)/)
+  assert.match(builderConfig, /publish:\s+[\s\S]*useMultipleRangeRequest:\s*false/)
 })
 
 test('CI builds and retains a real Windows installer', () => {

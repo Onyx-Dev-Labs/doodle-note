@@ -116,3 +116,5 @@ npmRebuild: false
 publish:
   provider: generic
   url: https://www.doodlenote.ai/updates
+  # Vercel Blob supports one byte range per request, not multipart ranges.
+  useMultipleRangeRequest: false

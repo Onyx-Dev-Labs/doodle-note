@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  isMultiRangeRequest,
   updateProxyRequestHeaders,
   updateProxyResponseInit,
 } from "../lib/update-proxy";
+
+test("update proxy identifies unsupported combined range requests", () => {
+  assert.equal(isMultiRangeRequest(null), false);
+  assert.equal(isMultiRangeRequest("bytes=0-0"), false);
+  assert.equal(isMultiRangeRequest("bytes=0-0,2-2"), true);
+});
 
 test("update proxy preserves byte-range requests and partial responses", () => {
   const request = new Request("https://www.doodlenote.ai/updates/setup.exe", {
