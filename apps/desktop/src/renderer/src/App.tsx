@@ -117,11 +117,15 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.engine.onCaptureControl((control) => {
       if (control.action === 'start') {
-        void startWinCapture(control.channels ?? ['mic', 'system'], control.inputDevice)
+        void startWinCapture(
+          control.sessionId,
+          control.channels ?? ['mic', 'system'],
+          control.inputDevice
+        )
       } else if (control.action === 'switch-input') {
-        void switchWinInputDevice(control.inputDevice)
+        void switchWinInputDevice(control.sessionId, control.inputDevice)
       } else {
-        stopWinCapture()
+        stopWinCapture(control.sessionId)
       }
     })
   }, [])

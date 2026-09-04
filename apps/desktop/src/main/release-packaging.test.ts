@@ -21,6 +21,7 @@ const ciWorkflow = readFileSync(
 )
 const modelsView = readFileSync(new URL('../renderer/src/ModelsView.tsx', import.meta.url), 'utf8')
 const desktopPackage = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
 function pngMetadata(url: URL): { width: number; height: number; colorType: number } {
   const png = readFileSync(url)
@@ -84,6 +85,7 @@ test('Windows builds an x64 NSIS updater with the Windows icon and native engine
   assert.match(builderConfig, /artifactName:\s*\$\{productName\}-\$\{version\}-setup\.\$\{ext\}/)
   assert.match(publishScript, /name === 'latest\.yml'/)
   assert.match(publishScript, /name\.endsWith\('\.exe\.blockmap'\)/)
+  assert.match(builderConfig, /publish:\s+[\s\S]*useMultipleRangeRequest:\s*false/)
 })
 
 test('CI builds and retains a real Windows installer', () => {
@@ -99,8 +101,8 @@ test('CI builds and retains a real Windows installer', () => {
 test('Windows website betas cannot replace the production updater feed', () => {
   assert.match(desktopPackage, /publish:win-beta[\s\S]*publish-windows-beta\.mjs/)
   assert.match(windowsBetaPublishScript, /-beta-setup\.exe/)
-  assert.match(windowsBetaPublishScript, /put\('updates\/latest-beta\.yml'/)
   assert.doesNotMatch(windowsBetaPublishScript, /put\('updates\/latest\.yml'/)
+  assert.match(updaterSource, /applyUpdatePolicy\(autoUpdater\)/)
 })
 
 test('macOS-only settings are gated out of the Windows UI', () => {

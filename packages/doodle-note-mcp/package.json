@@ -23,7 +23,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" && chmod +x dist/cli.js",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/*.test.ts",
     "prepublishOnly": "pnpm test && pnpm build"

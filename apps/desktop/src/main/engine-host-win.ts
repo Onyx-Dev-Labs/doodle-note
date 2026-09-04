@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import {
   ENGINE_CAPTURE_CONTROL_CHANNEL,
+  type EngineCaptureStatus,
   type EngineCommand,
   type EngineEvent,
   type EngineSidecarEvent,
@@ -13,6 +14,7 @@ import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 
 const RESTART_DELAY_MS = 3_000
+const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
 
 /**
  * Windows counterpart of EngineProcess: drives the sherpa-onnx engine
@@ -27,6 +29,11 @@ export class WinEngineHost {
   private child: UtilityProcess | null = null
   private ready = false
   private sessionActive = false
+  private captureState: 'idle' | 'starting' | 'capturing' | 'draining' | 'finishing' = 'idle'
+  private nextSessionId = 0
+  private activeSessionId: number | null = null
+  private workerStarted = false
+  private drainTimer: NodeJS.Timeout | null = null
   private restartTimer: NodeJS.Timeout | null = null
   private disposed = false
   private readonly listeners = new Set<EngineEventListener>()
@@ -72,8 +79,14 @@ export class WinEngineHost {
       this.child = null
       this.ready = false
       if (this.sessionActive) {
+        const sessionId = this.activeSessionId
         this.sessionActive = false
-        this.stopCaptureInRenderer()
+        this.captureState = 'idle'
+        this.activeSessionId = null
+        this.workerStarted = false
+        if (this.drainTimer) clearTimeout(this.drainTimer)
+        this.drainTimer = null
+        if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
         // Engine crashed mid-session: keep the checkpoint chunks on disk —
         // next launch's orphan recovery merges them.
         this.recorder?.abort()
@@ -121,8 +134,14 @@ export class WinEngineHost {
     if (!this.sessionActive) return
     this.emit(event as unknown as EngineSidecarEvent)
     if (event.event === 'done') {
+      if (this.drainTimer) clearTimeout(this.drainTimer)
+      this.drainTimer = null
       this.sessionActive = false
-      this.stopCaptureInRenderer()
+      this.captureState = 'idle'
+      const sessionId = this.activeSessionId
+      this.activeSessionId = null
+      this.workerStarted = false
+      if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
       // Merge the session's audio off the event path; the 'audio' event
       // follows 'exit' here (order is not part of the contract — listeners
       // react to each event independently).
@@ -164,11 +183,11 @@ export class WinEngineHost {
       return
     }
     if (this.sessionActive) {
-      // Supersede: end the old session; its tail events stop at 'done'.
-      // Its unmerged audio stays on disk for orphan recovery.
-      this.child.postMessage({ t: 'stop' })
-      this.recorder?.abort()
-      this.recorder = null
+      this.emit({
+        event: 'spawn-error',
+        message: 'The previous recording is still finishing. Try again in a moment.'
+      })
+      return
     }
     const source = opts.source ?? 'both'
     const channels = [
@@ -177,22 +196,48 @@ export class WinEngineHost {
     ].filter((c): c is string => c !== null)
 
     this.sessionActive = true
+    this.captureState = 'starting'
+    this.activeSessionId = ++this.nextSessionId
+    this.workerStarted = false
     this.activeChannels = channels
     this.inputDevice = opts.inputDevice
     this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
-    this.child.postMessage({ t: 'start', channels })
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
       action: 'start',
+      sessionId: this.activeSessionId,
       channels,
       ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
     })
   }
 
   stop(): void {
-    if (!this.sessionActive || !this.child) return
-    this.stopCaptureInRenderer()
-    this.child.postMessage({ t: 'stop' })
+    if (!this.sessionActive || !this.child || this.activeSessionId === null) return
+    if (this.captureState === 'draining' || this.captureState === 'finishing') return
+    this.captureState = 'draining'
+    this.stopCaptureInRenderer(this.activeSessionId)
+    this.drainTimer = setTimeout(() => {
+      if (this.captureState !== 'draining') return
+      this.emit({
+        event: 'error',
+        message: 'Audio capture did not finish draining in time; finalizing available audio.'
+      })
+      this.finishAfterCaptureDrain()
+    }, CAPTURE_DRAIN_TIMEOUT_MS)
+    this.drainTimer.unref()
+  }
+
+  private finishAfterCaptureDrain(): void {
+    if (!this.sessionActive || this.captureState !== 'draining' || !this.child) return
+    if (this.drainTimer) clearTimeout(this.drainTimer)
+    this.drainTimer = null
+    this.captureState = 'finishing'
+    if (this.workerStarted) {
+      this.child.postMessage({ t: 'stop', sessionId: this.activeSessionId })
+    } else {
+      this.handleEngineEvent({ event: 'done' })
+      return
+    }
     const escalate = setTimeout(() => {
       if (this.sessionActive && this.child) {
         this.child.kill() // exit handler synthesizes the session end
@@ -202,17 +247,46 @@ export class WinEngineHost {
   }
 
   /** Renderer capture frames land here (via ENGINE_AUDIO_CHANNEL). */
-  pushAudio(channel: string, samples: Float32Array): void {
-    if (!this.sessionActive || !this.child) return
+  pushAudio(sessionId: number, channel: string, samples: Float32Array): void {
+    if (
+      !this.sessionActive ||
+      !this.child ||
+      !this.workerStarted ||
+      sessionId !== this.activeSessionId ||
+      (this.captureState !== 'capturing' && this.captureState !== 'draining')
+    ) {
+      return
+    }
     this.recorder?.write(channel, samples)
-    this.child.postMessage({ t: 'audio', channel, samples })
+    this.child.postMessage({ t: 'audio', sessionId, channel, samples })
   }
 
-  /** Renderer-side capture failed (permission etc.) — surface + end session. */
-  captureFailed(message: string): void {
-    if (!this.sessionActive) return
-    this.emit({ event: 'error', message })
-    this.stop()
+  /** Renderer capture lifecycle acknowledgements and actionable errors. */
+  captureStatus(status: EngineCaptureStatus): void {
+    if (!status || typeof status.sessionId !== 'number' || typeof status.type !== 'string') return
+    if (!this.sessionActive || status.sessionId !== this.activeSessionId) return
+    if (status.type === 'ready' && this.captureState === 'starting' && this.child) {
+      this.captureState = 'capturing'
+      this.workerStarted = true
+      this.child.postMessage({
+        t: 'start',
+        sessionId: status.sessionId,
+        channels: this.activeChannels
+      })
+      return
+    }
+    if (status.type === 'drained' && this.captureState === 'draining') {
+      this.finishAfterCaptureDrain()
+      return
+    }
+    if (status.type === 'switch-error') {
+      this.emit({ event: 'error', message: `Could not switch microphones: ${status.message}` })
+      return
+    }
+    if (status.type === 'error') {
+      this.emit({ event: 'error', message: status.message })
+      this.stop()
+    }
   }
 
   /** Windows renderer owns microphone capture, so device switches are sent there. */
@@ -221,6 +295,7 @@ export class WinEngineHost {
     if (!this.sessionActive || !this.activeChannels.includes('mic')) return
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
       action: 'switch-input',
+      sessionId: this.activeSessionId,
       ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
     })
   }
@@ -257,13 +332,14 @@ export class WinEngineHost {
     this.warmupWaiters.clear()
   }
 
-  private stopCaptureInRenderer(): void {
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop' })
+  private stopCaptureInRenderer(sessionId: number): void {
+    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop', sessionId })
   }
 
   dispose(): void {
     this.disposed = true
     if (this.restartTimer) clearTimeout(this.restartTimer)
+    if (this.drainTimer) clearTimeout(this.drainTimer)
     // Quit mid-recording: chunks stay for next-launch recovery.
     this.recorder?.abort()
     this.recorder = null
