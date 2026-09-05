@@ -110,6 +110,7 @@ import {
 } from '../shared/integrations-api'
 import {
   UPDATE_CHECK_CHANNEL,
+  UPDATE_CANCEL_CHANNEL,
   UPDATE_GET_STATE_CHANNEL,
   UPDATE_INSTALL_CHANNEL,
   UPDATE_STATE_EVENT_CHANNEL,
@@ -459,6 +460,10 @@ const updateApi: UpdateApi = {
 
   check(): Promise<UpdateState> {
     return ipcRenderer.invoke(UPDATE_CHECK_CHANNEL) as Promise<UpdateState>
+  },
+
+  cancel(): Promise<void> {
+    return ipcRenderer.invoke(UPDATE_CANCEL_CHANNEL) as Promise<void>
   },
 
   install(): Promise<void> {
