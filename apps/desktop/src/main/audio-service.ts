@@ -320,6 +320,9 @@ export class AudioService {
       for (const session of sessions) {
         if (!SAFE_SESSION_DIR.test(session)) continue
         const dir = join(this.baseDir, meeting, session)
+        // The delayed startup scan can run after the user begins recording.
+        // Its open checkpoints belong to the live host, not crash recovery.
+        if (dir === this.activeSessionDir) continue
         if (audioFileIn(dir) !== null) continue
         const checkpoints = join(dir, 'checkpoints')
         let chunkCount = 0
@@ -339,6 +342,7 @@ export class AudioService {
       }
     }
     for (const dir of orphans) {
+      if (dir === this.activeSessionDir) continue
       console.log('[audio] recovering crashed session:', dir)
       // Windows sessions checkpoint raw PCM (merged in-process); macOS
       // sessions checkpoint CAF (merged by the Swift engine binary).
