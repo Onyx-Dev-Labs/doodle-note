@@ -20,6 +20,7 @@ import { ExportService } from './export-service'
 import { CalendarService } from './calendar-service'
 import { registerContextMenu } from './context-menu'
 import { EngineProcess } from './engine-process'
+import { RecordingIndicator } from './recording-indicator'
 import { WinEngineHost } from './engine-host-win'
 import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
@@ -339,17 +340,25 @@ app.whenReady().then(() => {
     }
   }
 
+  // Menu-bar "recording" pill: visible whenever a live capture runs, gone
+  // the moment it stops — crashes included, via the engine's exit event.
+  const recordingIndicator = new RecordingIndicator(focusMainWindow)
+
   engine.onEvent((event) => {
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)
+    if (event.event === 'exit' || event.event === 'spawn-error') recordingIndicator.stop()
     logEngineEvent(event)
   })
 
   ipcMain.on(ENGINE_START_CHANNEL, (_event, request: EngineStartRequest) => {
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
-    if (request.command === 'live') calendarService?.setRecordingActive(true)
+    if (request.command === 'live') {
+      calendarService?.setRecordingActive(true)
+      recordingIndicator.start()
+    }
     micWatcher.setSuppressed(true)
     const opts = { ...request.opts }
     // Audio persistence: give the session a directory keyed by meeting; the
@@ -367,6 +376,7 @@ app.whenReady().then(() => {
     engine.stop()
     micWatcher.setSuppressed(false)
     calendarService?.setRecordingActive(false)
+    recordingIndicator.stop()
   })
 
   // Mic input picker: device list + (mid-session) switching. macOS engine
