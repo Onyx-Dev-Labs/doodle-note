@@ -138,6 +138,21 @@ test('empty / missing session dirs merge to null', async () => {
   }
 })
 
+test('system-only recording retains the right channel for batch speaker attribution', async () => {
+  const dir = tempDir('system-only')
+  try {
+    const recorder = new WinSessionRecorder(dir)
+    recorder.write('system', frames(0.25, 16_000))
+    assert.ok(await recorder.finish())
+    const wav = readWav(join(dir, 'audio.wav'))
+    assert.equal(wav.channels, 2)
+    assert.equal(wav.sample(100, 0), 0)
+    assert.ok(Math.abs(wav.sample(100, 1) - 0.25) < 0.001)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('clipping: out-of-range floats clamp instead of wrapping', async () => {
   const dir = tempDir('clip')
   try {
