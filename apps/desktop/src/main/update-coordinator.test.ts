@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { UpdateCoordinator } from './update-coordinator'
 
-function deferred<T>() {
+function deferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (error: Error) => void
+} {
   let resolve!: (value: T) => void
   let reject!: (error: Error) => void
   const promise = new Promise<T>((yes, no) => {
@@ -54,7 +58,11 @@ test('cancelled downloads ignore late progress and completion', async () => {
       checkForUpdates: async () => ({
         isUpdateAvailable: true,
         updateInfo: { version: '0.4.22' },
-        cancellationToken: { cancel() {} }
+        cancellationToken: {
+          cancel() {
+            /* Simulate a transport that finishes after cancellation. */
+          }
+        }
       }),
       downloadUpdate: () => download.promise
     },
