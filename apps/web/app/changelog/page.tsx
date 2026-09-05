@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.22",
+    date: "September 5, 2026",
+    highlights: [
+      "Fix Windows recording finalization so the local transcript refinement pass can finish",
+      "Protect recordings started immediately after launch and preserve system-audio speaker labels",
+      "Cancel stalled update downloads and retry from Settings without exposing internal errors",
+    ],
+  },
+  {
     version: "0.4.21",
     date: "September 4, 2026",
     highlights: [

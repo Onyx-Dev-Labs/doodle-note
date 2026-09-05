@@ -2,22 +2,18 @@ import { app, ipcMain, Notification } from 'electron'
 import updaterPkg from 'electron-updater'
 import {
   UPDATE_CHECK_CHANNEL,
+  UPDATE_CANCEL_CHANNEL,
   UPDATE_GET_STATE_CHANNEL,
   UPDATE_INSTALL_CHANNEL,
-  UPDATE_STATE_EVENT_CHANNEL,
-  type UpdateState
+  UPDATE_STATE_EVENT_CHANNEL
 } from '../shared/update-api'
-import { applyUpdatePolicy, publicUpdateErrorMessage } from './update-policy'
+import { applyUpdatePolicy } from './update-policy'
+import { UpdateCoordinator } from './update-coordinator'
 
 const { autoUpdater } = updaterPkg
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60_000
 
-let state: UpdateState = {
-  currentVersion: app.getVersion(),
-  supported: app.isPackaged,
-  status: 'idle'
-}
 let quittingForUpdate = false
 
 /**
@@ -42,12 +38,29 @@ export function initAutoUpdater(
    *  normal teardown (the llama addon SIGABRTs if a model is loaded). */
   beforeInstall?: () => Promise<void>
 ): void {
-  const setState = (patch: Partial<UpdateState>): void => {
-    state = { ...state, ...patch }
-    broadcast(UPDATE_STATE_EVENT_CHANNEL, state)
-  }
+  const coordinator = new UpdateCoordinator(
+    autoUpdater,
+    app.getVersion(),
+    app.isPackaged,
+    (state) => {
+      broadcast(UPDATE_STATE_EVENT_CHANNEL, state)
+      if (state.status !== 'downloaded') return
+      try {
+        if (!Notification.isSupported()) return
+        const notification = new Notification({
+          title: `DoodleNote ${state.latestVersion} is ready`,
+          body: 'Click to restart and update now.'
+        })
+        notification.on('click', () => void installNow())
+        notification.show()
+      } catch {
+        // Settings still offers Restart to update.
+      }
+    }
+  )
 
   const installNow = async (): Promise<void> => {
+    if (coordinator.state.status !== 'downloaded' || quittingForUpdate) return
     quittingForUpdate = true
     // The update quit must be a NORMAL quit (the installer takes over after
     // it), so the hard-exit workaround doesn't protect this path — unload
@@ -60,58 +73,27 @@ export function initAutoUpdater(
     autoUpdater.quitAndInstall()
   }
 
-  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, () => state)
-  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
-    if (!app.isPackaged) return state
-    try {
-      await autoUpdater.checkForUpdates()
-    } catch {
-      // the error event already updated state
-    }
-    return state
-  })
+  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, () => coordinator.state)
+  ipcMain.handle(UPDATE_CHECK_CHANNEL, () => coordinator.check())
+  ipcMain.handle(UPDATE_CANCEL_CHANNEL, () => coordinator.cancel())
   ipcMain.handle(UPDATE_INSTALL_CHANNEL, () => {
-    if (state.status !== 'downloaded') return
     void installNow()
   })
 
   if (!app.isPackaged) return
 
   applyUpdatePolicy(autoUpdater)
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoDownload = false
+  // Installation must use installNow so native models are unloaded first.
+  autoUpdater.autoInstallOnAppQuit = false
 
-  autoUpdater.on('checking-for-update', () => setState({ status: 'checking', error: undefined }))
-  autoUpdater.on('update-not-available', () => setState({ status: 'up-to-date' }))
-  autoUpdater.on('update-available', (info) =>
-    setState({ status: 'downloading', latestVersion: info.version, percent: 0 })
-  )
-  autoUpdater.on('download-progress', (progress) =>
-    setState({ status: 'downloading', percent: Math.round(progress.percent) })
-  )
-  autoUpdater.on('update-downloaded', (info) => {
-    setState({ status: 'downloaded', latestVersion: info.version, percent: 100 })
-    try {
-      if (!Notification.isSupported()) return
-      const notification = new Notification({
-        title: `DoodleNote ${info.version} is ready`,
-        body: 'Click to restart and update now.'
-      })
-      notification.on('click', () => {
-        void installNow()
-      })
-      notification.show()
-    } catch {
-      // Settings still offers Restart to update.
-    }
-  })
+  autoUpdater.on('download-progress', (progress) => coordinator.progress(progress))
   autoUpdater.on('error', (error) => {
     console.error('[updater]', error.message)
-    setState({ status: 'error', error: publicUpdateErrorMessage() })
   })
 
-  void autoUpdater.checkForUpdates().catch(() => {})
+  void coordinator.check()
   setInterval(() => {
-    void autoUpdater.checkForUpdates().catch(() => {})
+    void coordinator.check()
   }, CHECK_INTERVAL_MS).unref()
 }

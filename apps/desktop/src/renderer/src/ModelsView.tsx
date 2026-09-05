@@ -341,6 +341,8 @@ export default function ModelsView({
         return `v${u.latestVersion} is ready to install`
       case 'up-to-date':
         return 'You are on the latest version'
+      case 'cancelled':
+        return 'Download cancelled. You can try again.'
       case 'error':
         return u.error ?? 'Update check failed'
       default:
@@ -997,6 +999,14 @@ export default function ModelsView({
                       >
                         Restart to update
                       </button>
+                    ) : update?.status === 'downloading' ? (
+                      <button
+                        type="button"
+                        className="pill-btn"
+                        onClick={() => void window.updates.cancel()}
+                      >
+                        Cancel download
+                      </button>
                     ) : (
                       <button
                         type="button"
@@ -1004,12 +1014,13 @@ export default function ModelsView({
                         disabled={
                           checkPending ||
                           update?.supported === false ||
-                          update?.status === 'checking' ||
-                          update?.status === 'downloading'
+                          update?.status === 'checking'
                         }
                         onClick={() => void checkForUpdates()}
                       >
-                        Check for updates
+                        {update?.status === 'error' || update?.status === 'cancelled'
+                          ? 'Retry update'
+                          : 'Check for updates'}
                       </button>
                     )}
                   </div>
