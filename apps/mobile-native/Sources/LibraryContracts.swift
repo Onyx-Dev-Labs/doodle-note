@@ -88,6 +88,7 @@ struct SummaryVersion: Codable, Identifiable, Equatable, Sendable {
 struct NoteMetadata: Codable, Equatable, Sendable {
     var libraryID = LibraryRecord.localID
     var folderID: UUID? = nil
+    var lifecycleGeneration: UUID? = nil
     var revisionID = UUID()
     var event: EventOccurrenceKey? = nil
     var summaries: [SummaryVersion] = []

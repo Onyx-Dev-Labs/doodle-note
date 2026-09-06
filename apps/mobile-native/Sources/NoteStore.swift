@@ -14,13 +14,25 @@ struct NoteDiskStore: Sendable {
     func directory(for id: UUID) -> URL { root.appendingPathComponent(id.uuidString, isDirectory: true) }
 
     func audioDirectory(for id: UUID) throws -> URL {
+        if FileManager.default.fileExists(atPath: lifecycleURL(id).path) {
+            let record = try JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: lifecycleURL(id)))
+            guard record.schemaVersion == 1, record.noteID == id, record.state == .active, !record.restorePending, !record.audioRemovalPending else { throw LifecycleError.unavailable }
+        }
         let url = directory(for: id).appendingPathComponent("audio", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
         return url
     }
 
-    func save(_ note: NoteRecord, migrationOriginal: Data? = nil) throws {
+    func save(_ note: NoteRecord, migrationOriginal: Data? = nil, restoring: Bool = false) throws {
+        if note.schemaVersion == 2 {
+            if restoring {
+                guard let metadata = note.metadata else { throw LibraryDataError.invalidDocument }
+                let state = try lifecycle(noteID: note.id, libraryID: metadata.libraryID)
+                guard state.state == .active, state.restorePending,
+                      state.generation == metadata.lifecycleGeneration else { throw LifecycleError.stale }
+            } else { try requireActive(note) }
+        }
         let dir = directory(for: note.id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("note.json")
@@ -129,6 +141,11 @@ struct NoteDiskStore: Sendable {
         var migrationProblems: [String] = []
         for dir in dirs where UUID(uuidString: dir.lastPathComponent) != nil {
             do {
+                if let id = UUID(uuidString: dir.lastPathComponent), FileManager.default.fileExists(atPath: lifecycleURL(id).path) {
+                    let state = try JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: lifecycleURL(id)))
+                    guard state.schemaVersion == 1, state.noteID == id else { throw LibraryDataError.invalidDocument }
+                    if state.state == .purged { continue }
+                }
                 let data = try Data(contentsOf: dir.appendingPathComponent("note.json"))
                 var note = try JSONDecoder().decode(NoteRecord.self, from: data)
                 guard (1...2).contains(note.schemaVersion), note.id.uuidString == dir.lastPathComponent else {
@@ -145,7 +162,8 @@ struct NoteDiskStore: Sendable {
                         continue
                     }
                 }
-                guard note.metadata != nil else { throw LibraryDataError.invalidDocument }
+                guard let metadata = note.metadata else { throw LibraryDataError.invalidDocument }
+                _ = try lifecycle(noteID: note.id, libraryID: metadata.libraryID)
                 let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
                 audioProblems.append(contentsOf: recovery.unreadable)
                 if note.captureState == .recording {
@@ -162,6 +180,10 @@ struct NoteDiskStore: Sendable {
     }
 
     func audioFiles(for id: UUID) -> [URL] {
+        if FileManager.default.fileExists(atPath: lifecycleURL(id).path) {
+            guard let record = try? JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: lifecycleURL(id))),
+                  record.schemaVersion == 1, record.noteID == id, record.state != .purged, !record.audioRemovalPending else { return [] }
+        }
         let dir = directory(for: id).appendingPathComponent("audio", isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         return files.filter { $0.pathExtension == "caf" && !$0.lastPathComponent.hasSuffix(".recovered.caf") }
@@ -189,13 +211,25 @@ final class NoteLibrary {
     private(set) var saveProblem: String?
     private(set) var disk: NoteDiskStore?
     private var repository: LibraryRepository?
+    private(set) var lifecycle: [UUID: NoteLifecycle] = [:]
+    private(set) var lifecycleReadable = false
+    private(set) var storage: StorageUsage?
+    private(set) var storageBusy = false
+    private(set) var storageProblem: String?
+    private var invalidating: Set<UUID> = []
+    var trashNotes: [NoteRecord] {
+        notes.filter { lifecycleReadable && $0.metadata?.libraryID == selectedLibraryID && lifecycle[$0.id]?.state == .trashed }
+            .sorted { (lifecycle[$0.id]?.deletedAt ?? .distantPast) > (lifecycle[$1.id]?.deletedAt ?? .distantPast) }
+    }
+    var cleanupPending: Bool { lifecycle.values.contains { $0.cleanupPending || $0.restorePending || $0.audioRemovalPending } }
+
     private var saveTask: Task<Void, Never>?
 
     var libraries: [LibraryRecord] {
         catalog.libraries.filter { $0.id == LibraryRecord.localID || $0.identity.map(identities.contains) == true }
     }
     var visibleNotes: [NoteRecord] {
-        notes.filter { $0.metadata?.libraryID == selectedLibraryID }
+        notes.filter { lifecycleReadable && $0.metadata?.libraryID == selectedLibraryID && !invalidating.contains($0.id) && (lifecycle[$0.id]?.state ?? .active) == .active && lifecycle[$0.id]?.restorePending != true }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
     var folders: [NoteFolder] { catalog.folders.filter { $0.libraryID == selectedLibraryID } }
@@ -210,6 +244,8 @@ final class NoteLibrary {
                     guard let repository else { return }
                     let result = try await repository.load()
                     notes = result.notes
+                    await refreshLifecycle()
+                    await processRetention(captureActive: false)
                     if !result.migrationProblems.isEmpty {
                         problem = "Some notes are read-only until their storage upgrade can finish. Free device storage and reopen the app. Original files are preserved."
                     } else if !result.unreadable.isEmpty {
@@ -239,6 +275,7 @@ final class NoteLibrary {
         _ = try await repository.addLibrary(name: name, identity: identity)
         identities.insert(identity)
         await refreshCatalog()
+        await refreshLifecycle()
     }
 
     /// Caller must stop active capture first; transport offline/paused is NOT sign-out.
@@ -248,6 +285,8 @@ final class NoteLibrary {
         guard pendingSaves == 0, unsavedIDs.isEmpty else { return false }
         identities.remove(identity)
         selectedLibraryID = LibraryRecord.localID
+        await refreshLifecycle()
+        storage = nil
         return true
     }
 
@@ -259,7 +298,7 @@ final class NoteLibrary {
     @discardableResult func create() -> UUID? {
         var note = NoteRecord()
         note.metadata?.libraryID = selectedLibraryID
-        guard disk != nil, !loading else { return nil }
+        guard disk != nil, !loading, lifecycleReadable else { return nil }
         notes.insert(note, at: 0)
         enqueue(note)
         return note.id
@@ -267,7 +306,8 @@ final class NoteLibrary {
 
     func note(_ id: UUID) -> NoteRecord? {
         notes.first { note in
-            note.id == id && libraries.contains(where: { $0.id == note.metadata?.libraryID })
+            lifecycleReadable && note.id == id && !invalidating.contains(id) && (lifecycle[id]?.state ?? .active) == .active
+                && lifecycle[id]?.restorePending != true && libraries.contains(where: { $0.id == note.metadata?.libraryID })
         }
     }
 
@@ -276,6 +316,7 @@ final class NoteLibrary {
         var note = original
         change(&note)
         guard note.id == original.id, note.metadata?.libraryID == original.metadata?.libraryID,
+              note.metadata?.lifecycleGeneration == original.metadata?.lifecycleGeneration,
               note.schemaVersion == 2 else { problem = LibraryDataError.invalidOwnership.localizedDescription; return false }
         if let folder = note.metadata?.folderID,
            !catalog.folders.contains(where: { $0.id == folder && $0.libraryID == note.metadata?.libraryID }) {
@@ -341,4 +382,99 @@ final class NoteLibrary {
             note.metadata?.selectedSummaryID = version.id
         }
     }
+    func refreshLifecycle() async {
+        guard let repository else { return }
+        do {
+            lifecycle = Dictionary(uniqueKeysWithValues: try await repository.lifecycleEvents(identities: identities).map { ($0.noteID, $0) })
+            lifecycleReadable = true
+        }
+        catch { lifecycleReadable = false; storageProblem = "Storage state could not be read. \(error.localizedDescription)" }
+    }
+
+    func refreshStorage() async {
+        guard let repository else { return }
+        let scope = selectedLibraryID
+        do {
+            let usage = try await repository.storageUsage(libraryID: scope, identities: identities)
+            if selectedLibraryID == scope { storage = usage }
+        }
+        catch { problem = error.localizedDescription }
+    }
+
+    func processRetention(captureActive: Bool) async {
+        guard !captureActive, !storageBusy, let repository else { return }
+        storageBusy = true
+        storageProblem = nil
+        defer { storageBusy = false }
+        do {
+            _ = try await repository.processRetention(now: Date(), identities: identities)
+            await refreshLifecycle()
+            notes.removeAll { lifecycle[$0.id]?.state == .purged }
+            for record in lifecycle.values where record.state == .active && !record.restorePending {
+                if let index = notes.firstIndex(where: { $0.id == record.noteID }),
+                   !unsavedIDs.contains(record.noteID),
+                   notes[index].metadata?.lifecycleGeneration != record.generation {
+                    let revision = notes[index].metadata?.revisionID
+                    let restored = try await repository.retainedNote(record.noteID, libraryID: record.libraryID, identities: identities)
+                    if let current = notes.firstIndex(where: { $0.id == record.noteID }),
+                       !unsavedIDs.contains(record.noteID), notes[current].metadata?.revisionID == revision {
+                        notes[current] = restored
+                    }
+                }
+            }
+        } catch {
+            await refreshLifecycle()
+            storageProblem = "Storage cleanup is incomplete. Retry when device storage is available. \(error.localizedDescription)"
+        }
+    }
+
+    enum StorageAction { case trash, restore, purge, removeAudio }
+    func performStorage(_ action: StorageAction, id: UUID, confirmed: Bool = false, captureActive: Bool) async {
+        guard !captureActive, !storageBusy, let repository else {
+            problem = LifecycleError.recordingActive.localizedDescription
+            return
+        }
+        guard let source = notes.first(where: { $0.id == id }), let libraryID = source.metadata?.libraryID,
+              libraries.contains(where: { $0.id == libraryID }) else { return }
+        storageBusy = true
+        storageProblem = nil
+        invalidating.insert(id)
+        defer { invalidating.remove(id); storageBusy = false }
+        await flush()
+        // Freeing audio or confirmed Trash payload must remain possible when another save hit ENOSPC.
+        if action == .trash && unsavedIDs.contains(id) { return }
+        do {
+            let state = lifecycle[id] ?? .initial(noteID: id, libraryID: libraryID)
+            switch action {
+            case .trash:
+                _ = try await repository.trash(noteID: id, libraryID: libraryID, expectedGeneration: state.generation,
+                    operationID: UUID(), now: Date(), identities: identities)
+            case .restore:
+                guard let deletionID = state.deletionID else { throw LifecycleError.stale }
+                _ = try await repository.restore(noteID: id, libraryID: libraryID, deletionID: deletionID,
+                    expectedGeneration: state.generation, operationID: UUID(), now: Date(), identities: identities)
+            case .purge:
+                _ = try await repository.permanentlyDelete(noteID: id, libraryID: libraryID, expectedGeneration: state.generation,
+                    operationID: UUID(), confirmed: confirmed, identities: identities)
+            case .removeAudio:
+                _ = try await repository.removeAudio(noteID: id, libraryID: libraryID, expectedGeneration: state.generation,
+                    operationID: UUID(), confirmed: confirmed, now: Date(), identities: identities)
+            }
+            await refreshLifecycle()
+            if lifecycle[id]?.state == .purged {
+                notes.removeAll { $0.id == id }
+                unsavedIDs.remove(id)
+                if unsavedIDs.isEmpty { saveProblem = nil }
+            }
+            else if action == .restore {
+                let restored = try await repository.retainedNote(id, libraryID: libraryID, identities: identities)
+                if let index = notes.firstIndex(where: { $0.id == id }) { notes[index] = restored }
+            }
+            await refreshStorage()
+        } catch {
+            await refreshLifecycle()
+            storageProblem = "Storage change is incomplete. \(error.localizedDescription)"
+        }
+    }
+
 }
