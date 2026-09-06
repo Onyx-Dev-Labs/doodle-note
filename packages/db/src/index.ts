@@ -17,3 +17,5 @@ export {
   or,
   sql,
 } from "drizzle-orm";
+export * from './sync-contract';
+export * from './sync-service';

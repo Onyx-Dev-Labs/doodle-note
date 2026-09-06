@@ -303,3 +303,42 @@ export const verifiedCallerIds = pgTable("verified_caller_ids", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
+/** V2 sequence is allocated while holding the workspace clock row until commit. */
+export const syncClocks = pgTable('sync_clocks', {
+  organizationId: text('organization_id').primaryKey().references(() => organization.id, {onDelete:'cascade'}),
+  sequence: bigint('sequence', {mode:'number'}).notNull().default(0),
+});
+export const syncLibraries = pgTable('sync_libraries', {
+  id: uuid('id').primaryKey(),
+  organizationId: text('organization_id').notNull().references(() => organization.id, {onDelete:'cascade'}),
+});
+/** Purged rows remain as minimal durable resurrection barriers. */
+export const syncNotes = pgTable('sync_notes', {
+  id: uuid('id').primaryKey(),
+  libraryId: uuid('library_id').notNull().references(() => syncLibraries.id, {onDelete:'cascade'}),
+  organizationId: text('organization_id').notNull().references(() => organization.id, {onDelete:'cascade'}),
+  headRevision: uuid('head_revision'),
+  lifecycleGeneration: uuid('lifecycle_generation').notNull().defaultRandom(),
+  state: text('state').notNull().default('active'),
+  deletionId: uuid('deletion_id'),
+  deletedAt: timestamp('deleted_at',{withTimezone:true}),
+  expiresAt: timestamp('expires_at',{withTimezone:true}),
+});
+export const syncRevisions = pgTable('sync_revisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  noteId: uuid('note_id').notNull().references(() => syncNotes.id, {onDelete:'cascade'}),
+  organizationId: text('organization_id').notNull().references(() => organization.id, {onDelete:'cascade'}),
+  sequence: bigint('sequence',{mode:'number'}).notNull(),
+  parentId: uuid('parent_id'),
+  kind: text('kind').notNull(),
+  snapshot: jsonb('snapshot'),
+  createdAt: timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),
+}, t => [uniqueIndex('sync_revisions_org_sequence').on(t.organizationId,t.sequence)]);
+export const syncOperations = pgTable('sync_operations', {
+  id: uuid('id').primaryKey(),
+  organizationId: text('organization_id').notNull().references(() => organization.id, {onDelete:'cascade'}),
+  noteId: uuid('note_id').notNull().references(() => syncNotes.id, {onDelete:'cascade'}),
+  payloadHash: text('payload_hash').notNull(),
+  receipt: jsonb('receipt').notNull(),
+});
