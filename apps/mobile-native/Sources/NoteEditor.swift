@@ -14,6 +14,11 @@ struct NoteEditor: View {
     private var isActive: Bool { recording.noteID == id }
     private var audio: [URL] { library.disk?.audioFiles(for: id) ?? [] }
 
+    private func play(at seconds: TimeInterval = 0) {
+        guard recording.permitsPlayback else { return }
+        player.play(files: audio, at: seconds)
+    }
+
     private func binding<Value>(_ keyPath: WritableKeyPath<NoteRecord, Value>) -> Binding<Value> {
         Binding(get: { note[keyPath: keyPath] }, set: { value in library.update(id) { $0[keyPath: keyPath] = value } })
     }
@@ -57,11 +62,14 @@ struct NoteEditor: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .task(id: note.language) {
-            if recording.noteID == nil { await recording.speech.check(note.language) }
-            await recording.speakers.check()
+            if recording.noteID == nil && !recording.busy {
+                await recording.speech.check(note.language)
+                await recording.speakers.check()
+            }
         }
         .onDisappear { player.stop() }
         .onChange(of: recording.noteID) { _, value in if value != nil { player.stop() } }
+        .onChange(of: recording.busy) { _, value in if value { player.stop() } }
     }
 
     private var notePicker: some View {
@@ -106,11 +114,11 @@ struct NoteEditor: View {
                                 .font(.caption.bold())
                             Spacer()
                             Button {
-                                player.play(files: audio, at: passage.start)
+                                play(at: passage.start)
                             } label: {
                                 Text(Duration.seconds(passage.start), format: .time(pattern: .minuteSecond))
                                     .monospacedDigit().font(.caption)
-                            }.disabled(audio.isEmpty || recording.noteID != nil)
+                            }.disabled(audio.isEmpty || !recording.permitsPlayback)
                                 .accessibilityLabel("Play passage")
                         }
                         Text(passage.text).foregroundStyle(passage.isFinal ? .primary : .secondary)
@@ -137,8 +145,8 @@ struct NoteEditor: View {
                 if !audio.isEmpty && recording.noteID == nil {
                     Button(player.isPlaying ? "Stop playback" : "Play recording",
                            systemImage: player.isPlaying ? "stop.fill" : "play.fill") {
-                        if player.isPlaying { player.stop() } else { player.play(files: audio) }
-                    }.buttonStyle(.bordered)
+                        if player.isPlaying { player.stop() } else { play() }
+                    }.buttonStyle(.bordered).disabled(!recording.permitsPlayback)
                 }
                 Spacer()
                 Button(isActive ? "Stop recording" : "Record", systemImage: isActive ? "stop.fill" : "mic.fill") {

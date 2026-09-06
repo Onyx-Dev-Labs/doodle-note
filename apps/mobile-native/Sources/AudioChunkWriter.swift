@@ -24,13 +24,14 @@ private final class ConverterSupply: @unchecked Sendable {
 }
 
 enum CaptureError: LocalizedError {
-    case microphone, format, backlog, conversion
+    case microphone, format, backlog, conversion, speakerBacklog
     var errorDescription: String? {
         switch self {
         case .microphone: "Microphone access is needed to record. Enable it in Settings."
         case .format: "The microphone audio format is unavailable."
         case .backlog: "Audio capture could not keep up. Recording stopped to avoid an unreported gap."
         case .conversion: "Live transcription could not process the audio format. Audio is still being saved."
+        case .speakerBacklog: "Speaker processing could not keep up. Speaker labels stopped."
         }
     }
 }
@@ -53,6 +54,7 @@ final class AudioChunkWriter: @unchecked Sendable {
     private let speechFormat: AVAudioFormat?
     private var speechInput: AsyncStream<AnalyzerInput>.Continuation?
     private var speakerInput: AsyncStream<SpeakerAudio>.Continuation?
+    private let speakerConverter = SpeakerPCMConverter()
     private let onCaptureError: @Sendable (String) -> Void
     private let onSpeechError: @Sendable (String) -> Void
     private let onSpeakerError: @Sendable (String) -> Void
@@ -111,6 +113,10 @@ final class AudioChunkWriter: @unchecked Sendable {
             queue.async { [self] in
                 do { try closeChunk() } catch { onCaptureError(error.localizedDescription) }
                 flushSpeech()
+                if speakerInput != nil {
+                    do { try yieldSpeakers(speakerConverter.finish()) }
+                    catch { onSpeakerError("Speaker finalization failed. Saved audio is preserved. \(error.localizedDescription)") }
+                }
                 speechInput?.finish()
                 speechInput = nil
                 speakerInput?.finish()
@@ -165,28 +171,22 @@ final class AudioChunkWriter: @unchecked Sendable {
     }
 
     private func feedSpeakers(_ buffer: AVAudioPCMBuffer) {
-        guard let speakerInput else { return }
-        guard let channels = buffer.floatChannelData else {
-            speakerInput.finish()
+        guard speakerInput != nil else { return }
+        do { try yieldSpeakers(speakerConverter.convert(buffer)) }
+        catch {
+            speakerInput?.finish()
             self.speakerInput = nil
-            onSpeakerError("Speaker labels stopped because the microphone format changed. Audio is preserved.")
-            return
+            onSpeakerError("Speaker processing stopped. Audio and transcription continue. \(error.localizedDescription)")
         }
-        let count = Int(buffer.format.channelCount)
-        var mono = [Float](repeating: 0, count: Int(buffer.frameLength))
-        for frame in mono.indices {
-            for channel in 0..<count {
-                mono[frame] += buffer.format.isInterleaved ? channels[0][frame * count + channel] : channels[channel][frame]
-            }
-            mono[frame] /= Float(count)
-        }
-        switch speakerInput.yield(SpeakerAudio(samples: mono, sampleRate: buffer.format.sampleRate)) {
+    }
+
+    private func yieldSpeakers(_ samples: [Float]) throws {
+        guard let speakerInput, !samples.isEmpty else { return }
+        switch speakerInput.yield(SpeakerAudio(samples: samples, sampleRate: 16_000)) {
         case .dropped, .terminated:
-            speakerInput.finish()
-            self.speakerInput = nil
-            onSpeakerError("Speaker processing could not keep up. Labels stopped; audio and transcription continue.")
+            throw CaptureError.speakerBacklog
         case .enqueued: break
-        @unknown default: break
+        @unknown default: throw CaptureError.conversion
         }
     }
 

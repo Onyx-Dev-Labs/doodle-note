@@ -64,6 +64,25 @@ final class LocalDataTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), bytes)
     }
 
+    func testRecoveryWriteFailureStillExposesReadableNotes() throws {
+        let store = try temporaryStore()
+        var note = NoteRecord()
+        note.text = "Keep this readable even when storage is full"
+        note.ink = Data([1, 2, 3])
+        note.apply(TranscriptPassage(start: 0, end: 1, text: "Saved speech", isFinal: true))
+        note.captureState = .recording
+        try store.save(note)
+        let url = store.directory(for: note.id).appendingPathComponent("note.json")
+        let original = try Data(contentsOf: url)
+        let result = try store.load(persistRecovery: { _ in throw CocoaError(.fileWriteOutOfSpace) })
+        note.captureState = .interrupted
+        XCTAssertEqual(result.notes, [note])
+        XCTAssertTrue(result.unreadable.isEmpty)
+        XCTAssertEqual(result.recoveryWriteProblems, [note.id.uuidString])
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        XCTAssertEqual(try store.load().notes.first?.captureState, .interrupted)
+    }
+
     func testSpeechRevisionsReplaceDraftsWithoutDuplicatingFinalText() {
         var note = NoteRecord()
         note.apply(TranscriptPassage(start: 0, end: 1, text: "Hel", isFinal: false))

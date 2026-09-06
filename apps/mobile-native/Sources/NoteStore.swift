@@ -27,11 +27,13 @@ struct NoteDiskStore {
                        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
-    func load() throws -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String]) {
+    func load(persistRecovery: ((NoteRecord) throws -> Void)? = nil) throws
+        -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String], recoveryWriteProblems: [String]) {
         let dirs = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         var notes: [NoteRecord] = []
         var unreadable: [String] = []
         var audioProblems: [String] = []
+        var recoveryWriteProblems: [String] = []
         for dir in dirs where UUID(uuidString: dir.lastPathComponent) != nil {
             do {
                 var note = try JSONDecoder().decode(NoteRecord.self,
@@ -44,12 +46,15 @@ struct NoteDiskStore {
                 audioProblems.append(contentsOf: recovery.unreadable)
                 if note.captureState == .recording {
                     note.captureState = .interrupted
-                    try save(note)
+                    do {
+                        if let persistRecovery { try persistRecovery(note) }
+                        else { try save(note) }
+                    } catch { recoveryWriteProblems.append(dir.lastPathComponent) }
                 }
                 notes.append(note)
             } catch { unreadable.append(dir.lastPathComponent) }
         }
-        return (notes.sorted { $0.updatedAt > $1.updatedAt }, unreadable, audioProblems)
+        return (notes.sorted { $0.updatedAt > $1.updatedAt }, unreadable, audioProblems, recoveryWriteProblems)
     }
 
     func audioFiles(for id: UUID) -> [URL] {
@@ -80,6 +85,8 @@ final class NoteLibrary {
                 problem = "Some saved notes could not be opened. Their files have been preserved."
             } else if !result.audioProblems.isEmpty {
                 problem = "Some interrupted audio needs recovery. Original files and notes are preserved."
+            } else if !result.recoveryWriteProblems.isEmpty {
+                problem = "Recovered notes are available, but recovery status could not be saved. Free device storage before continuing."
             }
         } catch { problem = "Local storage could not be opened. \(error.localizedDescription)" }
     }

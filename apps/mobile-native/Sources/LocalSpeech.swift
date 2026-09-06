@@ -12,30 +12,45 @@ final class LocalSpeech {
     private var selectedLocale: Locale?
     private var generation = UUID()
     private var downloading = false
+    private var preparing = false
+    struct Availability {
+        let locale: Locale
+        let installed: Bool
+    }
+    private let availability: @MainActor (SpokenLanguage) async -> Availability?
+
+    init(availability: @escaping @MainActor (SpokenLanguage) async -> Availability? = { language in
+        guard SpeechTranscriber.isAvailable,
+              let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: language.rawValue))
+        else { return nil }
+        let module = SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+        return Availability(locale: locale, installed: await AssetInventory.status(forModules: [module]) == .installed)
+    }) { self.availability = availability }
 
     func check(_ language: SpokenLanguage) async {
-        guard analyzer == nil, !downloading else { return }
+        guard analyzer == nil, !downloading, !preparing else { return }
+        await refreshAvailability(language)
+    }
+
+    private func refreshAvailability(_ language: SpokenLanguage) async {
         let request = UUID()
         generation = request
         readiness = .checking
-        let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: language.rawValue))
+        let result = await availability(language)
         guard request == generation else { return }
-        guard SpeechTranscriber.isAvailable, let locale else {
+        guard let result else {
             selectedLocale = nil
             readiness = .unavailable
             detail = "On-device speech is unavailable here for this language. You can still record and write notes."
             return
         }
-        selectedLocale = locale
-        let module = SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
-        let status = await AssetInventory.status(forModules: [module])
-        guard request == generation else { return }
-        readiness = status == .installed ? .ready : .downloadNeeded
-        detail = status == .installed ? "Speech model ready on this device." : "Download the speech model before recording with live text."
+        selectedLocale = result.locale
+        readiness = result.installed ? .ready : .downloadNeeded
+        detail = result.installed ? "Speech model ready on this device." : "Download the speech model before recording with live text."
     }
 
     func download(_ language: SpokenLanguage) async {
-        guard let selectedLocale, readiness == .downloadNeeded else { return }
+        guard !preparing, analyzer == nil, let selectedLocale, readiness == .downloadNeeded else { return }
         downloading = true
         readiness = .downloading
         detail = "Downloading the speech model…"
@@ -52,7 +67,10 @@ final class LocalSpeech {
     func start(language: SpokenLanguage, offset: TimeInterval,
                onPassage: @escaping @MainActor (TranscriptPassage) -> Void) async
         -> (AVAudioFormat, AsyncStream<AnalyzerInput>.Continuation)? {
-        await check(language)
+        guard analyzer == nil, !preparing, !downloading else { return nil }
+        preparing = true
+        defer { preparing = false }
+        await refreshAvailability(language)
         guard readiness == .ready, let selectedLocale else { return nil }
         let module = SpeechTranscriber(locale: selectedLocale, preset: .timeIndexedProgressiveTranscription)
         let analyzer = SpeechAnalyzer(modules: [module])

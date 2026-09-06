@@ -14,13 +14,19 @@ final class RecordingSession {
     private var captureFailed = false
     private var interruptionObserver: NSObjectProtocol?
     private var routeObserver: NSObjectProtocol?
+    private let recordPermission: @MainActor () async -> Bool
+    var permitsPlayback: Bool { noteID == nil && !busy }
+
+    init(recordPermission: @escaping @MainActor () async -> Bool = {
+        await AVAudioApplication.requestRecordPermission()
+    }) { self.recordPermission = recordPermission }
 
     func start(_ id: UUID, library: NoteLibrary) async {
         guard noteID == nil, !busy, let note = library.note(id), let disk = library.disk else { return }
         busy = true
         captureFailed = false
         defer { busy = false }
-        guard await AVAudioApplication.requestRecordPermission() else {
+        guard await recordPermission() else {
             problem = CaptureError.microphone.localizedDescription
             return
         }
