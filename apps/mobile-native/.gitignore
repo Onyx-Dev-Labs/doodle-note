@@ -1,0 +1,4 @@
+DerivedData/
+.build/
+.xcodebuildmcp/
+*.xcresult

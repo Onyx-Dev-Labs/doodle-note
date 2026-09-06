@@ -1,0 +1,69 @@
+name: DoodleNoteNative
+options:
+  bundleIdPrefix: ai.doodlenote
+  deploymentTarget:
+    iOS: "26.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: YES
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    revision: 5c19d5e12320e22bbfb7a1877b089d2665a69add
+targets:
+  DoodleNoteNative:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: FluidAudio
+    info:
+      path: Config/Info.plist
+      properties:
+        CFBundleDisplayName: DoodleNote
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSMicrophoneUsageDescription: Record conversations you choose to capture and save the audio on this device.
+        NSSpeechRecognitionUsageDescription: Create a transcript of your recording using speech models on this device.
+        UIBackgroundModes: [audio]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations~iphone:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.doodlenote.native.prototype
+        GENERATE_INFOPLIST_FILE: NO
+  DoodleNoteNativeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: DoodleNoteNative
+  DoodleNoteNativeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: DoodleNoteNative
+schemes:
+  DoodleNoteNative:
+    build:
+      targets:
+        DoodleNoteNative: all
+    test:
+      targets: [DoodleNoteNativeTests, DoodleNoteNativeUITests]
