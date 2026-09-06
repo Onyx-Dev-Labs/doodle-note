@@ -9,6 +9,8 @@ struct NoteEditor: View {
     @State private var pane = 0
     @State private var player = LocalPlayback()
     @State private var showSpeakers = false
+    @State private var summaryText = ""
+    @State private var editingSummary: SummaryVersion?
 
     private var note: NoteRecord { library.note(id) ?? NoteRecord(id: id) }
     private var isActive: Bool { recording.noteID == id }
@@ -26,7 +28,13 @@ struct NoteEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             TextField("Untitled note", text: binding(\.title), axis: .vertical)
-                .font(.largeTitle.bold()).padding().accessibilityIdentifier("noteTitle")
+                .font(.largeTitle.bold()).padding().accessibilityIdentifier("noteTitle").disabled(note.schemaVersion != 2)
+            Picker("Move to folder", selection: Binding(get: { note.metadata?.folderID }, set: { folder in
+                library.update(id) { $0.metadata?.folderID = folder }
+            })) {
+                Text("No folder").tag(UUID?.none)
+                ForEach(library.folders) { Text($0.name).tag(Optional($0.id)) }
+            }.padding(.horizontal).disabled(note.schemaVersion != 2).accessibilityIdentifier("noteFolder")
             if note.captureState == .interrupted {
                 Label("Recording interrupted. Saved audio and notes are retained. Start again when ready.", systemImage: "pause.circle")
                     .font(.callout).foregroundStyle(.orange).padding(.horizontal)
@@ -35,7 +43,7 @@ struct NoteEditor: View {
                 Picker("Spoken language", selection: binding(\.language)) {
                     ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) }
                 }
-                .disabled(recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
+                .disabled(note.schemaVersion != 2 || recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
                 Spacer()
                 if let started = recording.startedAt, isActive {
                     Label { Text(started, style: .timer).monospacedDigit() } icon: { Image(systemName: "record.circle.fill") }
@@ -56,6 +64,7 @@ struct NoteEditor: View {
                     Text("Notes").tag(0)
                     Text("Ink").tag(1)
                     Text("Transcript").tag(2)
+                    Text("Summary").tag(3)
                 }.pickerStyle(.segmented).padding()
                 if pane == 2 { transcript } else { notePane }
             }
@@ -73,14 +82,41 @@ struct NoteEditor: View {
     }
 
     private var notePicker: some View {
-        Picker("Content", selection: $pane) { Text("Notes").tag(0); Text("Ink").tag(1) }
+        Picker("Content", selection: $pane) { Text("Notes").tag(0); Text("Ink").tag(1); Text("Summary").tag(3) }
             .pickerStyle(.segmented).padding()
     }
 
     @ViewBuilder private var notePane: some View {
-        if pane == 1 {
+        if pane == 3 {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Summary versions").font(.headline)
+                    if note.metadata?.summaries.isEmpty != false {
+                        Text("Generated summaries will appear here. Your personal notes remain separate.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(note.metadata?.summaries ?? []) { version in
+                        Text(version.origin == .edited ? "Edited version" : "Generated version").font(.caption)
+                        Text(version.text).textSelection(.enabled)
+                        Button("Edit as new version") { summaryText = version.text; editingSummary = version }.disabled(note.schemaVersion != 2)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding()
+            }
+            .sheet(item: $editingSummary) { version in
+                NavigationStack {
+                    TextEditor(text: $summaryText).padding().navigationTitle("Edit summary")
+                        .toolbar {
+                            Button("Cancel") { editingSummary = nil }
+                            Button("Save version") {
+                                library.saveSummaryEdit(noteID: id, parent: version, text: summaryText)
+                                editingSummary = nil
+                            }
+                        }
+                }
+            }
+        } else if pane == 1 {
             if note.ink.isEmpty || (try? PKDrawing(data: note.ink)) != nil {
-                InkCanvas(data: binding(\.ink)).accessibilityLabel("Drawing canvas")
+                InkCanvas(data: binding(\.ink), editable: note.schemaVersion == 2).accessibilityLabel("Drawing canvas")
             } else {
                 ContentUnavailableView("Drawing could not be opened", systemImage: "pencil.tip.crop.circle.badge.exclamationmark",
                     description: Text("The original drawing is preserved."))
@@ -88,8 +124,12 @@ struct NoteEditor: View {
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Your personal notes").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
-                TextEditor(text: binding(\.text)).padding(.horizontal, 8)
-                    .accessibilityLabel("Personal notes").accessibilityIdentifier("personalNotes")
+                if note.schemaVersion == 2 {
+                    TextEditor(text: binding(\.text)).padding(.horizontal, 8)
+                        .accessibilityLabel("Personal notes").accessibilityIdentifier("personalNotes")
+                } else {
+                    ScrollView { Text(note.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
+                }
             }
         }
     }
@@ -156,7 +196,7 @@ struct NoteEditor: View {
                         else { await recording.start(id, library: library) }
                     }
                 }.buttonStyle(.borderedProminent).tint(isActive ? .red : .accentColor)
-                    .disabled(recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
+                    .disabled(note.schemaVersion != 2 || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
                     .accessibilityIdentifier("recordButton")
             }
             if recording.busy { ProgressView("Preparing or finalizing recording…").font(.caption) }
@@ -181,7 +221,7 @@ struct NoteEditor: View {
                         TextField(annotations.name(for: key), text: Binding(
                             get: { library.note(id)?.speakerAnnotations?.names[key] ?? "" },
                             set: { name in library.update(id) { $0.speakerAnnotations?.names[key] = name.trimmingCharacters(in: .whitespacesAndNewlines) } }))
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.roundedBorder).disabled(note.schemaVersion != 2)
                     }
                 }
                 Text("Names apply to this recording session. Remembering voices across meetings is still being built.")
@@ -197,6 +237,7 @@ struct NoteEditor: View {
 
 struct InkCanvas: UIViewRepresentable {
     @Binding var data: Data
+    var editable = true
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> PKCanvasView {
@@ -214,11 +255,12 @@ struct InkCanvas: UIViewRepresentable {
     }
     func updateUIView(_ canvas: PKCanvasView, context: Context) {
         context.coordinator.parent = self
+        canvas.drawingGestureRecognizer.isEnabled = editable
         if context.coordinator.lastData != data {
             context.coordinator.lastData = data
             canvas.drawing = (try? PKDrawing(data: data)) ?? PKDrawing()
         }
-        context.coordinator.picker.setVisible(true, forFirstResponder: canvas)
+        context.coordinator.picker.setVisible(editable, forFirstResponder: canvas)
     }
     final class Coordinator: NSObject, PKCanvasViewDelegate {
         var parent: InkCanvas

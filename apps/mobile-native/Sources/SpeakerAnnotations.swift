@@ -9,7 +9,7 @@ struct SpeakerTurn: Codable, Equatable, Sendable {
     var key: String { "\(sessionID.uuidString):\(slot)" }
 }
 
-struct SpeakerAnnotations: Codable, Equatable {
+struct SpeakerAnnotations: Codable, Equatable, Sendable {
     var turns: [SpeakerTurn] = []
     var names: [String: String] = [:]
     var order: [String]? = nil

@@ -1,7 +1,8 @@
 import Foundation
+import CryptoKit
 import Observation
 
-struct NoteDiskStore {
+struct NoteDiskStore: Sendable {
     let root: URL
 
     init(root: URL) throws {
@@ -19,29 +20,132 @@ struct NoteDiskStore {
         return url
     }
 
-    func save(_ note: NoteRecord) throws {
+    func save(_ note: NoteRecord, migrationOriginal: Data? = nil) throws {
         let dir = directory(for: note.id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(note)
-        try data.write(to: dir.appendingPathComponent("note.json"),
-                       options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let file = dir.appendingPathComponent("note.json")
+        if FileManager.default.fileExists(atPath: file.path), note.schemaVersion != 2 {
+            throw LibraryDataError.unsupportedVersion
+        }
+        if note.schemaVersion == 2 {
+            guard let metadata = note.metadata else { throw LibraryDataError.invalidDocument }
+            let ids = Set(metadata.summaries.map(\.id))
+            guard ids.count == metadata.summaries.count,
+                  metadata.selectedSummaryID.map(ids.contains) ?? true,
+                  metadata.summaries.allSatisfy({ version in
+                      (version.parentID.map { $0 != version.id && ids.contains($0) } ?? (version.origin == .generated))
+                        && version.sources.allSatisfy { $0.noteID == note.id && $0.libraryID == metadata.libraryID }
+                  }) else { throw LibraryDataError.immutableHistory }
+            var retainedIDs: Set<UUID> = []
+            for version in metadata.summaries {
+                if version.origin == .edited {
+                    guard let parent = version.parentID, retainedIDs.contains(parent) else { throw LibraryDataError.immutableHistory }
+                } else if version.parentID != nil { throw LibraryDataError.immutableHistory }
+                retainedIDs.insert(version.id)
+            }
+            if FileManager.default.fileExists(atPath: file.path) {
+                let existingBytes = try Data(contentsOf: file)
+                let old = try JSONDecoder().decode(NoteRecord.self, from: existingBytes)
+                guard (1...2).contains(old.schemaVersion) else { throw LibraryDataError.unsupportedVersion }
+                if old.schemaVersion == 1 {
+                    guard migrationOriginal == existingBytes,
+                          try Data(contentsOf: dir.appendingPathComponent("note.schema1.original.json")) == existingBytes,
+                          FileManager.default.fileExists(atPath: dir.appendingPathComponent("migration-1-to-2.json").path) else {
+                        throw LibraryDataError.invalidDocument
+                    }
+                } else if old.metadata == nil { throw LibraryDataError.invalidDocument }
+                guard old.id == note.id else { throw LibraryDataError.invalidDocument }
+                if let previous = old.metadata, old.schemaVersion == 2 {
+                    guard previous.libraryID == metadata.libraryID else { throw LibraryDataError.invalidOwnership }
+                    for version in previous.summaries {
+                        guard metadata.summaries.contains(version) else { throw LibraryDataError.immutableHistory }
+                    }
+                }
+            }
+            let revision = NoteRevision(note)
+            let history = dir.appendingPathComponent("revisions", isDirectory: true)
+            try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+            let revisionFile = history.appendingPathComponent(revision.id.uuidString + ".json")
+            if FileManager.default.fileExists(atPath: revisionFile.path) {
+                let existing = try JSONDecoder().decode(NoteRevision.self, from: Data(contentsOf: revisionFile))
+                guard existing == revision else { throw LibraryDataError.immutableHistory }
+            } else { try write(revision, to: revisionFile) }
+        }
+        try write(note, to: file)
     }
 
-    func load(persistRecovery: ((NoteRecord) throws -> Void)? = nil) throws
-        -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String], recoveryWriteProblems: [String]) {
+    func write<T: Encodable>(_ value: T, to file: URL) throws {
+        try JSONEncoder().encode(value).write(to: file,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    struct MigrationRecord: Codable {
+        let fromVersion: Int
+        let toVersion: Int
+        let noteID: UUID
+        let originalFile: String
+        let originalSHA256: String
+    }
+
+    func migrate(_ source: NoteRecord, data: Data, directory: URL,
+                 beforeCommit: (() throws -> Void)? = nil) throws -> NoteRecord {
+        guard source.id.uuidString == directory.lastPathComponent, source.schemaVersion == 1 else {
+            throw LibraryDataError.invalidDocument
+        }
+        let backup = directory.appendingPathComponent("note.schema1.original.json")
+        if FileManager.default.fileExists(atPath: backup.path) {
+            guard try Data(contentsOf: backup) == data else { throw LibraryDataError.invalidDocument }
+        } else { try data.write(to: backup, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
+        let record = MigrationRecord(fromVersion: 1, toVersion: 2, noteID: source.id,
+            originalFile: backup.lastPathComponent, originalSHA256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined())
+        try write(record, to: directory.appendingPathComponent("migration-1-to-2.json"))
+        var note = source
+        note.schemaVersion = 2
+        note.metadata = NoteMetadata(revisionID: source.id)
+        try beforeCommit?()
+        try save(note, migrationOriginal: data)
+        guard try JSONDecoder().decode(NoteRecord.self, from: Data(contentsOf: directory.appendingPathComponent("note.json"))) == note else {
+            throw LibraryDataError.invalidDocument
+        }
+        return note
+    }
+
+    func revision(_ anchor: SourceAnchor) throws -> NoteRevision {
+        let file = directory(for: anchor.noteID).appendingPathComponent("revisions")
+            .appendingPathComponent(anchor.revisionID.uuidString + ".json")
+        let revision = try JSONDecoder().decode(NoteRevision.self, from: Data(contentsOf: file))
+        guard revision.libraryID == anchor.libraryID, revision.noteID == anchor.noteID,
+              revision.id == anchor.revisionID else { throw LibraryDataError.invalidOwnership }
+        return revision
+    }
+
+    func load(persistRecovery: ((NoteRecord) throws -> Void)? = nil, beforeMigrationCommit: (() throws -> Void)? = nil) throws
+        -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String], recoveryWriteProblems: [String], migrationProblems: [String]) {
         let dirs = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         var notes: [NoteRecord] = []
         var unreadable: [String] = []
         var audioProblems: [String] = []
         var recoveryWriteProblems: [String] = []
+        var migrationProblems: [String] = []
         for dir in dirs where UUID(uuidString: dir.lastPathComponent) != nil {
             do {
-                var note = try JSONDecoder().decode(NoteRecord.self,
-                    from: Data(contentsOf: dir.appendingPathComponent("note.json")))
-                guard note.schemaVersion == 1, note.id.uuidString == dir.lastPathComponent else {
+                let data = try Data(contentsOf: dir.appendingPathComponent("note.json"))
+                var note = try JSONDecoder().decode(NoteRecord.self, from: data)
+                guard (1...2).contains(note.schemaVersion), note.id.uuidString == dir.lastPathComponent else {
                     unreadable.append(dir.lastPathComponent)
                     continue
                 }
+                if note.schemaVersion == 1 {
+                    do { note = try migrate(note, data: data, directory: dir, beforeCommit: beforeMigrationCommit) }
+                    catch {
+                        // A failed write must not hide readable source data or allow bypassing migration.
+                        note.metadata = NoteMetadata(revisionID: note.id)
+                        notes.append(note)
+                        migrationProblems.append(dir.lastPathComponent)
+                        continue
+                    }
+                }
+                guard note.metadata != nil else { throw LibraryDataError.invalidDocument }
                 let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
                 audioProblems.append(contentsOf: recovery.unreadable)
                 if note.captureState == .recording {
@@ -54,7 +158,7 @@ struct NoteDiskStore {
                 notes.append(note)
             } catch { unreadable.append(dir.lastPathComponent) }
         }
-        return (notes.sorted { $0.updatedAt > $1.updatedAt }, unreadable, audioProblems, recoveryWriteProblems)
+        return (notes.sorted { $0.updatedAt > $1.updatedAt }, unreadable, audioProblems, recoveryWriteProblems, migrationProblems)
     }
 
     func audioFiles(for id: UUID) -> [URL] {
@@ -72,52 +176,169 @@ struct NoteDiskStore {
 @MainActor @Observable
 final class NoteLibrary {
     private(set) var notes: [NoteRecord] = []
+    private(set) var catalog = LibraryCatalog()
+    private(set) var selectedLibraryID = LibraryRecord.localID
+    private(set) var identities: Set<LibraryIdentity> = []
+    private(set) var pendingSaves = 0
+    private(set) var loading = true
+    private(set) var completedWrites = 0
+    private var queued: [UUID: (NoteRecord, Set<LibraryIdentity>)] = [:]
+    private var loadTask: Task<Void, Never>?
+    private var unsavedIDs: Set<UUID> = []
     var problem: String?
+    private(set) var saveProblem: String?
     private(set) var disk: NoteDiskStore?
+    private var repository: LibraryRepository?
+    private var saveTask: Task<Void, Never>?
+
+    var libraries: [LibraryRecord] {
+        catalog.libraries.filter { $0.id == LibraryRecord.localID || $0.identity.map(identities.contains) == true }
+    }
+    var visibleNotes: [NoteRecord] {
+        notes.filter { $0.metadata?.libraryID == selectedLibraryID }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+    var folders: [NoteFolder] { catalog.folders.filter { $0.libraryID == selectedLibraryID } }
 
     init(root: URL) {
         do {
             let disk = try NoteDiskStore(root: root)
             self.disk = disk
-            let result = try disk.load()
-            notes = result.notes
-            if !result.unreadable.isEmpty {
-                problem = "Some saved notes could not be opened. Their files have been preserved."
-            } else if !result.audioProblems.isEmpty {
-                problem = "Some interrupted audio needs recovery. Original files and notes are preserved."
-            } else if !result.recoveryWriteProblems.isEmpty {
-                problem = "Recovered notes are available, but recovery status could not be saved. Free device storage before continuing."
+            repository = LibraryRepository(disk: disk)
+            loadTask = Task {
+                do {
+                    guard let repository else { return }
+                    let result = try await repository.load()
+                    notes = result.notes
+                    if !result.migrationProblems.isEmpty {
+                        problem = "Some notes are read-only until their storage upgrade can finish. Free device storage and reopen the app. Original files are preserved."
+                    } else if !result.unreadable.isEmpty {
+                        problem = "Some saved notes could not be opened. Their files have been preserved."
+                    } else if !result.audioProblems.isEmpty {
+                        problem = "Some interrupted audio needs recovery. Original files and notes are preserved."
+                    } else if !result.recoveryWriteProblems.isEmpty {
+                        problem = "Recovered notes are available, but recovery status could not be saved. Free device storage before continuing."
+                    }
+                    await refreshCatalog()
+                } catch { problem = "Local storage could not be opened. \(error.localizedDescription)" }
+                loading = false
             }
-        } catch { problem = "Local storage could not be opened. \(error.localizedDescription)" }
+        } catch { loading = false; problem = "Local storage could not be opened. \(error.localizedDescription)" }
+    }
+
+    func waitUntilLoaded() async { await loadTask?.value }
+
+    func refreshCatalog() async {
+        do { if let repository { catalog = try await repository.catalog() } }
+        catch { problem = error.localizedDescription }
+    }
+
+    /// Call only after explicit identity authentication; signing in never moves a note.
+    func authenticate(_ identity: LibraryIdentity, name: String) async throws {
+        guard let repository else { throw LibraryDataError.invalidDocument }
+        _ = try await repository.addLibrary(name: name, identity: identity)
+        identities.insert(identity)
+        await refreshCatalog()
+    }
+
+    /// Caller must stop active capture first; transport offline/paused is NOT sign-out.
+    func signOut(_ identity: LibraryIdentity, captureActive: Bool) async -> Bool {
+        guard !captureActive else { problem = "Stop recording before signing out."; return false }
+        await flush()
+        guard pendingSaves == 0, unsavedIDs.isEmpty else { return false }
+        identities.remove(identity)
+        selectedLibraryID = LibraryRecord.localID
+        return true
+    }
+
+    func selectLibrary(_ id: UUID) {
+        guard libraries.contains(where: { $0.id == id }) else { return }
+        selectedLibraryID = id
     }
 
     @discardableResult func create() -> UUID? {
-        let note = NoteRecord()
-        guard persist(note) else { return nil }
+        var note = NoteRecord()
+        note.metadata?.libraryID = selectedLibraryID
+        guard disk != nil, !loading else { return nil }
         notes.insert(note, at: 0)
+        enqueue(note)
         return note.id
     }
 
-    func note(_ id: UUID) -> NoteRecord? { notes.first { $0.id == id } }
-
-    @discardableResult func update(_ id: UUID, _ change: (inout NoteRecord) -> Void) -> Bool {
-        guard let i = notes.firstIndex(where: { $0.id == id }) else { return false }
-        var note = notes[i]
-        change(&note)
-        note.updatedAt = Date()
-        // Keep unsaved edits visible if storage fails. Never display a false saved status.
-        notes[i] = note
-        return persist(note)
+    func note(_ id: UUID) -> NoteRecord? {
+        notes.first { note in
+            note.id == id && libraries.contains(where: { $0.id == note.metadata?.libraryID })
+        }
     }
 
-    private func persist(_ note: NoteRecord) -> Bool {
-        do {
-            guard let disk else { return false }
-            try disk.save(note)
-            return true
-        } catch {
-            problem = "Changes could not be saved. Keep the app open and free device storage. \(error.localizedDescription)"
+    @discardableResult func update(_ id: UUID, _ change: (inout NoteRecord) -> Void) -> Bool {
+        guard let original = note(id), let i = notes.firstIndex(where: { $0.id == id }) else { return false }
+        var note = original
+        change(&note)
+        guard note.id == original.id, note.metadata?.libraryID == original.metadata?.libraryID,
+              note.schemaVersion == 2 else { problem = LibraryDataError.invalidOwnership.localizedDescription; return false }
+        if let folder = note.metadata?.folderID,
+           !catalog.folders.contains(where: { $0.id == folder && $0.libraryID == note.metadata?.libraryID }) {
+            problem = LibraryDataError.invalidOwnership.localizedDescription
             return false
+        }
+        note.updatedAt = Date()
+        note.metadata?.revisionID = UUID()
+        notes[i] = note
+        enqueue(note)
+        return true
+    }
+
+    private func enqueue(_ note: NoteRecord) {
+        queued[note.id] = (note, identities)
+        unsavedIDs.insert(note.id)
+        pendingSaves = queued.count + (saveTask == nil ? 0 : 1)
+        guard saveTask == nil, let repository else { return }
+        saveTask = Task {
+            while let id = queued.keys.first, let (snapshot, authorized) = queued.removeValue(forKey: id) {
+                pendingSaves = queued.count + 1
+                do {
+                    try await repository.save(snapshot, identities: authorized)
+                    completedWrites += 1
+                    if notes.first(where: { $0.id == id })?.metadata?.revisionID == snapshot.metadata?.revisionID {
+                        unsavedIDs.remove(id)
+                        if unsavedIDs.isEmpty { saveProblem = nil }
+                    }
+                } catch {
+                    unsavedIDs.insert(id)
+                    saveProblem = "Changes could not be saved. Keep the app open and free device storage. \(error.localizedDescription)"
+                }
+            }
+            pendingSaves = 0
+            saveTask = nil
+        }
+    }
+
+    @discardableResult func flush() async -> Bool {
+        await saveTask?.value
+        return unsavedIDs.isEmpty
+    }
+
+    func retrySaving() {
+        for id in unsavedIDs {
+            if let note = note(id) { enqueue(note) }
+        }
+    }
+
+    func addFolder(_ name: String) async {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let repository else { return }
+        do {
+            _ = try await repository.addFolder(name: name, libraryID: selectedLibraryID, identities: identities)
+            await refreshCatalog()
+        } catch { problem = error.localizedDescription }
+    }
+
+    func saveSummaryEdit(noteID: UUID, parent: SummaryVersion, text: String) {
+        update(noteID) { note in
+            let version = SummaryVersion(id: UUID(), parentID: parent.id, createdAt: Date(), origin: .edited,
+                format: parent.format, language: parent.language, text: text, sources: parent.sources)
+            note.metadata?.summaries.append(version)
+            note.metadata?.selectedSummaryID = version.id
         }
     }
 }
