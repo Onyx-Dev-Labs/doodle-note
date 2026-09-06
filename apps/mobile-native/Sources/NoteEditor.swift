@@ -1,0 +1,197 @@
+import SwiftUI
+import PencilKit
+
+struct NoteEditor: View {
+    let id: UUID
+    @Bindable var library: NoteLibrary
+    @Bindable var recording: RecordingSession
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var pane = 0
+    @State private var player = LocalPlayback()
+
+    private var note: NoteRecord { library.note(id) ?? NoteRecord(id: id) }
+    private var isActive: Bool { recording.noteID == id }
+    private var audio: [URL] { library.disk?.audioFiles(for: id) ?? [] }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<NoteRecord, Value>) -> Binding<Value> {
+        Binding(get: { note[keyPath: keyPath] }, set: { value in library.update(id) { $0[keyPath: keyPath] = value } })
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField("Untitled note", text: binding(\.title), axis: .vertical)
+                .font(.largeTitle.bold()).padding().accessibilityIdentifier("noteTitle")
+            if note.captureState == .interrupted {
+                Label("Recording interrupted. Saved audio and notes are retained. Start again when ready.", systemImage: "pause.circle")
+                    .font(.callout).foregroundStyle(.orange).padding(.horizontal)
+            }
+            HStack {
+                Picker("Spoken language", selection: binding(\.language)) {
+                    ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) }
+                }
+                .disabled(recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
+                Spacer()
+                if let started = recording.startedAt, isActive {
+                    Label { Text(started, style: .timer).monospacedDigit() } icon: { Image(systemName: "record.circle.fill") }
+                        .foregroundStyle(.red)
+                }
+            }.padding(.horizontal)
+            // Keep recording controls clear of PencilKit's floating tool palette.
+            captureControls
+            if sizeClass == .regular {
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) { notePicker; notePane }.frame(maxWidth: .infinity)
+                    Divider()
+                    transcript.frame(maxWidth: .infinity)
+                }
+            } else {
+                Picker("Content", selection: $pane) {
+                    Text("Notes").tag(0)
+                    Text("Ink").tag(1)
+                    Text("Transcript").tag(2)
+                }.pickerStyle(.segmented).padding()
+                if pane == 2 { transcript } else { notePane }
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: note.language) {
+            if recording.noteID == nil { await recording.speech.check(note.language) }
+        }
+        .onDisappear { player.stop() }
+        .onChange(of: recording.noteID) { _, value in if value != nil { player.stop() } }
+    }
+
+    private var notePicker: some View {
+        Picker("Content", selection: $pane) { Text("Notes").tag(0); Text("Ink").tag(1) }
+            .pickerStyle(.segmented).padding()
+    }
+
+    @ViewBuilder private var notePane: some View {
+        if pane == 1 {
+            if note.ink.isEmpty || (try? PKDrawing(data: note.ink)) != nil {
+                InkCanvas(data: binding(\.ink)).accessibilityLabel("Drawing canvas")
+            } else {
+                ContentUnavailableView("Drawing could not be opened", systemImage: "pencil.tip.crop.circle.badge.exclamationmark",
+                    description: Text("The original drawing is preserved."))
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Your personal notes").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                TextEditor(text: binding(\.text)).padding(.horizontal, 8)
+                    .accessibilityLabel("Personal notes").accessibilityIdentifier("personalNotes")
+            }
+        }
+    }
+
+    private var transcript: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                Text("Transcript").font(.title2.bold())
+                Text(recording.speech.detail).font(.callout).foregroundStyle(.secondary)
+                if recording.noteID == nil && recording.speech.readiness == .downloadNeeded {
+                    Button("Download speech model", systemImage: "arrow.down.circle") {
+                        Task { await recording.speech.download(note.language) }
+                    }.disabled(recording.busy)
+                }
+                if recording.noteID == nil && recording.speech.readiness == .failed {
+                    Button("Check speech availability") { Task { await recording.speech.check(note.language) } }
+                }
+                ForEach(note.passages) { passage in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(passage.speakerName ?? String(localized: "Unassigned speaker")).font(.caption.bold())
+                            Spacer()
+                            Button {
+                                player.play(files: audio, at: passage.start)
+                            } label: {
+                                Text(Duration.seconds(passage.start), format: .time(pattern: .minuteSecond))
+                                    .monospacedDigit().font(.caption)
+                            }.disabled(audio.isEmpty || recording.noteID != nil)
+                                .accessibilityLabel("Play passage")
+                        }
+                        Text(passage.text).foregroundStyle(passage.isFinal ? .primary : .secondary)
+                        if !passage.isFinal { Text("Draft transcription").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                if note.passages.isEmpty {
+                    Text("Live text will appear here when the speech model is ready.")
+                        .foregroundStyle(.secondary).padding(.vertical)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding()
+        }
+    }
+
+    private var captureControls: some View {
+        VStack(spacing: 8) {
+            if let problem = player.problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            HStack {
+                if !audio.isEmpty && recording.noteID == nil {
+                    Button(player.isPlaying ? "Stop playback" : "Play recording",
+                           systemImage: player.isPlaying ? "stop.fill" : "play.fill") {
+                        if player.isPlaying { player.stop() } else { player.play(files: audio) }
+                    }.buttonStyle(.bordered)
+                }
+                Spacer()
+                Button(isActive ? "Stop recording" : "Record", systemImage: isActive ? "stop.fill" : "mic.fill") {
+                    player.stop()
+                    Task {
+                        if isActive { await recording.stop(library: library) }
+                        else { await recording.start(id, library: library) }
+                    }
+                }.buttonStyle(.borderedProminent).tint(isActive ? .red : .accentColor)
+                    .disabled(recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading)
+                    .accessibilityIdentifier("recordButton")
+            }
+            if recording.busy { ProgressView("Preparing or finalizing recording…").font(.caption) }
+        }.padding().background(.bar)
+    }
+}
+
+struct InkCanvas: UIViewRepresentable {
+    @Binding var data: Data
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> PKCanvasView {
+        let canvas = DrawingCanvasView()
+        canvas.picker = context.coordinator.picker
+        canvas.drawingPolicy = .anyInput
+        canvas.alwaysBounceVertical = true
+        canvas.contentSize = CGSize(width: 1200, height: 1800)
+        canvas.minimumZoomScale = 0.25
+        canvas.maximumZoomScale = 4
+        canvas.tool = PKInkingTool(.pen, color: .label, width: 3)
+        canvas.delegate = context.coordinator
+        context.coordinator.picker.addObserver(canvas)
+        return canvas
+    }
+    func updateUIView(_ canvas: PKCanvasView, context: Context) {
+        context.coordinator.parent = self
+        if context.coordinator.lastData != data {
+            context.coordinator.lastData = data
+            canvas.drawing = (try? PKDrawing(data: data)) ?? PKDrawing()
+        }
+        context.coordinator.picker.setVisible(true, forFirstResponder: canvas)
+    }
+    final class Coordinator: NSObject, PKCanvasViewDelegate {
+        var parent: InkCanvas
+        var lastData = Data()
+        let picker = PKToolPicker()
+        init(_ parent: InkCanvas) { self.parent = parent }
+        func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            let data = canvasView.drawing.dataRepresentation()
+            guard data != lastData else { return }
+            lastData = data
+            parent.data = data
+        }
+    }
+}
+
+final class DrawingCanvasView: PKCanvasView {
+    var picker: PKToolPicker?
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else { return }
+        becomeFirstResponder()
+        picker?.setVisible(true, forFirstResponder: self)
+    }
+}
