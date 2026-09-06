@@ -24,6 +24,7 @@ import XCTest
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let library = NoteLibrary(root: root)
+        await library.waitUntilLoaded()
         let id = try XCTUnwrap(library.create())
         var pending: CheckedContinuation<Bool, Never>?
         let entered = expectation(description: "Permission request entered")

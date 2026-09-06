@@ -61,6 +61,14 @@ final class RecordingSession {
                 try? audioSession.setActive(false)
                 return
             }
+            guard await library.flush() else {
+                speechFeed?.1.finish()
+                speakerFeed?.finish()
+                await speech.finish()
+                await speakers.finish()
+                try? audioSession.setActive(false)
+                return
+            }
             let writer = AudioChunkWriter(directory: directory,
                 speechFormat: speechFeed?.0, speechInput: speechFeed?.1, speakerInput: speakerFeed,
                 onCaptureError: { [weak self] message in

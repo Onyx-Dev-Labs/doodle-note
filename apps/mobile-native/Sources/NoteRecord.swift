@@ -1,6 +1,6 @@
 import Foundation
 
-enum SpokenLanguage: String, Codable, CaseIterable, Identifiable {
+enum SpokenLanguage: String, Codable, CaseIterable, Identifiable, Sendable {
     case english = "en-US", danish = "da-DK", spanish = "es-ES"
     case french = "fr-FR", german = "de-DE"
 
@@ -16,7 +16,7 @@ enum SpokenLanguage: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct TranscriptPassage: Codable, Identifiable, Equatable {
+struct TranscriptPassage: Codable, Identifiable, Equatable, Sendable {
     var id = UUID()
     var start: TimeInterval
     var end: TimeInterval
@@ -26,9 +26,10 @@ struct TranscriptPassage: Codable, Identifiable, Equatable {
     var speakerName: String? = nil
 }
 
-struct NoteRecord: Codable, Identifiable, Equatable {
-    enum CaptureState: String, Codable { case idle, recording, finished, interrupted }
-    var schemaVersion = 1
+struct NoteRecord: Codable, Identifiable, Equatable, Sendable {
+    enum CaptureState: String, Codable, Sendable { case idle, recording, finished, interrupted }
+    var schemaVersion = 2
+    var metadata: NoteMetadata? = NoteMetadata()
     var id = UUID()
     var createdAt = Date()
     var updatedAt = Date()
