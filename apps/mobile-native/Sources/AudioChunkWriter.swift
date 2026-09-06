@@ -45,25 +45,32 @@ final class AudioChunkWriter: @unchecked Sendable {
     private let directory: URL
     private let prefix: String
     private var file: AVAudioFile?
+    private var openFileURL: URL?
     private var index = 0
     private var writeFailed = false
     private var framesInChunk: AVAudioFramePosition = 0
     private var converter: AVAudioConverter?
     private let speechFormat: AVAudioFormat?
     private var speechInput: AsyncStream<AnalyzerInput>.Continuation?
+    private var speakerInput: AsyncStream<SpeakerAudio>.Continuation?
     private let onCaptureError: @Sendable (String) -> Void
     private let onSpeechError: @Sendable (String) -> Void
+    private let onSpeakerError: @Sendable (String) -> Void
 
     init(directory: URL, speechFormat: AVAudioFormat? = nil,
          speechInput: AsyncStream<AnalyzerInput>.Continuation? = nil,
+         speakerInput: AsyncStream<SpeakerAudio>.Continuation? = nil,
          onCaptureError: @escaping @Sendable (String) -> Void,
-         onSpeechError: @escaping @Sendable (String) -> Void) {
+         onSpeechError: @escaping @Sendable (String) -> Void,
+         onSpeakerError: @escaping @Sendable (String) -> Void = { _ in }) {
         self.directory = directory
         self.prefix = String(format: "%020.0f", Date().timeIntervalSince1970 * 1_000_000)
         self.speechFormat = speechFormat
         self.speechInput = speechInput
+        self.speakerInput = speakerInput
         self.onCaptureError = onCaptureError
         self.onSpeechError = onSpeechError
+        self.onSpeakerError = onSpeakerError
     }
 
     func append(_ input: AVAudioPCMBuffer) {
@@ -102,10 +109,12 @@ final class AudioChunkWriter: @unchecked Sendable {
             lock.lock()
             accepting = false
             queue.async { [self] in
-                file = nil
+                do { try closeChunk() } catch { onCaptureError(error.localizedDescription) }
                 flushSpeech()
                 speechInput?.finish()
                 speechInput = nil
+                speakerInput?.finish()
+                speakerInput = nil
                 continuation.resume()
             }
             lock.unlock()
@@ -115,6 +124,8 @@ final class AudioChunkWriter: @unchecked Sendable {
     private func write(_ buffer: AVAudioPCMBuffer) throws {
         if file == nil {
             let url = directory.appendingPathComponent("\(prefix)-\(String(format: "%06d", index)).caf")
+            try AudioRecovery.begin(file: url, format: buffer.format)
+            openFileURL = url
             file = try AVAudioFile(forWriting: url, settings: [
                 AVFormatIDKey: kAudioFormatLinearPCM,
                 AVSampleRateKey: buffer.format.sampleRate,
@@ -129,24 +140,61 @@ final class AudioChunkWriter: @unchecked Sendable {
         try file?.write(from: buffer)
         framesInChunk += AVAudioFramePosition(buffer.frameLength)
         if Double(framesInChunk) >= buffer.format.sampleRate * 5 {
-            file = nil
+            try closeChunk()
             framesInChunk = 0
             index += 1
         }
 
+        feedSpeakers(buffer)
         // Speech has a separate failure path. Saved audio remains available for later processing.
         guard let speechInput, let speechFormat else { return }
         do {
             let converted = try convert(buffer, to: speechFormat)
             guard converted.frameLength > 0 else { return }
-            if case .dropped = speechInput.yield(AnalyzerInput(buffer: converted)) {
+            switch speechInput.yield(AnalyzerInput(buffer: converted)) {
+            case .dropped, .terminated:
                 throw CaptureError.conversion
+            case .enqueued: break
+            @unknown default: throw CaptureError.conversion
             }
         } catch {
             speechInput.finish()
             self.speechInput = nil
             onSpeechError(error.localizedDescription)
         }
+    }
+
+    private func feedSpeakers(_ buffer: AVAudioPCMBuffer) {
+        guard let speakerInput else { return }
+        guard let channels = buffer.floatChannelData else {
+            speakerInput.finish()
+            self.speakerInput = nil
+            onSpeakerError("Speaker labels stopped because the microphone format changed. Audio is preserved.")
+            return
+        }
+        let count = Int(buffer.format.channelCount)
+        var mono = [Float](repeating: 0, count: Int(buffer.frameLength))
+        for frame in mono.indices {
+            for channel in 0..<count {
+                mono[frame] += buffer.format.isInterleaved ? channels[0][frame * count + channel] : channels[channel][frame]
+            }
+            mono[frame] /= Float(count)
+        }
+        switch speakerInput.yield(SpeakerAudio(samples: mono, sampleRate: buffer.format.sampleRate)) {
+        case .dropped, .terminated:
+            speakerInput.finish()
+            self.speakerInput = nil
+            onSpeakerError("Speaker processing could not keep up. Labels stopped; audio and transcription continue.")
+        case .enqueued: break
+        @unknown default: break
+        }
+    }
+
+    private func closeChunk() throws {
+        file = nil
+        guard let url = openFileURL else { return }
+        if !writeFailed { try AudioRecovery.complete(file: url) }
+        openFileURL = nil
     }
 
     private func convert(_ input: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> AVAudioPCMBuffer {

@@ -27,10 +27,11 @@ struct NoteDiskStore {
                        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
-    func load() throws -> (notes: [NoteRecord], unreadable: [String]) {
+    func load() throws -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String]) {
         let dirs = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         var notes: [NoteRecord] = []
         var unreadable: [String] = []
+        var audioProblems: [String] = []
         for dir in dirs where UUID(uuidString: dir.lastPathComponent) != nil {
             do {
                 var note = try JSONDecoder().decode(NoteRecord.self,
@@ -39,6 +40,8 @@ struct NoteDiskStore {
                     unreadable.append(dir.lastPathComponent)
                     continue
                 }
+                let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
+                audioProblems.append(contentsOf: recovery.unreadable)
                 if note.captureState == .recording {
                     note.captureState = .interrupted
                     try save(note)
@@ -46,13 +49,18 @@ struct NoteDiskStore {
                 notes.append(note)
             } catch { unreadable.append(dir.lastPathComponent) }
         }
-        return (notes.sorted { $0.updatedAt > $1.updatedAt }, unreadable)
+        return (notes.sorted { $0.updatedAt > $1.updatedAt }, unreadable, audioProblems)
     }
 
     func audioFiles(for id: UUID) -> [URL] {
         let dir = directory(for: id).appendingPathComponent("audio", isDirectory: true)
-        return ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "caf" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "caf" && !$0.lastPathComponent.hasSuffix(".recovered.caf") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .map { original in
+                let recovered = AudioRecovery.recoveredURL(for: original)
+                return FileManager.default.fileExists(atPath: recovered.path) ? recovered : original
+            }
     }
 }
 
@@ -70,6 +78,8 @@ final class NoteLibrary {
             notes = result.notes
             if !result.unreadable.isEmpty {
                 problem = "Some saved notes could not be opened. Their files have been preserved."
+            } else if !result.audioProblems.isEmpty {
+                problem = "Some interrupted audio needs recovery. Original files and notes are preserved."
             }
         } catch { problem = "Local storage could not be opened. \(error.localizedDescription)" }
     }

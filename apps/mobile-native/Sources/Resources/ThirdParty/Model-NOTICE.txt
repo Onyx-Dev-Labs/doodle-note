@@ -1,0 +1,19 @@
+Experimental speaker model
+
+NVIDIA Sortformer v2.1, converted to Core ML by FluidInference.
+Model repository: https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml
+Pinned revision: ae9a27ab45dc0aa3abede7d2d6bad2b7a69aa6d1
+Upstream model: https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2.1
+
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License.
+https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/
+
+The conversion model card also declares Creative Commons Attribution 4.0:
+https://creativecommons.org/licenses/by/4.0/
+The converted artifact is used as published, without changing its weights.
+The relationship between these notices and release redistribution remains a release review item.
+Model weights are not included in this source repository or app bundle.
+
+FluidAudio is Apache-2.0; its license accompanies this notice.
+The pinned package also includes separately licensed clustering and text-processing components.
+Their notices must be included in the final distribution license inventory.

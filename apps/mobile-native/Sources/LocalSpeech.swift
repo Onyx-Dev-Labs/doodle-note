@@ -76,7 +76,7 @@ final class LocalSpeech {
             }
             try await analyzer.start(inputSequence: stream)
             readiness = .running
-            detail = "Transcribing on this device. Speaker identification is not connected yet."
+            detail = "Transcribing on this device."
             return (format, continuation)
         } catch {
             continuation.finish()

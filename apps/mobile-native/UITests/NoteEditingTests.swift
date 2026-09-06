@@ -1,6 +1,18 @@
 import XCTest
 
 @MainActor final class NoteEditingTests: XCTestCase {
+    func testSpeakerControlsAreAvailableWithoutDownloadingModels() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.buttons["newNote"].waitForExistence(timeout: 10))
+        app.buttons["newNote"].tap()
+        XCTAssertTrue(app.buttons["speakerSettings"].waitForExistence(timeout: 5))
+        app.buttons["speakerSettings"].tap()
+        XCTAssertTrue(app.switches["Live speaker labels"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Download speaker model"].exists)
+        XCTAssertTrue(app.buttons["recordButton"].isEnabled)
+    }
     func testCreateEditAndRecoverAfterRelaunch() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

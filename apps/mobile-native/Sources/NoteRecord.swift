@@ -38,6 +38,7 @@ struct NoteRecord: Codable, Identifiable, Equatable {
     var language = SpokenLanguage.english
     var passages: [TranscriptPassage] = []
     var captureState = CaptureState.idle
+    var speakerAnnotations: SpeakerAnnotations? = nil
 
     mutating func apply(_ passage: TranscriptPassage) {
         // Volatile hypotheses replace only their overlapping interval. Finalized text is immutable here.

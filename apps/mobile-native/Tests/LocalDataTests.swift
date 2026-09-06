@@ -16,13 +16,19 @@ final class LocalDataTests: XCTestCase {
         var note = NoteRecord()
         note.title = "Discovery"
         note.text = "A personal detail not in the transcript"
-        note.ink = PKDrawing().dataRepresentation()
+        let points = [CGPoint(x: 10, y: 10), CGPoint(x: 80, y: 40)].enumerated().map { index, point in
+            PKStrokePoint(location: point, timeOffset: Double(index) * 0.1, size: CGSize(width: 3, height: 3),
+                          opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+        }
+        let path = PKStrokePath(controlPoints: points, creationDate: Date())
+        note.ink = PKDrawing(strokes: [PKStroke(ink: PKInk(.pen, color: .black), path: path)]).dataRepresentation()
         note.language = .danish
         note.apply(TranscriptPassage(start: 0, end: 2, text: "Godmorgen", isFinal: true))
         try store.save(note)
         let result = try NoteDiskStore(root: store.root).load()
         XCTAssertEqual(result.notes, [note])
         XCTAssertTrue(result.unreadable.isEmpty)
+        XCTAssertEqual(try PKDrawing(data: XCTUnwrap(result.notes.first).ink).strokes.count, 1)
     }
 
     func testInterruptedCaptureIsRecoveredWithoutLosingAudio() throws {

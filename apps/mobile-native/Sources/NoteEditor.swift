@@ -8,6 +8,7 @@ struct NoteEditor: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var pane = 0
     @State private var player = LocalPlayback()
+    @State private var showSpeakers = false
 
     private var note: NoteRecord { library.note(id) ?? NoteRecord(id: id) }
     private var isActive: Bool { recording.noteID == id }
@@ -38,6 +39,7 @@ struct NoteEditor: View {
             }.padding(.horizontal)
             // Keep recording controls clear of PencilKit's floating tool palette.
             captureControls
+            if showSpeakers { speakerSettings }
             if sizeClass == .regular {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) { notePicker; notePane }.frame(maxWidth: .infinity)
@@ -56,6 +58,7 @@ struct NoteEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: note.language) {
             if recording.noteID == nil { await recording.speech.check(note.language) }
+            await recording.speakers.check()
         }
         .onDisappear { player.stop() }
         .onChange(of: recording.noteID) { _, value in if value != nil { player.stop() } }
@@ -99,7 +102,8 @@ struct NoteEditor: View {
                 ForEach(note.passages) { passage in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(passage.speakerName ?? String(localized: "Unassigned speaker")).font(.caption.bold())
+                            Text(passage.speakerName ?? note.speakerAnnotations?.label(for: passage) ?? String(localized: "Unassigned speaker"))
+                                .font(.caption.bold())
                             Spacer()
                             Button {
                                 player.play(files: audio, at: passage.start)
@@ -124,7 +128,12 @@ struct NoteEditor: View {
     private var captureControls: some View {
         VStack(spacing: 8) {
             if let problem = player.problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            if recording.speakers.state == .failed {
+                Text(recording.speakers.detail).font(.caption).foregroundStyle(.orange)
+            }
             HStack {
+                Button("Speakers", systemImage: "person.2") { showSpeakers.toggle() }
+                    .accessibilityIdentifier("speakerSettings")
                 if !audio.isEmpty && recording.noteID == nil {
                     Button(player.isPlaying ? "Stop playback" : "Play recording",
                            systemImage: player.isPlaying ? "stop.fill" : "play.fill") {
@@ -139,11 +148,42 @@ struct NoteEditor: View {
                         else { await recording.start(id, library: library) }
                     }
                 }.buttonStyle(.borderedProminent).tint(isActive ? .red : .accentColor)
-                    .disabled(recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading)
+                    .disabled(recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
                     .accessibilityIdentifier("recordButton")
             }
             if recording.busy { ProgressView("Preparing or finalizing recording…").font(.caption) }
         }.padding().background(.bar)
+    }
+
+    private var speakerSettings: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Live speaker labels", isOn: Binding(get: { recording.speakers.enabled }, set: { recording.speakers.enabled = $0 }))
+                    .disabled(recording.noteID != nil || recording.busy || recording.speakers.preparing)
+                Text(recording.speakers.detail).font(.caption).foregroundStyle(.secondary)
+                if recording.noteID == nil && !recording.busy {
+                    if recording.speakers.state == .downloading {
+                        Button("Cancel model download") { recording.speakers.cancelDownload() }
+                    } else if recording.speakers.state == .missing || recording.speakers.state == .failed {
+                        Button("Download speaker model") { recording.speakers.download() }
+                    }
+                }
+                if let annotations = note.speakerAnnotations {
+                    ForEach(annotations.speakerKeys, id: \.self) { key in
+                        TextField(annotations.name(for: key), text: Binding(
+                            get: { library.note(id)?.speakerAnnotations?.names[key] ?? "" },
+                            set: { name in library.update(id) { $0.speakerAnnotations?.names[key] = name.trimmingCharacters(in: .whitespacesAndNewlines) } }))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                Text("Names apply to this recording session. Remembering voices across meetings is still being built.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Link("Model source", destination: URL(string: "https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml")!)
+                    Link("Model license", destination: URL(string: "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/")!)
+                }.font(.caption)
+            }.padding()
+        }.frame(maxHeight: 240).background(.quaternary.opacity(0.3))
     }
 }
 

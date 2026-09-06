@@ -11,11 +11,17 @@ settings:
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
     GENERATE_INFOPLIST_FILE: YES
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    revision: 5c19d5e12320e22bbfb7a1877b089d2665a69add
 targets:
   DoodleNoteNative:
     type: application
     platform: iOS
     sources: [Sources]
+    dependencies:
+      - package: FluidAudio
     info:
       path: Config/Info.plist
       properties:
