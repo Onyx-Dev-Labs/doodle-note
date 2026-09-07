@@ -109,6 +109,8 @@ extension LibraryRepository {
         try CloudCacheScope.purgeCaches(disk: disk, record: record, catalog: catalog)
         let directory = disk.directory(for: record.noteID)
         if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+        let cloudIntent = disk.root.appendingPathComponent("cloud-imports/" + record.noteID.uuidString + ".json")
+        if FileManager.default.fileExists(atPath: cloudIntent.path) { try FileManager.default.removeItem(at: cloudIntent) }
         record.cleanupPending = false
         record.restorePending = false
         record.audioRemovalPending = false

@@ -147,7 +147,8 @@ final class CloudEngineTests: XCTestCase {
         let redacted = try await engine.journal.load()
         XCTAssertTrue(redacted.outbox.isEmpty)
         XCTAssertEqual(redacted.noteBindings[remote], note.id)
-        let journalBytes = try Data(contentsOf: engine.journal.directory.appendingPathComponent("journal.json"))
+        let journalDirectory = await engine.journal.directory
+        let journalBytes = try Data(contentsOf: journalDirectory.appendingPathComponent("journal.json"))
         XCTAssertFalse(String(decoding: journalBytes, as: UTF8.self).contains("Synthetic deleted payload"))
         _ = try await engine.synchronize() // learns accepted server identity without caching deleted snapshot
         let noContent = try await engine.replica.content(remote)

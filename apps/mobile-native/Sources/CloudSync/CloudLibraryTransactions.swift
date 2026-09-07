@@ -55,6 +55,11 @@ extension LibraryRepository {
             let intent = try JSONDecoder().decode(CloudImportIntent.self, from: Data(contentsOf: file))
             guard intent.identity == identity else { continue }
             guard file.lastPathComponent == intent.lifecycle.noteID.uuidString + ".json" else { throw LibraryDataError.invalidOwnership }
+            var current = try disk.lifecycle(noteID: intent.lifecycle.noteID, libraryID: intent.lifecycle.libraryID)
+            if current.state == .purged {
+                try finishPurge(&current)
+                continue
+            }
             try finishCloudImport(intent)
         }
     }
@@ -158,7 +163,7 @@ extension LibraryRepository {
             target.restorePending = false
             try disk.saveLifecycle(target)
         }
-        try FileManager.default.removeItem(at: cloudIntentURL(id))
+        if FileManager.default.fileExists(atPath: cloudIntentURL(id).path) { try FileManager.default.removeItem(at: cloudIntentURL(id)) }
     }
     private func orderCloudSummaries(_ values: [SummaryVersion]) throws -> [SummaryVersion] {
         var remaining = values, ordered: [SummaryVersion] = []
