@@ -3,10 +3,12 @@ import XCTest
 @MainActor final class CaptureUITests: XCTestCase {
     private func create(_ app: XCUIApplication) -> String {
         app.launch()
-        XCTAssertTrue(app.buttons["newNote"].waitForExistence(timeout: 10))
-        app.buttons["newNote"].tap()
+        let newNote = app.buttons["newNote"]
+        let ready = NSPredicate { _, _ in newNote.exists && newNote.isEnabled && newNote.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 10), .completed)
+        newNote.tap()
         let name = "Capture \(UUID().uuidString.prefix(6))"
-        let title = app.textFields["noteTitle"].exists ? app.textFields["noteTitle"] : app.textViews["noteTitle"]
+        let title = app.descendants(matching: .any).matching(identifier: "noteTitle").firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         let focused = NSPredicate(format: "hasKeyboardFocus == true")
         title.tap()
