@@ -12,6 +12,9 @@ final class LocalSpeech {
     private var selectedLocale: Locale?
     private var generation = UUID()
     private var downloading = false
+    private var installation: Task<Void, Error>?
+    private(set) var downloadProgress = 0.0
+    private(set) var cancellingDownload = false
     private var preparing = false
     struct Availability {
         let locale: Locale
@@ -52,16 +55,52 @@ final class LocalSpeech {
     func download(_ language: SpokenLanguage) async {
         guard !preparing, analyzer == nil, let selectedLocale, readiness == .downloadNeeded else { return }
         downloading = true
+        cancellingDownload = false
+        downloadProgress = 0
         readiness = .downloading
         detail = "Downloading the speech model…"
+        defer { downloading = false; installation = nil; cancellingDownload = false }
         do {
             let module = SpeechTranscriber(locale: selectedLocale, preset: .timeIndexedProgressiveTranscription)
+            _ = try await AssetInventory.reserve(locale: selectedLocale)
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
-                try await request.downloadAndInstall()
+                let task = Task { try await request.downloadAndInstall() }
+                installation = task
+                if cancellingDownload { task.cancel() }
+                let monitor = Task { [weak self] in
+                    while !Task.isCancelled {
+                        self?.downloadProgress = min(1, max(0, request.progress.fractionCompleted))
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
+                }
+                defer { monitor.cancel() }
+                try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
             }
             downloading = false
             await check(language)
-        } catch { downloading = false; fail("Speech model download failed. \(error.localizedDescription)") }
+        } catch is CancellationError {
+            downloading = false
+            await check(language)
+            detail = "Download stopped. Check readiness or retry; Apple manages retained speech assets."
+        } catch {
+            fail("Speech model download failed. \(error.localizedDescription)")
+        }
+    }
+
+    func cancelDownload() {
+        guard downloading else { return }
+        cancellingDownload = true
+        detail = "Cancellation requested. Waiting for Apple's download operation to finish."
+        installation?.cancel()
+    }
+
+    func releaseModel(_ language: SpokenLanguage) async {
+        guard analyzer == nil, !downloading, !preparing, let selectedLocale else { return }
+        preparing = true
+        _ = await AssetInventory.release(reservedLocale: selectedLocale)
+        preparing = false
+        await check(language)
+        detail = "Speech reservation released. Apple decides when shared assets are removed. Notes and recordings are unchanged."
     }
 
     func start(language: SpokenLanguage, offset: TimeInterval,
