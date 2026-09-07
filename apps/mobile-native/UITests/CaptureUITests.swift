@@ -24,6 +24,8 @@ import XCTest
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 10), .completed)
         XCTAssertEqual(app.buttons["recordButton"].label, "Record")
         app.buttons["recordButton"].tap()
+        XCTAssertTrue(app.buttons["allowFixtureCapture"].waitForExistence(timeout: 5))
+        app.buttons["allowFixtureCapture"].tap()
         let started = NSPredicate { _, _ in app.buttons["recordButton"].label == "Stop recording" && app.buttons["recordButton"].isEnabled }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: started, object: nil)], timeout: 10), .completed)
         app.buttons["recordButton"].tap()
@@ -39,6 +41,8 @@ import XCTest
         app.launchArguments = ["--ui-testing", "--capture-fixture", "--capture-interruption-fixture"]
         _ = create(app)
         if !app.buttons["cancelRecordingPreparation"].exists { app.buttons["recordButton"].tap() }
+        XCTAssertTrue(app.buttons["allowFixtureCapture"].waitForExistence(timeout: 5))
+        app.buttons["allowFixtureCapture"].tap()
         let resumed = NSPredicate { _, _ in app.buttons["recordButton"].label == "Resume" && app.buttons["recordButton"].isEnabled }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: resumed, object: nil)], timeout: 12), .completed)
         XCTAssertTrue(app.buttons["Play recording"].exists)
