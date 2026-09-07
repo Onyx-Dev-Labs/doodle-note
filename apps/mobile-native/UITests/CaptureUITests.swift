@@ -7,7 +7,16 @@ import XCTest
         app.buttons["newNote"].tap()
         let name = "Capture \(UUID().uuidString.prefix(6))"
         let title = app.textFields["noteTitle"].exists ? app.textFields["noteTitle"] : app.textViews["noteTitle"]
-        title.tap(); title.typeText(name)
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        title.tap()
+        // Navigation/keyboard presentation can discard the first tap on a busy simulator.
+        // Confirm actual field focus before sending text, then retain the rename/reopen check.
+        if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focused, object: title)], timeout: 2) != .completed {
+            title.tap()
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focused, object: title)], timeout: 5), .completed)
+        title.typeText(name)
         XCTAssertTrue(app.buttons["doneTyping"].waitForExistence(timeout: 5))
         app.buttons["doneTyping"].tap()
         return name
