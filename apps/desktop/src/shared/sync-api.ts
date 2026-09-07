@@ -32,6 +32,7 @@ export interface SyncStatus {
 export type ShareResult = { url: string } | { error: string }
 
 export interface SyncApi {
+  reader(request: unknown): Promise<unknown>
   /** Push the meeting (fresh) and mint/fetch its public share link. */
   share(meetingId: string): Promise<ShareResult>
   getStatus(): Promise<SyncStatus>
