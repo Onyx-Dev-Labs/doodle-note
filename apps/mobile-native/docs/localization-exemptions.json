@@ -6,7 +6,8 @@
     "Let’s keep the sketch beside the meeting notes while we explore this idea.": "DEBUG synthetic transcript fixture; source content must remain unchanged.",
     "Fixture speaker 1": "DEBUG synthetic confirmed speaker name.",
     "We can review the next steps together, then keep this drawing editable.": "DEBUG synthetic transcript fixture; source content must remain unchanged.",
-    "Fixture speaker 2": "DEBUG synthetic confirmed speaker name."
+    "Fixture speaker 2": "DEBUG synthetic confirmed speaker name.",
+    "Continue synthetic capture": "DEBUG test-harness permission control, only with both --ui-testing and --capture-fixture; never a product control."
   },
   "Calendar/CalendarContracts.swift": {
     "<calendar credential>": "Redacted debug description, never a user-facing credential."
