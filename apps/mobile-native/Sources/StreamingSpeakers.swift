@@ -77,7 +77,13 @@ final class StreamingSpeakers {
 
     func check() async {
         guard task == nil, !preparing else { return }
-        if await store.installed() { state = .ready; detail = "Speaker model available on this device." }
+        if await store.installed() {
+            state = .ready
+            detail = "Speaker model verified on this device."
+        } else {
+            state = .missing
+            detail = "The speaker model is missing or needs repair. Download it before enabling labels."
+        }
     }
 
     func download() {
