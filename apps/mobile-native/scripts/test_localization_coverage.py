@@ -37,6 +37,16 @@ class CoverageGateTests(unittest.TestCase):
     def test_wrong_argument_type_is_rejected(self):
         self.mutate(lambda value: value['strings']['Google account %@']['localizations']['de']['stringUnit'].update(value='Konto %lld'))
         self.assertIn('placeholder mismatch', self.run_gate().stderr)
+    def test_positional_reordering_must_preserve_argument_types(self):
+        key = "Account %@ has %lld notes"
+        def add(value):
+            value['strings'][key] = {'localizations': {
+                language: {'stringUnit': {'state': 'needs_review', 'value': '%2$lld notes: %1$@'}}
+                for language in ['en', 'da', 'es', 'fr', 'de']}}
+        self.mutate(add)
+        self.assertEqual(self.run_gate().returncode, 0)
+        self.mutate(lambda value: value['strings'][key]['localizations']['de']['stringUnit'].update(value='%1$lld notes: %2$@'))
+        self.assertIn('placeholder mismatch', self.run_gate().stderr)
     def test_new_controller_status_requires_translation(self):
         (self.root / 'Sources/NewController.swift').write_text('let problem = "This new failure needs a translation."')
         result = self.run_gate()

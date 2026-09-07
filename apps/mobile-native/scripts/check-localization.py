@@ -18,8 +18,15 @@ strings = catalog['strings']
 errors = []
 
 def placeholders(text):
-    # Ignore literal percent signs and argument positions; preserve argument types and multiplicity.
-    return sorted(re.sub(r'%\d+\$', '%', token) for token in re.findall(r'%(?:\d+\$)?(?:lld|ld|d|@|f)', text.replace('%%', '')))
+    # Preserve argument positions and types, allowing safe translated word-order changes.
+    result = []
+    implicit = 0
+    for position, kind in re.findall(r'%(?:(\d+)\$)?(lld|ld|d|@|f)', text.replace('%%', '')):
+        index = int(position) - 1 if position else implicit
+        if not position:
+            implicit += 1
+        result.append((index, kind))
+    return sorted(result)
 
 def units(value):
     if 'stringUnit' in value:
