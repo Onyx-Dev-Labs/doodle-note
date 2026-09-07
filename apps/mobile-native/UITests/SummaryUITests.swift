@@ -2,9 +2,13 @@ import XCTest
 
 @MainActor final class SummaryUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, app: XCUIApplication) {
-        for _ in 0..<5 {
-            if element.exists && element.isHittable { return }
-            app.swipeUp()
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            if element.isHittable { return }
+            // Saving collapses the draft and may leave the retained version above the
+            // current viewport. Follow its actual frame instead of always scrolling down.
+            if element.frame.midY < app.frame.midY { app.swipeDown() }
+            else { app.swipeUp() }
         }
         XCTAssertTrue(element.isHittable)
     }
