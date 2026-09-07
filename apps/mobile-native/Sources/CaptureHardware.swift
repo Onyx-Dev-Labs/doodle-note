@@ -42,6 +42,20 @@ import AVFoundation
 }
 
 #if DEBUG
+/// Permission stays pending until a test explicitly responds or cancels preparation.
+/// A wall-clock delay can expire while XCTest is still delivering its Cancel tap.
+@MainActor final class FixtureCapturePermission {
+    private var pending: CheckedContinuation<Bool, Never>?
+    func request() async -> Bool {
+        await withCheckedContinuation { pending = $0 }
+    }
+    func allow() {
+        let reply = pending
+        pending = nil
+        reply?.resume(returning: true)
+    }
+}
+
 /// Silent synthetic fixture; only selected with both explicit UI-test launch flags.
 @MainActor final class FixtureCaptureHardware: CaptureHardware {
     let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
