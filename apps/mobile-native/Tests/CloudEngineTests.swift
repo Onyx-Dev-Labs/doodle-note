@@ -163,6 +163,75 @@ final class CloudEngineTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: disk.directory(for: note.id).path))
     }
 
+    func testObsoleteImportIntentCannotBlockAccountAfterPermanentPurge() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = try NoteDiskStore(root: root), repository = LibraryRepository(disk: disk)
+        let identity = LibraryIdentity(accountID: "one", workspaceID: "work")
+        let map = CloudIdentityMap(identity: identity, remoteLibraryID: UUID())
+        _ = try await repository.attachLibrary(id: map.localLibraryID, name: "Account", identity: identity)
+        var note = NoteRecord()
+        note.metadata?.libraryID = map.localLibraryID
+        note.text = "Obsolete imported text"
+        try await repository.save(note, identities: [identity])
+        let intent = CloudImportIntent(identity: identity, note: note, sources: [NoteRevision(note)],
+            lifecycle: .initial(noteID: note.id, libraryID: map.localLibraryID), expectedLocalRevisionID: note.metadata?.revisionID)
+        let intentURL = root.appendingPathComponent("cloud-imports/" + note.id.uuidString + ".json")
+        try FileManager.default.createDirectory(at: intentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try disk.write(intent, to: intentURL)
+        let trash = try await repository.trash(noteID: note.id, libraryID: map.localLibraryID,
+            expectedGeneration: note.id, operationID: UUID(), now: Date(), identities: [identity])
+        _ = try await repository.permanentlyDelete(noteID: note.id, libraryID: map.localLibraryID,
+            expectedGeneration: trash.generation, operationID: UUID(), confirmed: true, identities: [identity])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: intentURL.path))
+        // Simulate an older app leaving its obsolete intent behind before this fix.
+        try disk.write(intent, to: intentURL)
+        try await repository.recoverCloudImports(identity: identity)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: intentURL.path))
+        XCTAssertEqual(try disk.lifecycle(noteID: note.id, libraryID: map.localLibraryID).state, .purged)
+        var other = NoteRecord(); other.metadata?.libraryID = map.localLibraryID
+        try await repository.save(other, identities: [identity])
+        let readable = try await repository.cloudNote(noteID: other.id, libraryID: map.localLibraryID, identity: identity)
+        XCTAssertNotNil(readable)
+    }
+
+    @MainActor func testPermissionRevocationCancelsOnlyAccountBoundPreparation() async throws {
+        for accountCapture in [true, false] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let library = NoteLibrary(root: root)
+            await library.waitUntilLoaded()
+            let identity = LibraryIdentity(accountID: "one", workspaceID: "work"), remoteLibrary = UUID()
+            let map = CloudIdentityMap(identity: identity, remoteLibraryID: remoteLibrary)
+            try await library.authenticate(identity, name: "Work", libraryID: map.localLibraryID)
+            if accountCapture { library.selectLibrary(map.localLibraryID) }
+            let noteID = try XCTUnwrap(library.create())
+            _ = await library.flush()
+            let gate = CloudPermissionGate()
+            var hardwareAttempts = 0
+            let recording = RecordingSession(recordPermission: { await gate.request() }, makeHardware: {
+                hardwareAttempts += 1
+                throw CloudSyncFailure.unavailable
+            }, analysisEnabled: false)
+            let preparation = Task { await recording.start(noteID, library: library) }
+            while recording.preparingNoteID == nil { await Task.yield() }
+            let coordinator = try CloudSyncCoordinator(root: root, transport: PermissionDeniedTransport(), credentials: EngineTestCredentials())
+            let linked = try await coordinator.connections.connect(account: .init(accountId: "one", workspaceId: "work", workspaceName: "Work",
+                entitled: true, syncAvailable: true, libraries: [.init(id: remoteLibrary)]), secret: CloudSecret("dnsy_" + String(repeating: "a", count: 64)))
+            _ = try await coordinator.connections.select(libraryID: remoteLibrary, expectedGeneration: linked.generation)
+            let startup = Task { await coordinator.start(library: library, recording: recording) }
+            while library.identities.contains(identity) { await Task.yield() }
+            XCTAssertTrue(library.authorizedNotes(in: map.localLibraryID).isEmpty)
+            gate.answer(true)
+            await preparation.value
+            await startup.value
+            XCTAssertEqual(hardwareAttempts, accountCapture ? 0 : 1)
+            XCTAssertNil(recording.noteID)
+            let connection = try await coordinator.connections.load()
+            XCTAssertEqual(connection?.authenticated, false)
+        }
+    }
+
 }
 
 private final class EngineTestCredentials: CloudCredentialStore, @unchecked Sendable {
@@ -245,4 +314,14 @@ private actor PurgeAfterLostReplyTransport: CloudTransport {
         return try CloudJSON.object(["protocolVersion": .number(2), "cursor": .string(head!.uuidString),
             "hasMore": .bool(false), "changes": .array(change.map { [$0] } ?? [])]).data()
     }
+}
+
+@MainActor private final class CloudPermissionGate {
+    var pending: CheckedContinuation<Bool, Never>?
+    func request() async -> Bool { await withCheckedContinuation { pending = $0 } }
+    func answer(_ value: Bool) { pending?.resume(returning: value); pending = nil }
+}
+private struct PermissionDeniedTransport: CloudTransport {
+    func request(path: String, method: String, query: [URLQueryItem], body: Data?, contentType: String,
+                 secret: CloudSecret, maxBytes: Int) async throws -> Data { throw CloudSyncFailure.permission }
 }

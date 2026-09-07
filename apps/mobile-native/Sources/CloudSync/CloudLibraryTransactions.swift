@@ -55,6 +55,7 @@ extension LibraryRepository {
             let intent = try JSONDecoder().decode(CloudImportIntent.self, from: Data(contentsOf: file))
             guard intent.identity == identity else { continue }
             guard file.lastPathComponent == intent.lifecycle.noteID.uuidString + ".json" else { throw LibraryDataError.invalidOwnership }
+            try authorize(intent.lifecycle.libraryID, identities: [intent.identity])
             var current = try disk.lifecycle(noteID: intent.lifecycle.noteID, libraryID: intent.lifecycle.libraryID)
             if current.state == .purged {
                 try finishPurge(&current)

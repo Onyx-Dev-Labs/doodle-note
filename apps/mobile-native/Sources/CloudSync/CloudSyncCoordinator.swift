@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor @Observable
 final class CloudSyncCoordinator {
     let connections: CloudConnectionStore
-    let transport: CloudHTTP
+    let transport: any CloudTransport
     let root: URL
     private(set) var connection: CloudConnection?
     private(set) var busy = false
@@ -15,18 +15,20 @@ final class CloudSyncCoordinator {
     private(set) var cloudVersionText: String?
     private var browser: CloudLinkBrowser?
     private var recording: RecordingSession?
+    private weak var library: NoteLibrary?
     private var task: Task<Void, Never>?
     private var monitor: NWPathMonitor?
     private var retryCount = 0
     private var ticket = UUID()
 
-    init(root: URL) throws {
+    init(root: URL, transport: (any CloudTransport)? = nil, credentials: any CloudCredentialStore = CloudKeychain()) throws {
         self.root = root.appendingPathComponent("cloud")
-        connections = try CloudConnectionStore(directory: self.root.appendingPathComponent("connection"))
-        transport = try CloudHTTP()
+        connections = try CloudConnectionStore(directory: self.root.appendingPathComponent("connection"), credentials: credentials)
+        self.transport = try transport ?? CloudHTTP()
     }
     func start(library: NoteLibrary, recording: RecordingSession) async {
         self.recording = recording
+        self.library = library
         if monitor == nil {
             let monitor = NWPathMonitor()
             monitor.pathUpdateHandler = { [weak self, weak library] path in
@@ -101,7 +103,7 @@ final class CloudSyncCoordinator {
             let response = try await transport.json(path: "api/sync/legacy", query: query, secret: secret)
             guard try await connections.load()?.generation == connection.generation else { throw CloudSyncFailure.signedOut }
             legacy = try CloudLegacyPage(response)
-        } catch { status = safe(error) }
+        } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func adopt(_ ids: [UUID], library: NoteLibrary) async {
         guard !busy, let connection, let repository = library.cloudRepository else { return }
@@ -110,7 +112,7 @@ final class CloudSyncCoordinator {
             try await engine.adopt(noteIDs: ids)
             await synchronize(library: library)
             await discoverLegacy()
-        } catch { status = safe(error) }
+        } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func previewConflict(_ id: UUID, library: NoteLibrary) async {
         guard let connection, let repository = library.cloudRepository else { return }
@@ -125,7 +127,7 @@ final class CloudSyncCoordinator {
             let summaries = (snapshot["summaries"]?.list ?? []).compactMap { $0["markdown"]?.string }.joined(separator: "\n\n")
             let transcript = (snapshot["passages"]?.list ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
             cloudVersionText = [typed, summaries, transcript].filter { !$0.isEmpty }.joined(separator: "\n\n")
-        } catch { status = safe(error) }
+        } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func resolve(_ localID: UUID, keepDevice: Bool, library: NoteLibrary) async {
         guard !busy, let connection, let repository = library.cloudRepository else { return }
@@ -135,7 +137,7 @@ final class CloudSyncCoordinator {
             if keepDevice { try await engine.keepDeviceVersion(localNoteID: localID) }
             else { try await engine.useCloudVersion(localNoteID: localID) }
             await synchronize(library: library)
-        } catch { status = safe(error) }
+        } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func pause() async {
         ticket = UUID()
@@ -211,8 +213,14 @@ final class CloudSyncCoordinator {
                     libraryID: map.localLibraryID, identity: map.identity, expectedLocalRevisionID: expected)
             }
     }
+    private func handleFailure(_ error: Error, expected: CloudConnection, library: NoteLibrary?) async {
+        guard let current = try? await connections.load(), current.generation == expected.generation else { return }
+        if case CloudSyncFailure.permission = error, let library {
+            await permissionDenied(library: library, account: expected.account.identity)
+        } else { status = safe(error) }
+    }
     private func permissionDenied(library: NoteLibrary, account: LibraryIdentity) async {
-        let captureID = recording?.noteID
+        let captureID = recording?.noteID ?? recording?.preparingNoteID
         let captureLibrary = captureID.flatMap { id in library.notes.first(where: { $0.id == id })?.metadata?.libraryID }
         let ownsCapture = captureLibrary.flatMap { id in library.libraries.first(where: { $0.id == id })?.identity } == account
         library.revokeAccountAccess(account)
@@ -224,7 +232,7 @@ final class CloudSyncCoordinator {
         if ownsCapture, let recording, let captureID, let captureLibrary {
             status = "Workspace access was revoked. Recording recovery is being saved on this device."
             await recording.stop(library: library, interrupted: true)
-            while recording.busy && recording.noteID == captureID {
+            while recording.busy && (recording.noteID ?? recording.preparingNoteID) == captureID {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             if recording.noteID == captureID { await recording.stop(library: library, interrupted: true) }

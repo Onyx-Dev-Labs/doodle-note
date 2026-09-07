@@ -90,8 +90,11 @@ final class CloudHTTP: NSObject, URLSessionTaskDelegate, CloudTransport {
         catch is CancellationError { throw CloudSyncFailure.cancelled }
         catch { throw CloudSyncFailure.unavailable }
     }
+}
+
+extension CloudTransport {
     func account(secret: CloudSecret) async throws -> CloudAccount {
-        let data = try await request(path: "api/sync/account", secret: secret, maxBytes: 1_000_000)
+        let data = try await request(path: "api/sync/account", method: "GET", query: [], body: nil, contentType: "application/json", secret: secret, maxBytes: 1_000_000)
         do {
             let account = try JSONDecoder().decode(CloudAccount.self, from: data)
             try account.validate()
