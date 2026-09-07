@@ -17,8 +17,25 @@ import XCTest
         XCTAssertTrue(app.buttons["recordButton"].exists)
         XCTAssertFalse(app.buttons["Stop recording"].exists)
         if !app.buttons["libraryOptions"].isHittable { app.navigationBars.buttons.firstMatch.tap() }
-        app.buttons["libraryOptions"].tap()
-        app.buttons["calendarSettings"].tap()
+        func openCalendars() {
+            if !app.buttons["calendarSettings"].exists { app.buttons["libraryOptions"].tap() }
+            XCTAssertTrue(app.buttons["calendarSettings"].waitForExistence(timeout: 5))
+            app.buttons["calendarSettings"].tap()
+        }
+        openCalendars()
+        let settingsScreen = app.navigationBars["Calendars"]
+        // Hosted CI received an Apple Intelligence banner over the menu tap, opening Settings.
+        // Recover only that observed external interruption, never retry an unexplained app failure.
+        if !settingsScreen.waitForExistence(timeout: 5),
+           XCUIApplication(bundleIdentifier: "com.apple.Preferences").state == .runningForeground {
+            app.activate()
+            openCalendars()
+        }
+        guard settingsScreen.waitForExistence(timeout: 5) else {
+            XCTFail("Calendar settings did not open")
+            return
+        }
+        XCTAssertTrue(app.collectionViews.firstMatch.waitForExistence(timeout: 5))
         let reminders = app.switches["calendarReminders"]
         for _ in 0..<4 where !reminders.exists || !reminders.isHittable { app.swipeUp() }
         XCTAssertTrue(reminders.waitForExistence(timeout: 5))
