@@ -31,6 +31,9 @@ importers:
       '@repo/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@repo/cloud-reader':
+        specifier: workspace:*
+        version: link:../../packages/cloud-reader
       '@repo/meetings-store':
         specifier: workspace:*
         version: link:../../packages/meetings-store
@@ -46,6 +49,9 @@ importers:
       sherpa-onnx-node:
         specifier: ^1.13.4
         version: 1.13.4
+    dependenciesMeta:
+      '@repo/cloud-reader':
+        injected: true
     devDependencies:
       '@electron-toolkit/eslint-config-prettier':
         specifier: ^3.0.0
@@ -132,6 +138,9 @@ importers:
       '@repo/agent-contract':
         specifier: workspace:*
         version: link:../../packages/agent-contract
+      '@repo/cloud-reader':
+        specifier: workspace:*
+        version: file:packages/cloud-reader(react@19.2.4)
       '@repo/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -159,6 +168,9 @@ importers:
       stripe:
         specifier: ^22.3.0
         version: 22.3.0(@types/node@20.19.43)
+    dependenciesMeta:
+      '@repo/cloud-reader':
+        injected: true
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -224,6 +236,16 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/cloud-reader:
+    dependencies:
+      react:
+        specifier: ^19
+        version: 19.2.7
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
 
   packages/db:
     dependencies:
@@ -1462,6 +1484,11 @@ packages:
   '@reflink/reflink@0.1.19':
     resolution: {integrity: sha512-DmCG8GzysnCZ15bres3N5AHCmwBwYgp0As6xjhQ47rAUTUXxJiK+lLUxaGsX3hd/30qUpVElh05PbGuxRPgJwA==}
     engines: {node: '>= 10'}
+
+  '@repo/cloud-reader@file:packages/cloud-reader':
+    resolution: {directory: packages/cloud-reader, type: directory}
+    peerDependencies:
+      react: ^19
 
   '@rolldown/pluginutils@1.0.0-rc.3':
     resolution: {integrity: sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q==}
@@ -6297,6 +6324,10 @@ snapshots:
       '@reflink/reflink-win32-arm64-msvc': 0.1.19
       '@reflink/reflink-win32-x64-msvc': 0.1.19
     optional: true
+
+  '@repo/cloud-reader@file:packages/cloud-reader(react@19.2.4)':
+    dependencies:
+      react: 19.2.4
 
   '@rolldown/pluginutils@1.0.0-rc.3': {}
 
