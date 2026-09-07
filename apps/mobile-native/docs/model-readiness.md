@@ -1,6 +1,6 @@
 # Model readiness and first run (ONY-243)
 
-The fresh native app opens with language selection and a direct Start taking notes action. There is no account, download, microphone permission or AI consent requirement for plain notes. Models is available from the library. The selected app language is stored separately from each existing note's spoken language. Translation coverage is tracked in ONY-263; setting a locale here is not evidence that all screens have been translated.
+The fresh native app opens with language selection and a direct Start taking notes action. There is no account, download, microphone permission or AI consent requirement for plain notes. Models is available from the library. The selected app language is stored separately from each existing note's spoken language. Translation coverage is tracked in ONY-248; setting a locale here is not evidence that all screens have been translated.
 
 Speech, speaker labels and generation have independent readiness. The generation contract uses Apple Foundation Models on device and checks both model availability and the selected locale at runtime. It does not create a cloud client or fall back to remote inference. Model support, human-speech quality, licensing qualification for existing speaker assets, minimum hardware and the provisional iOS 26 floor remain subject to ONY-241. This source implementation does not qualify Sean's iPadOS 18.5 device.
 
