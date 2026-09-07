@@ -338,7 +338,9 @@ export default function ModelsView({
       case 'downloading':
         return `Downloading v${u.latestVersion ?? ''}… ${u.percent ?? 0}%`
       case 'downloaded':
-        return `v${u.latestVersion} is ready to install`
+        return u.error ?? `v${u.latestVersion} is ready to install`
+      case 'installing':
+        return 'Restarting to install the update…'
       case 'up-to-date':
         return 'You are on the latest version'
       case 'cancelled':
@@ -1014,13 +1016,16 @@ export default function ModelsView({
                         disabled={
                           checkPending ||
                           update?.supported === false ||
-                          update?.status === 'checking'
+                          update?.status === 'checking' ||
+                          update?.status === 'installing'
                         }
                         onClick={() => void checkForUpdates()}
                       >
-                        {update?.status === 'error' || update?.status === 'cancelled'
-                          ? 'Retry update'
-                          : 'Check for updates'}
+                        {update?.status === 'installing'
+                          ? 'Restarting…'
+                          : update?.status === 'error' || update?.status === 'cancelled'
+                            ? 'Retry update'
+                            : 'Check for updates'}
                       </button>
                     )}
                   </div>

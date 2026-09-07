@@ -45,7 +45,8 @@ export class UpdateCoordinator<T extends { cancel(): void }> {
       !this.state.supported ||
       this.state.status === 'checking' ||
       this.download ||
-      this.state.status === 'downloaded'
+      this.state.status === 'downloaded' ||
+      this.state.status === 'installing'
     )
       return this.state
     const generation = ++this.generation
@@ -99,6 +100,20 @@ export class UpdateCoordinator<T extends { cancel(): void }> {
     this.timer = setTimeout(() => {
       this.cancel('error', 'The update download stopped responding. Please try again.')
     }, this.timeoutMs)
+  }
+
+  beginInstall(): boolean {
+    if (this.state.status !== 'downloaded') return false
+    this.set({ status: 'installing', error: undefined })
+    return true
+  }
+
+  installFailed(): void {
+    if (this.state.status !== 'installing') return
+    this.set({
+      status: 'downloaded',
+      error: 'Could not start the installer. Please try restarting to update again.'
+    })
   }
 
   progress(progress: { percent: number; transferred: number }): void {

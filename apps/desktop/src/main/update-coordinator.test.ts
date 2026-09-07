@@ -2,6 +2,30 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { UpdateCoordinator } from './update-coordinator'
 
+test('an installer handoff failure preserves the download and permits one retry', async () => {
+  const controller = new UpdateCoordinator(
+    {
+      checkForUpdates: async () => ({ isUpdateAvailable: true, updateInfo: { version: '0.4.23' } }),
+      downloadUpdate: async () => ['installer.exe']
+    },
+    '0.4.22',
+    true,
+    () => {}
+  )
+  assert.equal(controller.beginInstall(), false)
+  await controller.check()
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(controller.beginInstall(), true)
+  assert.equal(controller.state.status, 'installing')
+  assert.equal(controller.beginInstall(), false)
+  controller.installFailed()
+  assert.equal(controller.state.status, 'downloaded')
+  assert.equal(controller.state.latestVersion, '0.4.23')
+  assert.ok(controller.state.error)
+  assert.equal(controller.beginInstall(), true)
+  assert.equal(controller.state.error, undefined)
+})
+
 function deferred<T>(): {
   promise: Promise<T>
   resolve: (value: T) => void

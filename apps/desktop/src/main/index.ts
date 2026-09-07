@@ -117,6 +117,18 @@ if (process.env.DOODLE_USER_DATA && !app.isPackaged) {
   app.setPath('userData', process.env.DOODLE_USER_DATA)
 }
 
+// One owner per Windows profile: two mains would share the update cache and
+// could independently launch installers or write the same meeting library.
+if (process.platform === 'win32') {
+  if (!app.requestSingleInstanceLock()) app.exit(0)
+  app.on('second-instance', () => {
+    // Do not recreate a window while the installer is waiting for us to quit.
+    void app.whenReady().then(() => {
+      if (!isQuittingForUpdate()) focusMainWindow()
+    })
+  })
+}
+
 // Must run before app ready: lets <img src="doodle-media://…"> load without
 // mixed-content blocking (the dev renderer is served over http). doodle-audio
 // additionally needs stream support so <audio> can range-request recordings.
