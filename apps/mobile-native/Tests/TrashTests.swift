@@ -150,6 +150,10 @@ final class TrashTests: XCTestCase {
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_000)!
         buffer.frameLength = 16_000
         memset(buffer.floatChannelData![0], 0, 16_000 * MemoryLayout<Float>.size)
+        do {
+            let original = try AVAudioFile(forWriting: disk.audioDirectory(for: note.id).appendingPathComponent("001.caf"), settings: format.settings)
+            try original.write(from: buffer)
+        }
         _ = try await repository.removeAudio(noteID: note.id, libraryID: LibraryRecord.localID,
             expectedGeneration: note.id, operationID: UUID(), confirmed: true, now: now, identities: [])
         XCTAssertEqual(try disk.recordingOffset(for: note.id), 2)

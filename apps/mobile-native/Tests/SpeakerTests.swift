@@ -89,6 +89,8 @@ final class SpeakerTests: XCTestCase {
             onCaptureError: { _ in }, onSpeechError: { _ in }, onSpeakerError: { _ in failure.fulfill() })
         for _ in 0..<5 { writer.append(buffer) }
         await writer.finish()
+        let drained = await writer.finishAnalysis()
+        XCTAssertTrue(drained)
         var delivered = 0
         for await _ in stream { delivered += 1 }
         XCTAssertEqual(delivered, 1)

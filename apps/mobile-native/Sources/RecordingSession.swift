@@ -1,128 +1,226 @@
 import AVFoundation
+import UIKit
 import Observation
 
 @MainActor @Observable
 final class RecordingSession {
     private(set) var noteID: UUID?
+    private(set) var preparingNoteID: UUID?
     private(set) var busy = false
     private(set) var startedAt: Date?
+    private(set) var lastReport: AudioChunkWriter.Report?
     var problem: String?
     let speech = LocalSpeech()
     let speakers = StreamingSpeakers()
-    private var engine: AVAudioEngine?
+    private var hardware: (any CaptureHardware)?
     private var writer: AudioChunkWriter?
     private var captureFailed = false
-    private var interruptionObserver: NSObjectProtocol?
-    private var routeObserver: NSObjectProtocol?
+    private var canceled = false
+    private var attemptID: UUID?
+    private var observers: [NSObjectProtocol] = []
     private let recordPermission: @MainActor () async -> Bool
+    private let makeHardware: @MainActor () throws -> any CaptureHardware
+    private let analysisEnabled: Bool
+    private let writerFault: @Sendable (AudioChunkWriter.Stage) throws -> Void
     var permitsPlayback: Bool { noteID == nil && !busy }
 
     init(recordPermission: @escaping @MainActor () async -> Bool = {
         await AVAudioApplication.requestRecordPermission()
-    }) { self.recordPermission = recordPermission }
+    }, makeHardware: @escaping @MainActor () throws -> any CaptureHardware = { try SystemCaptureHardware() },
+         analysisEnabled: Bool = true,
+         writerFault: @escaping @Sendable (AudioChunkWriter.Stage) throws -> Void = { _ in }) {
+        #if DEBUG
+        if CommandLine.arguments.contains("--ui-testing") && CommandLine.arguments.contains("--capture-fixture") {
+            self.recordPermission = { try? await Task.sleep(for: .seconds(3)); return true }
+            self.makeHardware = { FixtureCaptureHardware(interrupt: CommandLine.arguments.contains("--capture-interruption-fixture")) }
+            self.analysisEnabled = false
+        } else {
+            self.recordPermission = recordPermission
+            self.makeHardware = makeHardware
+            self.analysisEnabled = analysisEnabled
+        }
+        #else
+        self.recordPermission = recordPermission
+        self.makeHardware = makeHardware
+        self.analysisEnabled = analysisEnabled
+        #endif
+        self.writerFault = writerFault
+    }
+
+    private func valid(_ token: UUID, _ id: UUID, _ library: NoteLibrary) -> Bool {
+        attemptID == token && !canceled && library.note(id) != nil && !library.storageBusy
+    }
 
     func start(_ id: UUID, library: NoteLibrary) async {
-        guard noteID == nil, !busy, !library.storageBusy, !library.loading, let note = library.note(id), let disk = library.disk else { return }
+        guard noteID == nil, !busy, !library.storageBusy, !library.loading,
+              let note = library.note(id), let disk = library.disk else { return }
+        let token = UUID()
+        attemptID = token
+        preparingNoteID = id
         busy = true
+        canceled = false
         captureFailed = false
-        defer { busy = false }
+        lastReport = nil
+        problem = nil
+        defer { preparingNoteID = nil; busy = false }
         guard await recordPermission() else {
-            problem = CaptureError.microphone.localizedDescription
+            if !canceled { problem = CaptureError.microphone.localizedDescription }
+            attemptID = nil
             return
         }
+        guard valid(token, id, library) else { attemptID = nil; return }
+        var finishPendingFeeds: (() -> Void)?
         do {
-            let directory = try disk.audioDirectory(for: id)
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
-            try audioSession.setActive(true)
-            let engine = AVAudioEngine()
-            let input = engine.inputNode
-            let format = input.outputFormat(forBus: 0)
-            guard format.sampleRate > 0, format.channelCount > 0 else { throw CaptureError.format }
+            let hardware = try makeHardware()
+            self.hardware = hardware
+            installObservers(hardware, library: library, token: token)
             let offset = try disk.recordingOffset(for: id)
-            let speechFeed = await speech.start(language: note.language, offset: offset) { passage in
+            let speechFeed = analysisEnabled ? await speech.start(language: note.language, offset: offset) { [weak self] passage in
+                guard self?.attemptID == token else { return }
                 library.update(id) { $0.apply(passage) }
+            } : nil
+            finishPendingFeeds = { speechFeed?.1.finish() }
+            guard valid(token, id, library) else {
+                speechFeed?.1.finish()
+                await abandon(id, library: library)
+                return
             }
-            let speakerFeed = await speakers.start(offset: offset) { sessionID, turns in
+            let speakerFeed = analysisEnabled ? await speakers.start(offset: offset) { [weak self] sessionID, turns in
+                guard self?.attemptID == token else { return }
                 library.update(id) { note in
                     var annotations = note.speakerAnnotations ?? SpeakerAnnotations()
                     annotations.replace(sessionID: sessionID, with: turns)
                     note.speakerAnnotations = annotations
                 }
-            }
-            guard library.update(id, { $0.captureState = .recording }) else {
-                speechFeed?.1.finish()
-                speakerFeed?.finish()
-                await speech.finish()
-                await speakers.finish()
-                try? audioSession.setActive(false)
+            } : nil
+            finishPendingFeeds = { speechFeed?.1.finish(); speakerFeed?.finish() }
+            guard valid(token, id, library), library.update(id, { $0.captureState = .recording }) else {
+                speechFeed?.1.finish(); speakerFeed?.finish()
+                await abandon(id, library: library)
                 return
             }
-            guard await library.flush() else {
-                speechFeed?.1.finish()
-                speakerFeed?.finish()
-                await speech.finish()
-                await speakers.finish()
-                try? audioSession.setActive(false)
+            guard await library.flush(noteID: id), valid(token, id, library) else {
+                speechFeed?.1.finish(); speakerFeed?.finish()
+                await abandon(id, library: library)
                 return
             }
+            // All awaits and cancellation checks precede filesystem creation and engine start.
+            let directory = try disk.audioDirectory(for: id)
             let writer = AudioChunkWriter(directory: directory,
                 speechFormat: speechFeed?.0, speechInput: speechFeed?.1, speakerInput: speakerFeed,
                 onCaptureError: { [weak self] message in
                     Task { @MainActor in
-                        guard let self, self.noteID == id else { return }
+                        guard let self, self.attemptID == token else { return }
                         self.problem = message
                         self.captureFailed = true
                         await self.stop(library: library, interrupted: true)
                     }
                 }, onSpeechError: { [weak self] message in
-                    Task { @MainActor in self?.speech.fail(message) }
+                    Task { @MainActor in
+                        guard self?.attemptID == token else { return }
+                        self?.speech.fail(message)
+                    }
                 }, onSpeakerError: { [weak self] message in
-                    Task { @MainActor in self?.speakers.fail(message) }
-                })
+                    Task { @MainActor in
+                        guard self?.attemptID == token else { return }
+                        self?.speakers.fail(message)
+                    }
+                }, fault: writerFault, timelineStart: offset)
             self.writer = writer
-            self.engine = engine
+            finishPendingFeeds = nil
             self.noteID = id
-            input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in writer.append(buffer) }
-            engine.prepare()
-            try engine.start()
+            try hardware.start(writer: writer)
             startedAt = Date()
-            interruptionObserver = NotificationCenter.default.addObserver(
-                forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] event in
-                    guard let raw = event.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                          raw == AVAudioSession.InterruptionType.began.rawValue else { return }
-                    Task { @MainActor in await self?.stop(library: library, interrupted: true) }
-                }
-            routeObserver = NotificationCenter.default.addObserver(
-                forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-                    Task { @MainActor in await self?.stop(library: library, interrupted: true) }
-                }
         } catch {
+            finishPendingFeeds?()
             problem = "Recording could not start. \(error.localizedDescription)"
-            busy = false
-            if noteID != nil { await stop(library: library, interrupted: true) }
-            else { try? AVAudioSession.sharedInstance().setActive(false) }
+            await abandon(id, library: library)
         }
     }
 
-    func stop(library: NoteLibrary, interrupted: Bool = false) async {
-        guard let id = noteID, !busy else { return }
-        busy = true
-        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
-        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
-        interruptionObserver = nil
-        routeObserver = nil
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
-        engine = nil
-        await writer?.finish()
+    private func abandon(_ id: UUID, library: NoteLibrary) async {
+        clearObservers()
+        hardware?.stop()
+        let closingWriter = writer
+        if let closingWriter { lastReport = await closingWriter.finish() }
         writer = nil
+        hardware?.deactivate(); hardware = nil
+        if library.note(id)?.captureState == .recording {
+            library.update(id) { $0.captureState = .interrupted }
+            await library.flush()
+        }
+        if let closingWriter { _ = await closingWriter.finishAnalysis() }
+        await speech.finish(); await speakers.finish()
+        noteID = nil; startedAt = nil; attemptID = nil
+    }
+
+    func stop(library: NoteLibrary, interrupted: Bool = false) async {
+        if busy {
+            if preparingNoteID != nil {
+                canceled = true
+                problem = interrupted ? "Recording preparation was interrupted. Choose Record to try again." : "Recording preparation canceled."
+            }
+            if interrupted { captureFailed = true }
+            return
+        }
+        guard let id = noteID else { return }
+        busy = true
+        defer { busy = false }
+        clearObservers()
+        hardware?.stop()
+        let closingWriter = writer
+        let report = await closingWriter?.finish()
+        lastReport = report
+        writer = nil
+        if let report, !report.complete {
+            captureFailed = true
+            problem = "Recording stopped with incomplete audio. \(report.failures.joined(separator: " "))"
+        }
         library.update(id) { $0.captureState = (interrupted || captureFailed) ? .interrupted : .finished }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        await speech.finish()
-        await speakers.finish()
-        noteID = nil
-        startedAt = nil
-        busy = false
+        if !(await library.flush(noteID: id)) {
+            problem = "Audio capture stopped, but its note status could not be saved. Keep the app open and retry saving."
+            library.update(id) { $0.captureState = .interrupted }
+            await library.flush(noteID: id)
+        }
+        hardware?.deactivate(); hardware = nil
+        if let closingWriter, !(await closingWriter.finishAnalysis()) {
+            speech.fail("Transcription processing timed out. Source audio is preserved.")
+            speakers.fail("Speaker processing timed out. Source audio is preserved.")
+        }
+        await speech.finish(); await speakers.finish()
+        noteID = nil; startedAt = nil; attemptID = nil
+    }
+
+    private func installObservers(_ hardware: any CaptureHardware, library: NoteLibrary, token: UUID) {
+        func observe(_ name: Notification.Name, object: AnyObject? = nil,
+                     accept: @escaping @Sendable (Notification) -> Bool = { _ in true }) {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] event in
+                guard accept(event) else { return }
+                Task { @MainActor in
+                    guard let self, self.attemptID == token else { return }
+                    self.problem = "Recording was interrupted. Saved audio is retained. Choose Resume to continue."
+                    await self.stop(library: library, interrupted: true)
+                }
+            })
+        }
+        observe(AVAudioSession.interruptionNotification) {
+            ($0.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
+        }
+        observe(.AVAudioEngineConfigurationChange, object: hardware.notificationObject)
+        observe(AVAudioSession.routeChangeNotification) {
+            guard let raw = $0.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return false }
+            return reason == .oldDeviceUnavailable || reason == .newDeviceAvailable || reason == .noSuitableRouteForCategory
+        }
+        observe(UIApplication.didBecomeActiveNotification) { _ in
+            AVAudioApplication.shared.recordPermission == .denied
+        }
+        observe(AVAudioSession.mediaServicesWereLostNotification)
+        observe(AVAudioSession.mediaServicesWereResetNotification)
+    }
+
+    private func clearObservers() {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers.removeAll()
     }
 }
