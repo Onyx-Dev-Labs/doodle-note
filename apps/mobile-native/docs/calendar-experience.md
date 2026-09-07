@@ -1,0 +1,27 @@
+# Native calendar experience (ONY-257)
+
+Home combines selected calendars from Google and Microsoft accounts for the next 14 days. Refresh occurs on first load, foreground activation, calendar selection, connection, and explicit refresh. Background polling is not promised. Cached events remain visible after a failed refresh, with per-account stale status. All-day events keep their provider timezone; timed events display in the device timezone.
+
+Meeting details offer an HTTPS Join link when supplied by the provider, an explicit Open meeting note action, and invitee suggestions. Invitees never become speaker labels or voice identities. Join uses the system URL opener and does not start capture. Neither notifications nor calendar actions invoke recording.
+
+Event-note jobs use the existing durable repository identity: library + provider + account + calendar + event + original occurrence. Repeated Home/reminder taps return the same note. A later title/date change cannot overwrite personal edits, ink, or confirmed speaker labels. Event details refresh from the calendar cache; note content remains independent. Deleted/canceled events and disconnects do not delete notes. A note in Trash or permanently deleted is not silently recreated; the user receives an unavailable message.
+
+Reminders default off. The first opt-in requests notification permission and denial leaves the preference off. Lead times are 0, 5 (default), 10, or 15 minutes. Up to 50 future timed events are scheduled with absolute UTC triggers, a generic privacy-preserving notification, and a serialized route to the meeting action. Permission loss, calendar deselection, disconnect, successful event cancellation/removal, or failed refresh cancels the corresponding scheduled reminders at the next reconciliation. Offline cached events stay visible but do not leave unverified reminders scheduled. OS delivery is best effort; cancellation cannot retract a reminder already delivered before the next app refresh. Cold-start routes wait for initial calendar loading. Unavailable events show a safe message and preserve notes.
+
+## Approved client configuration
+
+Normal `project.yml` builds contain no calendar client registrations. Both Connect controls fail closed until validated native configuration and the exact callback schemes exist in the built Info.plist. Local notes remain available. No IDs, secrets, tenant permissions, or provider registrations were created by this implementation.
+
+After the native OAuth registration owner approves the registrations described in [Google](google-calendar.md) and [Microsoft](microsoft-calendar.md), copy `Calendar.local.example.yml` to ignored `Calendar.local.yml` in `apps/mobile-native`. Populate the four Info keys with the approved public native client IDs and redirect URLs. Set each provider's `CFBundleURLSchemes` array to the scheme of its approved redirect. Omit an unused provider. Generate with `xcodegen generate --spec Calendar.local.yml`. Client IDs and redirects are public application identifiers, not client secrets. Never add a client secret. Do not commit the generated local configuration or Info.plist changes.
+
+The factory creates each provider adapter with its system authentication browser anchored to the foreground window, then passes the adapters to the shared account store/coordinator. `ASWebAuthenticationSession` handles its registered callback directly. Google validates state and PKCE; Microsoft validates state, PKCE and nonce. The provider credential store remains Keychain-backed. Returning from a browser refreshes Home; native calendar access is independent of cloud note sync.
+
+## Verification
+
+`CalendarExperienceTests` exercises concurrent durable note opening/relaunch, edited content retention after reschedule, missing-library rejection, opt-in/denial, DST absolute scheduling, serial cancellation, stale cache, deselection/disconnect preservation, meeting routing and unsafe Join URLs. `CalendarExperienceUITests` launches `--ui-testing --calendar-fixture --fixture-id=<UUID>` with two synthetic providers, memory credentials and a denied-notification fixture. This is DEBUG-only and performs no OAuth, external Join navigation, network request or recording. The fixture can also be used for manual Home/settings review.
+
+Required real-account QA remains pending: two independently connected providers/accounts, recurring/rescheduled/canceled events, offline refresh, successful/denied OS permission, notification delivery/tap from terminated app, actual provider Join links, and timezone changes on physical iPhone/iPad. Automated fixtures establish source behavior only, not native registration correctness or OS delivery reliability.
+
+Rollback: revert this feature commit. Optional cache metadata is backward-compatible; event notes use the existing schema and remain ordinary local notes. Before distributing a rollback, disable reminders in the newer build to remove scheduled notifications.
+
+Primary references: [Apple local notification scheduling](https://developer.apple.com/documentation/usernotifications/scheduling-a-notification-locally-from-your-app), [Google event fields](https://developers.google.com/workspace/calendar/api/v3/reference/events), [Microsoft event fields](https://learn.microsoft.com/en-us/graph/api/resources/event?view=graph-rest-1.0), [XcodeGen include merging](https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md#include).

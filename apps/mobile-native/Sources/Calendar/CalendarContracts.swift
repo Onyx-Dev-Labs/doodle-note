@@ -27,6 +27,14 @@ struct CalendarOccurrence: Codable, Equatable, Sendable {
     /// All-day dates retain the originating zone, never interpreted in the device zone.
     let timeZoneID: String
     let isAllDay: Bool
+    var joinURL: String? = nil
+    var invitees: [String]? = nil
+
+    var safeJoinURL: URL? {
+        guard let joinURL, joinURL.count <= 8192, let url = URL(string: joinURL), url.scheme == "https",
+              url.host != nil, url.user == nil, url.password == nil else { return nil }
+        return url
+    }
 }
 
 struct CalendarWindow: Codable, Equatable, Sendable {

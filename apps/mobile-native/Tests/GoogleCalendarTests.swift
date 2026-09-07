@@ -121,7 +121,7 @@ final class GoogleCalendarTests: XCTestCase {
     func testRecurringRescheduleAllDayCancellationAndContextBoundPages() async throws {
         let first = """
         {"timeZone":"America/Chicago","items":[
-        {"id":"instance","recurringEventId":"series","originalStartTime":{"dateTime":"2026-09-04T10:00:00-05:00"},"start":{"dateTime":"2026-09-05T10:00:00-05:00"},"end":{"dateTime":"2026-09-05T11:00:00-05:00"}},
+        {"id":"instance","hangoutLink":"https://meet.google.com/fixture","attendees":[{"displayName":"Jordan"},{"email":"room@example.invalid","resource":true}],"recurringEventId":"series","originalStartTime":{"dateTime":"2026-09-04T10:00:00-05:00"},"start":{"dateTime":"2026-09-05T10:00:00-05:00"},"end":{"dateTime":"2026-09-05T11:00:00-05:00"}},
         {"id":"cancelled","status":"cancelled"}],"nextPageToken":"two"}
         """
         let second = """
@@ -131,6 +131,8 @@ final class GoogleCalendarTests: XCTestCase {
         let page = try await value.events(account: account, credential: secret(), calendarIDs: ["a/b", "z"], window: window(), cursor: nil)
         XCTAssertEqual(page.events.count, 1)
         XCTAssertEqual(page.events.first?.key.eventID, "series")
+        XCTAssertEqual(page.events.first?.safeJoinURL?.host, "meet.google.com")
+        XCTAssertEqual(page.events.first?.invitees, ["Jordan"])
         XCTAssertEqual(page.events.first?.key.occurrenceID, "instant:\(try CalendarDateNormalizer.instant("2026-09-04T10:00:00-05:00").timeIntervalSince1970)")
         let next = try await value.events(account: account, credential: secret(), calendarIDs: ["a/b", "z"], window: window(), cursor: page.next)
         XCTAssertEqual(next.events.first?.isAllDay, true)
