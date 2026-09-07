@@ -211,9 +211,33 @@ final class SummaryGenerationTests: XCTestCase {
         try FileManager.default.moveItem(at: backup, to: file)
         library.retrySaving()
         let retried = await library.flush(); XCTAssertTrue(retried)
+        await controller.refreshSaveState(noteID: id, library: library)
+        XCTAssertNil(controller.problem)
         let reopened = NoteLibrary(root: root); await reopened.waitUntilLoaded()
         XCTAssertEqual(reopened.note(id)?.metadata?.summaries.count, 1)
         XCTAssertEqual(reopened.note(id)?.text, "Original content.")
+    }
+
+    func testUnrelatedUnsavedNoteDoesNotBlockSavedSourceOrSummary() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = NoteLibrary(root: root); await library.waitUntilLoaded()
+        let id = try XCTUnwrap(library.create()); library.update(id) { $0.text = "Saved summary source." }
+        let other = try XCTUnwrap(library.create()); let initial = await library.flush(); XCTAssertTrue(initial)
+        let file = root.appendingPathComponent(other.uuidString).appendingPathComponent("note.json")
+        let backup = file.appendingPathExtension("fixture-backup")
+        try FileManager.default.moveItem(at: file, to: backup)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        library.update(other) { $0.text = "Preserve this pending edit." }
+        let controller = SummaryController(engine: SummaryFixtureEngine())
+        controller.generate(noteID: id, library: library, format: .general, language: .english)
+        try await finish(controller); XCTAssertNotNil(controller.draft)
+        let saved = await controller.save(noteID: id, library: library, replaceEdited: false)
+        XCTAssertTrue(saved)
+        XCTAssertEqual(library.note(other)?.text, "Preserve this pending edit.")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: backup, to: file)
+        library.retrySaving(); let retried = await library.flush(); XCTAssertTrue(retried)
     }
 
 }

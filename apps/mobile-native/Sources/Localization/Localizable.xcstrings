@@ -12156,6 +12156,1194 @@
           }
         }
       }
+    },
+    "General": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Generelt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "General"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Général"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Allgemein"
+          }
+        }
+      }
+    },
+    "Client discovery": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Client discovery"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kundeafdækning"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Descubrimiento del cliente"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Découverte client"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kundenbedarf"
+          }
+        }
+      }
+    },
+    "Project / status": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project / status"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Projekt / status"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Proyecto / estado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Projet / suivi"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Projekt / Status"
+          }
+        }
+      }
+    },
+    "One-to-one": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One-to-one"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "En til en"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Uno a uno"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entretien individuel"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Einzelgespräch"
+          }
+        }
+      }
+    },
+    "Interview": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interview"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Interview"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entrevista"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entretien"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Interview"
+          }
+        }
+      }
+    },
+    "Training / workshop": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Training / workshop"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Undervisning / workshop"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Formación / taller"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Formation / atelier"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Schulung / Workshop"
+          }
+        }
+      }
+    },
+    "Meeting format": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meeting format"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mødeformat"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Formato de reunión"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Format de réunion"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Besprechungsformat"
+          }
+        }
+      }
+    },
+    "Summary language": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Summary language"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sprog for resumé"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Idioma del resumen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Langue du résumé"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sprache der Zusammenfassung"
+          }
+        }
+      }
+    },
+    "Generation stays on this device. Review claims, owners and dates against the sources before using the summary.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generation stays on this device. Review claims, owners and dates against the sources before using the summary."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Genereringen foregår på denne enhed. Kontrollér påstande, ansvarlige og datoer mod kilderne, før du bruger resuméet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La generación se realiza en este dispositivo. Revisa afirmaciones, responsables y fechas con las fuentes antes de usar el resumen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La génération reste sur cet appareil. Vérifiez les affirmations, les responsables et les dates dans les sources avant d'utiliser le résumé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Erstellung erfolgt auf diesem Gerät. Prüfen Sie Aussagen, Verantwortliche und Termine anhand der Quellen, bevor Sie die Zusammenfassung verwenden."
+          }
+        }
+      }
+    },
+    "Processing source parts: %lld of %lld": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processing source parts: %lld of %lld"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Behandler kildedele: %lld af %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Procesando partes de las fuentes: %lld de %lld"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Traitement des parties sources : %lld sur %lld"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quellenteile werden verarbeitet: %lld von %lld"
+          }
+        }
+      }
+    },
+    "Cancel generation": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel generation"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Annuller generering"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cancelar generación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Annuler la génération"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Erstellung abbrechen"
+          }
+        }
+      }
+    },
+    "Generate draft": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generate draft"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Generér udkast"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Generar borrador"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Générer un brouillon"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Entwurf erstellen"
+          }
+        }
+      }
+    },
+    "Review generated draft": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review generated draft"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gennemgå genereret udkast"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Revisar borrador generado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vérifier le brouillon généré"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Erstellten Entwurf prüfen"
+          }
+        }
+      }
+    },
+    "Processed all %lld source parts. Review the source citations below.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processed all %lld source parts. Review the source citations below."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Alle %lld kildedele er behandlet. Gennemgå kildehenvisningerne nedenfor."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se procesaron las %lld partes de las fuentes. Revisa las citas a continuación."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les %lld parties sources ont été traitées. Vérifiez les citations ci-dessous."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Alle %lld Quellenteile wurden verarbeitet. Prüfen Sie die Quellenangaben unten."
+          }
+        }
+      }
+    },
+    "Save as selected version": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save as selected version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gem som valgt version"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Guardar como versión seleccionada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Enregistrer comme version sélectionnée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Als ausgewählte Version speichern"
+          }
+        }
+      }
+    },
+    "Retained versions": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retained versions"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bevarede versioner"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versiones conservadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versions conservées"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aufbewahrte Versionen"
+          }
+        }
+      }
+    },
+    "No summary versions yet. Your personal notes remain separate.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No summary versions yet. Your personal notes remain separate."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ingen resuméversioner endnu. Dine personlige noter holdes adskilt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aún no hay versiones del resumen. Tus notas personales permanecen separadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aucune version du résumé pour le moment. Vos notes personnelles restent séparées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Noch keine Zusammenfassungsversionen. Ihre persönlichen Notizen bleiben getrennt."
+          }
+        }
+      }
+    },
+    "Selected version": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Valgt version"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versión seleccionada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version sélectionnée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ausgewählte Version"
+          }
+        }
+      }
+    },
+    "Select this version": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select this version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vælg denne version"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seleccionar esta versión"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sélectionner cette version"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Version auswählen"
+          }
+        }
+      }
+    },
+    "Replace the selected edited version?": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replace the selected edited version?"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Erstat den valgte redigerede version?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Reemplazar la versión editada seleccionada?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Remplacer la version modifiée sélectionnée ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ausgewählte bearbeitete Version ersetzen?"
+          }
+        }
+      }
+    },
+    "Select generated version": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select generated version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vælg genereret version"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seleccionar versión generada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sélectionner la version générée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Erstellte Version auswählen"
+          }
+        }
+      }
+    },
+    "Your edited version will remain in Retained versions.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your edited version will remain in Retained versions."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Din redigerede version bevares under Bevarede versioner."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tu versión editada permanecerá en Versiones conservadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Votre version modifiée restera dans Versions conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ihre bearbeitete Version bleibt unter Aufbewahrte Versionen erhalten."
+          }
+        }
+      }
+    },
+    "Source %lld": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source %lld"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kilde %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fuente %lld"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Source %lld"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quelle %lld"
+          }
+        }
+      }
+    },
+    "The original source is unavailable in this library.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The original source is unavailable in this library."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den oprindelige kilde er ikke tilgængelig i dette bibliotek."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La fuente original no está disponible en esta biblioteca."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La source originale n'est pas disponible dans cette bibliothèque."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Originalquelle ist in dieser Bibliothek nicht verfügbar."
+          }
+        }
+      }
+    },
+    "Original source": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original source"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Oprindelig kilde"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fuente original"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Source originale"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Originalquelle"
+          }
+        }
+      }
+    },
+    "Add typed notes or a transcript before generating a summary.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add typed notes or a transcript before generating a summary."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tilføj skrevne noter eller en transskription, før du genererer et resumé."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Añade notas escritas o una transcripción antes de generar un resumen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ajoutez des notes saisies ou une transcription avant de générer un résumé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fügen Sie vor der Erstellung einer Zusammenfassung getippte Notizen oder ein Transkript hinzu."
+          }
+        }
+      }
+    },
+    "The generated response could not be grounded in the supplied sources. Your previous versions are preserved.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The generated response could not be grounded in the supplied sources. Your previous versions are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Det genererede svar kunne ikke knyttes til de angivne kilder. Dine tidligere versioner er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo vincular la respuesta generada a las fuentes proporcionadas. Tus versiones anteriores se conservan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La réponse générée n'a pas pu être reliée aux sources fournies. Vos versions précédentes sont conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die erstellte Antwort konnte den angegebenen Quellen nicht zugeordnet werden. Ihre bisherigen Versionen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "The source note changed. Generate again from the saved version.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The source note changed. Generate again from the saved version."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kildenoten er ændret. Generér igen fra den gemte version."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La nota fuente cambió. Genera de nuevo desde la versión guardada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La note source a changé. Relancez la génération depuis la version enregistrée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Quellnotiz wurde geändert. Erstellen Sie erneut aus der gespeicherten Version."
+          }
+        }
+      }
+    },
+    "Summary generation canceled. Your notes and previous versions are preserved.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Summary generation canceled. Your notes and previous versions are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Generering af resumé annulleret. Dine noter og tidligere versioner er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Generación del resumen cancelada. Tus notas y versiones anteriores se conservan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Génération du résumé annulée. Vos notes et versions précédentes sont conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Erstellung der Zusammenfassung abgebrochen. Ihre Notizen und bisherigen Versionen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "The new version is waiting to be saved. Keep the app open and retry saving.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new version is waiting to be saved. Keep the app open and retry saving."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den nye version venter på at blive gemt. Hold appen åben, og prøv at gemme igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La nueva versión está pendiente de guardar. Mantén la app abierta e intenta guardarla de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La nouvelle version attend d'être enregistrée. Gardez l'app ouverte et réessayez l'enregistrement."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die neue Version wartet auf das Speichern. Lassen Sie die App geöffnet und versuchen Sie es erneut."
+          }
+        }
+      }
+    },
+    "A source fragment exceeds the on-device context limit. Your original note is preserved.": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A source fragment exceeds the on-device context limit. Your original note is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Et kildefragment overskrider enhedens kontekstgrænse. Din oprindelige note er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Un fragmento de la fuente supera el límite de contexto del dispositivo. Tu nota original se conserva."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Un fragment source dépasse la limite de contexte de l'appareil. Votre note originale est conservée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ein Quellenfragment überschreitet das Kontextlimit des Geräts. Ihre Originalnotiz bleibt erhalten."
+          }
+        }
+      }
+    },
+    "Synthetic generation fixture": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synthetic generation fixture"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Syntetisk genereringstest"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Prueba de generación sintética"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Test de génération synthétique"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synthetischer Erstellungstest"
+          }
+        }
+      }
+    },
+    "Synthetic model unavailable": {
+      "extractionState": "manual",
+      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synthetic model unavailable"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Syntetisk model ikke tilgængelig"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Modelo sintético no disponible"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Modèle synthétique indisponible"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synthetisches Modell nicht verfügbar"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

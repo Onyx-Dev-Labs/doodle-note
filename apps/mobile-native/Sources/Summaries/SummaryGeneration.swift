@@ -99,9 +99,16 @@ actor SummaryGenerator {
         guard let annotations = note.speakerAnnotations else { return nil }
         let overlapping = annotations.turns.filter { min($0.end, passage.end) > max($0.start, passage.start) }
         guard !overlapping.isEmpty, overlapping.allSatisfy(\.isFinal), Set(overlapping.map(\.key)).count == 1 else { return nil }
-        let label = annotations.label(for: passage)
-        guard label != "Unassigned speaker", label != "Multiple speakers" else { return nil }
-        return label
+        let duration = passage.end - passage.start
+        guard duration.isFinite, duration > 0 else { return nil }
+        var end = passage.start
+        let covered = overlapping.sorted { $0.start < $1.start }.reduce(0.0) { total, turn in
+            let start = max(passage.start, turn.start), stop = min(passage.end, turn.end)
+            let added = max(0, stop - max(end, start)); end = max(end, stop)
+            return total + added
+        }
+        guard covered / duration >= 0.65, let key = overlapping.first?.key else { return nil }
+        return annotations.name(for: key)
     }
 
     func generate(note: NoteRecord, format: MeetingFormat, language: SpokenLanguage,

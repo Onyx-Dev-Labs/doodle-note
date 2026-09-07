@@ -12,6 +12,8 @@ import Observation
     private(set) var total = 0
     private(set) var selectedAtStart: UUID?
     private var authentication: UUID?
+    private var waitingForSave = false
+    private static let saveProblem = "The new version is waiting to be saved. Keep the app open and retry saving."
 
     init(engine: any LocalGenerationEngine = AppleLocalGeneration()) { generator = SummaryGenerator(engine: engine) }
 
@@ -20,11 +22,12 @@ import Observation
         let token = UUID(); generation = token
         let identity = library.authenticationGeneration
         authentication = identity
+        waitingForSave = false
         busy = true; draft = nil; problem = nil; completed = 0; total = 0
         task = Task {
             defer { if generation == token { busy = false; task = nil } }
             do {
-                guard await library.flush(), !Task.isCancelled,
+                guard await library.flush(noteID: noteID), !Task.isCancelled,
                       library.authenticationGeneration == identity,
                       let note = library.note(noteID) else { throw SummaryFailure.changed }
                 selectedAtStart = note.metadata?.selectedSummaryID
@@ -46,6 +49,7 @@ import Observation
     }
 
     func cancel() {
+        waitingForSave = false
         generation = UUID(); task?.cancel(); task = nil; busy = false; draft = nil
         problem = "Summary generation canceled. Your notes and previous versions are preserved."
     }
@@ -63,8 +67,17 @@ import Observation
             note.metadata?.selectedSummaryID = version.id
         }) else { problem = SummaryFailure.changed.localizedDescription; return false }
         self.draft = nil
-        let saved = await library.flush()
-        if !saved { problem = "The new version is waiting to be saved. Keep the app open and retry saving." }
+        let saved = await library.flush(noteID: noteID)
+        if !saved { waitingForSave = true; problem = Self.saveProblem }
         return saved
     }
+    func refreshSaveState(noteID: UUID, library: NoteLibrary) async {
+        guard waitingForSave else { return }
+        let token = generation
+        guard await library.flush(noteID: noteID), generation == token,
+              authentication == library.authenticationGeneration else { return }
+        waitingForSave = false
+        if problem == Self.saveProblem { problem = nil }
+    }
+
 }

@@ -17,6 +17,7 @@ import XCTest
         let body = app.textViews.firstMatch
         XCTAssertTrue(body.waitForExistence(timeout: 5))
         body.tap(); body.typeText("We discussed the release. No owner or date was agreed.")
+        app.buttons["doneTyping"].tap()
         app.buttons["Summary"].firstMatch.tap()
         let generate = app.buttons["generateSummary"]
         XCTAssertTrue(generate.waitForExistence(timeout: 5))
@@ -44,6 +45,7 @@ import XCTest
             let body = app.textViews.firstMatch
             XCTAssertTrue(body.waitForExistence(timeout: 5))
             body.tap(); body.typeText("Preserved personal source.")
+        app.buttons["doneTyping"].tap()
             app.buttons["Summary"].firstMatch.tap()
             let generate = app.buttons["generateSummary"]
             reveal(generate, app: app); generate.tap()
@@ -70,6 +72,7 @@ import XCTest
         let body = app.textViews.firstMatch
         XCTAssertTrue(body.waitForExistence(timeout: 5))
         body.tap(); body.typeText("The team reviewed the plan.")
+        app.buttons["doneTyping"].tap()
         app.buttons["Summary"].firstMatch.tap()
         let generate = app.buttons["generateSummary"]
         reveal(generate, app: app); generate.tap()
@@ -90,6 +93,23 @@ import XCTest
         let retained = app.staticTexts["Edited version"]
         reveal(retained, app: app)
         XCTAssertTrue(retained.exists)
+    }
+
+    func testSpanishSummaryControlsAndErrorKeepOriginalText() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--summary-fixture", "--summary-unavailable", "--localization-fixture", "--app-language=es-ES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["newNote"].waitForExistence(timeout: 10))
+        app.buttons["newNote"].tap()
+        let body = app.textViews["personalNotes"]
+        XCTAssertTrue(body.waitForExistence(timeout: 5)); body.tap(); body.typeText("Original source stays English.")
+        app.buttons["doneTyping"].tap()
+        app.buttons["Resumen"].firstMatch.tap()
+        let generate = app.buttons["generateSummary"]
+        reveal(generate, app: app); XCTAssertEqual(generate.label, "Generar borrador"); generate.tap()
+        XCTAssertTrue(app.staticTexts["Modelo sintético no disponible"].waitForExistence(timeout: 5))
+        app.buttons["Notas"].firstMatch.tap()
+        XCTAssertEqual(body.value as? String, "Original source stays English.")
     }
 
 }

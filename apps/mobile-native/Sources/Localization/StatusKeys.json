@@ -161,5 +161,11 @@
   "Unconfirmed audio frames: %lld. Rejected audio frames: %lld. Saved audio is preserved.",
   "Write and draw immediately. No account or model download is required. Cloud sync is optional.",
   "Your notes stay on this device. No account is required.",
-  "Your notes, transcript, ink and summary versions stay. Audio removal cannot be undone here."
+  "Your notes, transcript, ink and summary versions stay. Audio removal cannot be undone here.",
+  "Add typed notes or a transcript before generating a summary.",
+  "The generated response could not be grounded in the supplied sources. Your previous versions are preserved.",
+  "The source note changed. Generate again from the saved version.",
+  "Summary generation canceled. Your notes and previous versions are preserved.",
+  "The new version is waiting to be saved. Keep the app open and retry saving.",
+  "A source fragment exceeds the on-device context limit. Your original note is preserved."
 ]

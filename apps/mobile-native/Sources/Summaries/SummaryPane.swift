@@ -29,7 +29,7 @@ struct SummaryPane: View {
                 if SummaryUIFixture.enabled { Text("Synthetic generation fixture").font(.caption) }
                 #endif
                 Picker("Meeting format", selection: $format) {
-                    ForEach(MeetingFormat.allCases) { Text($0.label).tag($0) }
+                    ForEach(MeetingFormat.allCases) { Text(L10n.key($0.label)).tag($0) }
                 }.disabled(controller.busy)
                 Picker("Summary language", selection: $language) {
                     ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) }
@@ -37,13 +37,13 @@ struct SummaryPane: View {
                 Text("Generation stays on this device. Review claims, owners and dates against the sources before using the summary.")
                     .font(.caption).foregroundStyle(.secondary)
                 if controller.busy {
-                    ProgressView("Processing source parts: \(controller.completed) of \(controller.total)")
+                    ProgressView(L10n.format("Processing source parts: %lld of %lld", controller.completed, controller.total))
                     Button("Cancel generation") { controller.cancel() }
                 } else {
                     Button("Generate draft") { controller.generate(noteID: id, library: library, format: format, language: language) }
                         .disabled(note?.schemaVersion != 2).accessibilityIdentifier("generateSummary")
                 }
-                if let problem = controller.problem { Text(problem).foregroundStyle(.orange) }
+                if let problem = controller.problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
                 if let draft = controller.draft {
                     Text("Review generated draft").font(.headline)
                     Text(draft.text).textSelection(.enabled)
@@ -58,7 +58,7 @@ struct SummaryPane: View {
                 if note?.metadata?.summaries.isEmpty != false { Text("No summary versions yet. Your personal notes remain separate.") }
                 ForEach(note?.metadata?.summaries.reversed() ?? []) { version in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(version.origin == .edited ? "Edited version" : "Generated version").font(.caption)
+                        Text(L10n.key(version.origin == .edited ? "Edited version" : "Generated version")).font(.caption)
                         if selected?.id == version.id { Text("Selected version").font(.caption).foregroundStyle(.secondary) }
                         Text(version.text).textSelection(.enabled)
                         sourceButtons(version.sources)
@@ -71,13 +71,16 @@ struct SummaryPane: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding()
         }
         .onDisappear { controller.cancel() }
+        .onChange(of: library.pendingSaves) { _, _ in
+            Task { await controller.refreshSaveState(noteID: id, library: library) }
+        }
         .onChange(of: library.authenticationGeneration) { _, _ in controller.cancel(); source = nil; editing = nil }
         .confirmationDialog("Replace the selected edited version?", isPresented: $confirmReplacement, titleVisibility: .visible) {
             Button("Select generated version") { Task { _ = await controller.save(noteID: id, library: library, replaceEdited: true) } }
         } message: { Text("Your edited version will remain in Retained versions.") }
         .sheet(item: $editing) { version in
             NavigationStack {
-                TextEditor(text: $editText).accessibilityIdentifier("summaryVersionText").padding().navigationTitle("Edit summary")
+                TextEditor(text: $editText).accessibilityIdentifier("summaryVersionText").padding().navigationTitle(L10n.text("Edit summary"))
                     .toolbar {
                         Button("Cancel") { editing = nil }
                         Button("Save version") { library.saveSummaryEdit(noteID: id, parent: version, text: editText); editing = nil }
@@ -109,7 +112,7 @@ private struct SummarySourceSheet: View {
                 if let text { Text(text).textSelection(.enabled).padding() }
                 else if failed { Text("The original source is unavailable in this library.").padding() }
                 else { ProgressView("Opening saved source…") }
-            }.navigationTitle("Original source")
+            }.navigationTitle(L10n.text("Original source"))
                 .toolbar { Button("Done") { dismiss() } }
                 .task(id: NoteSearchController.identity(library)) {
                     text = nil; failed = false
