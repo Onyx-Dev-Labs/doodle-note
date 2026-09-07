@@ -136,7 +136,7 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("DoodleNote")
-            .searchable(text: $search, prompt: "Search notes and transcripts")
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search notes and transcripts")
             .overlay {
                 if library.visibleNotes.isEmpty && calendar == nil {
                     ContentUnavailableView("Your notes start here", systemImage: "note.text",
