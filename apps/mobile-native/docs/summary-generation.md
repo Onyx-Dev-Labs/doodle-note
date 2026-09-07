@@ -26,4 +26,4 @@ Saving appends a generated version with its own identity and original source anc
 4. Generate from an interrupted recording or a finished recording without transcription. Expect an incomplete-source warning, not a claim of complete audio processing.
 5. In the debug synthetic UI fixture (`--ui-testing --summary-fixture`), inspect draft saving, original source access and retained versions. The fixture is visibly labeled and does not run real inference.
 
-Physical inference/language quality and complete ONY-245 transcription integration are open acceptance gates. Simulator fixtures and a tested PR are separate from device qualification or release.
+**Merge hold:** ONY-245 is an explicit unfinished prerequisite. Keep the summary PR unmerged until compatible transcription source/quality integration is complete; continued source development and review bypass do not waive that dependency. Physical inference/language quality also remains an open acceptance gate. Simulator fixtures and a tested PR are separate from device qualification or release.
