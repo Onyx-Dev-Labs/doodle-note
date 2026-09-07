@@ -37,7 +37,7 @@ import XCTest
         XCTAssertTrue(app.textViews["personalNotes"].waitForExistence(timeout: 5))
         app.typeKey("2", modifierFlags: .command)
         XCTAssertTrue(app.buttons["drawingTools"].waitForExistence(timeout: 5))
-        let image = XCTAttachment(screenshot: app.screenshot())
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         image.name = "Nonempty editable ink and accessible recording controls"
         image.lifetime = .keepAlways; add(image)
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -46,7 +46,7 @@ import XCTest
         app.buttons["inkZoom"].tap(); app.buttons["Fit page"].tap()
         XCTAssertTrue(app.buttons["drawingTools"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["recordButton"].isHittable)
-        let landscape = XCTAttachment(screenshot: app.screenshot())
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscape.name = "Adaptive landscape drawing layout"
         landscape.lifetime = .keepAlways; add(landscape)
         XCUIDevice.shared.orientation = .portrait
@@ -58,7 +58,7 @@ import XCTest
         XCTAssertTrue(app.buttons["drawingTools"].waitForExistence(timeout: 5))
         app.buttons["inkZoom"].tap(); app.buttons["Fit page"].tap()
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "inkCanvas").firstMatch.value as? String, "4 strokes")
-        let reopened = XCTAttachment(screenshot: app.screenshot())
+        let reopened = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         reopened.name = "Persisted nonempty drawing after relaunch"
         reopened.lifetime = .keepAlways; add(reopened)
         app.buttons["Notes"].tap()
@@ -78,7 +78,7 @@ import XCTest
         app.buttons["drawingTools"].tap()
         app.buttons["addSampleInk"].tap()
         XCTAssertTrue(app.buttons["recordButton"].isHittable)
-        let image = XCTAttachment(screenshot: app.screenshot())
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         image.name = "Accessibility text size with drawing controls"
         image.lifetime = .keepAlways; add(image)
     }
