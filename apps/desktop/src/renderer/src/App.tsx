@@ -1,3 +1,4 @@
+import { CloudNotesView } from './CloudNotesView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CalendarEvent,
@@ -27,7 +28,7 @@ import {
   TrashIcon
 } from './icons'
 
-type ViewId = 'home' | 'editor' | 'settings' | 'dev'
+type ViewId = 'home' | 'editor' | 'settings' | 'dev' | 'cloud'
 
 /** The "meeting is starting" banner disappears 10 min past the start. */
 const BANNER_TTL_PAST_START_MS = 10 * 60_000
@@ -563,6 +564,7 @@ function App(): React.JSX.Element {
           <div className="sidebar-spacer" />
 
           <div className="sidebar-bottom">
+            <button type="button" className={view === 'cloud' ? 'nav-item on' : 'nav-item'} onClick={() => setView('cloud')}>Mobile cloud notes</button>
             <div className="privacy-badge">
               <LockIcon size={12} /> Local &amp; private
             </div>
@@ -580,6 +582,7 @@ function App(): React.JSX.Element {
         </aside>
 
         <main className="content">
+          {view === 'cloud' && <CloudNotesView />}
           <div className={view === 'home' ? 'content-slot' : 'content-slot hidden'}>
             <HomeView
               meetings={meetings}

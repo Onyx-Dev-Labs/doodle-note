@@ -412,6 +412,7 @@ const calendarApi: CalendarApi = {
 }
 
 const syncApi: SyncApi = {
+  reader(request: unknown): Promise<unknown> { return ipcRenderer.invoke('sync:reader', request) },
   share(meetingId: string): Promise<ShareResult> {
     return ipcRenderer.invoke(SYNC_SHARE_CHANNEL, meetingId) as Promise<ShareResult>
   },
