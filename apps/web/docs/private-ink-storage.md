@@ -52,7 +52,7 @@ object overwrite or separate unbounded extension payload.
 ```
 
 The example uses placeholders, not valid request values. The manifest body is
-limited to 4096 bytes. Each part is **1 to 3 MiB**, independently uploaded as the
+limited to 4096 bytes. Each part is **1 byte to 3 MiB**, independently uploaded as the
 binary PUT body to `/api/sync/ink?versionId=UUID&part=ink` (or `preview`), with its
 exact content type. Oversized content fails explicitly; keep the local original
 and show a sync error. No truncation, lossy replacement, or original deletion.
