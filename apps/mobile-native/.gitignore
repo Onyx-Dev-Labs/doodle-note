@@ -2,3 +2,4 @@ DerivedData/
 .build/
 .xcodebuildmcp/
 *.xcresult
+Calendar.local.yml

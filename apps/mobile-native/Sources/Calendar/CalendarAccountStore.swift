@@ -120,6 +120,14 @@ actor CalendarAccountStore {
         for account in cache.connections.filter({ $0.state == .disconnecting }).map(\.account) { try disconnect(account) }
     }
 
+    /// Read-modify-write stays in one actor turn so rapid independent toggles cannot lose a selection.
+    func setSelected(_ calendarID: String, enabled: Bool, for account: CalendarAccountKey) throws {
+        guard let connection = cache.connections.first(where: { $0.account == account }) else { throw CalendarFailure.invalidResponse }
+        var ids = connection.selectedCalendarIDs ?? Set(connection.calendars.filter(\.isDefault).map(\.id))
+        if enabled { ids.insert(calendarID) } else { ids.remove(calendarID) }
+        try select(ids, for: account)
+    }
+
     func select(_ ids: Set<String>?, for account: CalendarAccountKey) throws {
         guard let i = cache.connections.firstIndex(where: { $0.account == account && $0.state != .disconnecting }),
               ids.map({ $0.isSubset(of: Set(cache.connections[i].calendars.map(\.id))) }) ?? true else {
