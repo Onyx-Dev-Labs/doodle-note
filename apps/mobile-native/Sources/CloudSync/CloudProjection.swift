@@ -63,9 +63,8 @@ struct CloudProjection {
     }
 
     private func transcriptStatus(_ note: NoteRecord) -> String {
-        if note.captureState == .idle, let imported = note.metadata?.cloudTranscriptStatus { return imported.rawValue }
+        if let imported = note.metadata?.cloudTranscriptStatus { return imported.rawValue }
         if note.captureState == .interrupted { return "interrupted" }
-        if note.captureState == .finished && !note.passages.isEmpty && note.passages.allSatisfy(\.isFinal) { return "complete" }
         if note.captureState == .idle && note.passages.isEmpty { return "none" }
         return "partial"
     }

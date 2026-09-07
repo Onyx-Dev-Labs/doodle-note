@@ -90,7 +90,11 @@ enum TranscriptFailure: LocalizedError {
     }
 
     func retry(noteID: UUID, library: NoteLibrary) {
-        guard !busy, !library.storageBusy, let note = library.note(noteID), note.captureState != .recording else { return }
+        guard !busy, !library.storageBusy, let note = library.note(noteID), note.captureState != .recording, note.schemaVersion == 2, note.metadata?.cloudReadOnly != true else { return }
+        guard note.transcriptCloudReviewRequired != true else {
+            problem = "Cloud changes affect a previous correction. Review the original correction in history before retrying."
+            return
+        }
         let token = UUID(), auth = library.authenticationGeneration
         attempt = token; busy = true; cancelling = false; problem = nil; completed = 0; total = 0
         task = Task { [weak self] in
@@ -99,7 +103,7 @@ enum TranscriptFailure: LocalizedError {
             @MainActor func valid() throws {
                 try Task.checkCancellation()
                 guard attempt == token, auth == library.authenticationGeneration, !library.storageBusy,
-                      let current = library.note(noteID), current.captureState != .recording, current.speechSessions == note.speechSessions else { throw TranscriptFailure.stale }
+                      let current = library.note(noteID), current.captureState != .recording, current.speechSessions == note.speechSessions, current.transcriptCloudReviewRequired != true, current.schemaVersion == 2, current.metadata?.cloudReadOnly != true else { throw TranscriptFailure.stale }
             }
             do {
                 guard await library.flush(noteID: noteID), let disk = library.disk else { throw TranscriptFailure.incomplete }
@@ -109,7 +113,7 @@ enum TranscriptFailure: LocalizedError {
                 guard !plan.segments.isEmpty else { throw TranscriptFailure.incomplete }
                 let sessions = note.speechSessions ?? []
                 total = plan.segments.count
-                library.update(noteID) { $0.metadata?.cloudTranscriptStatus = .partial }
+                guard library.update(noteID, { $0.metadata?.cloudTranscriptStatus = .partial }) else { throw TranscriptFailure.stale }
                 guard await library.flush(noteID: noteID) else { throw TranscriptFailure.incomplete }
                 var complete = plan.origin == 0
                 var endpoint = plan.origin
@@ -128,7 +132,7 @@ enum TranscriptFailure: LocalizedError {
                     guard currentPlan.segments.count == plan.segments.count,
                           zip(currentPlan.segments, plan.segments).allSatisfy({ $0.url == $1.url && $0.start == $1.start && $0.duration == $1.duration && $0.available == $1.available }) else { throw TranscriptFailure.stale }
                     guard passages.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= 0 && $0.end > $0.start && $0.end <= group.end - group.start + 0.05 && $0.isFinal && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { throw TranscriptFailure.incomplete }
-                    library.update(noteID) { current in
+                    let applied = library.update(noteID) { current in
                         let shifted = passages.map { value in
                             var passage = value
                             passage.start += group.start; passage.end += group.start
@@ -136,13 +140,18 @@ enum TranscriptFailure: LocalizedError {
                         }
                         if !current.replaceTranscript(start: group.start, end: group.end, with: shifted) { complete = false }
                     }
+                    guard applied else { throw TranscriptFailure.stale }
                     completed += group.segments.count
                     guard await library.flush(noteID: noteID) else { throw TranscriptFailure.incomplete }
                 }
                 try valid()
-                library.update(noteID) { current in
-                    current.metadata?.cloudTranscriptStatus = complete && current.transcriptNeedsReview != true && current.passages.allSatisfy(\.isFinal) ? .complete : .partial
+                let finished = library.update(noteID) { current in
+                    if complete && current.passages.allSatisfy(\.isFinal) {
+                        current.transcriptNeedsReview = false
+                        current.metadata?.cloudTranscriptStatus = .complete
+                    } else { current.metadata?.cloudTranscriptStatus = .partial }
                 }
+                guard finished else { throw TranscriptFailure.stale }
                 guard await library.flush(noteID: noteID) else { throw TranscriptFailure.incomplete }
                 if library.note(noteID)?.metadata?.cloudTranscriptStatus != .complete { problem = TranscriptFailure.incomplete.localizedDescription }
             } catch {

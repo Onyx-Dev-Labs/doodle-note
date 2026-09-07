@@ -15071,6 +15071,146 @@
           }
         }
       }
+    },
+    "Cloud changes affect a previous correction. Review the original correction in history before retrying.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud changes affect a previous correction. Review the original correction in history before retrying."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cloudændringer påvirker en tidligere rettelse. Gennemgå den oprindelige rettelse i historikken, før du prøver igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los cambios de la nube afectan a una corrección anterior. Revisa la corrección original en el historial antes de reintentar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les modifications du cloud affectent une correction précédente. Consultez la correction originale dans l’historique avant de réessayer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cloud-Änderungen betreffen eine frühere Korrektur. Prüfe die ursprüngliche Korrektur im Verlauf, bevor du es erneut versuchst."
+          }
+        }
+      }
+    },
+    "Show original corrections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show original corrections"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vis oprindelige rettelser"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mostrar correcciones originales"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Afficher les corrections originales"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ursprüngliche Korrekturen anzeigen"
+          }
+        }
+      }
+    },
+    "Acknowledge transcript review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Acknowledge transcript review"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bekræft gennemgang af transskription"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Confirmar revisión de la transcripción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Confirmer la révision de la transcription"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Prüfung des Transkripts bestätigen"
+          }
+        }
+      }
+    },
+    "The original correction is unavailable. Keep the transcript review pending.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The original correction is unavailable. Keep the transcript review pending."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den oprindelige rettelse er ikke tilgængelig. Lad gennemgangen af transskriptionen afvente."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La corrección original no está disponible. Mantén pendiente la revisión de la transcripción."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La correction originale est indisponible. Laissez la révision de la transcription en attente."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die ursprüngliche Korrektur ist nicht verfügbar. Lass die Prüfung des Transkripts ausstehend."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

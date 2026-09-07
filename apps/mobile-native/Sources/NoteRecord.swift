@@ -48,6 +48,8 @@ struct NoteRecord: Codable, Identifiable, Equatable, Sendable {
     var passages: [TranscriptPassage] = []
     var speechSessions: [RecordingSpeechSession]? = nil
     var transcriptNeedsReview: Bool? = nil
+    var transcriptCloudReviewRequired: Bool? = nil
+    var transcriptCorrectionSources: [SourceAnchor]? = nil
     var captureState = CaptureState.idle
     var speakerAnnotations: SpeakerAnnotations? = nil
 
@@ -89,6 +91,13 @@ struct NoteRecord: Codable, Identifiable, Equatable, Sendable {
 
     @discardableResult mutating func replaceTranscript(start: TimeInterval, end: TimeInterval, with recognized: [TranscriptPassage]) -> Bool {
         let old = passages
+        if old.contains(where: { prior in
+            prior.isUserEdited == true && prior.start >= start && prior.end <= end &&
+            !recognized.contains(where: { abs($0.start - prior.start) < 0.001 && abs($0.end - prior.end) < 0.001 })
+        }) {
+            transcriptNeedsReview = true
+            return false
+        }
         if recognized.contains(where: { incoming in old.contains(where: { prior in
             prior.isUserEdited == true && prior.start < incoming.end && prior.end > incoming.start &&
             (abs(prior.start - incoming.start) >= 0.001 || abs(prior.end - incoming.end) >= 0.001)

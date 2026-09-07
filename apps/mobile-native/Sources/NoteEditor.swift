@@ -118,6 +118,16 @@ struct NoteEditor: View {
                     note.title = CommandLine.arguments.first(where: { $0.hasPrefix("--transcript-title=") }).map { String($0.dropFirst("--transcript-title=".count)) } ?? "Transcript fixture"
                     note.passages = [.init(start: 0, end: 1, text: "Synthetic transcript draft", isFinal: false)]
                     note.metadata?.cloudTranscriptStatus = .partial
+                    if CommandLine.arguments.contains("--transcript-cloud-review") { note.passages[0].isUserEdited = true }
+                }
+                if CommandLine.arguments.contains("--transcript-cloud-review"), await library.flush(noteID: id) {
+                    library.update(id) { current in
+                        let original = current
+                        current.passages[0].text = "Synthetic cloud change"
+                        current.passages[0].isUserEdited = nil
+                        var sources: [NoteRevision] = []
+                        current.preserveLocalTranscript(from: original, sources: &sources)
+                    }
                 }
             }
             #endif
@@ -225,9 +235,10 @@ struct NoteEditor: View {
                 } else {
                     Button("Retry saved audio") { player.stop(); transcription.retry(noteID: id, library: library) }
                         .accessibilityIdentifier("retryTranscript")
-                        .disabled(recording.busy || recording.noteID != nil || audio.isEmpty || note.schemaVersion != 2)
+                        .disabled(recording.busy || recording.noteID != nil || audio.isEmpty || !canEdit)
                 }
-                if note.transcriptNeedsReview == true { Text("Corrections were preserved across changed transcript boundaries. Review the transcript.").font(.caption) }
+                if note.transcriptCloudReviewRequired == true { TranscriptCloudReviewView(note: note, library: library) }
+                if note.transcriptNeedsReview == true && note.transcriptCloudReviewRequired != true { Text("Corrections were preserved across changed transcript boundaries. Review the transcript.").font(.caption) }
                 Text(L10n.message(recording.speech.detail)).font(.callout).foregroundStyle(.secondary)
                 if recording.noteID == nil && recording.speech.readiness == .downloadNeeded {
                     Button("Download speech model", systemImage: "arrow.down.circle") {
@@ -252,7 +263,7 @@ struct NoteEditor: View {
                                 .accessibilityLabel("Play passage")
                         }
                         Text(passage.text).foregroundStyle(passage.isFinal ? .primary : .secondary)
-                        Button("Correct transcript") { correctionText = passage.text; correctionProblem = nil; editingPassage = passage }.disabled(note.schemaVersion != 2)
+                        Button("Correct transcript") { correctionText = passage.text; correctionProblem = nil; editingPassage = passage }.disabled(!canEdit)
                         if passage.isUserEdited == true { Text("User correction").font(.caption) }
                         if !passage.isFinal { Text("Draft transcription").font(.caption).foregroundStyle(.secondary) }
                     }

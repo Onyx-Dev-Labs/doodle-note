@@ -74,6 +74,29 @@ final class TranscriptMergeTests: XCTestCase {
         try AudioTimeline.save(.init(filename: filename, start: start, frames: 16_000, sampleRate: 16_000, channels: 1), for: file)
         return file
     }
+    func testCloudReviewBlocksRetryUntilAcknowledgedAndOnlySuccessfulRetryCompletes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = NoteLibrary(root: root); await library.waitUntilLoaded()
+        let id = try XCTUnwrap(library.create())
+        library.update(id) {
+            $0.transcriptCloudReviewRequired = true; $0.transcriptNeedsReview = true
+            $0.metadata?.cloudTranscriptStatus = .partial
+        }
+        _ = await library.flush(noteID: id)
+        _ = try audio(library, id: id, start: 0, filename: "1.caf")
+        let model = FixtureSavedSpeech(), retry = SavedTranscription(recognizer: FixtureSavedSpeech())
+        retry.retry(noteID: id, library: library)
+        XCTAssertFalse(retry.busy); XCTAssertNotNil(retry.problem)
+        library.update(id) { $0.acknowledgeTranscriptCloudReview() }
+        XCTAssertEqual(library.note(id)?.metadata?.cloudTranscriptStatus, .partial)
+        XCTAssertEqual(library.note(id)?.transcriptNeedsReview, true)
+        let allowed = SavedTranscription(recognizer: model)
+        allowed.retry(noteID: id, library: library); await allowed.waitUntilFinished()
+        XCTAssertEqual(model.languages.count, 1)
+        XCTAssertEqual(library.note(id)?.metadata?.cloudTranscriptStatus, .complete)
+        XCTAssertEqual(library.note(id)?.transcriptNeedsReview, false)
+    }
     func testRetryUsesSavedSessionLanguagesAndMissingTimelineNeverCompressesOffsets() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -175,6 +198,25 @@ final class TranscriptMergeTests: XCTestCase {
         XCTAssertEqual(frames, 32_000)
         let gap = AudioTimeline.Plan(segments: [plan.segments[0], plan.segments[2]], origin: 0)
         XCTAssertEqual(try SavedSpeechGroup.make(plan: gap, sessions: [], fallback: .spanish).count, 2)
+    }
+
+    func testReadOnlyRefreshDuringRetryRejectsLateResult() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = NoteLibrary(root: root); await library.waitUntilLoaded()
+        let id = try XCTUnwrap(library.create()); _ = await library.flush(noteID: id)
+        _ = try audio(library, id: id, start: 0, filename: "1.caf")
+        let model = FixtureSavedSpeech(); model.pause = true
+        let retry = SavedTranscription(recognizer: model)
+        retry.retry(noteID: id, library: library)
+        await fulfillment(of: [model.entered], timeout: 5)
+        library.update(id) { $0.metadata?.cloudReadOnly = true }
+        model.resume()
+        await retry.waitUntilFinished()
+        XCTAssertNotNil(retry.problem)
+        XCTAssertEqual(retry.completed, 0)
+        XCTAssertTrue(library.note(id)!.passages.isEmpty)
+        XCTAssertNotEqual(library.note(id)?.metadata?.cloudTranscriptStatus, .complete)
     }
 
     func testUnavailableInferenceKeepsAudioAndNeverClaimsComplete() async throws {

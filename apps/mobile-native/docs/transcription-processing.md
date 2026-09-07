@@ -20,6 +20,12 @@ Each completed group is committed against the currently authorized active note, 
 
 No audio upload, language auto-switch, automatic model download, alternate cloud recognizer or paid service is added. Missing models and unsupported locales leave audio and typed notes available. The retry UI exposes progress, cancellation, failures, correction review and timestamp playback.
 
+## Cloud correction review
+
+Cloud imports preserve device-only recording language receipts and capture state. An identical passage ID, text and millisecond interval retains its local correction marker in the current note and matching source revision. Changed or deleted corrections do not transfer that marker to remote words: the accepted cloud head remains visible, its status becomes partial, and the original immutable correction is retained through a scoped source anchor.
+
+The transcript pane opens these original sources through authenticated library access. Review acknowledgement clears only the local retry guard; it does not mark processing complete or erase the original revision. A later full successful retry may clear historical review state only after processing all available input without gaps, provisional output or new correction-boundary ambiguity. Failure/cancellation retains the pending review state. Source anchors and local audio/session receipts are excluded from the cloud wire payload.
+
 ## Verification and remaining QA
 
 Focused iPhone tests cover five-language Unicode correction/coding, stable IDs, inconsistent final overlap, stale correction-editor identity, saved session languages, missing audio timestamps, cancellation with concurrent personal edits, unavailable inference, repeated retry and bounded conversion across chunks. A structural two-hour fixture checks that 1,440 contiguous five-second entries form one analyzer group; it is not a two-hour inference or hardware benchmark. The DEBUG transcript UI fixture is synthetic and enabled only with both `--ui-testing` and `--transcript-fixture`.
@@ -30,6 +36,7 @@ Check this:
 2. Select another language for a later capture. Retry saved audio; each recording must use its retained language and timestamps.
 3. Cancel retry, close/reopen, then retry again. Earlier committed text, original audio, personal edits and corrections must remain; no duplicate passages should appear.
 4. Remove a synthetic audio segment or use an unsupported locale. Expect an incomplete/error state, preserved later source times and no claim of complete transcription.
-5. Run the approved real-speech quality and latency rubric for all five languages and device classes. This remains required human/device qualification, separate from source and simulator checks.
+5. From another device, change or delete a previously corrected passage. The original device must show the accepted cloud text without a user-correction label, retain the original correction in history, and require acknowledgement before retry. Acknowledgement alone must remain incomplete.
+6. Run the approved real-speech quality and latency rubric for all five languages and device classes. This remains required human/device qualification, separate from source and simulator checks.
 
 Primary references: [SpeechAnalyzer](https://developer.apple.com/documentation/speech/speechanalyzer), [AnalyzerInput](https://developer.apple.com/documentation/speech/analyzerinput), and the installed Xcode 26.6 Speech.swiftinterface. Newer online APIs absent from that SDK are not used. Rollback should retain the source files and new JSON metadata; do not downgrade by rewriting documents with an older client that drops optional fields.
