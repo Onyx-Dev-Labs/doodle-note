@@ -1,3 +1,5 @@
+import { cleanupPrivateInk } from "./private-ink-cleanup";
+import type { PrivateInkStore } from "./private-ink-store";
 import { del, list } from "@vercel/blob";
 import {
   agentTokens,
@@ -23,6 +25,7 @@ export interface CloudDataPurgeResult {
 interface PurgePersonalCloudDataInput {
   userId: string;
   db?: Db;
+  privateInkProvider?: PrivateInkStore;
   deleteAttachmentPrefix?: (prefix: string) => Promise<void>;
 }
 
@@ -50,6 +53,7 @@ export async function purgePersonalCloudData({
   userId,
   db = getDb(),
   deleteAttachmentPrefix = deleteCloudAttachments,
+  privateInkProvider,
 }: PurgePersonalCloudDataInput): Promise<CloudDataPurgeResult> {
   const personalWorkspaces = await db
     .select({ id: organization.id })
@@ -85,6 +89,10 @@ export async function purgePersonalCloudData({
     } else {
       const deletedMeetings = await db.delete(meetings).where(eq(meetings.organizationId, workspace.id)).returning();
       meetingCount += deletedMeetings.length;
+    }
+    const privateCleanup = await cleanupPrivateInk(db, workspace.id, privateInkProvider);
+    if (privateCleanup.failed || privateCleanup.pending) {
+      throw new Error("Private asset cleanup pending");
     }
     await db.delete(folders).where(eq(folders.organizationId, workspace.id));
     await db

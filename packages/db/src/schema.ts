@@ -342,3 +342,25 @@ export const syncOperations = pgTable('sync_operations', {
   payloadHash: text('payload_hash').notNull(),
   receipt: jsonb('receipt').notNull(),
 });
+
+/** Immutable private ink bundles; paths are server-only and never sync payloads. */
+export const inkVersions = pgTable('ink_versions', {
+  id: uuid('id').primaryKey(),
+  attachmentId: uuid('attachment_id').notNull(),
+  noteId: uuid('note_id').notNull().references(() => syncNotes.id,{onDelete:'cascade'}),
+  organizationId: text('organization_id').notNull(),
+  libraryId: uuid('library_id').notNull(),
+  generation: uuid('generation').notNull(),
+  manifest: jsonb('manifest').notNull(),
+  uploaded: jsonb('uploaded').notNull().default({}),
+  state: text('state').notNull().default('pending'),
+  createdAt: timestamp('created_at',{withTimezone:true}).notNull().defaultNow(),
+});
+/** No cascading FK: deletion work must survive account/note removal. */
+export const inkCleanup = pgTable('ink_cleanup', {
+  path: text('path').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  nextAttemptAt: timestamp('next_attempt_at',{withTimezone:true}).notNull().defaultNow(),
+  attempts: integer('attempts').notNull().default(0),
+  deletedAt: timestamp('deleted_at',{withTimezone:true}),
+});
