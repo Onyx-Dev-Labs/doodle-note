@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.23",
+    date: "September 7, 2026",
+    highlights: [
+      "Keep one Windows app instance in control of your library and updates",
+      "Show update restart progress and allow another attempt when the installer handoff reports an error",
+      "Add local update diagnostics to help investigate installation failures",
+    ],
+  },
+  {
     version: "0.4.22",
     date: "September 5, 2026",
     highlights: [

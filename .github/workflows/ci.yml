@@ -109,6 +109,16 @@ jobs:
       - name: Test recorder with packaged Electron runtime
         run: node apps/desktop/scripts/test-electron-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
 
+      - name: Verify one Windows app instance per profile
+        shell: pwsh
+        run: |
+          $qaDirectory = Join-Path $env:RUNNER_TEMP "doodle-electron-qa"
+          npm install --prefix $qaDirectory --no-audit --no-fund --ignore-scripts playwright@1.62.1
+          if ($LASTEXITCODE -ne 0) { throw "Playwright setup failed" }
+          $env:DOODLE_PLAYWRIGHT_MODULE = Join-Path $qaDirectory "node_modules/playwright"
+          node apps/desktop/scripts/test-single-instance.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
+          if ($LASTEXITCODE -ne 0) { throw "Single-instance Windows smoke failed" }
+
       - name: Smoke packaged Windows native modules
         shell: pwsh
         run: |
