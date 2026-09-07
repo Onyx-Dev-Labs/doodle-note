@@ -139,12 +139,18 @@ struct LibraryView: View {
                 }
             }
             .toolbar {
-                Button("Models", systemImage: "arrow.down.circle") { showModels = true }
-                Button("Calendars", systemImage: "calendar") { showCalendars = true }.accessibilityIdentifier("calendarSettings")
-                Button("Storage & Trash", systemImage: "trash") { showStorage = true }
-                Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
-                Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
-                    .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
+                        .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("Options", systemImage: "ellipsis.circle") {
+                        Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
+                        Button("Calendars", systemImage: "calendar") { showCalendars = true }.accessibilityIdentifier("calendarSettings")
+                        Button("Models", systemImage: "arrow.down.circle") { showModels = true }
+                        Button("Storage & Trash", systemImage: "trash") { showStorage = true }
+                    }.accessibilityIdentifier("libraryOptions")
+                }
             }
         } detail: {
             if let selection, library.note(selection) != nil {
