@@ -18,7 +18,7 @@ export interface SyncSnapshot {
   passages: Array<{ id: string; sourceId: string; startMs: number; endMs: number; text: string; speakerId?: string }>;
   speakers: Array<{ id: string; displayName: string; sessionId?: string; slot?: number }>;
   speakerTurns?: Array<{speakerId:string;startMs:number;endMs:number;isFinal:boolean}>;
-  summaries: Array<{ id: string; parentId?: string; createdAt: string; origin: 'generated' | 'edited'; format: string; language: string; markdown: string; sources: Array<{libraryId:string; noteId:string; revisionId:string; kind:'personalParagraph'|'transcript'; paragraphIndex?:number; passageId?:string}> }>;
+  summaries: Array<{ id: string; parentId?: string; createdAt: string; origin: 'generated' | 'edited'; format: string; language: string; markdown: string; sources: Array<{libraryId:string; noteId:string; revisionId:string; kind:'personalParagraph'|'transcript'|'title'|'summary'; paragraphIndex?:number; passageId?:string; summaryId?:string}> }>;
   inkAttachments: Array<{ id: string; versionId: string }>;
 }
 export interface SyncOperation {
@@ -107,10 +107,18 @@ export function validateSyncOperation(value: unknown): SyncOperation {
   unique(summaries, v => { const r=object(v,['id','parentId','createdAt','origin','format','language','markdown','sources']);
     if(r.parentId!==undefined) id(r.parentId); text(r.createdAt,40); if(!Number.isFinite(Date.parse(r.createdAt))||!['generated','edited'].includes(String(r.origin))) throw new Error('invalid_summary');
     text(r.format,100); text(r.language,40); text(r.markdown,500_000);
-    for(const value of array(r.sources,SYNC_MAX_SEGMENTS)) { const anchor=object(value,['libraryId','noteId','revisionId','kind','paragraphIndex','passageId']);
+    for(const value of array(r.sources,SYNC_MAX_SEGMENTS)) { const anchor=object(value,['libraryId','noteId','revisionId','kind','paragraphIndex','passageId','summaryId']);
       if(anchor.libraryId!==row.libraryId||anchor.noteId!==row.noteId) throw new Error('source_scope'); id(anchor.revisionId);
+      if(anchor.kind==='summary') {
+        id(anchor.summaryId);
+        if(anchor.revisionId!==anchor.summaryId||anchor.paragraphIndex!==undefined||anchor.passageId!==undefined||
+          !summaries.some(value=>(value as {id:string}).id===anchor.summaryId))throw new Error('missing_summary_source');
+        continue;
+      }
+      if(anchor.summaryId!==undefined)throw new Error('invalid_anchor');
       const source=sources.get(anchor.revisionId); if(!source) throw new Error('missing_source');
-      if(anchor.kind==='personalParagraph') { if(anchor.passageId!==undefined||!Number.isInteger(anchor.paragraphIndex)||Number(anchor.paragraphIndex)<0||Number(anchor.paragraphIndex)>=String(source.text).split('\n').length) throw new Error('missing_paragraph'); }
+      if(anchor.kind==='title') { if(anchor.paragraphIndex!==undefined||anchor.passageId!==undefined)throw new Error('invalid_anchor'); }
+      else if(anchor.kind==='personalParagraph') { if(anchor.passageId!==undefined||!Number.isInteger(anchor.paragraphIndex)||Number(anchor.paragraphIndex)<0||Number(anchor.paragraphIndex)>=String(source.text).split('\n').length) throw new Error('missing_paragraph'); }
       else if(anchor.kind==='transcript') { if(anchor.paragraphIndex!==undefined)throw new Error('invalid_anchor'); id(anchor.passageId); if(!(source.passages as Array<{id:string}>).some(p=>p.id===anchor.passageId)) throw new Error('missing_passage'); }
       else throw new Error('invalid_anchor');
     } return r; });
@@ -118,6 +126,15 @@ export function validateSyncOperation(value: unknown): SyncOperation {
   for(const summary of summaryMap.values()) { const seen=new Set<string>(); let node:typeof summary|undefined=summary;
     while(node) { if(seen.has(node.id))throw new Error('cyclic_summary');seen.add(node.id);if(node.parentId&&!summaryMap.has(node.parentId))throw new Error('missing_parent');node=node.parentId?summaryMap.get(node.parentId):undefined; }
   }
+  const referencedSummaries=new Map(summaries.map(value=>{const summary=value as {id:string;sources:Array<{kind:string;summaryId?:string}>};return [summary.id,summary.sources.filter(source=>source.kind==='summary').map(source=>source.summaryId!)];}));
+  const completedSources=new Set<string>();
+  function visitSummarySource(id:string, visiting:Set<string>) {
+    if(visiting.has(id))throw new Error('cyclic_summary_source');
+    if(completedSources.has(id))return;
+    visiting.add(id);for(const reference of referencedSummaries.get(id)??[])visitSummarySource(reference,visiting);
+    visiting.delete(id);completedSources.add(id);
+  }
+  for(const id of referencedSummaries.keys())visitSummarySource(id,new Set());
   if(s.selectedSummaryId!==null&&!summaryMap.has(String(s.selectedSummaryId)))throw new Error('missing_selected_summary');
   unique(array(s.inkAttachments,1000), v => { const r=object(v,['id','versionId']); id(r.versionId); return r; });
   return row as unknown as SyncOperation;

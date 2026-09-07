@@ -275,9 +275,10 @@ final class NoteLibrary {
     }
 
     /// Call only after explicit identity authentication; signing in never moves a note.
-    func authenticate(_ identity: LibraryIdentity, name: String) async throws {
+    func authenticate(_ identity: LibraryIdentity, name: String, libraryID: UUID? = nil) async throws {
         guard let repository else { throw LibraryDataError.invalidDocument }
-        _ = try await repository.addLibrary(name: name, identity: identity)
+        if let libraryID { _ = try await repository.attachLibrary(id: libraryID, name: name, identity: identity) }
+        else { _ = try await repository.addLibrary(name: name, identity: identity) }
         identities.insert(identity)
         authenticationGeneration = UUID()
         await refreshCatalog()

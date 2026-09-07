@@ -46,6 +46,22 @@ actor LibraryRepository {
         return library
     }
 
+    /// Attach an explicitly chosen cloud library without moving or relabeling existing local notes.
+    func attachLibrary(id: UUID, name: String, identity: LibraryIdentity) throws -> LibraryRecord {
+        guard id != LibraryRecord.localID, !identity.accountID.isEmpty, !identity.workspaceID.isEmpty else {
+            throw LibraryDataError.invalidOwnership
+        }
+        var catalog = try readCatalog()
+        if let existing = catalog.libraries.first(where: { $0.id == id }) {
+            guard existing.identity == identity else { throw LibraryDataError.invalidOwnership }
+            return existing
+        }
+        let library = LibraryRecord(id: id, name: name, identity: identity)
+        catalog.libraries.append(library)
+        try saveCatalog(catalog)
+        return library
+    }
+
     func authorize(_ libraryID: UUID, identities: Set<LibraryIdentity>) throws {
         let catalog = try readCatalog()
         guard let library = catalog.libraries.first(where: { $0.id == libraryID }),

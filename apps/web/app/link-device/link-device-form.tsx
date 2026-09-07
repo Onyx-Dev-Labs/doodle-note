@@ -54,6 +54,7 @@ export function LinkDeviceForm({
     if (!hasCallback) return;
     setError(null);
     setPending(true);
+    try {
     const response = await fetch("/api/device/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -99,6 +100,12 @@ export function LinkDeviceForm({
       setDone(false);
       setError("Could not return to the device. Start linking again from the app.");
     }
+    } catch {
+      setDone(false);
+      setError("Could not connect. Check your connection and try again.");
+    } finally {
+      setPending(false);
+    }
   }
 
   if (!hasCallback) {
@@ -122,8 +129,9 @@ export function LinkDeviceForm({
         Connect &ldquo;{deviceName}&rdquo;?
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-bark">
-        This {callbackScheme ? "device" : "computer"} will sync meetings,
-        transcripts, and notes to the workspace below, signed in as{" "}
+        {callbackScheme
+          ? "Connect to reopen this account’s saved device library. Eligible cloud sync starts only after you choose a library in the app. Signed in as "
+          : "This computer will sync meetings, transcripts, and notes to the workspace below, signed in as "}
         <strong>{email}</strong>.
       </p>
 
@@ -159,7 +167,7 @@ export function LinkDeviceForm({
 
       {done ? (
         <p className="mt-4 rounded-lg bg-sage-fill px-3 py-2 text-sm text-sage-deep">
-          Connected — taking you to your meetings…
+          {callbackScheme ? "Connected. Return to the app to choose your library." : "Connected — taking you to your meetings…"}
         </p>
       ) : (
         <button
