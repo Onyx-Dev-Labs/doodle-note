@@ -6,7 +6,7 @@ private final class CaptureFaults: @unchecked Sendable {
     private let lock = NSLock()
     var stage: AudioChunkWriter.Stage?
     private var fired = false
-    let entered = DispatchSemaphore(value: 0)
+    let entered = XCTestExpectation(description: "Analysis entered its deliberately blocked stage")
     let release = DispatchSemaphore(value: 0)
     var blockAnalysis = false
     private var blocked = false
@@ -16,7 +16,7 @@ private final class CaptureFaults: @unchecked Sendable {
             guard current == .analysis, blockAnalysis, !blocked else { return false }
             blocked = true; return true
         }
-        if shouldBlock { entered.signal(); release.wait() }
+        if shouldBlock { entered.fulfill(); release.wait() }
         let shouldFail = lock.withLock { () -> Bool in
             guard current == stage, !fired else { return false }
             fired = true; return true
@@ -86,10 +86,11 @@ final class CaptureDurabilityTests: XCTestCase {
         faults.blockAnalysis = true
         let writer = AudioChunkWriter(directory: directory, onCaptureError: { _ in }, onSpeechError: { _ in }, fault: faults.apply)
         let packet = try buffer()
+        defer { faults.release.signal() }
         writer.append(packet)
         _ = await writer.drain()
-        XCTAssertEqual(faults.entered.wait(timeout: .now() + 2), .success)
-        defer { faults.release.signal() }
+        // Suspend the async test instead of blocking a cooperative executor thread.
+        await fulfillment(of: [faults.entered], timeout: 2)
         for index in 0..<64 {
             writer.append(packet)
             if index.isMultiple(of: 16) { _ = await writer.drain() }
