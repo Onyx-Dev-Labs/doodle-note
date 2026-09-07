@@ -168,6 +168,10 @@ struct NoteDiskStore: Sendable {
                 if recoverRecording {
                     let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
                     audioProblems.append(contentsOf: recovery.unreadable)
+                    audioProblems.append(contentsOf: recovery.incompleteCaptures)
+                    if recovery.discardedBytes > 0 {
+                        audioProblems.append("Audio recovery could not use \(recovery.discardedBytes) trailing bytes. Original audio is preserved.")
+                    }
                 }
                 if recoverRecording && note.captureState == .recording {
                     note.captureState = .interrupted
@@ -209,6 +213,7 @@ final class NoteLibrary {
     private(set) var pendingSaves = 0
     private(set) var loading = true
     private(set) var completedWrites = 0
+    private(set) var searchLoadIncomplete = false
     private var queued: [UUID: (NoteRecord, Set<LibraryIdentity>)] = [:]
     private var loadTask: Task<Void, Never>?
     private var unsavedIDs: Set<UUID> = []
@@ -252,6 +257,7 @@ final class NoteLibrary {
                     guard let repository else { return }
                     let result = try await repository.load()
                     notes = result.notes
+                    searchLoadIncomplete = !result.unreadable.isEmpty || !result.migrationProblems.isEmpty
                     await refreshLifecycle()
                     await processRetention(captureActive: false)
                     if !result.migrationProblems.isEmpty {
@@ -259,7 +265,7 @@ final class NoteLibrary {
                     } else if !result.unreadable.isEmpty {
                         problem = "Some saved notes could not be opened. Their files have been preserved."
                     } else if !result.audioProblems.isEmpty {
-                        problem = "Some interrupted audio needs recovery. Original files and notes are preserved."
+                        problem = "Some interrupted audio needs recovery. Original files and notes are preserved. " + result.audioProblems.prefix(3).joined(separator: " ")
                     } else if !result.recoveryWriteProblems.isEmpty {
                         problem = "Recovered notes are available, but recovery status could not be saved. Free device storage before continuing."
                     }
@@ -418,10 +424,35 @@ final class NoteLibrary {
         return unsavedIDs.isEmpty
     }
 
+    @discardableResult func flush(noteID: UUID) async -> Bool {
+        await saveTask?.value
+        return !unsavedIDs.contains(noteID) && note(noteID) != nil
+    }
+
     func retrySaving() {
         for id in unsavedIDs {
             if let note = note(id) { enqueue(note) }
         }
+    }
+
+    /// Snapshot only saved, readable, authorized sources; a cache never upgrades access.
+    func searchInput(generation: UInt64) -> NoteSearchInput {
+        let available = authorizedNotes(in: selectedLibraryID)
+        let eligible = available.filter { !unsavedIDs.contains($0.id) && $0.schemaVersion == 2 && $0.metadata != nil }
+        return NoteSearchInput(libraryID: selectedLibraryID,
+            authorized: libraries.contains { $0.id == selectedLibraryID }, generation: generation, notes: eligible,
+            unavailableCount: available.count - eligible.count,
+            incompleteReason: searchLoadIncomplete || !lifecycleReadable || loading
+                ? "Some saved content is unavailable. Search totals may be incomplete." : nil)
+    }
+
+    func resolveSearchSource(_ anchor: SourceAnchor) async throws -> String? {
+        guard let repository, note(anchor.noteID)?.metadata?.libraryID == anchor.libraryID else { throw NoteSearchError.unauthorized }
+        let authentication = authenticationGeneration
+        let value = try await repository.resolve(anchor, identities: identities)
+        guard authenticationGeneration == authentication,
+              note(anchor.noteID)?.metadata?.libraryID == anchor.libraryID else { throw NoteSearchError.stale }
+        return value
     }
 
     func addFolder(_ name: String) async {

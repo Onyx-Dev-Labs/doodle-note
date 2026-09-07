@@ -26,7 +26,7 @@ import PencilKit
         canvas.alwaysBounceHorizontal = true
         canvas.contentSize = CGSize(width: 1200, height: 1800)
         canvas.tool = PKInkingTool(.pen, color: .label, width: 3)
-        canvas.accessibilityLabel = "Editable drawing canvas"
+        canvas.accessibilityLabel = L10n.text("Editable drawing canvas")
         canvas.accessibilityIdentifier = "inkCanvas"
         canvas.undoAction = { [weak self] in self?.undo() }
         canvas.redoAction = { [weak self] in self?.redo() }
@@ -57,9 +57,8 @@ import PencilKit
         applying = true
         bytes = data
         canvas.drawing = drawing
-        canvas.accessibilityValue = "\(drawing.strokes.count) strokes"
-        let bounds = drawing.bounds
-        canvas.contentSize = CGSize(width: max(1200, bounds.maxX + 80), height: max(1800, bounds.maxY + 80))
+        canvas.accessibilityValue = L10n.format("%lld strokes", drawing.strokes.count)
+        canvas.contentSize = Self.pageSize(for: drawing.bounds)
         applying = false
     }
     func replace(with drawing: PKDrawing) {
@@ -106,14 +105,23 @@ import PencilKit
         guard data != bytes else { return }
         if beforeTool == nil { remember(bytes) }
         bytes = data
-        canvas.accessibilityValue = "\(canvas.drawing.strokes.count) strokes"
+        canvas.accessibilityValue = L10n.format("%lld strokes", canvas.drawing.strokes.count)
         changed(data)
     }
     func setZoom(_ scale: CGFloat) {
         canvas.setZoomScale(min(4, max(0.2, scale)), animated: false)
         zoom = canvas.zoomScale
     }
-    func fit() { setZoom(canvas.bounds.width / max(1200, canvas.drawing.bounds.maxX + 80)) }
+    // Empty PKDrawing bounds can be CGRect.null (infinite origin). Never pass
+    // those coordinates through UIScrollView into CALayer geometry.
+    static func pageSize(for bounds: CGRect) -> CGSize {
+        guard !bounds.isNull, !bounds.isInfinite,
+              bounds.maxX.isFinite, bounds.maxY.isFinite else {
+            return CGSize(width: 1200, height: 1800)
+        }
+        return CGSize(width: max(1200, bounds.maxX + 80), height: max(1800, bounds.maxY + 80))
+    }
+    func fit() { setZoom(canvas.bounds.width / Self.pageSize(for: canvas.drawing.bounds).width) }
     func scrollViewDidZoom(_ scrollView: UIScrollView) { zoom = scrollView.zoomScale }
 }
 
@@ -131,6 +139,7 @@ final class DrawingCanvasView: PKCanvasView {
 }
 
 private struct RetainedInkCanvas: UIViewRepresentable {
+    @Environment(\.locale) private var locale
     let session: InkEditingSession
     let data: Data
     let id: UUID
@@ -138,6 +147,9 @@ private struct RetainedInkCanvas: UIViewRepresentable {
     let changed: (Data) -> Void
     func makeUIView(context: Context) -> DrawingCanvasView { session.canvas }
     func updateUIView(_ view: DrawingCanvasView, context: Context) {
+        _ = locale
+        view.accessibilityLabel = L10n.text("Editable drawing canvas")
+        view.accessibilityValue = L10n.format("%lld strokes", view.drawing.strokes.count)
         session.changed = changed
         session.load(data, id: id, editable: editable)
     }
@@ -162,10 +174,10 @@ struct InkEditor: View {
                     Menu {
                         Menu("Tool") {
                             Picker("Drawing tool", selection: $tool) {
-                                ForEach(["Pen", "Pencil", "Marker", "Eraser", "Lasso"], id: \.self) { Text($0) }
+                                ForEach(["Pen", "Pencil", "Marker", "Eraser", "Lasso"], id: \.self) { Text(L10n.key($0)) }
                             }
                         }
-                        Menu("Color") { Picker("Ink color", selection: $color) { ForEach(colors, id: \.0) { Text($0.0) } } }
+                        Menu("Color") { Picker("Ink color", selection: $color) { ForEach(colors, id: \.0) { Text(L10n.key($0.0)) } } }
                         Menu("Width") {
                             Picker("Stroke width", selection: $width) {
                                 Text("Fine").tag(CGFloat(3)); Text("Medium").tag(CGFloat(5)); Text("Broad").tag(CGFloat(10))
@@ -179,7 +191,7 @@ struct InkEditor: View {
                     }
                     #endif
 
-                    } label: { Label(tool, systemImage: "pencil.tip") }
+                    } label: { Label(L10n.key(tool), systemImage: "pencil.tip") }
                     .accessibilityLabel("Drawing tools").accessibilityIdentifier("drawingTools")
                     .disabled(!editable || session.problem != nil)
                     Button("Undo", systemImage: "arrow.uturn.backward") { session.undo() }
@@ -195,7 +207,7 @@ struct InkEditor: View {
                 }.buttonStyle(.bordered).padding(8)
             }.fixedSize(horizontal: false, vertical: true)
             if let problem = session.problem {
-                ContentUnavailableView("Drawing could not be opened", systemImage: "pencil.tip.crop.circle.badge.exclamationmark", description: Text(problem))
+                ContentUnavailableView("Drawing could not be opened", systemImage: "pencil.tip.crop.circle.badge.exclamationmark", description: Text(L10n.message(problem)))
             } else {
                 RetainedInkCanvas(session: session, data: data, id: id, editable: editable, changed: { data = $0 })
             }

@@ -21,6 +21,7 @@ struct NoteLifecycle: Codable, Equatable, Sendable, Identifiable {
     var audioRemovedAt: Date?
     var audioOperationID: UUID?
     var audioTimelineStart: TimeInterval?
+    var audioTimelineUncertain: Bool? = nil
     var id: UUID { noteID }
 
     static func initial(noteID: UUID, libraryID: UUID) -> Self {
@@ -68,9 +69,14 @@ extension NoteDiskStore {
     }
 
     func saveLifecycle(_ record: NoteLifecycle) throws {
+        var durable = record
+        if FileManager.default.fileExists(atPath: lifecycleURL(record.noteID).path) {
+            let previous = try lifecycle(noteID: record.noteID, libraryID: record.libraryID)
+            if previous.audioTimelineUncertain == true { durable.audioTimelineUncertain = true }
+        }
         let directory = lifecycleURL(record.noteID).deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try write(record, to: lifecycleURL(record.noteID))
+        try write(durable, to: lifecycleURL(record.noteID))
     }
 
     func lifecycleRecords() throws -> [NoteLifecycle] {
@@ -95,11 +101,23 @@ extension NoteDiskStore {
         return start
     }
 
-    func recordingOffset(for id: UUID) throws -> TimeInterval {
-        try audioFiles(for: id).reduce(audioTimelineStart(for: id)) { total, url in
-            let file = try AVAudioFile(forReading: url)
-            return total + Double(file.length) / file.processingFormat.sampleRate
+    func playbackTimeline(for id: UUID) throws -> AudioTimeline.Plan {
+        if FileManager.default.fileExists(atPath: lifecycleURL(id).path) {
+            let state = try JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: lifecycleURL(id)))
+            guard state.schemaVersion == 1, state.noteID == id, state.state == .active,
+                  !state.audioRemovalPending, !state.restorePending else { throw LifecycleError.unavailable }
         }
+        return try AudioTimeline.read(directory: directory(for: id).appendingPathComponent("audio"),
+                                      origin: audioTimelineStart(for: id))
+    }
+
+    func recordingOffset(for id: UUID) throws -> TimeInterval {
+        if FileManager.default.fileExists(atPath: lifecycleURL(id).path) {
+            let record = try JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: lifecycleURL(id)))
+            guard record.schemaVersion == 1, record.noteID == id else { throw LibraryDataError.invalidOwnership }
+            if record.audioTimelineUncertain == true { throw AudioTimeline.Failure.uncertainEndpoint }
+        }
+        return try playbackTimeline(for: id).end
     }
 
     func requireActive(_ note: NoteRecord) throws {

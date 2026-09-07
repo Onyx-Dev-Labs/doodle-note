@@ -128,9 +128,12 @@ extension LibraryRepository {
         guard note.captureState != .recording else { throw LifecycleError.recordingActive }
         if record.audioOperationID == operationID, !record.audioRemovalPending { return record }
         if !record.audioRemovalPending {
-            let audioEnd = disk.audioFiles(for: noteID).reduce(record.audioTimelineStart ?? 0) { total, url in
-                guard let file = try? AVAudioFile(forReading: url) else { return total }
-                return total + Double(file.length) / file.processingFormat.sampleRate
+            let audioEnd: TimeInterval
+            do { audioEnd = try disk.recordingOffset(for: noteID) }
+            catch {
+                // Cleanup must remain available when corrupt audio cannot establish its endpoint.
+                record.audioTimelineUncertain = true
+                audioEnd = record.audioTimelineStart ?? 0
             }
             record.audioTimelineStart = max(audioEnd, note.passages.map(\.end).max() ?? 0)
         }

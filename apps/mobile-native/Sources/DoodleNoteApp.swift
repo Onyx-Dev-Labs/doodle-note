@@ -14,18 +14,26 @@ struct DoodleNoteApp: App {
         let base = URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteNative", isDirectory: true)
         #if DEBUG
         let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        let localizationFixture = testing && ProcessInfo.processInfo.arguments.contains("--localization-fixture")
+        if testing && !localizationFixture { UserDefaults.standard.set("en-US", forKey: "appLanguage") }
         if testing && ProcessInfo.processInfo.arguments.contains("--first-run-fixture") {
             UserDefaults.standard.set(false, forKey: "mobileSetupComplete")
             UserDefaults.standard.set(SpokenLanguage.english.rawValue, forKey: "appLanguage")
+        }
+        if localizationFixture, let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--app-language=") }),
+           let value = SpokenLanguage(rawValue: String(argument.dropFirst("--app-language=".count))) {
+            UserDefaults.standard.set(value.rawValue, forKey: "appLanguage")
         }
         let storageFixture = testing && ProcessInfo.processInfo.arguments.contains("--storage-fixture")
         let fixtureArgument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--fixture-id=") })
         let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
         let calendarFixture = testing && ProcessInfo.processInfo.arguments.contains("--calendar-fixture")
-        let testDirectory = (storageFixture || calendarFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
+        let searchFixture = testing && ProcessInfo.processInfo.arguments.contains("--search-fixture")
+        let testDirectory = (storageFixture || calendarFixture || searchFixture || localizationFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
         let root = testing
             ? URL.applicationSupportDirectory.appendingPathComponent(testDirectory, isDirectory: true) : base
         if storageFixture { try? StorageUITestFixture.prepare(root: root) }
+        if searchFixture { try? SearchUITestFixture.prepare(root: root) }
         #else
         let root = base
         #endif
@@ -56,6 +64,7 @@ struct DoodleNoteApp: App {
                 }
             }
                 .environment(\.locale, Locale(identifier: appLanguage))
+                .onChange(of: appLanguage) { _, _ in Task { await calendar?.reconcileReminders() } }
                 .task { await calendar?.start(); await cloud?.start(library: library, recording: recording) }
                 .onChange(of: library.completedWrites) { _, _ in cloud?.schedule(library: library) }
                 .onChange(of: library.storageBusy) { _, busy in if !busy { cloud?.schedule(library: library) } }
@@ -114,7 +123,7 @@ struct LibraryView: View {
                         library.selectLibrary(id); selection = nil; folderID = nil
                         Task { await calendar?.setLibrary(id) }
                     })) {
-                        ForEach(library.libraries) { Text($0.name).tag($0.id) }
+                        ForEach(library.libraries) { Text($0.id == LibraryRecord.localID ? L10n.text("Only on this device") : $0.name).tag($0.id) }
                     }
                     Picker("Folder", selection: $folderID) {
                         Text("All notes").tag(UUID?.none)
@@ -122,22 +131,26 @@ struct LibraryView: View {
                     }
                 }
                 if let calendar { UpcomingMeetingsSection(calendar: calendar, libraryID: library.selectedLibraryID) }
+                if !search.isEmpty {
+                    NoteSearchSection(library: library, query: search) { selection = $0 }
+                } else {
                 Section("Notes") {
                     ForEach(visibleNotes) { note in
                         NavigationLink(value: note.id) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(note.title.isEmpty ? String(localized: "Untitled note") : note.title)
+                                Text(note.title.isEmpty ? L10n.text( "Untitled note") : note.title)
                                     .font(.headline).lineLimit(1)
-                                Text(note.text.isEmpty ? String(localized: "Personal notes and recordings") : note.text)
+                                Text(note.text.isEmpty ? L10n.text( "Personal notes and recordings") : note.text)
                                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                                 Text(note.updatedAt, style: .date).font(.caption).foregroundStyle(.secondary)
                             }.padding(.vertical, 4)
                         }
                     }
                 }
+                }
             }
-            .navigationTitle("DoodleNote")
-            .searchable(text: $search, prompt: "Search notes and transcripts")
+            .navigationTitle(L10n.text("DoodleNote"))
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search notes and transcripts")
             .overlay {
                 if library.visibleNotes.isEmpty && calendar == nil {
                     ContentUnavailableView("Your notes start here", systemImage: "note.text",
@@ -191,19 +204,19 @@ struct LibraryView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if let message = calendar?.problem {
-                HStack { Text(message).font(.caption); Button("Dismiss") { calendar?.problem = nil } }
+                HStack { Text(L10n.message(message)).font(.caption); Button("Dismiss") { calendar?.problem = nil } }
                     .padding().background(.regularMaterial)
             }
             if library.loading { ProgressView("Opening notes…") }
             if library.pendingSaves > 0 { Text("Saving changes…").font(.caption) }
             if let problem = library.saveProblem {
                 HStack {
-                    Text(problem).font(.callout).foregroundStyle(.red)
+                    Text(L10n.message(problem)).font(.callout).foregroundStyle(.red)
                     Button("Retry saving") { library.retrySaving() }.accessibilityIdentifier("retrySaving")
                 }.padding().background(.regularMaterial)
             }
             if let problem = library.problem ?? library.storageProblem ?? recording.problem {
-                Text(problem).font(.callout).foregroundStyle(.red)
+                Text(L10n.message(problem)).font(.callout).foregroundStyle(.red)
                     .padding().frame(maxWidth: .infinity).background(.regularMaterial)
                     .accessibilityIdentifier("storageProblem")
             }
