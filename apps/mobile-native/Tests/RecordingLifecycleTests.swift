@@ -69,6 +69,36 @@ import XCTest
         XCTAssertEqual(hardware.deactivations, 1)
     }
 
+    func testFailedStatusWriteRemainsVisibleAndRetriesAsInterrupted() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = NoteLibrary(root: root)
+        await library.waitUntilLoaded()
+        let id = try XCTUnwrap(library.create())
+        let recording = RecordingSession(recordPermission: { true }, makeHardware: { FakeCaptureHardware() }, analysisEnabled: false)
+        await recording.start(id, library: library)
+        let disk = try XCTUnwrap(library.disk)
+        let file = disk.directory(for: id).appendingPathComponent("note.json")
+        let original = try Data(contentsOf: file)
+        try original.write(to: root.appendingPathComponent("preserved-synthetic-source.json"))
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        await recording.stop(library: library)
+        XCTAssertEqual(recording.lastReport?.complete, true)
+        XCTAssertEqual(library.note(id)?.captureState, .interrupted)
+        XCTAssertNotNil(library.saveProblem)
+        XCTAssertTrue(recording.problem?.contains("status could not be saved") == true)
+        let failed = await library.flush(noteID: id)
+        XCTAssertFalse(failed)
+        try FileManager.default.removeItem(at: file)
+        try original.write(to: file)
+        library.retrySaving()
+        let retried = await library.flush(noteID: id)
+        XCTAssertTrue(retried)
+        XCTAssertNil(library.saveProblem)
+        XCTAssertEqual(try disk.load().notes.first?.captureState, .interrupted)
+    }
+
     func testHardwareStartFailureKeepsInterruptedNoteAndCanRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

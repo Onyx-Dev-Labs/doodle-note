@@ -34,12 +34,13 @@ enum AudioRecovery {
         try JSONEncoder().encode(journal).write(to: journalURL(for: file),
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
-    static func complete(file: URL) throws {
+    static func complete(file: URL, expectedFrames: AVAudioFramePosition? = nil) throws {
         let journal = try JSONDecoder().decode(OpenChunk.self, from: Data(contentsOf: journalURL(for: file)))
         let audio = try AVAudioFile(forReading: file)
         guard journal.version == 1, journal.filename == file.lastPathComponent,
               audio.processingFormat.sampleRate == journal.sampleRate,
               audio.processingFormat.channelCount == journal.channels else { throw Failure.validation }
+        if let expectedFrames, audio.length != expectedFrames { throw Failure.validation }
         if let start = journal.start {
             try AudioTimeline.save(.init(filename: file.lastPathComponent, start: start,
                 frames: audio.length, sampleRate: audio.processingFormat.sampleRate,

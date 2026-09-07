@@ -97,6 +97,8 @@ final class CaptureDurabilityTests: XCTestCase {
         let report = await writer.finish()
         XCTAssertTrue(report.complete)
         XCTAssertEqual(report.savedFrames, 65 * 16_000)
+        let drained = await writer.finishAnalysis(timeout: 0.02)
+        XCTAssertFalse(drained)
     }
 
     func testAdmissionWriteAndFinalizationFailuresNeverReportComplete() async throws {
@@ -110,6 +112,12 @@ final class CaptureDurabilityTests: XCTestCase {
             let report = await writer.finish()
             XCTAssertFalse(report.complete)
             XCTAssertFalse(report.failures.isEmpty)
+            let journals = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.hasSuffix(".open.json") }
+            let originals = try journals.map { try Data(contentsOf: $0) }
+            let repeated = await writer.finish()
+            XCTAssertFalse(repeated.complete)
+            for (file, bytes) in zip(journals, originals) { XCTAssertEqual(try Data(contentsOf: file), bytes) }
             if stage == .finalize { XCTAssertEqual(report.savedFrames, 16_000) }
             else { XCTAssertEqual(report.savedFrames, 0) }
             if stage == .afterWrite {

@@ -364,6 +364,11 @@ final class NoteLibrary {
         return unsavedIDs.isEmpty
     }
 
+    @discardableResult func flush(noteID: UUID) async -> Bool {
+        await saveTask?.value
+        return !unsavedIDs.contains(noteID) && note(noteID) != nil
+    }
+
     func retrySaving() {
         for id in unsavedIDs {
             if let note = note(id) { enqueue(note) }

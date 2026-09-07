@@ -22,6 +22,8 @@ A chunk's local timing receipt contains its source start, frame count, rate and 
 
 Timing receipts retain missing intervals. Seeking inside missing audio reports unavailable, later timestamps keep their original position, and continued recording starts after the known timeline end. Playback stops at a missing interval rather than silently joining the next chunk. Invalid, overlapping or future-version receipts fail closed and remain unchanged. Legacy chunks without receipts retain their prior sequential interpretation; missing legacy chunks cannot retroactively acquire unknown timing metadata.
 
+If confirmed audio removal encounters a corrupt timeline whose endpoint cannot be established, cleanup remains available. A local uncertainty flag then prevents appending new audio to that note; the user can start a new note while preserving existing personal content. Older lifecycle records omit the flag, and later lifecycle writes cannot silently clear an established uncertainty.
+
 Audio remains local. These sidecars contain no credentials or transcripts and are removed together with local audio through the existing confirmed storage workflow. They are not a cloud playback feature or a note schema migration.
 
 ## Verification and physical Check this:

@@ -23,6 +23,16 @@ private final class ConverterSupply: @unchecked Sendable {
     }
 }
 
+private final class AnalysisBarrier: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+    init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+    func complete(_ value: Bool) {
+        let pending = lock.withLock { let value = continuation; continuation = nil; return value }
+        pending?.resume(returning: value)
+    }
+}
+
 enum CaptureError: LocalizedError {
     case microphone, format, backlog, conversion, speakerBacklog
     var errorDescription: String? {
@@ -153,6 +163,15 @@ final class AudioChunkWriter: @unchecked Sendable {
         }
     }
 
+    /// Call after finish(), once the source outcome is visible and durable.
+    func finishAnalysis(timeout: TimeInterval = 20) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let barrier = AnalysisBarrier(continuation)
+            analysisQueue.async { barrier.complete(true) }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { barrier.complete(false) }
+        }
+    }
+
     @discardableResult
     func finish() async -> Report {
         await withCheckedContinuation { continuation in
@@ -160,6 +179,7 @@ final class AudioChunkWriter: @unchecked Sendable {
             accepting = false
             queue.async { [self] in
                 do { try closeChunk() } catch {
+                    writeFailed = true
                     lock.withLock { report.failures.append(error.localizedDescription) }
                     onCaptureError(error.localizedDescription)
                 }
@@ -294,7 +314,7 @@ final class AudioChunkWriter: @unchecked Sendable {
     private func closeChunk() throws {
         file = nil
         guard let url = openFileURL else { return }
-        if !writeFailed { try fault(.finalize); try AudioRecovery.complete(file: url) }
+        if !writeFailed { try fault(.finalize); try AudioRecovery.complete(file: url, expectedFrames: framesInChunk) }
         openFileURL = nil
     }
 

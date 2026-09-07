@@ -99,7 +99,7 @@ final class RecordingSession {
                 await abandon(id, library: library)
                 return
             }
-            guard await library.flush(), valid(token, id, library) else {
+            guard await library.flush(noteID: id), valid(token, id, library) else {
                 speechFeed?.1.finish(); speakerFeed?.finish()
                 await abandon(id, library: library)
                 return
@@ -141,13 +141,15 @@ final class RecordingSession {
     private func abandon(_ id: UUID, library: NoteLibrary) async {
         clearObservers()
         hardware?.stop()
-        if let writer { lastReport = await writer.finish() }
+        let closingWriter = writer
+        if let closingWriter { lastReport = await closingWriter.finish() }
         writer = nil
         hardware?.deactivate(); hardware = nil
         if library.note(id)?.captureState == .recording {
             library.update(id) { $0.captureState = .interrupted }
             await library.flush()
         }
+        if let closingWriter { _ = await closingWriter.finishAnalysis() }
         await speech.finish(); await speakers.finish()
         noteID = nil; startedAt = nil; attemptID = nil
     }
@@ -166,7 +168,8 @@ final class RecordingSession {
         defer { busy = false }
         clearObservers()
         hardware?.stop()
-        let report = await writer?.finish()
+        let closingWriter = writer
+        let report = await closingWriter?.finish()
         lastReport = report
         writer = nil
         if let report, !report.complete {
@@ -174,8 +177,16 @@ final class RecordingSession {
             problem = "Recording stopped with incomplete audio. \(report.failures.joined(separator: " "))"
         }
         library.update(id) { $0.captureState = (interrupted || captureFailed) ? .interrupted : .finished }
-        await library.flush()
+        if !(await library.flush(noteID: id)) {
+            problem = "Audio capture stopped, but its note status could not be saved. Keep the app open and retry saving."
+            library.update(id) { $0.captureState = .interrupted }
+            await library.flush(noteID: id)
+        }
         hardware?.deactivate(); hardware = nil
+        if let closingWriter, !(await closingWriter.finishAnalysis()) {
+            speech.fail("Transcription processing timed out. Source audio is preserved.")
+            speakers.fail("Speaker processing timed out. Source audio is preserved.")
+        }
         await speech.finish(); await speakers.finish()
         noteID = nil; startedAt = nil; attemptID = nil
     }
