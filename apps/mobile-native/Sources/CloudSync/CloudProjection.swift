@@ -63,9 +63,8 @@ struct CloudProjection {
     }
 
     private func transcriptStatus(_ note: NoteRecord) -> String {
-        if note.captureState == .idle, let imported = note.metadata?.cloudTranscriptStatus { return imported.rawValue }
+        if let imported = note.metadata?.cloudTranscriptStatus { return imported.rawValue }
         if note.captureState == .interrupted { return "interrupted" }
-        if note.captureState == .finished && !note.passages.isEmpty && note.passages.allSatisfy(\.isFinal) { return "complete" }
         if note.captureState == .idle && note.passages.isEmpty { return "none" }
         return "partial"
     }
@@ -94,6 +93,7 @@ struct CloudProjection {
             var row: [String: CloudJSON] = ["id": .uuid(passage.id), "sourceId": .uuid(passage.id),
                 "text": .string(passage.text), "isFinal": .bool(passage.isFinal), "startMs": .number(try milliseconds(passage.start)),
                 "endMs": .number(try milliseconds(passage.end))]
+            if let edited = passage.isUserEdited { row["isUserEdited"] = .bool(edited) }
             if let key = assignedSpeaker(passage, annotations: annotations), let id = identifiers[key] {
                 row["speakerId"] = .uuid(id)
             } else if let name = passage.speakerName, !name.isEmpty {

@@ -70,7 +70,7 @@ struct CloudSnapshotDecoder {
             return Set(row.keys).isSubset(of: allowed)
         }
         func content(_ row: CloudJSON) -> Bool {
-            (row["passages"]?.list ?? []).allSatisfy { keys($0, ["id", "sourceId", "startMs", "endMs", "text", "speakerId", "isFinal"]) }
+            (row["passages"]?.list ?? []).allSatisfy { keys($0, ["id", "sourceId", "startMs", "endMs", "text", "speakerId", "isFinal", "isUserEdited"]) }
                 && (row["speakers"]?.list ?? []).allSatisfy { keys($0, ["id", "displayName", "sessionId", "slot"]) }
                 && (row["speakerTurns"]?.list ?? []).allSatisfy { keys($0, ["speakerId", "startMs", "endMs", "isFinal"]) }
         }
@@ -120,6 +120,10 @@ struct CloudSnapshotDecoder {
             guard end >= start else { throw CloudSyncFailure.invalidResponse }
             var value = TranscriptPassage(id: try passage.requiredUUID("id"), start: start, end: end,
                 text: try passage.requiredString("text"), isFinal: passage["isFinal"]?.boolean ?? false)
+            if let edited = passage["isUserEdited"] {
+                guard let marker = edited.boolean else { throw CloudSyncFailure.invalidResponse }
+                value.isUserEdited = marker
+            }
             if let id = passage["speakerId"]?.string {
                 guard let speaker = UUID(uuidString: id), let name = names[speaker] else { throw CloudSyncFailure.invalidResponse }
                 value.speakerName = name

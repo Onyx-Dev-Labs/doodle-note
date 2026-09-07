@@ -14,6 +14,10 @@ struct NoteEditor: View {
     @State private var confirmAudioRemoval = false
     @State private var inkSession = InkEditingSession()
     @State private var showDetails = false
+    @State private var transcription = SavedTranscription()
+    @State private var editingPassage: TranscriptPassage?
+    @State private var correctionText = ""
+    @State private var correctionProblem: String?
     private enum TextFocus: Hashable { case title, personalNotes }
     @FocusState private var editingText: TextFocus?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -56,7 +60,7 @@ struct NoteEditor: View {
                 Picker("Spoken language", selection: binding(\.language)) {
                     ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) }
                 }
-                .disabled(!canEdit || recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
+                .disabled(transcription.busy || !canEdit || recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
                 Spacer()
             }.padding(.horizontal)
             }.padding(.horizontal)
@@ -97,7 +101,7 @@ struct NoteEditor: View {
                 if !audio.isEmpty {
                     Button("Remove local audio", role: .destructive) { player.stop(); confirmAudioRemoval = true }
                 }
-            }.disabled(recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
+            }.disabled(transcription.busy || recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
         }
         .alert("Remove this device's audio?", isPresented: $confirmAudioRemoval) {
             Button("Remove audio", role: .destructive) {
@@ -107,6 +111,27 @@ struct NoteEditor: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: { Text("Your notes, transcript, ink and summary versions stay. Audio removal cannot be undone here.") }
+        .task {
+            #if DEBUG
+            if CommandLine.arguments.contains("--ui-testing"), CommandLine.arguments.contains("--transcript-fixture"), note.passages.isEmpty {
+                library.update(id) { note in
+                    note.title = CommandLine.arguments.first(where: { $0.hasPrefix("--transcript-title=") }).map { String($0.dropFirst("--transcript-title=".count)) } ?? "Transcript fixture"
+                    note.passages = [.init(start: 0, end: 1, text: "Synthetic transcript draft", isFinal: false)]
+                    note.metadata?.cloudTranscriptStatus = .partial
+                    if CommandLine.arguments.contains("--transcript-cloud-review") { note.passages[0].isUserEdited = true }
+                }
+                if CommandLine.arguments.contains("--transcript-cloud-review"), await library.flush(noteID: id) {
+                    library.update(id) { current in
+                        let original = current
+                        current.passages[0].text = "Synthetic cloud change"
+                        current.passages[0].isUserEdited = nil
+                        var sources: [NoteRevision] = []
+                        current.preserveLocalTranscript(from: original, sources: &sources)
+                    }
+                }
+            }
+            #endif
+        }
         .onChange(of: library.storageBusy) { _, busy in if busy { player.stop() } }
         .task(id: note.language) {
             if recording.noteID == nil && !recording.busy {
@@ -125,7 +150,8 @@ struct NoteEditor: View {
             #endif
         }
         .onChange(of: pane) { _, value in if value != 0 { editingText = nil } }
-        .onDisappear { player.stop(); Task { await library.flush() } }
+        .onDisappear { player.stop(); transcription.cancel(noteID: id, library: library); Task { await library.flush() } }
+        .onChange(of: library.authenticationGeneration) { _, _ in transcription.cancel(noteID: id, library: library); editingPassage = nil }
         .onChange(of: recording.noteID) { _, value in if value != nil { player.stop() } }
         .onChange(of: recording.busy) { _, value in if value { player.stop() } }
     }
@@ -201,14 +227,26 @@ struct NoteEditor: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 Text("Transcript").font(.title2.bold())
+                Text(note.metadata?.cloudTranscriptStatus == .complete ? "Transcript processing complete" : "Transcript may be incomplete").font(.caption)
+                if let problem = transcription.problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
+                if transcription.busy {
+                    ProgressView(value: Double(transcription.completed), total: Double(max(1, transcription.total)))
+                    Button("Cancel transcription") { transcription.cancel(noteID: id, library: library) }.disabled(transcription.cancelling)
+                } else {
+                    Button("Retry saved audio") { player.stop(); transcription.retry(noteID: id, library: library) }
+                        .accessibilityIdentifier("retryTranscript")
+                        .disabled(recording.busy || recording.noteID != nil || audio.isEmpty || !canEdit)
+                }
+                if note.transcriptCloudReviewRequired == true { TranscriptCloudReviewView(note: note, library: library) }
+                if note.transcriptNeedsReview == true && note.transcriptCloudReviewRequired != true { Text("Corrections were preserved across changed transcript boundaries. Review the transcript.").font(.caption) }
                 Text(L10n.message(recording.speech.detail)).font(.callout).foregroundStyle(.secondary)
                 if recording.noteID == nil && recording.speech.readiness == .downloadNeeded {
                     Button("Download speech model", systemImage: "arrow.down.circle") {
                         Task { await recording.speech.download(note.language) }
-                    }.disabled(recording.busy)
+                    }.disabled(recording.busy || transcription.busy)
                 }
                 if recording.noteID == nil && recording.speech.readiness == .failed {
-                    Button("Check speech availability") { Task { await recording.speech.check(note.language) } }
+                    Button("Check speech availability") { Task { await recording.speech.check(note.language) } }.disabled(transcription.busy)
                 }
                 ForEach(note.passages) { passage in
                     VStack(alignment: .leading, spacing: 6) {
@@ -225,6 +263,8 @@ struct NoteEditor: View {
                                 .accessibilityLabel("Play passage")
                         }
                         Text(passage.text).foregroundStyle(passage.isFinal ? .primary : .secondary)
+                        Button("Correct transcript") { correctionText = passage.text; correctionProblem = nil; editingPassage = passage }.disabled(!canEdit)
+                        if passage.isUserEdited == true { Text("User correction").font(.caption) }
                         if !passage.isFinal { Text("Draft transcription").font(.caption).foregroundStyle(.secondary) }
                     }
                 }
@@ -233,6 +273,24 @@ struct NoteEditor: View {
                         .foregroundStyle(.secondary).padding(.vertical)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding()
+        }
+        .sheet(item: $editingPassage) { passage in
+            NavigationStack {
+                VStack {
+                    if let correctionProblem { Text(L10n.message(correctionProblem)).foregroundStyle(.orange) }
+                    TextEditor(text: $correctionText).accessibilityIdentifier("transcriptCorrection").padding()
+                }
+                    .navigationTitle(L10n.text("Correct transcript"))
+                    .toolbar {
+                        Button("Cancel") { editingPassage = nil }
+                        Button("Save correction") {
+                            var saved = false
+                            library.update(id) { saved = $0.correctPassage(id: passage.id, text: correctionText) }
+                            if saved { editingPassage = nil }
+                            else { correctionProblem = "The original passage changed. Your correction is still here; copy it before reopening the updated passage." }
+                        }
+                    }
+            }
         }
     }
 
@@ -245,7 +303,7 @@ struct NoteEditor: View {
                         else { await recording.start(id, library: library) }
                     }
                 }.buttonStyle(.borderedProminent).tint(isActive ? .red : .accentColor)
-                    .disabled(library.storageBusy || !canEdit || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
+                    .disabled(transcription.busy || library.storageBusy || !canEdit || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
                     .accessibilityIdentifier("recordButton")
     }
 

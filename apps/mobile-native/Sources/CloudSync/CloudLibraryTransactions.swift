@@ -115,6 +115,7 @@ extension LibraryRepository {
             guard var note = intent.note, note.id == id, note.metadata?.libraryID == libraryID else {
                 throw LibraryDataError.invalidOwnership
             }
+            var sources = intent.sources
             let file = disk.directory(for: id).appendingPathComponent("note.json")
             if FileManager.default.fileExists(atPath: file.path) {
                 let old = try JSONDecoder().decode(NoteRecord.self, from: Data(contentsOf: file))
@@ -130,12 +131,13 @@ extension LibraryRepository {
                 let orderedSummaries = try orderCloudSummaries(note.metadata?.summaries ?? [])
                 note.metadata?.summaries = orderedSummaries
                 // Cloud payloads never change the local audio capture/recovery status or remove original audio.
+                note.preserveLocalTranscript(from: old, sources: &sources)
                 note.captureState = old.captureState
                 note.metadata?.folderID = old.metadata?.folderID
             }
             let history = disk.directory(for: id).appendingPathComponent("revisions")
             try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
-            for source in intent.sources {
+            for source in sources {
                 guard source.noteID == id, source.libraryID == libraryID else { throw LibraryDataError.invalidOwnership }
                 let path = history.appendingPathComponent(source.id.uuidString + ".json")
                 if FileManager.default.fileExists(atPath: path.path) {

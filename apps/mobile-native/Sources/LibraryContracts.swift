@@ -50,7 +50,7 @@ struct NoteRevision: Codable, Identifiable, Equatable, Sendable {
     let savedAt: Date
     let title: String
     let text: String
-    let passages: [TranscriptPassage]
+    var passages: [TranscriptPassage]
     let speakerAnnotations: SpeakerAnnotations?
 
     init(_ note: NoteRecord) {
