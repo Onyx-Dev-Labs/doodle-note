@@ -31,11 +31,14 @@ struct EventOccurrenceKey: Codable, Equatable, Hashable, Sendable {
 
 struct SourceAnchor: Codable, Equatable, Sendable {
     enum Content: Codable, Equatable, Sendable {
+        case title
         case personalParagraph(Int)
         case transcript(UUID)
+        case summary(UUID)
     }
     let libraryID: UUID
     let noteID: UUID
+    /// NoteRevision.id for title/typed/transcript, SummaryVersion.id for summary sources.
     let revisionID: UUID
     let content: Content
 }
@@ -64,10 +67,12 @@ struct NoteRevision: Codable, Identifiable, Equatable, Sendable {
     func resolve(_ anchor: SourceAnchor) -> String? {
         guard anchor.noteID == noteID, anchor.revisionID == id, anchor.libraryID == libraryID else { return nil }
         switch anchor.content {
+        case .title: return title
         case .personalParagraph(let index):
             let paragraphs = text.components(separatedBy: "\n")
             return paragraphs.indices.contains(index) ? paragraphs[index] : nil
         case .transcript(let id): return passages.first { $0.id == id }?.text
+        case .summary: return nil // Summary anchors resolve their own immutable version through the repository.
         }
     }
 }

@@ -204,6 +204,7 @@ final class NoteLibrary {
     private(set) var pendingSaves = 0
     private(set) var loading = true
     private(set) var completedWrites = 0
+    private(set) var searchLoadIncomplete = false
     private var queued: [UUID: (NoteRecord, Set<LibraryIdentity>)] = [:]
     private var loadTask: Task<Void, Never>?
     private var unsavedIDs: Set<UUID> = []
@@ -244,6 +245,7 @@ final class NoteLibrary {
                     guard let repository else { return }
                     let result = try await repository.load()
                     notes = result.notes
+                    searchLoadIncomplete = !result.unreadable.isEmpty || !result.migrationProblems.isEmpty
                     await refreshLifecycle()
                     await processRetention(captureActive: false)
                     if !result.migrationProblems.isEmpty {
@@ -364,6 +366,26 @@ final class NoteLibrary {
         for id in unsavedIDs {
             if let note = note(id) { enqueue(note) }
         }
+    }
+
+    /// Snapshot only saved, readable, authorized sources; a cache never upgrades access.
+    func searchInput(generation: UInt64) -> NoteSearchInput {
+        let available = authorizedNotes(in: selectedLibraryID)
+        let eligible = available.filter { !unsavedIDs.contains($0.id) && $0.schemaVersion == 2 && $0.metadata != nil }
+        return NoteSearchInput(libraryID: selectedLibraryID,
+            authorized: libraries.contains { $0.id == selectedLibraryID }, generation: generation, notes: eligible,
+            unavailableCount: available.count - eligible.count,
+            incompleteReason: searchLoadIncomplete || !lifecycleReadable || loading
+                ? "Some saved content is unavailable. Search totals may be incomplete." : nil)
+    }
+
+    func resolveSearchSource(_ anchor: SourceAnchor) async throws -> String? {
+        guard let repository, note(anchor.noteID)?.metadata?.libraryID == anchor.libraryID else { throw NoteSearchError.unauthorized }
+        let authentication = authenticationGeneration
+        let value = try await repository.resolve(anchor, identities: identities)
+        guard authenticationGeneration == authentication,
+              note(anchor.noteID)?.metadata?.libraryID == anchor.libraryID else { throw NoteSearchError.stale }
+        return value
     }
 
     func addFolder(_ name: String) async {
