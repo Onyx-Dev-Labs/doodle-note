@@ -7,25 +7,64 @@ enum AudioRecovery {
         let filename: String
         let sampleRate: Double
         let channels: UInt32
+        var start: TimeInterval? = nil
     }
-    struct Report { var recovered = 0; var unreadable: [String] = [] }
+    struct Report {
+        var recovered = 0
+        var unreadable: [String] = []
+        var discardedBytes: UInt64 = 0
+        var incompleteCaptures: [String] = []
+    }
+    private struct Layout {
+        let dataHeader: UInt64
+        let dataStart: UInt64
+        let completeBytes: UInt64
+        let bytesPerFrame: UInt64
+        let discardedBytes: UInt64
+    }
     enum Failure: Error { case unsupported, malformed, empty, validation }
 
     static func journalURL(for file: URL) -> URL { file.appendingPathExtension("open.json") }
     static func recoveredURL(for file: URL) -> URL {
         file.deletingPathExtension().appendingPathExtension("recovered.caf")
     }
-    static func begin(file: URL, format: AVAudioFormat) throws {
+    static func begin(file: URL, format: AVAudioFormat, start: TimeInterval? = nil) throws {
         let journal = OpenChunk(filename: file.lastPathComponent,
-                                sampleRate: format.sampleRate, channels: format.channelCount)
+                                sampleRate: format.sampleRate, channels: format.channelCount, start: start)
         try JSONEncoder().encode(journal).write(to: journalURL(for: file),
             options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
-    static func complete(file: URL) throws { try FileManager.default.removeItem(at: journalURL(for: file)) }
+    static func complete(file: URL) throws {
+        let journal = try JSONDecoder().decode(OpenChunk.self, from: Data(contentsOf: journalURL(for: file)))
+        let audio = try AVAudioFile(forReading: file)
+        guard journal.version == 1, journal.filename == file.lastPathComponent,
+              audio.processingFormat.sampleRate == journal.sampleRate,
+              audio.processingFormat.channelCount == journal.channels else { throw Failure.validation }
+        if let start = journal.start {
+            try AudioTimeline.save(.init(filename: file.lastPathComponent, start: start,
+                frames: audio.length, sampleRate: audio.processingFormat.sampleRate,
+                channels: audio.processingFormat.channelCount), for: file)
+        }
+        try FileManager.default.removeItem(at: journalURL(for: file))
+    }
 
     static func recover(directory: URL) -> Report {
         var report = Report()
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for receipt in files where receipt.lastPathComponent.hasSuffix(".capture.json") {
+            do {
+                let saved = try JSONDecoder().decode(AudioChunkWriter.Report.self, from: Data(contentsOf: receipt))
+                guard saved.schemaVersion == 1, saved.acceptedFrames >= 0, saved.savedFrames >= 0,
+                      saved.savedFrames <= saved.acceptedFrames, saved.rejectedFrames >= 0 else { throw Failure.validation }
+                if !saved.complete {
+                    if saved.acceptedFrames > saved.savedFrames || saved.rejectedFrames > 0 {
+                        report.incompleteCaptures.append("An interrupted capture has \(saved.acceptedFrames - saved.savedFrames) unconfirmed accepted frames and \(saved.rejectedFrames) rejected frames. Saved audio is preserved.")
+                    } else {
+                        report.incompleteCaptures.append("Capture finalization reported a failure. Saved audio is preserved and needs verification.")
+                    }
+                }
+            } catch { report.unreadable.append(receipt.lastPathComponent) }
+        }
         for journalURL in files where journalURL.lastPathComponent.hasSuffix(".caf.open.json") {
             do {
                 let journal = try JSONDecoder().decode(OpenChunk.self, from: Data(contentsOf: journalURL))
@@ -37,17 +76,26 @@ enum AudioRecovery {
                 else { throw Failure.malformed }
                 let original = directory.appendingPathComponent(journal.filename)
                 let recovered = recoveredURL(for: original)
+                let layout = try inspect(original: original, journal: journal)
                 if !FileManager.default.fileExists(atPath: recovered.path) {
-                    try repair(original: original, recovered: recovered, journal: journal)
+                    try repair(original: original, recovered: recovered, layout: layout)
                 }
-                guard try AVAudioFile(forReading: recovered).length > 0 else { throw Failure.empty }
+                let file = try AVAudioFile(forReading: recovered)
+                guard file.length == AVAudioFramePosition(layout.completeBytes / layout.bytesPerFrame),
+                      file.processingFormat.sampleRate == journal.sampleRate,
+                      file.processingFormat.channelCount == journal.channels else { throw Failure.validation }
+                if let start = journal.start {
+                    try AudioTimeline.save(.init(filename: original.lastPathComponent, start: start,
+                        frames: file.length, sampleRate: journal.sampleRate, channels: journal.channels), for: original)
+                }
                 report.recovered += 1
+                report.discardedBytes += layout.discardedBytes
             } catch { report.unreadable.append(journalURL.lastPathComponent) }
         }
         return report
     }
 
-    private static func repair(original: URL, recovered: URL, journal: OpenChunk) throws {
+    private static func inspect(original: URL, journal: OpenChunk) throws -> Layout {
         let source = try FileHandle(forReadingFrom: original)
         defer { try? source.close() }
         let size = try source.seekToEnd()
@@ -90,6 +138,13 @@ enum AudioRecovery {
         guard let bytesPerFrame, let dataHeader, let dataStart else { throw Failure.malformed }
         let completeBytes = ((size - dataStart) / bytesPerFrame) * bytesPerFrame
         guard completeBytes > 0 else { throw Failure.empty }
+        return Layout(dataHeader: dataHeader, dataStart: dataStart, completeBytes: completeBytes,
+                      bytesPerFrame: bytesPerFrame, discardedBytes: size - dataStart - completeBytes)
+    }
+
+    private static func repair(original: URL, recovered: URL, layout: Layout) throws {
+        let dataHeader = layout.dataHeader, dataStart = layout.dataStart
+        let completeBytes = layout.completeBytes, bytesPerFrame = layout.bytesPerFrame
         // The journal identifies our data-last writer format. Trim a torn frame only in the copy.
         let temporary = recovered.appendingPathExtension(UUID().uuidString + ".tmp")
         defer { try? FileManager.default.removeItem(at: temporary) }

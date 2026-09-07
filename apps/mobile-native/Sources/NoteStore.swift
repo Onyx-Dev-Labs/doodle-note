@@ -166,6 +166,10 @@ struct NoteDiskStore: Sendable {
                 _ = try lifecycle(noteID: note.id, libraryID: metadata.libraryID)
                 let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
                 audioProblems.append(contentsOf: recovery.unreadable)
+                audioProblems.append(contentsOf: recovery.incompleteCaptures)
+                if recovery.discardedBytes > 0 {
+                    audioProblems.append("Audio recovery could not use \(recovery.discardedBytes) trailing bytes. Original audio is preserved.")
+                }
                 if note.captureState == .recording {
                     note.captureState = .interrupted
                     do {
@@ -251,7 +255,7 @@ final class NoteLibrary {
                     } else if !result.unreadable.isEmpty {
                         problem = "Some saved notes could not be opened. Their files have been preserved."
                     } else if !result.audioProblems.isEmpty {
-                        problem = "Some interrupted audio needs recovery. Original files and notes are preserved."
+                        problem = "Some interrupted audio needs recovery. Original files and notes are preserved. " + result.audioProblems.prefix(3).joined(separator: " ")
                     } else if !result.recoveryWriteProblems.isEmpty {
                         problem = "Recovered notes are available, but recovery status could not be saved. Free device storage before continuing."
                     }

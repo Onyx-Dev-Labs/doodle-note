@@ -21,7 +21,10 @@ struct NoteEditor: View {
     private func play(at seconds: TimeInterval? = nil) {
         let sourceTime = seconds ?? audioStart
         guard recording.permitsPlayback, sourceTime >= audioStart else { return }
-        player.play(files: audio, at: sourceTime - audioStart)
+        do {
+            guard let disk = library.disk else { return }
+            player.play(plan: try disk.playbackTimeline(for: id), at: sourceTime)
+        } catch { player.problem = error.localizedDescription }
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<NoteRecord, Value>) -> Binding<Value> {
@@ -199,6 +202,11 @@ struct NoteEditor: View {
 
     private var captureControls: some View {
         VStack(spacing: 8) {
+            #if DEBUG
+            if CommandLine.arguments.contains("--ui-testing") && CommandLine.arguments.contains("--capture-fixture") {
+                Text("Synthetic capture fixture · No microphone").font(.caption).foregroundStyle(.secondary)
+            }
+            #endif
             if let problem = player.problem { Text(problem).font(.caption).foregroundStyle(.red) }
             if recording.speakers.state == .failed {
                 Text(recording.speakers.detail).font(.caption).foregroundStyle(.orange)
@@ -213,7 +221,7 @@ struct NoteEditor: View {
                     }.buttonStyle(.bordered).disabled(!recording.permitsPlayback)
                 }
                 Spacer()
-                Button(isActive ? "Stop recording" : "Record", systemImage: isActive ? "stop.fill" : "mic.fill") {
+                Button(isActive ? "Stop recording" : (note.captureState == .interrupted ? "Resume" : "Record"), systemImage: isActive ? "stop.fill" : "mic.fill") {
                     player.stop()
                     Task {
                         if isActive { await recording.stop(library: library) }
@@ -223,7 +231,13 @@ struct NoteEditor: View {
                     .disabled(library.storageBusy || note.schemaVersion != 2 || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
                     .accessibilityIdentifier("recordButton")
             }
-            if recording.busy { ProgressView("Preparing or finalizing recording…").font(.caption) }
+            if recording.busy {
+                ProgressView(recording.preparingNoteID != nil ? "Preparing recording…" : "Finishing and saving recording…").font(.caption)
+                if recording.preparingNoteID != nil {
+                    Button("Cancel recording preparation") { Task { await recording.stop(library: library) } }
+                        .accessibilityIdentifier("cancelRecordingPreparation")
+                }
+            }
         }.padding().background(.bar)
     }
 
