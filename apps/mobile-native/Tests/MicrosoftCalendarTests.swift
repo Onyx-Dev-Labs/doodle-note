@@ -55,7 +55,9 @@ actor MicrosoftFixtureHTTP: MicrosoftHTTPTransport {
         ["id": id, "subject": "Fixture meeting", "type": type, "seriesMasterId": "series-stable",
          "originalStart": "2027-01-15T09:00:00Z", "originalStartTimeZone": "Pacific Standard Time",
          "start": ["dateTime": start, "timeZone": "UTC"], "end": ["dateTime": "2027-01-16T08:00:00.0000000", "timeZone": "UTC"],
-         "isAllDay": allDay, "isCancelled": cancelled]
+         "isAllDay": allDay, "isCancelled": cancelled,
+         "onlineMeeting": ["joinUrl": "https://teams.microsoft.com/fixture"],
+         "attendees": [["type": "required", "emailAddress": ["name": "Jordan"]], ["type": "resource", "emailAddress": ["name": "Room"]]]]
     }
     func window() throws -> CalendarWindow {
         try CalendarWindow(start: CalendarDateNormalizer.instant("2027-01-01T00:00:00Z"), end: CalendarDateNormalizer.instant("2027-02-01T00:00:00Z"))
@@ -151,6 +153,8 @@ actor MicrosoftFixtureHTTP: MicrosoftHTTPTransport {
         let one = try await provider.events(account: account, credential: credential, calendarIDs: ["a", "b"], window: range, cursor: nil)
         let two = try await provider.events(account: account, credential: credential, calendarIDs: ["a", "b"], window: range, cursor: one.next)
         let three = try await provider.events(account: account, credential: credential, calendarIDs: ["a", "b"], window: range, cursor: two.next)
+        XCTAssertEqual(one.events[0].safeJoinURL?.host, "teams.microsoft.com")
+        XCTAssertEqual(one.events[0].invitees, ["Jordan"])
         XCTAssertEqual(one.events.count, 1); XCTAssertEqual(one.events[0].key, two.events[0].key)
         XCTAssertNotEqual(one.events[0].start, two.events[0].start)
         XCTAssertEqual(three.events[0].timeZoneID, "America/Los_Angeles"); XCTAssertTrue(three.events[0].isAllDay)

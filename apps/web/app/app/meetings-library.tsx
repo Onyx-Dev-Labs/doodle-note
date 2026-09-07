@@ -263,6 +263,7 @@ export async function MeetingsLibrary({
 
       <section className="min-w-0">
         <div className="flex flex-wrap items-end justify-between gap-3">
+          <Link href="/app/mobile-notes" className="text-sm font-medium text-sage-deep hover:underline">Mobile notes and version history →</Link>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone">
               {workspace.activeOrganization.id === workspace.personal.id

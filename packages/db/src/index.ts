@@ -21,3 +21,5 @@ export * from './sync-contract';
 export * from './sync-service';
 
 export * from './ink-assets';
+
+export * from './mobile-reader';
