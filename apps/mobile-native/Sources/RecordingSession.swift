@@ -22,7 +22,7 @@ final class RecordingSession {
     }) { self.recordPermission = recordPermission }
 
     func start(_ id: UUID, library: NoteLibrary) async {
-        guard noteID == nil, !busy, let note = library.note(id), let disk = library.disk else { return }
+        guard noteID == nil, !busy, !library.storageBusy, !library.loading, let note = library.note(id), let disk = library.disk else { return }
         busy = true
         captureFailed = false
         defer { busy = false }
@@ -39,10 +39,7 @@ final class RecordingSession {
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else { throw CaptureError.format }
-            let offset = try disk.audioFiles(for: id).reduce(0.0) { total, url in
-                let file = try AVAudioFile(forReading: url)
-                return total + Double(file.length) / file.processingFormat.sampleRate
-            }
+            let offset = try disk.recordingOffset(for: id)
             let speechFeed = await speech.start(language: note.language, offset: offset) { passage in
                 library.update(id) { $0.apply(passage) }
             }

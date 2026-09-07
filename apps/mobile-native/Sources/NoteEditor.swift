@@ -11,14 +11,17 @@ struct NoteEditor: View {
     @State private var showSpeakers = false
     @State private var summaryText = ""
     @State private var editingSummary: SummaryVersion?
+    @State private var confirmAudioRemoval = false
 
     private var note: NoteRecord { library.note(id) ?? NoteRecord(id: id) }
     private var isActive: Bool { recording.noteID == id }
     private var audio: [URL] { library.disk?.audioFiles(for: id) ?? [] }
 
-    private func play(at seconds: TimeInterval = 0) {
-        guard recording.permitsPlayback else { return }
-        player.play(files: audio, at: seconds)
+    private var audioStart: TimeInterval { library.lifecycle[id]?.audioTimelineStart ?? 0 }
+    private func play(at seconds: TimeInterval? = nil) {
+        let sourceTime = seconds ?? audioStart
+        guard recording.permitsPlayback, sourceTime >= audioStart else { return }
+        player.play(files: audio, at: sourceTime - audioStart)
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<NoteRecord, Value>) -> Binding<Value> {
@@ -70,6 +73,27 @@ struct NoteEditor: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            Menu("Note storage", systemImage: "ellipsis.circle") {
+                Button("Move to Trash", role: .destructive) {
+                    player.stop()
+                    Task { await library.performStorage(.trash, id: id,
+                        captureActive: recording.busy || recording.noteID != nil) }
+                }.accessibilityIdentifier("moveToTrash")
+                if !audio.isEmpty {
+                    Button("Remove local audio", role: .destructive) { player.stop(); confirmAudioRemoval = true }
+                }
+            }.disabled(recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
+        }
+        .alert("Remove this device's audio?", isPresented: $confirmAudioRemoval) {
+            Button("Remove audio", role: .destructive) {
+                player.stop()
+                Task { await library.performStorage(.removeAudio, id: id, confirmed: true,
+                    captureActive: recording.busy || recording.noteID != nil) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: { Text("Your notes, transcript, ink and summary versions stay. Audio removal cannot be undone here.") }
+        .onChange(of: library.storageBusy) { _, busy in if busy { player.stop() } }
         .task(id: note.language) {
             if recording.noteID == nil && !recording.busy {
                 await recording.speech.check(note.language)
@@ -158,7 +182,7 @@ struct NoteEditor: View {
                             } label: {
                                 Text(Duration.seconds(passage.start), format: .time(pattern: .minuteSecond))
                                     .monospacedDigit().font(.caption)
-                            }.disabled(audio.isEmpty || !recording.permitsPlayback)
+                            }.disabled(audio.isEmpty || passage.start < audioStart || !recording.permitsPlayback)
                                 .accessibilityLabel("Play passage")
                         }
                         Text(passage.text).foregroundStyle(passage.isFinal ? .primary : .secondary)
@@ -196,7 +220,7 @@ struct NoteEditor: View {
                         else { await recording.start(id, library: library) }
                     }
                 }.buttonStyle(.borderedProminent).tint(isActive ? .red : .accentColor)
-                    .disabled(note.schemaVersion != 2 || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
+                    .disabled(library.storageBusy || note.schemaVersion != 2 || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
                     .accessibilityIdentifier("recordButton")
             }
             if recording.busy { ProgressView("Preparing or finalizing recording…").font(.caption) }

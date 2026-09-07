@@ -1,6 +1,43 @@
 import XCTest
 
 @MainActor final class NoteEditingTests: XCTestCase {
+    func testTrashRestoreAndAudioConfirmationPreservePersonalNotes() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--storage-fixture", "--fixture-id=\(UUID().uuidString)"]
+        app.launch()
+        let fixture = app.staticTexts["Storage fixture"].firstMatch
+        XCTAssertTrue(fixture.waitForExistence(timeout: 10))
+        fixture.tap()
+        XCTAssertTrue(app.buttons["Play recording"].waitForExistence(timeout: 5))
+        app.buttons["Note storage"].tap()
+        app.buttons["Remove local audio"].tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Play recording"].exists)
+        app.buttons["Note storage"].tap()
+        app.buttons["Remove local audio"].tap()
+        app.buttons["Remove audio"].tap()
+        XCTAssertTrue(app.textViews["personalNotes"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textViews["personalNotes"].value as? String, "Synthetic personal notes retained after audio removal.")
+        XCTAssertFalse(app.buttons["Play recording"].exists)
+        app.buttons["Note storage"].tap()
+        app.buttons["Move to Trash"].tap()
+        if !app.buttons["Storage & Trash"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        XCTAssertTrue(app.buttons["Storage & Trash"].waitForExistence(timeout: 5))
+        app.buttons["Storage & Trash"].tap()
+        let restore = app.buttons["restore-Storage fixture"].firstMatch
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Local storage and recoverable Trash"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.buttons["Delete permanently"].firstMatch.tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(restore.exists)
+        restore.tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Storage fixture"].firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testSpeakerControlsAreAvailableWithoutDownloadingModels() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

@@ -11,7 +11,7 @@ actor LibraryRepository {
         try disk.load()
     }
 
-    private func readCatalog() throws -> LibraryCatalog {
+    func readCatalog() throws -> LibraryCatalog {
         let url = disk.root.appendingPathComponent("libraries.json")
         guard FileManager.default.fileExists(atPath: url.path) else { return LibraryCatalog() }
         let value = try JSONDecoder().decode(LibraryCatalog.self, from: Data(contentsOf: url))
@@ -32,7 +32,7 @@ actor LibraryRepository {
         return value
     }
 
-    private func saveCatalog(_ value: LibraryCatalog) throws {
+    func saveCatalog(_ value: LibraryCatalog) throws {
         try disk.write(value, to: disk.root.appendingPathComponent("libraries.json"))
     }
 
@@ -76,6 +76,8 @@ actor LibraryRepository {
 
     func resolve(_ anchor: SourceAnchor, identities: Set<LibraryIdentity>) throws -> String? {
         try authorize(anchor.libraryID, identities: identities)
+        let lifecycle = try disk.lifecycle(noteID: anchor.noteID, libraryID: anchor.libraryID)
+        guard lifecycle.state == .active, !lifecycle.restorePending else { throw LifecycleError.unavailable }
         return try disk.revision(anchor).resolve(anchor)
     }
 

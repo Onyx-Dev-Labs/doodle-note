@@ -9,8 +9,14 @@ struct DoodleNoteApp: App {
     init() {
         let base = URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteNative", isDirectory: true)
         #if DEBUG
-        let root = ProcessInfo.processInfo.arguments.contains("--ui-testing")
-            ? URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteUITests", isDirectory: true) : base
+        let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        let storageFixture = testing && ProcessInfo.processInfo.arguments.contains("--storage-fixture")
+        let fixtureArgument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--fixture-id=") })
+        let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
+        let testDirectory = storageFixture ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
+        let root = testing
+            ? URL.applicationSupportDirectory.appendingPathComponent(testDirectory, isDirectory: true) : base
+        if storageFixture { try? StorageUITestFixture.prepare(root: root) }
         #else
         let root = base
         #endif
@@ -20,8 +26,15 @@ struct DoodleNoteApp: App {
     var body: some Scene {
         WindowGroup {
             LibraryView(library: library, recording: recording)
+                .onChange(of: recording.busy) { _, busy in
+                    if !busy && recording.noteID == nil {
+                        Task { await library.processRetention(captureActive: recording.busy || recording.noteID != nil) }
+                    }
+                }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase != .active {
+                    if phase == .active {
+                        Task { await library.processRetention(captureActive: recording.busy || recording.noteID != nil) }
+                    } else {
                         let task = SaveBackgroundLifetime()
                         Task {
                             await library.flush()
@@ -41,6 +54,7 @@ struct LibraryView: View {
     @State private var folderID: UUID?
     @State private var folderName = ""
     @State private var creatingFolder = false
+    @State private var showStorage = false
 
     private var visibleNotes: [NoteRecord] {
         library.visibleNotes.filter { note in
@@ -87,6 +101,7 @@ struct LibraryView: View {
                 }
             }
             .toolbar {
+                Button("Storage & Trash", systemImage: "trash") { showStorage = true }
                 Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
                 Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
                     .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
@@ -99,6 +114,7 @@ struct LibraryView: View {
                     description: Text("Your notes stay on this device. No account is required."))
             }
         }
+        .sheet(isPresented: $showStorage) { StorageView(library: library, recording: recording) }
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Folder name", text: $folderName)
             Button("Create") { let name = folderName; folderName = ""; Task { await library.addFolder(name) } }
@@ -113,7 +129,7 @@ struct LibraryView: View {
                     Button("Retry saving") { library.retrySaving() }.accessibilityIdentifier("retrySaving")
                 }.padding().background(.regularMaterial)
             }
-            if let problem = library.problem ?? recording.problem {
+            if let problem = library.problem ?? library.storageProblem ?? recording.problem {
                 Text(problem).font(.callout).foregroundStyle(.red)
                     .padding().frame(maxWidth: .infinity).background(.regularMaterial)
                     .accessibilityIdentifier("storageProblem")
