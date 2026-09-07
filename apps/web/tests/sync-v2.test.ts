@@ -46,6 +46,7 @@ test('disabled v2 touches no database and legacy DELETE failures return non-2xx 
   await db.execute(sql`insert into "user"(id,name,email,email_verified,created_at,updated_at) values('u','User','u@example.test',true,now(),now())`);
   await db.execute(sql`insert into organization(id,name,slug,created_at) values('a','a','a',now())`);
   await db.execute(sql`insert into sync_devices(id,token_hash,user_id,organization_id) values(${randomUUID()}::uuid,${createHash('sha256').update(token).digest('hex')},'u','a')`);
+  await db.execute(sql`insert into member(id,organization_id,user_id,role,created_at) values('member-u','a','u','member',now())`);
   await db.execute(sql`insert into subscriptions(user_id,grandfathered) values('u',true)`);
   const operation=op();const {applySync}=await import('@repo/db');await applySync(db,'a',operation);
   const legacy=randomUUID();await db.execute(sql`insert into meetings(id,organization_id,title)values(${legacy}::uuid,'a','legacy')`);
@@ -66,6 +67,7 @@ test('legacy push and pull operate with flag off against the actual pre-v2 schem
   await db.execute(sql`insert into "user"(id,name,email,email_verified,created_at,updated_at) values('legacy-user','User','legacy@example.test',true,now(),now())`);
   await db.execute(sql`insert into organization(id,name,slug,created_at) values('legacy-org','Org','legacy',now())`);
   await db.execute(sql`insert into sync_devices(id,token_hash,user_id,organization_id) values(${randomUUID()}::uuid,${createHash('sha256').update(token).digest('hex')},'legacy-user','legacy-org')`);
+  await db.execute(sql`insert into member(id,organization_id,user_id,role,created_at) values('member-legacy','legacy-org','legacy-user','member',now())`);
   await db.execute(sql`insert into subscriptions(user_id,grandfathered) values('legacy-user',true)`);
   const {POST}=await import('../app/api/sync/push/route');const {GET}=await import('../app/api/sync/pull/route');
   const id=randomUUID();const headers={authorization:'Bearer '+token};
@@ -73,5 +75,10 @@ test('legacy push and pull operate with flag off against the actual pre-v2 schem
   assert.equal((await push.json()).results[0].ok,true);
   const pull=await GET(new Request('https://local/api/sync/pull',{headers}));assert.equal((await pull.json()).changed[0].segments[0].text,'complete');
   const tables=await db.execute(sql`select to_regclass('sync_notes') is null as absent`);assert.equal(tables.rows[0]!.absent,true);
+  await db.execute(sql`delete from member where id='member-legacy'`);
+  assert.equal((await GET(new Request('https://local/api/sync/pull',{headers}))).status,401);
+  assert.equal((await POST(new Request('https://local/api/sync/push',{method:'POST',headers,body:JSON.stringify({meetings:[]})}))).status,401);
+  const {GET:ping}=await import('../app/api/sync/ping/route');
+  assert.equal((await ping(new Request('https://local/api/sync/ping',{headers}))).status,401);
  }finally{globalDb.__repoDbClient=previous;if(old===undefined)delete process.env.DOODLENOTE_SYNC_V2_ENABLED;else process.env.DOODLENOTE_SYNC_V2_ENABLED=old;await close();}
 });

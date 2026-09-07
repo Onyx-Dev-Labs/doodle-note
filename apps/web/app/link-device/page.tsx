@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { getAppWorkspace } from "@/lib/app-workspace";
+import { validLinkState } from "@/lib/device-link-callback";
 
 import { LinkDeviceForm } from "./link-device-form";
 
@@ -23,9 +24,9 @@ const ALLOWED_SCHEMES = new Set(["doodlenote"]);
 export default async function LinkDevicePage({
   searchParams,
 }: {
-  searchParams: Promise<{ port?: string; name?: string; scheme?: string }>;
+  searchParams: Promise<{ port?: string; name?: string; scheme?: string; state?: string }>;
 }) {
-  const { port, name, scheme } = await searchParams;
+  const { port, name, scheme, state } = await searchParams;
   const requestHeaders = await headers();
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) {
@@ -36,6 +37,7 @@ export default async function LinkDevicePage({
       port: port ?? "",
       scheme: scheme ?? "",
       name: name ?? "",
+      state: state ?? "",
     });
     const query = new URLSearchParams({ next: `/link-device?${inner}` });
     redirect(`/login?${query}`);
@@ -49,13 +51,14 @@ export default async function LinkDevicePage({
     Number.isInteger(portNum) && portNum >= 1024 && portNum <= 65_535
       ? portNum
       : null;
-  const validScheme = scheme && ALLOWED_SCHEMES.has(scheme) ? scheme : null;
+  const validScheme = scheme && ALLOWED_SCHEMES.has(scheme) && validLinkState(state) ? scheme : null;
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-cream px-6 py-16">
       <LinkDeviceForm
-        port={validPort}
+        port={scheme ? null : validPort}
         callbackScheme={validScheme}
+        callbackState={validLinkState(state)}
         personalOrganizationId={workspace?.personal.id ?? null}
         deviceName={(name ?? "Desktop").slice(0, 80)}
         email={session.user.email}

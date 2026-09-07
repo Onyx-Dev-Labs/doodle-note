@@ -36,10 +36,12 @@ export async function handleSyncV2(request:Request, db:Db, organizationId:string
   if(request.method==='GET') {
     const libraryId=url.searchParams.get('libraryId')!;
     let after='0';
+    const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 20;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) return Response.json({error:'invalid_limit'},{status:400});
     try { if(url.searchParams.has('cursor')) after=decodeCursor(url.searchParams.get('cursor')!,organizationId,libraryId,key); }
     catch { return Response.json({error:'invalid_cursor'},{status:400}); }
     try {
-      const result=await pullSync(db,organizationId,libraryId,after);
+      const result=await pullSync(db,organizationId,libraryId,after,limit);
       return Response.json({protocolVersion:2,...result,cursor:encodeCursor(organizationId,libraryId,result.after,key)});
     } catch { return Response.json({error:'invalid_library_or_cursor'},{status:400}); }
   }

@@ -113,6 +113,13 @@
       "when": 1788744785745,
       "tag": "0015_mobile_readers",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788798450498,
+      "tag": "0016_explicit_legacy_adoption",
+      "breakpoints": true
     }
   ]
 }

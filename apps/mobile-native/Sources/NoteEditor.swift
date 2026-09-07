@@ -40,24 +40,27 @@ struct NoteEditor: View {
         Binding(get: { note[keyPath: keyPath] }, set: { value in library.update(id) { $0[keyPath: keyPath] = value } })
     }
 
+    private var canEdit: Bool { note.schemaVersion == 2 && note.metadata?.cloudReadOnly != true }
+
     var body: some View {
         GeometryReader { geometry in
         VStack(spacing: 0) {
+            if note.metadata?.cloudReadOnly == true { Text("This cloud version is read-only. Its original data is preserved.").font(.caption).padding() }
             TextField("Untitled note", text: binding(\.title), axis: .vertical)
                 .focused($editingText, equals: .title)
-                .font(.title2.bold()).lineLimit(2).padding(.horizontal).padding(.top, 8).accessibilityIdentifier("noteTitle").disabled(note.schemaVersion != 2)
+                .font(.title2.bold()).lineLimit(2).padding(.horizontal).padding(.top, 8).accessibilityIdentifier("noteTitle").disabled(!canEdit)
             DisclosureGroup("Note details", isExpanded: $showDetails) {
             Picker("Move to folder", selection: Binding(get: { note.metadata?.folderID }, set: { folder in
                 library.update(id) { $0.metadata?.folderID = folder }
             })) {
                 Text("No folder").tag(UUID?.none)
                 ForEach(library.folders) { Text($0.name).tag(Optional($0.id)) }
-            }.padding(.horizontal).disabled(note.schemaVersion != 2).accessibilityIdentifier("noteFolder")
+            }.padding(.horizontal).disabled(!canEdit).accessibilityIdentifier("noteFolder")
             HStack {
                 Picker("Spoken language", selection: binding(\.language)) {
                     ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) }
                 }
-                .disabled(transcription.busy || note.schemaVersion != 2 || recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
+                .disabled(transcription.busy || !canEdit || recording.noteID != nil || recording.busy || recording.speech.readiness == .downloading)
                 Spacer()
             }.padding(.horizontal)
             }.padding(.horizontal)
@@ -173,7 +176,7 @@ struct NoteEditor: View {
                     ForEach(note.metadata?.summaries ?? []) { version in
                         Text(L10n.key(version.origin == .edited ? "Edited version" : "Generated version")).font(.caption)
                         Text(version.text).textSelection(.enabled)
-                        Button("Edit as new version") { summaryText = version.text; editingSummary = version }.disabled(note.schemaVersion != 2)
+                        Button("Edit as new version") { summaryText = version.text; editingSummary = version }.disabled(!canEdit)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding()
             }
@@ -190,7 +193,7 @@ struct NoteEditor: View {
                 }
             }
         } else if pane == 1 {
-            InkEditor(session: inkSession, id: id, data: binding(\.ink), editable: note.schemaVersion == 2)
+            InkEditor(session: inkSession, id: id, data: binding(\.ink), editable: canEdit)
         } else {
             notePaneForNotes
         }
@@ -199,7 +202,7 @@ struct NoteEditor: View {
     private var notePaneForNotes: some View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(L10n.key(UIDevice.current.userInterfaceIdiom == .pad ? "Personal notes · Type or use system Scribble" : "Personal notes")).font(.caption).foregroundStyle(.secondary).padding(.horizontal)
-                if note.schemaVersion == 2 {
+                if canEdit {
                     TextEditor(text: binding(\.text)).padding(.horizontal, 8)
                         .accessibilityLabel("Personal notes").accessibilityIdentifier("personalNotes")
                         .focused($editingText, equals: .personalNotes)
@@ -289,7 +292,7 @@ struct NoteEditor: View {
                         else { await recording.start(id, library: library) }
                     }
                 }.buttonStyle(.borderedProminent).tint(isActive ? .red : .accentColor)
-                    .disabled(transcription.busy || library.storageBusy || note.schemaVersion != 2 || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
+                    .disabled(transcription.busy || library.storageBusy || !canEdit || recording.busy || (recording.noteID != nil && !isActive) || recording.speech.readiness == .downloading || recording.speakers.preparing)
                     .accessibilityIdentifier("recordButton")
     }
 
@@ -363,7 +366,7 @@ struct NoteEditor: View {
                         TextField(annotations.name(for: key, localized: true), text: Binding(
                             get: { library.note(id)?.speakerAnnotations?.names[key] ?? "" },
                             set: { name in library.update(id) { $0.speakerAnnotations?.names[key] = name.trimmingCharacters(in: .whitespacesAndNewlines) } }))
-                            .textFieldStyle(.roundedBorder).disabled(note.schemaVersion != 2)
+                            .textFieldStyle(.roundedBorder).disabled(!canEdit)
                     }
                 }
                 Text("Names apply to this recording session. Remembering voices across meetings is still being built.")

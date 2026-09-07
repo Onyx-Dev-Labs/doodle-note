@@ -46,9 +46,11 @@ def main():
             journal=json.loads((ROOT/'drizzle/meta/_journal.json').read_text())['entries']
             for entry in journal:
                 migration=(ROOT/'drizzle'/f"{entry['tag']}.sql").read_text()
-                if entry['idx'] in (13,14,15):
+                if entry['idx'] in (13,14,15,16):
                     sql('BEGIN;'+migration+'ROLLBACK;')
-                    if entry['idx']==15:
+                    if entry['idx']==16:
+                        assert sql("SELECT to_regprocedure('sync_adopt_legacy(text,jsonb,text)') IS NULL;")=='t'
+                    elif entry['idx']==15:
                         assert sql("SELECT to_regprocedure('sync_choose_revision(text,jsonb,text)') IS NULL;")=='t'
                     else:
                         table="sync_notes" if entry["idx"]==13 else "ink_versions"
