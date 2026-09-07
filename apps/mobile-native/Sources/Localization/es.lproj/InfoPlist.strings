@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Graba las conversaciones que elijas y guarda el audio en este dispositivo.";
+"NSSpeechRecognitionUsageDescription" = "Crea una transcripción de la grabación con modelos de voz en este dispositivo.";

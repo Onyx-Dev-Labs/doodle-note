@@ -1,0 +1,37 @@
+{
+  "status": "machine-draft",
+  "humanReviewRequired": true,
+  "catalogSHA256": "8bfc11224910abebaa79aed028504187647bafbf578fd8b254606446b0577931",
+  "languages": {
+    "en": {
+      "reviewer": null,
+      "reviewedAt": null,
+      "status": "source-review-pending"
+    },
+    "da": {
+      "reviewer": null,
+      "reviewedAt": null,
+      "status": "machine-draft"
+    },
+    "es": {
+      "reviewer": null,
+      "reviewedAt": null,
+      "status": "machine-draft"
+    },
+    "fr": {
+      "reviewer": null,
+      "reviewedAt": null,
+      "status": "machine-draft"
+    },
+    "de": {
+      "reviewer": null,
+      "reviewedAt": null,
+      "status": "machine-draft"
+    }
+  },
+  "remainingQA": [
+    "Language-qualified review of all strings and flows",
+    "Physical VoiceOver and expanded Dynamic Type on iPhone and iPad",
+    "Repeat qualification after downstream capture, sync and search features land"
+  ]
+}

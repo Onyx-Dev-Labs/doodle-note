@@ -11,12 +11,12 @@ struct StorageView: View {
         NavigationStack {
             List {
                 Section("On this device") {
-                    Text(library.libraries.first(where: { $0.id == library.selectedLibraryID })?.name ?? "Library")
+                    Text(library.selectedLibraryID == LibraryRecord.localID ? L10n.text("Only on this device") : library.libraries.first(where: { $0.id == library.selectedLibraryID })?.name ?? L10n.text("Library"))
                     if let usage = library.storage {
-                        LabeledContent("Notes, ink and history", value: ByteCountFormatter.string(fromByteCount: usage.notesBytes, countStyle: .file))
-                        LabeledContent("Audio", value: ByteCountFormatter.string(fromByteCount: usage.audioBytes, countStyle: .file))
+                        LabeledContent("Notes, ink and history", value: L10n.bytes(usage.notesBytes))
+                        LabeledContent("Audio", value: L10n.bytes(usage.audioBytes))
                         if let free = usage.availableBytes {
-                            LabeledContent("Device space available", value: ByteCountFormatter.string(fromByteCount: free, countStyle: .file))
+                            LabeledContent("Device space available", value: L10n.bytes(free))
                         }
                         if usage.lowSpace { Text("Device space is low. Remove unneeded local audio or permanently delete items in Trash.").foregroundStyle(.orange) }
                     } else { ProgressView("Checking storage…") }
@@ -27,12 +27,12 @@ struct StorageView: View {
                     if library.trashNotes.isEmpty { Text("Trash is empty").foregroundStyle(.secondary) }
                     ForEach(library.trashNotes) { note in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(note.title.isEmpty ? "Untitled note" : note.title).font(.headline)
+                            Text(note.title.isEmpty ? L10n.text("Untitled note") : note.title).font(.headline)
                             if let state = library.lifecycle[note.id] {
                                 if state.clock == .provisionalAccount {
                                     Text("Recovery timing awaits cloud confirmation.").font(.caption)
                                 } else if let expiry = state.expiresAt {
-                                    Text("Recover until \(expiry.formatted(date: .abbreviated, time: .shortened))").font(.caption)
+                                    Text("Recover until \(L10n.date(expiry))").font(.caption)
                                 }
                             }
                             HStack {
@@ -54,9 +54,9 @@ struct StorageView: View {
                             .disabled(blocked)
                     }
                 }
-                if let error = library.storageProblem ?? library.problem { Text(error).foregroundStyle(.red).font(.callout) }
+                if let error = library.storageProblem ?? library.problem { Text(L10n.message(error)).foregroundStyle(.red).font(.callout) }
             }
-            .navigationTitle("Storage & Trash")
+            .navigationTitle(L10n.text("Storage & Trash"))
             .toolbar { Button("Done") { dismiss() } }
             .task { await library.refreshLifecycle(); await library.refreshStorage() }
             .alert("Permanently delete this note and its local audio?", isPresented: Binding(

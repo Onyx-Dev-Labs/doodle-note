@@ -78,7 +78,7 @@ struct CalendarContractPreview: View {
                         Button("Disconnect account") { run { try await $0.disconnect(connection.account) } }
                     }
                 }
-            }.navigationTitle("Calendar contract fixture")
+            }.navigationTitle(L10n.text("Calendar contract fixture"))
         }.task {
             do { store = try CalendarAccountStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("calendar-preview-\(UUID())"), credentials: PreviewCalendarCredentials()) }
             catch { message = "Fixture storage unavailable" }

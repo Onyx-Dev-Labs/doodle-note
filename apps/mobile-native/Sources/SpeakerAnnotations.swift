@@ -36,15 +36,15 @@ struct SpeakerAnnotations: Codable, Equatable, Sendable {
         return turns.compactMap { seen.insert($0.key).inserted ? $0.key : nil }
     }
 
-    func name(for key: String) -> String {
+    func name(for key: String, localized: Bool = false) -> String {
         if let name = names[key], !name.isEmpty { return name }
         let index = ((order ?? speakerKeys).firstIndex(of: key) ?? 0) + 1
-        return "Speaker \(index)"
+        return localized ? L10n.format("Speaker %lld", index) : "Speaker \(index)"
     }
 
-    func label(for passage: TranscriptPassage) -> String {
+    func label(for passage: TranscriptPassage, localized: Bool = false) -> String {
         let duration = passage.end - passage.start
-        guard duration > 0 else { return "Unassigned speaker" }
+        guard duration > 0 else { return localized ? L10n.text("Unassigned speaker") : "Unassigned speaker" }
         let relevant = turns.filter { min($0.end, passage.end) > max($0.start, passage.start) }
         let grouped = Dictionary(grouping: relevant, by: \.key)
         // Union each speaker's intervals so a finalized/draft overlap cannot inflate coverage.
@@ -58,9 +58,10 @@ struct SpeakerAnnotations: Codable, Equatable, Sendable {
             }
         }
         let active = coverage.filter { $0.value / duration >= 0.1 }
-        if active.count > 1 { return "Multiple speakers" }
-        guard let (key, covered) = active.first, covered / duration >= 0.65 else { return "Unassigned speaker" }
+        if active.count > 1 { return localized ? L10n.text("Multiple speakers") : "Multiple speakers" }
+        guard let (key, covered) = active.first, covered / duration >= 0.65 else { return localized ? L10n.text("Unassigned speaker") : "Unassigned speaker" }
         let tentative = relevant.contains { $0.key == key && !$0.isFinal }
-        return name(for: key) + (tentative ? " (provisional)" : "")
+        let name = name(for: key, localized: localized)
+        return tentative ? (localized ? L10n.format("%@ (provisional)", name) : name + " (provisional)") : name
     }
 }
