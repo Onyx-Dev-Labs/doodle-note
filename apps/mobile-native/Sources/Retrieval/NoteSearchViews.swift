@@ -30,24 +30,24 @@ struct NoteSearchSection: View {
         let identity = NoteSearchController.identity(library)
         Section("Search this library") {
             if search.searching { ProgressView("Searching saved notes…") }
-            if let problem = search.problem { Text(problem).foregroundStyle(.orange) }
+            if let problem = search.problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
             if let result = search.result, search.resultIdentity == identity {
-                Text("\(result.matchedNoteCount) notes · \(result.matchedSourceCount) sources")
+                Text(L10n.count(result.matchedNoteCount) + " · " + L10n.format("%lld sources", result.matchedSourceCount))
                     .font(.caption).accessibilityIdentifier("searchCounts")
-                if let reason = result.incompleteReason { Text(reason).font(.caption).foregroundStyle(.orange) }
+                if let reason = result.incompleteReason { Text(L10n.message(reason)).font(.caption).foregroundStyle(.orange) }
                 if result.unavailableCount > 0 {
-                    Text("\(result.unavailableCount) notes are not yet searchable. Save or repair them to include their content.")
+                    Text(L10n.format("%lld notes are not yet searchable. Save or repair them to include their content.", result.unavailableCount))
                         .font(.caption).foregroundStyle(.orange)
                 }
                 if !result.isExhaustive && result.countsAreComplete {
-                    Text("Showing the first \(result.hits.count) sources. The counts include every matching saved note.").font(.caption)
+                    Text(L10n.format("Showing the first %lld sources. The counts include every matching saved note.", result.hits.count)).font(.caption)
                 }
                 if result.hits.isEmpty { Text("No matching saved content in this library.").foregroundStyle(.secondary) }
                 ForEach(result.hits) { hit in
                     Button { selected = hit } label: {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(hit.title.isEmpty ? "Untitled note" : hit.title).font(.headline)
-                            Text(hit.source.content.label).font(.caption).foregroundStyle(.secondary)
+                            Text(hit.title.isEmpty ? L10n.text("Untitled note") : hit.title).font(.headline)
+                            Text(L10n.key(hit.source.content.label)).font(.caption).foregroundStyle(.secondary)
                             Text(hit.text).lineLimit(3)
                         }
                     }.accessibilityIdentifier("searchHit")
@@ -80,9 +80,9 @@ private struct SearchSourceView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(hit.source.content.label).font(.headline)
+                    Text(L10n.key(hit.source.content.label)).font(.headline)
                     if let text { Text(text).textSelection(.enabled) }
-                    else if let problem { Text(problem) }
+                    else if let problem { Text(L10n.message(problem)) }
                     else { ProgressView("Opening saved source…") }
                     Text("This is the saved source. The note may contain newer edits.").font(.caption).foregroundStyle(.secondary)
                     Button("Open note") {
@@ -91,7 +91,7 @@ private struct SearchSourceView: View {
                     }.disabled(text == nil)
                 }.frame(maxWidth: .infinity, alignment: .leading).padding()
             }
-            .navigationTitle("Source")
+            .navigationTitle(L10n.text("Source"))
             .toolbar { Button("Done") { dismiss() } }
             .task(id: NoteSearchController.identity(library)) {
                 text = nil

@@ -21,7 +21,7 @@ struct FirstRunView: View {
                     Text("Live transcription, speaker labels and generated notes use separate on-device models. You can prepare them later in Models.")
                     Button("Start taking notes", action: onContinue).accessibilityIdentifier("finishSetup")
                 }
-            }.navigationTitle("Welcome to DoodleNote")
+            }.navigationTitle(L10n.text("Welcome to DoodleNote"))
         }
     }
 }
@@ -43,11 +43,11 @@ struct ModelSettingsView: View {
                 Section("Language") {
                     Picker("App language", selection: $languageID) {
                         ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0.rawValue) }
-                    }.disabled(captureActive || preparing)
+                    }.disabled(captureActive || preparing).accessibilityIdentifier("settingsLanguage")
                 }
                 if captureActive { Text("Finish recording before changing models.") }
                 Section("Live transcription") {
-                    Text(recording.speech.detail)
+                    Text(L10n.message(recording.speech.detail))
                     if recording.speech.readiness == .downloading {
                         ProgressView(value: recording.speech.downloadProgress)
                         Button("Cancel speech download") { recording.speech.cancelDownload() }
@@ -62,7 +62,7 @@ struct ModelSettingsView: View {
                     }
                 }.disabled(captureActive)
                 Section("Speaker labels") {
-                    Text(recording.speakers.detail)
+                    Text(L10n.message(recording.speakers.detail))
                     if recording.speakers.state == .downloading {
                         ProgressView(value: recording.speakers.downloadProgress)
                         Button("Cancel speaker download") { recording.speakers.cancelDownload() }
@@ -73,14 +73,14 @@ struct ModelSettingsView: View {
                     Text("The download is verified before use. Completed files are kept for retry after an interruption. Speaker accuracy still requires device qualification.").font(.footnote)
                 }.disabled(captureActive || recording.speakers.state == .preparing)
                 Section("Generated notes") {
-                    Label(generation.available ? "Ready" : "Not available", systemImage: generation.available ? "checkmark.circle" : "info.circle")
-                    Text(generation.detail)
+                    Label(L10n.key(generation.available ? "Ready" : "Not available"), systemImage: generation.available ? "checkmark.circle" : "info.circle")
+                    Text(L10n.message(generation.detail))
                     Text("Apple Intelligence manages this model's preparation, storage and removal in system Settings. DoodleNote never silently sends requests to a cloud model.").font(.footnote)
                     Button("Check generation readiness") { Task { generation = await engine.readiness(language: language) } }
                 }
                 Section { Text("Removing models does not remove notes, drawings, transcripts or recordings. Installed functions can run offline when this device and language support them.") }
             }
-            .navigationTitle("Models")
+            .navigationTitle(L10n.text("Models"))
             .toolbar { Button("Done") { dismiss() } }
             .task(id: languageID) {
                 guard !captureActive else { return }

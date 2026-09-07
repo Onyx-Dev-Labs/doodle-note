@@ -12,7 +12,7 @@ import XCTest
         XCTAssertTrue(app.staticTexts["Showing the first 100 sources. The counts include every matching saved note."].exists)
         search.tap()
         search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 7) + "oldestneedle")
-        XCTAssertTrue(app.staticTexts["1 notes · 1 sources"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["1 note · 1 source"].waitForExistence(timeout: 10))
         app.buttons["searchHit"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["archive oldestneedle original decision"].waitForExistence(timeout: 10))
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
