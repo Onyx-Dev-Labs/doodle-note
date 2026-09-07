@@ -67,8 +67,12 @@ import Observation
             note.metadata?.selectedSummaryID = version.id
         }) else { problem = SummaryFailure.changed.localizedDescription; return false }
         self.draft = nil
+        let token = generation, identity = authentication
         let saved = await library.flush(noteID: noteID)
-        if !saved { waitingForSave = true; problem = Self.saveProblem }
+        if !saved, generation == token, authentication == identity,
+           library.authenticationGeneration == identity {
+            waitingForSave = true; problem = Self.saveProblem
+        }
         return saved
     }
     func refreshSaveState(noteID: UUID, library: NoteLibrary) async {
