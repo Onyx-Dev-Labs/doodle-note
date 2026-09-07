@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'apps/mobile-native/**'
+      - 'apps/desktop/resources/icon-master.png'
       - '.github/workflows/mobile-native.yml'
   push:
     branches: [main]
     paths:
       - 'apps/mobile-native/**'
+      - 'apps/desktop/resources/icon-master.png'
       - '.github/workflows/mobile-native.yml'
   workflow_dispatch:
 
@@ -33,6 +35,7 @@ jobs:
         run: |
           python3 -m unittest discover -s apps/mobile-native/scripts -p 'test_*.py' -v
           python3 apps/mobile-native/scripts/check-localization.py
+          cmp apps/desktop/resources/icon-master.png apps/mobile-native/Sources/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
       - name: Prepare native project
         run: |
           brew install xcodegen

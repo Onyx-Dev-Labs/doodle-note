@@ -16,6 +16,10 @@ final class RecordingSession {
     private var writer: AudioChunkWriter?
     private var captureFailed = false
     private var canceled = false
+    #if DEBUG
+    private var fixturePermission: FixtureCapturePermission?
+    func allowFixtureCapture() { fixturePermission?.allow() }
+    #endif
     private var attemptID: UUID?
     private var observers: [NSObjectProtocol] = []
     private let recordPermission: @MainActor () async -> Bool
@@ -31,7 +35,9 @@ final class RecordingSession {
          writerFault: @escaping @Sendable (AudioChunkWriter.Stage) throws -> Void = { _ in }) {
         #if DEBUG
         if CommandLine.arguments.contains("--ui-testing") && CommandLine.arguments.contains("--capture-fixture") {
-            self.recordPermission = { try? await Task.sleep(for: .seconds(3)); return true }
+            let permission = FixtureCapturePermission()
+            self.fixturePermission = permission
+            self.recordPermission = { await permission.request() }
             self.makeHardware = { FixtureCaptureHardware(interrupt: CommandLine.arguments.contains("--capture-interruption-fixture")) }
             self.analysisEnabled = false
         } else {
@@ -158,6 +164,9 @@ final class RecordingSession {
         if busy {
             if preparingNoteID != nil {
                 canceled = true
+                #if DEBUG
+                fixturePermission?.allow()
+                #endif
                 problem = interrupted ? "Recording preparation was interrupted. Choose Record to try again." : "Recording preparation canceled."
             }
             if interrupted { captureFailed = true }

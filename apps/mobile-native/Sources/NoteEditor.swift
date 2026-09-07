@@ -224,6 +224,11 @@ struct NoteEditor: View {
             #if DEBUG
             if CommandLine.arguments.contains("--ui-testing") && CommandLine.arguments.contains("--capture-fixture") {
                 Text("Synthetic capture fixture · No microphone").font(.caption).foregroundStyle(.secondary)
+                if recording.preparingNoteID == id {
+                    Button(action: recording.allowFixtureCapture) {
+                        Text(verbatim: "Continue synthetic capture")
+                    }.accessibilityIdentifier("allowFixtureCapture")
+                }
             }
             #endif
                 if let started = recording.startedAt, isActive {
