@@ -28,11 +28,11 @@ enum L10n {
     static func message(_ source: String) -> String { message(source, depth: 0) }
     private static func message(_ source: String, depth: Int) -> String {
         guard depth < 16 else { return source }
-        if let values = numbers(in: source, pattern: #"^An interrupted capture has (\d+) unconfirmed accepted frames and (\d+) rejected frames\. Saved audio is preserved\.$"#) {
-            return format("Unconfirmed audio frames: %lld. Rejected audio frames: %lld. Saved audio is preserved.", values[0], values[1])
+        if let match = numbers(in: source, pattern: #"^An interrupted capture has (\d+) unconfirmed accepted frames and (\d+) rejected frames\. Saved audio is preserved\.(?: |$)"#) {
+            return format("Unconfirmed audio frames: %lld. Rejected audio frames: %lld. Saved audio is preserved.", match.values[0], match.values[1]) + localizedRemainder(match.rest, depth: depth)
         }
-        if let values = numbers(in: source, pattern: #"^Audio recovery could not use (\d+) trailing bytes\. Original audio is preserved\.$"#) {
-            return format("Audio recovery could not use %lld trailing bytes. Original audio is preserved.", values[0])
+        if let match = numbers(in: source, pattern: #"^Audio recovery could not use (\d+) trailing bytes\. Original audio is preserved\.(?: |$)"#) {
+            return format("Audio recovery could not use %lld trailing bytes. Original audio is preserved.", match.values[0]) + localizedRemainder(match.rest, depth: depth)
         }
         let translated = key(source)
         if translated != source { return translated }
@@ -44,14 +44,18 @@ enum L10n {
         }
         return source // Unrecognized system/provider-owned diagnostic text retains its original wording.
     }
-    private static func numbers(in source: String, pattern: String) -> [Int]? {
+    private static func numbers(in source: String, pattern: String) -> (values: [Int], rest: String)? {
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)) else { return nil }
         let values = (1..<match.numberOfRanges).compactMap { index -> Int? in
             guard let range = Range(match.range(at: index), in: source) else { return nil }
             return Int(source[range])
         }
-        return values.count == match.numberOfRanges - 1 ? values : nil
+        guard values.count == match.numberOfRanges - 1, let range = Range(match.range, in: source) else { return nil }
+        return (values, String(source[range.upperBound...]))
+    }
+    private static func localizedRemainder(_ source: String, depth: Int) -> String {
+        source.isEmpty ? "" : " " + message(source, depth: depth + 1)
     }
     private static let statusSentences: [String] = {
         guard let url = Bundle.main.url(forResource: "StatusKeys", withExtension: "json"),

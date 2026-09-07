@@ -47,7 +47,7 @@
     "Audio recovery could not use \\(recovery.discardedBytes) trailing bytes. Original audio is preserved.": "Stored recovery diagnostic; L10n.message extracts and localizes the byte count at display time."
   },
   "Localization/L10n.swift": {
-    "^An interrupted capture has (\\d+) unconfirmed accepted frames and (\\d+) rejected frames\\. Saved audio is preserved\\.$": "Anchored matcher for persisted English diagnostic; numbers are formatted into translated catalog keys.",
-    "^Audio recovery could not use (\\d+) trailing bytes\\. Original audio is preserved\\.$": "Anchored matcher for persisted English diagnostic; numbers are formatted into translated catalog keys."
+    "^An interrupted capture has (\\d+) unconfirmed accepted frames and (\\d+) rejected frames\\. Saved audio is preserved\\.(?: |$)": "Anchored matcher for persisted English diagnostic; numbers are formatted into translated catalog keys.",
+    "^Audio recovery could not use (\\d+) trailing bytes\\. Original audio is preserved\\.(?: |$)": "Anchored matcher for persisted English diagnostic; numbers are formatted into translated catalog keys."
   }
 }
