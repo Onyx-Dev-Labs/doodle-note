@@ -14,7 +14,8 @@ struct NoteEditor: View {
     @State private var confirmAudioRemoval = false
     @State private var inkSession = InkEditingSession()
     @State private var showDetails = false
-    @FocusState private var editingText: Bool
+    private enum TextFocus: Hashable { case title, personalNotes }
+    @FocusState private var editingText: TextFocus?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var note: NoteRecord { library.note(id) ?? NoteRecord(id: id) }
@@ -25,7 +26,10 @@ struct NoteEditor: View {
     private func play(at seconds: TimeInterval? = nil) {
         let sourceTime = seconds ?? audioStart
         guard recording.permitsPlayback, sourceTime >= audioStart else { return }
-        player.play(files: audio, at: sourceTime - audioStart)
+        do {
+            guard let disk = library.disk else { return }
+            player.play(plan: try disk.playbackTimeline(for: id), at: sourceTime)
+        } catch { player.problem = error.localizedDescription }
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<NoteRecord, Value>) -> Binding<Value> {
@@ -36,6 +40,7 @@ struct NoteEditor: View {
         GeometryReader { geometry in
         VStack(spacing: 0) {
             TextField("Untitled note", text: binding(\.title), axis: .vertical)
+                .focused($editingText, equals: .title)
                 .font(.title2.bold()).lineLimit(2).padding(.horizontal).padding(.top, 8).accessibilityIdentifier("noteTitle").disabled(note.schemaVersion != 2)
             DisclosureGroup("Note details", isExpanded: $showDetails) {
             Picker("Move to folder", selection: Binding(get: { note.metadata?.folderID }, set: { folder in
@@ -74,12 +79,12 @@ struct NoteEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu("Editor navigation", systemImage: "rectangle.split.2x1") {
-                Button("Personal notes") { pane = 0; editingText = true }
-                Button("Drawing") { pane = 1; editingText = false }
-                Button("Transcript") { pane = 2; editingText = false }
-                Button("Summary") { pane = 3; editingText = false }
+                Button("Personal notes") { pane = 0; editingText = .personalNotes }
+                Button("Drawing") { pane = 1; editingText = nil }
+                Button("Transcript") { pane = 2; editingText = nil }
+                Button("Summary") { pane = 3; editingText = nil }
             }
-            if editingText { Button("Done typing") { editingText = false }.accessibilityIdentifier("doneTyping") }
+            if editingText != nil { Button("Done typing") { editingText = nil }.accessibilityIdentifier("doneTyping") }
             Menu("Note storage", systemImage: "ellipsis.circle") {
                 Button("Move to Trash", role: .destructive) {
                     player.stop()
@@ -116,7 +121,7 @@ struct NoteEditor: View {
             }
             #endif
         }
-        .onChange(of: pane) { _, value in if value != 0 { editingText = false } }
+        .onChange(of: pane) { _, value in if value != 0 { editingText = nil } }
         .onDisappear { player.stop(); Task { await library.flush() } }
         .onChange(of: recording.noteID) { _, value in if value != nil { player.stop() } }
         .onChange(of: recording.busy) { _, value in if value { player.stop() } }
@@ -134,7 +139,7 @@ struct NoteEditor: View {
     }
 
     private func contentButton(_ title: String, pane value: Int, key: KeyEquivalent) -> some View {
-        Button(title) { pane = value; editingText = value == 0 }
+        Button(title) { pane = value; editingText = value == 0 ? .personalNotes : nil }
             .keyboardShortcut(key, modifiers: .command)
             .buttonStyle(.bordered).tint(pane == value ? .accentColor : .secondary)
             .accessibilityAddTraits(pane == value ? .isSelected : [])
@@ -181,7 +186,7 @@ struct NoteEditor: View {
                 if note.schemaVersion == 2 {
                     TextEditor(text: binding(\.text)).padding(.horizontal, 8)
                         .accessibilityLabel("Personal notes").accessibilityIdentifier("personalNotes")
-                        .focused($editingText)
+                        .focused($editingText, equals: .personalNotes)
                         .accessibilityHint("Type with the keyboard or write with Apple Pencil using system Scribble. Saved drawings are not converted automatically.")
                 } else {
                     ScrollView { Text(note.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
@@ -229,7 +234,8 @@ struct NoteEditor: View {
     }
 
     private var recordControl: some View {
-                Button(isActive ? "Stop recording" : "Record", systemImage: isActive ? "stop.fill" : "mic.fill") {
+                Button(isActive ? "Stop recording" : (note.captureState == .interrupted ? "Resume" : "Record"), systemImage: isActive ? "stop.fill" : "mic.fill") {
+                    editingText = nil
                     player.stop()
                     Task {
                         if isActive { await recording.stop(library: library) }
@@ -242,6 +248,16 @@ struct NoteEditor: View {
 
     private var captureControls: some View {
         VStack(spacing: 8) {
+            #if DEBUG
+            if CommandLine.arguments.contains("--ui-testing") && CommandLine.arguments.contains("--capture-fixture") {
+                Text("Synthetic capture fixture · No microphone").font(.caption).foregroundStyle(.secondary)
+                if recording.preparingNoteID == id {
+                    Button(action: recording.allowFixtureCapture) {
+                        Text(verbatim: "Continue synthetic capture")
+                    }.accessibilityIdentifier("allowFixtureCapture")
+                }
+            }
+            #endif
                 if let started = recording.startedAt, isActive {
                     Label { Text(started, style: .timer).monospacedDigit() } icon: { Image(systemName: "record.circle.fill") }
                         .foregroundStyle(.red)
@@ -272,7 +288,13 @@ struct NoteEditor: View {
                 }
             }
             }
-            if recording.busy { ProgressView("Preparing or finalizing recording…").font(.caption) }
+            if recording.busy {
+                ProgressView(recording.preparingNoteID != nil ? "Preparing recording…" : "Finishing and saving recording…").font(.caption)
+                if recording.preparingNoteID != nil {
+                    Button("Cancel recording preparation") { Task { await recording.stop(library: library) } }
+                        .accessibilityIdentifier("cancelRecordingPreparation")
+                }
+            }
         }.padding().background(.bar)
     }
 

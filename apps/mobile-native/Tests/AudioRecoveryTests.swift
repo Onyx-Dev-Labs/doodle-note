@@ -37,7 +37,8 @@ final class AudioRecoveryTests: XCTestCase {
         try bytes.write(to: original)
         let result = try store.load()
         XCTAssertEqual(result.notes.first?.captureState, .interrupted)
-        XCTAssertTrue(result.audioProblems.isEmpty)
+        XCTAssertEqual(result.audioProblems.count, 1)
+        XCTAssertTrue(result.audioProblems[0].contains("2 trailing bytes"))
         XCTAssertEqual(try Data(contentsOf: original), bytes)
         let selected = try XCTUnwrap(store.audioFiles(for: id).first)
         XCTAssertEqual(selected, AudioRecovery.recoveredURL(for: original))
@@ -49,6 +50,21 @@ final class AudioRecoveryTests: XCTestCase {
         XCTAssertEqual(read.floatChannelData![1][15_999], -0.25, accuracy: 0.001)
         _ = try store.load()
         XCTAssertEqual(store.audioFiles(for: id), [selected])
+    }
+
+    func testInvalidCachedRecoveryIsReportedWithoutReplacingEitherFile() throws {
+        let (store, id, original, format) = try fixture()
+        try AudioRecovery.begin(file: original, format: format)
+        let originalBytes = try Data(contentsOf: original)
+        XCTAssertEqual(AudioRecovery.recover(directory: original.deletingLastPathComponent()).recovered, 1)
+        let recovered = AudioRecovery.recoveredURL(for: original)
+        let invalid = Data("invalid recovered copy".utf8)
+        try invalid.write(to: recovered)
+        let result = try store.load()
+        XCTAssertFalse(result.audioProblems.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: original), originalBytes)
+        XCTAssertEqual(try Data(contentsOf: recovered), invalid)
+        XCTAssertThrowsError(try store.playbackTimeline(for: id))
     }
 
     func testMalformedAudioIsReportedAndPreserved() throws {
