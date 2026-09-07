@@ -78,6 +78,14 @@ actor LibraryRepository {
         try authorize(anchor.libraryID, identities: identities)
         let lifecycle = try disk.lifecycle(noteID: anchor.noteID, libraryID: anchor.libraryID)
         guard lifecycle.state == .active, !lifecycle.restorePending else { throw LifecycleError.unavailable }
+        if case .summary(let versionID) = anchor.content {
+            guard anchor.revisionID == versionID else { throw LibraryDataError.invalidDocument }
+            let file = disk.directory(for: anchor.noteID).appendingPathComponent("note.json")
+            let note = try JSONDecoder().decode(NoteRecord.self, from: Data(contentsOf: file))
+            guard note.id == anchor.noteID, note.metadata?.libraryID == anchor.libraryID else { throw LibraryDataError.invalidOwnership }
+            // Summary versions are append-only and immutable under NoteDiskStore.save.
+            return note.metadata?.summaries.first { $0.id == versionID }?.text
+        }
         return try disk.revision(anchor).resolve(anchor)
     }
 

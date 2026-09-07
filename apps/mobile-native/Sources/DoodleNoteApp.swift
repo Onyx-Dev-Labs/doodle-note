@@ -21,10 +21,12 @@ struct DoodleNoteApp: App {
         let fixtureArgument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--fixture-id=") })
         let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
         let calendarFixture = testing && ProcessInfo.processInfo.arguments.contains("--calendar-fixture")
-        let testDirectory = (storageFixture || calendarFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
+        let searchFixture = testing && ProcessInfo.processInfo.arguments.contains("--search-fixture")
+        let testDirectory = (storageFixture || calendarFixture || searchFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
         let root = testing
             ? URL.applicationSupportDirectory.appendingPathComponent(testDirectory, isDirectory: true) : base
         if storageFixture { try? StorageUITestFixture.prepare(root: root) }
+        if searchFixture { try? SearchUITestFixture.prepare(root: root) }
         #else
         let root = base
         #endif
@@ -115,6 +117,9 @@ struct LibraryView: View {
                     }
                 }
                 if let calendar { UpcomingMeetingsSection(calendar: calendar, libraryID: library.selectedLibraryID) }
+                if !search.isEmpty {
+                    NoteSearchSection(library: library, query: search) { selection = $0 }
+                } else {
                 Section("Notes") {
                     ForEach(visibleNotes) { note in
                         NavigationLink(value: note.id) {
@@ -128,9 +133,10 @@ struct LibraryView: View {
                         }
                     }
                 }
+                }
             }
             .navigationTitle("DoodleNote")
-            .searchable(text: $search, prompt: "Search notes and transcripts")
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search notes and transcripts")
             .overlay {
                 if library.visibleNotes.isEmpty && calendar == nil {
                     ContentUnavailableView("Your notes start here", systemImage: "note.text",
