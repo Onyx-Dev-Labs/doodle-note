@@ -135,6 +135,14 @@ actor GoogleCalendarAdapter: CalendarProviderAdapter {
         let id: String
         let status: String?
         let summary: String?
+        struct Attendee: Decodable { let displayName: String?; let email: String?; let resource: Bool? }
+        struct Conference: Decodable {
+            struct Entry: Decodable { let entryPointType: String?; let uri: String? }
+            let entryPoints: [Entry]?
+        }
+        let attendees: [Attendee]?
+        let hangoutLink: String?
+        let conferenceData: Conference?
         let recurringEventId: String?
         let originalStartTime: Moment?
         let start: Moment?
@@ -187,7 +195,9 @@ actor GoogleCalendarAdapter: CalendarProviderAdapter {
             } else { occurrence = event.id }
             return CalendarOccurrence(key: EventOccurrenceKey(provider: "google", accountID: account.subject,
                 calendarID: calendar, eventID: event.recurringEventId ?? event.id, occurrenceID: occurrence),
-                title: event.summary ?? "Untitled event", start: beginning, end: ending, timeZoneID: zone, isAllDay: start.date != nil)
+                title: event.summary ?? "Untitled event", start: beginning, end: ending, timeZoneID: zone, isAllDay: start.date != nil,
+                joinURL: event.hangoutLink ?? event.conferenceData?.entryPoints?.first(where: { $0.entryPointType == "video" })?.uri,
+                invitees: event.attendees?.filter { $0.resource != true }.prefix(100).compactMap { $0.displayName ?? $0.email }.map { String($0.prefix(320)) })
         }
         let nextPosition: Cursor?
         if let page = response.nextPageToken {
