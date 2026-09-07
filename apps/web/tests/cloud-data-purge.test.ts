@@ -148,3 +148,29 @@ describe("personal Cloud Sync data purge", () => {
     assert.equal((await mem.db.select().from(subscriptions).where(eq(subscriptions.userId, userId))).length, 1);
   });
 });
+
+describe('versioned sync purge compatibility',()=>{
+  it('erases adopted and native-only personal snapshots, preserves shared content and purge receipts',async()=>{
+    const {randomUUID}=await import('node:crypto');
+    const {applySync,sql}=await import('@repo/db');
+    const local=await createInMemoryDb();
+    try {
+      await local.db.insert(user).values({id:'owner',name:'Owner',email:'owner@example.test',createdAt:new Date(),updatedAt:new Date()});
+      await local.db.insert(organization).values([{id:'personal',name:'Personal',slug:'personal-test',createdAt:new Date()},{id:'team',name:'Team',slug:'team-test',createdAt:new Date()}]);
+      await local.db.insert(member).values([{id:'p',userId:'owner',organizationId:'personal',role:'owner',createdAt:new Date()},{id:'t',userId:'owner',organizationId:'team',role:'member',createdAt:new Date()}]);
+      const personalLibrary=randomUUID(),teamLibrary=randomUUID();
+      function operation(libraryId:string,noteId=randomUUID()) {
+        const source=randomUUID();return {protocolVersion:2,libraryId,noteId,operationId:randomUUID(),expectedRevision:null,expectedLifecycleGeneration:null,kind:'upsert',snapshot:{title:'note',kind:'note',createdAt:'2026-09-06',language:'en-US',text:'private',passages:[],speakers:[],sourceRevisionId:source,sourceVersions:[{id:source,title:'note',text:'private',passages:[],speakers:[]}],summaries:[],selectedSummaryId:null,inkAttachments:[]}};
+      }
+      const adopted=operation(personalLibrary),native=operation(personalLibrary),shared=operation(teamLibrary);
+      await local.db.insert(meetings).values({id:adopted.noteId,organizationId:'personal',title:'legacy'});
+      await applySync(local.db,'personal',adopted);await applySync(local.db,'personal',native);await applySync(local.db,'team',shared);
+      const result=await purgePersonalCloudData({userId:'owner',db:local.db,deleteAttachmentPrefix:async()=>{}});
+      assert.equal(result.meetingCount,2);
+      const personal=await local.db.execute(sql`select state from sync_notes where organization_id='personal'`);assert.ok(personal.rows.every(r=>r.state==='purged'));
+      const payload=await local.db.execute(sql`select snapshot from sync_revisions where organization_id='personal'`);assert.ok(payload.rows.every(r=>r.snapshot===null));
+      const team=await local.db.execute(sql`select snapshot from sync_revisions where organization_id='team'`);assert.ok(team.rows.some(r=>r.snapshot!==null));
+      assert.equal((await applySync(local.db,'personal',native) as {status:string}).status,'purged');
+    }finally{await local.close();}
+  });
+});
