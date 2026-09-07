@@ -3,12 +3,29 @@ import XCTest
 @MainActor final class SummaryUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        for _ in 0..<8 {
+        let viewport = app.scrollViews.containing(.button, identifier: "generateSummary").firstMatch
+        XCTAssertTrue(viewport.exists)
+        for _ in 0..<12 {
             if element.isHittable { return }
             // Saving collapses the draft and may leave the retained version above the
             // current viewport. Follow its actual frame instead of always scrolling down.
-            if element.frame.midY < app.frame.midY { app.swipeDown() }
-            else { app.swipeUp() }
+            let upper = viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            let lower = viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70))
+            if element.frame.midY < viewport.frame.midY {
+                upper.press(forDuration: 0.01, thenDragTo: lower)
+            } else {
+                lower.press(forDuration: 0.01, thenDragTo: upper)
+            }
+        }
+        if !element.isHittable {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = "Summary reveal failure"
+            image.lifetime = .keepAlways
+            add(image)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Summary reveal hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
         }
         XCTAssertTrue(element.isHittable)
     }
