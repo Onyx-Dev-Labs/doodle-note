@@ -46,9 +46,10 @@ def main():
             journal=json.loads((ROOT/'drizzle/meta/_journal.json').read_text())['entries']
             for entry in journal:
                 migration=(ROOT/'drizzle'/f"{entry['tag']}.sql").read_text()
-                if entry['idx']==13:
+                if entry['idx'] in (13,14):
                     sql('BEGIN;'+migration+'ROLLBACK;')
-                    assert sql("SELECT to_regclass('sync_notes') IS NULL;")=='t'
+                    table="sync_notes" if entry["idx"]==13 else "ink_versions"
+                    assert sql(f"SELECT to_regclass('{table}') IS NULL;")=='t'
                     sql('BEGIN;'+migration+'COMMIT;')
                 else:
                     sql(migration)
@@ -67,7 +68,22 @@ def main():
                 outcomes=list(pool.map(lambda op:apply('a',op),edits))
             assert sorted(r['status'] for r in outcomes)==['conflict','ok'], outcomes
             assert sql(f"SELECT count(*) FROM sync_revisions WHERE note_id='{note}';")=='3'
-            print('PASS: migration rollback/reapply, cross-workspace library race, concurrent same-base edits preserve conflict')
+            version=uid()
+            manifests=[]
+            for org in ('a','b'):
+                op=operation(uid(),uid()); receipt=apply(org,op)
+                manifests.append((org,dict(libraryId=op['libraryId'],noteId=op['noteId'],attachmentId=uid(),versionId=version,
+                    generation=receipt['lifecycleGeneration'],expectedRevision=receipt['headRevision'],
+                    ink=dict(size=1,sha256='0'*64,contentType='application/x-apple-pencilkit'),
+                    preview=dict(size=1,sha256='0'*64,contentType='image/png'))))
+            def reserve(args):
+                org,manifest=args
+                return sql(f"SELECT ink_reserve('{org}','{json.dumps(manifest)}'::jsonb);")
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:
+                outcomes=list(pool.map(reserve,manifests))
+            assert sorted(outcomes)==['pending','version_reused'], outcomes
+            assert sql(f"SELECT count(*) FROM ink_versions WHERE id='{version}';")=='1'
+            print('PASS: migration rollback/reapply, cross-workspace library/version races, concurrent same-base edits preserve conflict')
         finally:
             subprocess.run([str(BIN/'pg_ctl'), '-D', data, '-m', 'fast', '-w', 'stop'], check=True, capture_output=True)
 
