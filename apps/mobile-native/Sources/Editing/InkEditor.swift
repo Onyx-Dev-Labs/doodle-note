@@ -58,8 +58,7 @@ import PencilKit
         bytes = data
         canvas.drawing = drawing
         canvas.accessibilityValue = L10n.format("%lld strokes", drawing.strokes.count)
-        let bounds = drawing.bounds
-        canvas.contentSize = CGSize(width: max(1200, bounds.maxX + 80), height: max(1800, bounds.maxY + 80))
+        canvas.contentSize = Self.pageSize(for: drawing.bounds)
         applying = false
     }
     func replace(with drawing: PKDrawing) {
@@ -113,7 +112,16 @@ import PencilKit
         canvas.setZoomScale(min(4, max(0.2, scale)), animated: false)
         zoom = canvas.zoomScale
     }
-    func fit() { setZoom(canvas.bounds.width / max(1200, canvas.drawing.bounds.maxX + 80)) }
+    // Empty PKDrawing bounds can be CGRect.null (infinite origin). Never pass
+    // those coordinates through UIScrollView into CALayer geometry.
+    static func pageSize(for bounds: CGRect) -> CGSize {
+        guard !bounds.isNull, !bounds.isInfinite,
+              bounds.maxX.isFinite, bounds.maxY.isFinite else {
+            return CGSize(width: 1200, height: 1800)
+        }
+        return CGSize(width: max(1200, bounds.maxX + 80), height: max(1800, bounds.maxY + 80))
+    }
+    func fit() { setZoom(canvas.bounds.width / Self.pageSize(for: canvas.drawing.bounds).width) }
     func scrollViewDidZoom(_ scrollView: UIScrollView) { zoom = scrollView.zoomScale }
 }
 

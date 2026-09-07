@@ -3,6 +3,25 @@ import PencilKit
 @testable import DoodleNoteNative
 
 @MainActor final class InkEditingTests: XCTestCase {
+    func testEmptyDrawingUndoAtZoomKeepsFinitePageGeometry() {
+        let session = InkEditingSession()
+        session.canvas.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+        session.load(Data(), id: UUID(), editable: true)
+        session.replace(with: InkFixture.drawing())
+        session.fit()
+        session.undo()
+        XCTAssertTrue(session.canvas.drawing.strokes.isEmpty)
+        XCTAssertEqual(session.canvas.contentSize, CGSize(width: 1200, height: 1800))
+        session.fit()
+        XCTAssertTrue(session.canvas.zoomScale.isFinite)
+        XCTAssertEqual(session.canvas.zoomScale, 402.0 / 1200.0, accuracy: 0.001)
+        session.redo()
+        XCTAssertEqual(session.canvas.drawing.strokes.count, 3)
+        for bounds in [CGRect.null, CGRect.infinite] {
+            XCTAssertEqual(InkEditingSession.pageSize(for: bounds), CGSize(width: 1200, height: 1800))
+        }
+    }
+
     func testNonemptyEditUndoRedoSerializeAndReopen() throws {
         let session = InkEditingSession(), id = UUID()
         let first = InkFixture.drawing()

@@ -8,8 +8,8 @@ import XCTest
         let name = "Capture \(UUID().uuidString.prefix(6))"
         let title = app.textFields["noteTitle"].exists ? app.textFields["noteTitle"] : app.textViews["noteTitle"]
         title.tap(); title.typeText(name)
-        if app.buttons["Done typing"].exists { app.buttons["Done typing"].tap() }
-        else { app.buttons["recordButton"].tap() } // tapping capture also dismisses native text input
+        XCTAssertTrue(app.buttons["doneTyping"].waitForExistence(timeout: 5))
+        app.buttons["doneTyping"].tap()
         return name
     }
 
