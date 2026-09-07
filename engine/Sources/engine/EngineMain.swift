@@ -6,7 +6,7 @@ struct EngineMain {
         let args = Array(CommandLine.arguments.dropFirst())
         guard let command = args.first else {
             Events.error(
-                "usage: engine <transcribe|stream|live|merge-audio|info> [--file <path>] [--model v2|v3] [--realtime] [--source mic|system|both] [--seconds N] [--audio-dir <path>] [--dir <path>]"
+                "usage: engine <transcribe|stream|live|merge-audio|info> [--file <path>] [--model v2|v3] [--realtime] [--source mic|system|both] [--language <code|auto>] [--seconds N] [--audio-dir <path>] [--dir <path>]"
             )
             exit(64)
         }

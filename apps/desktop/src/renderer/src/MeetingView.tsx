@@ -107,6 +107,9 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       if (ev.stage === 'transcribing') {
         return { ...state, transcribing: true, statusText: '' }
       }
+      if (ev.stage === 'loading_models') {
+        return { ...state, statusText: 'Loading speech model…' }
+      }
       // The engine confirms a stop instantly with `finishing` — reflect it
       // instantly, or the still-ticking timer makes stop look ignored and
       // users hammer the button.
@@ -115,6 +118,12 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       }
       return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
     }
+    case 'download':
+      if (!active) return state
+      return {
+        ...state,
+        statusText: `Downloading speech model — ${Math.round((ev.progress ?? 0) * 100)}%`
+      }
     case 'ready':
       if (!active) return state
       return { ...state, phase: 'recording', statusText: '' }

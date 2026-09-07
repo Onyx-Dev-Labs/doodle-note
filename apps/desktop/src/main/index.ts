@@ -353,6 +353,7 @@ app.whenReady().then(() => {
     // macOS, the main-process PCM tee on Windows). Renderer-set audioDir is
     // ignored — main owns the location.
     delete opts.audioDir
+    if (request.command === 'live') opts.language = notesService?.liveAsrLanguage()
     if (request.command === 'live' && opts.meetingId && opts.persistAudio !== false) {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }

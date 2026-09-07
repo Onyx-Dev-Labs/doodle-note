@@ -47,12 +47,27 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 export type EngineChoice = 'local' | 'cloud'
 
 /**
- * Batch-transcription language mode. 'english' runs the fastest English-only
- * model; 'multilingual' recognizes 25 European languages (Danish, German,
- * French, …). Applies to imported recordings and re-transcription; live
- * captions always use the English streaming model.
+ * Transcription language. 'english' runs the fastest English-only models;
+ * 'multilingual' auto-detects the spoken language; a FLEURS code such as
+ * 'de-DE' pins live captions to that language. Imports and re-transcription
+ * always auto-detect among 25 European languages when not 'english'.
+ * Live captions on Windows stay English.
  */
-export type TranscriptionLanguage = 'english' | 'multilingual'
+export const TRANSCRIPTION_LANGUAGES = [
+  ['english', 'English (fastest)'],
+  ['multilingual', 'Auto-detect'],
+  ['de-DE', 'Deutsch'],
+  ['fr-FR', 'Français'],
+  ['es-ES', 'Español'],
+  ['it-IT', 'Italiano'],
+  ['pt-BR', 'Português'],
+  ['nl-NL', 'Nederlands'],
+  ['pl-PL', 'Polski']
+] as const
+export type TranscriptionLanguage = (typeof TRANSCRIPTION_LANGUAGES)[number][0]
+export function isTranscriptionLanguage(value: unknown): value is TranscriptionLanguage {
+  return TRANSCRIPTION_LANGUAGES.some(([code]) => code === value)
+}
 
 /** One catalog model + its state on this machine. */
 export interface NotesModelInfo {

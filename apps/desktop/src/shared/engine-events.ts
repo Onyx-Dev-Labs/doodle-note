@@ -68,6 +68,8 @@ export interface EngineStartOptions {
   realtime?: boolean
   /** e.g. "v2" | "v3" */
   model?: string
+  /** live only (macOS): "auto" or a FLEURS code like "de-DE" selects the multilingual streaming model; omit = English. */
+  language?: string
   /** live only: which capture sources (default "both") */
   source?: 'mic' | 'system' | 'both'
   /** live only: auto-stop after N seconds (dev/testing) */

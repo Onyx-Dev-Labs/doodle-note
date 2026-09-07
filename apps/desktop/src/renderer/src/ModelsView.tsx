@@ -18,7 +18,8 @@ import {
   type NotesModelInfo,
   type NotesModelsResponse,
   type NotesSettingsView,
-  type TranscriptionLanguage
+  type TranscriptionLanguage,
+  TRANSCRIPTION_LANGUAGES
 } from '../../shared/notes-api'
 import mascotUrl from './assets/mascot-square.png'
 
@@ -959,32 +960,24 @@ export default function ModelsView({
               <section className="keys-section">
                 <h3>Transcription language</h3>
                 <p className="models-sub">
-                  Applies to imported recordings and &ldquo;Re-transcribe&rdquo;. Multilingual
-                  recognizes 25 European languages (Danish, German, French, Spanish, …). Live
-                  captions during a meeting stay English either way — re-transcribe afterwards for
-                  the full-quality transcript.
+                  Pick the language you speak, or Auto-detect. Applies to live captions, imported
+                  recordings, and &ldquo;Re-transcribe&rdquo;; the first non-English session
+                  downloads its model. Live captions on Windows stay English.
                 </p>
-                <div className="theme-seg" role="radiogroup" aria-label="Transcription language">
-                  {(
-                    [
-                      ['english', 'English (fastest)'],
-                      ['multilingual', 'Multilingual']
-                    ] as const
-                  ).map(([value, label]) => {
-                    const active = (settings?.transcriptionLanguage ?? 'english') === value
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        className={active ? 'theme-seg-btn on' : 'theme-seg-btn'}
-                        onClick={() => void chooseTranscriptionLanguage(value)}
-                      >
+                <div className="key-form">
+                  <select
+                    aria-label="Transcription language"
+                    value={settings?.transcriptionLanguage ?? 'english'}
+                    onChange={(e) =>
+                      void chooseTranscriptionLanguage(e.target.value as TranscriptionLanguage)
+                    }
+                  >
+                    {TRANSCRIPTION_LANGUAGES.map(([code, label]) => (
+                      <option key={code} value={code}>
                         {label}
-                      </button>
-                    )
-                  })}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </section>
 

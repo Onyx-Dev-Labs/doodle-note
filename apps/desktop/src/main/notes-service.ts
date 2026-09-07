@@ -40,7 +40,8 @@ import {
   type NotesModelsResponse,
   type NotesSettingsUpdate,
   type NotesSettingsView,
-  type TranscriptionLanguage
+  type TranscriptionLanguage,
+  isTranscriptionLanguage
 } from '../shared/notes-api'
 import type { MeetingRecord } from '../shared/meetings-api'
 import { isStoredCloudProvider } from '../shared/meeting-recovery'
@@ -475,7 +476,14 @@ export class NotesService {
 
   /** Engine model for batch transcription (import + re-transcribe). */
   batchAsrModel(): 'v2' | 'v3' {
-    return this.settings.transcriptionLanguage === 'multilingual' ? 'v3' : 'v2'
+    return (this.settings.transcriptionLanguage ?? 'english') === 'english' ? 'v2' : 'v3'
+  }
+
+  /** Language hint for live captions; undefined keeps the English streaming model. */
+  liveAsrLanguage(): string | undefined {
+    const language = this.settings.transcriptionLanguage
+    if (!language || language === 'english') return undefined
+    return language === 'multilingual' ? 'auto' : language
   }
 
   private settingsView(): NotesSettingsView {
@@ -505,10 +513,7 @@ export class NotesService {
       this.settings.engineChoice = update.engineChoice
     }
 
-    if (
-      update.transcriptionLanguage === 'english' ||
-      update.transcriptionLanguage === 'multilingual'
-    ) {
+    if (isTranscriptionLanguage(update.transcriptionLanguage)) {
       this.settings.transcriptionLanguage = update.transcriptionLanguage
     }
 
@@ -582,8 +587,8 @@ export class NotesService {
         const name = sanitizeSpeakerName(raw.profileName)
         if (name) settings.profileName = name
       }
-      if (raw.transcriptionLanguage === 'multilingual') {
-        settings.transcriptionLanguage = 'multilingual'
+      if (isTranscriptionLanguage(raw.transcriptionLanguage)) {
+        settings.transcriptionLanguage = raw.transcriptionLanguage
       }
       const cloud = raw.cloud
       if (

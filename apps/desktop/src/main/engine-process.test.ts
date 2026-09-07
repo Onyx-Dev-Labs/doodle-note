@@ -149,3 +149,22 @@ describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => 
     await waitFor(() => logLines(log).includes('SIGTERM'), 'immediate SIGTERM', 2_000)
   })
 })
+
+describe('EngineProcess live args', { skip: process.platform === 'win32' }, () => {
+  it('passes --language through to the live command', async () => {
+    const { binary, log } = fakeEngine(
+      [
+        "log('argv ' + process.argv.slice(2).join(' '))",
+        "emit({ event: 'ready', mode: 'live' })",
+        "process.on('SIGTERM', () => process.exit(0))",
+        'process.stdin.resume()'
+      ].join('\n')
+    )
+    const engine = new EngineProcess(binary, 1_000)
+    cleanups.push(() => engine.dispose())
+    engine.start('live', undefined, { language: 'auto' })
+    await waitFor(() => logLines(log).some((l) => l.startsWith('argv')), 'argv line')
+    const argv = logLines(log).find((l) => l.startsWith('argv')) ?? ''
+    assert.ok(argv.includes('--language auto'), argv)
+  })
+})
