@@ -66,7 +66,8 @@ final class StreamingSpeakers {
     }
     private(set) var state = State.missing
     private(set) var detail = "Download the speaker model to enable on-device labels."
-    private let store = SpeakerModelStore()
+    private let store = SpeakerModelStore.shared
+    private(set) var downloadProgress = 0.0
     private let worker = SpeakerWorker()
     private var downloadTask: Task<Void, Never>?
     private var task: Task<Void, Never>?
@@ -76,16 +77,25 @@ final class StreamingSpeakers {
 
     func check() async {
         guard task == nil, !preparing else { return }
-        if await store.installed() { state = .ready; detail = "Speaker model available on this device." }
+        if await store.installed() {
+            state = .ready
+            detail = "Speaker model verified on this device."
+        } else {
+            state = .missing
+            detail = "The speaker model is missing or needs repair. Download it before enabling labels."
+        }
     }
 
     func download() {
         guard !preparing, task == nil else { return }
         state = .downloading
+        downloadProgress = 0
         detail = "Downloading the speaker model (240 MB)…"
         downloadTask = Task {
             do {
-                try await store.download()
+                try await store.download { [weak self] value in
+                    Task { @MainActor in self?.downloadProgress = value }
+                }
                 state = .ready
                 enabled = true
                 detail = "Speaker model downloaded. Labels will be checked when recording starts."
@@ -95,7 +105,21 @@ final class StreamingSpeakers {
         }
     }
 
-    func cancelDownload() { downloadTask?.cancel() }
+    func cancelDownload() {
+        guard downloadTask != nil else { return }
+        detail = "Canceling download… Verified files will be kept for retry."
+        downloadTask?.cancel()
+    }
+
+    func removeModel() async {
+        guard task == nil, !preparing else { return }
+        do {
+            try await store.remove()
+            state = .missing
+            enabled = false
+            detail = "Speaker model removed. Your notes and recordings are unchanged."
+        } catch { fail(error.localizedDescription) }
+    }
 
     func start(offset: Double, onUpdate: @escaping @MainActor (UUID, [SpeakerTurn]) -> Void) async
         -> AsyncStream<SpeakerAudio>.Continuation? {

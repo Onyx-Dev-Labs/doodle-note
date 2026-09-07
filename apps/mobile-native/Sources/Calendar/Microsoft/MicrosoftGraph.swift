@@ -14,6 +14,10 @@ private struct MicrosoftEvent: Decodable {
     struct Time: Decodable { let dateTime: String; let timeZone: String }
     let id: String
     let subject: String?
+    struct Attendee: Decodable { struct Address: Decodable { let name: String?; let address: String? }; let emailAddress: Address?; let type: String? }
+    struct OnlineMeeting: Decodable { let joinUrl: String? }
+    let attendees: [Attendee]?
+    let onlineMeeting: OnlineMeeting?
     let type: String
     let seriesMasterId: String?
     let originalStart: String?
@@ -49,7 +53,8 @@ private struct MicrosoftEvent: Decodable {
         }
         return CalendarOccurrence(key: EventOccurrenceKey(provider: "microsoft", accountID: account.subject,
             calendarID: calendarID, eventID: eventID, occurrenceID: occurrenceID), title: subject ?? "Untitled meeting",
-            start: startDate, end: endDate, timeZoneID: zone, isAllDay: isAllDay)
+            start: startDate, end: endDate, timeZoneID: zone, isAllDay: isAllDay, joinURL: onlineMeeting?.joinUrl,
+            invitees: attendees?.filter { $0.type != "resource" }.prefix(100).compactMap { $0.emailAddress?.name ?? $0.emailAddress?.address }.map { String($0.prefix(320)) })
     }
 }
 private struct MicrosoftCursor: Codable {
@@ -100,7 +105,7 @@ extension MicrosoftCalendarAdapter {
         let format = ISO8601DateFormatter()
         components.queryItems = [URLQueryItem(name: "startDateTime", value: format.string(from: window.start)),
             URLQueryItem(name: "endDateTime", value: format.string(from: window.end)), URLQueryItem(name: "$top", value: "1000"),
-            URLQueryItem(name: "$select", value: "id,subject,type,seriesMasterId,originalStart,originalStartTimeZone,start,end,isAllDay,isCancelled")]
+            URLQueryItem(name: "$select", value: "id,subject,type,seriesMasterId,originalStart,originalStartTimeZone,start,end,isAllDay,isCancelled,attendees,onlineMeeting")]
         let url = try position.nextURL.map { try graphURL($0, path: path) } ?? components.url!
         let data = try await graph(url, path: path, account: account, credential: credential)
         guard let page = try? JSONDecoder().decode(MicrosoftCollection<MicrosoftEvent>.self, from: data), page.value.count <= 1000 else {

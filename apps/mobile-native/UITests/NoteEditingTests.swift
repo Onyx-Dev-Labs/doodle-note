@@ -21,7 +21,8 @@ import XCTest
         XCTAssertFalse(app.buttons["Play recording"].exists)
         app.buttons["Note storage"].tap()
         app.buttons["Move to Trash"].tap()
-        if !app.buttons["Storage & Trash"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        if !app.buttons["libraryOptions"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        app.buttons["libraryOptions"].tap()
         XCTAssertTrue(app.buttons["Storage & Trash"].waitForExistence(timeout: 5))
         app.buttons["Storage & Trash"].tap()
         let restore = app.buttons["restore-Storage fixture"].firstMatch
@@ -54,12 +55,14 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
+        app.buttons["libraryOptions"].tap()
         XCTAssertTrue(app.buttons["New folder"].waitForExistence(timeout: 10))
         app.buttons["New folder"].tap()
         let name = "Folder \(UUID().uuidString.prefix(6))"
         app.alerts.textFields.firstMatch.typeText(name)
         app.alerts.buttons["Create"].tap()
         app.buttons["newNote"].tap()
+        app.buttons["Note details"].tap()
         XCTAssertTrue(app.buttons["noteFolder"].waitForExistence(timeout: 5))
         app.buttons["noteFolder"].tap()
         app.buttons[name].firstMatch.tap()

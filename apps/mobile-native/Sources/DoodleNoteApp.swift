@@ -4,16 +4,24 @@ import SwiftUI
 struct DoodleNoteApp: App {
     @State private var library: NoteLibrary
     @State private var recording = RecordingSession()
+    @AppStorage("mobileSetupComplete") private var setupComplete = false
+    @AppStorage("appLanguage") private var appLanguage = SpokenLanguage.english.rawValue
+    @State private var calendar: CalendarCoordinator?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let base = URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteNative", isDirectory: true)
         #if DEBUG
         let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        if testing && ProcessInfo.processInfo.arguments.contains("--first-run-fixture") {
+            UserDefaults.standard.set(false, forKey: "mobileSetupComplete")
+            UserDefaults.standard.set(SpokenLanguage.english.rawValue, forKey: "appLanguage")
+        }
         let storageFixture = testing && ProcessInfo.processInfo.arguments.contains("--storage-fixture")
         let fixtureArgument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--fixture-id=") })
         let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
-        let testDirectory = storageFixture ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
+        let calendarFixture = testing && ProcessInfo.processInfo.arguments.contains("--calendar-fixture")
+        let testDirectory = (storageFixture || calendarFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
         let root = testing
             ? URL.applicationSupportDirectory.appendingPathComponent(testDirectory, isDirectory: true) : base
         if storageFixture { try? StorageUITestFixture.prepare(root: root) }
@@ -21,11 +29,35 @@ struct DoodleNoteApp: App {
         let root = base
         #endif
         _library = State(initialValue: NoteLibrary(root: root))
+        #if DEBUG
+        _calendar = State(initialValue: calendarFixture ? try? CalendarUIFixture.make(root: root) : try? CalendarAppFactory.make(root: root))
+        #else
+        _calendar = State(initialValue: try? CalendarAppFactory.make(root: root))
+        #endif
+    }
+
+    private var skipSetupForTesting: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--ui-testing") && !ProcessInfo.processInfo.arguments.contains("--first-run-fixture")
+        #else
+        false
+        #endif
     }
 
     var body: some Scene {
         WindowGroup {
-            LibraryView(library: library, recording: recording)
+            Group {
+                if setupComplete || skipSetupForTesting {
+                    LibraryView(library: library, recording: recording, calendar: calendar)
+                } else {
+                    FirstRunView { setupComplete = true }
+                }
+            }
+                .environment(\.locale, Locale(identifier: appLanguage))
+                .task { await calendar?.start() }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                    Task { await calendar?.refresh(); await calendar?.reconcileReminders() }
+                }
                 .onChange(of: recording.busy) { _, busy in
                     if !busy && recording.noteID == nil {
                         Task { await library.processRetention(captureActive: recording.busy || recording.noteID != nil) }
@@ -33,6 +65,7 @@ struct DoodleNoteApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        Task { await calendar?.refresh(); await calendar?.reconcileReminders() }
                         Task { await library.processRetention(captureActive: recording.busy || recording.noteID != nil) }
                     } else {
                         let task = SaveBackgroundLifetime()
@@ -49,12 +82,15 @@ struct DoodleNoteApp: App {
 struct LibraryView: View {
     @Bindable var library: NoteLibrary
     @Bindable var recording: RecordingSession
+    var calendar: CalendarCoordinator?
     @State private var selection: UUID?
     @State private var search = ""
     @State private var folderID: UUID?
     @State private var folderName = ""
     @State private var creatingFolder = false
     @State private var showStorage = false
+    @State private var showModels = false
+    @State private var showCalendars = false
 
     private var visibleNotes: [NoteRecord] {
         library.visibleNotes.filter { note in
@@ -69,6 +105,7 @@ struct LibraryView: View {
                 Section {
                     Picker("Library", selection: Binding(get: { library.selectedLibraryID }, set: { id in
                         library.selectLibrary(id); selection = nil; folderID = nil
+                        Task { await calendar?.setLibrary(id) }
                     })) {
                         ForEach(library.libraries) { Text($0.name).tag($0.id) }
                     }
@@ -77,6 +114,7 @@ struct LibraryView: View {
                         ForEach(library.folders) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
+                if let calendar { UpcomingMeetingsSection(calendar: calendar, libraryID: library.selectedLibraryID) }
                 Section("Notes") {
                     ForEach(visibleNotes) { note in
                         NavigationLink(value: note.id) {
@@ -94,17 +132,25 @@ struct LibraryView: View {
             .navigationTitle("DoodleNote")
             .searchable(text: $search, prompt: "Search notes and transcripts")
             .overlay {
-                if library.visibleNotes.isEmpty {
+                if library.visibleNotes.isEmpty && calendar == nil {
                     ContentUnavailableView("Your notes start here", systemImage: "note.text",
                         description: Text("Create a note to write, draw, or record a conversation."))
                         .allowsHitTesting(false)
                 }
             }
             .toolbar {
-                Button("Storage & Trash", systemImage: "trash") { showStorage = true }
-                Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
-                Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
-                    .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
+                        .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("Options", systemImage: "ellipsis.circle") {
+                        Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
+                        Button("Calendars", systemImage: "calendar") { showCalendars = true }.accessibilityIdentifier("calendarSettings")
+                        Button("Models", systemImage: "arrow.down.circle") { showModels = true }
+                        Button("Storage & Trash", systemImage: "trash") { showStorage = true }
+                    }.accessibilityIdentifier("libraryOptions")
+                }
             }
         } detail: {
             if let selection, library.note(selection) != nil {
@@ -114,6 +160,17 @@ struct LibraryView: View {
                     description: Text("Your notes stay on this device. No account is required."))
             }
         }
+        .sheet(isPresented: $showModels) { ModelSettingsView(recording: recording) }
+        .sheet(isPresented: $showCalendars) {
+            if let calendar { CalendarSettingsView(calendar: calendar) }
+            else { ContentUnavailableView("Calendars unavailable", systemImage: "calendar", description: Text("Calendar storage could not be opened. Restart the app to retry.")) }
+        }
+        .sheet(item: Binding(get: { calendar?.selectedEvent }, set: { calendar?.selectedEvent = $0 })) { event in
+            CalendarMeetingView(event: event, library: library, requestedLibraryID: calendar?.actionLibraryID ?? library.selectedLibraryID) { id in
+                if let scope = library.note(id)?.metadata?.libraryID { library.selectLibrary(scope) }
+                selection = id
+            }
+        }
         .sheet(isPresented: $showStorage) { StorageView(library: library, recording: recording) }
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Folder name", text: $folderName)
@@ -121,6 +178,10 @@ struct LibraryView: View {
             Button("Cancel", role: .cancel) { folderName = "" }
         }
         .safeAreaInset(edge: .bottom) {
+            if let message = calendar?.problem {
+                HStack { Text(message).font(.caption); Button("Dismiss") { calendar?.problem = nil } }
+                    .padding().background(.regularMaterial)
+            }
             if library.loading { ProgressView("Opening notes…") }
             if library.pendingSaves > 0 { Text("Saving changes…").font(.caption) }
             if let problem = library.saveProblem {
