@@ -1,3 +1,4 @@
+import type { JSX } from 'react'
 import { Reader } from '@repo/cloud-reader'
 import type { ReaderTransport, ReaderDetail, ReaderNote } from '@repo/cloud-reader/types'
 const transport: ReaderTransport = {
@@ -20,6 +21,6 @@ const transport: ReaderTransport = {
       })) as Uint8Array
     )
 }
-export function CloudNotesView() {
+export function CloudNotesView(): JSX.Element {
   return <Reader transport={transport} />
 }

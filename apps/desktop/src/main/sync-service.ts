@@ -74,7 +74,11 @@ export class SyncService {
   }
 
   registerIpc(): void {
-    const reader = cloudReaderClient(() => ({ token: this.token(), enabled: this.config.enabled, baseUrl: this.baseUrl }))
+    const reader = cloudReaderClient(() => ({
+      token: this.token(),
+      enabled: this.config.enabled,
+      baseUrl: this.baseUrl
+    }))
     ipcMain.handle('sync:reader', (_event, request: unknown) => reader(request))
     ipcMain.handle(SYNC_GET_STATUS_CHANNEL, () => this.status())
     ipcMain.handle(SYNC_CONNECT_CHANNEL, () => this.connect())

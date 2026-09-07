@@ -564,7 +564,13 @@ function App(): React.JSX.Element {
           <div className="sidebar-spacer" />
 
           <div className="sidebar-bottom">
-            <button type="button" className={view === 'cloud' ? 'nav-item on' : 'nav-item'} onClick={() => setView('cloud')}>Mobile cloud notes</button>
+            <button
+              type="button"
+              className={view === 'cloud' ? 'nav-item on' : 'nav-item'}
+              onClick={() => setView('cloud')}
+            >
+              Mobile cloud notes
+            </button>
             <div className="privacy-badge">
               <LockIcon size={12} /> Local &amp; private
             </div>
