@@ -19,7 +19,7 @@ errors = []
 
 def placeholders(text):
     # Ignore literal percent signs and argument positions; preserve argument types and multiplicity.
-    return sorted(re.findall(r'%(?:\d+\$)?(?:lld|ld|d|@|f)', text.replace('%%', '')))
+    return sorted(re.sub(r'%\d+\$', '%', token) for token in re.findall(r'%(?:\d+\$)?(?:lld|ld|d|@|f)', text.replace('%%', '')))
 
 def units(value):
     if 'stringUnit' in value:

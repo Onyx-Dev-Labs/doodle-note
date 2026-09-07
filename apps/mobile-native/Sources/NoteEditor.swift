@@ -281,7 +281,7 @@ struct NoteEditor: View {
             }
             }
             if recording.busy {
-                ProgressView(recording.preparingNoteID != nil ? "Preparing recording…" : "Finishing and saving recording…").font(.caption)
+                ProgressView(L10n.key(recording.preparingNoteID != nil ? "Preparing recording…" : "Finishing and saving recording…")).font(.caption)
                 if recording.preparingNoteID != nil {
                     Button("Cancel recording preparation") { Task { await recording.stop(library: library) } }
                         .accessibilityIdentifier("cancelRecordingPreparation")

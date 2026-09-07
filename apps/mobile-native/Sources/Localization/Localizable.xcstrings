@@ -1165,6 +1165,174 @@
         }
       }
     },
+    "Audio capture stopped, but its note status could not be saved. Keep the app open and retry saving.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio capture stopped, but its note status could not be saved. Keep the app open and retry saving."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Lydoptagelsen stoppede, men notens status kunne ikke gemmes. Hold appen åben, og prøv at gemme igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La captura de audio se detuvo, pero no se pudo guardar el estado de la nota. Mantén la app abierta y vuelve a guardar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La capture audio s’est arrêtée, mais l’état de la note n’a pas pu être enregistré. Gardez l’app ouverte et réessayez d’enregistrer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Audioaufnahme wurde beendet, aber der Notizstatus konnte nicht gespeichert werden. Lassen Sie die App geöffnet und versuchen Sie erneut zu speichern."
+          }
+        }
+      }
+    },
+    "Audio for this part of the recording is unavailable on this device.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio for this part of the recording is unavailable on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Lyd til denne del af optagelsen er ikke tilgængelig på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "El audio de esta parte de la grabación no está disponible en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’audio de cette partie de l’enregistrement est indisponible sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Audio für diesen Teil der Aufnahme ist auf diesem Gerät nicht verfügbar."
+          }
+        }
+      }
+    },
+    "Audio recovery could not use %lld trailing bytes. Original audio is preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "Audio recovery could not use %lld trailing byte. Original audio is preserved.",
+                  "state": "translated"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Audio recovery could not use %lld trailing bytes. Original audio is preserved."
+                }
+              }
+            }
+          }
+        },
+        "da": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "Lydgendannelse kunne ikke bruge %lld afsluttende byte. Originallyden er bevaret.",
+                  "state": "needs_review"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Lydgendannelse kunne ikke bruge %lld afsluttende bytes. Originallyden er bevaret."
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "La recuperación de audio no pudo utilizar %lld byte final. Se conserva el audio original.",
+                  "state": "needs_review"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "La recuperación de audio no pudo utilizar %lld bytes finales. Se conserva el audio original."
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "La récupération audio n’a pas pu utiliser %lld octet de fin. L’audio d’origine est conservé.",
+                  "state": "needs_review"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "La récupération audio n’a pas pu utiliser %lld octets de fin. L’audio d’origine est conservé."
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "value": "Die Audiowiederherstellung konnte %lld nachfolgendes Byte nicht verwenden. Das Originalaudio bleibt erhalten.",
+                  "state": "needs_review"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "Die Audiowiederherstellung konnte %lld nachfolgende Bytes nicht verwenden. Das Originalaudio bleibt erhalten."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Audio stays on its original device. Removing audio keeps your text, transcript, ink and summary versions.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -1705,6 +1873,42 @@
         }
       }
     },
+    "Cancel recording preparation": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel recording preparation"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Annuller forberedelse af optagelse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cancelar preparación de la grabación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Annuler la préparation de l’enregistrement"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aufnahmevorbereitung abbrechen"
+          }
+        }
+      }
+    },
     "Cancel speaker download": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -1845,6 +2049,78 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Abbruch angefordert. Warten auf das Ende des Apple-Downloads."
+          }
+        }
+      }
+    },
+    "Capture finalization reported a failure. Saved audio is preserved and needs verification.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture finalization reported a failure. Saved audio is preserved and needs verification."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Afslutning af optagelsen meldte en fejl. Gemt lyd er bevaret og skal kontrolleres."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se produjo un error al finalizar la captura. El audio guardado se conserva y debe verificarse."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Une erreur a été signalée à la fin de la capture. L’audio enregistré est conservé et doit être vérifié."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Beim Abschließen der Aufnahme wurde ein Fehler gemeldet. Gespeicherte Audiodaten bleiben erhalten und müssen geprüft werden."
+          }
+        }
+      }
+    },
+    "Capture status could not be saved. ": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture status could not be saved. "
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelsesstatus kunne ikke gemmes. "
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo guardar el estado de la captura. "
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’état de la capture n’a pas pu être enregistré. "
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der Aufnahmestatus konnte nicht gespeichert werden. "
           }
         }
       }
@@ -3721,6 +3997,42 @@
         }
       }
     },
+    "Finishing and saving recording…": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finishing and saving recording…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Afslutter og gemmer optagelse…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finalizando y guardando grabación…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Finalisation et enregistrement de l’audio…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aufnahme wird abgeschlossen und gespeichert…"
+          }
+        }
+      }
+    },
     "Fit page": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -4441,6 +4753,42 @@
         }
       }
     },
+    "Live transcription could not keep up. Source audio continues to be saved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live transcription could not keep up. Source audio continues to be saved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den direkte transskription kunne ikke følge med. Kildelyden bliver fortsat gemt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La transcripción en directo no pudo seguir el ritmo. El audio original se sigue guardando."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La transcription en direct n’a pas pu suivre le rythme. L’audio source continue d’être enregistré."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Live-Transkription konnte nicht Schritt halten. Das Quellaudio wird weiterhin gespeichert."
+          }
+        }
+      }
+    },
     "Live transcription could not process the audio format. Audio is still being saved.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -4581,6 +4929,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Live-Transkription, Sprecherkennzeichnung und generierte Notizen nutzen separate Modelle auf dem Gerät. Du kannst sie später unter Modelle vorbereiten."
+          }
+        }
+      }
+    },
+    "Local audio playback failed. Original files are preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local audio playback failed. Original files are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Lokal lydafspilning mislykkedes. Originalfilerne er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Falló la reproducción del audio local. Se conservan los archivos originales."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La lecture de l’audio local a échoué. Les fichiers d’origine sont conservés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die lokale Audiowiedergabe ist fehlgeschlagen. Die Originaldateien bleiben erhalten."
           }
         }
       }
@@ -6313,6 +6697,42 @@
         }
       }
     },
+    "Playback was interrupted. Choose Play to listen again.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playback was interrupted. Choose Play to listen again."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Afspilningen blev afbrudt. Vælg Afspil for at lytte igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La reproducción se interrumpió. Elige Reproducir para volver a escuchar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La lecture a été interrompue. Choisissez Lire pour réécouter."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Wiedergabe wurde unterbrochen. Wählen Sie Wiedergabe, um erneut zuzuhören."
+          }
+        }
+      }
+    },
     "Preparing or finalizing recording…": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -6345,6 +6765,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Aufnahme wird vorbereitet oder abgeschlossen…"
+          }
+        }
+      }
+    },
+    "Preparing recording…": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing recording…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forbereder optagelse…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preparando grabación…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Préparation de l’enregistrement…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aufnahme wird vorbereitet…"
           }
         }
       }
@@ -6633,6 +7089,150 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Aufnahme unterbrochen. Gespeichertes Audio und Notizen bleiben erhalten. Starte erneut, wenn du bereit bist."
+          }
+        }
+      }
+    },
+    "Recording preparation canceled.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording preparation canceled."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forberedelse af optagelsen annulleret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Preparación de la grabación cancelada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Préparation de l’enregistrement annulée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aufnahmevorbereitung abgebrochen."
+          }
+        }
+      }
+    },
+    "Recording preparation was interrupted. Choose Record to try again.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording preparation was interrupted. Choose Record to try again."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forberedelsen af optagelsen blev afbrudt. Vælg Optag for at prøve igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se interrumpió la preparación de la grabación. Elige Grabar para volver a intentarlo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La préparation de l’enregistrement a été interrompue. Choisissez Enregistrer pour réessayer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Aufnahmevorbereitung wurde unterbrochen. Wählen Sie Aufnehmen, um es erneut zu versuchen."
+          }
+        }
+      }
+    },
+    "Recording stopped with incomplete audio. ": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording stopped with incomplete audio. "
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelsen stoppede med ufuldstændig lyd. "
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La grabación se detuvo con audio incompleto. "
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’enregistrement s’est arrêté avec un audio incomplet. "
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Aufnahme wurde mit unvollständigem Audio beendet. "
+          }
+        }
+      }
+    },
+    "Recording was interrupted. Saved audio is retained. Choose Resume to continue.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording was interrupted. Saved audio is retained. Choose Resume to continue."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelsen blev afbrudt. Gemt lyd bevares. Vælg Fortsæt for at fortsætte."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La grabación se interrumpió. Se conserva el audio guardado. Elige Reanudar para continuar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’enregistrement a été interrompu. L’audio enregistré est conservé. Choisissez Reprendre pour continuer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Aufnahme wurde unterbrochen. Gespeichertes Audio bleibt erhalten. Wählen Sie Fortsetzen, um weiterzumachen."
           }
         }
       }
@@ -7321,6 +7921,42 @@
         }
       }
     },
+    "Resume": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fortsæt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reanudar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reprendre"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fortsetzen"
+          }
+        }
+      }
+    },
     "Retry cleanup": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -7809,6 +8445,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Einige unterbrochene Audiodateien müssen wiederhergestellt werden. Originaldateien und Notizen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "Some interrupted audio needs recovery. Original files and notes are preserved. ": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some interrupted audio needs recovery. Original files and notes are preserved. "
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Noget afbrudt lyd skal gendannes. Originalfiler og noter er bevaret. "
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Parte del audio interrumpido necesita recuperación. Se conservan los archivos y las notas originales. "
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Certains enregistrements interrompus doivent être récupérés. Les fichiers et notes d’origine sont conservés. "
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Einige unterbrochene Audiodaten müssen wiederhergestellt werden. Originaldateien und Notizen bleiben erhalten. "
           }
         }
       }
@@ -8425,6 +9097,42 @@
         }
       }
     },
+    "Speaker processing could not keep up. Source audio continues to be saved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speaker processing could not keep up. Source audio continues to be saved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Talerbehandlingen kunne ikke følge med. Kildelyden bliver fortsat gemt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "El procesamiento de los hablantes no pudo seguir el ritmo. El audio original se sigue guardando."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le traitement des intervenants n’a pas pu suivre le rythme. L’audio source continue d’être enregistré."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Sprecherverarbeitung konnte nicht Schritt halten. Das Quellaudio wird weiterhin gespeichert."
+          }
+        }
+      }
+    },
     "Speaker processing could not keep up. Speaker labels stopped.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -8529,6 +9237,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Sprecherverarbeitung gestoppt. Audio und Transkription laufen weiter. "
+          }
+        }
+      }
+    },
+    "Speaker processing timed out. Source audio is preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speaker processing timed out. Source audio is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Talerbehandlingen fik timeout. Kildelyden er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se agotó el tiempo de procesamiento de los hablantes. Se conserva el audio original."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le traitement des intervenants a expiré. L’audio source est conservé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Sprecherverarbeitung hat das Zeitlimit überschritten. Das Quellaudio bleibt erhalten."
           }
         }
       }
@@ -9217,6 +9961,42 @@
         }
       }
     },
+    "Synthetic capture fixture · No microphone": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synthetic capture fixture · No microphone"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Syntetisk optagelsesfixture · Ingen mikrofon"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Prueba de captura sintética · Sin micrófono"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Données de test synthétiques · Sans microphone"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synthetische Aufnahme-Testdaten · Kein Mikrofon"
+          }
+        }
+      }
+    },
     "The 30-day recovery period has ended.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -9289,6 +10069,42 @@
         }
       }
     },
+    "The earlier audio timeline could not be established. Start a new note to record; your existing notes are preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The earlier audio timeline could not be established. Start a new note to record; your existing notes are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den tidligere lydtidslinje kunne ikke fastlægges. Start en ny note for at optage. Dine eksisterende noter bevares."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo determinar la cronología del audio anterior. Crea una nota nueva para grabar; se conservan tus notas existentes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La chronologie audio précédente n’a pas pu être établie. Créez une nouvelle note pour enregistrer ; vos notes existantes sont conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die bisherige Audio-Zeitachse konnte nicht ermittelt werden. Beginnen Sie eine neue Notiz zur Aufnahme; Ihre vorhandenen Notizen bleiben erhalten."
+          }
+        }
+      }
+    },
     "The library changed. Search again.": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -9321,6 +10137,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Die Bibliothek wurde geändert. Suchen Sie erneut."
+          }
+        }
+      }
+    },
+    "The local audio timeline is invalid. Original files are preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The local audio timeline is invalid. Original files are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den lokale lydtidslinje er ugyldig. Originalfilerne er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La cronología del audio local no es válida. Se conservan los archivos originales."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La chronologie audio locale est invalide. Les fichiers d’origine sont conservés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die lokale Audio-Zeitachse ist ungültig. Die Originaldateien bleiben erhalten."
           }
         }
       }
@@ -10513,6 +11365,42 @@
         }
       }
     },
+    "Transcription processing timed out. Source audio is preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcription processing timed out. Source audio is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transskriptionen fik timeout. Kildelyden er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se agotó el tiempo de procesamiento de la transcripción. Se conserva el audio original."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le traitement de la transcription a expiré. L’audio source est conservé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Transkriptionsverarbeitung hat das Zeitlimit überschritten. Das Quellaudio bleibt erhalten."
+          }
+        }
+      }
+    },
     "Trash": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -10725,6 +11613,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Nicht zugeordneter Sprecher"
+          }
+        }
+      }
+    },
+    "Unconfirmed audio frames: %lld. Rejected audio frames: %lld. Saved audio is preserved.": {
+      "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unconfirmed audio frames: %lld. Rejected audio frames: %lld. Saved audio is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ubekræftede lydframes: %lld. Afviste lydframes: %lld. Gemt lyd er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fotogramas de audio sin confirmar: %lld. Fotogramas rechazados: %lld. Se conserva el audio guardado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Trames audio non confirmées : %lld. Trames audio rejetées : %lld. L’audio enregistré est conservé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Unbestätigte Audioframes: %lld. Abgelehnte Audioframes: %lld. Gespeichertes Audio bleibt erhalten."
           }
         }
       }

@@ -40,6 +40,26 @@ import XCTest
         let note = NoteRecord(title: "Record", text: "This is user text.", language: .spanish)
         withLanguage("de-DE") { XCTAssertEqual(note.title, "Record"); XCTAssertEqual(note.text, "This is user text."); XCTAssertEqual(note.language, .spanish) }
     }
+    func testCaptureFailuresAndNumericRecoveryMessagesUseCurrentLanguage() {
+        let numeric = "An interrupted capture has 12 unconfirmed accepted frames and 3 rejected frames. Saved audio is preserved."
+        let recovery = "Audio recovery could not use 1 trailing bytes. Original audio is preserved."
+        let failures = "Recording stopped with incomplete audio. Capture finalization reported a failure. Saved audio is preserved and needs verification. Local audio playback failed. Original files are preserved."
+        for language in ["da-DK", "es-ES", "fr-FR", "de-DE"] {
+            withLanguage(language) {
+                let localized = L10n.message(numeric)
+                XCTAssertTrue(localized.contains("12")); XCTAssertTrue(localized.contains("3"))
+                XCTAssertFalse(localized.contains("unconfirmed accepted"))
+                XCTAssertFalse(L10n.message(recovery).contains("Original audio is preserved"))
+                let combined = L10n.message(failures)
+                XCTAssertFalse(combined.contains("Recording stopped"))
+                XCTAssertFalse(combined.contains("Capture finalization"))
+                XCTAssertFalse(combined.contains("Local audio playback"))
+                XCTAssertEqual(L10n.message("Unknown OS diagnostic 123"), "Unknown OS diagnostic 123")
+            }
+        }
+        withLanguage("de-invalid") { XCTAssertEqual(L10n.language, "en") }
+    }
+
     func testSpeakerDisplayDoesNotTranslateConfirmedNamesOrMutateAnnotations() {
         let session = UUID()
         var annotations = SpeakerAnnotations()
