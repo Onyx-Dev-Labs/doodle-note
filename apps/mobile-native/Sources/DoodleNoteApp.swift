@@ -4,12 +4,18 @@ import SwiftUI
 struct DoodleNoteApp: App {
     @State private var library: NoteLibrary
     @State private var recording = RecordingSession()
+    @AppStorage("mobileSetupComplete") private var setupComplete = false
+    @AppStorage("appLanguage") private var appLanguage = SpokenLanguage.english.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let base = URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteNative", isDirectory: true)
         #if DEBUG
         let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        if testing && ProcessInfo.processInfo.arguments.contains("--first-run-fixture") {
+            UserDefaults.standard.set(false, forKey: "mobileSetupComplete")
+            UserDefaults.standard.set(SpokenLanguage.english.rawValue, forKey: "appLanguage")
+        }
         let storageFixture = testing && ProcessInfo.processInfo.arguments.contains("--storage-fixture")
         let fixtureArgument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--fixture-id=") })
         let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
@@ -23,9 +29,24 @@ struct DoodleNoteApp: App {
         _library = State(initialValue: NoteLibrary(root: root))
     }
 
+    private var skipSetupForTesting: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--ui-testing") && !ProcessInfo.processInfo.arguments.contains("--first-run-fixture")
+        #else
+        false
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
-            LibraryView(library: library, recording: recording)
+            Group {
+                if setupComplete || skipSetupForTesting {
+                    LibraryView(library: library, recording: recording)
+                } else {
+                    FirstRunView { setupComplete = true }
+                }
+            }
+                .environment(\.locale, Locale(identifier: appLanguage))
                 .onChange(of: recording.busy) { _, busy in
                     if !busy && recording.noteID == nil {
                         Task { await library.processRetention(captureActive: recording.busy || recording.noteID != nil) }
@@ -55,6 +76,7 @@ struct LibraryView: View {
     @State private var folderName = ""
     @State private var creatingFolder = false
     @State private var showStorage = false
+    @State private var showModels = false
 
     private var visibleNotes: [NoteRecord] {
         library.visibleNotes.filter { note in
@@ -101,6 +123,7 @@ struct LibraryView: View {
                 }
             }
             .toolbar {
+                Button("Models", systemImage: "arrow.down.circle") { showModels = true }
                 Button("Storage & Trash", systemImage: "trash") { showStorage = true }
                 Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
                 Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
@@ -114,6 +137,7 @@ struct LibraryView: View {
                     description: Text("Your notes stay on this device. No account is required."))
             }
         }
+        .sheet(isPresented: $showModels) { ModelSettingsView(recording: recording) }
         .sheet(isPresented: $showStorage) { StorageView(library: library, recording: recording) }
         .alert("New folder", isPresented: $creatingFolder) {
             TextField("Folder name", text: $folderName)
