@@ -390,12 +390,13 @@ final class NoteLibrary {
         }
         let authorized = identities
         let job = try await repository.beginEventNote(libraryID: libraryID, event: event.key, identities: authorized)
+        guard libraries.contains(where: { $0.id == libraryID }) else { throw LibraryDataError.invalidOwnership }
         var draft = NoteRecord()
         draft.id = job.noteID
         draft.title = event.title
         draft.metadata?.libraryID = libraryID
         draft.metadata?.event = event.key
-        let saved = try await repository.commit(draft, for: job.id, identities: authorized)
+        let saved = try await repository.commit(draft, for: job.id, identities: identities)
         guard libraries.contains(where: { $0.id == libraryID }) else { throw LibraryDataError.invalidOwnership }
         if !notes.contains(where: { $0.id == saved.id }) { notes.append(saved) }
         await refreshCatalog()

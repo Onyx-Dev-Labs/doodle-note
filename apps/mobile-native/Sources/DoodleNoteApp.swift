@@ -92,7 +92,7 @@ struct LibraryView: View {
                         ForEach(library.folders) { Text($0.name).tag(Optional($0.id)) }
                     }
                 }
-                if let calendar { UpcomingMeetingsSection(calendar: calendar) }
+                if let calendar { UpcomingMeetingsSection(calendar: calendar, libraryID: library.selectedLibraryID) }
                 Section("Notes") {
                     ForEach(visibleNotes) { note in
                         NavigationLink(value: note.id) {

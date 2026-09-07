@@ -77,6 +77,11 @@ import XCTest
         XCTAssertEqual(notifications.plans.last?.count, 1)
         coordinator.open(CalendarReminderRoute(event: meeting.key, libraryID: LibraryRecord.localID))
         XCTAssertEqual(coordinator.selectedEvent?.key, meeting.key)
+        coordinator.selectedEvent = nil
+        let otherLibrary = UUID()
+        coordinator.openFromHome(meeting, libraryID: otherLibrary)
+        XCTAssertEqual(coordinator.actionLibraryID, otherLibrary)
+        XCTAssertEqual(coordinator.selectedEvent?.key, meeting.key)
         async let hide: Void = coordinator.select("primary", enabled: false, account: account)
         async let show: Void = coordinator.select("secondary", enabled: true, account: account)
         _ = await (hide, show)

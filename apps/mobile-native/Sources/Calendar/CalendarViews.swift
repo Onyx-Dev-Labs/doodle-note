@@ -51,6 +51,7 @@ struct CalendarSettingsView: View {
 
 struct UpcomingMeetingsSection: View {
     @Bindable var calendar: CalendarCoordinator
+    let libraryID: UUID
     var body: some View {
         Section("Upcoming · 14 days") {
             if calendar.loading { ProgressView("Refreshing calendars…") }
@@ -63,7 +64,7 @@ struct UpcomingMeetingsSection: View {
                 Text("\(account.displayName): cached events may be out of date. Check Calendar settings.").font(.caption).foregroundStyle(.orange)
             }
             ForEach(calendar.upcoming) { event in
-                Button { calendar.selectedEvent = event } label: {
+                Button { calendar.openFromHome(event, libraryID: libraryID) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(event.title).font(.headline)
                         Text(event.isAllDay ? "All day" : event.start.formatted(date: .abbreviated, time: .shortened))

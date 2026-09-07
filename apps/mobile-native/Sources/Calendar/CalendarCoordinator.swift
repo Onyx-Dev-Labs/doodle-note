@@ -149,6 +149,10 @@ extension CalendarOccurrence: Identifiable { var id: EventOccurrenceKey { key } 
             now: Date(), enabled: remindersEnabled && allowed, leadMinutes: leadMinutes))
         if let error = scheduler.problem { problem = error }
     }
+    func openFromHome(_ event: CalendarOccurrence, libraryID: UUID) {
+        actionLibraryID = libraryID
+        selectedEvent = event
+    }
     func open(_ route: CalendarReminderRoute) {
         if loading { pendingRoute = route; return }
         guard let event = upcoming.first(where: { $0.key == route.event }) else {
