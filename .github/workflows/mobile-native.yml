@@ -29,6 +29,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Benchmark scorer regression tests
         run: python3 -m unittest discover -s apps/mobile-native/Benchmarks -v
+      - name: Validate localization catalog and status coverage
+        run: |
+          python3 -m unittest discover -s apps/mobile-native/scripts -p 'test_*.py' -v
+          python3 apps/mobile-native/scripts/check-localization.py
       - name: Prepare native project
         run: |
           brew install xcodegen
@@ -55,6 +59,8 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DoodleNoteDerivedData" \
             -resultBundlePath "$RUNNER_TEMP/DoodleNoteNative.xcresult" \
             CODE_SIGNING_ALLOWED=NO test
+      - name: Verify compiler-extracted localization coverage
+        run: python3 apps/mobile-native/scripts/check-localization.py --extracted-dir "$RUNNER_TEMP/DoodleNoteDerivedData"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

@@ -35,8 +35,8 @@ struct CalendarReminder: Equatable, Sendable {
         center.removePendingNotificationRequests(withIdentifiers: old)
         for reminder in reminders {
             let content = UNMutableNotificationContent()
-            content.title = "Upcoming meeting"
-            content.body = "Open DoodleNote to join or take notes."
+            content.title = L10n.text("Upcoming meeting")
+            content.body = L10n.text("Open DoodleNote to join or take notes.")
             content.sound = .default
             content.userInfo = ["calendarRoute": try JSONEncoder().encode(reminder.route).base64EncodedString()]
             var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!

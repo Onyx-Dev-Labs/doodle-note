@@ -135,7 +135,7 @@ struct NoteEditor: View {
     }
 
     private func contentButton(_ title: String, pane value: Int, key: KeyEquivalent) -> some View {
-        Button(title) { pane = value; editingText = value == 0 }
+        Button(L10n.key(title)) { pane = value; editingText = value == 0 }
             .keyboardShortcut(key, modifiers: .command)
             .buttonStyle(.bordered).tint(pane == value ? .accentColor : .secondary)
             .accessibilityAddTraits(pane == value ? .isSelected : [])
@@ -153,7 +153,7 @@ struct NoteEditor: View {
 
     private var notePaneForNotes: some View {
             VStack(alignment: .leading, spacing: 0) {
-                Text(UIDevice.current.userInterfaceIdiom == .pad ? "Personal notes · Type or use system Scribble" : "Personal notes").font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+                Text(L10n.key(UIDevice.current.userInterfaceIdiom == .pad ? "Personal notes · Type or use system Scribble" : "Personal notes")).font(.caption).foregroundStyle(.secondary).padding(.horizontal)
                 if note.schemaVersion == 2 {
                     TextEditor(text: binding(\.text)).padding(.horizontal, 8)
                         .accessibilityLabel("Personal notes").accessibilityIdentifier("personalNotes")
@@ -169,7 +169,7 @@ struct NoteEditor: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 Text("Transcript").font(.title2.bold())
-                Text(recording.speech.detail).font(.callout).foregroundStyle(.secondary)
+                Text(L10n.message(recording.speech.detail)).font(.callout).foregroundStyle(.secondary)
                 if recording.noteID == nil && recording.speech.readiness == .downloadNeeded {
                     Button("Download speech model", systemImage: "arrow.down.circle") {
                         Task { await recording.speech.download(note.language) }
@@ -181,7 +181,7 @@ struct NoteEditor: View {
                 ForEach(note.passages) { passage in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(passage.speakerName ?? note.speakerAnnotations?.label(for: passage) ?? String(localized: "Unassigned speaker"))
+                            Text(passage.speakerName ?? note.speakerAnnotations?.label(for: passage, localized: true) ?? L10n.text( "Unassigned speaker"))
                                 .font(.caption.bold())
                             Spacer()
                             Button {
@@ -205,7 +205,7 @@ struct NoteEditor: View {
     }
 
     private var recordControl: some View {
-                Button(isActive ? "Stop recording" : (note.captureState == .interrupted ? "Resume" : "Record"), systemImage: isActive ? "stop.fill" : "mic.fill") {
+                Button(L10n.key(isActive ? "Stop recording" : (note.captureState == .interrupted ? "Resume" : "Record")), systemImage: isActive ? "stop.fill" : "mic.fill") {
                     player.stop()
                     Task {
                         if isActive { await recording.stop(library: library) }
@@ -227,16 +227,16 @@ struct NoteEditor: View {
                     Label { Text(started, style: .timer).monospacedDigit() } icon: { Image(systemName: "record.circle.fill") }
                         .foregroundStyle(.red)
                 }
-            if let problem = player.problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            if let problem = player.problem { Text(L10n.message(problem)).font(.caption).foregroundStyle(.red) }
             if recording.speakers.state == .failed {
-                Text(recording.speakers.detail).font(.caption).foregroundStyle(.orange)
+                Text(L10n.message(recording.speakers.detail)).font(.caption).foregroundStyle(.orange)
             }
             ViewThatFits(in: .horizontal) {
             HStack {
                 Button("Speakers", systemImage: "person.2") { showSpeakers.toggle() }
                     .accessibilityIdentifier("speakerSettings")
                 if !audio.isEmpty && recording.noteID == nil {
-                    Button(player.isPlaying ? "Stop playback" : "Play recording",
+                    Button(L10n.key(player.isPlaying ? "Stop playback" : "Play recording"),
                            systemImage: player.isPlaying ? "stop.fill" : "play.fill") {
                         if player.isPlaying { player.stop() } else { play() }
                     }.buttonStyle(.bordered).disabled(!recording.permitsPlayback)
@@ -248,13 +248,13 @@ struct NoteEditor: View {
                 Button("Speakers", systemImage: "person.2") { showSpeakers.toggle() }.accessibilityIdentifier("speakerSettings")
                 recordControl
                 if !audio.isEmpty && recording.noteID == nil {
-                    Button(player.isPlaying ? "Stop playback" : "Play recording") { if player.isPlaying { player.stop() } else { play() } }
+                    Button(L10n.key(player.isPlaying ? "Stop playback" : "Play recording")) { if player.isPlaying { player.stop() } else { play() } }
                         .disabled(!recording.permitsPlayback)
                 }
             }
             }
             if recording.busy {
-                ProgressView(recording.preparingNoteID != nil ? "Preparing recording…" : "Finishing and saving recording…").font(.caption)
+                ProgressView(L10n.key(recording.preparingNoteID != nil ? "Preparing recording…" : "Finishing and saving recording…")).font(.caption)
                 if recording.preparingNoteID != nil {
                     Button("Cancel recording preparation") { Task { await recording.stop(library: library) } }
                         .accessibilityIdentifier("cancelRecordingPreparation")
@@ -268,7 +268,7 @@ struct NoteEditor: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Live speaker labels", isOn: Binding(get: { recording.speakers.enabled }, set: { recording.speakers.enabled = $0 }))
                     .disabled(recording.noteID != nil || recording.busy || recording.speakers.preparing)
-                Text(recording.speakers.detail).font(.caption).foregroundStyle(.secondary)
+                Text(L10n.message(recording.speakers.detail)).font(.caption).foregroundStyle(.secondary)
                 if recording.noteID == nil && !recording.busy {
                     if recording.speakers.state == .downloading {
                         Button("Cancel model download") { recording.speakers.cancelDownload() }
@@ -278,7 +278,7 @@ struct NoteEditor: View {
                 }
                 if let annotations = note.speakerAnnotations {
                     ForEach(annotations.speakerKeys, id: \.self) { key in
-                        TextField(annotations.name(for: key), text: Binding(
+                        TextField(annotations.name(for: key, localized: true), text: Binding(
                             get: { library.note(id)?.speakerAnnotations?.names[key] ?? "" },
                             set: { name in library.update(id) { $0.speakerAnnotations?.names[key] = name.trimmingCharacters(in: .whitespacesAndNewlines) } }))
                             .textFieldStyle(.roundedBorder).disabled(note.schemaVersion != 2)

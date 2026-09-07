@@ -8,7 +8,7 @@ struct CalendarSettingsView: View {
             Form {
                 Section("Calendar accounts") {
                     ForEach(CalendarProvider.allCases, id: \.self) { provider in
-                        Button("Connect \(provider == .google ? "Google Calendar" : "Microsoft 365")") { calendar.connect(provider) }
+                        Button("Connect \(provider == .google ? L10n.text("Google Calendar") : L10n.text("Microsoft 365"))") { calendar.connect(provider) }
                             .disabled(!calendar.configured(provider) || calendar.busyProviders.contains(provider))
                         if !calendar.configured(provider) { Text("Connection is unavailable in this build.").font(.caption).foregroundStyle(.secondary) }
                         if calendar.busyProviders.contains(provider) {
@@ -17,8 +17,8 @@ struct CalendarSettingsView: View {
                     }
                 }
                 ForEach(calendar.snapshots, id: \.account) { account in
-                    Section(account.displayName) {
-                        Text(account.account.provider == .google ? "Google Calendar" : "Microsoft 365")
+                    Section(account.localizedDisplayName) {
+                        Text(account.account.provider == .google ? L10n.text("Google Calendar") : L10n.text("Microsoft 365"))
                         if account.failure != nil || account.state != .connected {
                             Text("Calendar refresh needs attention. Previously saved events may be out of date.").foregroundStyle(.orange)
                             Button("Reconnect account") { calendar.connect(account.account.provider, existing: account.account) }
@@ -28,7 +28,7 @@ struct CalendarSettingsView: View {
                                 account.selectedCalendarIDs?.contains(item.id) ?? item.isDefault
                             }, set: { enabled in Task { await calendar.select(item.id, enabled: enabled, account: account.account) } }))
                         }
-                        Button(account.state == .disconnecting ? "Retry disconnect" : "Disconnect account", role: .destructive) {
+                        Button(L10n.key(account.state == .disconnecting ? "Retry disconnect" : "Disconnect account"), role: .destructive) {
                             Task { await calendar.disconnect(account.account) }
                         }
                         Text("Disconnecting keeps your notes.").font(.caption)
@@ -39,12 +39,12 @@ struct CalendarSettingsView: View {
                         .accessibilityIdentifier("calendarReminders")
                     Picker("Remind me", selection: Binding(get: { calendar.leadMinutes }, set: { value in Task { await calendar.setLead(value) } })) {
                         Text("At start time").tag(0)
-                        ForEach([5, 10, 15], id: \.self) { Text("\($0) minutes before").tag($0) }
+                        ForEach([5, 10, 15], id: \.self) { Text(L10n.format("%lld minutes before", $0)).tag($0) }
                     }.disabled(!calendar.remindersEnabled)
                     Text("Reminders open meeting details. Recording starts only when you choose Record in a note.").font(.caption)
                 }
-                if let problem = calendar.problem { Section { Text(problem).foregroundStyle(.orange) } }
-            }.navigationTitle("Calendars").toolbar { Button("Done") { dismiss() } }
+                if let problem = calendar.problem { Section { Text(L10n.message(problem)).foregroundStyle(.orange) } }
+            }.navigationTitle(L10n.text("Calendars")).toolbar { Button("Done") { dismiss() } }
         }
     }
 }
@@ -61,15 +61,15 @@ struct UpcomingMeetingsSection: View {
                 Text("No upcoming events in your selected calendars.").foregroundStyle(.secondary)
             }
             ForEach(calendar.snapshots.filter { $0.failure != nil || $0.state != .connected }, id: \.account) { account in
-                Text("\(account.displayName): cached events may be out of date. Check Calendar settings.").font(.caption).foregroundStyle(.orange)
+                Text("\(account.localizedDisplayName): cached events may be out of date. Check Calendar settings.").font(.caption).foregroundStyle(.orange)
             }
             ForEach(calendar.upcoming) { event in
                 Button { calendar.openFromHome(event, libraryID: libraryID) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(event.title).font(.headline)
-                        Text(event.isAllDay ? "All day" : event.start.formatted(date: .abbreviated, time: .shortened))
+                        Text(event.isAllDay ? L10n.text("All day") : L10n.date(event.start))
                             .font(.subheadline)
-                        Text(calendar.accountName(event.key)).font(.caption).foregroundStyle(.secondary)
+                        Text(calendar.snapshots.first { $0.account.provider.rawValue == event.key.provider && $0.account.subject == event.key.accountID }?.localizedDisplayName ?? calendar.accountName(event.key)).font(.caption).foregroundStyle(.secondary)
                     }
                 }.accessibilityIdentifier("calendarEvent")
             }
@@ -92,7 +92,7 @@ struct CalendarMeetingView: View {
             Form {
                 Section {
                     Text(event.title).font(.title2)
-                    Text(event.start.formatted(date: .complete, time: event.isAllDay ? .omitted : .shortened))
+                    Text(L10n.date(event.start, time: !event.isAllDay))
                     Text("Event timezone: \(event.timeZoneID)").font(.caption)
                     if let url = event.safeJoinURL {
                         Button("Join meeting", systemImage: "video") { openURL(url) }
@@ -115,8 +115,26 @@ struct CalendarMeetingView: View {
                         ForEach(Array(invitees.enumerated()), id: \.offset) { _, name in Text(name) }
                     }
                 }
-                if let problem { Text(problem).foregroundStyle(.red) }
-            }.navigationTitle("Meeting").toolbar { Button("Done") { dismiss() } }
+                if let problem { Text(L10n.message(problem)).foregroundStyle(.red) }
+            }.navigationTitle(L10n.text("Meeting")).toolbar { Button("Done") { dismiss() } }
         }
+    }
+}
+
+private extension CalendarConnection {
+    var localizedDisplayName: String {
+        // This exact fallback is generated by our adapter. Verified provider names/emails stay verbatim.
+        let fallback = "Google account \(account.subject.prefix(16))"
+        if account.provider == .google && displayName == fallback {
+            return L10n.format("Google account %@", String(account.subject.prefix(16)))
+        }
+        let parts = account.subject.split(separator: "/")
+        if account.provider == .microsoft, parts.count == 2 {
+            let microsoftFallback = "Microsoft account (\(parts[0].prefix(8))/\(parts[1].prefix(8)))"
+            if displayName.lowercased() == microsoftFallback.lowercased() {
+                return L10n.text("Microsoft account") + String(displayName.dropFirst("Microsoft account".count))
+            }
+        }
+        return displayName
     }
 }
