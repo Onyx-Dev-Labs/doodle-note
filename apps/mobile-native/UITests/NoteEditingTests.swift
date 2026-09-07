@@ -60,6 +60,7 @@ import XCTest
         app.alerts.textFields.firstMatch.typeText(name)
         app.alerts.buttons["Create"].tap()
         app.buttons["newNote"].tap()
+        app.buttons["Note details"].tap()
         XCTAssertTrue(app.buttons["noteFolder"].waitForExistence(timeout: 5))
         app.buttons["noteFolder"].tap()
         app.buttons[name].firstMatch.tap()
