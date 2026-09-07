@@ -201,6 +201,8 @@ final class NoteLibrary {
     private(set) var catalog = LibraryCatalog()
     private(set) var selectedLibraryID = LibraryRecord.localID
     private(set) var identities: Set<LibraryIdentity> = []
+    /// Invalidates late account-scoped work even when the same account signs in again.
+    private(set) var authenticationGeneration = UUID()
     private(set) var pendingSaves = 0
     private(set) var loading = true
     private(set) var completedWrites = 0
@@ -229,10 +231,13 @@ final class NoteLibrary {
     var libraries: [LibraryRecord] {
         catalog.libraries.filter { $0.id == LibraryRecord.localID || $0.identity.map(identities.contains) == true }
     }
-    var visibleNotes: [NoteRecord] {
-        notes.filter { lifecycleReadable && $0.metadata?.libraryID == selectedLibraryID && !invalidating.contains($0.id) && (lifecycle[$0.id]?.state ?? .active) == .active && lifecycle[$0.id]?.restorePending != true }
+    /// Retrieval and background readers must use this authorization/lifecycle boundary.
+    func authorizedNotes(in libraryID: UUID) -> [NoteRecord] {
+        guard libraries.contains(where: { $0.id == libraryID }) else { return [] }
+        return notes.filter { lifecycleReadable && $0.metadata?.libraryID == libraryID && !invalidating.contains($0.id) && (lifecycle[$0.id]?.state ?? .active) == .active && lifecycle[$0.id]?.restorePending != true }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
+    var visibleNotes: [NoteRecord] { authorizedNotes(in: selectedLibraryID) }
     var folders: [NoteFolder] { catalog.folders.filter { $0.libraryID == selectedLibraryID } }
 
     init(root: URL) {
@@ -276,6 +281,7 @@ final class NoteLibrary {
         guard let repository else { throw LibraryDataError.invalidDocument }
         _ = try await repository.addLibrary(name: name, identity: identity)
         identities.insert(identity)
+        authenticationGeneration = UUID()
         await refreshCatalog()
         await refreshLifecycle()
     }
@@ -286,6 +292,7 @@ final class NoteLibrary {
         await flush()
         guard pendingSaves == 0, unsavedIDs.isEmpty else { return false }
         identities.remove(identity)
+        authenticationGeneration = UUID()
         selectedLibraryID = LibraryRecord.localID
         await refreshLifecycle()
         storage = nil

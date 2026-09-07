@@ -311,14 +311,22 @@ final class LibraryContractTests: XCTestCase {
         library.selectLibrary(account.id)
         XCTAssertTrue(library.visibleNotes.isEmpty)
         let accountNote = try XCTUnwrap(library.create())
+        let generation = library.authenticationGeneration
+        XCTAssertEqual(library.authorizedNotes(in: account.id).map(\.id), [accountNote])
         let refused = await library.signOut(identity, captureActive: true)
         XCTAssertFalse(refused)
+        XCTAssertEqual(library.authenticationGeneration, generation)
         let signedOut = await library.signOut(identity, captureActive: false)
         XCTAssertTrue(signedOut)
+        XCTAssertNotEqual(library.authenticationGeneration, generation)
+        XCTAssertTrue(library.authorizedNotes(in: account.id).isEmpty)
+        XCTAssertEqual(library.authorizedNotes(in: LibraryRecord.localID).map(\.id), [localID])
         XCTAssertNil(library.note(accountNote))
         XCTAssertEqual(library.note(localID)?.metadata?.folderID, folder.id)
         XCTAssertEqual(library.note(localID)?.metadata?.libraryID, LibraryRecord.localID)
         try await library.authenticate(identity, name: "Work")
         XCTAssertNotNil(library.note(accountNote))
+        XCTAssertNotEqual(library.authenticationGeneration, generation)
+        XCTAssertEqual(library.authorizedNotes(in: account.id).map(\.id), [accountNote])
     }
 }
