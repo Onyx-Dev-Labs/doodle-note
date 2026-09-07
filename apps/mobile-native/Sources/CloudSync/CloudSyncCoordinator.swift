@@ -12,7 +12,8 @@ final class CloudSyncCoordinator {
     private(set) var status = "Cloud sync is optional. Local notes stay on this device."
     private(set) var report = CloudSyncReport()
     private(set) var legacy: CloudLegacyPage?
-    private(set) var cloudVersionText: String?
+    private var preview = CloudConflictPreview()
+    var cloudVersionText: String? { preview.text }
     private var browser: CloudLinkBrowser?
     private var recording: RecordingSession?
     private weak var library: NoteLibrary?
@@ -54,6 +55,7 @@ final class CloudSyncCoordinator {
     }
     func connect(library: NoteLibrary, recording: RecordingSession) async {
         guard !busy, !(recording.busy || recording.noteID != nil) else { return }
+        preview.invalidate()
         busy = true
         ticket = UUID()
         let expected = ticket
@@ -85,6 +87,7 @@ final class CloudSyncCoordinator {
         guard !busy, !(recording.busy || recording.noteID != nil), let current = connection else { return }
         do {
             guard !recording.busy, recording.noteID == nil else { throw CloudSyncFailure.changed }
+            preview.invalidate()
             let selected = try await connections.select(libraryID: remoteID, expectedGeneration: current.generation)
             let localID = CloudIdentityMap(identity: selected.account.identity, remoteLibraryID: remoteID).localLibraryID
             try await library.authenticate(selected.account.identity, name: selected.account.workspaceName + " Cloud", libraryID: localID)
@@ -107,39 +110,50 @@ final class CloudSyncCoordinator {
     }
     func adopt(_ ids: [UUID], library: NoteLibrary) async {
         guard !busy, let connection, let repository = library.cloudRepository else { return }
+        busy = true
+        defer { busy = false }
         do {
             let engine = try makeEngine(connection: connection, library: library, repository: repository)
             try await engine.adopt(noteIDs: ids)
+            busy = false
             await synchronize(library: library)
             await discoverLegacy()
         } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func previewConflict(_ id: UUID, library: NoteLibrary) async {
         guard let connection, let repository = library.cloudRepository else { return }
-        cloudVersionText = nil
+        let requestID = preview.begin(noteID: id)
         do {
             let engine = try makeEngine(connection: connection, library: library, repository: repository)
             let state = try await engine.journal.load()
             guard let remoteID = state.noteBindings.first(where: { $0.value == id })?.key,
+                  let remote = try await engine.replica.note(remoteID), let head = remote.headRevision,
                   let content = try await engine.replica.content(remoteID), let snapshot = content.snapshot else { throw CloudSyncFailure.changed }
             guard try await connections.load()?.generation == connection.generation else { throw CloudSyncFailure.signedOut }
             let typed = snapshot["text"]?.string ?? snapshot["legacyNotes"]?["raw_content"]?["markdown"]?.string ?? ""
             let summaries = (snapshot["summaries"]?.list ?? []).compactMap { $0["markdown"]?.string }.joined(separator: "\n\n")
             let transcript = (snapshot["passages"]?.list ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
-            cloudVersionText = [typed, summaries, transcript].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            preview.publish(requestID: requestID, noteID: id, revisionID: head, text: [typed, summaries, transcript].filter { !$0.isEmpty }.joined(separator: "\n\n"))
         } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func resolve(_ localID: UUID, keepDevice: Bool, library: NoteLibrary) async {
         guard !busy, let connection, let repository = library.cloudRepository else { return }
+        busy = true
+        defer { busy = false }
         do {
             guard await library.flush() else { throw CloudSyncFailure.changed }
             let engine = try makeEngine(connection: connection, library: library, repository: repository)
             if keepDevice { try await engine.keepDeviceVersion(localNoteID: localID) }
-            else { try await engine.useCloudVersion(localNoteID: localID) }
+            else {
+                guard preview.noteID == localID, let revision = preview.revisionID else { throw CloudSyncFailure.changed }
+                try await engine.useCloudVersion(localNoteID: localID, expectedPreviewRevision: revision)
+            }
+            busy = false
             await synchronize(library: library)
         } catch { await handleFailure(error, expected: connection, library: library) }
     }
     func pause() async {
+        preview.invalidate()
         ticket = UUID()
         task?.cancel()
         do {
@@ -149,6 +163,7 @@ final class CloudSyncCoordinator {
     }
     func signOut(library: NoteLibrary, recording: RecordingSession) async {
         guard !(recording.busy || recording.noteID != nil), let current = connection else { return }
+        preview.invalidate()
         // Do not lock the account until pending device writes are safely flushed.
         guard await library.flush() else { return }
         ticket = UUID()
@@ -182,7 +197,8 @@ final class CloudSyncCoordinator {
             report = result
             retryCount = 0
             if result.hasMore || result.needsFollowup { schedule(library: library) }
-            status = !result.conflicts.isEmpty ? "Some notes have versions to review." :
+            status = !result.unsupported.isEmpty ? "Some cloud notes use an unsupported format and remain in cloud history. Other notes can still sync." :
+                !result.conflicts.isEmpty ? "Some notes have versions to review." :
                 !result.deferred.isEmpty ? "Some notes are waiting for sync. Their device copies are preserved." :
                 result.hasMore ? "More cloud history is available. Sync again to continue." : "Cloud sync is up to date."
         } catch {
@@ -226,7 +242,7 @@ final class CloudSyncCoordinator {
         library.revokeAccountAccess(account)
         ticket = UUID()
         legacy = nil
-        cloudVersionText = nil
+        preview.invalidate()
         do { try await connections.signOut() } catch { status = safe(error) }
         connection = try? await connections.load()
         if ownsCapture, let recording, let captureID, let captureLibrary {

@@ -5,6 +5,7 @@ struct CloudSyncReport: Sendable {
     var downloaded = 0
     var conflicts: Set<UUID> = []
     var deferred: Set<UUID> = []
+    var unsupported: Set<UUID> = []
     var hasMore = false
     var needsFollowup = false
 }
@@ -104,10 +105,11 @@ actor CloudSyncEngine {
         }
         try await replica.permitDeviceResolution(noteID: remoteID)
     }
-    func useCloudVersion(localNoteID: UUID) async throws {
+    func useCloudVersion(localNoteID: UUID, expectedPreviewRevision: UUID) async throws {
         try await check()
         guard let remoteID = try await journal.load().noteBindings.first(where: { $0.value == localNoteID })?.key,
               let remote = try await replica.note(remoteID), remote.state == .active, let head = remote.headRevision,
+              head == expectedPreviewRevision,
               let local = try await repository.cloudNote(noteID: localNoteID, libraryID: map.localLibraryID, identity: map.identity),
               local.metadata?.revisionID == remote.uploadedLocalRevisionID, remote.uploadConflict else {
             // The current device draft must already exist as an immutable cloud conflict before choosing another version.
@@ -276,23 +278,28 @@ actor CloudSyncEngine {
                 continue
             }
             guard let content = try await replica.content(remote.id), let snapshot = content.snapshot else { continue }
-            let references = snapshot["inkAttachments"]?.list ?? []
-            let ink: Data
-            if references.isEmpty {
-                let preparingInitialInk = remote.uploadedHeadID == remote.headRevision
-                    && local?.metadata?.revisionID == remote.uploadedLocalRevisionID
-                ink = preparingInitialInk ? local?.ink ?? Data() : Data()
+            do {
+                let references = snapshot["inkAttachments"]?.list ?? []
+                let ink: Data
+                if references.isEmpty {
+                    let preparingInitialInk = remote.uploadedHeadID == remote.headRevision
+                        && local?.metadata?.revisionID == remote.uploadedLocalRevisionID
+                    ink = preparingInitialInk ? local?.ink ?? Data() : Data()
+                }
+                else { ink = try await assets.download(noteID: remote.id, revisionID: content.id,
+                    references: references, transport: transport, secret: checkedSecret()) }
+                try await check()
+                let decoder = CloudSnapshotDecoder(map: map, remoteNoteID: remote.id, localNoteID: localID)
+                let decoded = try decoder.decode(snapshot, revisionID: content.id, generation: remote.generation,
+                    savedAt: content.createdAt, ink: ink)
+                try await check()
+                try await importNote(decoded, remote: remote, localID: localID, expected: local?.metadata?.revisionID)
+                try await replica.imported(noteID: remote.id, localRevision: decoded.note.metadata!.revisionID, generation: remote.generation)
+                report.downloaded += 1
+            } catch CloudSyncFailure.unsupported {
+                // Retain the complete raw revision and advance the page so other notes still sync.
+                report.unsupported.insert(localID)
             }
-            else { ink = try await assets.download(noteID: remote.id, revisionID: content.id,
-                references: references, transport: transport, secret: checkedSecret()) }
-            try await check()
-            let decoder = CloudSnapshotDecoder(map: map, remoteNoteID: remote.id, localNoteID: localID)
-            let decoded = try decoder.decode(snapshot, revisionID: content.id, generation: remote.generation,
-                savedAt: content.createdAt, ink: ink)
-            try await check()
-            try await importNote(decoded, remote: remote, localID: localID, expected: local?.metadata?.revisionID)
-            try await replica.imported(noteID: remote.id, localRevision: decoded.note.metadata!.revisionID, generation: remote.generation)
-            report.downloaded += 1
         }
     }
 }

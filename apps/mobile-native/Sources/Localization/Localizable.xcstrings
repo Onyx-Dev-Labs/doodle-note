@@ -73,6 +73,102 @@
         }
       }
     },
+    "%lld desktop notes available": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud count. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld desktop note available"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld desktop notes available"
+                }
+              }
+            }
+          }
+        },
+        "da": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld skrivebordsnote tilgængelig"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld skrivebordsnoter tilgængelige"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld nota de escritorio disponible"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld notas de escritorio disponibles"
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld note de bureau disponible"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld notes de bureau disponibles"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld Desktop-Notiz verfügbar"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld Desktop-Notizen verfügbar"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld minutes before": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -546,6 +642,102 @@
                 "stringUnit": {
                   "state": "needs_review",
                   "value": "%lld Striche"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld transcript passages": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud count. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld transcript passage"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld transcript passages"
+                }
+              }
+            }
+          }
+        },
+        "da": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld transskriptionsafsnit"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld transskriptionsafsnit"
+                }
+              }
+            }
+          }
+        },
+        "es": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld fragmento de transcripción"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld fragmentos de transcripción"
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld passage de transcription"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld passages de transcription"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld Transkriptabschnitt"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "needs_review",
+                  "value": "%lld Transkriptabschnitte"
                 }
               }
             }
@@ -2413,6 +2605,330 @@
         }
       }
     },
+    "Choose which version becomes current. The other version remains in cloud history.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose which version becomes current. The other version remains in cloud history."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vælg, hvilken version der skal være den aktuelle. Den anden version bevares i skyhistorikken."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Elige qué versión será la actual. La otra versión permanece en el historial de la nube."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Choisissez la version qui devient la version actuelle. L’autre version reste dans l’historique cloud."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Wählen Sie, welche Version aktuell wird. Die andere Version bleibt im Cloud-Verlauf erhalten."
+          }
+        }
+      }
+    },
+    "Cloud settings could not be opened. Your notes remain on this device.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud status. Machine draft; qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud settings could not be opened. Your notes remain on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skyindstillingerne kunne ikke åbnes. Dine noter bliver på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo abrir la configuración de la nube. Tus notas permanecen en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les réglages cloud n’ont pas pu être ouverts. Vos notes restent sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Einstellungen konnten nicht geöffnet werden. Deine Notizen bleiben auf diesem Gerät."
+          }
+        }
+      }
+    },
+    "Cloud sync": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronización en la nube"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synchronisation cloud"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cloud-Synchronisierung"
+          }
+        }
+      }
+    },
+    "Cloud sync is optional. Local notes stay on this device.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync is optional. Local notes stay on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering er valgfri. Lokale noter bliver på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La sincronización en la nube es opcional. Las notas locales permanecen en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La synchronisation cloud est facultative. Les notes locales restent sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Synchronisierung ist optional. Lokale Notizen bleiben auf diesem Gerät."
+          }
+        }
+      }
+    },
+    "Cloud sync is paused. Local notes remain available. Manage your subscription on the website.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync is paused. Local notes remain available. Manage your subscription on the website."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering er sat på pause. Lokale noter er stadig tilgængelige. Administrer dit abonnement på webstedet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La sincronización en la nube está en pausa. Las notas locales siguen disponibles. Gestiona tu suscripción en el sitio web."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La synchronisation cloud est en pause. Les notes locales restent disponibles. Gérez votre abonnement sur le site web."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Synchronisierung pausiert. Lokale Notizen bleiben verfügbar. Verwalten Sie Ihr Abonnement auf der Website."
+          }
+        }
+      }
+    },
+    "Cloud sync is unavailable. Your saved notes remain on this device.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync is unavailable. Your saved notes remain on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering er ikke tilgængelig. Dine gemte noter bliver på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La sincronización en la nube no está disponible. Tus notas guardadas permanecen en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La synchronisation cloud n’est pas disponible. Vos notes enregistrées restent sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Synchronisierung ist nicht verfügbar. Ihre gespeicherten Notizen bleiben auf diesem Gerät."
+          }
+        }
+      }
+    },
+    "Cloud sync is up to date.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync is up to date."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering er ajour."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La sincronización en la nube está al día."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La synchronisation cloud est à jour."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Synchronisierung ist auf dem neuesten Stand."
+          }
+        }
+      }
+    },
+    "Cloud sync paused. This account's notes remain available on this device.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync paused. This account's notes remain available on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering er sat på pause. Denne kontos noter er stadig tilgængelige på enheden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La sincronización en la nube está en pausa. Las notas de esta cuenta siguen disponibles en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La synchronisation cloud est en pause. Les notes de ce compte restent disponibles sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Synchronisierung pausiert. Die Notizen dieses Kontos bleiben auf diesem Gerät verfügbar."
+          }
+        }
+      }
+    },
+    "Cloud sync unavailable": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud status. Machine draft; qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud sync unavailable"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Skysynkronisering er ikke tilgængelig"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronización en la nube no disponible"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synchronisation cloud indisponible"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cloud-Synchronisierung nicht verfügbar"
+          }
+        }
+      }
+    },
     "Color": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -2557,6 +3073,150 @@
         }
       }
     },
+    "Connect account": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect account"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forbind konto"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conectar cuenta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Connecter un compte"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Konto verbinden"
+          }
+        }
+      }
+    },
+    "Connect the same account to reopen its saved notes.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect the same account to reopen its saved notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forbind den samme konto for at åbne dens gemte noter igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conecta la misma cuenta para abrir sus notas guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Connectez le même compte pour rouvrir ses notes enregistrées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verbinden Sie dasselbe Konto, um seine gespeicherten Notizen erneut zu öffnen."
+          }
+        }
+      }
+    },
+    "Connected workspace": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected workspace"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forbundet arbejdsområde"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Espacio de trabajo conectado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Espace de travail connecté"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verbundener Arbeitsbereich"
+          }
+        }
+      }
+    },
+    "Connected. Choose a cloud library to enable sync.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected. Choose a cloud library to enable sync."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forbundet. Vælg et skybibliotek for at aktivere synkronisering."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conectado. Elige una biblioteca en la nube para activar la sincronización."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Connecté. Choisissez une bibliothèque cloud pour activer la synchronisation."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verbunden. Wählen Sie eine Cloud-Bibliothek, um die Synchronisierung zu aktivieren."
+          }
+        }
+      }
+    },
     "Connection canceled.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -2565,6 +3225,42 @@
           "stringUnit": {
             "state": "translated",
             "value": "Connection canceled."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Forbindelsen blev annulleret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Conexión cancelada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Connexion annulée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Verbindung abgebrochen."
+          }
+        }
+      }
+    },
+    "Connection cancelled.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection cancelled."
           }
         },
         "da": {
@@ -2701,6 +3397,42 @@
         }
       }
     },
+    "Create a separate cloud library": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create a separate cloud library"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Opret et separat skybibliotek"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Crear una biblioteca en la nube independiente"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Créer une bibliothèque cloud distincte"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Separate Cloud-Bibliothek erstellen"
+          }
+        }
+      }
+    },
     "Create a transcript of your recording using speech models on this device.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -2733,6 +3465,114 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Erstelle ein Transkript deiner Aufnahme mit Sprachmodellen auf diesem Gerät."
+          }
+        }
+      }
+    },
+    "Create an empty cloud library?": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create an empty cloud library?"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Opret et tomt skybibliotek?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Crear una biblioteca en la nube vacía?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Créer une bibliothèque cloud vide ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Leere Cloud-Bibliothek erstellen?"
+          }
+        }
+      }
+    },
+    "Create cloud library": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create cloud library"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Opret skybibliotek"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Crear biblioteca en la nube"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Créer une bibliothèque cloud"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cloud-Bibliothek erstellen"
+          }
+        }
+      }
+    },
+    "Current cloud version": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current cloud version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktuel skyversion"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versión actual en la nube"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version cloud actuelle"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktuelle Cloud-Version"
           }
         }
       }
@@ -2841,6 +3681,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Der Gerätespeicher ist knapp. Entferne unnötiges lokales Audio oder lösche Papierkorbinhalte endgültig."
+          }
+        }
+      }
+    },
+    "Device version": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Device version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version på enheden"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versión del dispositivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version sur l’appareil"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version auf dem Gerät"
           }
         }
       }
@@ -3925,6 +4801,114 @@
         }
       }
     },
+    "Existing desktop notes": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Existing desktop notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eksisterende skrivebordsnoter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Notas existentes de la aplicación de escritorio"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Notes existantes de l’application de bureau"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vorhandene Notizen aus der Desktop-App"
+          }
+        }
+      }
+    },
+    "Existing local notes stay in their current library. New notes created in the cloud library will sync when the service is available.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Existing local notes stay in their current library. New notes created in the cloud library will sync when the service is available."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eksisterende lokale noter bliver i deres nuværende bibliotek. Nye noter, der oprettes i skybiblioteket, synkroniseres, når tjenesten er tilgængelig."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Las notas locales existentes permanecen en su biblioteca actual. Las nuevas notas creadas en la biblioteca en la nube se sincronizarán cuando el servicio esté disponible."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les notes locales existantes restent dans leur bibliothèque actuelle. Les nouvelles notes créées dans la bibliothèque cloud seront synchronisées lorsque le service sera disponible."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vorhandene lokale Notizen bleiben in ihrer aktuellen Bibliothek. Neue Notizen in der Cloud-Bibliothek werden synchronisiert, sobald der Dienst verfügbar ist."
+          }
+        }
+      }
+    },
+    "Find desktop notes": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find desktop notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Find skrivebordsnoter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Buscar notas de la aplicación de escritorio"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Rechercher les notes de l’application de bureau"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Notizen aus der Desktop-App suchen"
+          }
+        }
+      }
+    },
     "Fine": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -4357,6 +5341,114 @@
         }
       }
     },
+    "Import selected desktop notes?": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import selected desktop notes?"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importer de valgte skrivebordsnoter?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Importar las notas seleccionadas de la aplicación de escritorio?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importer les notes sélectionnées de l’application de bureau ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ausgewählte Notizen aus der Desktop-App importieren?"
+          }
+        }
+      }
+    },
+    "Import selected notes": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import selected notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importer valgte noter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importar notas seleccionadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importer les notes sélectionnées"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ausgewählte Notizen importieren"
+          }
+        }
+      }
+    },
+    "Imported desktop notes": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud status. Machine draft; qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported desktop notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importerede skrivebordsnoter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Notas de escritorio importadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Notes de bureau importées"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Importierte Desktop-Notizen"
+          }
+        }
+      }
+    },
     "Ink": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -4497,6 +5589,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Am Meeting teilnehmen"
+          }
+        }
+      }
+    },
+    "Keep device version as current": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep device version as current"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Behold enhedens version som den aktuelle"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mantener la versión del dispositivo como actual"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Utiliser la version de l’appareil comme version actuelle"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Geräteversion als aktuelle Version behalten"
           }
         }
       }
@@ -4933,6 +6061,42 @@
         }
       }
     },
+    "Loading version…": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading version…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Indlæser version…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cargando versión…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Chargement de la version…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Version wird geladen…"
+          }
+        }
+      }
+    },
     "Local audio playback failed. Original files are preserved.": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -5001,6 +6165,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Lokaler Speicher konnte nicht geöffnet werden. "
+          }
+        }
+      }
+    },
+    "Local-only notes stay available. Reconnect the same account to reopen its cached notes.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local-only notes stay available. Reconnect the same account to reopen its cached notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Noter, der kun er lokale, er stadig tilgængelige. Forbind den samme konto igen for at åbne dens cachelagrede noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Las notas exclusivamente locales siguen disponibles. Vuelve a conectar la misma cuenta para abrir sus notas almacenadas en caché."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les notes uniquement locales restent disponibles. Reconnectez le même compte pour rouvrir ses notes en cache."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ausschließlich lokale Notizen bleiben verfügbar. Verbinden Sie dasselbe Konto erneut, um seine zwischengespeicherten Notizen zu öffnen."
           }
         }
       }
@@ -5365,6 +6565,42 @@
         }
       }
     },
+    "More cloud history is available. Sync again to continue.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More cloud history is available. Sync again to continue."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der er mere skyhistorik tilgængelig. Synkroniser igen for at fortsætte."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Hay más historial en la nube disponible. Sincroniza de nuevo para continuar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "D’autres éléments de l’historique cloud sont disponibles. Relancez la synchronisation pour continuer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Weiterer Cloud-Verlauf ist verfügbar. Synchronisieren Sie erneut, um fortzufahren."
+          }
+        }
+      }
+    },
     "Move to Trash": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -5577,6 +6813,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Neue Notiz"
+          }
+        }
+      }
+    },
+    "Next page": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next page"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Næste side"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Página siguiente"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Page suivante"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nächste Seite"
           }
         }
       }
@@ -6049,6 +7321,42 @@
         }
       }
     },
+    "Only notes in the cloud library you choose are synced. Local-only notes are never uploaded automatically.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only notes in the cloud library you choose are synced. Local-only notes are never uploaded automatically."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kun noter i det skybibliotek, du vælger, synkroniseres. Noter, der kun er lokale, uploades aldrig automatisk."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Solo se sincronizan las notas de la biblioteca en la nube que elijas. Las notas exclusivamente locales nunca se suben automáticamente."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Seules les notes de la bibliothèque cloud choisie sont synchronisées. Les notes uniquement locales ne sont jamais envoyées automatiquement."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nur Notizen in der ausgewählten Cloud-Bibliothek werden synchronisiert. Ausschließlich lokale Notizen werden niemals automatisch hochgeladen."
+          }
+        }
+      }
+    },
     "Only on this device": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -6337,6 +7645,42 @@
         }
       }
     },
+    "Optional cloud sync": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional cloud sync"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Valgfri skysynkronisering"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronización opcional en la nube"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synchronisation cloud facultative"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optionale Cloud-Synchronisierung"
+          }
+        }
+      }
+    },
     "Options": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -6369,6 +7713,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Optionen"
+          }
+        }
+      }
+    },
+    "Pause sync": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause sync"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sæt synkronisering på pause"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Pausar sincronización"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mettre la synchronisation en pause"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synchronisierung pausieren"
           }
         }
       }
@@ -7237,6 +8617,42 @@
         }
       }
     },
+    "Recordings and voice profiles stay on their original device. Transcripts, typed notes, summaries and drawings can sync.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recordings and voice profiles stay on their original device. Transcripts, typed notes, summaries and drawings can sync."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelser og stemmeprofiler bliver på deres oprindelige enhed. Transskriptioner, skrevne noter, resuméer og tegninger kan synkroniseres."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Las grabaciones y los perfiles de voz permanecen en su dispositivo original. Las transcripciones, notas escritas, resúmenes y dibujos se pueden sincronizar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les enregistrements et les profils vocaux restent sur leur appareil d’origine. Les transcriptions, notes saisies, résumés et dessins peuvent être synchronisés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aufnahmen und Stimmprofile bleiben auf ihrem ursprünglichen Gerät. Transkripte, getippte Notizen, Zusammenfassungen und Zeichnungen können synchronisiert werden."
+          }
+        }
+      }
+    },
     "Recover until %@": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -7957,6 +9373,42 @@
         }
       }
     },
+    "Resume sync": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume sync"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Genoptag synkronisering"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reanudar sincronización"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reprendre la synchronisation"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synchronisierung fortsetzen"
+          }
+        }
+      }
+    },
     "Retry cleanup": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -8061,6 +9513,78 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Speichern erneut versuchen"
+          }
+        }
+      }
+    },
+    "Review and select desktop notes to add to this cloud library. Original IDs and full stored transcripts are retained. Imported legacy notes are read-only.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review and select desktop notes to add to this cloud library. Original IDs and full stored transcripts are retained. Imported legacy notes are read-only."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gennemgå og vælg skrivebordsnoter, der skal føjes til dette skybibliotek. Oprindelige id’er og hele de gemte transskriptioner bevares. Importerede ældre noter er skrivebeskyttede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Revisa y selecciona las notas de la aplicación de escritorio que quieras añadir a esta biblioteca en la nube. Se conservan los identificadores originales y las transcripciones completas guardadas. Las notas antiguas importadas son de solo lectura."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Examinez et sélectionnez les notes de l’application de bureau à ajouter à cette bibliothèque cloud. Les identifiants d’origine et les transcriptions enregistrées complètes sont conservés. Les anciennes notes importées sont en lecture seule."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Prüfen und wählen Sie Notizen aus der Desktop-App aus, die dieser Cloud-Bibliothek hinzugefügt werden sollen. Ursprüngliche IDs und vollständige gespeicherte Transkripte bleiben erhalten. Importierte ältere Notizen sind schreibgeschützt."
+          }
+        }
+      }
+    },
+    "Review note": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review note"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gennemgå note"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Revisar nota"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Examiner la note"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Notiz prüfen"
           }
         }
       }
@@ -8413,6 +9937,186 @@
         }
       }
     },
+    "Sign out": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Log ud"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cerrar sesión"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se déconnecter"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Abmelden"
+          }
+        }
+      }
+    },
+    "Sign out and lock account notes": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out and lock account notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Log ud, og lås kontonoter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cerrar sesión y bloquear las notas de la cuenta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se déconnecter et verrouiller les notes du compte"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Abmelden und Kontonotizen sperren"
+          }
+        }
+      }
+    },
+    "Sign out and lock account notes?": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out and lock account notes?"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Log ud, og lås kontonoter?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Cerrar sesión y bloquear las notas de la cuenta?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se déconnecter et verrouiller les notes du compte ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Abmelden und Kontonotizen sperren?"
+          }
+        }
+      }
+    },
+    "Signed out. This account's saved notes are locked until the same account reconnects.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed out. This account's saved notes are locked until the same account reconnects."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Du er logget ud. Denne kontos gemte noter er låst, indtil den samme konto forbindes igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sesión cerrada. Las notas guardadas de esta cuenta están bloqueadas hasta que se vuelva a conectar la misma cuenta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Déconnecté. Les notes enregistrées de ce compte sont verrouillées jusqu’à la reconnexion du même compte."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Abgemeldet. Die gespeicherten Notizen dieses Kontos sind gesperrt, bis dasselbe Konto erneut verbunden wird."
+          }
+        }
+      }
+    },
+    "Some cloud notes use an unsupported format and remain in cloud history. Other notes can still sync.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud status. Machine draft; qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some cloud notes use an unsupported format and remain in cloud history. Other notes can still sync."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nogle skynoter bruger et format, der ikke understøttes, og forbliver i skyhistorikken. Andre noter kan stadig synkroniseres."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Algunas notas en la nube usan un formato no compatible y permanecen en el historial de la nube. Las demás notas pueden seguir sincronizándose."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Certaines notes cloud utilisent un format non pris en charge et restent dans l’historique cloud. Les autres notes peuvent toujours être synchronisées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Einige Cloud-Notizen verwenden ein nicht unterstütztes Format und bleiben im Cloud-Verlauf. Andere Notizen können weiterhin synchronisiert werden."
+          }
+        }
+      }
+    },
     "Some interrupted audio needs recovery. Original files and notes are preserved.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -8557,6 +10261,42 @@
         }
       }
     },
+    "Some notes are waiting for sync. Their device copies are preserved.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some notes are waiting for sync. Their device copies are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nogle noter venter på synkronisering. Kopierne på enheden er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Algunas notas están pendientes de sincronización. Sus copias en el dispositivo se conservan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Certaines notes attendent la synchronisation. Leurs copies sur l’appareil sont conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Einige Notizen warten auf die Synchronisierung. Ihre Kopien auf dem Gerät bleiben erhalten."
+          }
+        }
+      }
+    },
     "Some notes could not be indexed. Their originals are preserved.": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -8589,6 +10329,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Einige Notizen konnten nicht indexiert werden. Die Originale bleiben erhalten."
+          }
+        }
+      }
+    },
+    "Some notes have versions to review.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some notes have versions to review."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Nogle noter har versioner, der skal gennemgås."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Algunas notas tienen versiones pendientes de revisión."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Certaines notes ont des versions à examiner."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Einige Notizen haben Versionen, die geprüft werden müssen."
           }
         }
       }
@@ -9637,6 +11413,42 @@
         }
       }
     },
+    "Stop recording before changing cloud accounts or libraries.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop recording before changing cloud accounts or libraries."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stop optagelsen, før du skifter skykonto eller bibliotek."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Detén la grabación antes de cambiar de cuenta o biblioteca en la nube."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Arrêtez l’enregistrement avant de changer de compte ou de bibliothèque cloud."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Beenden Sie die Aufnahme, bevor Sie Cloud-Konten oder Bibliotheken wechseln."
+          }
+        }
+      }
+    },
     "Stop recording before changing storage for this note.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -9961,6 +11773,78 @@
         }
       }
     },
+    "Sync could not finish. Saved notes and pending changes are preserved.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync could not finish. Saved notes and pending changes are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synkroniseringen kunne ikke fuldføres. Gemte noter og ventende ændringer er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo completar la sincronización. Las notas guardadas y los cambios pendientes se conservan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La synchronisation n’a pas pu se terminer. Les notes enregistrées et les modifications en attente sont conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Synchronisierung konnte nicht abgeschlossen werden. Gespeicherte Notizen und ausstehende Änderungen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "Sync now": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync now"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synkroniser nu"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Sincronizar ahora"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Synchroniser maintenant"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Jetzt synchronisieren"
+          }
+        }
+      }
+    },
     "Synthetic capture fixture · No microphone": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -10029,6 +11913,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Die 30-tägige Wiederherstellungsfrist ist abgelaufen."
+          }
+        }
+      }
+    },
+    "The cloud response could not be verified. Try connecting again.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cloud response could not be verified. Try connecting again."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Svaret fra skyen kunne ikke verificeres. Prøv at oprette forbindelse igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo verificar la respuesta de la nube. Intenta conectarte de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La réponse du cloud n’a pas pu être vérifiée. Essayez de vous reconnecter."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Cloud-Antwort konnte nicht überprüft werden. Versuchen Sie erneut, eine Verbindung herzustellen."
           }
         }
       }
@@ -10717,6 +12637,114 @@
         }
       }
     },
+    "These notes will use the shared cloud version history. Older desktop editors cannot overwrite their richer content after import. Local-only mobile notes are unchanged.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These notes will use the shared cloud version history. Older desktop editors cannot overwrite their richer content after import. Local-only mobile notes are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Disse noter vil bruge den fælles versionshistorik i skyen. Ældre skrivebordseditorer kan ikke overskrive deres mere omfattende indhold efter import. Mobilnoter, der kun er lokale, ændres ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Estas notas usarán el historial de versiones compartido en la nube. Tras la importación, los editores de escritorio antiguos no podrán sobrescribir su contenido más completo. Las notas móviles exclusivamente locales no cambian."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ces notes utiliseront l’historique partagé des versions cloud. Après l’importation, les anciens éditeurs de bureau ne pourront pas écraser leur contenu enrichi. Les notes mobiles uniquement locales restent inchangées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Notizen verwenden den gemeinsamen Cloud-Versionsverlauf. Ältere Desktop-Editoren können ihre erweiterten Inhalte nach dem Import nicht überschreiben. Ausschließlich lokale mobile Notizen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "This account no longer has access to that workspace.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This account no longer has access to that workspace."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne konto har ikke længere adgang til arbejdsområdet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta cuenta ya no tiene acceso a ese espacio de trabajo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ce compte n’a plus accès à cet espace de travail."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Dieses Konto hat keinen Zugriff mehr auf diesen Arbeitsbereich."
+          }
+        }
+      }
+    },
+    "This cloud version is read-only. Its original data is preserved.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud status. Machine draft; qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This cloud version is read-only. Its original data is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne skyversion er skrivebeskyttet. De oprindelige data bevares."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta versión en la nube es de solo lectura. Sus datos originales se conservan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette version cloud est en lecture seule. Ses données originales sont conservées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Cloud-Version ist schreibgeschützt. Ihre ursprünglichen Daten bleiben erhalten."
+          }
+        }
+      }
+    },
     "This device does not support Apple's on-device generation model.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -10933,6 +12961,42 @@
         }
       }
     },
+    "This note changed. Review its versions before continuing.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This note changed. Review its versions before continuing."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne note er ændret. Gennemgå dens versioner, før du fortsætter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta nota ha cambiado. Revisa sus versiones antes de continuar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette note a changé. Examinez ses versions avant de continuer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Notiz wurde geändert. Prüfen Sie ihre Versionen, bevor Sie fortfahren."
+          }
+        }
+      }
+    },
     "This note is in Trash or was permanently deleted.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -11005,6 +13069,42 @@
         }
       }
     },
+    "This note is unavailable.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This note is unavailable."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne note er ikke tilgængelig."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta nota no está disponible."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette note n’est pas disponible."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Notiz ist nicht verfügbar."
+          }
+        }
+      }
+    },
     "This note is unavailable. Check the selected library and Trash, then try again.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -11037,6 +13137,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Diese Notiz ist nicht verfügbar. Prüfe die ausgewählte Bibliothek und den Papierkorb und versuche es erneut."
+          }
+        }
+      }
+    },
+    "This note uses a newer format. Update DoodleNote before editing it.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This note uses a newer format. Update DoodleNote before editing it."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne note bruger et nyere format. Opdater DoodleNote, før du redigerer den."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta nota usa un formato más reciente. Actualiza DoodleNote antes de editarla."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette note utilise un format plus récent. Mettez DoodleNote à jour avant de la modifier."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Notiz verwendet ein neueres Format. Aktualisieren Sie DoodleNote, bevor Sie sie bearbeiten."
           }
         }
       }
@@ -11869,6 +14005,150 @@
         }
       }
     },
+    "Use cloud library %@": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use cloud library %@"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Brug skybibliotek %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar la biblioteca en la nube %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Utiliser la bibliothèque cloud %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cloud-Bibliothek %@ verwenden"
+          }
+        }
+      }
+    },
+    "Use current cloud version": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use current cloud version"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Brug den aktuelle skyversion"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar la versión actual en la nube"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Utiliser la version cloud actuelle"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktuelle Cloud-Version verwenden"
+          }
+        }
+      }
+    },
+    "Use selected cloud library": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use selected cloud library"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Brug det valgte skybibliotek"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar la biblioteca en la nube seleccionada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Utiliser la bibliothèque cloud sélectionnée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ausgewählte Cloud-Bibliothek verwenden"
+          }
+        }
+      }
+    },
+    "Versions to review": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Versions to review"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versioner til gennemgang"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versiones para revisar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Versions à examiner"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Zu prüfende Versionen"
+          }
+        }
+      }
+    },
     "Welcome to DoodleNote": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -11941,6 +14221,150 @@
         }
       }
     },
+    "Working…": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud progress. Machine draft; qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Arbejder…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Procesando…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Traitement en cours…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Wird verarbeitet…"
+          }
+        }
+      }
+    },
+    "Workspace access is blocked. Recording recovery files are preserved for the next launch.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace access is blocked. Recording recovery files are preserved for the next launch."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Adgangen til arbejdsområdet er blokeret. Optagelsens gendannelsesfiler bevares til næste opstart."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "El acceso al espacio de trabajo está bloqueado. Los archivos de recuperación de la grabación se conservan para el próximo inicio."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’accès à l’espace de travail est bloqué. Les fichiers de récupération de l’enregistrement sont conservés pour le prochain lancement."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der Zugriff auf den Arbeitsbereich ist gesperrt. Wiederherstellungsdateien der Aufnahme bleiben für den nächsten Start erhalten."
+          }
+        }
+      }
+    },
+    "Workspace access was revoked. Reconnect an authorized account to reopen its saved notes.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace access was revoked. Reconnect an authorized account to reopen its saved notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Adgangen til arbejdsområdet er tilbagekaldt. Forbind en godkendt konto igen for at åbne dens gemte noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se ha revocado el acceso al espacio de trabajo. Vuelve a conectar una cuenta autorizada para abrir sus notas guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’accès à l’espace de travail a été révoqué. Reconnectez un compte autorisé pour rouvrir ses notes enregistrées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der Zugriff auf den Arbeitsbereich wurde entzogen. Verbinden Sie ein berechtigtes Konto erneut, um seine gespeicherten Notizen zu öffnen."
+          }
+        }
+      }
+    },
+    "Workspace access was revoked. Recording recovery is being saved on this device.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workspace access was revoked. Recording recovery is being saved on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Adgangen til arbejdsområdet er tilbagekaldt. Gendannelsesdata for optagelsen gemmes på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se ha revocado el acceso al espacio de trabajo. Se están guardando los datos de recuperación de la grabación en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’accès à l’espace de travail a été révoqué. Les données de récupération de l’enregistrement sont en cours de sauvegarde sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der Zugriff auf den Arbeitsbereich wurde entzogen. Wiederherstellungsdaten der Aufnahme werden auf diesem Gerät gespeichert."
+          }
+        }
+      }
+    },
     "Write and draw immediately. No account or model download is required. Cloud sync is optional.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -11973,6 +14397,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Schreibe und zeichne sofort. Kein Konto oder Modelldownload erforderlich. Cloud-Synchronisierung ist optional."
+          }
+        }
+      }
+    },
+    "Your account library remains available locally while cloud sync is paused.": {
+      "extractionState": "manual",
+      "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your account library remains available locally while cloud sync is paused."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Dit kontobibliotek er stadig tilgængeligt lokalt, mens skysynkronisering er sat på pause."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La biblioteca de tu cuenta sigue disponible localmente mientras la sincronización en la nube está en pausa."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La bibliothèque de votre compte reste disponible localement lorsque la synchronisation cloud est en pause."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Bibliothek Ihres Kontos bleibt lokal verfügbar, während die Cloud-Synchronisierung pausiert."
           }
         }
       }

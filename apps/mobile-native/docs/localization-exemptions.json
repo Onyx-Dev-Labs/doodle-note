@@ -50,5 +50,11 @@
   "Localization/L10n.swift": {
     "^An interrupted capture has (\\d+) unconfirmed accepted frames and (\\d+) rejected frames\\. Saved audio is preserved\\.(?: |$)": "Anchored matcher for persisted English diagnostic; numbers are formatted into translated catalog keys.",
     "^Audio recovery could not use (\\d+) trailing bytes\\. Original audio is preserved\\.(?: |$)": "Anchored matcher for persisted English diagnostic; numbers are formatted into translated catalog keys."
+  },
+  "CloudSync/CloudHTTP.swift": {
+    "Bearer \\(secret.value)": "Authorization protocol prefix, not display text."
+  },
+  "CloudSync/CloudAuthorization.swift": {
+    "DoodleNote iPhone / iPad": "Stable device authorization label, not app display text."
   }
 }

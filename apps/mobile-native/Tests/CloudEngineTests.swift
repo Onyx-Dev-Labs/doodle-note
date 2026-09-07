@@ -84,6 +84,72 @@ final class CloudEngineTests: XCTestCase {
         try await connections.signOut()
         do { _ = try await restarted.synchronize(); XCTFail("stale authenticated engine") } catch {}
     }
+    func testUnsupportedInkDoesNotBlockLaterNoteOrCursorProgress() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = try NoteDiskStore(root: root.appendingPathComponent("notes"))
+        let repository = LibraryRepository(disk: disk)
+        let identity = LibraryIdentity(accountID: "one", workspaceID: "shared")
+        let remoteLibrary = UUID(), remoteNote = UUID(), head = UUID(), generation = UUID()
+        let map = CloudIdentityMap(identity: identity, remoteLibraryID: remoteLibrary)
+        _ = try await repository.attachLibrary(id: map.localLibraryID, name: "Shared", identity: identity)
+        var source = NoteRecord()
+        source.metadata?.libraryID = map.localLibraryID
+        source.text = "Synthetic text kept across restart"
+        source.captureState = .interrupted
+        source.passages = [.init(start: 0, end: 1, text: "Partial phrase", isFinal: false)]
+        let snapshot = try CloudProjection(map: map, remoteNoteID: remoteNote).snapshot(note: source, retained: [], inkReferences: [])
+        let change: CloudJSON = .object(["id": .uuid(head), "note_id": .uuid(remoteNote), "parent_id": .null,
+            "kind": .string("upsert"), "created_at": .string("2026-09-07T10:00:00.000Z"), "snapshot": snapshot,
+            "head_revision": .uuid(head), "lifecycle_generation": .uuid(generation), "state": .string("active"),
+            "deletion_id": .null, "deleted_at": .null, "expires_at": .null])
+        let keys = EngineTestCredentials()
+        let connections = try CloudConnectionStore(directory: root.appendingPathComponent("account"), credentials: keys)
+        let linked = try await connections.connect(account: .init(accountId: "one", workspaceId: "shared", workspaceName: "Shared",
+            entitled: true, syncAvailable: true, libraries: [.init(id: remoteLibrary)]),
+            secret: CloudSecret("dnsy_" + String(repeating: "a", count: 64)))
+        let connection = try await connections.select(libraryID: remoteLibrary, expectedGeneration: linked.generation)
+        guard case .object(var unsupported) = change else { return XCTFail("fixture object") }
+        let unsupportedNote = UUID(), unsupportedRevision = UUID()
+        unsupported["id"] = .uuid(unsupportedRevision)
+        unsupported["note_id"] = .uuid(unsupportedNote)
+        unsupported["head_revision"] = .uuid(unsupportedRevision)
+        guard case .object(var unsupportedSnapshot) = snapshot else { return XCTFail("fixture snapshot") }
+        unsupportedSnapshot["inkAttachments"] = .array([
+            .object(["id": .uuid(UUID()), "versionId": .uuid(UUID())]),
+            .object(["id": .uuid(UUID()), "versionId": .uuid(UUID())])])
+        unsupported["snapshot"] = .object(unsupportedSnapshot)
+        let transport = EngineTestTransport(changes: [.object(unsupported), change])
+        let syncRoot = root.appendingPathComponent("sync")
+        let engine = try CloudSyncEngine(connection: connection, connections: connections, repository: repository, transport: transport, root: syncRoot)
+        let result = try await engine.synchronize()
+        XCTAssertEqual(result.downloaded, 1)
+        XCTAssertEqual(result.unsupported, [map.localNoteID(unsupportedNote)])
+        let journal = try await engine.journal.load()
+        XCTAssertEqual(journal.cursor, "fixture-cursor")
+        XCTAssertNil(journal.pendingPage)
+        let retained = try await engine.replica.content(unsupportedNote)
+        XCTAssertEqual(retained?.snapshot, .object(unsupportedSnapshot))
+        let noPartialNote = try await repository.cloudNote(noteID: map.localNoteID(unsupportedNote), libraryID: map.localLibraryID, identity: identity)
+        XCTAssertNil(noPartialNote)
+        let localID = map.localNoteID(remoteNote)
+        let imported = try await repository.cloudNote(noteID: localID, libraryID: map.localLibraryID, identity: identity)
+        XCTAssertEqual(imported?.text, source.text)
+        XCTAssertEqual(imported?.metadata?.cloudTranscriptStatus, .interrupted)
+        XCTAssertEqual(imported?.passages.first?.isFinal, false)
+        XCTAssertTrue(disk.audioFiles(for: localID).isEmpty)
+        let other = LibraryIdentity(accountID: "two", workspaceID: "shared")
+        do {
+            _ = try await repository.cloudNote(noteID: localID, libraryID: map.localLibraryID, identity: other)
+            XCTFail("other account must not open cached content")
+        } catch {}
+        let restarted = try CloudSyncEngine(connection: connection, connections: connections, repository: repository, transport: transport, root: syncRoot)
+        _ = try await restarted.synchronize()
+        let posts = await transport.posts
+        XCTAssertEqual(posts, 0, "unchanged imported source must not echo an upsert")
+        try await connections.signOut()
+        do { _ = try await restarted.synchronize(); XCTFail("stale authenticated engine") } catch {}
+    }
     func testLostPushReplyReplaysExactDurableOperationAfterEngineRestart() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -115,6 +181,45 @@ final class CloudEngineTests: XCTestCase {
         XCTAssertTrue(finished.outbox.isEmpty)
         let local = try await repository.cloudNote(noteID: note.id, libraryID: map.localLibraryID, identity: identity)
         XCTAssertEqual(local?.text, note.text)
+    }
+
+    func testLocalRestoreSurvivesOlderTrashReplyAndPageInFlight() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let disk = try NoteDiskStore(root: root)
+        let repository = LibraryRepository(disk: disk)
+        let identity = LibraryIdentity(accountID: "one", workspaceID: "work"), remoteLibrary = UUID()
+        let map = CloudIdentityMap(identity: identity, remoteLibraryID: remoteLibrary)
+        _ = try await repository.attachLibrary(id: map.localLibraryID, name: "Work", identity: identity)
+        var note = NoteRecord()
+        note.metadata?.libraryID = map.localLibraryID
+        note.text = "Offline restore keeps this text"
+        try await repository.save(note, identities: [identity])
+        let connections = try CloudConnectionStore(directory: root.appendingPathComponent("account"), credentials: EngineTestCredentials())
+        let linked = try await connections.connect(account: .init(accountId: "one", workspaceId: "work", workspaceName: "Work",
+            entitled: true, syncAvailable: true, libraries: [.init(id: remoteLibrary)]), secret: CloudSecret("dnsy_" + String(repeating: "a", count: 64)))
+        let connection = try await connections.select(libraryID: remoteLibrary, expectedGeneration: linked.generation)
+        let transport = PurgeAfterLostReplyTransport(loseFirstReply: false)
+        let engine = try CloudSyncEngine(connection: connection, connections: connections, repository: repository,
+            transport: transport, root: root.appendingPathComponent("cloud/libraries"))
+        _ = try await engine.synchronize()
+        let initial = try disk.lifecycle(noteID: note.id, libraryID: map.localLibraryID)
+        let trash = try await repository.trash(noteID: note.id, libraryID: map.localLibraryID,
+            expectedGeneration: initial.generation, operationID: UUID(), now: Date(), identities: [identity])
+        let noteID = note.id
+        try await transport.restoreWhileTrashReplies {
+            _ = try await repository.restore(noteID: noteID, libraryID: map.localLibraryID,
+                deletionID: XCTUnwrap(trash.deletionID), expectedGeneration: trash.generation,
+                operationID: UUID(), now: Date(), identities: [identity])
+        }
+        _ = try await engine.synchronize()
+        XCTAssertEqual(try disk.lifecycle(noteID: note.id, libraryID: map.localLibraryID).state, .active)
+        let kept = try await repository.cloudNote(noteID: note.id, libraryID: map.localLibraryID, identity: identity)
+        XCTAssertEqual(kept?.text, note.text)
+        _ = try await engine.synchronize()
+        let kinds = await transport.kinds
+        XCTAssertEqual(kinds, ["upsert", "trash", "restore"])
+        XCTAssertEqual(try disk.lifecycle(noteID: note.id, libraryID: map.localLibraryID).state, .active)
     }
 
     func testLocalPurgeAfterLostFirstUploadReplyRedactsCachesThenPurgesServerCopy() async throws {
@@ -282,6 +387,11 @@ private actor LostReplyTransport: CloudTransport {
 }
 
 private actor PurgeAfterLostReplyTransport: CloudTransport {
+    let loseFirstReply: Bool
+    var trashHook: (@Sendable () async throws -> Void)?
+    init(loseFirstReply: Bool = true) { self.loseFirstReply = loseFirstReply }
+    func restoreWhileTrashReplies(_ action: @escaping @Sendable () async throws -> Void) { trashHook = action }
+
     var kinds: [String] = []
     var change: CloudJSON?
     var head: UUID?
@@ -299,6 +409,7 @@ private actor PurgeAfterLostReplyTransport: CloudTransport {
             kinds.append(kind)
             if kind == "trash" { state = "trashed"; deletionID = operation["deletionId"] ?? .null }
             if kind == "purge" { XCTAssertEqual(state, "trashed"); state = "purged" }
+            if kind == "restore" { XCTAssertEqual(state, "trashed"); state = "active" }
             let parent = head
             head = UUID()
             generation = UUID()
@@ -306,7 +417,8 @@ private actor PurgeAfterLostReplyTransport: CloudTransport {
                 "kind": .string(kind), "created_at": .string("2026-09-07T10:00:00.000Z"), "snapshot": operation["snapshot"] ?? .null,
                 "head_revision": .uuid(head!), "lifecycle_generation": .uuid(generation), "state": .string(state),
                 "deletion_id": deletionID, "deleted_at": .null, "expires_at": .null])
-            if kinds.count == 1 { throw CloudSyncFailure.unavailable }
+            if kinds.count == 1 && loseFirstReply { throw CloudSyncFailure.unavailable }
+            if kind == "trash", let hook = trashHook { trashHook = nil; try await hook() }
             return try CloudJSON.object(["protocolVersion": .number(2), "results": .array([.object(["index": .number(0),
                 "receipt": .object(["status": .string("ok"), "noteId": operation["noteId"]!, "revision": .uuid(head!),
                     "headRevision": .uuid(head!), "lifecycleGeneration": .uuid(generation), "state": .string(state)])])])]).data()

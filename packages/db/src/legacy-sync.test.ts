@@ -5,6 +5,7 @@ import {sql} from 'drizzle-orm';
 import {createInMemoryDb} from './testing';
 import {adoptLegacy,discoverLegacy,legacySyncAvailable} from './legacy-sync';
 import {inkRows} from './ink-assets';
+import {applySync} from './sync-service';
 
 test('legacy discovery is scoped and paginated; explicit adoption preserves originals and is idempotent', async()=>{
   const f=await createInMemoryDb();
@@ -41,4 +42,31 @@ test('legacy adoption capability is false on previous schema and empty workspace
     assert.equal(await legacySyncAvailable(f.db),true);
     assert.deepEqual(await discoverLegacy(f.db,'empty'),{notes:[],total:0,next:null});
   }finally{await f.close();}
+});
+
+test('adoption cannot revive Trash/purge or reuse another account operation', async()=>{
+ const f=await createInMemoryDb();
+ try {
+  await f.db.execute(sql`insert into organization(id,name,slug,created_at) values('review-a','A','review-a',now()),('review-b','B','review-b',now())`);
+  const noteId=randomUUID(), foreign=randomUUID(), libraryId=randomUUID(), otherLibrary=randomUUID(), operationId=randomUUID();
+  await f.db.execute(sql`insert into meetings(id,organization_id,title) values(${noteId}::uuid,'review-a','Synthetic'),(${foreign}::uuid,'review-b','Other synthetic')`);
+  const op={libraryId,noteId,operationId};
+  const first:any=await adoptLegacy(f.db,'review-a',op);
+  assert.equal(first.status,'ok');
+  const collision:any=await adoptLegacy(f.db,'review-b',{libraryId:otherLibrary,noteId:foreign,operationId});
+  assert.equal(collision.status,'operation_reused');
+  const absent=await f.db.execute(sql`select count(*)::int as count from sync_notes where id=${foreign}::uuid`);
+  assert.equal(absent.rows[0].count,0);
+  const trash:any=await applySync(f.db,'review-a',{protocolVersion:2,libraryId,noteId,operationId:randomUUID(),kind:'trash',expectedRevision:first.headRevision,expectedLifecycleGeneration:first.lifecycleGeneration});
+  assert.equal(trash.state,'trashed');
+  assert.equal((await adoptLegacy(f.db,'review-a',{...op,operationId:randomUUID()}) as any).status,'already_adopted');
+  const stillTrash=await f.db.execute(sql`select state from sync_notes where id=${noteId}::uuid`);
+  assert.equal(stillTrash.rows[0].state,'trashed');
+  const purge:any=await applySync(f.db,'review-a',{protocolVersion:2,libraryId,noteId,operationId:randomUUID(),kind:'purge',expectedRevision:trash.headRevision,expectedLifecycleGeneration:trash.lifecycleGeneration,deletionId:trash.deletionId});
+  assert.equal(purge.state,'purged');
+  assert.equal((await adoptLegacy(f.db,'review-a',op) as any).status,'purged');
+  assert.equal((await adoptLegacy(f.db,'review-a',{...op,operationId:randomUUID()}) as any).status,'purged');
+  const payloads=await f.db.execute(sql`select count(*)::int as count from sync_revisions where note_id=${noteId}::uuid and snapshot is not null`);
+  assert.equal(payloads.rows[0].count,0);
+ } finally {await f.close();}
 });
