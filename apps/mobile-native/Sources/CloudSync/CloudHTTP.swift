@@ -47,7 +47,7 @@ final class CloudHTTP: NSObject, URLSessionTaskDelegate, CloudTransport {
     func request(path: String, method: String = "GET", query: [URLQueryItem] = [],
                  body: Data? = nil, contentType: String = "application/json", secret: CloudSecret,
                  maxBytes: Int = 4_000_000) async throws -> Data {
-        guard ["api/sync/account", "api/sync/v2", "api/sync/ink", "api/sync/reader"].contains(path),
+        guard ["api/sync/account", "api/sync/v2", "api/sync/ink", "api/sync/reader", "api/sync/legacy"].contains(path),
               ["GET", "POST", "PUT"].contains(method), maxBytes > 0, maxBytes <= 8_000_000 else {
             throw CloudSyncFailure.invalidResponse
         }

@@ -13,7 +13,7 @@ struct CloudInkPlan: Codable, Sendable {
     let generation: UUID
     let ink: Data
     let preview: Data
-    var downloadedCache = false
+    var downloadedCache: Bool? = nil
     var reference: CloudJSON { .object(["id": .uuid(attachmentID), "versionId": .uuid(versionID)]) }
 }
 
@@ -21,7 +21,9 @@ struct CloudInkPlan: Codable, Sendable {
 actor CloudInkTransfer {
     let root: URL
     let libraryID: UUID
-    init(root: URL, libraryID: UUID) throws {
+    let cacheScope: CloudCacheScope?
+    init(root: URL, libraryID: UUID, cacheScope: CloudCacheScope? = nil) throws {
+        self.cacheScope = cacheScope
         self.root = root
         self.libraryID = libraryID
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
@@ -29,7 +31,7 @@ actor CloudInkTransfer {
     }
     private func path(_ id: UUID) -> URL { root.appendingPathComponent(id.uuidString + ".json") }
     private func plan(_ id: UUID) throws -> CloudInkPlan? {
-        guard FileManager.default.fileExists(atPath: path(id).path) else { return nil }
+        guard try cacheScope?.locallyPurged(id) != true, FileManager.default.fileExists(atPath: path(id).path) else { return nil }
         let plan = try JSONDecoder().decode(CloudInkPlan.self, from: Data(contentsOf: path(id)))
         guard plan.noteID == id else { throw LibraryDataError.invalidOwnership }
         return plan
@@ -43,8 +45,14 @@ actor CloudInkTransfer {
         if FileManager.default.fileExists(atPath: path(noteID).path) { try FileManager.default.removeItem(at: path(noteID)) }
     }
     func prepare(noteID: UUID, ink: Data, head: UUID, generation: UUID) throws -> CloudInkPlan {
+        try CloudCacheScope.synchronized {
+            guard try cacheScope?.locallyPurged(noteID) != true else { throw LifecycleError.unavailable }
+            return try prepareProtected(noteID: noteID, ink: ink, head: head, generation: generation)
+        }
+    }
+    private func prepareProtected(noteID: UUID, ink: Data, head: UUID, generation: UUID) throws -> CloudInkPlan {
         guard !ink.isEmpty, ink.count <= 3 * 1024 * 1024 else { throw CloudSyncFailure.unsupported }
-        if let previous = try plan(noteID), previous.ink == ink, !previous.downloadedCache,
+        if let previous = try plan(noteID), previous.ink == ink, previous.downloadedCache != true,
            previous.head == head, previous.generation == generation { return previous }
         let drawing: PKDrawing
         do { drawing = try PKDrawing(data: ink) } catch { throw CloudSyncFailure.invalidResponse }
@@ -87,7 +95,10 @@ actor CloudInkTransfer {
         do { drawing = try PKDrawing(data: bytes) } catch { throw CloudSyncFailure.invalidResponse }
         let remembered = CloudInkPlan(noteID: noteID, attachmentID: try reference.requiredUUID("id"), versionID: version,
             head: revisionID, generation: UUID(), ink: bytes, preview: try Self.preview(drawing), downloadedCache: true)
-        try JSONEncoder().encode(remembered).write(to: path(noteID), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try CloudCacheScope.synchronized {
+            guard try cacheScope?.locallyPurged(noteID) != true else { throw LifecycleError.unavailable }
+            try JSONEncoder().encode(remembered).write(to: path(noteID), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
         return bytes
     }
     private func descriptor(_ data: Data, type: String) -> CloudJSON {

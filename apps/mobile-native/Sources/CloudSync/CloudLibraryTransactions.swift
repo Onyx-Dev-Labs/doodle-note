@@ -9,6 +9,15 @@ struct CloudImportIntent: Codable, Sendable {
 }
 
 extension LibraryRepository {
+    func finishRevokedCapture(noteID: UUID, libraryID: UUID, identity: LibraryIdentity) throws {
+        try authorize(libraryID, identities: [identity])
+        guard var note = try cloudNote(noteID: noteID, libraryID: libraryID, identity: identity) else { throw LifecycleError.unavailable }
+        guard note.captureState == .recording else { return }
+        note.captureState = .interrupted
+        note.updatedAt = Date()
+        note.metadata?.revisionID = UUID()
+        try disk.save(note)
+    }
     func cloudLifecycles(libraryID: UUID, identity: LibraryIdentity) throws -> [NoteLifecycle] {
         try authorize(libraryID, identities: [identity])
         return try disk.lifecycleRecords().filter { $0.libraryID == libraryID }

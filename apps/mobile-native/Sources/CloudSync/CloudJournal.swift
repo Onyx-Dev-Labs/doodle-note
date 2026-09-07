@@ -18,12 +18,18 @@ struct CloudPage: Codable, Equatable, Sendable {
     }
 }
 
+struct CloudLegacyAdoption: Codable, Equatable, Sendable, Identifiable {
+    let id: UUID
+    let noteID: UUID
+}
+
 struct CloudJournalState: Codable, Equatable, Sendable {
     var schemaVersion = 1
     let identity: LibraryIdentity
     let libraryID: UUID
     var cursor: String?
     var outbox: [CloudOperation] = []
+    var adoptions: [CloudLegacyAdoption]? = nil
     var noteBindings: [UUID: UUID] = [:] // remote note UUID -> local note UUID
     var pendingPage: CloudPage?
     var acknowledgements: [UUID: CloudJSON] = [:]
@@ -37,6 +43,7 @@ actor CloudJournal {
     let identity: LibraryIdentity
     let libraryID: UUID
     let directory: URL
+    private var cacheScope: CloudCacheScope?
     private var file: URL { directory.appendingPathComponent("journal.json") }
     init(root: URL, identity: LibraryIdentity, libraryID: UUID) throws {
         guard libraryID != LibraryRecord.localID, !identity.accountID.isEmpty, !identity.workspaceID.isEmpty else {
@@ -67,9 +74,14 @@ actor CloudJournal {
         }
         return state
     }
-    private func save(_ state: CloudJournalState) throws {
-        try JSONEncoder().encode(state).write(to: file,
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    func protectCaches(_ scope: CloudCacheScope) throws { cacheScope = scope; try save(load()) }
+    private func save(_ input: CloudJournalState) throws {
+        try CloudCacheScope.synchronized {
+            var state = input
+            try cacheScope?.clean(&state)
+            try JSONEncoder().encode(state).write(to: file,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
     }
     func bind(remoteNoteID: UUID, localNoteID: UUID? = nil) throws -> UUID {
         var state = try load()
@@ -82,6 +94,18 @@ actor CloudJournal {
         state.noteBindings[remoteNoteID] = local
         try save(state)
         return local
+    }
+    func enqueueAdoption(noteID: UUID) throws {
+        var state = try load()
+        guard !state.purgedNoteIDs.contains(noteID) else { throw LifecycleError.unavailable }
+        if (state.adoptions ?? []).contains(where: { $0.noteID == noteID }) { return }
+        state.adoptions = (state.adoptions ?? []) + [.init(id: UUID(), noteID: noteID)]
+        try save(state)
+    }
+    func finishAdoption(id: UUID) throws {
+        var state = try load()
+        state.adoptions?.removeAll { $0.id == id }
+        try save(state)
     }
     func enqueue(_ operation: CloudOperation) throws {
         guard operation.libraryID == libraryID else { throw LibraryDataError.invalidOwnership }

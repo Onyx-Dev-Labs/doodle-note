@@ -301,6 +301,16 @@ final class NoteLibrary {
         return true
     }
 
+    /// Positive permission denial invalidates every account-scoped reader immediately.
+    /// Already-started capture cleanup retains its own narrowly scoped disk recovery path.
+    func revokeAccountAccess(_ identity: LibraryIdentity) {
+        identities.remove(identity)
+        authenticationGeneration = UUID()
+        if catalog.libraries.first(where: { $0.id == selectedLibraryID })?.identity == identity {
+            selectedLibraryID = LibraryRecord.localID
+        }
+    }
+
     func selectLibrary(_ id: UUID) {
         guard libraries.contains(where: { $0.id == id }) else { return }
         selectedLibraryID = id
@@ -369,6 +379,20 @@ final class NoteLibrary {
 
     var cloudRepository: LibraryRepository? { repository }
 
+    func commitCloudImport(decoded: CloudDecodedNote?, remote: CloudRemoteNote, localNoteID: UUID,
+                           libraryID: UUID, identity: LibraryIdentity, expectedLocalRevisionID: UUID?) async throws {
+        guard let repository, identities.contains(identity), !invalidating.contains(localNoteID),
+              !unsavedIDs.contains(localNoteID) else { throw CloudSyncFailure.changed }
+        if let local = notes.first(where: { $0.id == localNoteID }) {
+            guard local.captureState != .recording, local.metadata?.revisionID == expectedLocalRevisionID else { throw CloudSyncFailure.changed }
+        }
+        invalidating.insert(localNoteID)
+        defer { invalidating.remove(localNoteID) }
+        try await repository.cloudImport(decoded: decoded, remote: remote, localNoteID: localNoteID,
+            libraryID: libraryID, identity: identity, expectedLocalRevisionID: expectedLocalRevisionID,
+            readOnly: decoded?.isReadOnly ?? true)
+    }
+
     func refreshAfterCloud(read: (() async throws -> [NoteRecord])? = nil) async throws {
         guard let repository else { throw CloudSyncFailure.unavailable }
         let authentication = authenticationGeneration
@@ -377,7 +401,8 @@ final class NoteLibrary {
         if let read { result = try await read() }
         else { result = try await repository.cloudReload() }
         guard authenticationGeneration == authentication else { throw CloudSyncFailure.signedOut }
-        let changed = Set(notes.filter { before[$0.id] != $0 }.map(\.id)).union(unsavedIDs)
+        let removed = Set(before.keys).subtracting(notes.map(\.id))
+        let changed = Set(notes.filter { before[$0.id] != $0 }.map(\.id)).union(unsavedIDs).union(removed)
         let savedIDs = Set(result.map(\.id))
         notes.removeAll { !savedIDs.contains($0.id) && !changed.contains($0.id) }
         for note in result where !changed.contains(note.id) {

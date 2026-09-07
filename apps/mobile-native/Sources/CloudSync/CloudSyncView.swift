@@ -7,6 +7,9 @@ struct CloudSyncView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var createLibrary = false
     @State private var confirmSignOut = false
+    @State private var legacySelection: Set<UUID> = []
+    @State private var confirmAdoption = false
+    @State private var reviewNote: UUID?
     private var captureActive: Bool { recording.busy || recording.noteID != nil }
 
     var body: some View {
@@ -45,10 +48,52 @@ struct CloudSyncView: View {
                     Button("Connect account") { Task { await cloud.connect(library: library, recording: recording) } }
                         .disabled(cloud.busy || captureActive).accessibilityIdentifier("connectCloudAccount")
                 }
+                if !cloud.report.conflicts.isEmpty {
+                    Section("Versions to review") {
+                        Text("Choose which version becomes current. The other version remains in cloud history.")
+                        ForEach(Array(cloud.report.conflicts).sorted(by: { $0.uuidString < $1.uuidString }), id: \.self) { id in
+                            Button(library.note(id)?.title ?? "Review note") {
+                                reviewNote = id
+                                Task { await cloud.previewConflict(id, library: library) }
+                            }
+                        }
+                        if let id = reviewNote {
+                            Text("Device version").font(.headline)
+                            Text(library.note(id)?.text ?? "This note is unavailable.")
+                            Text("Current cloud version").font(.headline)
+                            Text(cloud.cloudVersionText ?? "Loading version…")
+                            Button("Keep device version as current") { Task { await cloud.resolve(id, keepDevice: true, library: library); reviewNote = nil } }
+                                .disabled(cloud.busy || captureActive)
+                            Button("Use current cloud version") { Task { await cloud.resolve(id, keepDevice: false, library: library); reviewNote = nil } }
+                                .disabled(cloud.busy || captureActive || cloud.cloudVersionText == nil)
+                        }
+                    }
+                }
+                if cloud.connection?.authenticated == true, cloud.connection?.selectedLibraryID != nil {
+                    Section("Existing desktop notes") {
+                        Text("Review and select desktop notes to add to this cloud library. Original IDs and full stored transcripts are retained. Imported legacy notes are read-only.")
+                        Button("Find desktop notes") { Task { legacySelection = []; await cloud.discoverLegacy() } }.disabled(cloud.busy)
+                        if let page = cloud.legacy {
+                            Text("\(page.total) desktop notes available")
+                            ForEach(page.notes) { note in
+                                Toggle(isOn: Binding(get: { legacySelection.contains(note.id) }, set: { selected in
+                                    if selected { legacySelection.insert(note.id) } else { legacySelection.remove(note.id) }
+                                })) {
+                                    VStack(alignment: .leading) { Text(note.title); Text("\(note.transcriptCount) transcript passages").font(.caption) }
+                                }
+                            }
+                            Button("Import selected notes") { confirmAdoption = true }.disabled(legacySelection.isEmpty || cloud.busy)
+                            if page.next != nil { Button("Next page") { Task { legacySelection = []; await cloud.discoverLegacy(next: true) } }.disabled(cloud.busy) }
+                        }
+                    }
+                }
                 if captureActive { Text("Stop recording before changing cloud accounts or libraries.") }
             }
             .navigationTitle("Cloud sync")
             .toolbar { Button("Done") { dismiss() } }
+            .confirmationDialog("Import selected desktop notes?", isPresented: $confirmAdoption, titleVisibility: .visible) {
+                Button("Import selected notes") { Task { await cloud.adopt(Array(legacySelection), library: library); legacySelection = [] } }
+            } message: { Text("These notes will use the shared cloud version history. Older desktop editors cannot overwrite their richer content after import. Local-only mobile notes are unchanged.") }
             .confirmationDialog("Create an empty cloud library?", isPresented: $createLibrary, titleVisibility: .visible) {
                 Button("Create cloud library") { Task { await cloud.select(UUID(), library: library, recording: recording) } }
             } message: { Text("Existing local notes stay in their current library. New notes created in the cloud library will sync when the service is available.") }

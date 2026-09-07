@@ -6,6 +6,7 @@ struct CloudSyncReport: Sendable {
     var conflicts: Set<UUID> = []
     var deferred: Set<UUID> = []
     var hasMore = false
+    var needsFollowup = false
 }
 
 /// Owns one explicitly selected account/library. A persisted page is replayed before fetching
@@ -19,10 +20,13 @@ actor CloudSyncEngine {
     let journal: CloudJournal
     let replica: CloudReplica
     let assets: CloudInkTransfer
+    let cacheScope: CloudCacheScope
+    typealias ImportCommit = @Sendable (CloudDecodedNote?, CloudRemoteNote, UUID, UUID?) async throws -> Void
+    private let commit: ImportCommit?
     private var running = false
 
     init(connection: CloudConnection, connections: CloudConnectionStore, repository: LibraryRepository,
-         transport: any CloudTransport, root: URL) throws {
+         transport: any CloudTransport, root: URL, commit: ImportCommit? = nil) throws {
         guard let library = connection.selectedLibraryID, connection.authenticated, !connection.paused else {
             throw CloudSyncFailure.signedOut
         }
@@ -30,10 +34,12 @@ actor CloudSyncEngine {
         self.connections = connections
         self.repository = repository
         self.transport = transport
+        self.commit = commit
         map = CloudIdentityMap(identity: connection.account.identity, remoteLibraryID: library)
         journal = try CloudJournal(root: root, identity: connection.account.identity, libraryID: library)
-        replica = try CloudReplica(root: journal.directory.appendingPathComponent("replica"))
-        assets = try CloudInkTransfer(root: journal.directory.appendingPathComponent("assets"), libraryID: library)
+        cacheScope = CloudCacheScope(disk: repository.disk, map: map, journalDirectory: journal.directory)
+        replica = try CloudReplica(root: journal.directory.appendingPathComponent("replica"), cacheScope: cacheScope)
+        assets = try CloudInkTransfer(root: journal.directory.appendingPathComponent("assets"), libraryID: library, cacheScope: cacheScope)
     }
 
     private func checkedSecret() async throws -> CloudSecret {
@@ -51,7 +57,9 @@ actor CloudSyncEngine {
         running = true
         defer { running = false }
         try await check()
+        try await journal.protectCaches(cacheScope)
         var report = CloudSyncReport()
+        try await sendAdoptions()
         // Persist current device edits before importing a remote head that may have changed offline.
         try await stageLocalChanges(report: &report)
         try await sendOutbox(report: &report)
@@ -111,6 +119,24 @@ actor CloudSyncEngine {
         try await journal.enqueue(operation)
     }
 
+    func adopt(noteIDs: [UUID]) async throws {
+        try await check()
+        guard noteIDs.count <= 50 else { throw CloudSyncFailure.unsupported }
+        for id in noteIDs { try await journal.enqueueAdoption(noteID: id) }
+    }
+    private func sendAdoptions() async throws {
+        for adoption in try await journal.load().adoptions ?? [] {
+            let response = try await transport.json(path: "api/sync/legacy", method: "POST", body: .object([
+                "libraryId": .uuid(map.remoteLibraryID), "noteId": .uuid(adoption.noteID), "operationId": .uuid(adoption.id)]),
+                secret: checkedSecret())
+            try await check()
+            guard ["ok", "already_adopted", "purged"].contains(response["status"]?.string ?? ""),
+                  try response.requiredUUID("noteId") == adoption.noteID else { throw CloudSyncFailure.changed }
+            if response["status"]?.string == "purged" { try await journal.discardPurgedPayload(noteID: adoption.noteID) }
+            try await journal.finishAdoption(id: adoption.id)
+        }
+    }
+
     private func stageLocalChanges(report: inout CloudSyncReport) async throws {
         let notes = try await repository.cloudReload().filter { $0.metadata?.libraryID == map.localLibraryID }
         var states = try await repository.cloudLifecycles(libraryID: map.localLibraryID, identity: map.identity)
@@ -140,7 +166,7 @@ actor CloudSyncEngine {
             let kind: CloudOperation.Kind
             if local.state != (remote?.state ?? .active) {
                 if local.state == .trashed { kind = .trash }
-                else if local.state == .purged { kind = .purge }
+                else if local.state == .purged { kind = remote?.state == .active ? .trash : .purge }
                 else { kind = .restore }
             } else {
                 guard local.state == .active, let note, note.metadata?.cloudReadOnly != true,
@@ -164,6 +190,7 @@ actor CloudSyncEngine {
                     // The server requires an existing note before reserving private assets. First send
                     // its text revision; the next pass adds the preserved local drawing to that note.
                     inkReferences = []
+                    report.needsFollowup = true
                     report.deferred.insert(local.noteID)
                 }
                 let sources = retained?["sourceVersions"]?.list ?? []
@@ -175,7 +202,7 @@ actor CloudSyncEngine {
             let operation = CloudOperation(id: UUID(), noteID: id, libraryID: map.remoteLibraryID, kind: kind,
                 expectedRevision: remote?.headRevision, expectedGeneration: remote?.generation,
                 deletionID: kind == .trash ? local.deletionID : remote?.deletionID,
-                localRevisionID: note?.metadata?.revisionID, snapshot: snapshot)
+                localRevisionID: note?.metadata?.revisionID, snapshot: snapshot, localGeneration: local.generation)
             try await check()
             try await journal.enqueue(operation)
         }
@@ -184,6 +211,7 @@ actor CloudSyncEngine {
     private func sendOutbox(report: inout CloudSyncReport) async throws {
         for operation in try await journal.load().outbox {
             try await check()
+            if (operation.kind == .upsert || operation.kind == .restore), try cacheScope.locallyPurged(operation.noteID) { continue }
             let response = try await transport.json(path: operation.kind == .choose ? "api/sync/reader" : "api/sync/v2", method: "POST",
                 body: operation.kind == .choose ? operation.wire : .object(["operations": .array([operation.wire])]), secret: checkedSecret())
             try await check()
@@ -206,6 +234,15 @@ actor CloudSyncEngine {
         }
     }
 
+    private func importNote(_ decoded: CloudDecodedNote?, remote: CloudRemoteNote, localID: UUID, expected: UUID?) async throws {
+        if let commit { try await commit(decoded, remote, localID, expected) }
+        else {
+            try await repository.cloudImport(decoded: decoded, remote: remote, localNoteID: localID,
+                libraryID: map.localLibraryID, identity: map.identity,
+                expectedLocalRevisionID: expected, readOnly: decoded?.isReadOnly ?? true)
+        }
+    }
+
     private func importAvailable(report: inout CloudSyncReport) async throws {
         for remote in try await replica.notes() {
             try await check()
@@ -214,12 +251,25 @@ actor CloudSyncEngine {
             let pending = try await journal.load().outbox.contains { $0.noteID == remote.id }
             if remote.state == .purged {
                 try await journal.discardPurgedPayload(noteID: remote.id)
-                try await repository.cloudImport(decoded: nil, remote: remote, localNoteID: localID,
-                    libraryID: map.localLibraryID, identity: map.identity,
-                    expectedLocalRevisionID: local?.metadata?.revisionID, readOnly: true)
+                try await importNote(nil, remote: remote, localID: localID, expected: local?.metadata?.revisionID)
                 continue
             }
             guard !pending else { continue }
+            let localLifecycle = try await repository.cloudLifecycles(libraryID: map.localLibraryID, identity: map.identity)
+                .first { $0.noteID == localID }
+            if let localLifecycle, localLifecycle.state != remote.state,
+               localLifecycle.generation != remote.importedLocalGeneration,
+               localLifecycle.generation != remote.uploadedLocalGeneration {
+                // A newer offline Trash/restore/purge action must reach the server before its older receipt can be imported.
+                report.needsFollowup = true
+                report.deferred.insert(localID)
+                continue
+            }
+            if localLifecycle?.state == .purged {
+                report.needsFollowup = true
+                report.deferred.insert(localID)
+                continue
+            }
             if remote.uploadConflict || (local != nil && local?.metadata?.revisionID != remote.importedLocalRevisionID
                 && local?.metadata?.revisionID != remote.uploadedLocalRevisionID) {
                 report.conflicts.insert(localID)
@@ -240,10 +290,8 @@ actor CloudSyncEngine {
             let decoded = try decoder.decode(snapshot, revisionID: content.id, generation: remote.generation,
                 savedAt: content.createdAt, ink: ink)
             try await check()
-            try await repository.cloudImport(decoded: decoded, remote: remote, localNoteID: localID,
-                libraryID: map.localLibraryID, identity: map.identity,
-                expectedLocalRevisionID: local?.metadata?.revisionID, readOnly: decoded.isReadOnly)
-            try await replica.imported(noteID: remote.id, localRevision: decoded.note.metadata!.revisionID)
+            try await importNote(decoded, remote: remote, localID: localID, expected: local?.metadata?.revisionID)
+            try await replica.imported(noteID: remote.id, localRevision: decoded.note.metadata!.revisionID, generation: remote.generation)
             report.downloaded += 1
         }
     }

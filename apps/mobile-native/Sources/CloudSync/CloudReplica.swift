@@ -17,6 +17,8 @@ struct CloudRemoteNote: Codable, Equatable, Sendable, Identifiable {
     var deletedAt: Date?
     var expiresAt: Date?
     var importedLocalRevisionID: UUID?
+    var importedLocalGeneration: UUID?
+    var uploadedLocalGeneration: UUID?
     var uploadedLocalRevisionID: UUID?
     var uploadedHeadID: UUID?
     var uploadedRevisionID: UUID?
@@ -28,7 +30,9 @@ struct CloudRemoteNote: Codable, Equatable, Sendable, Identifiable {
 /// Purge intent is durable before payload cleanup and survives restarting the app.
 actor CloudReplica {
     let root: URL
-    init(root: URL) throws {
+    let cacheScope: CloudCacheScope?
+    init(root: URL, cacheScope: CloudCacheScope? = nil) throws {
+        self.cacheScope = cacheScope
         self.root = root
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
@@ -50,7 +54,7 @@ actor CloudReplica {
             .compactMap { UUID(uuidString: $0.lastPathComponent) }.compactMap { try note($0) }
     }
     func revisions(_ noteID: UUID) throws -> [CloudRemoteRevision] {
-        guard try note(noteID)?.state != .purged else { return [] }
+        guard try note(noteID)?.state != .purged, try cacheScope?.locallyPurged(noteID) != true else { return [] }
         let directory = folder(noteID).appendingPathComponent("revisions")
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).map {
@@ -60,7 +64,7 @@ actor CloudReplica {
         }.sorted { $0.createdAt < $1.createdAt }
     }
     func content(_ id: UUID, revisionID: UUID? = nil) throws -> CloudRemoteRevision? {
-        guard let state = try note(id), state.state != .purged else { return nil }
+        guard let state = try note(id), state.state != .purged, try cacheScope?.locallyPurged(id) != true else { return nil }
         let versions = try revisions(id)
         var current = revisionID ?? state.headRevision
         var seen: Set<UUID> = []
@@ -72,7 +76,12 @@ actor CloudReplica {
         }
         return nil
     }
-    func accept(_ change: CloudJSON) throws -> CloudRemoteNote {
+    func accept(_ input: CloudJSON) throws -> CloudRemoteNote {
+        try CloudCacheScope.synchronized {
+            try acceptProtected(cacheScope?.redact(input) ?? input)
+        }
+    }
+    private func acceptProtected(_ change: CloudJSON) throws -> CloudRemoteNote {
         let id = try change.requiredUUID("note_id")
         guard let state = NoteLifecycle.State(rawValue: try change.requiredString("state")) else { throw CloudSyncFailure.invalidResponse }
         var value = try note(id) ?? CloudRemoteNote(id: id, headRevision: nil,
@@ -102,9 +111,10 @@ actor CloudReplica {
         }
         return value
     }
-    func imported(noteID: UUID, localRevision: UUID) throws {
+    func imported(noteID: UUID, localRevision: UUID, generation: UUID) throws {
         guard var value = try note(noteID), value.state != .purged else { throw LifecycleError.unavailable }
         value.importedLocalRevisionID = localRevision
+        value.importedLocalGeneration = generation
         try write(value, to: metadata(noteID))
     }
     func uploaded(_ operation: CloudOperation, receipt: CloudJSON) throws {
@@ -115,6 +125,7 @@ actor CloudReplica {
         var value = try note(operation.noteID) ?? CloudRemoteNote(id: operation.noteID, headRevision: nil,
             generation: try receipt.requiredUUID("lifecycleGeneration"), state: .active)
         value.uploadedLocalRevisionID = operation.localRevisionID
+        value.uploadedLocalGeneration = operation.localGeneration
         value.uploadedHeadID = try optionalUUID(receipt, "headRevision")
         value.uploadedRevisionID = try optionalUUID(receipt, "revision")
         value.uploadConflict = status == "conflict"

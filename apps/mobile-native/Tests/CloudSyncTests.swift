@@ -38,6 +38,29 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertEqual(again["passages"], snapshot["passages"])
     }
 
+    func testLegacyDiscoveryRejectsUnrepresentableCounts() {
+        XCTAssertThrowsError(try CloudLegacyPage(.object(["total": .number(1e300), "notes": .array([])])))
+        let invalid: CloudJSON = .object(["total": .number(1), "notes": .array([
+            .object(["id": .uuid(UUID()), "title": .string("Fixture"), "transcript_count": .number(1e300)])])])
+        XCTAssertThrowsError(try CloudLegacyPage(invalid))
+    }
+
+    func testLegacyGeneratedNotesRemainVisibleAndReadOnly() throws {
+        let map = CloudIdentityMap(identity: .init(accountID: "one", workspaceID: "work"), remoteLibraryID: UUID())
+        let noteID = UUID(), revision = UUID()
+        let row: CloudJSON = .object(["legacyMeeting": .object(["title": .string("Legacy title")]),
+            "legacySegments": .array([]), "legacyNotes": .object([
+                "raw_content": .object(["format": .string("markdown"), "markdown": .string("Typed original")]),
+                "enhanced_content": .object(["format": .string("markdown"), "markdown": .string("Generated original")])])])
+        let decoded = try CloudSnapshotDecoder(map: map, remoteNoteID: noteID, localNoteID: map.localNoteID(noteID))
+            .decode(row, revisionID: revision, generation: UUID(), savedAt: Date(), ink: Data())
+        XCTAssertEqual(decoded.note.text, "Typed original")
+        XCTAssertEqual(decoded.note.metadata?.summaries.first?.text, "Generated original")
+        XCTAssertEqual(decoded.note.metadata?.selectedSummaryID, revision)
+        XCTAssertTrue(decoded.isReadOnly)
+        XCTAssertEqual(decoded.note.metadata?.cloudTranscriptStatus, .partial)
+    }
+
     func testFinishedCaptureWithoutTranscriptDoesNotClaimCompletion() throws {
         let map = CloudIdentityMap(identity: .init(accountID: "one", workspaceID: "work"), remoteLibraryID: UUID())
         var note = NoteRecord()

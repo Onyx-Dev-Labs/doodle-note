@@ -106,6 +106,7 @@ extension LibraryRepository {
         var catalog = try readCatalog()
         catalog.jobs.removeAll { $0.noteID == record.noteID && $0.libraryID == record.libraryID }
         try saveCatalog(catalog)
+        try CloudCacheScope.purgeCaches(disk: disk, record: record, catalog: catalog)
         let directory = disk.directory(for: record.noteID)
         if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
         record.cleanupPending = false

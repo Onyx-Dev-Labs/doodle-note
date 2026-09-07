@@ -171,7 +171,7 @@ struct CloudSnapshotDecoder {
         return result
     }
     private func seconds(_ row: CloudJSON, _ field: String) throws -> Double {
-        guard let value = row[field]?.number, value.isFinite, value >= 0, value.rounded() == value else { throw CloudSyncFailure.invalidResponse }
+        guard let value = row[field]?.number, value.isFinite, value >= 0, value <= 9_007_199_254_740_991, value.rounded() == value else { throw CloudSyncFailure.invalidResponse }
         return value / 1000
     }
     private func date(_ value: String) throws -> Date {
@@ -193,6 +193,13 @@ struct CloudSnapshotDecoder {
         note.captureState = .idle
         note.metadata = NoteMetadata(libraryID: map.localLibraryID, lifecycleGeneration: generation, revisionID: revisionID)
         note.metadata?.cloudTranscriptStatus = .partial
+        if let enhanced = row["legacyNotes"]?["enhanced_content"]?["markdown"]?.string, !enhanced.isEmpty {
+            // Existing desktop push stores AI-generated notes in this markdown envelope. No citations are invented.
+            let summary = SummaryVersion(id: revisionID, parentID: nil, createdAt: savedAt, origin: .generated,
+                format: "Imported desktop notes", language: note.language, text: enhanced, sources: [])
+            note.metadata?.summaries = [summary]
+            note.metadata?.selectedSummaryID = summary.id
+        }
         note.passages = try segments.map { segment in
             let id = try segment.requiredUUID("id")
             return TranscriptPassage(id: id, start: try seconds(segment, "start_ms"), end: try seconds(segment, "end_ms"),

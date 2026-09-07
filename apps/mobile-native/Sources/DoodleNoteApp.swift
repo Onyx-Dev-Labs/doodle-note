@@ -56,8 +56,9 @@ struct DoodleNoteApp: App {
                 }
             }
                 .environment(\.locale, Locale(identifier: appLanguage))
-                .task { await calendar?.start(); await cloud?.start(library: library) }
+                .task { await calendar?.start(); await cloud?.start(library: library, recording: recording) }
                 .onChange(of: library.completedWrites) { _, _ in cloud?.schedule(library: library) }
+                .onChange(of: library.storageBusy) { _, busy in if !busy { cloud?.schedule(library: library) } }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
                     Task { await calendar?.refresh(); await calendar?.reconcileReminders() }
                 }
