@@ -3,6 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 
+import { deviceLinkCallback } from "@/lib/device-link-callback";
+
 import { buttonPrimary, inputClass } from "../ui";
 
 function DialogCard({ children }: { children: React.ReactNode }) {
@@ -24,6 +26,7 @@ function DialogCard({ children }: { children: React.ReactNode }) {
 export function LinkDeviceForm({
   port,
   callbackScheme,
+  callbackState,
   personalOrganizationId,
   deviceName,
   email,
@@ -32,6 +35,7 @@ export function LinkDeviceForm({
   port: number | null;
   /** Custom URL scheme callback for mobile apps (e.g. "doodlenote"). */
   callbackScheme?: string | null;
+  callbackState?: string | null;
   personalOrganizationId: string | null;
   deviceName: string;
   email: string;
@@ -57,6 +61,7 @@ export function LinkDeviceForm({
         organizationId,
         deviceName,
         platform: callbackScheme ? "ios" : "desktop",
+        ...(callbackScheme ? { state: callbackState, purpose: "native-library" } : {}),
       }),
     });
     const body = await response.json();
@@ -85,14 +90,15 @@ export function LinkDeviceForm({
       return;
     }
     setDone(true);
-    const params = new URLSearchParams({
-      token: body.token,
-      email: body.email,
-      workspace: body.workspaceName,
-    });
-    window.location.href = callbackScheme
-      ? `${callbackScheme}://link?${params}`
-      : `http://127.0.0.1:${port}/callback?${params}`;
+    try {
+      window.location.href = deviceLinkCallback({
+        port, scheme: callbackScheme, state: callbackState,
+        token: body.token, email: body.email, workspaceName: body.workspaceName,
+      });
+    } catch {
+      setDone(false);
+      setError("Could not return to the device. Start linking again from the app.");
+    }
   }
 
   if (!hasCallback) {
