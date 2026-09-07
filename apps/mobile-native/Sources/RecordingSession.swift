@@ -16,6 +16,8 @@ final class RecordingSession {
     private var writer: AudioChunkWriter?
     private var captureFailed = false
     private var canceled = false
+    private var previousTranscriptComplete = false
+    private var speechStarted = false
     #if DEBUG
     private var fixturePermission: FixtureCapturePermission?
     func allowFixtureCapture() { fixturePermission?.allow() }
@@ -81,10 +83,12 @@ final class RecordingSession {
             self.hardware = hardware
             installObservers(hardware, library: library, token: token)
             let offset = try disk.recordingOffset(for: id)
+            previousTranscriptComplete = offset == 0 || note.metadata?.cloudTranscriptStatus == .complete
             let speechFeed = analysisEnabled ? await speech.start(language: note.language, offset: offset) { [weak self] passage in
                 guard self?.attemptID == token else { return }
-                library.update(id) { $0.apply(passage) }
+                library.update(id) { if !$0.apply(passage) { $0.transcriptNeedsReview = true } }
             } : nil
+            speechStarted = speechFeed != nil
             finishPendingFeeds = { speechFeed?.1.finish() }
             guard valid(token, id, library) else {
                 speechFeed?.1.finish()
@@ -100,7 +104,11 @@ final class RecordingSession {
                 }
             } : nil
             finishPendingFeeds = { speechFeed?.1.finish(); speakerFeed?.finish() }
-            guard valid(token, id, library), library.update(id, { $0.captureState = .recording }) else {
+            guard valid(token, id, library), library.update(id, {
+                $0.captureState = .recording
+                $0.metadata?.cloudTranscriptStatus = .partial
+                $0.speechSessions = ($0.speechSessions ?? []) + [.init(id: token, start: offset, end: nil, language: note.language)]
+            }) else {
                 speechFeed?.1.finish(); speakerFeed?.finish()
                 await abandon(id, library: library)
                 return
@@ -152,7 +160,7 @@ final class RecordingSession {
         writer = nil
         hardware?.deactivate(); hardware = nil
         if library.note(id)?.captureState == .recording {
-            library.update(id) { $0.captureState = .interrupted }
+            library.update(id) { $0.captureState = .interrupted; $0.metadata?.cloudTranscriptStatus = .interrupted }
             await library.flush()
         }
         if let closingWriter { _ = await closingWriter.finishAnalysis() }
@@ -188,7 +196,7 @@ final class RecordingSession {
         library.update(id) { $0.captureState = (interrupted || captureFailed) ? .interrupted : .finished }
         if !(await library.flush(noteID: id)) {
             problem = "Audio capture stopped, but its note status could not be saved. Keep the app open and retry saving."
-            library.update(id) { $0.captureState = .interrupted }
+            library.update(id) { $0.captureState = .interrupted; $0.metadata?.cloudTranscriptStatus = .interrupted }
             await library.flush(noteID: id)
         }
         hardware?.deactivate(); hardware = nil
@@ -196,7 +204,18 @@ final class RecordingSession {
             speech.fail("Transcription processing timed out. Source audio is preserved.")
             speakers.fail("Speaker processing timed out. Source audio is preserved.")
         }
-        await speech.finish(); await speakers.finish()
+        let speechComplete = await speech.finish()
+        await speakers.finish()
+        let endpoint = try? library.disk?.recordingOffset(for: id)
+        library.update(id) { note in
+            note.metadata?.cloudTranscriptStatus = !interrupted && !captureFailed && previousTranscriptComplete && speechStarted && speechComplete && note.transcriptNeedsReview != true && note.passages.allSatisfy(\.isFinal) ? .complete : .interrupted
+            if let index = note.speechSessions?.firstIndex(where: { $0.id == attemptID }) {
+                note.speechSessions?[index].end = endpoint
+            }
+        }
+        if !(await library.flush(noteID: id)), problem == nil {
+            problem = "Transcription is incomplete. Saved audio and corrections are preserved."
+        }
         noteID = nil; startedAt = nil; attemptID = nil
     }
 

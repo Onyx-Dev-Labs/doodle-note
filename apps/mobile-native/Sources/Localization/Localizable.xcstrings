@@ -12156,6 +12156,461 @@
           }
         }
       }
+    },
+    "Transcript processing complete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript processing complete"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transskriptionen er færdig"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transcripción procesada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transcription terminée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transkription abgeschlossen"
+          }
+        }
+      }
+    },
+    "Transcript may be incomplete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript may be incomplete"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transskriptionen kan være ufuldstændig"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La transcripción puede estar incompleta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La transcription peut être incomplète"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Transkription ist möglicherweise unvollständig"
+          }
+        }
+      }
+    },
+    "Cancel transcription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel transcription"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Annuller transskription"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cancelar transcripción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Annuler la transcription"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transkription abbrechen"
+          }
+        }
+      }
+    },
+    "Retry saved audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry saved audio"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Prøv gemt lyd igen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Reintentar audio guardado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Réessayer l’audio enregistré"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeichertes Audio erneut verarbeiten"
+          }
+        }
+      }
+    },
+    "Correct transcript": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Correct transcript"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ret transskription"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Corregir transcripción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Corriger la transcription"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transkript korrigieren"
+          }
+        }
+      }
+    },
+    "Save correction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save correction"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gem rettelse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Guardar corrección"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Enregistrer la correction"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Korrektur speichern"
+          }
+        }
+      }
+    },
+    "User correction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User correction"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Brugerrettelse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Corrección del usuario"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Correction utilisateur"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Benutzerkorrektur"
+          }
+        }
+      }
+    },
+    "Corrections were preserved across changed transcript boundaries. Review the transcript.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Corrections were preserved across changed transcript boundaries. Review the transcript."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Rettelser blev bevaret ved ændrede tekstgrænser. Gennemgå transskriptionen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se conservaron las correcciones al cambiar los límites. Revisa la transcripción."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les corrections ont été conservées malgré les changements de limites. Vérifiez la transcription."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Korrekturen wurden trotz geänderter Textgrenzen beibehalten. Prüfe das Transkript."
+          }
+        }
+      }
+    },
+    "The speech model is unavailable for this recording language. Check model readiness before retrying.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The speech model is unavailable for this recording language. Check model readiness before retrying."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Talemodellen er ikke tilgængelig for optagelsens sprog. Kontrollér modellen før et nyt forsøg."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "El modelo de voz no está disponible para este idioma de grabación. Comprueba el modelo antes de reintentar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le modèle vocal est indisponible pour la langue de cet enregistrement. Vérifiez sa disponibilité avant de réessayer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Das Sprachmodell ist für diese Aufnahmesprache nicht verfügbar. Prüfe das Modell vor einem erneuten Versuch."
+          }
+        }
+      }
+    },
+    "Transcription is incomplete. Saved audio and corrections are preserved.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcription is incomplete. Saved audio and corrections are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transskriptionen er ufuldstændig. Gemt lyd og rettelser er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La transcripción está incompleta. Se conservan el audio guardado y las correcciones."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La transcription est incomplète. L’audio enregistré et les corrections sont conservés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Transkription ist unvollständig. Gespeichertes Audio und Korrekturen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "The recording changed during processing. Retry from its saved audio.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The recording changed during processing. Retry from its saved audio."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelsen blev ændret under behandlingen. Prøv igen fra den gemte lyd."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "La grabación cambió durante el procesamiento. Reintenta desde el audio guardado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’enregistrement a changé pendant le traitement. Réessayez à partir de l’audio enregistré."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Aufnahme wurde während der Verarbeitung geändert. Versuche es mit dem gespeicherten Audio erneut."
+          }
+        }
+      }
+    },
+    "Transcription canceled. Saved audio and corrections are preserved.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcription canceled. Saved audio and corrections are preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transskription annulleret. Gemt lyd og rettelser er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transcripción cancelada. Se conservan el audio guardado y las correcciones."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transcription annulée. L’audio enregistré et les corrections sont conservés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Transkription abgebrochen. Gespeichertes Audio und Korrekturen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "The original passage changed. Your correction is still here; copy it before reopening the updated passage.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The original passage changed. Your correction is still here; copy it before reopening the updated passage."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den oprindelige passage blev ændret. Din rettelse er stadig her; kopiér den, før du åbner den opdaterede passage."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "El pasaje original cambió. Tu corrección sigue aquí; cópiala antes de abrir el pasaje actualizado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Le passage original a changé. Votre correction est conservée ici ; copiez-la avant de rouvrir le passage mis à jour."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die ursprüngliche Passage wurde geändert. Deine Korrektur ist noch hier; kopiere sie, bevor du die aktualisierte Passage öffnest."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
