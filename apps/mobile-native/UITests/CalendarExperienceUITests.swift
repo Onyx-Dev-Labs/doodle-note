@@ -16,7 +16,8 @@ import XCTest
         XCTAssertTrue(app.textViews["personalNotes"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["recordButton"].exists)
         XCTAssertFalse(app.buttons["Stop recording"].exists)
-        if !app.buttons["calendarSettings"].isHittable { app.navigationBars.buttons.firstMatch.tap() }
+        if !app.buttons["libraryOptions"].isHittable { app.navigationBars.buttons.firstMatch.tap() }
+        app.buttons["libraryOptions"].tap()
         app.buttons["calendarSettings"].tap()
         let reminders = app.switches["calendarReminders"]
         for _ in 0..<4 where !reminders.exists || !reminders.isHittable { app.swipeUp() }

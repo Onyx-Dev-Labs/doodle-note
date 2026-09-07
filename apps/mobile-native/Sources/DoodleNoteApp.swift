@@ -4,6 +4,8 @@ import SwiftUI
 struct DoodleNoteApp: App {
     @State private var library: NoteLibrary
     @State private var recording = RecordingSession()
+    @AppStorage("mobileSetupComplete") private var setupComplete = false
+    @AppStorage("appLanguage") private var appLanguage = SpokenLanguage.english.rawValue
     @State private var calendar: CalendarCoordinator?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -11,6 +13,10 @@ struct DoodleNoteApp: App {
         let base = URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteNative", isDirectory: true)
         #if DEBUG
         let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        if testing && ProcessInfo.processInfo.arguments.contains("--first-run-fixture") {
+            UserDefaults.standard.set(false, forKey: "mobileSetupComplete")
+            UserDefaults.standard.set(SpokenLanguage.english.rawValue, forKey: "appLanguage")
+        }
         let storageFixture = testing && ProcessInfo.processInfo.arguments.contains("--storage-fixture")
         let fixtureArgument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--fixture-id=") })
         let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
@@ -30,9 +36,24 @@ struct DoodleNoteApp: App {
         #endif
     }
 
+    private var skipSetupForTesting: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--ui-testing") && !ProcessInfo.processInfo.arguments.contains("--first-run-fixture")
+        #else
+        false
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
-            LibraryView(library: library, recording: recording, calendar: calendar)
+            Group {
+                if setupComplete || skipSetupForTesting {
+                    LibraryView(library: library, recording: recording, calendar: calendar)
+                } else {
+                    FirstRunView { setupComplete = true }
+                }
+            }
+                .environment(\.locale, Locale(identifier: appLanguage))
                 .task { await calendar?.start() }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
                     Task { await calendar?.refresh(); await calendar?.reconcileReminders() }
@@ -68,6 +89,7 @@ struct LibraryView: View {
     @State private var folderName = ""
     @State private var creatingFolder = false
     @State private var showStorage = false
+    @State private var showModels = false
     @State private var showCalendars = false
 
     private var visibleNotes: [NoteRecord] {
@@ -117,11 +139,18 @@ struct LibraryView: View {
                 }
             }
             .toolbar {
-                Button("Calendars", systemImage: "calendar") { showCalendars = true }.accessibilityIdentifier("calendarSettings")
-                Button("Storage & Trash", systemImage: "trash") { showStorage = true }
-                Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
-                Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
-                    .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New note", systemImage: "square.and.pencil") { selection = library.create() }
+                        .disabled(library.disk == nil || library.loading).accessibilityIdentifier("newNote")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("Options", systemImage: "ellipsis.circle") {
+                        Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
+                        Button("Calendars", systemImage: "calendar") { showCalendars = true }.accessibilityIdentifier("calendarSettings")
+                        Button("Models", systemImage: "arrow.down.circle") { showModels = true }
+                        Button("Storage & Trash", systemImage: "trash") { showStorage = true }
+                    }.accessibilityIdentifier("libraryOptions")
+                }
             }
         } detail: {
             if let selection, library.note(selection) != nil {
@@ -131,6 +160,7 @@ struct LibraryView: View {
                     description: Text("Your notes stay on this device. No account is required."))
             }
         }
+        .sheet(isPresented: $showModels) { ModelSettingsView(recording: recording) }
         .sheet(isPresented: $showCalendars) {
             if let calendar { CalendarSettingsView(calendar: calendar) }
             else { ContentUnavailableView("Calendars unavailable", systemImage: "calendar", description: Text("Calendar storage could not be opened. Restart the app to retry.")) }
