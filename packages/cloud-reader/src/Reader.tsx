@@ -389,6 +389,11 @@ export function Reader({ transport }: { transport: ReaderTransport }) {
                 </section>
                 <section style={panel}>
                   <h3>Transcript</h3>
+              {snapshot.transcriptStatus !== "complete" && (
+                <p role="status">{snapshot.transcriptStatus === "interrupted"
+                  ? "This transcript was interrupted and may be incomplete."
+                  : "Transcript completion has not been confirmed."}</p>
+              )}
                   <p>
                     Audio playback is unavailable here; audio is not synced.
                   </p>

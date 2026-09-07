@@ -8,7 +8,7 @@ struct CloudProjection {
     let remoteNoteID: UUID
 
     func snapshot(note: NoteRecord, retained: [NoteRevision], inkReferences: [CloudJSON],
-                  retainedWireSources: [UUID: CloudJSON] = [:]) throws -> CloudJSON {
+                  retainedWireSources: [UUID: CloudJSON] = [:], remoteFolderID: UUID? = nil) throws -> CloudJSON {
         guard let metadata = note.metadata, metadata.libraryID == map.localLibraryID,
               note.passages.count <= 20_000, note.text.utf16.count <= 500_000, metadata.summaries.count <= 100, inkReferences.count <= 1000 else {
             throw CloudSyncFailure.unsupported
@@ -44,6 +44,7 @@ struct CloudProjection {
         }
         var value: [String: CloudJSON] = ["title": .string(note.title),
             "kind": .string(note.captureState == .idle && note.passages.isEmpty ? "note" : "meeting"),
+            "transcriptStatus": .string(transcriptStatus(note)),
             "createdAt": .string(date(note.createdAt)), "language": .string(note.language.rawValue), "text": .string(note.text),
             "sourceRevisionId": .uuid(current.id), "sourceVersions": .array(sources),
             "selectedSummaryId": metadata.selectedSummaryID.map(CloudJSON.uuid) ?? .null,
@@ -54,10 +55,19 @@ struct CloudProjection {
             value["event"] = .object(["provider": .string(event.provider), "accountId": .string(event.accountID),
                 "calendarId": .string(event.calendarID), "eventId": .string(event.eventID), "occurrenceId": .string(event.occurrenceID)])
         }
-        // Folder ownership needs an explicit remote folder binding; local folder UUIDs are never sent as remote ownership.
+        // Preserve existing remote folder membership without sending local UUIDs as remote ownership.
+        if let remoteFolderID { value["folderId"] = .uuid(remoteFolderID) }
         let result = CloudJSON.object(value)
         guard try result.data().count < 1_990_000 else { throw CloudSyncFailure.unsupported }
         return result
+    }
+
+    private func transcriptStatus(_ note: NoteRecord) -> String {
+        if note.captureState == .idle, let imported = note.metadata?.cloudTranscriptStatus { return imported.rawValue }
+        if note.captureState == .interrupted { return "interrupted" }
+        if note.captureState == .finished && !note.passages.isEmpty && note.passages.allSatisfy(\.isFinal) { return "complete" }
+        if note.captureState == .idle && note.passages.isEmpty { return "none" }
+        return "partial"
     }
 
     private func sourceVersion(_ revision: NoteRevision) throws -> CloudJSON {
@@ -82,7 +92,7 @@ struct CloudProjection {
         }
         let passages = try revision.passages.map { passage -> CloudJSON in
             var row: [String: CloudJSON] = ["id": .uuid(passage.id), "sourceId": .uuid(passage.id),
-                "text": .string(passage.text), "startMs": .number(try milliseconds(passage.start)),
+                "text": .string(passage.text), "isFinal": .bool(passage.isFinal), "startMs": .number(try milliseconds(passage.start)),
                 "endMs": .number(try milliseconds(passage.end))]
             if let key = assignedSpeaker(passage, annotations: annotations), let id = identifiers[key] {
                 row["speakerId"] = .uuid(id)

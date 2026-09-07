@@ -7,6 +7,7 @@ struct DoodleNoteApp: App {
     @AppStorage("mobileSetupComplete") private var setupComplete = false
     @AppStorage("appLanguage") private var appLanguage = SpokenLanguage.english.rawValue
     @State private var calendar: CalendarCoordinator?
+    @State private var cloud: CloudSyncCoordinator?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -29,6 +30,7 @@ struct DoodleNoteApp: App {
         let root = base
         #endif
         _library = State(initialValue: NoteLibrary(root: root))
+        _cloud = State(initialValue: try? CloudSyncCoordinator(root: root))
         #if DEBUG
         _calendar = State(initialValue: calendarFixture ? try? CalendarUIFixture.make(root: root) : try? CalendarAppFactory.make(root: root))
         #else
@@ -48,13 +50,14 @@ struct DoodleNoteApp: App {
         WindowGroup {
             Group {
                 if setupComplete || skipSetupForTesting {
-                    LibraryView(library: library, recording: recording, calendar: calendar)
+                    LibraryView(library: library, recording: recording, calendar: calendar, cloud: cloud)
                 } else {
                     FirstRunView { setupComplete = true }
                 }
             }
                 .environment(\.locale, Locale(identifier: appLanguage))
-                .task { await calendar?.start() }
+                .task { await calendar?.start(); await cloud?.start(library: library) }
+                .onChange(of: library.completedWrites) { _, _ in cloud?.schedule(library: library) }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
                     Task { await calendar?.refresh(); await calendar?.reconcileReminders() }
                 }
@@ -65,6 +68,7 @@ struct DoodleNoteApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        cloud?.schedule(library: library)
                         Task { await calendar?.refresh(); await calendar?.reconcileReminders() }
                         Task { await library.processRetention(captureActive: recording.busy || recording.noteID != nil) }
                     } else {
@@ -83,6 +87,7 @@ struct LibraryView: View {
     @Bindable var library: NoteLibrary
     @Bindable var recording: RecordingSession
     var calendar: CalendarCoordinator?
+    var cloud: CloudSyncCoordinator?
     @State private var selection: UUID?
     @State private var search = ""
     @State private var folderID: UUID?
@@ -91,6 +96,7 @@ struct LibraryView: View {
     @State private var showStorage = false
     @State private var showModels = false
     @State private var showCalendars = false
+    @State private var showCloud = false
 
     private var visibleNotes: [NoteRecord] {
         library.visibleNotes.filter { note in
@@ -147,6 +153,7 @@ struct LibraryView: View {
                     Menu("Options", systemImage: "ellipsis.circle") {
                         Button("New folder", systemImage: "folder.badge.plus") { creatingFolder = true }
                         Button("Calendars", systemImage: "calendar") { showCalendars = true }.accessibilityIdentifier("calendarSettings")
+                        Button("Cloud sync", systemImage: "arrow.triangle.2.circlepath.icloud") { showCloud = true }
                         Button("Models", systemImage: "arrow.down.circle") { showModels = true }
                         Button("Storage & Trash", systemImage: "trash") { showStorage = true }
                     }.accessibilityIdentifier("libraryOptions")
@@ -159,6 +166,10 @@ struct LibraryView: View {
                 ContentUnavailableView("Choose a note", systemImage: "note.text",
                     description: Text("Your notes stay on this device. No account is required."))
             }
+        }
+        .sheet(isPresented: $showCloud) {
+            if let cloud { CloudSyncView(cloud: cloud, library: library, recording: recording) }
+            else { ContentUnavailableView("Cloud sync unavailable", systemImage: "icloud.slash", description: Text("Cloud settings could not be opened. Your notes remain on this device.")) }
         }
         .sheet(isPresented: $showModels) { ModelSettingsView(recording: recording) }
         .sheet(isPresented: $showCalendars) {

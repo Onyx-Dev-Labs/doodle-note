@@ -101,6 +101,7 @@ actor CloudConnectionStore {
               connection.generation == expectedGeneration else { throw CloudSyncFailure.signedOut }
         // A newly created empty cloud library is permitted; server enforces immutable workspace ownership on first upsert.
         connection.selectedLibraryID = libraryID
+        connection.generation = UUID()
         connection.paused = false
         try save(connection)
         return connection

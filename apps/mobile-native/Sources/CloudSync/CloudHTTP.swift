@@ -18,8 +18,23 @@ struct CloudAccount: Codable, Equatable, Sendable {
     }
 }
 
+protocol CloudTransport: Sendable {
+    func request(path: String, method: String, query: [URLQueryItem], body: Data?, contentType: String,
+                 secret: CloudSecret, maxBytes: Int) async throws -> Data
+}
+
+extension CloudTransport {
+    func json(path: String, method: String = "GET", query: [URLQueryItem] = [], body: CloudJSON? = nil,
+              secret: CloudSecret) async throws -> CloudJSON {
+        let bytes = try await request(path: path, method: method, query: query, body: body?.data(),
+                                      contentType: "application/json", secret: secret, maxBytes: 4_000_000)
+        do { return try JSONDecoder().decode(CloudJSON.self, from: bytes) }
+        catch { throw CloudSyncFailure.invalidResponse }
+    }
+}
+
 /// Transport has a fixed HTTPS origin, no redirect forwarding, no cookies and no disk cache.
-final class CloudHTTP: NSObject, URLSessionTaskDelegate, Sendable {
+final class CloudHTTP: NSObject, URLSessionTaskDelegate, CloudTransport {
     let origin: URL
     init(origin: URL = URL(string: "https://www.doodlenote.ai")!) throws {
         _ = try CloudLinkAttempt(baseURL: origin)

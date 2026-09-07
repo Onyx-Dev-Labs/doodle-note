@@ -101,7 +101,7 @@ extension LibraryRepository {
         return record
     }
 
-    private func finishPurge(_ record: inout NoteLifecycle, beforeRemoval: (@Sendable () throws -> Void)? = nil) throws {
+    func finishPurge(_ record: inout NoteLifecycle, beforeRemoval: (@Sendable () throws -> Void)? = nil) throws {
         try beforeRemoval?()
         var catalog = try readCatalog()
         catalog.jobs.removeAll { $0.noteID == record.noteID && $0.libraryID == record.libraryID }

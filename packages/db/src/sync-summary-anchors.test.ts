@@ -20,3 +20,21 @@ test('native title and immutable-summary sources validate without rewriting note
   const foreign=structuredClone(operation);foreign.snapshot!.summaries[1]!.sources[0]!.libraryId=randomUUID();
   assert.throws(()=>validateSyncOperation(foreign),/source_scope/);
 });
+
+test('transcript completion and provisional passages survive validation without implying finality', () => {
+  const libraryId = randomUUID(), noteId = randomUUID(), sourceId = randomUUID();
+  const passages = [{id: randomUUID(), sourceId: randomUUID(), startMs: 0, endMs: 1000, text: 'Provisional', isFinal: false}];
+  const operation: SyncOperation = {protocolVersion: 2, libraryId, noteId, operationId: randomUUID(),
+    expectedRevision: null, expectedLifecycleGeneration: null, kind: 'upsert', snapshot: {
+      title: 'Interrupted meeting', kind: 'meeting', transcriptStatus: 'interrupted', createdAt: '2026-09-07',
+      language: 'en-US', text: 'Typed notes remain usable', passages, speakers: [], summaries: [], selectedSummaryId: null, inkAttachments: [],
+      sourceRevisionId: sourceId, sourceVersions: [{id: sourceId, title: 'Interrupted meeting', text: 'Typed notes remain usable', passages, speakers: []}]
+    }};
+  assert.deepEqual(validateSyncOperation(operation), operation);
+  const absent = structuredClone(operation);
+  delete absent.snapshot!.transcriptStatus;
+  delete absent.snapshot!.passages[0]!.isFinal;
+  delete absent.snapshot!.sourceVersions[0]!.passages[0]!.isFinal;
+  assert.deepEqual(validateSyncOperation(absent), absent, 'old payloads remain absent, never upgraded to complete');
+  assert.throws(() => validateSyncOperation({...operation, snapshot: {...operation.snapshot, transcriptStatus: 'recording_audio'}}), /invalid_transcript_status/);
+});

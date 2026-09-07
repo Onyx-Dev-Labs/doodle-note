@@ -52,7 +52,7 @@ indirect enum CloudJSON: Codable, Equatable, Sendable {
 }
 
 struct CloudOperation: Codable, Equatable, Sendable, Identifiable {
-    enum Kind: String, Codable, Sendable { case upsert, trash, restore, purge }
+    enum Kind: String, Codable, Sendable { case upsert, trash, restore, purge, choose }
     let id: UUID
     let noteID: UUID
     let libraryID: UUID
@@ -62,11 +62,14 @@ struct CloudOperation: Codable, Equatable, Sendable, Identifiable {
     let deletionID: UUID?
     let localRevisionID: UUID?
     let snapshot: CloudJSON?
+    var selectedRevision: UUID? = nil
     var wire: CloudJSON {
         var value: [String: CloudJSON] = ["protocolVersion": .number(2), "operationId": .uuid(id),
             "noteId": .uuid(noteID), "libraryId": .uuid(libraryID), "kind": .string(kind.rawValue),
             "expectedRevision": expectedRevision.map(CloudJSON.uuid) ?? .null,
             "expectedLifecycleGeneration": expectedGeneration.map(CloudJSON.uuid) ?? .null]
+        if kind == .choose { value.removeValue(forKey: "protocolVersion") }
+        if let selectedRevision { value["selectedRevision"] = .uuid(selectedRevision) }
         if let deletionID { value["deletionId"] = .uuid(deletionID) }
         if let snapshot { value["snapshot"] = snapshot }
         return .object(value)

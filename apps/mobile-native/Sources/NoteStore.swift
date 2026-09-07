@@ -24,7 +24,8 @@ struct NoteDiskStore: Sendable {
         return url
     }
 
-    func save(_ note: NoteRecord, migrationOriginal: Data? = nil, restoring: Bool = false) throws {
+    func save(_ note: NoteRecord, migrationOriginal: Data? = nil, restoring: Bool = false, cloudImport: Bool = false) throws {
+        if !cloudImport, note.metadata?.cloudReadOnly == true { throw CloudSyncFailure.unsupported }
         if note.schemaVersion == 2 {
             if restoring {
                 guard let metadata = note.metadata else { throw LibraryDataError.invalidDocument }
@@ -131,7 +132,7 @@ struct NoteDiskStore: Sendable {
         return revision
     }
 
-    func load(persistRecovery: ((NoteRecord) throws -> Void)? = nil, beforeMigrationCommit: (() throws -> Void)? = nil) throws
+    func load(persistRecovery: ((NoteRecord) throws -> Void)? = nil, beforeMigrationCommit: (() throws -> Void)? = nil, recoverRecording: Bool = true) throws
         -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String], recoveryWriteProblems: [String], migrationProblems: [String]) {
         let dirs = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         var notes: [NoteRecord] = []
@@ -164,9 +165,11 @@ struct NoteDiskStore: Sendable {
                 }
                 guard let metadata = note.metadata else { throw LibraryDataError.invalidDocument }
                 _ = try lifecycle(noteID: note.id, libraryID: metadata.libraryID)
-                let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
-                audioProblems.append(contentsOf: recovery.unreadable)
-                if note.captureState == .recording {
+                if recoverRecording {
+                    let recovery = AudioRecovery.recover(directory: dir.appendingPathComponent("audio"))
+                    audioProblems.append(contentsOf: recovery.unreadable)
+                }
+                if recoverRecording && note.captureState == .recording {
                     note.captureState = .interrupted
                     do {
                         if let persistRecovery { try persistRecovery(note) }
@@ -321,6 +324,7 @@ final class NoteLibrary {
 
     @discardableResult func update(_ id: UUID, _ change: (inout NoteRecord) -> Void) -> Bool {
         guard let original = note(id), let i = notes.firstIndex(where: { $0.id == id }) else { return false }
+        guard original.metadata?.cloudReadOnly != true else { problem = CloudSyncFailure.unsupported.localizedDescription; return false }
         var note = original
         change(&note)
         guard note.id == original.id, note.metadata?.libraryID == original.metadata?.libraryID,
@@ -361,6 +365,27 @@ final class NoteLibrary {
             pendingSaves = 0
             saveTask = nil
         }
+    }
+
+    var cloudRepository: LibraryRepository? { repository }
+
+    func refreshAfterCloud(read: (() async throws -> [NoteRecord])? = nil) async throws {
+        guard let repository else { throw CloudSyncFailure.unavailable }
+        let authentication = authenticationGeneration
+        let before = Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0) })
+        let result: [NoteRecord]
+        if let read { result = try await read() }
+        else { result = try await repository.cloudReload() }
+        guard authenticationGeneration == authentication else { throw CloudSyncFailure.signedOut }
+        let changed = Set(notes.filter { before[$0.id] != $0 }.map(\.id)).union(unsavedIDs)
+        let savedIDs = Set(result.map(\.id))
+        notes.removeAll { !savedIDs.contains($0.id) && !changed.contains($0.id) }
+        for note in result where !changed.contains(note.id) {
+            if let index = notes.firstIndex(where: { $0.id == note.id }) { notes[index] = note }
+            else { notes.append(note) }
+        }
+        await refreshCatalog()
+        await refreshLifecycle()
     }
 
     @discardableResult func flush() async -> Bool {

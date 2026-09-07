@@ -19,6 +19,54 @@ final class CloudSyncTests: XCTestCase {
         XCTAssertNil(snapshot["audio"])
         XCTAssertNil(snapshot["voiceProfiles"])
     }
+    func testTranscriptCompletionRoundTripKeepsProvisionalTextAndLocalAudioStateSeparate() throws {
+        let map = CloudIdentityMap(identity: .init(accountID: "one", workspaceID: "work"), remoteLibraryID: UUID())
+        let remote = UUID()
+        var note = NoteRecord()
+        note.metadata?.libraryID = map.localLibraryID
+        note.captureState = .interrupted
+        note.passages = [.init(start: 0, end: 1, text: "Provisional phrase", isFinal: false),
+                         .init(start: 1, end: 2, text: "Final phrase", isFinal: true)]
+        let snapshot = try CloudProjection(map: map, remoteNoteID: remote).snapshot(note: note, retained: [], inkReferences: [])
+        let decoder = CloudSnapshotDecoder(map: map, remoteNoteID: remote, localNoteID: map.localNoteID(remote))
+        let decoded = try decoder.decode(snapshot, revisionID: UUID(), generation: UUID(), savedAt: Date(), ink: Data())
+        XCTAssertEqual(decoded.note.metadata?.cloudTranscriptStatus, .interrupted)
+        XCTAssertEqual(decoded.note.captureState, .idle)
+        XCTAssertEqual(decoded.note.passages.map(\.isFinal), [false, true])
+        let again = try CloudProjection(map: map, remoteNoteID: remote).snapshot(note: decoded.note, retained: decoded.sources, inkReferences: [])
+        XCTAssertEqual(again["transcriptStatus"], .string("interrupted"))
+        XCTAssertEqual(again["passages"], snapshot["passages"])
+    }
+
+    func testFinishedCaptureWithoutTranscriptDoesNotClaimCompletion() throws {
+        let map = CloudIdentityMap(identity: .init(accountID: "one", workspaceID: "work"), remoteLibraryID: UUID())
+        var note = NoteRecord()
+        note.metadata?.libraryID = map.localLibraryID
+        note.captureState = .finished
+        let snapshot = try CloudProjection(map: map, remoteNoteID: UUID()).snapshot(note: note, retained: [], inkReferences: [])
+        XCTAssertEqual(snapshot["transcriptStatus"], .string("partial"))
+    }
+
+    func testPurgeRedactsPendingPageAndRestartFinishesRedactedPage() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let identity = LibraryIdentity(accountID: "one", workspaceID: "work"), library = UUID(), note = UUID()
+        let journal = try CloudJournal(root: root, identity: identity, libraryID: library)
+        let page = try CloudPage(.object(["protocolVersion": .number(2), "cursor": .string("next"), "hasMore": .bool(false),
+            "changes": .array([.object(["note_id": .uuid(note), "state": .string("active"),
+                                      "snapshot": .object(["text": .string("Synthetic private draft")])])])]))
+        try await journal.stage(page)
+        try await journal.discardPurgedPayload(noteID: note)
+        let reopened = try CloudJournal(root: root, identity: identity, libraryID: library)
+        let pending = try await reopened.load().pendingPage
+        XCTAssertEqual(pending?.changes.first?["snapshot"], .null)
+        XCTAssertNotEqual(pending, page)
+        try await reopened.finishPage(expected: XCTUnwrap(pending))
+        let state = try await reopened.load()
+        XCTAssertEqual(state.cursor, "next")
+        XCTAssertNil(state.pendingPage)
+    }
+
     func testSharedWorkspaceUsesSeparateLocalIDsAndRejectsBindingCollisions() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
