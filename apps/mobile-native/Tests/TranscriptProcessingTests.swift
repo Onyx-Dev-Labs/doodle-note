@@ -200,6 +200,44 @@ final class TranscriptMergeTests: XCTestCase {
         XCTAssertEqual(try SavedSpeechGroup.make(plan: gap, sessions: [], fallback: .spanish).count, 2)
     }
 
+    func testInFlightTranscriptOrLegacyLanguageChangesRejectRetryButPersonalEditsRemainAllowed() async throws {
+        for change in ["transcript", "language", "personal"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let library = NoteLibrary(root: root); await library.waitUntilLoaded()
+            let id = try XCTUnwrap(library.create())
+            library.update(id) { $0.passages = [.init(start: 0, end: 1, text: "Original recognition", isFinal: true)] }
+            _ = await library.flush(noteID: id)
+            _ = try audio(library, id: id, start: 0, filename: "1.caf")
+            let model = FixtureSavedSpeech(); model.pause = true
+            let retry = SavedTranscription(recognizer: model)
+            retry.retry(noteID: id, library: library)
+            await fulfillment(of: [model.entered], timeout: 5)
+            library.update(id) {
+                switch change {
+                case "transcript":
+                    // A cloud correction has no wire isUserEdited marker.
+                    $0.passages[0].text = "Correction from another device"
+                    XCTAssertNil($0.passages[0].isUserEdited)
+                case "language": $0.language = .danish
+                default: $0.text = "Concurrent personal edit"; $0.title = "Concurrent title"
+                }
+            }
+            model.resume(); await retry.waitUntilFinished()
+            if change == "personal" {
+                XCTAssertNil(retry.problem)
+                XCTAssertEqual(library.note(id)?.metadata?.cloudTranscriptStatus, .complete)
+                XCTAssertEqual(library.note(id)?.text, "Concurrent personal edit")
+                XCTAssertEqual(library.note(id)?.title, "Concurrent title")
+            } else {
+                XCTAssertNotNil(retry.problem)
+                XCTAssertEqual(retry.completed, 0)
+                XCTAssertEqual(library.note(id)?.metadata?.cloudTranscriptStatus, .interrupted)
+                XCTAssertEqual(library.note(id)?.passages[0].text, change == "transcript" ? "Correction from another device" : "Original recognition")
+            }
+        }
+    }
+
     func testReadOnlyRefreshDuringRetryRejectsLateResult() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

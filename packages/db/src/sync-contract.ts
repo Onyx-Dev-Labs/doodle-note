@@ -16,7 +16,7 @@ export interface SyncSnapshot {
   selectedSummaryId: string | null;
   folderId?: string;
   event?: {provider: string; accountId: string; calendarId: string; eventId: string; occurrenceId: string};
-  passages: Array<{ id: string; sourceId: string; startMs: number; endMs: number; text: string; speakerId?: string; isFinal?: boolean }>;
+  passages: Array<{ id: string; sourceId: string; startMs: number; endMs: number; text: string; speakerId?: string; isFinal?: boolean; isUserEdited?: boolean }>;
   speakers: Array<{ id: string; displayName: string; sessionId?: string; slot?: number }>;
   speakerTurns?: Array<{speakerId:string;startMs:number;endMs:number;isFinal:boolean}>;
   summaries: Array<{ id: string; parentId?: string; createdAt: string; origin: 'generated' | 'edited'; format: string; language: string; markdown: string; sources: Array<{libraryId:string; noteId:string; revisionId:string; kind:'personalParagraph'|'transcript'|'title'|'summary'; paragraphIndex?:number; passageId?:string; summaryId?:string}> }>;
@@ -83,7 +83,7 @@ export function validateSyncOperation(value: unknown): SyncOperation {
   unique(speakers, v => { const r=object(v,['id','displayName','sessionId','slot']); text(r.displayName,200); if(r.sessionId!==undefined)id(r.sessionId);if(r.slot!==undefined&&(!Number.isInteger(r.slot)||Number(r.slot)<0||Number(r.slot)>3))throw new Error('invalid_slot');return r; });
   const speakerIds = new Set(speakers.map(v => (v as {id:string}).id));
   unique(array(s.passages,SYNC_MAX_SEGMENTS), v => {
-    const r=object(v,['id','sourceId','startMs','endMs','text','speakerId','isFinal']); id(r.sourceId); text(r.text,10_000);if(r.isFinal!==undefined&&typeof r.isFinal!=='boolean')throw new Error('invalid_final');
+    const r=object(v,['id','sourceId','startMs','endMs','text','speakerId','isFinal','isUserEdited']); id(r.sourceId); text(r.text,10_000);if(r.isFinal!==undefined&&typeof r.isFinal!=='boolean')throw new Error('invalid_final');if(r.isUserEdited!==undefined&&typeof r.isUserEdited!=='boolean')throw new Error('invalid_correction');
     if (!Number.isSafeInteger(r.startMs) || !Number.isSafeInteger(r.endMs) || Number(r.startMs)<0 || Number(r.endMs)<Number(r.startMs)) throw new Error('invalid_anchor');
     if (r.speakerId !== undefined && !speakerIds.has(String(r.speakerId))) throw new Error('unknown_speaker');
     return r;
@@ -97,7 +97,7 @@ export function validateSyncOperation(value: unknown): SyncOperation {
   unique(versions, v => {
     const r=object(v,['id','title','text','passages','speakers','speakerTurns']); text(r.title,500); text(r.text,500_000);
     unique(array(r.speakers,100), value=>{const speaker=object(value,['id','displayName','sessionId','slot']);text(speaker.displayName,200);if(speaker.sessionId!==undefined)id(speaker.sessionId);if(speaker.slot!==undefined&&(!Number.isInteger(speaker.slot)||Number(speaker.slot)<0||Number(speaker.slot)>3))throw new Error('invalid_slot');return speaker;});
-    unique(array(r.passages,SYNC_MAX_SEGMENTS), value=>{const passage=object(value,['id','sourceId','startMs','endMs','text','speakerId','isFinal']);id(passage.sourceId);text(passage.text,10_000);if(passage.isFinal!==undefined&&typeof passage.isFinal!=='boolean')throw new Error('invalid_final');
+    unique(array(r.passages,SYNC_MAX_SEGMENTS), value=>{const passage=object(value,['id','sourceId','startMs','endMs','text','speakerId','isFinal','isUserEdited']);id(passage.sourceId);text(passage.text,10_000);if(passage.isFinal!==undefined&&typeof passage.isFinal!=='boolean')throw new Error('invalid_final');if(passage.isUserEdited!==undefined&&typeof passage.isUserEdited!=='boolean')throw new Error('invalid_correction');
       if(!Number.isSafeInteger(passage.startMs)||!Number.isSafeInteger(passage.endMs)||Number(passage.startMs)<0||Number(passage.endMs)<Number(passage.startMs)) throw new Error('invalid_anchor');
       if(passage.speakerId!==undefined&&!(r.speakers as Array<{id:string}>).some((speaker: {id:string})=>speaker.id===passage.speakerId)) throw new Error('unknown_speaker');return passage;});
     validateTurns(r.speakerTurns,r.speakers as Array<{id:string}>);

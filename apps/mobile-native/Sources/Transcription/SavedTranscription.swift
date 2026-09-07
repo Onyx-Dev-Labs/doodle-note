@@ -100,10 +100,13 @@ enum TranscriptFailure: LocalizedError {
         task = Task { [weak self] in
             guard let self else { return }
             defer { if attempt == token { busy = false; cancelling = false; task = nil } }
+            var expectedPassages = note.passages
             @MainActor func valid() throws {
                 try Task.checkCancellation()
                 guard attempt == token, auth == library.authenticationGeneration, !library.storageBusy,
-                      let current = library.note(noteID), current.captureState != .recording, current.speechSessions == note.speechSessions, current.transcriptCloudReviewRequired != true, current.schemaVersion == 2, current.metadata?.cloudReadOnly != true else { throw TranscriptFailure.stale }
+                      let current = library.note(noteID), current.captureState != .recording, current.speechSessions == note.speechSessions, current.transcriptCloudReviewRequired != true, current.schemaVersion == 2, current.metadata?.cloudReadOnly != true,
+                      current.passages == expectedPassages,
+                      !(note.speechSessions ?? []).isEmpty || current.language == note.language else { throw TranscriptFailure.stale }
             }
             do {
                 guard await library.flush(noteID: noteID), let disk = library.disk else { throw TranscriptFailure.incomplete }
@@ -139,6 +142,7 @@ enum TranscriptFailure: LocalizedError {
                             return passage
                         }
                         if !current.replaceTranscript(start: group.start, end: group.end, with: shifted) { complete = false }
+                        expectedPassages = current.passages
                     }
                     guard applied else { throw TranscriptFailure.stale }
                     completed += group.segments.count

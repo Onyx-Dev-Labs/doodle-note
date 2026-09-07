@@ -2,6 +2,39 @@ import XCTest
 @testable import DoodleNoteNative
 
 final class TranscriptCloudTests: XCTestCase {
+    func testCrossDeviceCorrectionMarkerRoundTripsAndProtectsRetryBeforeItStarts() throws {
+        let map = CloudIdentityMap(identity: .init(accountID: "fixture", workspaceID: "work"), remoteLibraryID: UUID())
+        let remoteID = UUID()
+        var original = NoteRecord()
+        original.metadata?.libraryID = map.localLibraryID
+        original.passages = [.init(start: 0, end: 1, text: "Correction from another device", isFinal: true, isUserEdited: true)]
+        let snapshot = try CloudProjection(map: map, remoteNoteID: remoteID).snapshot(note: original, retained: [], inkReferences: [])
+        XCTAssertEqual(snapshot["passages"]?.list?.first?["isUserEdited"], .bool(true))
+        XCTAssertEqual(snapshot["sourceVersions"]?.list?.first?["passages"]?.list?.first?["isUserEdited"], .bool(true))
+        let decoder = CloudSnapshotDecoder(map: map, remoteNoteID: remoteID, localNoteID: map.localNoteID(remoteID))
+        let decoded = try decoder.decode(snapshot, revisionID: UUID(), generation: UUID(), savedAt: Date(), ink: Data())
+        XCTAssertFalse(decoded.isReadOnly)
+        XCTAssertEqual(decoded.sources.first?.passages.first?.isUserEdited, true)
+        var received = decoded.note
+        XCTAssertTrue(received.replaceTranscript(start: 0, end: 1, with: [.init(start: 0, end: 1, text: "Later automatic recognition", isFinal: true)]))
+        XCTAssertEqual(received.passages.first?.text, "Correction from another device")
+        XCTAssertEqual(received.passages.first?.isUserEdited, true)
+        // Optional booleans must not be interpreted from strings in either head or history.
+        for history in [false, true] {
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: snapshot.data()) as? [String: Any])
+            if history {
+                var sources = object["sourceVersions"] as! [[String: Any]]
+                var passages = sources[0]["passages"] as! [[String: Any]]
+                passages[0]["isUserEdited"] = "true"; sources[0]["passages"] = passages; object["sourceVersions"] = sources
+            } else {
+                var passages = object["passages"] as! [[String: Any]]
+                passages[0]["isUserEdited"] = "true"; object["passages"] = passages
+            }
+            let bad = try JSONDecoder().decode(CloudJSON.self, from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertThrowsError(try decoder.decode(bad, revisionID: UUID(), generation: UUID(), savedAt: Date(), ink: Data()))
+        }
+    }
+
     func testCompletionUsesDurableSpeechOutcomeInsteadOfFinishedAudio() throws {
         let map = CloudIdentityMap(identity: .init(accountID: "fixture", workspaceID: "work"), remoteLibraryID: UUID())
         var note = NoteRecord()

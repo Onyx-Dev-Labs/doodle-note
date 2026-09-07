@@ -38,3 +38,26 @@ test('transcript completion and provisional passages survive validation without 
   assert.deepEqual(validateSyncOperation(absent), absent, 'old payloads remain absent, never upgraded to complete');
   assert.throws(() => validateSyncOperation({...operation, snapshot: {...operation.snapshot, transcriptStatus: 'recording_audio'}}), /invalid_transcript_status/);
 });
+
+
+test('optional human correction markers survive head and history validation and reject non-booleans', () => {
+  const libraryId = randomUUID(), noteId = randomUUID(), sourceId = randomUUID();
+  const passages = [{id: randomUUID(), sourceId: randomUUID(), startMs: 0, endMs: 1000,
+    text: 'Reviewed correction', isFinal: true, isUserEdited: true}];
+  const operation: SyncOperation = {protocolVersion: 2, libraryId, noteId, operationId: randomUUID(),
+    expectedRevision: null, expectedLifecycleGeneration: null, kind: 'upsert', snapshot: {
+      title: 'Synthetic meeting', kind: 'meeting', createdAt: '2026-09-07', language: 'en-US', text: '',
+      passages, speakers: [], summaries: [], selectedSummaryId: null, inkAttachments: [], sourceRevisionId: sourceId,
+      sourceVersions: [{id: sourceId, title: 'Synthetic meeting', text: '', passages: structuredClone(passages), speakers: []}]
+    }};
+  assert.deepEqual(validateSyncOperation(operation), operation);
+  for (const target of ['head', 'history']) {
+    const invalid = structuredClone(operation);
+    const row = target === 'head' ? invalid.snapshot!.passages[0]! : invalid.snapshot!.sourceVersions[0]!.passages[0]!;
+    Object.assign(row, {isUserEdited: 'true'});
+    assert.throws(() => validateSyncOperation(invalid), /invalid_correction/);
+  }
+  delete operation.snapshot!.passages[0]!.isUserEdited;
+  delete operation.snapshot!.sourceVersions[0]!.passages[0]!.isUserEdited;
+  assert.deepEqual(validateSyncOperation(operation), operation, 'legacy absent markers remain valid');
+});

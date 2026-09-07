@@ -93,6 +93,7 @@ struct CloudProjection {
             var row: [String: CloudJSON] = ["id": .uuid(passage.id), "sourceId": .uuid(passage.id),
                 "text": .string(passage.text), "isFinal": .bool(passage.isFinal), "startMs": .number(try milliseconds(passage.start)),
                 "endMs": .number(try milliseconds(passage.end))]
+            if let edited = passage.isUserEdited { row["isUserEdited"] = .bool(edited) }
             if let key = assignedSpeaker(passage, annotations: annotations), let id = identifiers[key] {
                 row["speakerId"] = .uuid(id)
             } else if let name = passage.speakerName, !name.isEmpty {
