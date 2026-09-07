@@ -90,7 +90,14 @@ struct SummaryVersion: Codable, Identifiable, Equatable, Sendable {
     let sources: [SourceAnchor]
 }
 
+enum TranscriptCompletion: String, Codable, Sendable {
+    case none, partial, interrupted, complete
+}
+
 struct NoteMetadata: Codable, Equatable, Sendable {
+    /// Imported transcript completeness, independent of device-local recording/audio state.
+    var cloudTranscriptStatus: TranscriptCompletion? = nil
+    var cloudReadOnly: Bool? = nil
     var libraryID = LibraryRecord.localID
     var folderID: UUID? = nil
     var lifecycleGeneration: UUID? = nil

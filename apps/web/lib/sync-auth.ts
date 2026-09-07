@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { NextResponse } from "next/server";
-import { eq, getDb, organization, syncDevices } from "@repo/db";
+import { and, eq, getDb, member, organization, syncDevices } from "@repo/db";
 
 import { entitlementFor } from "@/lib/billing";
 
@@ -9,8 +9,8 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function mintToken(): string {
-  return `dnsy_${randomBytes(32).toString("hex")}`;
+export function mintToken(identityOnly = false): string {
+  return `${identityOnly ? "dnid" : "dnsy"}_${randomBytes(32).toString("hex")}`;
 }
 
 export interface SyncDeviceAuth {
@@ -24,12 +24,19 @@ export interface SyncDeviceAuth {
  * Resolves the `Authorization: Bearer <sync token>` header to a linked
  * device, or null. Only the token's SHA-256 is stored, so lookup is by hash.
  */
-export async function authenticateSyncRequest(
-  request: Request,
-): Promise<SyncDeviceAuth | null> {
+export function authenticateSyncRequest(request: Request): Promise<SyncDeviceAuth | null> {
+  return authenticateDevice(request, false);
+}
+
+/** Identity-only tokens may unlock the same local account cache, never cloud data routes. */
+export function authenticateIdentityRequest(request: Request): Promise<SyncDeviceAuth | null> {
+  return authenticateDevice(request, true);
+}
+
+async function authenticateDevice(request: Request, allowIdentity: boolean): Promise<SyncDeviceAuth | null> {
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (!token.startsWith("dnsy_") || token.length < 40) return null;
+  if (!/^dnsy_[0-9a-f]{64}$/.test(token) && !(allowIdentity && /^dnid_[0-9a-f]{64}$/.test(token))) return null;
 
   const db = getDb();
   const rows = await db
@@ -41,6 +48,11 @@ export async function authenticateSyncRequest(
     })
     .from(syncDevices)
     .innerJoin(organization, eq(organization.id, syncDevices.organizationId))
+    // A device token is not a permanent grant after workspace membership is revoked.
+    .innerJoin(member, and(
+      eq(member.organizationId, syncDevices.organizationId),
+      eq(member.userId, syncDevices.userId),
+    ))
     .where(eq(syncDevices.tokenHash, hashToken(token)))
     .limit(1);
   const device = rows[0];
