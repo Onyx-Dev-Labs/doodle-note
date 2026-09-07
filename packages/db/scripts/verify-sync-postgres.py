@@ -46,10 +46,13 @@ def main():
             journal=json.loads((ROOT/'drizzle/meta/_journal.json').read_text())['entries']
             for entry in journal:
                 migration=(ROOT/'drizzle'/f"{entry['tag']}.sql").read_text()
-                if entry['idx'] in (13,14):
+                if entry['idx'] in (13,14,15):
                     sql('BEGIN;'+migration+'ROLLBACK;')
-                    table="sync_notes" if entry["idx"]==13 else "ink_versions"
-                    assert sql(f"SELECT to_regclass('{table}') IS NULL;")=='t'
+                    if entry['idx']==15:
+                        assert sql("SELECT to_regprocedure('sync_choose_revision(text,jsonb,text)') IS NULL;")=='t'
+                    else:
+                        table="sync_notes" if entry["idx"]==13 else "ink_versions"
+                        assert sql(f"SELECT to_regclass('{table}') IS NULL;")=='t'
                     sql('BEGIN;'+migration+'COMMIT;')
                 else:
                     sql(migration)
@@ -68,6 +71,15 @@ def main():
                 outcomes=list(pool.map(lambda op:apply('a',op),edits))
             assert sorted(r['status'] for r in outcomes)==['conflict','ok'], outcomes
             assert sql(f"SELECT count(*) FROM sync_revisions WHERE note_id='{note}';")=='3'
+            current=next(r for r in outcomes if r['status']=='ok')
+            choices=[dict(kind='choose',libraryId=lib,noteId=note,operationId=uid(),
+                          expectedRevision=current['headRevision'],expectedLifecycleGeneration=first['lifecycleGeneration'],
+                          selectedRevision=first['headRevision']) for _ in range(2)]
+            def choose(op):
+                return json.loads(sql(f"SELECT sync_choose_revision('a','{json.dumps(op)}'::jsonb,'{op['operationId']}');"))
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:
+                chosen=list(pool.map(choose,choices))
+            assert sorted(r['status'] for r in chosen)==['changed','ok'], chosen
             version=uid()
             manifests=[]
             for org in ('a','b'):
@@ -83,7 +95,7 @@ def main():
                 outcomes=list(pool.map(reserve,manifests))
             assert sorted(outcomes)==['pending','version_reused'], outcomes
             assert sql(f"SELECT count(*) FROM ink_versions WHERE id='{version}';")=='1'
-            print('PASS: migration rollback/reapply, cross-workspace library/version races, concurrent same-base edits preserve conflict')
+            print('PASS: migration rollback/reapply, cross-workspace library/version races, concurrent same-base edits preserve conflict and stale reader choices fail closed')
         finally:
             subprocess.run([str(BIN/'pg_ctl'), '-D', data, '-m', 'fast', '-w', 'stop'], check=True, capture_output=True)
 
