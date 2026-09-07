@@ -10,7 +10,7 @@ The DoodleNote identity pairs the doodle-dog mascot with a warm cream, ink, and 
 | Master app icon      | [`apps/desktop/resources/icon-master.png`](../apps/desktop/resources/icon-master.png)                                                             | Source for generated platform icons; do not replace generated files independently |
 | macOS icon           | [`apps/desktop/resources/icon.icns`](../apps/desktop/resources/icon.icns)                                                                         | Electron packaging                                                                |
 | Windows icon         | [`apps/desktop/resources/icon.ico`](../apps/desktop/resources/icon.ico)                                                                           | Electron packaging                                                                |
-| iOS icon             | [`apps/ios/DoodleNote/Assets.xcassets/AppIcon.appiconset/icon-1024.png`](../apps/ios/DoodleNote/Assets.xcassets/AppIcon.appiconset/icon-1024.png) | Xcode asset catalog                                                               |
+| iOS icon             | [`apps/mobile-native/Sources/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`](../apps/mobile-native/Sources/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png) | Xcode asset catalog                                                               |
 
 Regenerate the desktop and in-app derivatives from the master on macOS:
 
