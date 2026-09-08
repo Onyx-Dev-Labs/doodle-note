@@ -30,6 +30,13 @@ const launch = async () => {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setTitle('DoodleNote — ONY-271 synthetic QA')
   )
+  // Keep physical keyboard input out of the synthetic editor while QA runs.
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    window.setFocusable(false)
+    window.webContents.setBackgroundThrottling(false)
+    window.showInactive()
+  })
 }
 const send = async (ev) =>
   app.evaluate(
@@ -338,6 +345,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
     await resolve()
     await expect(page.locator('.tiptap')).toContainText('Synthetic generated notes')
     await expect(page.getByRole('button', { name: 'Regenerate notes', exact: true })).toBeEnabled()
+    await expect(page.getByText('New transcript detected', { exact: true })).toHaveCount(0)
     await start()
     await expect(page.locator('.tiptap')).toHaveAttribute('contenteditable', 'true')
     await expect(page.locator('.tiptap')).toContainText('Original rough notes')
@@ -348,10 +356,22 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
     })
     await expect(page.locator('.transcript-panel')).toContainText('Continued discussion')
     await expect(page.getByRole('button', { name: 'Regenerate notes', exact: true })).toHaveCount(0)
+    await expect(page.getByText('New transcript detected', { exact: true })).toHaveCount(0)
     await stop(false)
     before = await count()
     await finalize()
     if (!automatic) {
+      await expect(page.getByText('New transcript detected', { exact: true })).toBeVisible()
+      await expect.poll(async () => (await saved(id)).segments.length).toBe(2)
+      await expect
+        .poll(async () => (await saved(id)).rawNotesMarkdown)
+        .toBe('Additional notes after Resume')
+      await page.reload()
+      await page.getByText(id, { exact: true }).first().click()
+      await expect(page.locator('.meeting-generation-actions')).toContainText(
+        'New transcript detected'
+      )
+      await page.screenshot({ path: artifacts + '/new-transcript-cue.png' })
       await expect(
         page.getByRole('button', { name: 'Regenerate notes', exact: true })
       ).toBeEnabled()
@@ -367,6 +387,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
     assert.equal(input.rawNotesMarkdown, 'Additional notes after Resume')
     await resolve({ error: 'Synthetic provider unavailable. Try again.' })
     await expect(page.getByRole('alert')).toContainText('provider unavailable')
+    await expect(page.getByText('New transcript detected', { exact: true })).toBeVisible()
     assert.equal((await saved(id)).enhancedMarkdown, '## Synthetic generated notes')
     assert.equal((await saved(id)).rawNotesMarkdown, 'Additional notes after Resume')
     await page.screenshot({ path: artifacts + '/resume-retry.png' })
@@ -395,6 +416,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
       'Updated notes including continued discussion'
     )
     assert.equal(await count(), before + 2)
+    await expect(page.getByText('New transcript detected', { exact: true })).toHaveCount(0)
     await page.screenshot({ path: artifacts + '/resume-regenerated.png' })
     await page.reload()
     await page.getByText(id, { exact: true }).first().click()
@@ -402,6 +424,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
       'Updated notes including continued discussion'
     )
     assert.equal((await saved(id)).segments.length, 2)
+    await expect(page.getByText('New transcript detected', { exact: true })).toHaveCount(0)
     results.push(
       `Completed notes → Resume (${automatic ? 'on' : 'off'}): editable rough notes, live transcript, full regeneration, preserved prior result on failure, explicit retry and reopen`
     )

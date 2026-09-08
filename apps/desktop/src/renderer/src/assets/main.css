@@ -3155,6 +3155,14 @@ button.fp-row:hover {
 }
 
 /* generate-notes CTA (centered button above the pill bar) */
+.generate-cta-notice {
+  margin: 0;
+  color: var(--accent-deep);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .generate-cta-wrap {
   position: relative;
   display: flex;
