@@ -28,6 +28,9 @@ importers:
       '@electron-toolkit/utils':
         specifier: ^4.0.0
         version: 4.0.0(electron@44.0.0)
+      '@repo/agent-contract':
+        specifier: workspace:*
+        version: link:../../packages/agent-contract
       '@repo/ai':
         specifier: workspace:*
         version: link:../../packages/ai
