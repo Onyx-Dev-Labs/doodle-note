@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import { createHash } from "node:crypto";
+import { eq } from "@repo/db";
 
 import { organization, user } from "@repo/db/auth-schema";
-import { agentTokens, meetings, notes } from "@repo/db/schema";
+import { agentTokens, meetings, notes, subscriptions } from "@repo/db/schema";
 import { createInMemoryDb, type InMemoryDb } from "@repo/db/testing";
 
 /**
@@ -32,7 +34,10 @@ function rpc(body: unknown, token = TOKEN): Request {
 
 async function call(method: string, params?: unknown, token = TOKEN) {
   const res = await post(rpc({ jsonrpc: "2.0", id: 1, method, params }, token));
-  return { status: res.status, body: res.status === 202 ? null : await res.json() };
+  return {
+    status: res.status,
+    body: res.status === 202 ? null : await res.json(),
+  };
 }
 
 before(async () => {
@@ -176,4 +181,55 @@ test("tool validation errors surface as isError content, not crashes", async () 
   });
   assert.equal(body.result.isError, true);
   assert.match(body.result.content[0].text, /query is required/);
+});
+
+test("revoking a dedicated remote token denies the next request", async () => {
+  const token = `dnag_${"ef".repeat(32)}`;
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  await mem.db
+    .insert(agentTokens)
+    .values({
+      tokenHash,
+      userId: "u1",
+      organizationId: "org-a",
+      name: "Revocation fixture",
+    });
+  assert.equal((await call("tools/list", undefined, token)).status, 200);
+  await mem.db.delete(agentTokens).where(eq(agentTokens.tokenHash, tokenHash));
+  assert.equal((await call("tools/list", undefined, token)).status, 401);
+});
+
+test("remote tools lose access when the token owner's entitlement lapses", async () => {
+  // Only entitlement reads run here; these fixtures never call Stripe.
+  const settings = {
+    DOODLENOTE_SELF_HOSTED: "false",
+    STRIPE_SECRET_KEY: "fixture-only",
+    STRIPE_ACCOUNT_ID: "acct_fixture",
+    STRIPE_PRICE_ID: "price_fixture",
+    STRIPE_WEBHOOK_SECRET: "fixture-only",
+    STRIPE_PORTAL_CONFIGURATION_ID: "bpc_fixture",
+  };
+  const previous = Object.fromEntries(
+    Object.keys(settings).map((key) => [key, process.env[key]]),
+  );
+  try {
+    Object.assign(process.env, settings);
+    await mem.db
+      .insert(subscriptions)
+      .values({ userId: "u1", status: "active" });
+    assert.equal((await call("tools/list")).status, 200);
+    await mem.db
+      .update(subscriptions)
+      .set({ status: "canceled" })
+      .where(eq(subscriptions.userId, "u1"));
+    const denied = await call("tools/list");
+    assert.equal(denied.status, 402);
+    assert.equal(denied.body.needsSubscription, true);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await mem.db.delete(subscriptions).where(eq(subscriptions.userId, "u1"));
+  }
 });

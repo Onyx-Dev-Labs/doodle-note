@@ -19,6 +19,7 @@ import {
   type NotesModelsResponse,
   type NotesSettingsView
 } from '../../shared/notes-api'
+import { RemoteMcpSetup } from './RemoteMcpSetup'
 import mascotUrl from './assets/mascot-square.png'
 
 function lastSyncLabel(iso: string): string {
@@ -1320,12 +1321,13 @@ export default function ModelsView({
 
           {section === 'integrations' && (
             <>
+              <RemoteMcpSetup key={syncStatus?.baseUrl} baseUrl={syncStatus?.baseUrl} />
               <section className="keys-section calendar-section">
-                <h3>Agent access</h3>
+                <h3>Local MCP</h3>
                 <p className="models-sub">
                   Let AI tools on this computer (Claude, Codex, and other MCP clients) read your
                   meetings, notes, and transcripts. Read-only, off by default, and local — nothing
-                  is uploaded. Turning this off revokes access immediately.
+                  is uploaded. Turning this off revokes local access immediately.
                 </p>
                 {agentError && <div className="models-error">{agentError}</div>}
                 {agentAccess === null ? (
@@ -1394,7 +1396,7 @@ export default function ModelsView({
                       ))}
                       <div className="cal-row">
                         <span className="cal-row-main">
-                          <span className="cal-row-label">Other MCP clients</span>
+                          <span className="cal-row-label">Other local MCP clients</span>
                           <span className="cal-row-sub">
                             Copy a ready-made config snippet — no build steps, the server ships
                             inside DoodleNote
