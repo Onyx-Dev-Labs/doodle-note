@@ -326,7 +326,6 @@ export default function MeetingView({
   /** Seconds recorded in EARLIER sessions of this meeting — Resume must not
    *  restart the clock at 0 when the recording itself is cumulative. */
   const elapsedBaseRef = useRef(0)
-  const autoOpenedRef = useRef(false)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -500,11 +499,8 @@ export default function MeetingView({
             elapsedBaseRef.current = Math.max(elapsedBaseRef.current, shown)
             return shown
           })
-          if (!autoOpenedRef.current) {
-            autoOpenedRef.current = true
-            setTranscriptOpen(true)
-            setChatOpen(false)
-          }
+          setTranscriptOpen(true)
+          setChatOpen(false)
         }
         if (
           ev.event === 'capture-finalized' &&
@@ -876,9 +872,17 @@ export default function MeetingView({
     }
   }
 
+  const showNotesDoc = (): void => {
+    if (docView === 'notes') return
+    setDocView('notes')
+    docViewRef.current = 'notes'
+    setEditorMarkdown(roughMarkdownRef.current, true)
+  }
+
   const startRecording = (): void => {
     if (ACTIVE_PHASES.includes(stateRef.current.phase)) return
     generationRef.current.startCapture()
+    showNotesDoc()
     if (startedAtRef.current === null) {
       startedAtRef.current = new Date().toISOString()
       persist({ startedAt: startedAtRef.current })
@@ -1193,13 +1197,6 @@ export default function MeetingView({
       generation.invalidate()
     }
   }, [])
-
-  const showNotesDoc = (): void => {
-    if (docView === 'notes') return
-    setDocView('notes')
-    docViewRef.current = 'notes'
-    setEditorMarkdown(roughMarkdownRef.current, true)
-  }
 
   const showEnhancedDoc = (): void => {
     if (docView === 'enhanced' || enhancedMarkdown === null) return
@@ -1539,44 +1536,6 @@ export default function MeetingView({
                 </button>
               </span>
             )}
-            {enhancedMarkdown !== null && !capturing && (
-              <button
-                type="button"
-                className="chip chip-regen"
-                disabled={!canEnhance}
-                title={
-                  !modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'
-                }
-                aria-label="Regenerate notes"
-                onClick={() => void runEnhance()}
-              >
-                {enhanceStatus === 'running' ? (
-                  <span className="spinner" aria-hidden="true" />
-                ) : (
-                  '↻'
-                )}
-              </button>
-            )}
-            {enhancedMarkdown !== null && !capturing && (
-              <span className="chip-template-anchor tpl-anchor">
-                <button
-                  type="button"
-                  className="chip"
-                  disabled={!canEnhance}
-                  title="Regenerate with a different template"
-                  aria-expanded={tplMenuOpen}
-                  onClick={() => setTplMenuOpen((o) => !o)}
-                >
-                  {templates.find((t) => t.id === templateId)?.label ?? 'Template'} ▾
-                </button>
-                {tplMenuOpen && templateMenu}
-              </span>
-            )}
-            {enhancedMarkdown !== null && enhanceStatus === 'running' && (
-              <span className="chip-regen-status">
-                <DoodlingIndicator statusText={enhanceProgressText} />
-              </span>
-            )}
           </div>
 
           {docView === 'notes' && (
@@ -1847,77 +1806,92 @@ export default function MeetingView({
         </div>
       )}
 
-      {enhanceStatus === 'error' && enhanceError && (
-        <div className="enhance-error-bar" role="alert">
-          <span>{enhanceError}</span>
-          {!modelReady && (
+      <div className="meeting-generation-actions">
+        {enhanceStatus === 'error' && enhanceError && (
+          <div className="enhance-error-bar" role="alert">
+            <span>{enhanceError}</span>
+            {!capturing && allSegments.length > 0 && modelReady && (
+              <button
+                type="button"
+                disabled={!canEnhance || retranscribing}
+                onClick={() => void runEnhance()}
+              >
+                Retry generation
+              </button>
+            )}
             <button type="button" onClick={onOpenSettings}>
               Open Settings →
             </button>
-          )}
-          <button type="button" onClick={() => setEnhanceStatus('idle')}>
-            Dismiss
-          </button>
-        </div>
-      )}
+            <button type="button" onClick={() => setEnhanceStatus('idle')}>
+              Dismiss
+            </button>
+          </div>
+        )}
 
-      {primaryAction !== 'hidden' && (
-        <div className="generate-cta-wrap tpl-anchor">
-          <button
-            type="button"
-            className="generate-cta"
-            disabled={primaryAction === 'generating' || primaryAction === 'transcribing'}
-            title={
-              primaryAction === 'configure-model'
-                ? 'Choose a local model or connect an AI provider'
-                : primaryAction === 'transcribe' || primaryAction === 'transcribing'
-                  ? 'Build a transcript from the saved recording'
-                  : 'Generate notes'
-            }
-            onClick={() => {
-              if (primaryAction === 'configure-model') onOpenSettings()
-              else if (primaryAction === 'transcribe') void runRetranscribe()
-              else if (primaryAction === 'generate') void runEnhance()
-            }}
-          >
-            {enhanceStatus === 'running' ? (
-              <DoodlingIndicator statusText={enhanceProgressText} />
-            ) : primaryAction === 'transcribing' ? (
+        {primaryAction !== 'hidden' && (
+          <div className="generate-cta-wrap tpl-anchor">
+            <button
+              type="button"
+              className="generate-cta"
+              disabled={primaryAction === 'generating' || primaryAction === 'transcribing'}
+              title={
+                primaryAction === 'configure-model'
+                  ? 'Choose a local model or connect an AI provider'
+                  : primaryAction === 'transcribe' || primaryAction === 'transcribing'
+                    ? 'Build a transcript from the saved recording'
+                    : primaryAction === 'regenerate'
+                      ? 'Regenerate from the full transcript and your latest notes'
+                      : 'Generate notes'
+              }
+              onClick={() => {
+                if (primaryAction === 'configure-model') onOpenSettings()
+                else if (primaryAction === 'transcribe') void runRetranscribe()
+                else if (primaryAction === 'generate' || primaryAction === 'regenerate')
+                  void runEnhance()
+              }}
+            >
+              {enhanceStatus === 'running' ? (
+                <DoodlingIndicator statusText={enhanceProgressText} />
+              ) : primaryAction === 'transcribing' ? (
+                <>
+                  <span className="spinner" aria-hidden="true" /> Transcribing recording…
+                </>
+              ) : primaryAction === 'transcribe' ? (
+                <>
+                  <SparkleIcon size={14} /> Transcribe recording
+                </>
+              ) : primaryAction === 'configure-model' ? (
+                <>
+                  <SparkleIcon size={14} /> Set up notes model
+                </>
+              ) : (
+                <>
+                  <SparkleIcon size={14} />{' '}
+                  {primaryAction === 'regenerate' ? 'Regenerate notes' : 'Generate notes'}
+                </>
+              )}
+            </button>
+            {(primaryAction === 'generate' ||
+              primaryAction === 'regenerate' ||
+              primaryAction === 'generating') && (
               <>
-                <span className="spinner" aria-hidden="true" /> Transcribing recording…
-              </>
-            ) : primaryAction === 'transcribe' ? (
-              <>
-                <SparkleIcon size={14} /> Transcribe recording
-              </>
-            ) : primaryAction === 'configure-model' ? (
-              <>
-                <SparkleIcon size={14} /> Set up notes model
-              </>
-            ) : (
-              <>
-                <SparkleIcon size={14} /> Generate notes
+                <button
+                  type="button"
+                  className="generate-cta generate-cta-arrow"
+                  disabled={!canEnhance}
+                  title="Choose a note template"
+                  aria-label="Choose a note template"
+                  aria-expanded={tplMenuOpen}
+                  onClick={() => setTplMenuOpen((o) => !o)}
+                >
+                  ▾
+                </button>
+                {tplMenuOpen && templateMenu}
               </>
             )}
-          </button>
-          {(primaryAction === 'generate' || primaryAction === 'generating') && (
-            <>
-              <button
-                type="button"
-                className="generate-cta generate-cta-arrow"
-                disabled={!canEnhance}
-                title="Choose a note template"
-                aria-label="Choose a note template"
-                aria-expanded={tplMenuOpen}
-                onClick={() => setTplMenuOpen((o) => !o)}
-              >
-                ▾
-              </button>
-              {tplMenuOpen && templateMenu}
-            </>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <div className="bottom-bar">
         <div className="rec-pill">

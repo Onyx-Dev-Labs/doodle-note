@@ -73,6 +73,63 @@ function startLive(
 const sawFinishing = (events: EngineEvent[]): boolean =>
   events.some((e) => e.event === 'status' && e.stage === 'finishing')
 
+describe('EngineProcess persistent capture', { skip: process.platform === 'win32' }, () => {
+  async function serve(wedged = false): Promise<{
+    engine: EngineProcess
+    events: EngineEvent[]
+    log: string
+  }> {
+    const { binary, log } = fakeEngine(`
+      if (process.argv[2] !== 'serve') throw new Error('expected warm serve path')
+      process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0) })
+      require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+        const { cmd } = JSON.parse(line)
+        log(cmd)
+        if (cmd === 'start') emit({ event: 'ready', mode: 'live' })
+        if (cmd === 'stop' && !${wedged}) emit({ event: 'done' })
+        if (cmd === 'set-input') emit({ event: 'partial', text: 'Continued speech', channel: 'mic' })
+      })
+      process.stdin.on('end', () => process.exit(0))
+      emit({ event: 'status', stage: 'serve_ready' })
+      log('booted')
+    `)
+    const engine = new EngineProcess(binary, 500, 250)
+    cleanups.push(() => engine.dispose())
+    const events: EngineEvent[] = []
+    engine.onEvent((event) => events.push(event))
+    engine.startServe()
+    await waitFor(() => logLines(log).includes('booted'), 'serve boot')
+    engine.start('live')
+    await waitFor(() => events.some((e) => e.event === 'ready'), 'warm capture ready')
+    return { engine, events, log }
+  }
+
+  it('keeps resumed speech flowing past the previous Stop timeout', async () => {
+    const { engine, events, log } = await serve()
+    engine.stop()
+    await waitFor(() => events.some((e) => e.event === 'done'), 'first capture done')
+    engine.start('live')
+    await waitFor(() => logLines(log).filter((s) => s === 'start').length === 2, 'Resume')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(logLines(log).includes('SIGTERM'), false, 'old Stop cannot terminate Resume')
+    engine.setInputDevice(null)
+    await waitFor(() => events.some((e) => e.event === 'partial'), 'resumed speech')
+    engine.stop()
+    await waitFor(
+      () => events.filter((e) => e.event === 'done').length === 2,
+      'resumed capture saved'
+    )
+  })
+
+  it('still terminates a capture that wedges while stopping', async () => {
+    const { engine, events, log } = await serve(true)
+    engine.stop()
+    engine.stop()
+    await waitFor(() => logLines(log).includes('SIGTERM'), 'wedged capture escalation')
+    assert.equal(events.filter((e) => e.event === 'exit').length, 1)
+  })
+})
+
 describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => {
   it('lets a finishing session exit cleanly without any signal', async () => {
     const { binary, log } = fakeEngine(

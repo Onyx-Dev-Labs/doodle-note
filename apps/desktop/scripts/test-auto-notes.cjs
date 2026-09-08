@@ -321,6 +321,91 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
     ['Before Resume', 'After Resume']
   )
   results.push('Resume rejects old output; next completed capture includes both transcript parts')
+  // Human regression: Resume AFTER generated notes exist, then regenerate/retry.
+  for (const automatic of [false, true]) {
+    await page.evaluate(
+      (automatic) => window.notes.setSettings({ autoGenerateNotesAfterStop: automatic }),
+      automatic
+    )
+    const id = await openMeeting()
+    await start()
+    await send({ event: 'segments', segments: [segment('Original discussion')] })
+    await stop(false)
+    before = await count()
+    await finalize()
+    if (!automatic) await page.getByRole('button', { name: 'Generate notes', exact: true }).click()
+    await waitCount(before + 1)
+    await resolve()
+    await expect(page.locator('.tiptap')).toContainText('Synthetic generated notes')
+    await expect(page.getByRole('button', { name: 'Regenerate notes', exact: true })).toBeEnabled()
+    await start()
+    await expect(page.locator('.tiptap')).toHaveAttribute('contenteditable', 'true')
+    await expect(page.locator('.tiptap')).toContainText('Original rough notes')
+    await page.locator('.tiptap').fill('Additional notes after Resume')
+    await send({
+      event: 'segments',
+      segments: [{ ...segment('Continued discussion'), id: 'continued' }]
+    })
+    await expect(page.locator('.transcript-panel')).toContainText('Continued discussion')
+    await expect(page.getByRole('button', { name: 'Regenerate notes', exact: true })).toHaveCount(0)
+    await stop(false)
+    before = await count()
+    await finalize()
+    if (!automatic) {
+      await expect(
+        page.getByRole('button', { name: 'Regenerate notes', exact: true })
+      ).toBeEnabled()
+      assert.equal(await count(), before)
+      await page.getByRole('button', { name: 'Regenerate notes', exact: true }).click()
+    }
+    await waitCount(before + 1)
+    const input = await app.evaluate(() => qa.calls.at(-1))
+    assert.deepEqual(
+      input.segments.map((s) => s.text),
+      ['Original discussion', 'Continued discussion']
+    )
+    assert.equal(input.rawNotesMarkdown, 'Additional notes after Resume')
+    await resolve({ error: 'Synthetic provider unavailable. Try again.' })
+    await expect(page.getByRole('alert')).toContainText('provider unavailable')
+    assert.equal((await saved(id)).enhancedMarkdown, '## Synthetic generated notes')
+    assert.equal((await saved(id)).rawNotesMarkdown, 'Additional notes after Resume')
+    await page.screenshot({ path: artifacts + '/resume-retry.png' })
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(800, 560))
+    await expect(
+      page.getByRole('button', { name: 'Retry generation', exact: true })
+    ).toBeInViewport()
+    await expect(
+      page.getByRole('button', { name: 'Regenerate notes', exact: true })
+    ).toBeInViewport()
+    const recoveryBounds = await page.getByRole('alert').boundingBox()
+    const actionBounds = await page.locator('.generate-cta-wrap').boundingBox()
+    assert.ok(
+      recoveryBounds.y + recoveryBounds.height <= actionBounds.y,
+      'recovery and generation actions must not overlap'
+    )
+    await page.screenshot({ path: artifacts + '/resume-retry-compact.png' })
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1180, 760))
+    await page.getByRole('button', { name: 'Retry generation', exact: true }).dblclick()
+    await waitCount(before + 2)
+    await resolve({
+      markdown: '## Updated notes including continued discussion',
+      engine: 'QA stub'
+    })
+    await expect(page.locator('.tiptap')).toContainText(
+      'Updated notes including continued discussion'
+    )
+    assert.equal(await count(), before + 2)
+    await page.screenshot({ path: artifacts + '/resume-regenerated.png' })
+    await page.reload()
+    await page.getByText(id, { exact: true }).first().click()
+    await expect(page.locator('.tiptap')).toContainText(
+      'Updated notes including continued discussion'
+    )
+    assert.equal((await saved(id)).segments.length, 2)
+    results.push(
+      `Completed notes → Resume (${automatic ? 'on' : 'off'}): editable rough notes, live transcript, full regeneration, preserved prior result on failure, explicit retry and reopen`
+    )
+  }
   // Empty, model missing, finalization and provider errors recover without delayed AI.
   for (const failure of ['empty', 'model', 'finalization', 'provider']) {
     await app.evaluate((_e, ready) => {

@@ -2209,15 +2209,30 @@ button.fp-row:hover {
   color: var(--ink);
 }
 
-.enhance-error-bar {
+.meeting-generation-actions {
   position: absolute;
-  bottom: 84px;
+  bottom: 96px;
   left: 50%;
   transform: translateX(-50%);
+  width: min(600px, calc(100% - 48px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 21;
+  pointer-events: none;
+}
+
+.meeting-generation-actions > * {
+  pointer-events: auto;
+}
+
+.enhance-error-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: min(600px, calc(100% - 48px));
+  max-width: 100%;
+  flex-wrap: wrap;
   background: var(--card);
   border: 1px solid var(--danger-border);
   border-radius: 10px;
@@ -2226,6 +2241,11 @@ button.fp-row:hover {
   color: var(--danger);
   box-shadow: var(--shadow-pill);
   z-index: 21;
+}
+
+.enhance-error-bar > span {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
 }
 
 .enhance-error-bar button {
@@ -3136,10 +3156,7 @@ button.fp-row:hover {
 
 /* generate-notes CTA (centered button above the pill bar) */
 .generate-cta-wrap {
-  position: absolute;
-  left: 50%;
-  bottom: 96px;
-  transform: translateX(-50%);
+  position: relative;
   display: flex;
   gap: 2px;
   z-index: 5;
