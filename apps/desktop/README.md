@@ -44,8 +44,8 @@ Packaging requires the platform's native dependencies. Maintainer release comman
 
 ## Record from the macOS menu bar
 
-The filled dog gains red eyes during confirmed recording, clearing when capture
-stops (including while the meeting finishes saving). The recording body stays
+The 22-point filled dog gains red eyes, nose and mouth during confirmed recording,
+clearing when capture stops (including while the meeting finishes saving). The recording body stays
 solid white regardless of app theme; the idle icon uses native template rendering.
 
 After setup and the welcome tour, the dog icon offers **Record now** even with

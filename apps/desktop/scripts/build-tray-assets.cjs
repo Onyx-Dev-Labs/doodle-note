@@ -19,11 +19,11 @@ async function main() {
         '<use href="#dog"',
         `<use href="#dog" fill="none" stroke="${halo}" stroke-width="0.8"/><use href="#dog"`
       )
-      svg = svg.replace('</svg>', `<use href="#eyes" fill="#ff3b30"/></svg>`)
+      svg = svg.replace('</svg>', `<use href="#features" color="#ff3b30"/></svg>`)
     }
     for (const [size, density, suffix] of [
-      [18, 72, ''],
-      [36, 144, '@2x']
+      [22, 72, ''],
+      [44, 144, '@2x']
     ]) {
       await sharp(Buffer.from(svg))
         .resize(size, size)

@@ -95,7 +95,9 @@ async function main() {
       let redPixels = 0
       let leftEyePixels = 0
       let rightEyePixels = 0
-      let redOutsideEyes = 0
+      let nosePixels = 0
+      let mouthPixels = 0
+      let redOutsideFace = 0
       for (let i = 0; i < pixels.length; i += 4) {
         if (pixels[i] > 220 && pixels[i + 1] > 220 && pixels[i + 2] > 220 && pixels[i + 3] > 220)
           whiteBodyPixels++
@@ -105,7 +107,9 @@ async function main() {
           const y = (Math.floor(i / 4 / width) + 0.5) / height
           if (y >= 0.34 && y <= 0.49 && x >= 0.29 && x <= 0.42) leftEyePixels++
           else if (y >= 0.34 && y <= 0.49 && x >= 0.58 && x <= 0.71) rightEyePixels++
-          else redOutsideEyes++
+          else if (y >= 0.50 && y < 0.65 && x >= 0.36 && x <= 0.64) nosePixels++
+          else if (y >= 0.65 && y <= 0.78 && x >= 0.29 && x <= 0.71) mouthPixels++
+          else redOutsideFace++
         }
       }
       return {
@@ -116,7 +120,11 @@ async function main() {
         redPixels,
         leftEyePixels,
         rightEyePixels,
-        redOutsideEyes,
+        nosePixels,
+        mouthPixels,
+        redOutsideFace,
+        width,
+        height,
         png: image.toPNG().toString('base64')
       }
     })
@@ -127,10 +135,14 @@ async function main() {
       assert.ok(icon.whiteBodyPixels >= 30, 'recording dog has a filled white body')
       assert.equal(icon.whiteForehead, true, 'body interior is white, not just an outline')
     }
-    assert.equal(icon.redPixels > 0, recording, 'red eyes match confirmed capture')
+    assert.equal(icon.redPixels > 0, recording, 'red face matches confirmed capture')
+    assert.equal(icon.width, 22)
+    assert.equal(icon.height, 22)
     assert.equal(icon.leftEyePixels > 0, recording, 'left eye changes color')
     assert.equal(icon.rightEyePixels > 0, recording, 'right eye changes color')
-    assert.equal(icon.redOutsideEyes, 0, 'no recording dot outside the eyes')
+    assert.equal(icon.nosePixels > 0, recording, 'nose changes color')
+    assert.equal(icon.mouthPixels > 0, recording, 'mouth changes color')
+    assert.equal(icon.redOutsideFace, 0, 'red stays within the facial features')
     assert.deepEqual(icon.scales, [1, 2])
     return icon
   }
@@ -282,7 +294,7 @@ async function main() {
       }
     })
     fs.writeFileSync(path.join(evidence, 'dog-template.png'), Buffer.from(icon.png, 'base64'))
-    assert.deepEqual(icon.size, { width: 18, height: 18 })
+    assert.deepEqual(icon.size, { width: 22, height: 22 })
     assert.deepEqual(icon.scales, [1, 2])
     assert.equal(icon.template, true)
     console.log(
@@ -303,8 +315,8 @@ async function main() {
             'finishing lock',
             'engine failure recovery',
             'Retina template resources',
-            'no red eyes before engine ready or after stop/failure',
-            'red eyes and filled white body across light/dark app themes'
+            'no red facial features before engine ready or after stop/failure',
+            '22-point red eyes, nose and mouth with a filled white body across app themes'
           ],
           limitation:
             'Engine is synthetic; real saved audio/transcript and OS permission QA remain required.'

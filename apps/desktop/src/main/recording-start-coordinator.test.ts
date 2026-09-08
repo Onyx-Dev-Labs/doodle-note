@@ -94,10 +94,10 @@ test('normal editor capture locks the tray and renderer loss waits for stopped e
 })
 test('tray resources include transparent standard and Retina images with correct density', () => {
   for (const [name, size, ppm] of [
-    ['dogTemplate.png', 18, 2835],
-    ['dogTemplate@2x.png', 36, 5669],
-    ['dogRecording.png', 18, 2835],
-    ['dogRecording@2x.png', 36, 5669]
+    ['dogTemplate.png', 22, 2835],
+    ['dogTemplate@2x.png', 44, 5669],
+    ['dogRecording.png', 22, 2835],
+    ['dogRecording@2x.png', 44, 5669]
   ] as const) {
     const png = readFileSync(resolve('resources/tray', name))
     assert.equal(png.toString('hex', 0, 8), '89504e470d0a1a0a')

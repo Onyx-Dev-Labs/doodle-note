@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { RecordingState } from '../shared/recording-api'
 import { recordingMenuAction } from './recording-start-coordinator'
 
-/** Persistent launcher; the red eyes indicate confirmed capture, never preparation. */
+/** Persistent launcher; the red face indicates confirmed capture, never preparation. */
 export class RecordingTray {
   private tray: Tray | null = null
   private recording = false
@@ -22,7 +22,7 @@ export class RecordingTray {
     if (process.platform !== 'darwin') return
     this.images = ['dogTemplate.png', 'dogRecording.png'].map((name, index) => {
       const image = nativeImage.createFromPath(join(resourceDir, name))
-      // Template rendering would turn the recording eyes monochrome.
+      // Template rendering would turn the recording facial features monochrome.
       image.setTemplateImage(index === 0)
       return image
     })
