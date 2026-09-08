@@ -4037,3 +4037,49 @@ button.fp-row:hover {
 }
 
 .wizard-skip:hover { color: var(--ink); }
+
+/* Remote setup is independent of the local-agent opt-in. */
+.remote-mcp-url {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.remote-mcp-steps {
+  padding-left: 22px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.remote-mcp-steps li {
+  margin-bottom: 10px;
+}
+.remote-mcp code {
+  overflow-wrap: anywhere;
+}
+.remote-mcp summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.remote-mcp details p {
+  margin-top: 12px;
+}
+.remote-mcp pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.remote-mcp .calendar-note { color: var(--ink); }
+.remote-mcp .calendar-actions { flex-wrap: wrap; }

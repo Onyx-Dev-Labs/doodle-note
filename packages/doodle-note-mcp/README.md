@@ -75,7 +75,7 @@ as the command. Once published to npm, `npx doodle-note-mcp` works too.
 The same five tools are served remotely at `https://www.doodlenote.ai/api/mcp`,
 backed by your cloud-synced meetings instead of the local store — for Claude
 web/mobile, cloud Codex, and agents that don't run on your machine. Mint a
-read-only agent token in the web app (**Workspaces → AI agents**), then:
+read-only agent token in the web app (**Settings → AI agents**), then:
 
 ```bash
 claude mcp add --transport http doodle-note https://www.doodlenote.ai/api/mcp \
@@ -84,6 +84,14 @@ claude mcp add --transport http doodle-note https://www.doodlenote.ai/api/mcp \
 
 Tokens are workspace-scoped and revocable from the same panel. Remote access
 requires cloud sync (it reads the synced copy of your meetings).
+
+### Composio
+
+In desktop **Settings → Integrations → Composio / remote MCP**, copy the server URL
+and open token settings. Composio needs the hosted HTTPS endpoint and API-key
+authentication mapped to an Authorization bearer header; the local launch JSON
+cannot be used as a server URL. See the [Composio setup guide](../../docs/composio-mcp.md)
+for dashboard and API steps, workspace scope, verification, and revocation.
 
 ## Development
 
