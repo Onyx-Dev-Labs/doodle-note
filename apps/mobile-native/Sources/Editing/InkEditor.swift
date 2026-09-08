@@ -188,6 +188,8 @@ struct InkEditor: View {
                     if ProcessInfo.processInfo.arguments.contains("--ink-fixture") {
                         Button("Add sample ink") { session.replace(with: InkFixture.drawing()) }
                             .accessibilityIdentifier("addSampleInk")
+                        Button("Add extra sample stroke") { session.replace(with: InkFixture.appendingStroke(to: session.canvas.drawing)) }
+                            .accessibilityIdentifier("addExtraSampleInk")
                     }
                     #endif
 

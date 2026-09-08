@@ -996,6 +996,42 @@
         }
       }
     },
+    "Add extra sample stroke": {
+      "extractionState": "manual",
+      "comment": "DEBUG ink-fixture control, only with --ui-testing and --ink-fixture; never a product control.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add extra sample stroke"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Tilføj ekstra eksempelstreg"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Añadir un trazo de ejemplo extra"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ajouter un trait d’exemple supplémentaire"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Extra-Beispielstrich hinzufügen"
+          }
+        }
+      }
+    },
     "Add sample ink": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",

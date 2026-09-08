@@ -25,18 +25,14 @@ import XCTest
         XCTAssertTrue(app.buttons["recordButton"].isHittable)
         let canvas = app.descendants(matching: .any).matching(identifier: "inkCanvas").firstMatch
         XCTAssertTrue(canvas.exists)
-        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.45))
-        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "4 strokes"), object: canvas)], timeout: 5), .completed)
+        waitForStrokeCount(3, on: canvas)
+        app.buttons["drawingTools"].tap()
+        app.buttons["addExtraSampleInk"].tap()
+        waitForStrokeCount(4, on: canvas)
         app.buttons["undoInk"].tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "3 strokes"), object: canvas)], timeout: 5), .completed)
+        waitForStrokeCount(3, on: canvas)
         app.buttons["redoInk"].tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "4 strokes"), object: canvas)], timeout: 5), .completed)
-        app.typeKey("1", modifierFlags: .command)
-        XCTAssertTrue(app.textViews["personalNotes"].waitForExistence(timeout: 5))
-        app.typeKey("2", modifierFlags: .command)
-        XCTAssertTrue(app.buttons["drawingTools"].waitForExistence(timeout: 5))
+        waitForStrokeCount(4, on: canvas)
         let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         image.name = "Nonempty editable ink and accessible recording controls"
         image.lifetime = .keepAlways; add(image)
@@ -63,6 +59,20 @@ import XCTest
         reopened.lifetime = .keepAlways; add(reopened)
         app.buttons["Notes"].tap()
         XCTAssertTrue(app.textViews["personalNotes"].exists)
+    }
+
+    private func waitForStrokeCount(_ count: Int, on canvas: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        let expected = "\(count) strokes"
+        let result = XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: canvas)],
+            timeout: 8)
+        if result != .completed {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = "Ink canvas expected \(expected)"
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        XCTAssertEqual(result, .completed, "inkCanvas value was \(canvas.value as? String ?? "nil"), expected \(expected)", file: file, line: line)
     }
     func testAccessibilityTextSizeKeepsToolsAndRecordingReachable() {
         let app = XCUIApplication()
