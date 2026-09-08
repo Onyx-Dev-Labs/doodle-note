@@ -30,13 +30,6 @@ const launch = async () => {
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0].setTitle('DoodleNote — ONY-271 synthetic QA')
   )
-  // Keep physical keyboard input out of the synthetic editor while QA runs.
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0]
-    window.setFocusable(false)
-    window.webContents.setBackgroundThrottling(false)
-    window.showInactive()
-  })
 }
 const send = async (ev) =>
   app.evaluate(
@@ -170,6 +163,13 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
       qa.calls.push(request)
       return new Promise((resolve) => qa.pending.push(resolve))
     })
+  })
+  // Keep physical keyboard input out of the synthetic editor while QA runs.
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    window.setFocusable(false)
+    window.webContents.setBackgroundThrottling(false)
+    window.showInactive()
   })
   let serial = 0
   const segment = (text) => ({
