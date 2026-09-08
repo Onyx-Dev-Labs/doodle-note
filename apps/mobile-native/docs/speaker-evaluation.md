@@ -13,15 +13,19 @@ The download is explicit, cancellable, staged, and validated before installation
 
 ## Labels and names
 
-Four anonymous speaker slots are supported per session. Live labels can change as the timeline finalizes. Manual names survive revised turns within a session and are not automatically applied to a reused slot in another session. Persisted speaker intervals can be joined to transcript passages without modifying the transcription itself.
+Four anonymous speaker slots are supported per session. Live labels can change as the timeline finalizes. Confirmed names survive revised turns within a session and are not copied onto a different slot. Overlap uses the same 10%/65% coverage gate as transcripts, summaries and exports. Uncertain matcher abstentions display as “Uncertain speaker” rather than a guessed name.
 
-The passage join unions intervals per speaker. Two speakers each covering at least 10% of a passage yield “Multiple speakers”; a single speaker requires at least 65% coverage to receive a label. Otherwise the passage stays unassigned. These are uncalibrated display heuristics, not measured identity confidence. Word-level splitting, overlapping-speech quality, saved voice references, and automatic recognition of known people remain open work.
+Optional remembered voices are stored only under `VoiceProfiles/`, with complete-until-first-unlock protection and exclusion from iCloud backup, notes sync, initial archive copies and generation payloads. Recording works with an empty profile catalog. Matching uses cosine similarity with conservative open-set rejection (accept ≥ 0.82 and margin ≥ 0.10). These thresholds follow the ONY-241 feasibility proposal; they are not a physical-device accuracy claim. Calendar invitees remain name suggestions and never enter the matcher. Uncertain or corrected-away speech does not update a saved profile.
+
+The passage join unions intervals per speaker. Two speakers each covering at least 10% of a passage yield “Multiple speakers”; a single speaker requires at least 65% coverage to receive a label. Otherwise the passage stays unassigned. Word-level splitting and overlapping-speech quality on real meetings remain physical qualification work.
 
 ## Evidence and remaining gates
 
 The exact downloaded model passed size and SHA-256 checks, compiled, loaded with matching embedded configuration, and processed two seconds of synthetic silence through the actual engine in a simulator test. This only verifies execution and frame progression. It does not establish attribution, speech accuracy, latency, memory, battery, or thermal behavior with real meetings.
 
-The opt-in test `SpeakerTests/testPinnedModelProcessesSyntheticAudioWhenProvided` reads `DOODLENOTE_SPEAKER_MODEL` in the test-runner environment. Point it at a complete verified `.mlpackage` directory. Normal CI skips that one test and does not download the model. Unit tests separately exercise label rules, session-scoped naming, hash rejection, and preservation of recorded audio when a bounded speaker consumer overflows.
+The opt-in test `SpeakerTests/testPinnedModelProcessesSyntheticAudioWhenProvided` reads `DOODLENOTE_SPEAKER_MODEL` in the test-runner environment. Point it at a complete verified `.mlpackage` directory. Normal CI skips that one test and does not download the model. Unit tests separately exercise label rules, session-scoped naming, hash rejection, preservation of recorded audio when a bounded speaker consumer overflows, three/four-speaker overlap, false-match/unknown rejection, profile removal and serialization boundaries.
+
+Authorized known/unknown speaker sessions in five languages, live labels, and subsequent-meeting matching on physical iPhone and iPad remain ONY-265.
 
 ## Licensing before distribution
 

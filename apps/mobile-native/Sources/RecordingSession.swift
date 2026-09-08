@@ -12,6 +12,7 @@ final class RecordingSession {
     var problem: String?
     let speech = LocalSpeech()
     let speakers = StreamingSpeakers()
+    let voices: VoiceProfiles
     private var hardware: (any CaptureHardware)?
     private var writer: AudioChunkWriter?
     private var captureFailed = false
@@ -34,7 +35,9 @@ final class RecordingSession {
         await AVAudioApplication.requestRecordPermission()
     }, makeHardware: @escaping @MainActor () throws -> any CaptureHardware = { try SystemCaptureHardware() },
          analysisEnabled: Bool = true,
-         writerFault: @escaping @Sendable (AudioChunkWriter.Stage) throws -> Void = { _ in }) {
+         writerFault: @escaping @Sendable (AudioChunkWriter.Stage) throws -> Void = { _ in },
+         voiceRoot: URL = URL.applicationSupportDirectory.appendingPathComponent("DoodleNoteNative/VoiceProfiles")) {
+        voices = VoiceProfiles(root: voiceRoot)
         #if DEBUG
         if CommandLine.arguments.contains("--ui-testing") && CommandLine.arguments.contains("--capture-fixture") {
             let permission = FixtureCapturePermission()
@@ -70,6 +73,7 @@ final class RecordingSession {
         captureFailed = false
         lastReport = nil
         problem = nil
+        Task { await voices.refresh() }
         defer { preparingNoteID = nil; busy = false }
         guard await recordPermission() else {
             if !canceled { problem = CaptureError.microphone.localizedDescription }
@@ -206,6 +210,9 @@ final class RecordingSession {
         }
         let speechComplete = await speech.finish()
         await speakers.finish()
+        if let annotations = library.note(id)?.speakerAnnotations, let sessionID = annotations.turns.last?.sessionID {
+            applySpeakers(annotations.turns.filter { $0.sessionID == sessionID }, sessionID: sessionID, id: id, library: library)
+        }
         let endpoint = try? library.disk?.recordingOffset(for: id)
         library.update(id) { note in
             note.metadata?.cloudTranscriptStatus = !interrupted && !captureFailed && previousTranscriptComplete && speechStarted && speechComplete && note.transcriptNeedsReview != true && note.passages.allSatisfy(\.isFinal) ? .complete : .interrupted
@@ -217,6 +224,20 @@ final class RecordingSession {
             problem = "Transcription is incomplete. Saved audio and corrections are preserved."
         }
         noteID = nil; startedAt = nil; attemptID = nil
+    }
+
+    private func applySpeakers(_ turns: [SpeakerTurn], sessionID: UUID, id: UUID, library: NoteLibrary) {
+        library.update(id) { note in
+            var annotations = note.speakerAnnotations ?? SpeakerAnnotations()
+            annotations.replace(sessionID: sessionID, with: turns)
+            if let disk = library.disk, let plan = try? disk.playbackTimeline(for: id) {
+                let snapshot = annotations
+                SpeakerIdentity.reconcile(&annotations, selected: voices.selectedProfiles) { key in
+                    SpeakerIdentity.probe(for: key, annotations: snapshot, plan: plan)
+                }
+            }
+            note.speakerAnnotations = annotations
+        }
     }
 
     private func installObservers(_ hardware: any CaptureHardware, library: NoteLibrary, token: UUID) {

@@ -16435,6 +16435,654 @@
           }
         }
       }
+    },
+    "Remember this voice": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remember this voice"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Husk denne stemme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Recordar esta voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mémoriser cette voix"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme merken"
+          }
+        }
+      }
+    },
+    "Remove saved voice": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove saved voice"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fjern gemt stemme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eliminar voz guardada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Supprimer la voix enregistrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeicherte Stimme entfernen"
+          }
+        }
+      }
+    },
+    "Remove voice from this device": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove voice from this device"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fjern stemmen fra denne enhed"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar la voz de este dispositivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retirer la voix de cet appareil"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stimme von diesem Gerät entfernen"
+          }
+        }
+      }
+    },
+    "Saved voices": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved voices"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gemte stemmer"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Voces guardadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Voix enregistrées"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeicherte Stimmen"
+          }
+        }
+      }
+    },
+    "Known participants": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known participants"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kendte deltagere"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Participantes conocidos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Participants connus"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bekannte Teilnehmende"
+          }
+        }
+      }
+    },
+    "No saved voices yet.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No saved voices yet."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ingen gemte stemmer endnu."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aún no hay voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aucune voix enregistrée pour le moment."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Noch keine gespeicherten Stimmen."
+          }
+        }
+      }
+    },
+    "Voice profiles stay on this device. They are not synced or backed up.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice profiles stay on this device. They are not synced or backed up."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stemmeprofiler bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los perfiles de voz permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les profils vocaux restent sur cet appareil. Ils ne sont ni synchronisés ni sauvegardés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stimmprofile bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert."
+          }
+        }
+      }
+    },
+    "Recording works without saved voices.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording works without saved voices."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelse fungerer uden gemte stemmer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se puede grabar sin voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’enregistrement fonctionne sans voix enregistrées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Aufnahme funktioniert ohne gespeicherte Stimmen."
+          }
+        }
+      }
+    },
+    "Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stemmeprofiler bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke. Optagelse fungerer uden gemte stemmer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los perfiles de voz permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad. Se puede grabar sin voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les profils vocaux restent sur cet appareil. Ils ne sont ni synchronisés ni sauvegardés. L’enregistrement fonctionne sans voix enregistrées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stimmprofile bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert. Die Aufnahme funktioniert ohne gespeicherte Stimmen."
+          }
+        }
+      }
+    },
+    "Use suggested name": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use suggested name"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Brug foreslået navn"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar nombre sugerido"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Utiliser le nom suggéré"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vorgeschlagenen Namen verwenden"
+          }
+        }
+      }
+    },
+    "Remove this saved voice from this device?": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove this saved voice from this device?"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fjern denne gemte stemme fra denne enhed?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Quitar esta voz guardada de este dispositivo?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retirer cette voix enregistrée de cet appareil ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese gespeicherte Stimme von diesem Gerät entfernen?"
+          }
+        }
+      }
+    },
+    "This does not change names already confirmed in notes.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This does not change names already confirmed in notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Dette ændrer ikke navne, der allerede er bekræftet i noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esto no cambia los nombres ya confirmados en las notas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cela ne modifie pas les noms déjà confirmés dans les notes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bereits in Notizen bestätigte Namen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Uncertain speaker": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uncertain speaker"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usikker taler"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Orador no identificado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Locuteur incertain"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Unsichere Stimme"
+          }
+        }
+      }
+    },
+    "Could not save this voice. Notes and recordings are unchanged.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save this voice. Notes and recordings are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne stemme kunne ikke gemmes. Noter og optagelser er uændrede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo guardar esta voz. Las notas y grabaciones no cambian."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Impossible d’enregistrer cette voix. Les notes et enregistrements sont inchangés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme konnte nicht gespeichert werden. Notizen und Aufnahmen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "That saved voice is unavailable. Notes and recordings are unchanged.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That saved voice is unavailable. Notes and recordings are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den gemte stemme er utilgængelig. Noter og optagelser er uændrede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esa voz guardada no está disponible. Las notas y grabaciones no cambian."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette voix enregistrée est indisponible. Les notes et enregistrements sont inchangés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese gespeicherte Stimme ist nicht verfügbar. Notizen und Aufnahmen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Need a clear finalized solo stretch before remembering this voice.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Need a clear finalized solo stretch before remembering this voice."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der skal være et tydeligt, færdigt soloafsnit, før denne stemme kan huskes."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Hace falta un tramo final en solitario y claro antes de recordar esta voz."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Il faut un passage solo finalisé et net avant de mémoriser cette voix."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Es braucht eine klare, abgeschlossene Solo-Passage, bevor diese Stimme gespeichert werden kann."
+          }
+        }
+      }
+    },
+    "Saved voices stay on this device. They are not synced or backed up.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved voices stay on this device. They are not synced or backed up."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gemte stemmer bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Las voces guardadas permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les voix enregistrées restent sur cet appareil. Elles ne sont ni synchronisées ni sauvegardées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeicherte Stimmen bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert."
+          }
+        }
+      }
+    },
+    "This voice is remembered on this device only.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This voice is remembered on this device only."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne stemme huskes kun på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta voz se recuerda solo en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette voix est mémorisée uniquement sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme wird nur auf diesem Gerät gespeichert."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

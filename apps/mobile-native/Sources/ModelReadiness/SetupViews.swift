@@ -72,6 +72,23 @@ struct ModelSettingsView: View {
                     }
                     Text("The download is verified before use. Completed files are kept for retry after an interruption. Speaker accuracy still requires device qualification.").font(.footnote)
                 }.disabled(captureActive || recording.speakers.state == .preparing)
+                Section("Saved voices") {
+                    Text(L10n.message(recording.voices.detail))
+                    if recording.voices.profiles.isEmpty {
+                        Text("No saved voices yet.").font(.footnote)
+                    }
+                    ForEach(recording.voices.profiles) { profile in
+                        HStack {
+                            Toggle(profile.name, isOn: Binding(
+                                get: { recording.voices.catalog.selectedIDs.contains(profile.id) },
+                                set: { enabled in Task { await recording.voices.setSelected(profile.id, enabled: enabled) } }))
+                            Button("Remove saved voice", role: .destructive) {
+                                Task { try? await recording.voices.remove(profile.id) }
+                            }
+                        }
+                    }
+                    Text("Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices.").font(.footnote)
+                }.disabled(captureActive)
                 Section("Generated notes") {
                     Label(L10n.key(generation.available ? "Ready" : "Not available"), systemImage: generation.available ? "checkmark.circle" : "info.circle")
                     Text(L10n.message(generation.detail))
@@ -86,6 +103,7 @@ struct ModelSettingsView: View {
                 guard !captureActive else { return }
                 await recording.speech.check(language)
                 await recording.speakers.check()
+                await recording.voices.refresh()
                 generation = await engine.readiness(language: language)
             }
             .confirmationDialog("Remove downloaded speaker assets?", isPresented: $confirmingRemoval, titleVisibility: .visible) {

@@ -10,7 +10,8 @@
     "Continue synthetic capture": "DEBUG test-harness permission control, only with both --ui-testing and --capture-fixture; never a product control.",
     "Transcript fixture": "DEBUG synthetic source title, only enabled by --ui-testing and --transcript-fixture.",
     "Synthetic transcript draft": "DEBUG synthetic source text, not a product UI label.",
-    "Synthetic cloud change": "DEBUG-only synthetic transcript review fixture; requires explicit UI-testing arguments."
+    "Synthetic cloud change": "DEBUG-only synthetic transcript review fixture; requires explicit UI-testing arguments.",
+    "Synthetic speaker turn \\($0 + 1).": "DEBUG speaker-identity fixture transcript; only with --ui-testing and --speaker-identity-fixture."
   },
   "Calendar/CalendarContracts.swift": {
     "<calendar credential>": "Redacted debug description, never a user-facing credential."

@@ -247,5 +247,13 @@
   "The source note changed. Generate again from the saved version.",
   "Summary generation canceled. Your notes and previous versions are preserved.",
   "The new version is waiting to be saved. Keep the app open and retry saving.",
-  "A source fragment exceeds the on-device context limit. Your original note is preserved."
+  "A source fragment exceeds the on-device context limit. Your original note is preserved.",
+  "Could not save this voice. Notes and recordings are unchanged.",
+  "That saved voice is unavailable. Notes and recordings are unchanged.",
+  "Need a clear finalized solo stretch before remembering this voice.",
+  "Recording works without saved voices.",
+  "Saved voices stay on this device. They are not synced or backed up.",
+  "This voice is remembered on this device only.",
+  "Voice profiles stay on this device. They are not synced or backed up.",
+  "No saved voices yet."
 ]
