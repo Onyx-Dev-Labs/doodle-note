@@ -4,7 +4,7 @@ import type { CalendarEvent, CalendarStartMeetingEvent } from '../shared/calenda
 export const MIC_CALENDAR_MATCH_LOOKAHEAD_MS = 5 * 60_000
 /** Calendar ids remain unique enough to suppress repeats for a full day. */
 const CALENDAR_PROMPT_RETENTION_MS = 24 * 60 * 60_000
-/** Ad-hoc prompts retain the existing five-minute quiet period. */
+/** Retain deduplication for repeats; distinct mic sessions have their own key. */
 const AD_HOC_PROMPT_RETENTION_MS = 5 * 60_000
 
 export interface PromptCoordinatorState {
@@ -142,6 +142,7 @@ function matchingCalendarEvent(
 
 function promptKey(prompt: CalendarStartMeetingEvent): string {
   if (prompt.eventId) return `calendar:${prompt.eventId}`
+  if (prompt.detectionId) return `mic-session:${prompt.detectionId}`
   return `adhoc:${prompt.subject.trim().toLowerCase() || 'meeting'}`
 }
 

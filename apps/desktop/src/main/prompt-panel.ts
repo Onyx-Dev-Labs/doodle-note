@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import mascotPath from '../renderer/src/assets/mascot-square.png?asset'
 import { BrowserWindow, nativeTheme, screen } from 'electron'
 import { panelBounds, panelDataUrl } from './prompt-panel-content'
 import type { CalendarStartMeetingEvent } from '../shared/calendar-api'
@@ -16,6 +18,7 @@ const PANEL_TTL_MS = 4 * 60_000
  */
 export class PromptPanel {
   private window: BrowserWindow | null = null
+  private readonly logoDataUrl = `data:image/png;base64,${readFileSync(mascotPath).toString('base64')}`
   private closeTimer: NodeJS.Timeout | null = null
 
   ownsWindow(window: BrowserWindow): boolean {
@@ -71,7 +74,9 @@ export class PromptPanel {
       if (this.window === panel && !panel.isDestroyed()) panel.showInactive()
     })
     void panel
-      .loadURL(panelDataUrl(prompt, nativeTheme.shouldUseDarkColors, process.platform))
+      .loadURL(
+        panelDataUrl(prompt, nativeTheme.shouldUseDarkColors, process.platform, this.logoDataUrl)
+      )
       .catch(() => {
         if (this.window === panel) this.close()
       })

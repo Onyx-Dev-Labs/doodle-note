@@ -14,10 +14,10 @@ const html = (dark = false): string =>
 describe('prompt panel content and placement', () => {
   it('centers at the bottom of the cursor display work area, including negative coordinates', () => {
     assert.deepEqual(panelBounds({ x: -1920, y: 25, width: 1920, height: 1000 }, 'darwin'), {
-      x: -1130,
-      y: 901,
-      width: 340,
-      height: 108
+      x: -1158,
+      y: 889,
+      width: 396,
+      height: 120
     })
   })
   it('stays inside work areas narrowed by side/bottom Docks, scaling or small displays', () => {

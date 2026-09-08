@@ -132,6 +132,8 @@ export interface CalendarStartMeetingEvent {
   startIso: string
   /** True when detected from mic activity rather than the calendar. */
   adHoc?: boolean
+  /** Local identity of a distinct microphone-detected call, when available. */
+  detectionId?: string
 }
 
 /** API surface exposed on `window.calendar` by the preload script. */

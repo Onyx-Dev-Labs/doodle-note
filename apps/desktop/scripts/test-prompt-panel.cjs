@@ -13,7 +13,9 @@ async function main() {
   const evidence = process.env.DOODLE_QA_OUTPUT || join(temp, 'evidence')
   mkdirSync(evidence, { recursive: true })
   for (const name of ['prompt-panel', 'prompt-panel-content']) {
-    const source = readFileSync(resolve(__dirname, '../src/main', `${name}.ts`), 'utf8')
+    let source = readFileSync(resolve(__dirname, '../src/main', `${name}.ts`), 'utf8')
+    // Resolve the same existing asset that electron-vite copies into the main build.
+    source = source.replace(/import mascotPath from '[^']+'/g, `const mascotPath = ${JSON.stringify(resolve(__dirname, '../src/renderer/src/assets/mascot-square.png'))}`)
     writeFileSync(join(temp, `${name}.js`), ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
     }).outputText)
@@ -53,6 +55,15 @@ async function main() {
     await page.screenshot({ path: join(evidence, 'paws-appearance.png') })
     await page.locator('.card').hover()
     assert.equal(await page.locator('.dismiss').evaluate(el => getComputedStyle(el).opacity), '1')
+    const geometry = await page.evaluate(() => {
+      const box = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
+      const logo = document.querySelector('.logo')
+      return { card: box('.card'), close: box('.dismiss'), title: box('h1'), brand: box('.brand'), logoLoaded: logo.complete && logo.naturalWidth > 0 }
+    })
+    assert.equal(geometry.logoLoaded, true, 'bundled DoodleNote logo renders')
+    assert.equal(geometry.title.x, geometry.brand.x, 'title and branding align')
+    assert.ok(geometry.close.x < geometry.card.x && geometry.close.y < geometry.card.y, 'X sits outside the top-left corner')
+    assert.ok(geometry.close.x >= 4 && geometry.close.y >= 4, 'outside X and focus ring remain inside transparent window')
     await page.screenshot({ path: join(evidence, 'light-hover.png') })
     await page.locator('.dismiss').click().catch(error => { if (!page.isClosed()) throw error })
     assert.deepEqual(await runtime.evaluate(() => global.actions), ['dismiss'])

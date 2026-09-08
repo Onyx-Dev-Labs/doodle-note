@@ -76,8 +76,8 @@ interface WorkArea {
 /** Electron work areas use logical pixels and already exclude the Dock/taskbar. */
 export function panelBounds(area: WorkArea, platform: NodeJS.Platform): WorkArea {
   const inset = 16
-  const width = Math.min(PANEL_WIDTH, area.width)
-  const height = Math.min(PANEL_HEIGHT, area.height)
+  const width = Math.min(platform === 'darwin' ? 396 : PANEL_WIDTH, area.width)
+  const height = Math.min(platform === 'darwin' ? 120 : PANEL_HEIGHT, area.height)
   return {
     width,
     height,
@@ -105,28 +105,28 @@ const paw = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
 export function panelDataUrl(
   prompt: CalendarStartMeetingEvent,
   dark: boolean,
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform,
+  logoDataUrl = ''
 ): string {
   if (platform !== 'darwin') return legacyPanelDataUrl(prompt, dark)
-  const heading = prompt.adHoc
-    ? 'Looks like you’re on a call'
-    : prompt.subject.trim() || 'Untitled meeting'
+  const heading = prompt.adHoc ? 'Meeting detected' : prompt.subject.trim() || 'Untitled meeting'
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
   <title>DoodleNote — meeting detected</title><style>
   * { box-sizing: border-box; }
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }
-  body { margin: 0; padding: 4px; background: transparent;
+  body { margin: 0; padding: 16px; background: transparent;
     font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
     color: ${dark ? '#f0eee2' : '#26281f'}; -webkit-user-select: none; }
-  .card { position: relative; height: 100px; padding: 13px 16px 12px;
+  .card { position: relative; height: 88px; padding: 12px 14px;
     background: ${dark ? '#262922' : '#fdfcf8'}; border: 1px solid ${dark ? '#4c5144' : '#dfdccf'};
-    border-radius: 16px; display: flex; flex-direction: column; gap: 10px;
+    border-radius: 16px; display: flex; align-items: center; gap: 12px;
     animation: enter 300ms cubic-bezier(.2,.8,.2,1) both; }
-  h1 { font-size: 13px; line-height: 18px; font-weight: 600; margin: 0 0 0 22px;
+  h1 { font-size: 13px; line-height: 18px; font-weight: 600; margin: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .brand { display: flex; flex-direction: column; gap: 5px; padding-left: 12px; }
+  .logo { width: 42px; height: 42px; border-radius: 11px; flex: none; }
+  .content { flex: 1; min-width: 0; }
+  .brand { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
   .name { font-size: 10px; font-weight: 600; color: ${dark ? '#b4b9a7' : '#626951'}; }
   .paw-walk { display: inline-flex; align-items: center; gap: 3px; color: ${dark ? '#aac996' : '#5f7a4e'}; }
   .paw { display: inline-flex; opacity: 0; animation: paw-step 1.6s ease-in-out infinite; }
@@ -136,11 +136,12 @@ export function panelDataUrl(
   .paw:nth-child(3) { animation-delay: .7s; }
   .paw:nth-child(4) { animation-delay: 1.05s; }
   a { text-decoration: none; cursor: pointer; }
-  .go { padding: 9px 16px; border-radius: 9px; font-size: 12px; font-weight: 650;
+  .go { padding: 10px 12px; border-radius: 9px; font-size: 12px; font-weight: 650;
     color: ${dark ? '#1d1f19' : '#fff'}; background: ${dark ? '#aac996' : '#526b42'}; white-space: nowrap; }
   .go:hover { background: ${dark ? '#bfdaae' : '#405633'}; }
-  .dismiss { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
-    display: grid; place-items: center; border-radius: 50%; font-size: 19px; line-height: 1;
+  .dismiss { position: absolute; top: -12px; left: -12px; width: 24px; height: 24px;
+    display: grid; place-items: center; border-radius: 50%; line-height: 1;
+    border: 1px solid ${dark ? '#51564a' : '#d2d0c5'};
     color: inherit; background: ${dark ? '#3a3e33' : '#eeece3'}; opacity: 0; }
   .card:hover .dismiss, .card:focus-within .dismiss { opacity: 1; }
   a:focus-visible { outline: 2px solid ${dark ? '#e0edbc' : '#344d26'}; outline-offset: 2px; }
@@ -149,11 +150,12 @@ export function panelDataUrl(
   @media (prefers-reduced-motion: reduce) { .card { animation: none; } .paw { animation: none; opacity: .95; } }
   @media (hover: none) { .dismiss { opacity: 1; } }
   </style></head><body><section class="card" aria-label="Meeting detected">
-    <h1 title="${escapeHtml(heading)}">${escapeHtml(heading)}</h1>
-    <div class="row"><div class="brand"><span class="name">DoodleNote</span>
+    <img class="logo" src="${escapeHtml(logoDataUrl)}" alt="DoodleNote logo" width="42" height="42">
+    <div class="content"><h1 title="${escapeHtml(heading)}">${escapeHtml(heading)}</h1>
+    <div class="brand"><span class="name">DoodleNote</span>
       <span class="paw-walk" aria-hidden="true">${[1, 2, 3, 4].map(() => `<span class="paw">${paw}</span>`).join('')}</span>
-    </div><a class="go" href="doodle-panel://start">Record now</a></div>
-    <a class="dismiss" href="doodle-panel://dismiss" aria-label="Dismiss meeting prompt" title="Dismiss (Esc)">×</a>
+    </div></div><a class="go" href="doodle-panel://start">Record now</a>
+    <a class="dismiss" href="doodle-panel://dismiss" aria-label="Dismiss meeting prompt" title="Dismiss (Esc)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a>
   </section></body></html>`
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
 }

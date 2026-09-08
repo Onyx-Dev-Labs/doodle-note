@@ -289,14 +289,15 @@ app.whenReady().then(() => {
   const micWatcher = new MicWatcher(
     resolveEngineBinary(),
     app.getPath('userData'),
-    (appLabel) => {
+    (appLabel, detectionId) => {
       calendarService?.deliverPrompt({
         action: 'prompt',
         eventId: '',
         // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
         subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
         startIso: new Date().toISOString(),
-        adHoc: true
+        adHoc: true,
+        ...(detectionId ? { detectionId } : {})
       })
     },
     () => {

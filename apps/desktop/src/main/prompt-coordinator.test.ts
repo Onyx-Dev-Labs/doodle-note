@@ -161,3 +161,29 @@ describe('macOS prompt delivery', () => {
     assert.equal(planPromptDelivery(false, false, true, false, 'darwin').external, null)
   })
 })
+
+describe('distinct microphone session identities', () => {
+  it('allows the next call inside five minutes but suppresses the same detection', () => {
+    const prompt = { ...micPrompt('Meeting'), detectionId: 'call-1' }
+    const first = coordinatePrompt(initialPromptCoordinatorState(), prompt, [], NOW)
+    assert.ok(first.prompt)
+    assert.equal(coordinatePrompt(first.state, prompt, [], NOW + 10000).prompt, null)
+    assert.ok(
+      coordinatePrompt(first.state, { ...prompt, detectionId: 'call-2' }, [], NOW + 15000).prompt
+    )
+  })
+  it('still correlates different microphone identities to one calendar event', () => {
+    const event = eventAt(0)
+    const first = coordinatePrompt(
+      initialPromptCoordinatorState(),
+      { ...micPrompt(), detectionId: 'call-1' },
+      [event],
+      NOW
+    )
+    assert.equal(
+      coordinatePrompt(first.state, { ...micPrompt(), detectionId: 'call-2' }, [event], NOW + 15000)
+        .prompt,
+      null
+    )
+  })
+})
