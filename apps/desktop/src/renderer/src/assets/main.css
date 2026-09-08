@@ -362,7 +362,10 @@ a,
 
 .folder-add {
   flex-shrink: 0;
-  display: none;
+  /* Reserve the action's space so revealing it cannot resize the row. */
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -372,8 +375,10 @@ a,
   font-size: 11px;
 }
 
-.nav-item:hover .folder-add {
-  display: flex;
+.nav-item:hover .folder-add,
+.nav-item:focus-within .folder-add {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .folder-add:hover {
