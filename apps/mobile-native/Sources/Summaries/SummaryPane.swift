@@ -20,6 +20,7 @@ struct SummaryPane: View {
     }
     private var note: NoteRecord? { library.note(id) }
     private var selected: SummaryVersion? { note?.metadata?.summaries.first { $0.id == note?.metadata?.selectedSummaryID } }
+    private var canEdit: Bool { note?.schemaVersion == 2 && note?.metadata?.cloudReadOnly != true }
 
     var body: some View {
         ScrollView {
@@ -30,10 +31,10 @@ struct SummaryPane: View {
                 #endif
                 Picker("Meeting format", selection: $format) {
                     ForEach(MeetingFormat.allCases) { Text(L10n.key($0.label)).tag($0) }
-                }.disabled(controller.busy)
+                }.disabled(controller.busy || !canEdit)
                 Picker("Summary language", selection: $language) {
                     ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) }
-                }.disabled(controller.busy)
+                }.disabled(controller.busy || !canEdit)
                 Text("Generation stays on this device. Review claims, owners and dates against the sources before using the summary.")
                     .font(.caption).foregroundStyle(.secondary)
                 if controller.busy {
@@ -41,7 +42,7 @@ struct SummaryPane: View {
                     Button("Cancel generation") { controller.cancel() }
                 } else {
                     Button("Generate draft") { controller.generate(noteID: id, library: library, format: format, language: language) }
-                        .disabled(note?.schemaVersion != 2).accessibilityIdentifier("generateSummary")
+                        .disabled(!canEdit).accessibilityIdentifier("generateSummary")
                 }
                 if let problem = controller.problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
                 if let draft = controller.draft {
@@ -52,7 +53,7 @@ struct SummaryPane: View {
                     Button("Save as selected version") {
                         if selected?.origin == .edited { confirmReplacement = true }
                         else { Task { _ = await controller.save(noteID: id, library: library, replaceEdited: false) } }
-                    }.accessibilityIdentifier("saveGeneratedSummary")
+                    }.disabled(!canEdit).accessibilityIdentifier("saveGeneratedSummary")
                 }
                 Text("Retained versions").font(.headline)
                 if note?.metadata?.summaries.isEmpty != false { Text("No summary versions yet. Your personal notes remain separate.") }
@@ -62,9 +63,10 @@ struct SummaryPane: View {
                         if selected?.id == version.id { Text("Selected version").font(.caption).foregroundStyle(.secondary) }
                         Text(version.text).textSelection(.enabled)
                         sourceButtons(version.sources)
-                        Button("Edit as new version") { editText = version.text; editing = version }
+                        Button("Edit as new version") { editText = version.text; editing = version }.disabled(!canEdit)
                         if selected?.id != version.id {
                             Button("Select this version") { library.update(id) { $0.metadata?.selectedSummaryID = version.id } }
+                                .disabled(!canEdit)
                         }
                     }.padding(.vertical, 8)
                 }

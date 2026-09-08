@@ -92,6 +92,42 @@ final class SummaryGenerationTests: XCTestCase {
         }
     }
 
+    func testLocalTranscriptReceiptAndReviewQualifyIncompleteSources() async throws {
+        var complete = NoteRecord()
+        complete.captureState = .finished
+        complete.text = "Typed notes."
+        complete.passages = [.init(start: 0, end: 1, text: "Final local passage.", isFinal: true)]
+        complete.metadata?.cloudTranscriptStatus = .complete
+        let ready = try await SummaryGenerator(engine: SummaryFixtureEngine()).generate(note: complete, format: .general, language: .english) { _, _ in }
+        XCTAssertFalse(ready.incomplete)
+
+        var gapped = complete
+        gapped.metadata?.cloudTranscriptStatus = .partial
+        let gappedDraft = try await SummaryGenerator(engine: SummaryFixtureEngine()).generate(note: gapped, format: .general, language: .english) { _, _ in }
+        XCTAssertTrue(gappedDraft.incomplete)
+
+        var legacy = complete
+        legacy.metadata?.cloudTranscriptStatus = nil
+        legacy.speechSessions = [.init(id: UUID(), start: 0, end: 1, language: .english)]
+        let legacyDraft = try await SummaryGenerator(engine: SummaryFixtureEngine()).generate(note: legacy, format: .general, language: .english) { _, _ in }
+        XCTAssertTrue(legacyDraft.incomplete)
+
+        var review = complete
+        review.transcriptNeedsReview = true
+        let reviewDraft = try await SummaryGenerator(engine: SummaryFixtureEngine()).generate(note: review, format: .general, language: .english) { _, _ in }
+        XCTAssertTrue(reviewDraft.incomplete)
+    }
+
+    func testFinalPassagesArePreferredOverProvisionalHypotheses() throws {
+        var note = NoteRecord()
+        let final = TranscriptPassage(start: 0, end: 1, text: "Stable final text.", isFinal: true)
+        note.passages = [final, .init(start: 1, end: 2, text: "Still changing.", isFinal: false)]
+        let sources = try SummaryGenerator.sources(note)
+        XCTAssertEqual(sources.map(\.text), ["Stable final text."])
+        XCTAssertEqual(sources.first?.anchor.content, .transcript(final.id))
+        XCTAssertTrue(SummaryGenerator.isIncomplete(note))
+    }
+
     func testOnlyStableUnambiguousSpeakerContextEntersPrompt() async throws {
         var note = NoteRecord()
         let passage = TranscriptPassage(start: 0, end: 3, text: "I can help review.", isFinal: true)

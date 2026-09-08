@@ -87,9 +87,25 @@ actor SummaryGenerator {
             finish()
         }
         for (index, paragraph) in note.text.components(separatedBy: "\n").enumerated() { append(paragraph, .personalParagraph(index)) }
-        for passage in note.passages { append(passage.text, .transcript(passage.id), speaker: confirmedSpeaker(passage, note: note)) }
+        // Ground in finalized/corrected transcript text. Provisional hypotheses stay out when finals exist.
+        let passages = note.passages.contains(where: \.isFinal) ? note.passages.filter(\.isFinal) : note.passages
+        for passage in passages { append(passage.text, .transcript(passage.id), speaker: confirmedSpeaker(passage, note: note)) }
         guard !result.isEmpty else { throw SummaryFailure.empty }
         return result
+    }
+
+    /// `cloudTranscriptStatus` is the shared local+imported completion receipt. Absent is unknown, not completed.
+    static func isIncomplete(_ note: NoteRecord) -> Bool {
+        if note.captureState == .recording || note.captureState == .interrupted { return true }
+        if note.passages.contains(where: { !$0.isFinal }) { return true }
+        if note.transcriptNeedsReview == true || note.transcriptCloudReviewRequired == true { return true }
+        if let status = note.metadata?.cloudTranscriptStatus {
+            switch status {
+            case .partial, .interrupted: return true
+            case .complete, .none: return false
+            }
+        }
+        return note.captureState == .finished || !(note.speechSessions ?? []).isEmpty
     }
 
     /// Only stable, unambiguous attribution is supplied to the generator. Names are source data, not instructions.
@@ -162,8 +178,7 @@ actor SummaryGenerator {
         var anchors: [SourceAnchor] = []
         let headings = Self.headings(language)
         var lines: [String] = ["# " + headings[0], headings[5]]
-        let importedIncomplete = note.metadata?.cloudTranscriptStatus == .partial || note.metadata?.cloudTranscriptStatus == .interrupted
-        let incomplete = importedIncomplete || note.captureState == .recording || note.captureState == .interrupted || note.passages.contains { !$0.isFinal } || (note.captureState == .finished && note.passages.isEmpty)
+        let incomplete = Self.isIncomplete(note)
         if incomplete { lines.append(headings[4]) }
         for (kind, heading) in [(Item.Kind.point, headings[1]), (.decision, headings[2]), (.action, headings[3])] {
             let matching = items.filter { $0.0.kind == kind }
