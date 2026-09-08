@@ -677,7 +677,11 @@ function App(): React.JSX.Element {
           >
             Start taking notes
           </button>
-          <button type="button" className="mb-dismiss" onClick={() => setBanner(null)}>
+          <button
+            type="button"
+            className="mb-dismiss"
+            onClick={() => void window.calendar.dismissPrompt()}
+          >
             Dismiss
           </button>
         </div>

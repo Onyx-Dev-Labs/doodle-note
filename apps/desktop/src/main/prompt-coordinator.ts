@@ -43,15 +43,22 @@ export function setPromptRecording(
 
 /**
  * Keep the in-app action banner as persistent state, then choose one external
- * attention surface. Native notifications are preferred; the floating panel
- * remains a fallback for platforms/builds where they are unavailable.
+ * attention surface. macOS uses the branded panel in the background; other
+ * platforms retain native notifications and the existing panel fallback.
  */
 export function planPromptDelivery(
   hasWindow: boolean,
   windowFocusedAndVisible: boolean,
   notificationSupported: boolean,
-  hasPanel: boolean
+  hasPanel: boolean,
+  platform: NodeJS.Platform = process.platform
 ): PromptDeliveryPlan {
+  if (platform === 'darwin') {
+    return {
+      banner: hasWindow,
+      external: !windowFocusedAndVisible && hasPanel ? 'panel' : null
+    }
+  }
   return {
     banner: hasWindow,
     external: notificationSupported

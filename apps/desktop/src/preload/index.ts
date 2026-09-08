@@ -167,6 +167,7 @@ import {
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_DISMISS_PROMPT_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
   CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
@@ -400,6 +401,10 @@ const calendarApi: CalendarApi = {
 
   refresh(): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_REFRESH_CHANNEL) as Promise<CalendarState>
+  },
+
+  dismissPrompt(): Promise<void> {
+    return ipcRenderer.invoke(CALENDAR_DISMISS_PROMPT_CHANNEL) as Promise<void>
   },
 
   onEvents(cb: (state: CalendarState) => void): () => void {

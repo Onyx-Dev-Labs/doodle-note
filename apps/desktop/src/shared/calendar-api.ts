@@ -15,6 +15,7 @@ export const CALENDAR_CONNECT_CHANNEL = 'calendar:connect'
 export const CALENDAR_DISCONNECT_CHANNEL = 'calendar:disconnect'
 export const CALENDAR_CONNECT_GOOGLE_CHANNEL = 'calendar:connect-google'
 export const CALENDAR_DISCONNECT_GOOGLE_CHANNEL = 'calendar:disconnect-google'
+export const CALENDAR_DISMISS_PROMPT_CHANNEL = 'calendar:dismiss-prompt'
 export const CALENDAR_REFRESH_CHANNEL = 'calendar:refresh'
 /** main → renderer: full CalendarState after every refresh / auth change. */
 export const CALENDAR_EVENTS_CHANNEL = 'calendar:events'
@@ -149,6 +150,7 @@ export interface CalendarApi {
   disconnectGoogle(): Promise<CalendarState>
   /** Manual "Sync now". */
   refresh(): Promise<CalendarState>
+  dismissPrompt(): Promise<void>
   onEvents(cb: (state: CalendarState) => void): () => void
   onStartMeeting(cb: (ev: CalendarStartMeetingEvent) => void): () => void
 }
