@@ -83,23 +83,39 @@ async function main() {
   const iconState = () =>
     runtime.evaluate(() => {
       const image = global.trays[0].qaImage
-      const pixels = image.toBitmap()
+      const pixels = image.toBitmap({ scaleFactor: 1 })
+      const { width, height } = image.getSize()
       let redPixels = 0
+      let leftEyePixels = 0
+      let rightEyePixels = 0
+      let redOutsideEyes = 0
       for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i + 2] > 200 && pixels[i + 1] < 100 && pixels[i] < 100 && pixels[i + 3] > 200)
+        if (pixels[i + 2] > 200 && pixels[i + 1] < 100 && pixels[i] < 100 && pixels[i + 3] > 200) {
           redPixels++
+          const x = (((i / 4) % width) + 0.5) / width
+          const y = (Math.floor(i / 4 / width) + 0.5) / height
+          if (y >= 0.34 && y <= 0.49 && x >= 0.29 && x <= 0.42) leftEyePixels++
+          else if (y >= 0.34 && y <= 0.49 && x >= 0.58 && x <= 0.71) rightEyePixels++
+          else redOutsideEyes++
+        }
       }
       return {
         template: image.isTemplateImage(),
         scales: image.getScaleFactors(),
         redPixels,
+        leftEyePixels,
+        rightEyePixels,
+        redOutsideEyes,
         png: image.toPNG().toString('base64')
       }
     })
   const assertIcon = async (recording) => {
     const icon = await iconState()
     assert.equal(icon.template, !recording)
-    assert.equal(icon.redPixels > 0, recording, 'red dot matches confirmed capture')
+    assert.equal(icon.redPixels > 0, recording, 'red eyes match confirmed capture')
+    assert.equal(icon.leftEyePixels > 0, recording, 'left eye changes color')
+    assert.equal(icon.rightEyePixels > 0, recording, 'right eye changes color')
+    assert.equal(icon.redOutsideEyes, 0, 'no recording dot outside the eyes')
     assert.deepEqual(icon.scales, [1, 2])
     return icon
   }
@@ -268,8 +284,8 @@ async function main() {
             'finishing lock',
             'engine failure recovery',
             'Retina template resources',
-            'no red dot before engine ready or after stop/failure',
-            'colored recording dot and live light/dark switching'
+            'no red eyes before engine ready or after stop/failure',
+            'colored recording eyes and live light/dark switching'
           ],
           limitation:
             'Engine is synthetic; real saved audio/transcript and OS permission QA remain required.'

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { RecordingState } from '../shared/recording-api'
 import { recordingMenuAction } from './recording-start-coordinator'
 
-/** Persistent launcher; the red dot indicates confirmed capture, never preparation. */
+/** Persistent launcher; the red eyes indicate confirmed capture, never preparation. */
 export class RecordingTray {
   private tray: Tray | null = null
   private recording = false
@@ -22,7 +22,7 @@ export class RecordingTray {
     this.images = ['dogTemplate.png', 'dogRecordingLight.png', 'dogRecordingDark.png'].map(
       (name, index) => {
         const image = nativeImage.createFromPath(join(resourceDir, name))
-        // Template rendering would turn the recording dot monochrome.
+        // Template rendering would turn the recording eyes monochrome.
         image.setTemplateImage(index === 0)
         return image
       }

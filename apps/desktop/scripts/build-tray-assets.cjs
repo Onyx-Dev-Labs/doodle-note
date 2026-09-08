@@ -20,10 +20,7 @@ async function main() {
         '<use href="#dog"',
         `<use href="#dog" fill="none" stroke="${halo}" stroke-width="0.8"/><use href="#dog"`
       )
-      svg = svg.replace(
-        '</svg>',
-        `<circle cx="19" cy="5" r="3.5" fill="#ff3b30" stroke="${halo}" stroke-width="1.3"/></svg>`
-      )
+      svg = svg.replace('</svg>', `<use href="#eyes" fill="#ff3b30"/></svg>`)
     }
     for (const [size, density, suffix] of [
       [18, 72, ''],
