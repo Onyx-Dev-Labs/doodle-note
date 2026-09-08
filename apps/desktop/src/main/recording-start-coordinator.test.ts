@@ -92,10 +92,14 @@ test('normal editor capture locks the tray and renderer loss waits for stopped e
   c.handle({ event: 'exit', code: 1, signal: null })
   assert.equal(c.busy, false)
 })
-test('template resources include transparent standard and Retina images with correct density', () => {
+test('tray resources include transparent standard and Retina images with correct density', () => {
   for (const [name, size, ppm] of [
     ['dogTemplate.png', 18, 2835],
-    ['dogTemplate@2x.png', 36, 5669]
+    ['dogTemplate@2x.png', 36, 5669],
+    ['dogRecordingLight.png', 18, 2835],
+    ['dogRecordingLight@2x.png', 36, 5669],
+    ['dogRecordingDark.png', 18, 2835],
+    ['dogRecordingDark@2x.png', 36, 5669]
   ] as const) {
     const png = readFileSync(resolve('resources/tray', name))
     assert.equal(png.toString('hex', 0, 8), '89504e470d0a1a0a')
@@ -107,5 +111,5 @@ test('template resources include transparent standard and Retina images with cor
     assert.equal(png.readUInt32BE(densityOffset + 4), ppm)
   }
   const config = readFileSync('electron-builder.yml', 'utf8')
-  assert.match(config, /from: resources\/tray\s+to: tray\s+filter: \["\*Template\*\.png"\]/)
+  assert.match(config, /from: resources\/tray\s+to: tray\s+filter: \["\*\.png"\]/)
 })

@@ -1,10 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24">
-  <!-- Small-size outline of DoodleNote's curly, floppy-eared dog mascot. -->
-  <g fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M6 6Q4 5 4 8Q1 9 2 12Q0 15 3 16Q3 19 6 17M18 6Q20 5 20 8Q23 9 22 12Q24 15 21 16Q21 19 18 17"/>
-    <path d="M6 7Q4 3 8 4Q9 1 12 3Q15 1 16 4Q20 3 18 7M6 12Q4 18 8 19Q9 22 12 21Q15 22 16 19Q20 18 18 12"/>
-    <path d="M8 16Q10 18 12 15Q14 18 16 16"/>
-  </g>
-  <ellipse cx="8.5" cy="10" rx="1.1" ry="1.5"/><ellipse cx="15.5" cy="10" rx="1.1" ry="1.5"/>
-  <path d="M9.5 13Q12 11.5 14.5 13Q15 15 12 16Q9 15 9.5 13"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" color="#000">
+  <!-- Filled curly, floppy-eared dog, with transparent facial details. -->
+  <defs>
+    <path id="dog" d="M6 6Q4 3 8 4Q9 1 12 3Q15 1 16 4Q20 3 18 6Q21 5 20 8Q23 9 22 12Q24 15 21 16Q21 19 18 17Q18 19 16 19Q15 22 12 21Q9 22 8 19Q6 19 6 17Q3 19 3 16Q0 15 2 12Q1 9 4 8Q3 5 6 6Z"/>
+    <mask id="face">
+      <rect width="24" height="24" fill="white"/>
+      <g fill="black">
+        <ellipse cx="8.5" cy="10" rx="1" ry="1.4"/>
+        <ellipse cx="15.5" cy="10" rx="1" ry="1.4"/>
+        <path d="M9.5 13Q12 11.5 14.5 13Q15 15 12 16Q9 15 9.5 13"/>
+      </g>
+      <path d="M8 16Q10 19 12 16Q14 19 16 16" fill="none" stroke="black" stroke-width="1" stroke-linecap="round"/>
+    </mask>
+  </defs>
+  <use href="#dog" fill="currentColor" mask="url(#face)"/>
 </svg>

@@ -44,6 +44,10 @@ Packaging requires the platform's native dependencies. Maintainer release comman
 
 ## Record from the macOS menu bar
 
+The filled dog gains a red dot during confirmed recording, clearing when capture
+stops (including while the meeting finishes saving). Active artwork follows light
+and dark appearance; the idle icon uses native template rendering.
+
 After setup and the welcome tour, the dog icon offers **Record now** even with
 no calendar account or upcoming meeting. It opens the normal meeting editor and
 starts capture with the existing microphone, audio persistence and system-audio

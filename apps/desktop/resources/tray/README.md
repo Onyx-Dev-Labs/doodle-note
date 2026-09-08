@@ -1,11 +1,22 @@
 # Dog menu-bar assets
 
-`dog.svg` is a small-size outline of DoodleNote's curly, floppy-eared mascot.
-The checked-in transparent PNGs are raster exports at 18×18 (72 dpi) and
-36×36 (144 dpi). Preserve the `Template` and `@2x` names: Electron/macOS uses
-them to select the appearance and Retina representation. The tray explicitly
-marks the native image as a template as well.
+`dog.svg` is the filled curly, floppy-eared mascot with transparent facial details.
+Rebuild all exports after artwork changes:
 
-The macOS `extraResources` entry copies both PNGs to `Resources/tray` without
-Vite hashing. The desktop tests verify their dimensions, transparency format,
-density and packaging mapping. Future artwork changes must update both exports.
+```sh
+pnpm install --frozen-lockfile
+node apps/desktop/scripts/build-tray-assets.cjs
+```
+
+The generator reuses the locked sharp toolchain. Transparent PNGs are exported at
+18×18 (72 dpi) and 36×36 (144 dpi). Preserve the `Template` and `@2x` names for
+native appearance and Retina selection. Only the idle image is a template.
+The recording variants retain color so macOS does not flatten the red dot;
+light/dark variants follow native theme changes, with a contrasting edge for
+wallpaper visibility. The red dot appears only in confirmed `recording` state,
+clearing during finishing, idle and failed starts. Starting a second recording
+remains disabled throughout preparation, capture and finishing.
+
+macOS `extraResources` copies all PNGs to `Resources/tray` without Vite hashing.
+Desktop tests verify dimensions, RGBA format, density and packaging. The native
+tray harness verifies red pixels, template modes, theme switching and lifecycle.

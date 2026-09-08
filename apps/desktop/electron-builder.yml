@@ -27,7 +27,7 @@ mac:
   extraResources:
     - from: resources/tray
       to: tray
-      filter: ["*Template*.png"]
+      filter: ["*.png"]
     - from: ../../engine/.build/release/engine
       to: engine/engine
     # Keep the opaque artwork under a new bundle resource name. macOS can

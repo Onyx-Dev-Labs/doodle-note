@@ -33,9 +33,11 @@ async function main() {
     app.setAppPath(${JSON.stringify(desktop)});
     app.setPath('userData', ${JSON.stringify(profile)});
     nativeTheme.themeSource = 'light';
-    global.trays = []; global.starts = []; global.failure = false;
+    global.trays = []; global.starts = []; global.failure = false; global.holdReady = true;
     global.captureTray = tray => {
       global.trays.push(tray);
+      const setImage = tray.setImage.bind(tray);
+      tray.setImage = image => { tray.qaImage = image; return setImage(image) };
       const setContextMenu = tray.setContextMenu.bind(tray);
       tray.setContextMenu = menu => { tray.qaMenu = menu; return setContextMenu(menu) };
       return tray;
@@ -53,7 +55,7 @@ async function main() {
         global.starts.push({ command, opts });
         if (global.failure) { engine.emit({ event: 'spawn-error', message: 'QA engine unavailable — check setup and retry.' }); return }
         engine.emit({ event: 'started', command, binaryPath: 'synthetic' });
-        engine.emit({ event: 'ready' });
+        if (!global.holdReady) engine.emit({ event: 'ready' });
       };
       engine.stop = () => {
         engine.emit({ event: 'status', stage: 'finishing' });
@@ -78,6 +80,29 @@ async function main() {
     runtime.evaluate(() =>
       global.trays[0].qaMenu.items.map((i) => ({ label: i.label, enabled: i.enabled }))
     )
+  const iconState = () =>
+    runtime.evaluate(() => {
+      const image = global.trays[0].qaImage
+      const pixels = image.toBitmap()
+      let redPixels = 0
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 2] > 200 && pixels[i + 1] < 100 && pixels[i] < 100 && pixels[i + 3] > 200)
+          redPixels++
+      }
+      return {
+        template: image.isTemplateImage(),
+        scales: image.getScaleFactors(),
+        redPixels,
+        png: image.toPNG().toString('base64')
+      }
+    })
+  const assertIcon = async (recording) => {
+    const icon = await iconState()
+    assert.equal(icon.template, !recording)
+    assert.equal(icon.redPixels > 0, recording, 'red dot matches confirmed capture')
+    assert.deepEqual(icon.scales, [1, 2])
+    return icon
+  }
   const start = async () => {
     await runtime.evaluate(() => {
       setImmediate(() => global.trays[0].qaMenu.items[0].click())
@@ -92,6 +117,7 @@ async function main() {
     throw new Error('tray did not become idle')
   }
   try {
+    console.log('Native tray QA: waiting for renderer')
     let page = await runtime.firstWindow()
     await page.waitForFunction(() => !!window.recording)
     assert.equal((await menu())[0].enabled, false, 'setup required')
@@ -106,9 +132,52 @@ async function main() {
       await page.evaluate(async () => (await window.calendar.getState()).signedIn),
       false
     )
+    console.log('Native tray QA: checking start and icon lifecycle')
+    await assertIcon(false)
     await start()
+    for (let i = 0; i < 80 && (await runtime.evaluate(() => global.starts.length)) === 0; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    assert.equal(await runtime.evaluate(() => global.starts.length), 1)
+    assert.equal((await menu())[0].label, 'Starting…')
+    await assertIcon(false)
+    await runtime.evaluate(() => {
+      global.holdReady = false
+      global.qaEngine.emit({ event: 'ready' })
+    })
     await page.getByRole('button', { name: 'Stop recording', exact: true }).waitFor()
     assert.equal((await menu())[0].label, 'Recording…')
+    const setTheme = async (theme) => {
+      const expected = await runtime.evaluate(({ nativeTheme, nativeImage, app }, theme) => {
+        nativeTheme.themeSource = theme
+        const name = theme === 'dark' ? 'dogRecordingDark.png' : 'dogRecordingLight.png'
+        return nativeImage
+          .createFromPath(app.getAppPath() + '/resources/tray/' + name)
+          .toPNG()
+          .toString('base64')
+      }, theme)
+      for (let i = 0; i < 40 && (await iconState()).png !== expected; i++) {
+        await new Promise((r) => setTimeout(r, 50))
+      }
+      const icon = await assertIcon(true)
+      assert.equal(icon.png === expected, true, `active icon follows ${theme} theme`)
+      return icon
+    }
+    console.log('Native tray QA: checking light/dark recording artwork')
+    const light = await setTheme('light')
+    const dark = await setTheme('dark')
+    assert.equal(dark.png !== light.png, true, 'theme assets differ')
+    fs.writeFileSync(
+      path.join(evidence, 'dog-recording-light.png'),
+      Buffer.from(light.png, 'base64')
+    )
+    fs.writeFileSync(path.join(evidence, 'dog-recording-dark.png'), Buffer.from(dark.png, 'base64'))
+    await runtime.evaluate(({ nativeTheme }) => {
+      setImmediate(() => {
+        nativeTheme.themeSource = 'light'
+      })
+    })
+    console.log('Native tray QA: checking duplicate and window lifecycle')
     await start() // even a stale native menu activation must be rejected in main
     assert.equal(await runtime.evaluate(() => global.starts.length), 1)
     const first = await runtime.evaluate(() => global.starts[0])
@@ -129,6 +198,7 @@ async function main() {
     await runtime.evaluate(() => global.trays[0].qaMenu.items[2].click())
     await page.getByRole('button', { name: 'Stop recording', exact: true }).click()
     assert.equal((await menu())[0].label, 'Finishing…')
+    await assertIcon(false)
     await start()
     assert.equal(await runtime.evaluate(() => global.starts.length), 1)
     await waitIdle()
@@ -152,6 +222,7 @@ async function main() {
     )
     await page.getByRole('button', { name: 'Stop recording', exact: true }).click()
     await waitIdle()
+    console.log('Native tray QA: checking failed-start recovery')
     await runtime.evaluate(() => {
       global.failure = true
     })
@@ -161,6 +232,7 @@ async function main() {
       .getByText('QA engine unavailable — check setup and retry.', { exact: true })
       .waitFor()
     await waitIdle()
+    await assertIcon(false)
     await page.screenshot({ path: path.join(evidence, 'engine-failure.png') })
     assert.equal(await page.getByRole('button', { name: 'Stop recording', exact: true }).count(), 0)
     assert.equal(await page.evaluate(async () => (await window.meetings.list()).length), 4)
@@ -195,7 +267,9 @@ async function main() {
             'minimized-window delivery',
             'finishing lock',
             'engine failure recovery',
-            'Retina template resources'
+            'Retina template resources',
+            'no red dot before engine ready or after stop/failure',
+            'colored recording dot and live light/dark switching'
           ],
           limitation:
             'Engine is synthetic; real saved audio/transcript and OS permission QA remain required.'
