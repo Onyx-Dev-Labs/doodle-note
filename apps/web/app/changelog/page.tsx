@@ -9,6 +9,15 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.24",
+    date: "September 8, 2026",
+    highlights: [
+      "Set up Composio and other remote MCP clients from Integrations with a separate server URL and authentication guide",
+      "Manage agent tokens within the selected cloud workspace",
+      "Keep local MCP client setup available alongside remote connections",
+    ],
+  },
+  {
     version: "0.4.23",
     date: "September 7, 2026",
     highlights: [
