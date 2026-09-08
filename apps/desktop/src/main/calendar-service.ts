@@ -198,7 +198,8 @@ export class CalendarService {
     /** Bring the app forward (or recreate the window) on notification click. */
     private readonly focusWindow: () => void,
     /** Floating always-on-top card for when the main window can't be seen. */
-    private readonly promptPanel?: PromptPanel
+    private readonly promptPanel?: PromptPanel,
+    private readonly requestRecordingStart?: (prompt: CalendarStartMeetingEvent) => void
   ) {
     this.settingsPath = join(userDataDir, 'calendar-settings.json')
     this.tokenCachePath = join(userDataDir, 'calendar-token-cache')
@@ -908,6 +909,10 @@ export class CalendarService {
   private actOnPromptStart(prompt: CalendarStartMeetingEvent): void {
     const payload = { ...prompt, action: 'start' as const }
     this.promptPanel?.close()
+    if (this.requestRecordingStart) {
+      this.requestRecordingStart(payload)
+      return
+    }
     const hadWindow = BrowserWindow.getAllWindows().length > 0
     this.focusWindow()
     if (hadWindow) {

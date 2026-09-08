@@ -41,3 +41,47 @@ Packaging requires the platform's native dependencies. Maintainer release comman
 - The local MCP server is disabled until the user explicitly enables Agent access in Settings; it remains read-only.
 - Cloud sync, external AI providers, calendars, connectors, and update publication are separate opt-in or maintainer-configured paths.
 - Never commit generated release artifacts, local meeting stores, OAuth tokens, provider keys, or signing material.
+
+## Record from the macOS menu bar
+
+After setup and the welcome tour, the dog icon offers **Record now** even with
+no calendar account or upcoming meeting. It opens the normal meeting editor and
+starts capture with the existing microphone, audio persistence and system-audio
+settings. The menu disables new starts during preparation, recording and finalization.
+Closing the main window during capture hides it to preserve the active document;
+closing an idle window destroys it, and the next tray action recreates it.
+
+The optional calendar countdown retains its own menu and preference. Contributor
+PR #119's capture-only timer is independent and is not included here. The dog menu
+adds no duplicate Stop action or timer. Windows has no new tray or close-to-tray
+behavior. The start coordinator also serializes calendar/banner and normal new
+meeting actions, and the optional CalendarService callback is the integration
+point for ONY-269's desktop prompt.
+
+Native wiring QA can run after `pnpm --filter desktop build` using a separately
+installed Playwright runtime:
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright \
+  node apps/desktop/scripts/test-recording-tray.cjs
+```
+
+This harness loads the real main/preload/renderer with a synthetic engine in an
+isolated temporary profile. It never captures audio or downloads models. It checks
+setup eligibility, one-click capture routing, remembered input, repeated starts,
+visible/minimized/closed windows, failure recovery and both native icon resolutions.
+It reports the screenshot directory. Native menu activation is scheduled outside
+inspector evaluation to avoid a macOS Electron 44 inspector crash during window
+creation. This does not prove real microphone/system-audio capture, transcription,
+OS permission recovery, native menu keyboard access or light/dark menu-bar contrast.
+
+Human QA: run `pnpm engine:build` then `pnpm --filter desktop dev` with a dedicated
+`DOODLE_USER_DATA` profile. Complete setup, select a non-default available mic, and
+use safe test speech. With no calendar, activate the dog menu and Record now with
+the window visible, minimized, then closed while the app runs. Expect one new
+recording per idle activation; rapid clicks and clicks while finishing must not
+create another. Stop and reopen each meeting: confirm the saved audio/transcript.
+Check permission denial/unavailable engine recovery, both menu-bar appearances,
+scaled/Retina displays, keyboard menu operation, calendar countdown coexistence,
+and quitting during capture. Packaging, release and installed-version evidence
+remain separate approval gates under `docs/RELEASING.md`.
