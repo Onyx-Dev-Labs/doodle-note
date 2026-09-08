@@ -95,7 +95,7 @@ enum TranscriptCompletion: String, Codable, Sendable {
 }
 
 struct NoteMetadata: Codable, Equatable, Sendable {
-    /// Imported transcript completeness, independent of device-local recording/audio state.
+    /// Local and imported transcript completeness. Absent is unknown, not completed.
     var cloudTranscriptStatus: TranscriptCompletion? = nil
     var cloudReadOnly: Bool? = nil
     var libraryID = LibraryRecord.localID

@@ -9,8 +9,6 @@ struct NoteEditor: View {
     @State private var pane = 0
     @State private var player = LocalPlayback()
     @State private var showSpeakers = false
-    @State private var summaryText = ""
-    @State private var editingSummary: SummaryVersion?
     @State private var confirmAudioRemoval = false
     @State private var inkSession = InkEditingSession()
     @State private var showDetails = false
@@ -176,32 +174,7 @@ struct NoteEditor: View {
 
     @ViewBuilder private var notePane: some View {
         if pane == 3 {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Summary versions").font(.headline)
-                    if note.metadata?.summaries.isEmpty != false {
-                        Text("Generated summaries will appear here. Your personal notes remain separate.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(note.metadata?.summaries ?? []) { version in
-                        Text(L10n.key(version.origin == .edited ? "Edited version" : "Generated version")).font(.caption)
-                        Text(version.text).textSelection(.enabled)
-                        Button("Edit as new version") { summaryText = version.text; editingSummary = version }.disabled(!canEdit)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding()
-            }
-            .sheet(item: $editingSummary) { version in
-                NavigationStack {
-                    TextEditor(text: $summaryText).padding().navigationTitle(L10n.text("Edit summary"))
-                        .toolbar {
-                            Button("Cancel") { editingSummary = nil }
-                            Button("Save version") {
-                                library.saveSummaryEdit(noteID: id, parent: version, text: summaryText)
-                                editingSummary = nil
-                            }
-                        }
-                }
-            }
+            SummaryPane(library: library, id: id)
         } else if pane == 1 {
             InkEditor(session: inkSession, id: id, data: binding(\.ink), editable: canEdit)
         } else {

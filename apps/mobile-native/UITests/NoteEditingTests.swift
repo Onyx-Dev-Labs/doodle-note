@@ -68,8 +68,8 @@ import XCTest
         app.buttons[name].firstMatch.tap()
         XCTAssertTrue(app.buttons["noteFolder"].label.contains(name))
         app.buttons["Summary"].tap()
-        XCTAssertTrue(app.staticTexts["Summary versions"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Generated summaries will appear here. Your personal notes remain separate."].exists)
+        XCTAssertTrue(app.staticTexts["Retained versions"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No summary versions yet. Your personal notes remain separate."].exists)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Folder and independent summary pane"
         attachment.lifetime = .keepAlways
