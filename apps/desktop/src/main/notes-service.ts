@@ -1,9 +1,11 @@
-import { ipcMain, safeStorage } from 'electron'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { app, ipcMain, safeStorage } from 'electron'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CloudNotesEngine,
+  DEFAULT_MODELS_DIR,
   LOCAL_MODELS,
+  LocalModelStore,
   LocalNotesEngine,
   totalRamGB,
   type AskInput,
@@ -44,6 +46,7 @@ import {
 import type { MeetingRecord } from '../shared/meetings-api'
 import { isStoredCloudProvider } from '../shared/meeting-recovery'
 import type { MeetingsService } from './meetings-service'
+import { modelSearchDirectories } from './model-paths'
 
 /**
  * @repo/ai's index does not re-export the global-ask types (the engines
@@ -90,10 +93,11 @@ export type NotesBroadcast = (channel: string, payload: unknown) => void
 export class NotesService {
   private readonly settingsPath: string
   private readonly globalChatPath: string
-  private readonly modelsDir: string
+  private readonly modelStore: LocalModelStore
   private settings: StoredSettings
   private localEngine: LocalNotesEngine | null = null
   private localEngineModelId: string | null = null
+  private localEnginePath: string | null = null
   private enhanceBusy = false
   private askBusy = false
   private activateBusy = false
@@ -106,7 +110,9 @@ export class NotesService {
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
     this.globalChatPath = join(userDataDir, 'global-chat.json')
-    this.modelsDir = join(userDataDir, 'models')
+    this.modelStore = new LocalModelStore(
+      modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR)
+    )
     this.settings = this.loadSettings()
   }
 
@@ -151,16 +157,15 @@ export class NotesService {
 
   /* ---- models ---- */
 
-  private modelsResponse(): NotesModelsResponse {
+  private async modelsResponse(): Promise<NotesModelsResponse> {
     const ramGB = totalRamGB()
-    const files = this.listModelFiles()
+    const paths = new Map<string, string | null>()
+    for (const spec of LOCAL_MODELS) paths.set(spec.id, await this.modelStore.find(spec))
     // Out-of-the-box behavior: if nothing was explicitly activated but a
     // usable model is already on disk, adopt the best downloaded one so
     // Enhance works without requiring a trip to Settings first.
     if (this.settings.activeLocalModelId === undefined) {
-      const downloaded = LOCAL_MODELS.filter(
-        (m) => m.minRamGB <= ramGB && this.isDownloaded(m, files)
-      )
+      const downloaded = LOCAL_MODELS.filter((m) => m.minRamGB <= ramGB && paths.get(m.id))
       const adopt = downloaded[downloaded.length - 1]
       if (adopt) {
         this.settings.activeLocalModelId = adopt.id
@@ -176,39 +181,10 @@ export class NotesService {
         sizeGB: spec.sizeGB,
         minRamGB: spec.minRamGB,
         available: spec.minRamGB <= ramGB,
-        downloaded: this.isDownloaded(spec, files),
-        active: this.settings.activeLocalModelId === spec.id
+        downloaded: Boolean(paths.get(spec.id)),
+        active: this.settings.activeLocalModelId === spec.id && Boolean(paths.get(spec.id))
       }))
     }
-  }
-
-  private listModelFiles(): string[] {
-    try {
-      return readdirSync(this.modelsDir)
-    } catch {
-      return [] // dir doesn't exist yet — nothing downloaded
-    }
-  }
-
-  /**
-   * node-llama-cpp caches `hf:owner/repo:quant` URIs as
-   * `hf_<owner>_<repo minus -GGUF>.<quant>.gguf` (verified against a real
-   * download). Exact-name match first, then a fuzzy base+quant fallback; a
-   * sibling `.ipull` marker means the download is still in progress.
-   */
-  private isDownloaded(spec: LocalModelSpec, files: string[]): boolean {
-    const parsed = /^hf:([^/]+)\/([^:]+):(.+)$/.exec(spec.uri)
-    if (!parsed) return false
-    const owner = parsed[1]!.toLowerCase()
-    const repoBase = parsed[2]!.replace(/-GGUF$/i, '').toLowerCase()
-    const quant = parsed[3]!.toLowerCase()
-    const expected = `hf_${owner}_${repoBase}.${quant}.gguf`
-    const lower = files.map((f) => f.toLowerCase())
-    const inProgress = new Set(lower.filter((f) => f.endsWith('.ipull')))
-    return lower.some((f) => {
-      if (!f.endsWith('.gguf') || inProgress.has(`${f}.ipull`)) return false
-      return f === expected || (f.includes(repoBase) && f.includes(quant))
-    })
   }
 
   private async activateModel(modelId: string): Promise<ActivateModelResult> {
@@ -217,13 +193,34 @@ export class NotesService {
     if (spec.minRamGB > totalRamGB()) {
       return { ok: false, error: `${spec.label} needs at least ${spec.minRamGB} GB RAM.` }
     }
-    if (this.activateBusy) {
-      return { ok: false, error: 'Another model is already downloading.' }
+    if (this.activateBusy || this.enhanceBusy || this.askBusy) {
+      return { ok: false, error: 'Another model operation is running. Try again when it finishes.' }
     }
     this.activateBusy = true
     try {
-      const engine = this.obtainLocalEngine(spec)
-      await engine.prepare() // downloads (with progress events) + loads
+      const phase = (stage: 'checking' | 'loading' | 'verifying'): void => {
+        this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, { modelId: spec.id, progress: 0, stage })
+      }
+      phase('checking')
+      const modelPath = await this.modelStore.ensure(spec, async (directory) => {
+        const { resolveModelFile } = await import('node-llama-cpp')
+        const file = await resolveModelFile(spec.artifact.uri, {
+          directory,
+          cli: false,
+          onProgress: ({ totalSize, downloadedSize }) => {
+            this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, {
+              modelId: spec.id,
+              stage: 'downloading',
+              progress: totalSize > 0 ? downloadedSize / totalSize : 0
+            })
+          }
+        })
+        phase('verifying')
+        return file
+      })
+      phase('loading')
+      const engine = this.obtainLocalEngine(spec, modelPath)
+      await engine.prepare()
       this.settings.activeLocalModelId = spec.id
       this.saveSettings()
       return { ok: true }
@@ -235,19 +232,21 @@ export class NotesService {
   }
 
   /** The single long-lived local engine; swapped only on model change. */
-  private obtainLocalEngine(spec: LocalModelSpec): LocalNotesEngine {
-    if (this.localEngine && this.localEngineModelId === spec.id) {
+  private obtainLocalEngine(spec: LocalModelSpec, modelPath: string): LocalNotesEngine {
+    if (
+      this.localEngine &&
+      this.localEngineModelId === spec.id &&
+      this.localEnginePath === modelPath
+    ) {
       return this.localEngine
     }
     const previous = this.localEngine
     this.localEngine = new LocalNotesEngine({
       modelUri: spec.uri,
-      modelsDir: this.modelsDir,
-      onDownloadProgress: (fraction) => {
-        this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, { modelId: spec.id, progress: fraction })
-      }
+      modelPath
     })
     this.localEngineModelId = spec.id
+    this.localEnginePath = modelPath
     void previous?.dispose().catch(() => {})
     return this.localEngine
   }
@@ -277,7 +276,7 @@ export class NotesService {
         ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
-      const engine = this.pickEngine()
+      const engine = await this.pickEngine()
       const result = await engine.generateNotes(
         input,
         (token) => {
@@ -332,7 +331,7 @@ export class NotesService {
         history: history.map((h) => ({ question: h.question, answer: h.answer })),
         question
       }
-      const engine = this.pickEngine()
+      const engine = await this.pickEngine()
       const result = await engine.askQuestion(input, (token) => {
         this.broadcast(NOTES_ASK_TOKEN_CHANNEL, { token })
       })
@@ -376,7 +375,7 @@ export class NotesService {
           .map((e) => ({ question: e.question, answer: e.answer })),
         question
       }
-      const engine = this.pickEngine()
+      const engine = await this.pickEngine()
       const result = await engine.askAcrossMeetings(input, (token) => {
         this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token })
       })
@@ -442,7 +441,8 @@ export class NotesService {
 
   /** Local by default; cloud only when explicitly chosen AND usable —
    *  a readable key, or Ollama which needs none. */
-  private pickEngine(): NotesEngine {
+  private async pickEngine(): Promise<NotesEngine> {
+    if (this.activateBusy) throw new Error('A model is being prepared. Try again when it finishes.')
     const { engineChoice, cloud } = this.settings
     if (engineChoice === 'cloud' && cloud) {
       const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
@@ -456,16 +456,15 @@ export class NotesService {
       // Key unreadable (keychain changed, etc.) — fall through to local.
     }
 
-    const files = this.listModelFiles()
-    const spec =
-      LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId) ??
-      LOCAL_MODELS.find((m) => this.isDownloaded(m, files)) // settings lost but files present
-    if (!spec || !this.isDownloaded(spec, files)) {
-      throw new Error(
-        'No local notes model is downloaded yet. Open the Models view and activate one.'
-      )
+    const selected = LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId)
+    for (const spec of selected ? [selected] : LOCAL_MODELS) {
+      if (spec.minRamGB > totalRamGB()) continue
+      const modelPath = await this.modelStore.find(spec)
+      if (modelPath) return this.obtainLocalEngine(spec, modelPath)
     }
-    return this.obtainLocalEngine(spec)
+    throw new Error(
+      'The local notes model is missing, unreadable or invalid. Open Settings → Notes model to activate or download it.'
+    )
   }
 
   /* ---- settings ---- */

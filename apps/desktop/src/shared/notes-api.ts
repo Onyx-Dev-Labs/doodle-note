@@ -56,7 +56,7 @@ export interface NotesModelInfo {
   minRamGB: number
   /** This machine has enough RAM to run it. */
   available: boolean
-  /** The GGUF is present in the app's models dir. */
+  /** A compatible GGUF has been verified in a known local cache. */
   downloaded: boolean
   /** Currently selected as the local notes model. */
   active: boolean
@@ -182,6 +182,7 @@ export interface GlobalChatEntry {
 
 export interface DownloadProgressEvent {
   modelId: string
+  stage?: 'checking' | 'downloading' | 'verifying' | 'loading'
   /** 0..1 */
   progress: number
 }

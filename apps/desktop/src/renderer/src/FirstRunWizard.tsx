@@ -99,6 +99,7 @@ export default function FirstRunWizard({
   const [models, setModels] = useState<NotesModelInfo[] | null>(null)
   const [notesState, setNotesState] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle')
   const [notesProgress, setNotesProgress] = useState(0)
+  const [notesStage, setNotesStage] = useState('checking')
   const [notesError, setNotesError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -106,23 +107,29 @@ export default function FirstRunWizard({
     void window.notes
       .models()
       .then((response) => setModels(response.models))
-      .catch(() => setModels([]))
+      .catch(() => {
+        setModels([])
+        setNotesError('Could not check local models. Retry from Settings → Notes model.')
+      })
   }, [step, models])
 
   useEffect(
     () =>
-      window.notes.onDownloadProgress(({ progress }) => {
+      window.notes.onDownloadProgress(({ progress, stage }) => {
         setNotesProgress(progress)
+        setNotesStage(stage ?? 'downloading')
       }),
     []
   )
 
   const recommended = models?.find((m) => m.available) ?? null
-  const alreadyActive = models?.some((m) => m.downloaded) ?? false
+  const alreadyActive = models?.some((m) => m.available && m.downloaded) ?? false
 
   const downloadNotesModel = async (): Promise<void> => {
     if (!recommended) return
     setNotesState('downloading')
+    setNotesStage('checking')
+    setNotesProgress(0)
     setNotesError(null)
     try {
       const result = await window.notes.activateModel(recommended.id)
@@ -254,22 +261,27 @@ export default function FirstRunWizard({
               notes — by default with a model that runs entirely on this computer.
             </p>
             {alreadyActive || notesState === 'done' ? (
-              <div className="wizard-rows">
+              <div className="wizard-rows" role="status">
                 <div className="wizard-row">
                   <span>On-device notes model</span>
                   <span className="wz-ok">✓ ready</span>
                 </div>
               </div>
             ) : recommended ? (
-              <div className="wizard-rows">
+              <div className="wizard-rows" aria-live="polite">
                 <div className="wizard-row">
                   <span>
                     {recommended.label} — {recommended.description}
                   </span>
                   <span>{recommended.sizeGB.toFixed(1)} GB</span>
                 </div>
-                {notesState === 'downloading' && (
-                  <progress className="wizard-progress" value={notesProgress} max={1} />
+                {notesState === 'downloading' && notesStage === 'downloading' && (
+                  <progress
+                    aria-label="Model download"
+                    className="wizard-progress"
+                    value={notesProgress}
+                    max={1}
+                  />
                 )}
                 {notesError && <p className="wizard-hint wz-bad">{notesError}</p>}
                 <button
@@ -279,15 +291,22 @@ export default function FirstRunWizard({
                   onClick={() => void downloadNotesModel()}
                 >
                   {notesState === 'downloading'
-                    ? `Downloading… ${Math.round(notesProgress * 100)}%`
+                    ? notesStage === 'downloading'
+                      ? `Downloading… ${Math.round(notesProgress * 100)}%`
+                      : notesStage === 'loading'
+                        ? 'Loading local model…'
+                        : notesStage === 'verifying'
+                          ? 'Verifying download…'
+                          : 'Checking local models…'
                     : 'Download the model'}
                 </button>
               </div>
             ) : (
-              <p className="wizard-hint">
-                {models === null
-                  ? 'Checking this computer…'
-                  : 'This computer is short on RAM for the on-device model — use your own API key instead.'}
+              <p className="wizard-hint" role="status">
+                {notesError ??
+                  (models === null
+                    ? 'Checking this computer…'
+                    : 'This computer is short on RAM for the on-device model — use your own API key instead.')}
               </p>
             )}
             <button type="button" className="wizard-link" onClick={() => setStep('done')}>
