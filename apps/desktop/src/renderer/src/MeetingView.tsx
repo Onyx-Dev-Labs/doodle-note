@@ -10,6 +10,7 @@ import type {
   EngineInputDevice,
   TranscriptSegment
 } from '../../shared/engine-events'
+import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
@@ -157,14 +158,14 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       }
     case 'done':
       if (!active) return state
-      return { ...state, phase: 'ended', statusText: '', partials: {} }
+      return { ...state, phase: 'finishing', statusText: 'Saving transcript…', partials: {} }
     case 'download':
       if (state.phase !== 'finishing') return state
       return {
         ...state,
         statusText: `Preparing accurate transcript… ${Math.round(ev.progress * 100)}%`
       }
-    case 'session-saved':
+    case 'capture-finalized':
       if (!active && state.phase !== 'ended') return state
       return { ...state, phase: 'ended', statusText: '', partials: {} }
     case 'error':
@@ -309,6 +310,8 @@ export default function MeetingView({
   const [templateId, setTemplateId] = useState('general')
   const [tplMenuOpen, setTplMenuOpen] = useState(false)
 
+  const generationRef = useRef(new MeetingGeneration())
+  const mountedRef = useRef(true)
   const roughMarkdownRef = useRef('')
   const titleValueRef = useRef('')
   /** Lets generated notes improve a deterministic transcript fallback later in the same session. */
@@ -395,6 +398,7 @@ export default function MeetingView({
     },
     onUpdate: ({ editor: ed }) => {
       if (applyingRef.current || docViewRef.current !== 'notes') return
+      generationRef.current.edit()
       roughMarkdownRef.current = docToMarkdown(ed.getJSON())
       scheduleNotesSave()
     }
@@ -481,6 +485,7 @@ export default function MeetingView({
         if (ev.event === 'started' && ev.command === 'live') {
           // Fold the previous session's segments into the saved pool before
           // the reducer resets, so nothing is lost across re-records.
+          generationRef.current.startCapture(ev.captureId)
           const prev = stateRef.current
           if (prev.segments.length > 0) {
             setSavedSegments((s) => [...s, ...prev.segments])
@@ -501,6 +506,15 @@ export default function MeetingView({
             setChatOpen(false)
           }
         }
+        if (
+          ev.event === 'capture-finalized' &&
+          !generationRef.current.finalize(ev.error, ev.captureId)
+        )
+          return
+        if (ev.event === 'started' && ev.command !== 'live') generationRef.current.invalidate()
+        if (ev.event === 'spawn-error') generationRef.current.invalidate()
+        // Keep event ownership current even when React batches several IPC events.
+        stateRef.current = sessionReducer(stateRef.current, ev)
         dispatch(ev)
       }),
     []
@@ -671,15 +685,11 @@ export default function MeetingView({
     capturingRef.current = capturing
   }, [capturing])
 
-  /** Meeting ended → after the capture settles, generate notes on their own. */
-  const pendingAutoGenRef = useRef(false)
-
   useEffect(() => {
     return window.detect.onMeetingEnded(() => {
       if (!capturingRef.current) return
       window.engine.stop()
       setAutoStopped(true)
-      pendingAutoGenRef.current = true
     })
   }, [])
 
@@ -737,6 +747,7 @@ export default function MeetingView({
       const next = renameSpeaker({ segments: [], participants: roster }, speakerId, name)
       setRenamingId(null)
       setRenameText('')
+      generationRef.current.edit()
       setParticipants(next.participants)
       // The store relabels the stored segments from the roster on write.
       persist({ participants: next.participants })
@@ -866,7 +877,8 @@ export default function MeetingView({
   }
 
   const startRecording = (): void => {
-    if (capturing) return
+    if (ACTIVE_PHASES.includes(stateRef.current.phase)) return
+    generationRef.current.startCapture()
     if (startedAtRef.current === null) {
       startedAtRef.current = new Date().toISOString()
       persist({ startedAt: startedAtRef.current })
@@ -889,7 +901,10 @@ export default function MeetingView({
     })
   }
 
-  const stopRecording = (): void => window.engine.stop()
+  const stopRecording = (): void => {
+    if (stateRef.current.phase === 'finishing') return
+    window.engine.stop()
+  }
 
   /* ---- playback: transcript ↔ audio sync ---- */
 
@@ -1003,67 +1018,140 @@ export default function MeetingView({
     retranscribing
   })
 
-  const runEnhance = async (selectedTemplateId = templateId): Promise<void> => {
-    if (!editor || enhanceStatus === 'running') return
-    refreshNotesMeta()
+  const runEnhance = async (
+    selectedTemplateId = templateId,
+    automatic?: { error?: string }
+  ): Promise<void> => {
+    if (!editor || ACTIVE_PHASES.includes(stateRef.current.phase)) return
+    const generation = generationRef.current
+    const run = generation.begin()
+    if (!run) return
     setEnhanceError(null)
     setEnhanceStatus('running')
-    // Make sure the freshest rough notes go into the merge.
-    if (docViewRef.current === 'notes') {
-      roughMarkdownRef.current = docToMarkdown(editor.getJSON())
-    }
-    const shouldGenerateTitle =
-      isGenericDraftTitle(titleValueRef.current) || titleWasAutoGeneratedRef.current
-    const result = await window.notes.enhance({
-      title: shouldGenerateTitle ? '' : titleValueRef.current.trim(),
-      rawNotesMarkdown: roughMarkdownRef.current,
-      segments: allSegments,
-      participants: roster,
-      templateId: selectedTemplateId
-    })
-    if (result.error !== undefined || result.markdown === undefined) {
-      setEnhanceStatus('error')
-      setEnhanceError(result.error ?? 'Enhance failed with no output')
-      return
-    }
-    // Cloud-aware footer: when the meeting lives in the cloud too, the
-    // notes link to its web page (full transcript + chat). Skipped while
-    // sync is off — local-first notes carry no dead links.
-    let markdown = result.markdown
+    setEnhanceProgressText('Preparing notes…')
+    const current = (): boolean => mountedRef.current && generation.isCurrent(run)
     try {
-      const sync = await window.sync.getStatus()
-      if (sync.connected && sync.enabled) {
-        markdown += `\n\n---\n\n[View transcript & chat](${sync.baseUrl}/app/meeting/${meetingId})`
+      // Read once at completion. A skipped run never waits for a later settings change.
+      const [latestSettings, latestModels] = await Promise.all([
+        window.notes.getSettings(),
+        window.notes.models()
+      ])
+      if (!current())
+        throw new Error(
+          'Notes generation canceled because the meeting changed. Generate notes again when ready.'
+        )
+      setSettings(latestSettings)
+      setModelsInfo(latestModels)
+      if (automatic && !autoGenerateNotesAfterStop(latestSettings.autoGenerateNotesAfterStop))
+        return
+      if (automatic?.error) throw new Error(`Automatic notes skipped: ${automatic.error}`)
+      if (allSegments.length === 0) {
+        throw new Error(
+          'No transcript to generate notes from. Retry transcription from the saved recording or record again.'
+        )
       }
-    } catch {
-      // status unavailable — plain notes are fine
+      const selectedReady =
+        latestSettings.engineChoice === 'cloud'
+          ? latestSettings.cloud?.hasKey === true
+          : latestModels.models.some(
+              (model) =>
+                model.downloaded &&
+                (!latestSettings.activeLocalModelId ||
+                  model.id === latestSettings.activeLocalModelId)
+            )
+      const ready = automatic
+        ? selectedReady
+        : selectedReady || latestModels.models.some((model) => model.downloaded)
+      if (!ready)
+        throw new Error(
+          'Set up your selected notes model or provider in Settings, then choose Generate notes.'
+        )
+      // Read rough notes immediately before the request, and save the finalized
+      // transcript independently of AI success. No audio goes to this pipeline.
+      if (docViewRef.current === 'notes') roughMarkdownRef.current = docToMarkdown(editor.getJSON())
+      const rawNotesMarkdown = roughMarkdownRef.current
+      const shouldGenerateTitle =
+        isGenericDraftTitle(titleValueRef.current) || titleWasAutoGeneratedRef.current
+      const request = {
+        title: shouldGenerateTitle ? '' : titleValueRef.current.trim(),
+        rawNotesMarkdown,
+        segments: allSegments,
+        participants: roster,
+        templateId: selectedTemplateId,
+        ...(automatic ? { automaticAfterStop: true } : {})
+      }
+      await window.meetings.upsert({
+        id: meetingId,
+        rawNotesMarkdown,
+        segments: allSegments,
+        echoSuppressed: totalEcho
+      })
+      if (!current())
+        throw new Error(
+          'Notes generation canceled because the meeting changed. Your notes are preserved; generate again when ready.'
+        )
+      setEnhanceProgressText(null)
+      const result = await window.notes.enhance(request)
+      if (result.error !== undefined || result.markdown === undefined) {
+        throw new Error(result.error ?? 'Generate notes failed with no output. Try again.')
+      }
+      let markdown = result.markdown
+      try {
+        const sync = await window.sync.getStatus()
+        if (sync.connected && sync.enabled) {
+          markdown += `\n\n---\n\n[View transcript & chat](${sync.baseUrl}/app/meeting/${meetingId})`
+        }
+      } catch {
+        // Status unavailable — plain notes are fine.
+      }
+      if (!current())
+        throw new Error(
+          'Generated notes were not applied because the meeting changed. Your existing notes are preserved; generate again when ready.'
+        )
+      const generatedTitle = deriveDraftTitle({
+        kind: meeting?.kind === 'note' ? 'note' : 'meeting',
+        title: shouldGenerateTitle ? '' : titleValueRef.current,
+        rawNotesMarkdown,
+        enhancedMarkdown: markdown,
+        segments: allSegments
+      })
+      // Persist before presenting success. Never write rough notes from an old request here.
+      await window.meetings.upsert({
+        id: meetingId,
+        enhancedMarkdown: markdown,
+        ...(result.engine ? { engine: result.engine } : {})
+      })
+      if (!current())
+        throw new Error(
+          'The generated version was saved, but your newer edits remain open. Generate again when ready.'
+        )
+      setEnhancedMarkdown(markdown)
+      if (generatedTitle !== null && generatedTitle !== titleValueRef.current.trim()) {
+        setTitle(generatedTitle)
+        titleValueRef.current = generatedTitle
+        titleWasAutoGeneratedRef.current = shouldGenerateTitle
+        persist({ title: generatedTitle })
+      }
+      setDocView('enhanced')
+      docViewRef.current = 'enhanced'
+      setEditorMarkdown(markdown, false)
+    } catch (err) {
+      if (mountedRef.current) {
+        setEnhanceStatus('error')
+        setEnhanceError(err instanceof Error ? err.message : String(err))
+      }
+    } finally {
+      generation.finish(run)
+      if (mountedRef.current) {
+        setEnhanceStatus((status) => (status === 'running' ? 'idle' : status))
+        setEnhanceProgressText(null)
+      }
     }
-    setEnhanceStatus('idle')
-    setEnhancedMarkdown(markdown)
-    const generatedTitle = deriveDraftTitle({
-      kind: meeting?.kind === 'note' ? 'note' : 'meeting',
-      title: shouldGenerateTitle ? '' : titleValueRef.current,
-      rawNotesMarkdown: roughMarkdownRef.current,
-      enhancedMarkdown: markdown,
-      segments: allSegments
-    })
-    if (generatedTitle !== null && generatedTitle !== titleValueRef.current.trim()) {
-      setTitle(generatedTitle)
-      titleValueRef.current = generatedTitle
-      titleWasAutoGeneratedRef.current = shouldGenerateTitle
-    }
-    persist({
-      enhancedMarkdown: markdown,
-      ...(generatedTitle !== null ? { title: generatedTitle } : {}),
-      ...(result.engine ? { engine: result.engine } : {})
-    })
-    setDocView('enhanced')
-    docViewRef.current = 'enhanced'
-    setEditorMarkdown(markdown, false)
   }
 
   /** Pick a template: remember it on the meeting and (re)generate with it. */
   const chooseTemplate = (id: string): void => {
+    generationRef.current.edit()
     setTemplateId(id)
     setTplMenuOpen(false)
     persist({ templateId: id })
@@ -1088,18 +1176,23 @@ export default function MeetingView({
     </div>
   )
 
-  // Notes appear on their own after the meeting ends. Waits
-  // for the stop to settle (capturing false, segments folded) and the model
-  // to be ready; skips silently when there is nothing to write from.
+  // Only the main-process completion event arms this one-shot attempt. It is
+  // consumed even when settings/model/transcript/finalization prevents generation.
   useEffect(() => {
-    if (!pendingAutoGenRef.current || capturing) return
-    if (enhanceStatus === 'running') return
-    if (allSegments.length === 0 || !modelReady) return
-    pendingAutoGenRef.current = false
-    // Auto-generation is the intended side effect of a completed capture.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void runEnhance()
+    if (capturing || !editor) return
+    const automatic = generationRef.current.takeAutomatic()
+    if (!automatic) return
+    void runEnhance(templateId, automatic)
   })
+
+  useEffect(() => {
+    mountedRef.current = true
+    const generation = generationRef.current
+    return () => {
+      mountedRef.current = false
+      generation.invalidate()
+    }
+  }, [])
 
   const showNotesDoc = (): void => {
     if (docView === 'notes') return
@@ -1388,6 +1481,7 @@ export default function MeetingView({
             placeholder={meeting?.kind === 'note' ? 'New note' : 'New meeting'}
             value={title}
             onChange={(e) => {
+              generationRef.current.edit()
               setTitle(e.target.value)
               titleValueRef.current = e.target.value
               titleWasAutoGeneratedRef.current = false
@@ -1754,7 +1848,7 @@ export default function MeetingView({
       )}
 
       {enhanceStatus === 'error' && enhanceError && (
-        <div className="enhance-error-bar">
+        <div className="enhance-error-bar" role="alert">
           <span>{enhanceError}</span>
           {!modelReady && (
             <button type="button" onClick={onOpenSettings}>

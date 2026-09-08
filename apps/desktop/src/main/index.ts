@@ -8,6 +8,7 @@ import {
   protocol,
   session as electronSession
 } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
@@ -351,7 +352,9 @@ app.whenReady().then(() => {
     }
   }
 
-  engine.onEvent((event) => {
+  engine.onEvent((rawEvent) => {
+    // Bind terminal transcript persistence to the exact capture the renderer saw start.
+    const event = rawEvent.event === 'started' ? { ...rawEvent, captureId: randomUUID() } : rawEvent
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)

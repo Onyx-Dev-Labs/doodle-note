@@ -1,5 +1,5 @@
 import { ipcMain, safeStorage } from 'electron'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CloudNotesEngine,
@@ -41,6 +41,7 @@ import {
   type NotesSettingsUpdate,
   type NotesSettingsView
 } from '../shared/notes-api'
+import { autoGenerateNotesAfterStop } from '../shared/auto-notes'
 import type { MeetingRecord } from '../shared/meetings-api'
 import { isStoredCloudProvider } from '../shared/meeting-recovery'
 import type { MeetingsService } from './meetings-service'
@@ -71,6 +72,7 @@ interface StoredCloudSettings {
 }
 
 interface StoredSettings {
+  autoGenerateNotesAfterStop?: boolean
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
   /** The user's own name, shown instead of "You" on their transcript lines. */
@@ -263,6 +265,12 @@ export class NotesService {
     }
     this.enhanceBusy = true
     try {
+      if (
+        request.automaticAfterStop &&
+        !autoGenerateNotesAfterStop(this.settings.autoGenerateNotesAfterStop)
+      ) {
+        return { error: 'Automatic notes are now disabled. Choose Generate notes to run manually.' }
+      }
       const segments = labelSegments(
         Array.isArray(request.segments) ? request.segments : [],
         request.participants
@@ -277,7 +285,7 @@ export class NotesService {
         ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
-      const engine = this.pickEngine()
+      const engine = this.pickEngine(request.automaticAfterStop === true)
       const result = await engine.generateNotes(
         input,
         (token) => {
@@ -442,7 +450,7 @@ export class NotesService {
 
   /** Local by default; cloud only when explicitly chosen AND usable —
    *  a readable key, or Ollama which needs none. */
-  private pickEngine(): NotesEngine {
+  private pickEngine(requireSelectedProvider = false): NotesEngine {
     const { engineChoice, cloud } = this.settings
     if (engineChoice === 'cloud' && cloud) {
       const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
@@ -453,9 +461,16 @@ export class NotesService {
           ...(cloud.model ? { model: cloud.model } : {})
         })
       }
+      if (requireSelectedProvider)
+        throw new Error(
+          'The selected provider key is unavailable. Open Settings and reconnect it, then generate notes manually.'
+        )
       // Key unreadable (keychain changed, etc.) — fall through to local.
     }
 
+    if (requireSelectedProvider && engineChoice === 'cloud' && !cloud) {
+      throw new Error('Set up the selected provider in Settings, then generate notes manually.')
+    }
     const files = this.listModelFiles()
     const spec =
       LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId) ??
@@ -474,6 +489,9 @@ export class NotesService {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
+      autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(
+        this.settings.autoGenerateNotesAfterStop
+      ),
       ...(activeLocalModelId ? { activeLocalModelId } : {}),
       ...(profileName ? { profileName } : {}),
       ...(cloud
@@ -491,6 +509,7 @@ export class NotesService {
 
   private applySettings(update: NotesSettingsUpdate): NotesSettingsView {
     let error: string | undefined
+    const previousSettings = { ...this.settings }
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
@@ -500,6 +519,10 @@ export class NotesService {
       const name = sanitizeSpeakerName(update.profileName)
       if (name) this.settings.profileName = name
       else delete this.settings.profileName
+    }
+
+    if (typeof update.autoGenerateNotesAfterStop === 'boolean') {
+      this.settings.autoGenerateNotesAfterStop = update.autoGenerateNotesAfterStop
     }
 
     const validProviders: CloudProvider[] = ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']
@@ -536,7 +559,10 @@ export class NotesService {
       }
     }
 
-    this.saveSettings()
+    if (!this.saveSettings()) {
+      this.settings = previousSettings
+      error = 'Could not save notes settings. Please try again.'
+    }
     const view = this.settingsView()
     return error ? { ...view, error } : view
   }
@@ -554,6 +580,7 @@ export class NotesService {
     try {
       const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as Partial<StoredSettings>
       const settings: StoredSettings = {
+        autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(raw.autoGenerateNotesAfterStop),
         engineChoice: raw.engineChoice === 'cloud' ? 'cloud' : 'local'
       }
       if (
@@ -587,12 +614,21 @@ export class NotesService {
     }
   }
 
-  private saveSettings(): void {
+  private saveSettings(): boolean {
+    const temporaryPath = `${this.settingsPath}.${process.pid}.tmp`
     try {
-      writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2))
+      writeFileSync(temporaryPath, JSON.stringify(this.settings, null, 2))
+      renameSync(temporaryPath, this.settingsPath)
+      return true
     } catch (err) {
       // Never log settings content here — it would include the encrypted key.
       console.error('[notes] failed to save settings:', err)
+      try {
+        rmSync(temporaryPath, { force: true })
+      } catch {
+        /* Preserve the original failure. */
+      }
+      return false
     }
   }
 }

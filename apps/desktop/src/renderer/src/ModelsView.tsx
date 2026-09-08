@@ -546,6 +546,23 @@ export default function ModelsView({
     setTimeout(() => setProfileSaved(false), 2000)
   }
 
+  const [savingAutoNotes, setSavingAutoNotes] = useState(false)
+  const toggleAutoNotes = async (): Promise<void> => {
+    setSavingAutoNotes(true)
+    setError(null)
+    try {
+      const view = await window.notes.setSettings({
+        autoGenerateNotesAfterStop: settings?.autoGenerateNotesAfterStop === false
+      })
+      setSettings(view)
+      if (view.error) setError(view.error)
+    } catch {
+      setError('Could not save automatic notes preference. Please try again.')
+    } finally {
+      setSavingAutoNotes(false)
+    }
+  }
+
   const chooseEngine = async (choice: EngineChoice): Promise<void> => {
     setError(null)
     const view = await window.notes.setSettings({ engineChoice: choice })
@@ -1400,6 +1417,24 @@ export default function ModelsView({
 
           {section === 'model' && (
             <section className="keys-section">
+              <h3>Meeting notes</h3>
+              <div className="cal-row">
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Generate notes automatically after Stop</span>
+                  <span className="cal-row-sub">
+                    After you stop recording or a detected meeting ends, generate notes once the
+                    transcript is saved. Uses your selected model and template. On-device processing
+                    stays local; your configured external provider receives text and may charge
+                    usage fees. Audio is not sent for note generation.
+                  </span>
+                </span>
+                <Toggle
+                  checked={settings?.autoGenerateNotesAfterStop !== false}
+                  disabled={!settings || savingAutoNotes}
+                  onChange={() => void toggleAutoNotes()}
+                  label="Generate notes automatically after Stop"
+                />
+              </div>
               <h3>AI keys (optional)</h3>
               <p className="models-sub">
                 On-device is the default and needs no account. Add your own API key only if you want
