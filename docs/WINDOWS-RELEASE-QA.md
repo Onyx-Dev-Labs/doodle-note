@@ -56,6 +56,30 @@ a flow check; score the entire final transcript separately for accuracy.
 
 ## Production gate
 
+### Installer follow-up in 0.4.23
+
+The two-launch regression reproduced two independent app/updater owners in
+0.4.22. Windows now claims one instance per profile and routes another launch
+to the existing app. The regression script is
+`apps/desktop/scripts/test-single-instance.cjs <packaged-exe>` and uses the same
+external Playwright module setting as the capture smoke above.
+
+The updater now displays an installing state, dismisses its ready notification
+when installation starts, and permits another attempt when the handoff reports
+an error. Local `updates.log` in the app profile records lifecycle events,
+process IDs and version numbers, with rotation at 512 KiB. It does not record
+transcripts, audio, URLs, error messages or credentials.
+
+These changes do not yet establish the cause of the reported NSIS Retry/Cancel
+dialog. Verify the actual installed upgrade and retain the exact dialog text
+plus update lifecycle log if it recurs. The 0.4.22-to-0.4.23 upgrade still runs
+the 0.4.22 updater; the new handoff behavior applies to subsequent updates.
+
+Outstanding production acceptance: code signing, first-attempt installed
+upgrades, varied physical microphones/system audio, long meetings, device
+interruptions, and fresh-machine model setup. Notes-generation speed is a
+follow-up unless generation fails or prevents normal app use.
+
 Record candidate commit, installer hash, observed checks, skipped environments
 and remaining failures. Require a valid Windows Authenticode signature before
 production publication through `release:win`. An unsigned beta is suitable for

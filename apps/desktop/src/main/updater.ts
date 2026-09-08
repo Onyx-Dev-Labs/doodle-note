@@ -9,6 +9,9 @@ import {
 } from '../shared/update-api'
 import { applyUpdatePolicy } from './update-policy'
 import { UpdateCoordinator } from './update-coordinator'
+import { join } from 'node:path'
+import { writeUpdateDiagnostic } from './update-diagnostics'
+import type { UpdateState } from '../shared/update-api'
 
 const { autoUpdater } = updaterPkg
 
@@ -38,20 +41,40 @@ export function initAutoUpdater(
    *  normal teardown (the llama addon SIGABRTs if a model is loaded). */
   beforeInstall?: () => Promise<void>
 ): void {
+  let readyNotification: Notification | null = null
+  let previousStatus: UpdateState['status'] | undefined
+  const logFile = join(app.getPath('userData'), 'updates.log')
+  const log = (event: Parameters<typeof writeUpdateDiagnostic>[1], targetVersion?: string): void =>
+    writeUpdateDiagnostic(logFile, event, app.getVersion(), targetVersion)
+  log('launch')
+  app.on('before-quit', () => log('before-quit'))
+  app.on('quit', () => log('quit'))
   const coordinator = new UpdateCoordinator(
     autoUpdater,
     app.getVersion(),
     app.isPackaged,
     (state) => {
+      if (state.status !== previousStatus) log(state.status, state.latestVersion)
+      previousStatus = state.status
       broadcast(UPDATE_STATE_EVENT_CHANNEL, state)
-      if (state.status !== 'downloaded') return
+      if (state.status === 'installing') {
+        try {
+          readyNotification?.close()
+        } catch {
+          // A dismissed notification must not block installation.
+        }
+        readyNotification = null
+      }
+      if (state.status !== 'downloaded' || state.error) return
       try {
         if (!Notification.isSupported()) return
+        readyNotification?.close()
         const notification = new Notification({
           title: `DoodleNote ${state.latestVersion} is ready`,
           body: 'Click to restart and update now.'
         })
         notification.on('click', () => void installNow())
+        readyNotification = notification
         notification.show()
       } catch {
         // Settings still offers Restart to update.
@@ -60,17 +83,34 @@ export function initAutoUpdater(
   )
 
   const installNow = async (): Promise<void> => {
-    if (coordinator.state.status !== 'downloaded' || quittingForUpdate) return
+    if (quittingForUpdate || !coordinator.beginInstall()) return
     quittingForUpdate = true
     // The update quit must be a NORMAL quit (the installer takes over after
     // it), so the hard-exit workaround doesn't protect this path — unload
     // the model first, bounded so a hung dispose can't block the update.
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      await Promise.race([beforeInstall?.(), new Promise((resolve) => setTimeout(resolve, 3_000))])
+      await Promise.race([
+        beforeInstall?.(),
+        new Promise<void>((resolve) => {
+          cleanupTimer = setTimeout(() => {
+            log('cleanup-timeout')
+            resolve()
+          }, 3_000)
+        })
+      ])
     } catch {
       // install regardless
+    } finally {
+      clearTimeout(cleanupTimer)
     }
-    autoUpdater.quitAndInstall()
+    try {
+      autoUpdater.quitAndInstall()
+    } catch {
+      log('installer-error')
+      quittingForUpdate = false
+      coordinator.installFailed()
+    }
   }
 
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, () => coordinator.state)
@@ -90,6 +130,11 @@ export function initAutoUpdater(
   autoUpdater.on('download-progress', (progress) => coordinator.progress(progress))
   autoUpdater.on('error', (error) => {
     console.error('[updater]', error.message)
+    if (coordinator.state.status === 'installing') {
+      log('installer-error')
+      quittingForUpdate = false
+      coordinator.installFailed()
+    }
   })
 
   void coordinator.check()

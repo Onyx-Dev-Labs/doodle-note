@@ -7,7 +7,10 @@
     "Fixture speaker 1": "DEBUG synthetic confirmed speaker name.",
     "We can review the next steps together, then keep this drawing editable.": "DEBUG synthetic transcript fixture; source content must remain unchanged.",
     "Fixture speaker 2": "DEBUG synthetic confirmed speaker name.",
-    "Continue synthetic capture": "DEBUG test-harness permission control, only with both --ui-testing and --capture-fixture; never a product control."
+    "Continue synthetic capture": "DEBUG test-harness permission control, only with both --ui-testing and --capture-fixture; never a product control.",
+    "Transcript fixture": "DEBUG synthetic source title, only enabled by --ui-testing and --transcript-fixture.",
+    "Synthetic transcript draft": "DEBUG synthetic source text, not a product UI label.",
+    "Synthetic cloud change": "DEBUG-only synthetic transcript review fixture; requires explicit UI-testing arguments."
   },
   "Calendar/CalendarContracts.swift": {
     "<calendar credential>": "Redacted debug description, never a user-facing credential."
@@ -90,5 +93,11 @@
     "Entwurf. Prüfen Sie Entscheidungen, Verantwortliche und Termine anhand der Quellen.": "Generated document text follows requested summary language, independent of interface language; all five variants supplied here, human language QA pending.",
     "brief summary": "Model JSON response example, not interface text.",
     "exact source quote": "Model JSON response example, not interface text."
+  },
+  "CloudSync/CloudHTTP.swift": {
+    "Bearer \\(secret.value)": "Authorization protocol prefix, not display text."
+  },
+  "CloudSync/CloudAuthorization.swift": {
+    "DoodleNote iPhone / iPad": "Stable device authorization label, not app display text."
   }
 }

@@ -4,7 +4,7 @@ import AVFoundation
 /// Durable event/receipt. Contains identities and state only, never note content or audio.
 struct NoteLifecycle: Codable, Equatable, Sendable, Identifiable {
     enum State: String, Codable, Sendable { case active, trashed, purged }
-    enum Clock: String, Codable, Sendable { case device, provisionalAccount }
+    enum Clock: String, Codable, Sendable { case device, provisionalAccount, server }
     var schemaVersion = 1
     let noteID: UUID
     let libraryID: UUID

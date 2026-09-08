@@ -50,7 +50,7 @@ struct NoteRevision: Codable, Identifiable, Equatable, Sendable {
     let savedAt: Date
     let title: String
     let text: String
-    let passages: [TranscriptPassage]
+    var passages: [TranscriptPassage]
     let speakerAnnotations: SpeakerAnnotations?
 
     init(_ note: NoteRecord) {
@@ -95,8 +95,9 @@ enum TranscriptCompletion: String, Codable, Sendable {
 }
 
 struct NoteMetadata: Codable, Equatable, Sendable {
-    /// Imported transcript completeness, independent of device-local recording/audio state.
+    /// Local and imported transcript completeness. Absent is unknown, not completed.
     var cloudTranscriptStatus: TranscriptCompletion? = nil
+    var cloudReadOnly: Bool? = nil
     var libraryID = LibraryRecord.localID
     var folderID: UUID? = nil
     var lifecycleGeneration: UUID? = nil

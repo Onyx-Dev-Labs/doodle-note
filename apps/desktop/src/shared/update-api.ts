@@ -9,7 +9,15 @@ export interface UpdateState {
   currentVersion: string
   /** False in dev builds — the feed only serves packaged apps. */
   supported: boolean
-  status: 'idle' | 'checking' | 'up-to-date' | 'downloading' | 'downloaded' | 'cancelled' | 'error'
+  status:
+    | 'idle'
+    | 'checking'
+    | 'up-to-date'
+    | 'downloading'
+    | 'downloaded'
+    | 'installing'
+    | 'cancelled'
+    | 'error'
   /** Version on the feed when newer than current. */
   latestVersion?: string
   /** Download progress 0-100 while status is "downloading". */

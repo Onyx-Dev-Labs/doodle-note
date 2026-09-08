@@ -145,7 +145,8 @@ final class LocalSpeech {
         }
     }
 
-    func finish() async {
+    @discardableResult func finish() async -> Bool {
+        let hadAnalyzer = analyzer != nil
         if let analyzer {
             let timeout = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(20)) } catch { return }
@@ -159,7 +160,9 @@ final class LocalSpeech {
         await resultTask?.value
         resultTask = nil
         analyzer = nil
-        if readiness == .running { readiness = .ready; detail = "Speech model ready on this device." }
+        let complete = hadAnalyzer && readiness == .running
+        if complete { readiness = .ready; detail = "Speech model ready on this device." }
+        return complete
     }
 
     func fail(_ message: String) { readiness = .failed; detail = message }
