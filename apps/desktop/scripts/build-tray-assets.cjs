@@ -10,8 +10,7 @@ const source = fs.readFileSync(path.join(resources, 'dog.svg'), 'utf8')
 async function main() {
   for (const [name, color, halo] of [
     ['dogTemplate', '#000', null],
-    ['dogRecordingLight', '#111', '#fff'],
-    ['dogRecordingDark', '#fff', '#111']
+    ['dogRecording', '#fff', '#111']
   ]) {
     let svg = source.replace('color="#000"', `color="${color}"`)
     if (halo) {

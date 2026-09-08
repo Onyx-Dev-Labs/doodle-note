@@ -85,11 +85,20 @@ async function main() {
       const image = global.trays[0].qaImage
       const pixels = image.toBitmap({ scaleFactor: 1 })
       const { width, height } = image.getSize()
+      const forehead = (Math.floor(height / 4) * width + Math.floor(width / 2)) * 4
+      const whiteForehead =
+        pixels[forehead] > 220 &&
+        pixels[forehead + 1] > 220 &&
+        pixels[forehead + 2] > 220 &&
+        pixels[forehead + 3] > 220
+      let whiteBodyPixels = 0
       let redPixels = 0
       let leftEyePixels = 0
       let rightEyePixels = 0
       let redOutsideEyes = 0
       for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] > 220 && pixels[i + 1] > 220 && pixels[i + 2] > 220 && pixels[i + 3] > 220)
+          whiteBodyPixels++
         if (pixels[i + 2] > 200 && pixels[i + 1] < 100 && pixels[i] < 100 && pixels[i + 3] > 200) {
           redPixels++
           const x = (((i / 4) % width) + 0.5) / width
@@ -102,6 +111,8 @@ async function main() {
       return {
         template: image.isTemplateImage(),
         scales: image.getScaleFactors(),
+        whiteForehead,
+        whiteBodyPixels,
         redPixels,
         leftEyePixels,
         rightEyePixels,
@@ -112,6 +123,10 @@ async function main() {
   const assertIcon = async (recording) => {
     const icon = await iconState()
     assert.equal(icon.template, !recording)
+    if (recording) {
+      assert.ok(icon.whiteBodyPixels >= 30, 'recording dog has a filled white body')
+      assert.equal(icon.whiteForehead, true, 'body interior is white, not just an outline')
+    }
     assert.equal(icon.redPixels > 0, recording, 'red eyes match confirmed capture')
     assert.equal(icon.leftEyePixels > 0, recording, 'left eye changes color')
     assert.equal(icon.rightEyePixels > 0, recording, 'right eye changes color')
@@ -166,7 +181,7 @@ async function main() {
     const setTheme = async (theme) => {
       const expected = await runtime.evaluate(({ nativeTheme, nativeImage, app }, theme) => {
         nativeTheme.themeSource = theme
-        const name = theme === 'dark' ? 'dogRecordingDark.png' : 'dogRecordingLight.png'
+        const name = 'dogRecording.png'
         return nativeImage
           .createFromPath(app.getAppPath() + '/resources/tray/' + name)
           .toPNG()
@@ -176,13 +191,17 @@ async function main() {
         await new Promise((r) => setTimeout(r, 50))
       }
       const icon = await assertIcon(true)
-      assert.equal(icon.png === expected, true, `active icon follows ${theme} theme`)
+      assert.equal(
+        icon.png === expected,
+        true,
+        `white recording dog is preserved in ${theme} app theme`
+      )
       return icon
     }
     console.log('Native tray QA: checking light/dark recording artwork')
     const light = await setTheme('light')
     const dark = await setTheme('dark')
-    assert.equal(dark.png !== light.png, true, 'theme assets differ')
+    assert.equal(dark.png === light.png, true, 'app theme cannot turn the dog body black')
     fs.writeFileSync(
       path.join(evidence, 'dog-recording-light.png'),
       Buffer.from(light.png, 'base64')
@@ -285,7 +304,7 @@ async function main() {
             'engine failure recovery',
             'Retina template resources',
             'no red eyes before engine ready or after stop/failure',
-            'colored recording eyes and live light/dark switching'
+            'red eyes and filled white body across light/dark app themes'
           ],
           limitation:
             'Engine is synthetic; real saved audio/transcript and OS permission QA remain required.'

@@ -45,8 +45,8 @@ Packaging requires the platform's native dependencies. Maintainer release comman
 ## Record from the macOS menu bar
 
 The filled dog gains red eyes during confirmed recording, clearing when capture
-stops (including while the meeting finishes saving). Active artwork follows light
-and dark appearance; the idle icon uses native template rendering.
+stops (including while the meeting finishes saving). The recording body stays
+solid white regardless of app theme; the idle icon uses native template rendering.
 
 After setup and the welcome tour, the dog icon offers **Record now** even with
 no calendar account or upcoming meeting. It opens the normal meeting editor and

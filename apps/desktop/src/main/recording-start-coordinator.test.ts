@@ -96,10 +96,8 @@ test('tray resources include transparent standard and Retina images with correct
   for (const [name, size, ppm] of [
     ['dogTemplate.png', 18, 2835],
     ['dogTemplate@2x.png', 36, 5669],
-    ['dogRecordingLight.png', 18, 2835],
-    ['dogRecordingLight@2x.png', 36, 5669],
-    ['dogRecordingDark.png', 18, 2835],
-    ['dogRecordingDark@2x.png', 36, 5669]
+    ['dogRecording.png', 18, 2835],
+    ['dogRecording@2x.png', 36, 5669]
   ] as const) {
     const png = readFileSync(resolve('resources/tray', name))
     assert.equal(png.toString('hex', 0, 8), '89504e470d0a1a0a')
