@@ -34,12 +34,20 @@ export function ChevronIcon({
   direction,
   size
 }: {
-  direction: 'up' | 'down'
+  direction: 'up' | 'down' | 'left'
   size?: number
 }): React.JSX.Element {
   return (
     <Icon {...(size !== undefined ? { size } : {})}>
-      <path d={direction === 'up' ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'} />
+      <path
+        d={
+          direction === 'left'
+            ? 'm15 6-6 6 6 6'
+            : direction === 'up'
+              ? 'm6 15 6-6 6 6'
+              : 'm6 9 6 6 6-6'
+        }
+      />
     </Icon>
   )
 }

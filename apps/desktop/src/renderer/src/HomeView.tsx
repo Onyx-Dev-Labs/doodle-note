@@ -12,6 +12,7 @@ import { meetingHistoryWindow } from '../../shared/meeting-history'
 import FolderPicker from './FolderPicker'
 import {
   CheckSquareIcon,
+  ChevronIcon,
   DocIcon,
   FolderIcon,
   ImportIcon,
@@ -737,7 +738,7 @@ export default function HomeView({
           >
             + New{' '}
             <span className="new-menu-chevron" aria-hidden="true">
-              ⌄
+              <ChevronIcon direction="down" size={12} />
             </span>
           </button>
           {newMenuOpen && (

@@ -1344,8 +1344,9 @@ export default function MeetingView({
           className="back-pill no-drag"
           onClick={() => void goBack()}
           title="Back to home"
+          aria-label="Back to home"
         >
-          ‹ <HomeIcon size={13} />
+          <ChevronIcon direction="left" size={12} /> <HomeIcon size={13} />
         </button>
       </div>
 
@@ -1818,7 +1819,7 @@ export default function MeetingView({
                 aria-expanded={tplMenuOpen}
                 onClick={() => setTplMenuOpen((o) => !o)}
               >
-                ▾
+                <ChevronIcon direction="down" size={14} />
               </button>
               {tplMenuOpen && templateMenu}
             </>
