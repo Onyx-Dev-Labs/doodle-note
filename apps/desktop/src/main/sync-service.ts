@@ -1,4 +1,5 @@
 import { cloudReaderClient } from './cloud-reader-client'
+import { remoteMcpEligibilityClient } from './remote-mcp-eligibility'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { hostname } from 'node:os'
@@ -12,6 +13,7 @@ import {
   SYNC_SHARE_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
+  SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
@@ -55,6 +57,7 @@ export class SyncService {
   private syncing = false
   private pulling = false
   private linking = false
+  private connectionRevision = 0
   private lastError: string | undefined
   private debounceTimer: NodeJS.Timeout | null = null
   private linkServer: Server | null = null
@@ -81,6 +84,12 @@ export class SyncService {
     }))
     ipcMain.handle('sync:reader', (_event, request: unknown) => reader(request))
     ipcMain.handle(SYNC_GET_STATUS_CHANNEL, () => this.status())
+    const remoteMcpEligible = remoteMcpEligibilityClient(() => ({
+      token: this.token(),
+      baseUrl: this.baseUrl,
+      revision: this.connectionRevision
+    }))
+    ipcMain.handle(SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL, () => remoteMcpEligible())
     ipcMain.handle(SYNC_CONNECT_CHANNEL, () => this.connect())
     ipcMain.handle(SYNC_DISCONNECT_CHANNEL, () => this.disconnect())
     ipcMain.handle(SYNC_SET_ENABLED_CHANNEL, (_e, enabled: unknown) =>
@@ -146,6 +155,7 @@ export class SyncService {
 
   status(): SyncStatus {
     return {
+      connectionRevision: this.connectionRevision,
       connected: Boolean(this.token()),
       ...(this.config.email ? { email: this.config.email } : {}),
       ...(this.config.workspaceName ? { workspaceName: this.config.workspaceName } : {}),
@@ -220,6 +230,7 @@ export class SyncService {
       )
 
       this.config.tokenEnc = safeStorage.encryptString(token.token).toString('base64')
+      this.connectionRevision++
       this.config.email = token.email
       this.config.workspaceName = token.workspace
       this.config.enabled = true
@@ -238,6 +249,7 @@ export class SyncService {
   }
 
   disconnect(): SyncStatus {
+    this.connectionRevision++
     this.linkServer?.close()
     this.linkServer = null
     this.linking = false

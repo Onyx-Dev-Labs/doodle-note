@@ -4,6 +4,19 @@ DoodleNote's desktop **Settings > Integrations > Composio / remote MCP** provide
 the server URL separately from the local MCP launch configuration. Web
 **Settings > AI agents** shows the same setup for that server.
 
+The desktop section appears only after the linked account is verified to have an
+active paid Cloud Sync subscription. Trials, grandfathered-only access and
+past-due subscriptions do not show it. Local MCP stays available without a paid
+plan. Pausing uploads does not hide remote setup for an eligible subscriber.
+Opening Integrations, returning focus to the app, or reconnecting the network
+rechecks eligibility. While checking or when the service is unavailable, the
+remote section stays hidden. Reopen Integrations to retry. A desktop connected to
+an older server without the eligibility field also keeps the section hidden.
+
+This visibility rule does not change existing Cloud Sync entitlements or hosted
+token authorization. Deploy the compatible account endpoint before releasing the
+updated desktop client. No schema migration is needed.
+
 ## Before connecting
 
 - Sign in to the DoodleNote web app and select the workspace you intend to share.
