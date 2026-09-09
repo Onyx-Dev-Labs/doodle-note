@@ -165,8 +165,8 @@ enum LiveSession {
             })
             guard granted else {
                 throw EngineError.internalError(
-                    "Microphone permission denied. Open System Settings → Privacy & Security → Microphone, "
-                        + "enable it for the app running DoodleNote (Electron during development), then try again."
+                    "Microphone access is off. Open System Settings → Privacy & Security → Microphone, "
+                        + "enable DoodleNote, then try recording again."
                 )
             }
             Events.emit(["event": "status", "stage": "starting_capture", "channel": "mic"])
@@ -690,11 +690,8 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         } catch {
-            throw EngineError.internalError(
-                "System audio capture is unavailable: \(error.localizedDescription). "
-                    + "Check System Settings → Privacy & Security → Screen & System Audio Recording, "
-                    + "allow the app running DoodleNote, then quit and reopen it if required."
-            )
+            Events.log("system audio setup failed: \(error)")
+            throw EngineError.systemAudio(error)
         }
         guard let display = content.displays.first else {
             throw EngineError.internalError("no display available for system audio capture")
@@ -718,7 +715,12 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
     }
 
     func start() async throws {
-        try await stream?.startCapture()
+        do {
+            try await stream?.startCapture()
+        } catch {
+            Events.log("system audio start failed: \(error)")
+            throw EngineError.systemAudio(error)
+        }
         // Registered only once capture is live: from here on, a process that
         // dies without stopCapture strands the tap's "System Audio Recording"
         // attribution in Control Center.

@@ -99,15 +99,3 @@ struct CLIOptions {
         return url
     }
 }
-
-enum EngineError: Error {
-    case usage(String)
-    case internalError(String)
-
-    var message: String {
-        switch self {
-        case .usage(let m): return m
-        case .internalError(let m): return m
-        }
-    }
-}
