@@ -46,6 +46,7 @@ import DoodlingIndicator from './DoodlingIndicator'
 import FormatToolbar from './FormatToolbar'
 import {
   CalendarIcon,
+  ChevronIcon,
   FolderIcon,
   HomeIcon,
   MailIcon,
@@ -1840,8 +1841,10 @@ export default function MeetingView({
                 className="chev-btn"
                 onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-expanded={transcriptOpen}
               >
-                {transcriptOpen ? '⌄' : '⌃'}
+                <ChevronIcon direction={transcriptOpen ? 'down' : 'up'} />
               </button>
               <button
                 type="button"
@@ -1870,8 +1873,10 @@ export default function MeetingView({
                 className="chev-btn"
                 onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-expanded={transcriptOpen}
               >
-                {transcriptOpen ? '⌄' : '⌃'}
+                <ChevronIcon direction={transcriptOpen ? 'down' : 'up'} />
               </button>
             </>
           )}
