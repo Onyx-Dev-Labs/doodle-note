@@ -63,7 +63,8 @@ async function main() {
   const server = createServer((req, res) => {
     if (req.url === '/app.js' || req.url === '/app.css') {
       res.setHeader('Content-Type', req.url.endsWith('.js') ? 'text/javascript' : 'text/css')
-      res.end(fs.readFileSync(path.join(bundle, req.url.slice(1))))
+      const filename = req.url === '/app.js' ? 'app.js' : 'app.css'
+      res.end(fs.readFileSync(path.join(bundle, filename)))
     } else {
       res.setHeader('Content-Type', 'text/html')
       res.end(
