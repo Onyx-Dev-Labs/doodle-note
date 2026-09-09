@@ -1,5 +1,6 @@
 export const SYNC_GET_STATUS_CHANNEL = 'sync:get-status'
 export const SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL = 'sync:remote-mcp-eligibility'
+export const SYNC_CANCEL_CONNECT_CHANNEL = 'sync:cancel-connect'
 export const SYNC_CONNECT_CHANNEL = 'sync:connect'
 export const SYNC_DISCONNECT_CHANNEL = 'sync:disconnect'
 export const SYNC_SET_ENABLED_CHANNEL = 'sync:set-enabled'
@@ -8,6 +9,8 @@ export const SYNC_SHARE_CHANNEL = 'sync:share'
 export const SYNC_STATUS_EVENT_CHANNEL = 'sync:status-event'
 
 export interface SyncStatus {
+  /** Monotonic status ordering, including pending link lifecycle changes. */
+  statusRevision: number
   /** In-memory generation: invalidates UI state when a device is linked/disconnected. */
   connectionRevision: number
   /** A sync token is stored (the device has been linked). */
@@ -43,6 +46,8 @@ export interface SyncApi {
   getRemoteMcpEligibility(): Promise<boolean>
   /** Opens the browser link flow; resolves when linked, failed, or timed out. */
   connect(): Promise<SyncStatus>
+  /** Retires only the pending attempt; leaves existing account and notes intact. */
+  cancelConnect(): Promise<SyncStatus>
   disconnect(): Promise<SyncStatus>
   setEnabled(enabled: boolean): Promise<SyncStatus>
   syncNow(): Promise<SyncStatus>

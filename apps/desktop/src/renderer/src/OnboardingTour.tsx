@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
 import type { NotesSettingsView } from '../../shared/notes-api'
-import type { SyncStatus } from '../../shared/sync-api'
+import { useSyncConnection } from './lib/use-sync-connection'
 import mascotUrl from './assets/mascot-square.png'
 import { CalendarIcon, CloudIcon, MicIcon, SparkleIcon } from './icons'
 import { markOnboardingDone } from './lib/onboarding'
@@ -35,9 +35,14 @@ function OnboardingTour({
   onClose
 }: TourProps): React.JSX.Element {
   const [detect, setDetect] = useState<DetectState | null>(null)
-  const [sync, setSync] = useState<SyncStatus | null>(null)
+  const {
+    status: sync,
+    error: syncError,
+    connect: connectSync,
+    cancel: cancelSync
+  } = useSyncConnection()
   const [notes, setNotes] = useState<NotesSettingsView | null>(null)
-  const [busy, setBusy] = useState<'ms' | 'google' | 'sync' | null>(null)
+  const [busy, setBusy] = useState<'ms' | 'google' | null>(null)
   const [stepIndex, setStepIndex] = useState(0)
 
   useEffect(() => {
@@ -48,22 +53,14 @@ function OnboardingTour({
         if (!cancelled) setDetect(s)
       })
       .catch(() => {})
-    void window.sync
-      .getStatus()
-      .then((s) => {
-        if (!cancelled) setSync(s)
-      })
-      .catch(() => {})
     void window.notes
       .getSettings()
       .then((s) => {
         if (!cancelled) setNotes(s)
       })
       .catch(() => {})
-    const offSync = window.sync.onStatus(setSync)
     return () => {
       cancelled = true
-      offSync()
     }
   }, [])
 
@@ -103,15 +100,6 @@ function OnboardingTour({
     setBusy('google')
     try {
       await window.calendar.connectGoogle()
-    } finally {
-      setBusy(null)
-    }
-  }, [])
-
-  const connectSync = useCallback(async () => {
-    setBusy('sync')
-    try {
-      setSync(await window.sync.connect())
     } finally {
       setBusy(null)
     }
@@ -315,12 +303,34 @@ function OnboardingTour({
                 <button
                   type="button"
                   className="tour-action"
-                  disabled={busy !== null || sync?.linking === true}
+                  disabled={sync === null || sync.linking}
                   onClick={() => void connectSync()}
                 >
-                  {busy === 'sync' || sync?.linking ? 'Waiting for browser…' : 'Connect cloud sync'}
+                  {sync?.linking ? 'Waiting for browser…' : 'Connect cloud sync'}
+                </button>
+                {sync?.linking && (
+                  <button type="button" className="tour-action" onClick={() => void cancelSync()}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+            {syncConnected && sync?.linking && (
+              <div className="tour-actions-row">
+                <button type="button" className="tour-action" onClick={() => void cancelSync()}>
+                  Cancel
                 </button>
               </div>
+            )}
+            {(syncError || sync?.lastError) && (
+              <p className="models-error" role="alert">
+                {syncError || sync?.lastError}
+              </p>
+            )}
+            {sync?.linking && (
+              <p className="tour-footnote" role="status">
+                Approve in your browser, or cancel to try again if you closed it.
+              </p>
             )}
             <p className="tour-footnote">Optional and off by default — local-first, always.</p>
           </div>
