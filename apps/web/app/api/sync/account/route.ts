@@ -1,6 +1,6 @@
 import { getDb } from "@repo/db";
 import { entitlementFor } from "@/lib/billing";
-import { hasActivePaidSubscription } from "@/lib/billing-state";
+import { isRemoteMcpEligible } from "@/lib/billing-state";
 import { syncAccountResponse } from "@/lib/sync-account";
 import { authenticateIdentityRequest } from "@/lib/sync-auth";
 import { syncV2Enabled } from "@/lib/sync-v2";
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
       headers: { "Cache-Control": "private, no-store", Vary: "Authorization" } });
     const entitlement = await entitlementFor(device.userId);
     return await syncAccountResponse(getDb(), device, entitlement.entitled, syncV2Enabled(),
-      hasActivePaidSubscription(entitlement));
+      isRemoteMcpEligible(entitlement));
   } catch {
     return Response.json({ error: "account_unavailable" }, { status: 503,
       headers: { "Cache-Control": "private, no-store" } });
