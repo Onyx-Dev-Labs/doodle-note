@@ -5,8 +5,8 @@ the server URL separately from the local MCP launch configuration. Web
 **Settings > AI agents** shows the same setup for that server.
 
 The desktop section appears only after the linked account is verified to have an
-active paid Cloud Sync subscription. Trials, grandfathered-only access and
-past-due subscriptions do not show it. Local MCP stays available without a paid
+active paid Cloud Sync subscription or an active Cloud Sync trial. Grandfathered-only
+access and past-due subscriptions do not show it. Local MCP stays available without a paid
 plan. Pausing uploads does not hide remote setup for an eligible subscriber.
 Opening Integrations, returning focus to the app, or reconnecting the network
 rechecks eligibility. While checking or when the service is unavailable, the

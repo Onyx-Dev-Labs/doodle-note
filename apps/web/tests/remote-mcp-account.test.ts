@@ -6,7 +6,7 @@ import { createInMemoryDb } from "@repo/db/testing";
 import { hashToken, mintToken } from "../lib/sync-auth";
 import { GET } from "../app/api/sync/account/route";
 
-test("account endpoint exposes paid-only eligibility for the authenticated device without changing Sync access", async () => {
+test("account endpoint exposes paid and active-trial eligibility for the authenticated device without changing Sync access", async () => {
   const { db, close } = await createInMemoryDb({ throughMigration: 12 });
   const globalDb = globalThis as { __repoDbClient?: unknown };
   const previous = globalDb.__repoDbClient;
@@ -46,7 +46,7 @@ test("account endpoint exposes paid-only eligibility for the authenticated devic
         assert.deepEqual(await response.json(), {
           accountId: "paid-owner", workspaceId: "paid-work", workspaceName: "Paid workspace",
           entitled: grandfathered || ["active", "trialing", "past_due"].includes(status),
-          remoteMcpEligible: status === "active", syncAvailable: false, libraries: [],
+          remoteMcpEligible: status === "active" || status === "trialing", syncAvailable: false, libraries: [],
         });
       }
     }

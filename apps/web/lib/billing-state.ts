@@ -30,11 +30,11 @@ export interface SubscriptionState {
   currentPeriodEnd: Date | null;
 }
 
-/** Setup visibility is narrower than Sync access (which includes trials/grace). */
-export function hasActivePaidSubscription(entitlement: Entitlement): boolean {
+/** Setup visibility permits paid subscriptions and active trials, but not grace access. */
+export function isRemoteMcpEligible(entitlement: Entitlement): boolean {
   return entitlement.entitled &&
-    entitlement.subscriptionStatus === "active" &&
-    (entitlement.reason === "active" || entitlement.reason === "grandfathered");
+    (entitlement.subscriptionStatus === "active" || entitlement.subscriptionStatus === "trialing") &&
+    (entitlement.reason === "active" || entitlement.reason === "trialing" || entitlement.reason === "grandfathered");
 }
 
 const SERVING_STATUSES = new Set(["trialing", "active", "past_due"]);
