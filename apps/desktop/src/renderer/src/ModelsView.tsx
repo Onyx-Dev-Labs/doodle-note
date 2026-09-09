@@ -17,7 +17,9 @@ import {
   type EngineChoice,
   type NotesModelInfo,
   type NotesModelsResponse,
-  type NotesSettingsView
+  type NotesSettingsView,
+  type TranscriptionLanguage,
+  TRANSCRIPTION_LANGUAGES
 } from '../../shared/notes-api'
 import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
 import mascotUrl from './assets/mascot-square.png'
@@ -559,6 +561,11 @@ export default function ModelsView({
     setSettings(view)
   }
 
+  const chooseTranscriptionLanguage = async (language: TranscriptionLanguage): Promise<void> => {
+    const view = await window.notes.setSettings({ transcriptionLanguage: language })
+    setSettings(view)
+  }
+
   const saveCloudKey = async (): Promise<void> => {
     setError(null)
     const view = await window.notes.setSettings({
@@ -958,6 +965,30 @@ export default function ModelsView({
                   <button type="button" className="pill-btn" onClick={() => void saveProfileName()}>
                     {profileSaved ? 'Saved' : 'Save'}
                   </button>
+                </div>
+              </section>
+
+              <section className="keys-section">
+                <h3>Transcription language</h3>
+                <p className="models-sub">
+                  Pick the language you speak, or Auto-detect. Applies to live captions, imported
+                  recordings, and &ldquo;Re-transcribe&rdquo;; the first non-English session
+                  downloads its model. Live captions on Windows stay English.
+                </p>
+                <div className="key-form">
+                  <select
+                    aria-label="Transcription language"
+                    value={settings?.transcriptionLanguage ?? 'english'}
+                    onChange={(e) =>
+                      void chooseTranscriptionLanguage(e.target.value as TranscriptionLanguage)
+                    }
+                  >
+                    {TRANSCRIPTION_LANGUAGES.map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </section>
 

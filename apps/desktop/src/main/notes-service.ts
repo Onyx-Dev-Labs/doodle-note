@@ -39,7 +39,9 @@ import {
   type GlobalChatEntry,
   type NotesModelsResponse,
   type NotesSettingsUpdate,
-  type NotesSettingsView
+  type NotesSettingsView,
+  type TranscriptionLanguage,
+  isTranscriptionLanguage
 } from '../shared/notes-api'
 import type { MeetingRecord } from '../shared/meetings-api'
 import { isStoredCloudProvider } from '../shared/meeting-recovery'
@@ -73,6 +75,8 @@ interface StoredCloudSettings {
 interface StoredSettings {
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
+  /** Absent means 'english', the pre-existing behavior. */
+  transcriptionLanguage?: TranscriptionLanguage
   /** The user's own name, shown instead of "You" on their transcript lines. */
   profileName?: string
   cloud?: StoredCloudSettings
@@ -470,10 +474,23 @@ export class NotesService {
 
   /* ---- settings ---- */
 
+  /** Engine model for batch transcription (import + re-transcribe). */
+  batchAsrModel(): 'v2' | 'v3' {
+    return (this.settings.transcriptionLanguage ?? 'english') === 'english' ? 'v2' : 'v3'
+  }
+
+  /** Language hint for live captions; undefined keeps the English streaming model. */
+  liveAsrLanguage(): string | undefined {
+    const language = this.settings.transcriptionLanguage
+    if (!language || language === 'english') return undefined
+    return language === 'multilingual' ? 'auto' : language
+  }
+
   private settingsView(): NotesSettingsView {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
+      transcriptionLanguage: this.settings.transcriptionLanguage ?? 'english',
       ...(activeLocalModelId ? { activeLocalModelId } : {}),
       ...(profileName ? { profileName } : {}),
       ...(cloud
@@ -494,6 +511,10 @@ export class NotesService {
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
+    }
+
+    if (isTranscriptionLanguage(update.transcriptionLanguage)) {
+      this.settings.transcriptionLanguage = update.transcriptionLanguage
     }
 
     if (typeof update.profileName === 'string') {
@@ -565,6 +586,9 @@ export class NotesService {
       if (typeof raw.profileName === 'string') {
         const name = sanitizeSpeakerName(raw.profileName)
         if (name) settings.profileName = name
+      }
+      if (isTranscriptionLanguage(raw.transcriptionLanguage)) {
+        settings.transcriptionLanguage = raw.transcriptionLanguage
       }
       const cloud = raw.cloud
       if (

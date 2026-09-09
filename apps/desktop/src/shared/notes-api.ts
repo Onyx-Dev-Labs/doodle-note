@@ -46,6 +46,29 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 ]
 export type EngineChoice = 'local' | 'cloud'
 
+/**
+ * Transcription language. 'english' runs the fastest English-only models;
+ * 'multilingual' auto-detects the spoken language; a FLEURS code such as
+ * 'de-DE' pins live captions to that language. Imports and re-transcription
+ * always auto-detect among 25 European languages when not 'english'.
+ * Live captions on Windows stay English.
+ */
+export const TRANSCRIPTION_LANGUAGES = [
+  ['english', 'English (fastest)'],
+  ['multilingual', 'Auto-detect'],
+  ['de-DE', 'Deutsch'],
+  ['fr-FR', 'Français'],
+  ['es-ES', 'Español'],
+  ['it-IT', 'Italiano'],
+  ['pt-BR', 'Português'],
+  ['nl-NL', 'Nederlands'],
+  ['pl-PL', 'Polski']
+] as const
+export type TranscriptionLanguage = (typeof TRANSCRIPTION_LANGUAGES)[number][0]
+export function isTranscriptionLanguage(value: unknown): value is TranscriptionLanguage {
+  return TRANSCRIPTION_LANGUAGES.some(([code]) => code === value)
+}
+
 /** One catalog model + its state on this machine. */
 export interface NotesModelInfo {
   id: string
@@ -76,6 +99,7 @@ export interface ActivateModelResult {
 export interface NotesSettingsView {
   engineChoice: EngineChoice
   activeLocalModelId?: string
+  transcriptionLanguage: TranscriptionLanguage
   /** The user's own name, used to label their transcript lines. */
   profileName?: string
   cloud?: {
@@ -90,6 +114,7 @@ export interface NotesSettingsView {
 /** Partial update; omitted fields are left untouched. */
 export interface NotesSettingsUpdate {
   engineChoice?: EngineChoice
+  transcriptionLanguage?: TranscriptionLanguage
   /** The user's own name; empty string clears it back to "You". */
   profileName?: string
   /**
