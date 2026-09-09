@@ -21,7 +21,7 @@ struct EngineMain {
             case "live":
                 try await LiveCommand.run(options)
             case "preflight":
-                await PreflightCommand.run()
+                await PreflightCommand.run(modelsOnly: options.flags.contains("models-only"))
             case "micmon":
                 MicMonitorCommand.run()
             case "serve":
