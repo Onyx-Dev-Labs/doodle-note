@@ -12,7 +12,6 @@ import { meetingHistoryWindow } from '../../shared/meeting-history'
 import FolderPicker from './FolderPicker'
 import {
   CheckSquareIcon,
-  ChevronIcon,
   DocIcon,
   FolderIcon,
   ImportIcon,
@@ -736,10 +735,7 @@ export default function HomeView({
               setNewMenuOpen((open) => !open)
             }}
           >
-            + New{' '}
-            <span className="new-menu-chevron" aria-hidden="true">
-              <ChevronIcon direction="down" size={12} />
-            </span>
+            + New
           </button>
           {newMenuOpen && (
             <div className="new-menu-popover" role="menu" aria-label="Create or import">

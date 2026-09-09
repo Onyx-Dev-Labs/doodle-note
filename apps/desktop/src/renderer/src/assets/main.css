@@ -463,12 +463,6 @@ a,
   justify-content: center;
 }
 
-.new-menu-chevron {
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-}
-
 .new-menu-popover {
   position: absolute;
   top: calc(100% + 7px);
