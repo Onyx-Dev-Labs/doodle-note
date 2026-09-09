@@ -30,6 +30,13 @@ export interface SubscriptionState {
   currentPeriodEnd: Date | null;
 }
 
+/** Setup visibility is narrower than Sync access (which includes trials/grace). */
+export function hasActivePaidSubscription(entitlement: Entitlement): boolean {
+  return entitlement.entitled &&
+    entitlement.subscriptionStatus === "active" &&
+    (entitlement.reason === "active" || entitlement.reason === "grandfathered");
+}
+
 const SERVING_STATUSES = new Set(["trialing", "active", "past_due"]);
 const CHECKOUT_RETRY_STATUSES = new Set([
   "none",

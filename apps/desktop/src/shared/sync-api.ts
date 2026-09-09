@@ -1,4 +1,5 @@
 export const SYNC_GET_STATUS_CHANNEL = 'sync:get-status'
+export const SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL = 'sync:remote-mcp-eligibility'
 export const SYNC_CONNECT_CHANNEL = 'sync:connect'
 export const SYNC_DISCONNECT_CHANNEL = 'sync:disconnect'
 export const SYNC_SET_ENABLED_CHANNEL = 'sync:set-enabled'
@@ -7,6 +8,8 @@ export const SYNC_SHARE_CHANNEL = 'sync:share'
 export const SYNC_STATUS_EVENT_CHANNEL = 'sync:status-event'
 
 export interface SyncStatus {
+  /** In-memory generation: invalidates UI state when a device is linked/disconnected. */
+  connectionRevision: number
   /** A sync token is stored (the device has been linked). */
   connected: boolean
   /** Account email captured during linking. */
@@ -36,6 +39,8 @@ export interface SyncApi {
   /** Push the meeting (fresh) and mint/fetch its public share link. */
   share(meetingId: string): Promise<ShareResult>
   getStatus(): Promise<SyncStatus>
+  /** Revalidate paid remote-setup visibility; does not enable Sync or upload data. */
+  getRemoteMcpEligibility(): Promise<boolean>
   /** Opens the browser link flow; resolves when linked, failed, or timed out. */
   connect(): Promise<SyncStatus>
   disconnect(): Promise<SyncStatus>

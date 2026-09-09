@@ -151,6 +151,7 @@ import {
   SYNC_CONNECT_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
+  SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SHARE_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
@@ -412,6 +413,9 @@ const calendarApi: CalendarApi = {
 }
 
 const syncApi: SyncApi = {
+  getRemoteMcpEligibility(): Promise<boolean> {
+    return ipcRenderer.invoke(SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL) as Promise<boolean>
+  },
   reader(request: unknown): Promise<unknown> {
     return ipcRenderer.invoke('sync:reader', request)
   },

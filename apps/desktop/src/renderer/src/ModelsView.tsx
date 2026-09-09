@@ -19,7 +19,7 @@ import {
   type NotesModelsResponse,
   type NotesSettingsView
 } from '../../shared/notes-api'
-import { RemoteMcpSetup } from './RemoteMcpSetup'
+import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
 import mascotUrl from './assets/mascot-square.png'
 
 function lastSyncLabel(iso: string): string {
@@ -205,6 +205,12 @@ export default function ModelsView({
 
   /* ---- cloud sync ---- */
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const adoptSyncStatus = useCallback((next: SyncStatus) => {
+    // A slow status request must not restore a disconnected/previous account.
+    setSyncStatus((previous) =>
+      previous && previous.connectionRevision > next.connectionRevision ? previous : next
+    )
+  }, [])
   const [linkPending, setLinkPending] = useState(false)
 
   /* ---- integrations: agent access ---- */
@@ -389,12 +395,12 @@ export default function ModelsView({
     if (active) {
       void window.sync
         .getStatus()
-        .then(setSyncStatus)
+        .then(adoptSyncStatus)
         .catch(() => setSyncStatus(null))
     }
-  }, [active])
+  }, [active, adoptSyncStatus])
 
-  useEffect(() => window.sync.onStatus(setSyncStatus), [])
+  useEffect(() => window.sync.onStatus(adoptSyncStatus), [adoptSyncStatus])
 
   useEffect(() => {
     if (active) {
@@ -409,7 +415,7 @@ export default function ModelsView({
     if (linkPending) return
     setLinkPending(true)
     try {
-      setSyncStatus(await window.sync.connect())
+      adoptSyncStatus(await window.sync.connect())
     } finally {
       setLinkPending(false)
     }
@@ -1272,7 +1278,7 @@ export default function ModelsView({
                         checked={syncStatus.enabled}
                         label="Sync meetings to the cloud"
                         onChange={() => {
-                          void window.sync.setEnabled(!syncStatus.enabled).then(setSyncStatus)
+                          void window.sync.setEnabled(!syncStatus.enabled).then(adoptSyncStatus)
                         }}
                       />
                     </div>
@@ -1283,7 +1289,7 @@ export default function ModelsView({
                       type="button"
                       disabled={syncStatus.syncing || !syncStatus.enabled}
                       onClick={() => {
-                        void window.sync.syncNow().then(setSyncStatus)
+                        void window.sync.syncNow().then(adoptSyncStatus)
                       }}
                     >
                       {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
@@ -1291,7 +1297,7 @@ export default function ModelsView({
                     <button
                       type="button"
                       onClick={() => {
-                        void window.sync.disconnect().then(setSyncStatus)
+                        void window.sync.disconnect().then(adoptSyncStatus)
                       }}
                     >
                       Disconnect
@@ -1304,7 +1310,12 @@ export default function ModelsView({
 
           {section === 'integrations' && (
             <>
-              <RemoteMcpSetup key={syncStatus?.baseUrl} baseUrl={syncStatus?.baseUrl} />
+              {active && syncStatus?.connected && (
+                <PaidRemoteMcpSetup
+                  key={`${syncStatus.baseUrl}:${syncStatus.connectionRevision}`}
+                  baseUrl={syncStatus.baseUrl}
+                />
+              )}
               <section className="keys-section calendar-section">
                 <h3>Local MCP</h3>
                 <p className="models-sub">
