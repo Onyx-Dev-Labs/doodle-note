@@ -53,9 +53,16 @@ source. All remaining runtime differences from that reference are accounted for:
   functionality remain the accepted implementation.
 - A formatting-only cleanup in FirstRunWizard resolves its existing lint warning.
 
-The web source, dependency manifests/lockfile, release feeds and GitHub workflows
-match the base. Its dependency updates already resolve the old #154 audit failure;
-the fresh production audit reports no known vulnerabilities.
+The web source, release feeds and GitHub workflows match the base. Main already
+resolves the old #154 audit failure. This integration also raises two transitive
+dependency floors in the root manifest and lockfile: `@xmldom/xmldom` 0.8.13 to
+0.8.15 (Electron packaging/signing via plist), and `qs` 6.15.3 to 6.16.0 (the MCP
+SDK's Express/body-parser dependencies). These versions address the 12 existing
+Dependabot alerts without changing direct dependency versions. Static review did
+not establish application exploitability: local MCP uses stdio and hosted MCP
+uses Next.js JSON handling; upstream input/API reachability was not fully proven.
+No alerts were dismissed or waived. The full dependency audit, including development
+dependencies, now reports no known vulnerabilities.
 
 ## Verification
 
@@ -64,6 +71,9 @@ the fresh production audit reports no known vulnerabilities.
 - Desktop suite: 248 passed, six existing environment skips, zero failures.
 - Notes engine package: 23 passed; MCP: five passed; meeting store: 15 passed.
 - Production dependency audit: no known vulnerabilities.
+- CI follow-up: the tray test now uses the host's `path.join` for resource-path
+  expectations, matching the controller on Windows as well as macOS. This fixes
+  the Windows-only assertion failure without changing tray behavior.
 - Source ancestry: all nine listed PR heads are included.
 - Swift production engine build passed; existing upstream concurrency warnings remain.
 - Recording-prompt Electron smoke: eight scenarios passed, including closed-window
