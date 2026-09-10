@@ -89,3 +89,39 @@ Check permission denial/unavailable engine recovery, both menu-bar appearances,
 scaled/Retina displays, keyboard menu operation, calendar countdown coexistence,
 and quitting during capture. Packaging, release and installed-version evidence
 remain separate approval gates under `docs/RELEASING.md`.
+
+### Google Calendar in official desktop builds
+
+Downloaded official apps use DoodleNote's **Desktop** OAuth client. Users only
+select Connect Google and consent to read-only Calendar access; they do not need
+Node, a fork, Google Cloud setup, or a personal application secret.
+
+Maintainers supply `DOODLENOTE_GOOGLE_CLIENT_SECRET` in the build environment from
+secure credential storage. It must belong to the Desktop client declared in
+`src/shared/google-app.ts`, never the separate Web client. `electron-vite` embeds
+it only in the main-process bundle. Do not paste its value in source, `.env`
+examples, logs, issues, or chat. Build injection keeps the value out of Git, but
+**cannot make an installed-app credential confidential**: it is extractable from
+the distributed binary. PKCE, state, browser consent, loopback redirects, and
+OS-encrypted user refresh tokens remain necessary.
+
+The Mac release workflow reads the GitHub Actions repository secret named
+`DOODLENOTE_GOOGLE_CLIENT_SECRET`. Local Mac packaging and Windows publishing
+require the same environment variable. Generic development builds and unsigned
+Windows CI packages can build without it, but Google connection then gives a
+configuration error before opening a browser. They are not Google-enabled
+release artifacts. Changing the environment after building does not update an
+existing bundle: rebuild before packaging.
+
+Keep the client ID during secret rotation so existing refresh tokens remain
+associated with the same registration. Securely save a replacement, update the
+build input, build and test fresh connect plus expiry/restart refresh, and then
+release through the normal approved process. Do not disable the outgoing
+credential until dependent builds are retired. Users whose refresh tokens were
+revoked must reconnect Google; notes and calendar preferences must be preserved.
+
+Google Console must have Calendar API enabled, External production audience,
+verified branding/domain ownership, and verified declarations matching the
+actual `openid email https://www.googleapis.com/auth/calendar.readonly` request.
+OAuth verification requires a real working-flow demo; a successful unit test or
+branding check is not Google approval.

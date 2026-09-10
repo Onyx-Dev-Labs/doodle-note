@@ -456,7 +456,7 @@ export class CalendarService {
     this.prefs = next
     this.saveSettings()
     this.broadcastState()
-    if (visibilityChanged && this.account) void this.refreshEvents()
+    if (visibilityChanged && (this.account || this.google.signedIn)) void this.refreshEvents()
     return this.state()
   }
 
@@ -550,6 +550,7 @@ export class CalendarService {
 
   private async disconnectGoogle(): Promise<CalendarState> {
     this.google.disconnect()
+    this.lastError = undefined
     this.googleCalendars = []
     this.rawEvents = this.rawEvents.filter((e) => !e.calendarId.startsWith('g:'))
     if (this.account === null) {
@@ -684,55 +685,56 @@ export class CalendarService {
     if (this.refreshBusy || (!this.account && !this.google.signedIn)) return
     this.refreshBusy = true
     try {
-      let token: string | null = null
-      if (this.account) {
-        token = await this.getAccessToken()
-        if (token !== null) {
-          this.calendars = await this.fetchCalendars(token)
-        } else if (!this.google.signedIn) {
-          return // lastError already explains
-        }
-      }
-      if (this.google.signedIn) {
-        try {
-          this.googleCalendars = await this.google.fetchCalendars()
-        } catch (err) {
-          // Google blip must not kill the Microsoft sync (and vice versa).
-          if (this.googleCalendars.length === 0) throw err
-          console.error('[calendar] google calendar list refresh failed:', err)
-        }
-      }
-      const visible = resolveVisibleCalendars(
-        this.allCalendars(),
-        this.prefs.visibleCalendarIds
-      ).filter((calendar) => (calendar.id.startsWith('g:') ? true : token !== null))
-      // Per-calendar fetches run in parallel; one failing shared calendar
-      // must not kill the sync, so failures are collected, not thrown.
-      const results = await Promise.allSettled(
-        visible.map((calendar) =>
-          calendar.id.startsWith('g:')
-            ? this.google.fetchEvents(calendar)
-            : this.fetchCalendarView(token as string, calendar)
-        )
+      // Providers refresh independently. Preserve the failed provider/calendar's
+      // cached meetings, and never advance the full-sync timestamp on partial failure.
+      const providers = [...(this.account ? [false] : []), ...(this.google.signedIn ? [true] : [])]
+      const loaded = await Promise.allSettled(
+        providers.map(async (google) => {
+          const token = google ? null : await this.getAccessToken()
+          if (!google && token === null) {
+            throw new Error(this.lastError ?? 'Microsoft calendar sign-in is required.')
+          }
+          const calendars = google
+            ? await this.google.fetchCalendars()
+            : await this.fetchCalendars(token as string)
+          if (google) this.googleCalendars = calendars
+          else this.calendars = calendars
+          return token
+        })
       )
-      const lists: CalendarEvent[][] = []
-      let firstFailure: unknown
-      results.forEach((result, i) => {
-        if (result.status === 'fulfilled') {
-          lists.push(result.value)
-        } else {
-          firstFailure ??= result.reason
-          console.error(`[calendar] sync failed for “${visible[i]?.name}”:`, result.reason)
-        }
-      })
-      // …but when every fetch failed there is nothing fresh at all — surface
-      // the first reason and keep the previous events.
-      if (lists.length === 0 && visible.length > 0) {
-        throw firstFailure instanceof Error ? firstFailure : new Error(String(firstFailure))
-      }
-      this.rawEvents = mergeCalendarEvents(lists)
-      this.lastSyncIso = new Date().toISOString()
-      this.lastError = undefined
+      // Resolve selection once across both providers, including cached calendars
+      // when a provider's list failed. A hidden provider must stay hidden.
+      const visible = resolveVisibleCalendars(this.allCalendars(), this.prefs.visibleCalendarIds)
+      const results = await Promise.all(
+        providers.map(async (google, providerIndex) => {
+          const cached = this.rawEvents.filter(
+            (event) => event.calendarId.startsWith('g:') === google
+          )
+          const loadedProvider = loaded[providerIndex]!
+          if (loadedProvider.status === 'rejected') {
+            return { events: cached, errors: [friendlyError(loadedProvider.reason)] }
+          }
+          const calendars = visible.filter((calendar) => calendar.id.startsWith('g:') === google)
+          const fetched = await Promise.allSettled(
+            calendars.map((calendar) =>
+              google
+                ? this.google.fetchEvents(calendar)
+                : this.fetchCalendarView(loadedProvider.value as string, calendar)
+            )
+          )
+          const errors: string[] = []
+          const lists = fetched.map((result, index) => {
+            if (result.status === 'fulfilled') return result.value
+            errors.push(friendlyError(result.reason))
+            return cached.filter((event) => event.calendarId === calendars[index]?.id)
+          })
+          return { events: mergeCalendarEvents(lists), errors }
+        })
+      )
+      this.rawEvents = mergeCalendarEvents(results.map((result) => result.events))
+      const errors = results.flatMap((result) => result.errors)
+      if (errors.length === 0) this.lastSyncIso = new Date().toISOString()
+      this.lastError = errors.length ? [...new Set(errors)].join(' ') : undefined
       this.saveEventCache()
       // Catch an already-imminent meeting without waiting for the next tick.
       this.checkMeetingStarts()
@@ -744,37 +746,28 @@ export class CalendarService {
     }
   }
 
-  /** GET /me/calendars — the account's calendar list. Falls back to the
-   *  cached list when Graph hiccups so a blip never blanks the sync. */
+  /** GET /me/calendars. The refresh coordinator preserves cached data on failure. */
   private async fetchCalendars(accessToken: string): Promise<CalendarInfo[]> {
     const params = new URLSearchParams({
       $select: 'id,name,color,hexColor,isDefaultCalendar,canEdit',
       $top: '50'
     })
-    try {
-      const res = await fetch(`https://graph.microsoft.com/v1.0/me/calendars?${params}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      })
-      if (!res.ok) {
-        throw new Error(await graphErrorMessage(res))
-      }
-      const body = (await res.json()) as { value?: unknown }
-      const items = Array.isArray(body.value) ? body.value : []
-      const calendars: CalendarInfo[] = []
-      for (const item of items) {
-        const calendar = normalizeGraphCalendar(item)
-        if (calendar) calendars.push(calendar)
-      }
-      // Every mailbox has a default calendar; an empty list is a Graph blip.
-      if (calendars.length === 0) throw new Error('Microsoft returned no calendars')
-      return calendars
-    } catch (err) {
-      if (this.calendars.length > 0) {
-        console.error('[calendar] calendar list refresh failed, using cached list:', err)
-        return this.calendars
-      }
-      throw err
+    const res = await fetch(`https://graph.microsoft.com/v1.0/me/calendars?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    })
+    if (!res.ok) {
+      throw new Error(await graphErrorMessage(res))
     }
+    const body = (await res.json()) as { value?: unknown }
+    const items = Array.isArray(body.value) ? body.value : []
+    const calendars: CalendarInfo[] = []
+    for (const item of items) {
+      const calendar = normalizeGraphCalendar(item)
+      if (calendar) calendars.push(calendar)
+    }
+    // Every mailbox has a default calendar; an empty list is a Graph blip.
+    if (calendars.length === 0) throw new Error('Microsoft returned no calendars')
+    return calendars
   }
 
   /** GET /me/calendars/{id}/calendarView for the next LOOKAHEAD_DAYS. */
@@ -1057,6 +1050,9 @@ export class CalendarService {
       return {
         events,
         ...(calendars.length > 0 ? { calendars } : {}),
+        ...(Array.isArray(raw.googleCalendars)
+          ? { googleCalendars: raw.googleCalendars.filter(isStoredCalendarInfo) }
+          : {}),
         ...(typeof raw.lastSyncIso === 'string' ? { lastSyncIso: raw.lastSyncIso } : {}),
         ...(raw.account && typeof raw.account.email === 'string'
           ? {
@@ -1274,6 +1270,7 @@ async function graphErrorMessage(res: Response): Promise<string> {
 /** Turn auth/network failures into one calm sentence for the Settings card. */
 function friendlyError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
+  if (/^Google Calendar/i.test(message)) return clip(message)
   if (/AADSTS700016|unauthorized_client/i.test(message)) {
     return 'Microsoft didn’t recognize that Client ID — double-check the app registration.'
   }
