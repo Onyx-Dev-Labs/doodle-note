@@ -6,7 +6,7 @@ import {
 } from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
-import type { SyncStatus } from '../../shared/sync-api'
+import { useSyncConnection } from './lib/use-sync-connection'
 import type { AgentAccessStatus, McpClientId, McpServerSpec } from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
@@ -207,14 +207,13 @@ export default function ModelsView({
   const cloudFormSeeded = useRef(false)
 
   /* ---- cloud sync ---- */
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
-  const adoptSyncStatus = useCallback((next: SyncStatus) => {
-    // A slow status request must not restore a disconnected/previous account.
-    setSyncStatus((previous) =>
-      previous && previous.connectionRevision > next.connectionRevision ? previous : next
-    )
-  }, [])
-  const [linkPending, setLinkPending] = useState(false)
+  const {
+    status: syncStatus,
+    error: syncError,
+    adoptStatus: adoptSyncStatus,
+    connect: connectSync,
+    cancel: cancelSync
+  } = useSyncConnection(active)
 
   /* ---- integrations: agent access ---- */
   const [agentAccess, setAgentAccess] = useState<AgentAccessStatus | null>(null)
@@ -396,33 +395,12 @@ export default function ModelsView({
 
   useEffect(() => {
     if (active) {
-      void window.sync
-        .getStatus()
-        .then(adoptSyncStatus)
-        .catch(() => setSyncStatus(null))
-    }
-  }, [active, adoptSyncStatus])
-
-  useEffect(() => window.sync.onStatus(adoptSyncStatus), [adoptSyncStatus])
-
-  useEffect(() => {
-    if (active) {
       void window.detect
         .getState()
         .then(setDetect)
         .catch(() => setDetect(null))
     }
   }, [active])
-
-  const connectSync = async (): Promise<void> => {
-    if (linkPending) return
-    setLinkPending(true)
-    try {
-      adoptSyncStatus(await window.sync.connect())
-    } finally {
-      setLinkPending(false)
-    }
-  }
 
   const saveCalendarConfig = async (): Promise<void> => {
     const state = await window.calendar.setConfig({
@@ -1259,6 +1237,11 @@ export default function ModelsView({
                 share them on the web.
               </p>
 
+              {syncError && (
+                <div className="models-error" role="alert">
+                  {syncError}
+                </div>
+              )}
               {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
 
               {syncStatus === null ? (
@@ -1268,19 +1251,24 @@ export default function ModelsView({
                   <button
                     type="button"
                     className="ms-signin"
-                    disabled={linkPending || syncStatus.linking}
+                    disabled={syncStatus.linking}
                     onClick={() => void connectSync()}
                   >
                     <span>
-                      {linkPending || syncStatus.linking
+                      {syncStatus.linking
                         ? 'Waiting for your browser…'
                         : 'Connect DoodleNote Cloud'}
                     </span>
                   </button>
-                  {(linkPending || syncStatus.linking) && (
-                    <span className="calendar-note">
-                      approve the connection in your browser, then come back
-                    </span>
+                  {syncStatus.linking && (
+                    <>
+                      <button type="button" className="pill-btn" onClick={() => void cancelSync()}>
+                        Cancel
+                      </button>
+                      <span className="calendar-note" role="status">
+                        Approve in your browser, or cancel to try again if you closed it.
+                      </span>
+                    </>
                   )}
                 </div>
               ) : (
@@ -1326,6 +1314,11 @@ export default function ModelsView({
                   </div>
 
                   <div className="calendar-actions">
+                    {syncStatus.linking && (
+                      <button type="button" onClick={() => void cancelSync()}>
+                        Cancel
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={syncStatus.syncing || !syncStatus.enabled}

@@ -160,6 +160,7 @@ import {
 } from '../shared/media-api'
 import {
   SYNC_CONNECT_CHANNEL,
+  SYNC_CANCEL_CONNECT_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
   SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
@@ -467,6 +468,10 @@ const syncApi: SyncApi = {
 
   connect(): Promise<SyncStatus> {
     return ipcRenderer.invoke(SYNC_CONNECT_CHANNEL) as Promise<SyncStatus>
+  },
+
+  cancelConnect(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_CANCEL_CONNECT_CHANNEL) as Promise<SyncStatus>
   },
 
   disconnect(): Promise<SyncStatus> {
