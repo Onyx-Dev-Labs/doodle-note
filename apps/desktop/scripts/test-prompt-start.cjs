@@ -122,7 +122,7 @@ async function main() {
     await closeClick(panel.locator('.dismiss'))
     assert.equal(await runtime.evaluate(() => global.starts.length), 0)
     assert.equal(await page.evaluate(async () => (await window.meetings.list()).length), 0)
-    await page.getByRole('button', { name: 'Dismiss', exact: true }).waitFor({ state: 'detached' })
+    await page.locator('.mb-dismiss').waitFor({ state: 'detached' })
 
     // The panel is the only window. Its real start callback must create a renderer.
     await runtime.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
@@ -174,7 +174,7 @@ async function main() {
       await runtime.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
       1
     )
-    await page.getByRole('button', { name: 'Dismiss', exact: true }).waitFor({ state: 'detached' })
+    await page.locator('.mb-dismiss').waitFor({ state: 'detached' })
     assert.equal(await runtime.evaluate(() => global.starts.length), 2)
 
     await runtime.evaluate(() => {

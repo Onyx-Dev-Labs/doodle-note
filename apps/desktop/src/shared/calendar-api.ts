@@ -58,7 +58,7 @@ export interface CalendarInfo {
 
 /** User-tweakable calendar display preferences (calendar-settings.json). */
 export interface CalendarPrefs {
-  /** Show the next meeting in the macOS menu bar (default true). */
+  /** Full Island shows today’s next meeting beside the dog; false = Compact. */
   showMenuBar: boolean
   /** Include events without participants or a video link in "Coming up" (default true). */
   showNoParticipants: boolean

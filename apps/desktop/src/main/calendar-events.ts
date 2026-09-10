@@ -97,28 +97,21 @@ export function resolveVisibleCalendars(
   return visible.length > 0 ? visible : defaults
 }
 
-/** The event the macOS menu bar shows: the soonest non-all-day event that is
- *  in progress or upcoming, or null when nothing qualifies. Input is the
+/** The event the macOS menu bar shows: the soonest timed event still running
+ *  or starting today in the user's local timezone. Input is the
  *  canonical (already sorted, already filtered) list. */
 export function nextTrayEvent(
   events: readonly CalendarEvent[],
   nowMs: number
 ): CalendarEvent | null {
-  for (const event of events) {
-    if (event.isAllDay) continue
-    const end = Date.parse(event.endIso)
-    if (!Number.isFinite(end) || end <= nowMs) continue
-    if (!Number.isFinite(Date.parse(event.startIso))) continue
-    return event
-  }
-  return null
+  return upcomingTrayEvents(events, nowMs, 1)[0] ?? null
 }
 
-/** Menu-bar title text: "◷ Team Meeting in 12m" (or "… now" while it runs). */
+/** Text beside the dog icon: "Team Meeting in 12m" (or "… now" while it runs). */
 export function trayTitle(event: CalendarEvent, nowMs: number): string {
   const subject = event.subject.trim() || 'Untitled meeting'
   const truncated = subject.length > 28 ? `${subject.slice(0, 27)}…` : subject
-  return `◷ ${truncated} ${trayEta(Date.parse(event.startIso), nowMs)}`
+  return `${truncated} ${trayEta(Date.parse(event.startIso), nowMs)}`
 }
 
 /** "now" during the event, else "in 12m" / "in 3h" / "in 2d". */
@@ -132,20 +125,25 @@ function trayEta(startMs: number, nowMs: number): string {
   return `in ${Math.max(1, Math.round(hours / 24))}d`
 }
 
-/** The next few non-all-day events (in progress or upcoming) for the Tray
- *  click menu, in start order. */
+/** Remaining timed meetings today, including an overnight meeting still running.
+ * Use local midnight rather than adding 24 hours so DST days work correctly.
+ * The input is the canonical calendar list, already sorted and filtered. */
 export function upcomingTrayEvents(
   events: readonly CalendarEvent[],
   nowMs: number,
   count: number
 ): CalendarEvent[] {
   const out: CalendarEvent[] = []
+  const tomorrow = new Date(nowMs)
+  tomorrow.setHours(0, 0, 0, 0)
+  tomorrow.setDate(tomorrow.getDate() + 1)
   for (const event of events) {
     if (out.length >= count) break
     if (event.isAllDay) continue
     const end = Date.parse(event.endIso)
     if (!Number.isFinite(end) || end <= nowMs) continue
-    if (!Number.isFinite(Date.parse(event.startIso))) continue
+    const start = Date.parse(event.startIso)
+    if (!Number.isFinite(start) || start >= tomorrow.getTime() || end <= start) continue
     out.push(event)
   }
   return out

@@ -14,6 +14,7 @@ export class MeetingGeneration {
   private captureId: string | undefined
   private revision = 0
   private capturing = false
+  private ready = false
   private pending = false
   private failure: string | undefined
   private running: GenerationRun | null = null
@@ -22,14 +23,21 @@ export class MeetingGeneration {
     this.capture++
     this.captureId = captureId
     this.capturing = true
+    this.ready = false
     this.pending = false
     this.failure = undefined
+  }
+
+  markReady(): void {
+    if (this.capturing) this.ready = true
   }
 
   finalize(error?: string, captureId?: string): boolean {
     if (!this.capturing || captureId !== this.captureId) return false
     this.capturing = false
-    this.pending = true
+    // A denied or cancelled startup has no completed recording to summarize.
+    // Still accept finalization so the recorder returns to an idle/retry state.
+    this.pending = this.ready
     this.failure = error
     return true
   }

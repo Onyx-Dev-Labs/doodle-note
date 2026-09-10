@@ -106,10 +106,7 @@ test('Windows website betas cannot replace the production updater feed', () => {
 })
 
 test('macOS-only settings are gated out of the Windows UI', () => {
-  assert.match(
-    modelsView,
-    /detect\?\.platform === 'darwin'[\s\S]*Show upcoming meetings in menu bar/
-  )
+  assert.match(modelsView, /detect\?\.platform === 'darwin'[\s\S]*Full Island in menu bar/)
   assert.match(
     modelsView,
     /detect\?\.platform === 'darwin'[\s\S]*Capture without screen permission/

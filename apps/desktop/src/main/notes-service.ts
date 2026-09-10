@@ -1,5 +1,5 @@
 import { app, ipcMain, safeStorage } from 'electron'
-import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CloudNotesEngine,

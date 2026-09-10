@@ -10,6 +10,13 @@ const path = require('node:path')
 const os = require('node:os')
 const root = path.resolve(__dirname, '..')
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ony-271-qa-profile-'))
+// Pin a valid selection before launch. Model reuse can otherwise adopt a real
+// cached model while this fixture advertises a different synthetic model ID.
+const fixtureModelId = 'qwen3-4b-instruct'
+fs.writeFileSync(
+  path.join(profile, 'settings.json'),
+  JSON.stringify({ engineChoice: 'local', activeLocalModelId: fixtureModelId })
+)
 const artifacts =
   process.env.DOODLE_QA_ARTIFACTS || fs.mkdtempSync(path.join(os.tmpdir(), 'ony-271-qa-evidence-'))
 fs.mkdirSync(artifacts, { recursive: true })
@@ -122,8 +129,15 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   assert.match(missingKey.error, /selected provider/)
   await page.evaluate(() => window.notes.setSettings({ engineChoice: 'local' }))
   // Preserve provider/main settings behavior; only capture hardware and generation are synthetic.
-  await app.evaluate(({ ipcMain, BrowserWindow }) => {
-    globalThis.qa = { calls: [], pending: [], ready: true, stops: 0, capture: 0 }
+  await app.evaluate(({ ipcMain, BrowserWindow }, modelId) => {
+    globalThis.qa = {
+      calls: [],
+      pending: [],
+      ready: true,
+      stops: 0,
+      capture: 0,
+      captureReady: true
+    }
     ipcMain.removeAllListeners('engine:start')
     ipcMain.removeAllListeners('engine:stop')
     ipcMain.on('engine:start', () => {
@@ -134,7 +148,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
         binaryPath: 'synthetic-qa',
         captureId: String(++qa.capture)
       })
-      w.send('engine:event', { event: 'ready' })
+      if (qa.captureReady) w.send('engine:event', { event: 'ready' })
     })
     ipcMain.on('engine:stop', () => {
       qa.stops++
@@ -148,7 +162,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
       ramGB: 32,
       models: [
         {
-          id: 'qa',
+          id: modelId,
           label: 'Synthetic QA',
           downloaded: qa.ready,
           active: true,
@@ -163,7 +177,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
       qa.calls.push(request)
       return new Promise((resolve) => qa.pending.push(resolve))
     })
-  })
+  }, fixtureModelId)
   // Keep physical keyboard input out of the synthetic editor while QA runs.
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]
@@ -223,6 +237,29 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   ) => app.evaluate((_electron, result) => qa.pending.shift()(result), result)
   const saved = (id) => page.evaluate((id) => window.meetings.get(id), id)
   const results = []
+  // Denied startup must expose one recording error without starting automatic notes.
+  await openMeeting()
+  await app.evaluate(() => {
+    qa.captureReady = false
+  })
+  const deniedBefore = await count()
+  await page.getByTitle('Start recording', { exact: true }).click()
+  const permissionMessage =
+    'System audio access is off. Open System Settings → Privacy & Security → Screen & System Audio Recording and enable DoodleNote. Then quit and reopen the app to try recording again.'
+  await send({ event: 'error', message: permissionMessage })
+  await finalize(permissionMessage)
+  await expect(page.getByTitle(/^(Start|Resume) recording$/)).toBeEnabled()
+  await expect(page.getByText(permissionMessage, { exact: true })).toHaveCount(1)
+  await expect(page.getByText(/Automatic notes skipped/)).toHaveCount(0)
+  await expect(page.locator('.tiptap')).toContainText('Original rough notes')
+  assert.equal(await count(), deniedBefore)
+  await page.screenshot({ path: artifacts + '/denied-startup.png' })
+  results.push(
+    'Denied startup: one actionable recording error, no automatic notes, authored notes retained, retry enabled'
+  )
+  await app.evaluate(() => {
+    qa.captureReady = true
+  })
   // Happy path and both stop routes; finalization must settle before provider invocation.
   for (const detected of [false, true]) {
     const id = await openMeeting()

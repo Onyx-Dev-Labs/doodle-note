@@ -146,7 +146,10 @@ export default function FirstRunWizard({
   )
 
   const recommended = models?.find((m) => m.available) ?? null
-  const alreadyActive = models?.some((m) => m.available && m.downloaded) ?? false
+  const readyModel =
+    notesState === 'done'
+      ? recommended
+      : (models?.find((m) => m.active && m.available && m.downloaded) ?? null)
 
   const downloadNotesModel = async (): Promise<void> => {
     if (!recommended) return
@@ -299,12 +302,21 @@ export default function FirstRunWizard({
               After a meeting, DoodleNote merges your rough notes with the transcript into polished
               notes — by default with a model that runs entirely on this computer.
             </p>
-            {alreadyActive || notesState === 'done' ? (
+            {readyModel ? (
               <div className="wizard-rows" role="status">
                 <div className="wizard-row">
-                  <span>On-device notes model</span>
-                  <span className="wz-ok">✓ ready</span>
+                  <span>
+                    {readyModel.label} — {readyModel.description}
+                  </span>
+                  <span className="wz-ok" style={{ whiteSpace: 'nowrap' }}>
+                    ✓ ready
+                  </span>
                 </div>
+                <p className="wizard-hint">
+                  {notesState === 'done'
+                    ? 'Selected for your notes. Ready to use on this computer.'
+                    : 'Selected for your notes. Already on this computer — no download needed.'}
+                </p>
               </div>
             ) : recommended ? (
               <div className="wizard-rows" aria-live="polite">
@@ -349,9 +361,7 @@ export default function FirstRunWizard({
               </p>
             )}
             <button type="button" className="wizard-link" onClick={() => setStep('done')}>
-              {alreadyActive || notesState === 'done'
-                ? 'Continue'
-                : 'Skip — I’ll use my own API key (Settings → Notes model)'}
+              {readyModel ? 'Continue' : 'Skip — I’ll use my own API key (Settings → Notes model)'}
             </button>
           </div>
         )}

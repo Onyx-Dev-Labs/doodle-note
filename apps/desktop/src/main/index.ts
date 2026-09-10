@@ -516,7 +516,8 @@ app.whenReady().then(() => {
     broadcast,
     focusMainWindow,
     new PromptPanel(),
-    requestRecordingStart
+    requestRecordingStart,
+    (state) => recordingTray?.updateCalendar(state)
   )
   calendarService.registerIpc()
 
@@ -545,7 +546,8 @@ app.whenReady().then(() => {
     () => {
       requestRecordingStart()
     },
-    focusMainWindow
+    focusMainWindow,
+    (fullIsland) => calendarService?.setMenuBarMode(fullIsland)
   )
 
   // Meeting-detection settings: login item (OS-owned) + the mic watcher.

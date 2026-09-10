@@ -871,14 +871,15 @@ export default function ModelsView({
                           <MenuBarIcon />
                         </span>
                         <span className="cal-row-main">
-                          <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                          <span className="cal-row-label">Full Island in menu bar</span>
                           <span className="cal-row-sub">
-                            Display your next meeting and time until it starts in the macOS menu bar
+                            Show today’s next meeting beside the dog. Turn off for the compact dog
+                            icon.
                           </span>
                         </span>
                         <Toggle
                           checked={calState.prefs.showMenuBar}
-                          label="Show upcoming meetings in menu bar"
+                          label="Full Island in menu bar"
                           onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
                         />
                       </div>
