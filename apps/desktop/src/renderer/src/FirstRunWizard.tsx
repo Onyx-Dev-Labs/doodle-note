@@ -51,7 +51,9 @@ export default function FirstRunWizard({
   useEffect(() => {
     if (step !== 'engine' || preflightStartedRef.current) return
     preflightStartedRef.current = true
+    let active = true
     const unsubscribe = window.wizard.onPreflightEvent((ev: WizardPreflightEvent) => {
+      if (!active) return
       setEngine((prev) => {
         switch (ev.stage) {
           case 'mic':
@@ -72,6 +74,7 @@ export default function FirstRunWizard({
             return {
               ...prev,
               status: 'error',
+              progress: null,
               detail: ev.message ?? 'Setup hit a snag — you can finish later from Settings'
             }
           default:
@@ -79,20 +82,40 @@ export default function FirstRunWizard({
         }
       })
     })
-    window.wizard.runPreflight().then((result) => {
-      setEngine((prev) =>
-        prev.status === 'running'
-          ? {
-              ...prev,
-              status: result.ok ? 'ready' : 'error',
-              detail: result.ok
-                ? 'Transcription is ready'
-                : (result.error ?? 'Setup hit a snag — you can finish later from Settings')
-            }
-          : prev
-      )
-    })
-    return unsubscribe
+    void window.wizard
+      .runPreflight()
+      .then((result) => {
+        if (!active) return
+        setEngine((prev) =>
+          prev.status === 'running'
+            ? {
+                ...prev,
+                status: result.ok ? 'ready' : 'error',
+                progress: null,
+                detail: result.ok
+                  ? 'Transcription is ready'
+                  : (result.error ?? 'Setup hit a snag — you can finish later from Settings')
+              }
+            : prev
+        )
+      })
+      .catch(() => {
+        if (!active) return
+        setEngine((prev) =>
+          prev.status === 'running'
+            ? {
+                ...prev,
+                status: 'error',
+                progress: null,
+                detail: 'Setup hit a snag — you can finish later from Settings'
+              }
+            : prev
+        )
+      })
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [step])
 
   /* ---- notes model step ---- */
@@ -225,14 +248,30 @@ export default function FirstRunWizard({
                   </span>
                 </div>
               )}
-              <div className="wizard-row">
+              <div className="wizard-row" role="status" aria-live="polite" aria-atomic="true">
                 <span>{engine.detail}</span>
-                <span className={engine.status === 'error' ? 'wz-bad' : 'wz-ok'}>
-                  {engine.status === 'ready' ? '✓' : engine.status === 'error' ? '✕' : '…'}
-                </span>
+                {engine.status === 'running' ? (
+                  <span className="wizard-loading" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                ) : (
+                  <span
+                    className={engine.status === 'error' ? 'wz-bad' : 'wz-ok'}
+                    aria-hidden="true"
+                  >
+                    {engine.status === 'ready' ? '✓' : '✕'}
+                  </span>
+                )}
               </div>
               {engine.progress !== null && (
-                <progress className="wizard-progress" value={engine.progress} max={1} />
+                <progress
+                  aria-label="Transcription model download"
+                  className="wizard-progress"
+                  value={engine.progress}
+                  max={1}
+                />
               )}
             </div>
             {!isWindows && (engine.mic === false || engine.screen === false) && (
