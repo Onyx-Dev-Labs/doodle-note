@@ -362,7 +362,10 @@ a,
 
 .folder-add {
   flex-shrink: 0;
-  display: none;
+  /* Reserve the action's space so revealing it cannot resize the row. */
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -372,8 +375,10 @@ a,
   font-size: 11px;
 }
 
-.nav-item:hover .folder-add {
-  display: flex;
+.nav-item:hover .folder-add,
+.nav-item:focus-within .folder-add {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .folder-add:hover {
@@ -3351,21 +3356,38 @@ button.fp-row:hover {
 }
 
 .folder-menu-btn {
-  display: none;
-  margin-left: 4px;
-  padding: 0 5px;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  opacity: 0;
+  pointer-events: none;
   border-radius: 6px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
 }
 
-.folder-row:hover .folder-menu-btn {
-  display: inline-flex;
+.folder-row .nav-count {
+  /* Share a stable slot with the overlaid options button. */
+  min-width: 22px;
+  text-align: right;
 }
 
-.folder-row:hover .nav-count {
-  display: none;
+.folder-row:hover .folder-menu-btn,
+.folder-row:focus-within .folder-menu-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.folder-row:hover .nav-count,
+.folder-row:focus-within .nav-count {
+  visibility: hidden;
 }
 
 .folder-menu-btn:hover {
