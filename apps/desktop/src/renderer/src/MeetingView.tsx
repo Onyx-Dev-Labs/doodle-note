@@ -48,6 +48,7 @@ import DoodlingIndicator from './DoodlingIndicator'
 import FormatToolbar from './FormatToolbar'
 import {
   CalendarIcon,
+  ChevronIcon,
   FolderIcon,
   HomeIcon,
   MailIcon,
@@ -1470,8 +1471,9 @@ export default function MeetingView({
           className="back-pill no-drag"
           onClick={() => void goBack()}
           title="Back to home"
+          aria-label="Back to home"
         >
-          ‹ <HomeIcon size={13} />
+          <ChevronIcon direction="left" size={12} /> <HomeIcon size={13} />
         </button>
       </div>
 
@@ -1931,7 +1933,7 @@ export default function MeetingView({
                   aria-expanded={tplMenuOpen}
                   onClick={() => setTplMenuOpen((o) => !o)}
                 >
-                  ▾
+                  <ChevronIcon direction="down" size={14} />
                 </button>
                 {tplMenuOpen && templateMenu}
               </>
@@ -1955,8 +1957,10 @@ export default function MeetingView({
                 className="chev-btn"
                 onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-expanded={transcriptOpen}
               >
-                {transcriptOpen ? '⌄' : '⌃'}
+                <ChevronIcon direction={transcriptOpen ? 'down' : 'up'} />
               </button>
               <button
                 type="button"
@@ -1985,8 +1989,10 @@ export default function MeetingView({
                 className="chev-btn"
                 onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-expanded={transcriptOpen}
               >
-                {transcriptOpen ? '⌄' : '⌃'}
+                <ChevronIcon direction={transcriptOpen ? 'down' : 'up'} />
               </button>
             </>
           )}

@@ -461,17 +461,12 @@ a,
 }
 
 .new-menu-trigger {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-width: 82px;
   justify-content: center;
-}
-
-.new-menu-chevron {
-  color: var(--muted);
-  font-size: 12px;
-  transform: translateY(-1px);
+  gap: 4px;
+  padding: 6px 12px;
+  line-height: 16px;
 }
 
 .new-menu-popover {
@@ -1272,6 +1267,10 @@ button.fp-row:hover {
 }
 
 .back-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -3188,6 +3187,9 @@ button.fp-row:hover {
 }
 
 .generate-cta-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px 14px;
   border-radius: 0 999px 999px 0;
   font-size: 11px;
