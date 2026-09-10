@@ -1,3 +1,14 @@
+import {
+  RECORDING_REQUEST_CHANNEL,
+  RECORDING_READY_CHANNEL,
+  RECORDING_DELIVER_CHANNEL,
+  RECORDING_ATTACH_CHANNEL,
+  RECORDING_CANCEL_CHANNEL,
+  RECORDING_STATE_CHANNEL,
+  type RecordingApi,
+  type RecordingStartRequest,
+  type RecordingState
+} from '../shared/recording-api'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   ENGINE_AUDIO_CHANNEL,
@@ -370,6 +381,28 @@ const foldersApi: FoldersApi = {
   }
 }
 
+const recordingApi: RecordingApi = {
+  requestStart: (event) => ipcRenderer.invoke(RECORDING_REQUEST_CHANNEL, event),
+  ready: (eligible) => ipcRenderer.invoke(RECORDING_READY_CHANNEL, eligible),
+  attach: (requestId, meetingId) =>
+    ipcRenderer.invoke(RECORDING_ATTACH_CHANNEL, requestId, meetingId),
+  cancel: (requestId) => ipcRenderer.invoke(RECORDING_CANCEL_CHANNEL, requestId),
+  onStart(cb) {
+    const listener = (_event: IpcRendererEvent, request: RecordingStartRequest): void => cb(request)
+    ipcRenderer.on(RECORDING_DELIVER_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(RECORDING_DELIVER_CHANNEL, listener)
+    }
+  },
+  onState(cb) {
+    const listener = (_event: IpcRendererEvent, state: RecordingState): void => cb(state)
+    ipcRenderer.on(RECORDING_STATE_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(RECORDING_STATE_CHANNEL, listener)
+    }
+  }
+}
+
 const calendarApi: CalendarApi = {
   getState(): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_GET_STATE_CHANNEL) as Promise<CalendarState>
@@ -580,6 +613,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
+    contextBridge.exposeInMainWorld('recording', recordingApi)
     contextBridge.exposeInMainWorld('sync', syncApi)
     contextBridge.exposeInMainWorld('media', mediaApi)
     contextBridge.exposeInMainWorld('detect', detectApi)
@@ -604,6 +638,8 @@ if (process.contextIsolated) {
   window.folders = foldersApi
   // @ts-ignore (defined in index.d.ts)
   window.calendar = calendarApi
+  // @ts-ignore (defined in index.d.ts)
+  window.recording = recordingApi
   // @ts-ignore (defined in index.d.ts)
   window.sync = syncApi
   // @ts-ignore (defined in index.d.ts)
