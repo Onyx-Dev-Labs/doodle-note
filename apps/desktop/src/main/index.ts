@@ -8,6 +8,19 @@ import {
   protocol,
   session as electronSession
 } from 'electron'
+import { RecordingStartCoordinator } from './recording-start-coordinator'
+import { RecordingTray } from './recording-tray'
+import {
+  RECORDING_REQUEST_CHANNEL,
+  RECORDING_READY_CHANNEL,
+  RECORDING_DELIVER_CHANNEL,
+  RECORDING_ATTACH_CHANNEL,
+  RECORDING_CANCEL_CHANNEL,
+  RECORDING_STATE_CHANNEL,
+  type RecordingStartRequest
+} from '../shared/recording-api'
+import type { CalendarStartMeetingEvent } from '../shared/calendar-api'
+import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
@@ -84,8 +97,8 @@ function resolveMcpServerSpec(): McpServerSpec {
 /**
  * One-time migration: dev runs stored everything under the app name
  * "desktop" (~/Library/Application Support/desktop). The packaged app is
- * "DoodleNote" — adopt the dev data (meetings, folders, settings, chat,
- * downloaded models) on first launch so nothing is lost or re-downloaded.
+ * "DoodleNote" — adopt the dev data (meetings, folders, settings and chat)
+ * on first launch. Models are discovered in place by NotesService.
  */
 function migrateDevUserData(): void {
   if (!app.isPackaged) return
@@ -97,9 +110,6 @@ function migrateDevUserData(): void {
     cpSync(join(oldDir, 'meetings'), join(newDir, 'meetings'), { recursive: true })
     for (const name of ['folders.json', 'settings.json', 'global-chat.json']) {
       if (existsSync(join(oldDir, name))) cpSync(join(oldDir, name), join(newDir, name))
-    }
-    if (existsSync(join(oldDir, 'models'))) {
-      cpSync(join(oldDir, 'models'), join(newDir, 'models'), { recursive: true })
     }
   } catch (err) {
     console.error('[migrate] failed (continuing with fresh data):', err)
@@ -137,6 +147,33 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'doodle-audio', privileges: { secure: true, supportFetchAPI: true, stream: true } }
 ])
 
+let mainWindow: BrowserWindow | null = null
+let recordingTray: RecordingTray | null = null
+let quitting = false
+const recording = new RecordingStartCoordinator(
+  (request: RecordingStartRequest) =>
+    mainWindow?.webContents.send(RECORDING_DELIVER_CHANNEL, request),
+  (state) => {
+    recordingTray?.update(state)
+    mainWindow?.webContents.send(RECORDING_STATE_CHANNEL, state)
+    calendarService?.setRecordingActive(state.phase !== 'idle')
+  }
+)
+
+function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
+  const accepted = recording.request(
+    event ?? {
+      action: 'start',
+      eventId: '',
+      subject: 'Meeting',
+      startIso: new Date().toISOString(),
+      adHoc: true
+    }
+  )
+  focusMainWindow()
+  return accepted
+}
+
 let notesService: NotesService | null = null
 let calendarService: CalendarService | null = null
 let winBatchTranscriber: WinBatchTranscriber | null = null
@@ -160,7 +197,7 @@ function broadcastEngineEvent(event: EngineEvent): void {
 }
 
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: MAIN_WINDOW_SIZE.defaultWidth,
     height: MAIN_WINDOW_SIZE.defaultHeight,
     minWidth: MAIN_WINDOW_SIZE.minWidth,
@@ -180,21 +217,41 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+  mainWindow = window
+  window.on('close', (event) => {
+    // Keep the document renderer alive while it owns a recording.
+    if (process.platform === 'darwin' && recording.busy && !quitting) {
+      event.preventDefault()
+      window.hide()
+    }
+  })
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null
+    recording.rendererGone()
+  })
+  window.webContents.on('did-start-loading', () => {
+    if (recording.busy && engine.running) engine.stop()
+    recording.rendererGone()
+  })
+  window.webContents.on('render-process-gone', () => {
+    engine.stop()
+    recording.rendererGone()
+  })
+  window.on('ready-to-show', () => {
+    window.show()
   })
 
   // Spell-check suggestions + edit ops on right-click (Electron has none).
-  registerContextMenu(mainWindow)
+  registerContextMenu(window)
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
   // In-page link clicks (e.g. the transcript footer in generated notes) go
   // to the system browser — the app itself never navigates away.
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  window.webContents.on('will-navigate', (event, url) => {
     if (/^https?:/i.test(url)) {
       event.preventDefault()
       shell.openExternal(url)
@@ -204,22 +261,22 @@ function createWindow(): void {
   // HMR for renderer based on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    window.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
 
 app.whenReady().then(() => {
   migrateDevUserData()
 
-  // Warm the engine once per launch. macOS: Swift preflight triggers the
-  // permission prompts and primes the CoreML cache before serve starts.
+  // Warm the engine once per launch. macOS: Swift preflight primes the
+  // CoreML cache only. Permission setup belongs to the visible first-run wizard.
   // Windows: the sherpa engine forks immediately (downloads its model on
   // first run) and the renderer handles capture permissions per session.
   if (process.platform === 'darwin') {
     try {
-      const preflight = spawn(resolveEngineBinary(), ['preflight'], {
+      const preflight = spawn(resolveEngineBinary(), ['preflight', '--models-only'], {
         stdio: ['ignore', 'ignore', 'pipe']
       })
       preflight.stderr?.setEncoding('utf8')
@@ -289,14 +346,15 @@ app.whenReady().then(() => {
   const micWatcher = new MicWatcher(
     resolveEngineBinary(),
     app.getPath('userData'),
-    (appLabel) => {
+    (appLabel, detectionId) => {
       calendarService?.deliverPrompt({
         action: 'prompt',
         eventId: '',
         // Pre-title from the detected app ("Zoom meeting"); generic otherwise.
         subject: appLabel && appLabel !== 'browser' ? `${appLabel} meeting` : 'Meeting',
         startIso: new Date().toISOString(),
-        adHoc: true
+        adHoc: true,
+        ...(detectionId ? { detectionId } : {})
       })
     },
     () => {
@@ -351,14 +409,20 @@ app.whenReady().then(() => {
     }
   }
 
-  engine.onEvent((event) => {
+  engine.onEvent((rawEvent) => {
+    // Bind terminal transcript persistence to the exact capture the renderer saw start.
+    const event = rawEvent.event === 'started' ? { ...rawEvent, captureId: randomUUID() } : rawEvent
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)
     logEngineEvent(event)
+    recording.handle(event)
+    if (!recording.busy) micWatcher.setSuppressed(false)
   })
 
-  ipcMain.on(ENGINE_START_CHANNEL, (_event, request: EngineStartRequest) => {
+  ipcMain.on(ENGINE_START_CHANNEL, (event, request: EngineStartRequest) => {
+    if (event.sender !== mainWindow?.webContents || !recording.beginEngine(request.opts?.meetingId))
+      return
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
     if (request.command === 'live') calendarService?.setRecordingActive(true)
@@ -376,9 +440,8 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
+    recording.stop()
     engine.stop()
-    micWatcher.setSuppressed(false)
-    calendarService?.setRecordingActive(false)
   })
 
   // Mic input picker: device list + (mid-session) switching. macOS engine
@@ -452,9 +515,40 @@ app.whenReady().then(() => {
     app.getPath('userData'),
     broadcast,
     focusMainWindow,
-    new PromptPanel()
+    new PromptPanel(),
+    requestRecordingStart,
+    (state) => recordingTray?.updateCalendar(state)
   )
   calendarService.registerIpc()
+
+  // Only the main document renderer may participate in the start handshake.
+  ipcMain.handle(
+    RECORDING_REQUEST_CHANNEL,
+    (event, prompt?: CalendarStartMeetingEvent) =>
+      event.sender === mainWindow?.webContents && requestRecordingStart(prompt)
+  )
+  ipcMain.handle(RECORDING_READY_CHANNEL, (event, eligible: boolean) => {
+    if (event.sender !== mainWindow?.webContents) return recording.snapshot()
+    return recording.ready(eligible === true)
+  })
+  ipcMain.handle(
+    RECORDING_ATTACH_CHANNEL,
+    (event, requestId: string, meetingId: string) =>
+      event.sender === mainWindow?.webContents && recording.attach(requestId, meetingId)
+  )
+  ipcMain.handle(RECORDING_CANCEL_CHANNEL, (event, requestId: string) => {
+    if (event.sender === mainWindow?.webContents) recording.cancel(requestId)
+  })
+  recordingTray = new RecordingTray(
+    app.isPackaged
+      ? join(process.resourcesPath, 'tray')
+      : join(app.getAppPath(), 'resources', 'tray'),
+    () => {
+      requestRecordingStart()
+    },
+    focusMainWindow,
+    (fullIsland) => calendarService?.setMenuBarMode(fullIsland)
+  )
 
   // Meeting-detection settings: login item (OS-owned) + the mic watcher.
   const detectState = (): DetectState => ({
@@ -490,6 +584,10 @@ app.whenReady().then(() => {
   // (transcription engine, micmon) exit on their own via stdin-close
   // watchdogs, so skipping native teardown loses nothing.
   app.on('before-quit', () => {
+    quitting = true
+    recordingTray?.dispose()
+    calendarService?.dispose()
+    engine.dispose()
     micWatcher.stop()
     // A quit driven by Restart-to-update must proceed normally so Squirrel
     // can hand off to the installer; the hard exit is only for regular quits
@@ -540,14 +638,14 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     // On macOS re-create a window when the dock icon is clicked
     // and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    focusMainWindow()
   })
 })
 
 /** Bring the app forward for a notification click, recreating the window if
  *  the user closed it (macOS keeps the app alive without windows). */
 function focusMainWindow(): void {
-  const window = BrowserWindow.getAllWindows()[0]
+  const window = mainWindow
   if (window) {
     if (window.isMinimized()) window.restore()
     window.show()

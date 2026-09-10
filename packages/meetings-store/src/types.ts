@@ -77,6 +77,8 @@ export interface MeetingRecord {
   rawNotesMarkdown: string;
   /** AI-merged notes, present after a successful Enhance run. */
   enhancedMarkdown?: string;
+  /** Non-echo segments included in the last generated version; local freshness cue. */
+  enhancedTranscriptSegmentCount?: number;
   /** Which notes engine produced enhancedMarkdown (e.g. "local:…"). */
   engine?: string;
   /** Note template used for Generate notes; absent = "general". */

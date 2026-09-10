@@ -1,14 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  Menu,
-  nativeImage,
-  Notification,
-  safeStorage,
-  shell,
-  Tray
-} from 'electron'
+import { BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
@@ -25,6 +15,7 @@ import {
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_DISMISS_PROMPT_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
   CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
@@ -43,10 +34,7 @@ import {
   filterByParticipants,
   graphColorToHex,
   mergeCalendarEvents,
-  nextTrayEvent,
-  resolveVisibleCalendars,
-  trayTitle,
-  upcomingTrayEvents
+  resolveVisibleCalendars
 } from './calendar-events'
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
 import { GoogleCalendarClient } from './google-calendar'
@@ -71,8 +59,6 @@ const FOCUS_REFRESH_MIN_GAP_MS = 60_000
 const CONNECT_TIMEOUT_MS = 5 * 60_000
 /** How far ahead the "Coming up" card looks (two 7-day pages). */
 const LOOKAHEAD_DAYS = 14
-/** Tray click menu lists this many upcoming meetings. */
-const TRAY_MENU_EVENTS = 3
 
 /**
  * Branded landing pages served by the local OAuth redirect during sign-in.
@@ -154,8 +140,8 @@ export type CalendarBroadcast = (channel: string, payload: unknown) => void
  * - A 30s meeting-start watcher (pure decision logic in calendar-watcher.ts)
  *   that fires an OS notification + a renderer broadcast; notified event ids
  *   persist in userData/calendar-notified.json.
- * - A text-only macOS menu-bar Tray showing the next meeting and countdown,
- *   created/destroyed here as sign-in state, prefs and events change.
+ * - Calendar snapshots for the shared dog menu-bar item. RecordingTray owns
+ *   the single native item and its today-only display.
  *
  * Every IPC entry point resolves to a CalendarState — errors are strings on
  * that state, never rejected promises.
@@ -184,7 +170,6 @@ export class CalendarService {
 
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private watchTimer: ReturnType<typeof setInterval> | null = null
-  private tray: Tray | null = null
   private connectBusy = false
   private refreshBusy = false
   private disposed = false
@@ -198,7 +183,9 @@ export class CalendarService {
     /** Bring the app forward (or recreate the window) on notification click. */
     private readonly focusWindow: () => void,
     /** Floating always-on-top card for when the main window can't be seen. */
-    private readonly promptPanel?: PromptPanel
+    private readonly promptPanel?: PromptPanel,
+    private readonly requestRecordingStart?: (prompt: CalendarStartMeetingEvent) => void,
+    private readonly updateMenuBar?: (state: CalendarState) => void
   ) {
     this.settingsPath = join(userDataDir, 'calendar-settings.json')
     this.tokenCachePath = join(userDataDir, 'calendar-token-cache')
@@ -222,7 +209,7 @@ export class CalendarService {
     this.lastSyncIso = cache.lastSyncIso
     this.accountView = cache.account ?? null
     this.google = new GoogleCalendarClient(userDataDir)
-    this.ready = this.bootstrap()
+    this.ready = this.bootstrap().then(() => this.updateMenuBarState())
   }
 
   /** The canonical event list every consumer sees (broadcast, watcher, tray):
@@ -248,6 +235,7 @@ export class CalendarService {
   }
 
   registerIpc(): void {
+    ipcMain.handle(CALENDAR_DISMISS_PROMPT_CHANNEL, () => this.dismissPrompt())
     ipcMain.handle(CALENDAR_GET_STATE_CHANNEL, async () => {
       await this.ready
       return this.state()
@@ -302,7 +290,6 @@ export class CalendarService {
   dispose(): void {
     this.disposed = true
     this.stopTimers()
-    this.destroyTray()
     this.promptPanel?.close()
   }
 
@@ -311,6 +298,11 @@ export class CalendarService {
   setRecordingActive(recording: boolean): void {
     this.promptState = setPromptRecording(this.promptState, recording)
     if (!recording) return
+    this.dismissPrompt()
+  }
+
+  /** Dismiss every presentation of the current prompt without starting capture. */
+  dismissPrompt(): void {
     this.promptPanel?.close()
     this.broadcast(CALENDAR_START_MEETING_CHANNEL, {
       action: 'dismiss',
@@ -344,6 +336,7 @@ export class CalendarService {
   }
 
   private broadcastState(): void {
+    this.updateMenuBarState()
     this.broadcast(CALENDAR_EVENTS_CHANNEL, this.state())
   }
 
@@ -462,7 +455,6 @@ export class CalendarService {
     }
     this.prefs = next
     this.saveSettings()
-    this.updateTray()
     this.broadcastState()
     if (visibilityChanged && this.account) void this.refreshEvents()
     return this.state()
@@ -565,7 +557,7 @@ export class CalendarService {
       this.rawEvents = []
       this.lastSyncIso = undefined
       this.stopTimers()
-      this.destroyTray()
+      this.updateMenuBarState()
     }
     this.saveEventCache()
     this.broadcastState()
@@ -596,7 +588,7 @@ export class CalendarService {
     this.lastSyncIso = undefined
     this.lastError = undefined
     this.stopTimers()
-    this.destroyTray()
+    this.updateMenuBarState()
     for (const path of [this.tokenCachePath, this.eventCachePath]) {
       try {
         rmSync(path, { force: true })
@@ -748,7 +740,6 @@ export class CalendarService {
       this.lastError = friendlyError(err)
     } finally {
       this.refreshBusy = false
-      this.updateTray()
       this.broadcastState()
     }
   }
@@ -856,7 +847,7 @@ export class CalendarService {
   /**
    * Deliver one deduplicated meeting prompt. The renderer keeps a persistent
    * action banner, while one external surface gets the user's attention: a
-   * native notification when supported, or the floating panel as fallback.
+   * bottom panel on macOS, native notification with panel fallback elsewhere.
    * Also the entry point for ad-hoc mic-detected prompts (MicWatcher).
    */
   deliverPrompt(requested: CalendarStartMeetingEvent): void {
@@ -900,6 +891,7 @@ export class CalendarService {
     if (this.promptPanel) {
       this.promptPanel.show(prompt, (action) => {
         if (action === 'start') this.actOnPromptStart(prompt)
+        else this.dismissPrompt()
       })
     }
   }
@@ -908,6 +900,10 @@ export class CalendarService {
   private actOnPromptStart(prompt: CalendarStartMeetingEvent): void {
     const payload = { ...prompt, action: 'start' as const }
     this.promptPanel?.close()
+    if (this.requestRecordingStart) {
+      this.requestRecordingStart(payload)
+      return
+    }
     const hadWindow = BrowserWindow.getAllWindows().length > 0
     this.focusWindow()
     if (hadWindow) {
@@ -949,70 +945,22 @@ export class CalendarService {
     }
   }
 
-  /* ---- menu bar (Tray) ---- */
+  /* ---- shared menu bar ---- */
 
-  /**
-   * Reconcile the macOS menu-bar item with current state: a text-only Tray
-   * (empty image + title) showing the next meeting and its countdown. It
-   * exists only while signed in, the pref is on, and a timed event is in the
-   * fetched window — otherwise it is destroyed (an empty tray still occupies
-   * menu-bar space). Refreshed on every poll, pref change and 30s watch tick.
-   */
-  private updateTray(): void {
-    if (process.platform !== 'darwin' || this.disposed) {
-      this.destroyTray()
-      return
-    }
-    const nowMs = Date.now()
-    const shown = this.account !== null && this.prefs.showMenuBar ? this.visibleEvents() : []
-    const next = nextTrayEvent(shown, nowMs)
-    if (next === null) {
-      this.destroyTray()
-      return
-    }
-    try {
-      if (this.tray === null) {
-        this.tray = new Tray(nativeImage.createEmpty())
-        this.tray.setToolTip('DoodleNote — upcoming meetings')
-      }
-      this.tray.setTitle(trayTitle(next, nowMs), { fontType: 'monospacedDigit' })
-      const items: Electron.MenuItemConstructorOptions[] = upcomingTrayEvents(
-        shown,
-        nowMs,
-        TRAY_MENU_EVENTS
-      ).map((event) => ({
-        label: `${trayMenuTime(event.startIso)} — ${event.subject.trim() || 'Untitled meeting'}`,
-        enabled: false
-      }))
-      items.push(
-        { type: 'separator' },
-        { label: 'Open DoodleNote', click: () => this.focusWindow() },
-        {
-          label: 'Hide from menu bar',
-          click: () => {
-            this.setPrefs({ showMenuBar: false })
-          }
-        },
-        { type: 'separator' },
-        { label: 'Quit DoodleNote', click: () => app.quit() }
-      )
-      this.tray.setContextMenu(Menu.buildFromTemplate(items))
-    } catch (err) {
-      // Tray support can be flaky (headless CI, odd window managers) — the
-      // in-app card is the real surface; never let the menu bar break sync.
-      console.error('[calendar] tray update failed:', err)
-      this.destroyTray()
-    }
+  /** Keep the legacy preference so existing Settings and saved choices agree
+   * with the Compact / Full Island radio items. The dog is always available. */
+  setMenuBarMode(fullIsland: boolean): void {
+    this.setPrefs({ showMenuBar: fullIsland })
   }
 
-  private destroyTray(): void {
-    if (this.tray === null) return
+  private updateMenuBarState(): void {
+    if (this.disposed) return
     try {
-      this.tray.destroy()
-    } catch {
-      // Already gone.
+      this.updateMenuBar?.(this.state())
+    } catch (err) {
+      // A native menu failure must never interrupt calendar auth or syncing.
+      console.error('[calendar] menu bar update failed:', err)
     }
-    this.tray = null
   }
 
   /* ---- timers ---- */
@@ -1026,7 +974,6 @@ export class CalendarService {
     if (this.watchTimer === null) {
       this.watchTimer = setInterval(() => {
         this.checkMeetingStarts()
-        this.updateTray() // keep the "in 12m" countdown honest
       }, WATCH_INTERVAL_MS)
       this.watchTimer.unref?.()
     }
@@ -1200,15 +1147,6 @@ function graphDateTimeToIso(value: unknown): string | null {
   const ms = new Date(trimmed).getTime()
   if (!Number.isFinite(ms)) return null
   return new Date(ms).toISOString()
-}
-
-/** "9:00 AM" for the Tray click menu rows. */
-function trayMenuTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  } catch {
-    return ''
-  }
 }
 
 function normalizeGraphCalendar(item: unknown): CalendarInfo | null {

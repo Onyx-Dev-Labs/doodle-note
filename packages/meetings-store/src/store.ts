@@ -186,6 +186,11 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     ...(typeof raw.enhancedMarkdown === "string"
       ? { enhancedMarkdown: raw.enhancedMarkdown }
       : {}),
+    ...(typeof raw.enhancedTranscriptSegmentCount === "number" &&
+    Number.isSafeInteger(raw.enhancedTranscriptSegmentCount) &&
+    raw.enhancedTranscriptSegmentCount >= 0
+      ? { enhancedTranscriptSegmentCount: raw.enhancedTranscriptSegmentCount }
+      : {}),
     ...(typeof raw.engine === "string" ? { engine: raw.engine } : {}),
     ...(typeof raw.templateId === "string" && raw.templateId.length > 0
       ? { templateId: raw.templateId }

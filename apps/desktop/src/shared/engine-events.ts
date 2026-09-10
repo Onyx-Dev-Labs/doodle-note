@@ -209,6 +209,8 @@ export type EngineSidecarEvent =
 /* ---- Lifecycle events synthesized by the main process ---- */
 
 export interface EngineStartedEvent {
+  /** Main-process identity used by transcript completion, absent in raw host events. */
+  captureId?: string
   event: 'started'
   command: EngineCommand
   filePath?: string
@@ -266,6 +268,8 @@ export type EngineLifecycleEvent =
   | EngineSegmentsEvent
   | EngineSegmentsReplacedEvent
   | EngineSessionSavedEvent
+  /** Emitted by main only after final segments and session persistence settle. */
+  | { event: 'capture-finalized'; captureId?: string; error?: string }
 
 /** Everything the renderer can receive on ENGINE_EVENT_CHANNEL. */
 export type EngineEvent = EngineSidecarEvent | EngineLifecycleEvent

@@ -1,3 +1,4 @@
+import type { RecordingApi } from '../shared/recording-api'
 import type { AudioApi } from '../shared/audio-api'
 import type { ImporterApi } from '../shared/import-api'
 import type { WizardApi } from '../shared/wizard-api'
@@ -16,6 +17,7 @@ import type { UpdateApi } from '../shared/update-api'
 
 declare global {
   interface Window {
+    recording: RecordingApi
     engine: EngineApi
     notes: NotesApi
     meetings: MeetingsApi

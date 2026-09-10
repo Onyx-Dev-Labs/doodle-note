@@ -140,13 +140,13 @@ test('nextTrayEvent skips all-day and ended events, keeps in-progress ones', () 
 })
 
 test('trayTitle formats minutes, hours, days, "now" and truncates ~28 chars', () => {
-  assert.equal(trayTitle(eventAt(12 * 60_000), NOW), '◷ Team Meeting in 12m')
-  assert.equal(trayTitle(eventAt(-60_000), NOW), '◷ Team Meeting now')
-  assert.equal(trayTitle(eventAt(3 * 3_600_000), NOW), '◷ Team Meeting in 3h')
-  assert.equal(trayTitle(eventAt(2 * 86_400_000), NOW), '◷ Team Meeting in 2d')
-  assert.equal(trayTitle(eventAt(60_000, { subject: '  ' }), NOW), '◷ Untitled meeting in 1m')
+  assert.equal(trayTitle(eventAt(12 * 60_000), NOW), 'Team Meeting in 12m')
+  assert.equal(trayTitle(eventAt(-60_000), NOW), 'Team Meeting now')
+  assert.equal(trayTitle(eventAt(3 * 3_600_000), NOW), 'Team Meeting in 3h')
+  assert.equal(trayTitle(eventAt(2 * 86_400_000), NOW), 'Team Meeting in 2d')
+  assert.equal(trayTitle(eventAt(60_000, { subject: '  ' }), NOW), 'Untitled meeting in 1m')
   const long = eventAt(60_000, { subject: 'Quarterly Business Review With Leadership' })
-  assert.equal(trayTitle(long, NOW), '◷ Quarterly Business Review W… in 1m')
+  assert.equal(trayTitle(long, NOW), 'Quarterly Business Review W… in 1m')
 })
 
 test('upcomingTrayEvents returns at most N timed events in start order', () => {
@@ -161,4 +161,55 @@ test('upcomingTrayEvents returns at most N timed events in start order', () => {
     upcomingTrayEvents(events, NOW, 3).map((e) => e.id),
     ['running', 'soon', 'later']
   )
+})
+
+test('menu bar excludes tomorrow and later dates using local calendar days', () => {
+  const now = new Date(2026, 8, 9, 23, 30).getTime()
+  const make = (id: string, start: Date, end: Date, isAllDay = false): CalendarEvent =>
+    eventAt(0, { id, startIso: start.toISOString(), endIso: end.toISOString(), isAllDay })
+  const today = make('today', new Date(2026, 8, 9, 23, 45), new Date(2026, 8, 10, 0, 15))
+  const tomorrow = make('tomorrow', new Date(2026, 8, 10), new Date(2026, 8, 10, 1))
+  const fiveDays = make('five-days', new Date(2026, 8, 14, 10), new Date(2026, 8, 14, 11))
+  const allDay = make('all-day', new Date(2026, 8, 9), new Date(2026, 8, 10), true)
+  assert.equal(nextTrayEvent([allDay, tomorrow, fiveDays], now), null)
+  assert.deepEqual(upcomingTrayEvents([allDay, today, tomorrow, fiveDays], now, 3), [today])
+  // At midnight, a meeting still running stays visible and the next day's
+  // events become eligible without changing the cached provider event list.
+  const midnight = new Date(2026, 8, 10).getTime()
+  assert.deepEqual(upcomingTrayEvents([today, tomorrow, fiveDays], midnight, 3), [today, tomorrow])
+  assert.equal(nextTrayEvent([today, tomorrow, fiveDays], new Date(2026, 8, 10, 1).getTime()), null)
+})
+
+test('today boundary follows the local timezone and both DST transitions', () => {
+  const previousTimezone = process.env.TZ
+  try {
+    process.env.TZ = 'America/Chicago'
+    for (const [month, day] of [
+      [2, 8],
+      [10, 1]
+    ]) {
+      const now = new Date(2026, month, day, 0, 30).getTime()
+      const today = eventAt(0, {
+        startIso: new Date(2026, month, day, 23, 45).toISOString(),
+        endIso: new Date(2026, month, day + 1, 0, 15).toISOString()
+      })
+      const tomorrow = eventAt(0, {
+        startIso: new Date(2026, month, day + 1, 0, 5).toISOString(),
+        endIso: new Date(2026, month, day + 1, 1).toISOString()
+      })
+      assert.deepEqual(upcomingTrayEvents([today, tomorrow], now, 3), [today])
+    }
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ
+    else process.env.TZ = previousTimezone
+  }
+})
+
+test('menu bar rejects invalid event intervals', () => {
+  const invalid = [
+    eventAt(0, { startIso: 'invalid' }),
+    eventAt(0, { endIso: 'invalid' }),
+    eventAt(3_600_000, { endIso: new Date(NOW + 1_800_000).toISOString() })
+  ]
+  assert.equal(nextTrayEvent(invalid, NOW), null)
 })

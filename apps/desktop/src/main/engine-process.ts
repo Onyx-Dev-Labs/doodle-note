@@ -54,6 +54,7 @@ export class EngineProcess {
   private serveReady = false
   private serveSessionActive = false
   private serveRestartTimer: NodeJS.Timeout | null = null
+  private serveStopTimer: NodeJS.Timeout | null = null
   private disposed = false
   /** True from the engine's "finishing" status until the session ends. */
   private sessionFinishing = false
@@ -61,7 +62,8 @@ export class EngineProcess {
   constructor(
     private readonly binaryPath: string,
     /** Overridable for tests; production uses the default. */
-    private readonly finishingGraceMs = FINISHING_EXIT_GRACE_MS
+    private readonly finishingGraceMs = FINISHING_EXIT_GRACE_MS,
+    private readonly serveStopGraceMs = 25_000
   ) {}
 
   /**
@@ -106,6 +108,7 @@ export class EngineProcess {
     })
     child.on('close', () => {
       if (this.serveChild !== child) return
+      this.clearServeStopTimer()
       this.serveChild = null
       this.serveReady = false
       // A crash mid-session must end the session for the renderer too.
@@ -138,6 +141,7 @@ export class EngineProcess {
     if (event.event === 'status' && event.stage === 'serve_loading_models') return
     // Session events flow only while a session is active — boot noise stays out.
     if (!this.serveSessionActive) return
+    if (event.event === 'done') this.clearServeStopTimer()
     this.emit(parsed as EngineSidecarEvent)
     if (event.event === 'done') {
       this.serveSessionActive = false
@@ -306,6 +310,7 @@ export class EngineProcess {
 
     // Instant path: the persistent engine has models loaded and is idle.
     if (command === 'live' && this.serveReady && this.serveChild && !this.serveSessionActive) {
+      this.clearServeStopTimer()
       this.serveSessionActive = true
       this.emit({ event: 'started', command, filePath, binaryPath: this.binaryPath })
       const ok = this.serveWrite({
@@ -410,13 +415,16 @@ export class EngineProcess {
    */
   stop(): void {
     if (this.serveSessionActive) {
+      if (this.serveStopTimer) return
       this.serveWrite({ cmd: 'stop' })
-      // If the serve engine wedges mid-finish, restart it — the close handler
-      // ends the session for the renderer.
-      const escalate = setTimeout(() => {
-        if (this.serveSessionActive) this.restartServe()
-      }, 25_000)
-      escalate.unref()
+      // This watchdog belongs only to the stopping session. A successful done
+      // cancels it so a later Resume cannot inherit the previous Stop deadline.
+      const child = this.serveChild
+      this.serveStopTimer = setTimeout(() => {
+        this.serveStopTimer = null
+        if (this.serveChild === child && this.serveSessionActive) this.restartServe()
+      }, this.serveStopGraceMs)
+      this.serveStopTimer.unref()
       return
     }
     const child = this.child
@@ -483,6 +491,7 @@ export class EngineProcess {
 
   /** Hard-restart the persistent engine (crash recovery / supersede). */
   private restartServe(): void {
+    this.clearServeStopTimer()
     const child = this.serveChild
     this.serveChild = null
     this.serveReady = false
@@ -518,6 +527,7 @@ export class EngineProcess {
    */
   dispose(): void {
     this.disposed = true
+    this.clearServeStopTimer()
     if (this.serveRestartTimer) clearTimeout(this.serveRestartTimer)
     const serve = this.serveChild
     this.serveChild = null
@@ -529,6 +539,11 @@ export class EngineProcess {
   }
 
   /* ---- NDJSON line parsing ---- */
+
+  private clearServeStopTimer(): void {
+    if (this.serveStopTimer) clearTimeout(this.serveStopTimer)
+    this.serveStopTimer = null
+  }
 
   private ingestStdout(chunk: string): void {
     this.stdoutBuffer += chunk
