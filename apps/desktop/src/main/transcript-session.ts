@@ -19,6 +19,8 @@ export class TranscriptSession {
   private finals: Partial<Record<EngineChannel, string>> = {}
   private startedAtIso: string | null = null
   private saved = false
+  private error: string | undefined
+  private captureId: string | undefined
 
   constructor(
     private readonly broadcast: (ev: EngineEvent) => void,
@@ -34,6 +36,8 @@ export class TranscriptSession {
         this.finals = {}
         this.startedAtIso = new Date().toISOString()
         this.saved = false
+        this.error = undefined
+        this.captureId = ev.captureId
         return
       case 'channel_start':
         this.assembler?.setChannelEpoch(ev.channel, ev.epochMs)
@@ -57,12 +61,17 @@ export class TranscriptSession {
           this.broadcast({ event: 'segments-replaced', segments: this.segments })
         }
         return
+      case 'error':
+        this.error = ev.message
+        return
       case 'done':
         this.finish()
         return
       case 'exit':
         // Engine is gone (graceful or not) — make sure the session hit disk.
-        this.finish()
+        this.finish(
+          'Capture ended before finalization completed. Use the saved transcript or recording to retry.'
+        )
         return
       default:
         return
@@ -75,11 +84,19 @@ export class TranscriptSession {
     this.broadcast({ event: 'segments', segments: newSegments })
   }
 
-  private finish(): void {
+  private finish(exitError?: string): void {
     if (!this.assembler || this.saved) return
     this.publish(this.assembler.flush())
     this.saved = true
-    if (this.segments.length === 0) return
+    const error = this.error ?? exitError
+    if (this.segments.length === 0) {
+      this.broadcast({
+        event: 'capture-finalized',
+        ...(this.captureId ? { captureId: this.captureId } : {}),
+        ...(error ? { error } : {})
+      })
+      return
+    }
 
     try {
       mkdirSync(this.sessionsDir, { recursive: true })
@@ -100,8 +117,19 @@ export class TranscriptSession {
         )
       )
       this.broadcast({ event: 'session-saved', path, segmentCount: this.segments.length })
+      this.broadcast({
+        event: 'capture-finalized',
+        ...(this.captureId ? { captureId: this.captureId } : {}),
+        ...(error ? { error } : {})
+      })
     } catch (err) {
-      this.broadcast({ event: 'error', message: `failed to save session: ${String(err)}` })
+      const message = `Failed to save session: ${String(err)}`
+      this.broadcast({ event: 'error', message })
+      this.broadcast({
+        event: 'capture-finalized',
+        ...(this.captureId ? { captureId: this.captureId } : {}),
+        error: message
+      })
     }
   }
 }

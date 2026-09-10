@@ -75,6 +75,8 @@ export interface ActivateModelResult {
 /** Settings as exposed to the renderer — the API key never crosses IPC. */
 export interface NotesSettingsView {
   engineChoice: EngineChoice
+  /** Missing stored values default on; applies to manual and detected stops. */
+  autoGenerateNotesAfterStop?: boolean
   activeLocalModelId?: string
   /** The user's own name, used to label their transcript lines. */
   profileName?: string
@@ -90,6 +92,7 @@ export interface NotesSettingsView {
 /** Partial update; omitted fields are left untouched. */
 export interface NotesSettingsUpdate {
   engineChoice?: EngineChoice
+  autoGenerateNotesAfterStop?: boolean
   /** The user's own name; empty string clears it back to "You". */
   profileName?: string
   /**
@@ -104,6 +107,8 @@ export interface NotesSettingsUpdate {
 }
 
 export interface EnhanceRequest {
+  /** Recheck the stop preference and selected provider in main before AI work. */
+  automaticAfterStop?: boolean
   title: string
   rawNotesMarkdown: string
   segments: TranscriptSegment[]
