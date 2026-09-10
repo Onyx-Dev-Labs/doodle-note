@@ -59,7 +59,8 @@ enum ServeCommand {
                             stopper: stopper
                         )
                     } catch {
-                        Events.emit(["event": "error", "message": "session failed: \(error)"])
+                        Events.log("session failed: \(error)")
+                        Events.emit(["event": "error", "message": error.localizedDescription])
                         Events.emit(["event": "done"])
                     }
                     // A session that threw mid-setup can strand a running

@@ -270,13 +270,13 @@ function createWindow(): void {
 app.whenReady().then(() => {
   migrateDevUserData()
 
-  // Warm the engine once per launch. macOS: Swift preflight triggers the
-  // permission prompts and primes the CoreML cache before serve starts.
+  // Warm the engine once per launch. macOS: Swift preflight primes the
+  // CoreML cache only. Permission setup belongs to the visible first-run wizard.
   // Windows: the sherpa engine forks immediately (downloads its model on
   // first run) and the renderer handles capture permissions per session.
   if (process.platform === 'darwin') {
     try {
-      const preflight = spawn(resolveEngineBinary(), ['preflight'], {
+      const preflight = spawn(resolveEngineBinary(), ['preflight', '--models-only'], {
         stdio: ['ignore', 'ignore', 'pipe']
       })
       preflight.stderr?.setEncoding('utf8')

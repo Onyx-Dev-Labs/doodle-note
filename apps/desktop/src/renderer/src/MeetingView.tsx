@@ -12,6 +12,7 @@ import type {
 } from '../../shared/engine-events'
 import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
+import { applyCaptureStatus } from './lib/capture-status'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
   SYSTEM_BACKEND_STORAGE_KEY,
@@ -99,26 +100,8 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         return active ? { ...state, phase: 'idle', statusText: '' } : state
       }
       return { ...initialSessionState, phase: 'starting', statusText: 'Starting…' }
-    case 'status': {
-      if (!active) return state
-      if (ev.stage === 'requesting_permission') {
-        const which = (ev.permission ?? 'capture').replace(/_/g, ' ')
-        return { ...state, statusText: `Waiting for macOS permission — ${which}` }
-      }
-      if (ev.stage === 'transcribing') {
-        return { ...state, transcribing: true, statusText: '' }
-      }
-      // The engine confirms a stop instantly with `finishing` — reflect it
-      // instantly, or the still-ticking timer makes stop look ignored and
-      // users hammer the button.
-      if (ev.stage === 'finishing' || ev.stage === 'saving_audio') {
-        return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
-      }
-      if (ev.stage === 'refining_transcript') {
-        return { ...state, phase: 'finishing', statusText: 'Improving transcript locally…' }
-      }
-      return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
-    }
+    case 'status':
+      return applyCaptureStatus(state, ev)
     case 'ready':
       if (!active) return state
       return { ...state, phase: 'recording', statusText: '' }
@@ -175,7 +158,12 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
     case 'exit': {
       if (!active) return state
       if (ev.code !== null && ev.code !== 0 && state.phase === 'starting') {
-        return { ...state, phase: 'idle', statusText: '', error: `Engine exited (code ${ev.code})` }
+        return {
+          ...state,
+          phase: 'idle',
+          statusText: '',
+          error: state.error ?? `Engine exited (code ${ev.code})`
+        }
       }
       return {
         ...state,
@@ -1673,11 +1661,15 @@ export default function MeetingView({
               <div className="tp-empty">
                 <p className="tp-empty-title">Transcript on…</p>
                 <p className="tp-empty-sub">
-                  {capturing
-                    ? state.transcribing
-                      ? 'Start talking'
-                      : 'Warming up transcription — keep talking, your audio is being captured'
-                    : 'Hit record and start talking'}
+                  {phase === 'starting'
+                    ? state.statusText || 'Starting…'
+                    : phase === 'finishing'
+                      ? 'Finishing up…'
+                      : phase === 'recording'
+                        ? state.transcribing
+                          ? 'Start talking'
+                          : 'Warming up transcription — keep talking, your audio is being captured'
+                        : 'Hit record and start talking'}
                 </p>
               </div>
             ) : (
