@@ -155,6 +155,39 @@ describe('meeting-end watch', () => {
 })
 
 describe('meetingPromptLabel', () => {
+  for (const [bundle, label] of [
+    ['com.tinyspeck.slackmacgap.helper', 'Slack'],
+    ['us.zoom.xos', 'Zoom'],
+    ['com.microsoft.teams2', 'Teams']
+  ]) {
+    it(`recognizes ${label} input while the default microphone is idle`, () => {
+      assert.equal(
+        meetingPromptLabel({ inputRunning: false, inputBundles: [bundle], outputBundles: [] }),
+        label
+      )
+    })
+  }
+
+  it('requires recognized input attribution regardless of default-device activity', () => {
+    for (const inputRunning of [false, true]) {
+      for (const inputBundles of [[], ['com.electron.wispr-flow.helper'], ['unknown.app']]) {
+        assert.equal(
+          meetingPromptLabel({
+            inputRunning,
+            inputBundles,
+            outputBundles: [
+              'us.zoom.ZoomPhone',
+              'com.tinyspeck.slackmacgap.helper',
+              'com.hnc.Discord.helper',
+              'com.google.Chrome.helper'
+            ]
+          }),
+          null
+        )
+      }
+    }
+  })
+
   it('never promotes output-only audio into a recording prompt', () => {
     assert.equal(
       meetingPromptLabel({
