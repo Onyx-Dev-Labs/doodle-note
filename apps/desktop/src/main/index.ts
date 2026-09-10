@@ -97,8 +97,8 @@ function resolveMcpServerSpec(): McpServerSpec {
 /**
  * One-time migration: dev runs stored everything under the app name
  * "desktop" (~/Library/Application Support/desktop). The packaged app is
- * "DoodleNote" — adopt the dev data (meetings, folders, settings, chat,
- * downloaded models) on first launch so nothing is lost or re-downloaded.
+ * "DoodleNote" — adopt the dev data (meetings, folders, settings and chat)
+ * on first launch. Models are discovered in place by NotesService.
  */
 function migrateDevUserData(): void {
   if (!app.isPackaged) return
@@ -110,9 +110,6 @@ function migrateDevUserData(): void {
     cpSync(join(oldDir, 'meetings'), join(newDir, 'meetings'), { recursive: true })
     for (const name of ['folders.json', 'settings.json', 'global-chat.json']) {
       if (existsSync(join(oldDir, name))) cpSync(join(oldDir, name), join(newDir, name))
-    }
-    if (existsSync(join(oldDir, 'models'))) {
-      cpSync(join(oldDir, 'models'), join(newDir, 'models'), { recursive: true })
     }
   } catch (err) {
     console.error('[migrate] failed (continuing with fresh data):', err)

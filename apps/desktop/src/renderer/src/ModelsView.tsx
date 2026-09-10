@@ -15,6 +15,7 @@ import {
   CLOUD_PROVIDERS,
   type CloudProvider,
   type EngineChoice,
+  type DownloadProgressEvent,
   type NotesModelInfo,
   type NotesModelsResponse,
   type NotesSettingsView
@@ -189,7 +190,9 @@ export default function ModelsView({
   }
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
-  const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
+  const [downloading, setDownloading] = useState<(DownloadProgressEvent & { id: string }) | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
 
   /** The user's own name; labels their lines instead of "You". */
@@ -531,18 +534,23 @@ export default function ModelsView({
   useEffect(
     () =>
       window.notes.onDownloadProgress((ev) => {
-        setDownloading((d) => (d && d.id === ev.modelId ? { ...d, progress: ev.progress } : d))
+        setDownloading((d) => (d && d.id === ev.modelId ? { ...d, ...ev } : d))
       }),
     []
   )
 
   const activate = async (modelId: string): Promise<void> => {
     setError(null)
-    setDownloading({ id: modelId, progress: 0 })
-    const result = await window.notes.activateModel(modelId)
-    setDownloading(null)
-    if (!result.ok) setError(result.error ?? 'activation failed')
-    refresh()
+    setDownloading({ id: modelId, modelId, progress: 0, stage: 'checking' })
+    try {
+      const result = await window.notes.activateModel(modelId)
+      if (!result.ok) setError(result.error ?? 'Activation failed. Please retry.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Activation failed. Please retry.')
+    } finally {
+      setDownloading(null)
+      refresh()
+    }
   }
 
   const saveProfileName = async (): Promise<void> => {
@@ -599,12 +607,20 @@ export default function ModelsView({
     if (downloading?.id === m.id) {
       const pct = Math.round(downloading.progress * 100)
       return (
-        <div className="model-progress">
-          <div className="progress-track">
-            <div className="progress-bar" style={{ width: `${pct}%` }} />
-          </div>
+        <div className="model-progress" role="status" aria-live="polite">
+          {downloading.stage === 'downloading' && (
+            <div className="progress-track">
+              <div className="progress-bar" style={{ width: `${pct}%` }} />
+            </div>
+          )}
           <span className="progress-label">
-            {downloading.progress > 0 ? `downloading… ${pct}%` : 'preparing…'}
+            {downloading.stage === 'downloading'
+              ? `Downloading… ${pct}%`
+              : downloading.stage === 'loading'
+                ? 'Loading local model…'
+                : downloading.stage === 'verifying'
+                  ? 'Verifying download…'
+                  : 'Checking local models…'}
           </span>
         </div>
       )
@@ -674,10 +690,18 @@ export default function ModelsView({
                 machine.
               </p>
 
-              {error && <div className="models-error">{error}</div>}
+              {error && (
+                <div className="models-error" role="alert">
+                  {error}
+                </div>
+              )}
 
               <div className="model-cards">
-                {data === null && <span className="placeholder">loading models…</span>}
+                {data === null && (
+                  <span className="placeholder" role="status">
+                    Checking local models…
+                  </span>
+                )}
                 {data?.models.map((m) => (
                   <div
                     key={m.id}
