@@ -84,7 +84,8 @@ test('initial exchange includes desktop credential, PKCE and matching redirect; 
         refresh_token: 'fixture-refresh'
       })
     }
-    assert.match(url, /^https:\/\/www.googleapis.com\/calendar\/v3\//)
+    assert.equal(new URL(url).origin, 'https://www.googleapis.com')
+    assert.ok(new URL(url).pathname.startsWith('/calendar/v3/'))
     return response({ items: [{ id: 'primary', summary: 'Test calendar', primary: true }] })
   })
   await client.connect()
@@ -107,7 +108,7 @@ test('Google missing-client-secret response gives application recovery without l
   const { client, cache } = setup(t, true)
   let failed = true
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
-    if (String(input).includes('oauth2.googleapis.com')) {
+    if (String(input) === 'https://oauth2.googleapis.com/token') {
       if (failed)
         return response(
           {
@@ -137,7 +138,7 @@ test('expired access token refreshes, invalid grant requests reconnect, disconne
   let refreshes = 0
   let revoked = false
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
-    if (String(input).includes('oauth2.googleapis.com')) {
+    if (String(input) === 'https://oauth2.googleapis.com/token') {
       refreshes++
       return revoked
         ? response({ error: 'invalid_grant' }, 400)
