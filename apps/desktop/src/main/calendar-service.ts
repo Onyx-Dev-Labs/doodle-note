@@ -25,6 +25,7 @@ import {
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_DISMISS_PROMPT_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
   CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
@@ -249,6 +250,7 @@ export class CalendarService {
   }
 
   registerIpc(): void {
+    ipcMain.handle(CALENDAR_DISMISS_PROMPT_CHANNEL, () => this.dismissPrompt())
     ipcMain.handle(CALENDAR_GET_STATE_CHANNEL, async () => {
       await this.ready
       return this.state()
@@ -312,6 +314,11 @@ export class CalendarService {
   setRecordingActive(recording: boolean): void {
     this.promptState = setPromptRecording(this.promptState, recording)
     if (!recording) return
+    this.dismissPrompt()
+  }
+
+  /** Dismiss every presentation of the current prompt without starting capture. */
+  dismissPrompt(): void {
     this.promptPanel?.close()
     this.broadcast(CALENDAR_START_MEETING_CHANNEL, {
       action: 'dismiss',
@@ -857,7 +864,7 @@ export class CalendarService {
   /**
    * Deliver one deduplicated meeting prompt. The renderer keeps a persistent
    * action banner, while one external surface gets the user's attention: a
-   * native notification when supported, or the floating panel as fallback.
+   * bottom panel on macOS, native notification with panel fallback elsewhere.
    * Also the entry point for ad-hoc mic-detected prompts (MicWatcher).
    */
   deliverPrompt(requested: CalendarStartMeetingEvent): void {
@@ -901,6 +908,7 @@ export class CalendarService {
     if (this.promptPanel) {
       this.promptPanel.show(prompt, (action) => {
         if (action === 'start') this.actOnPromptStart(prompt)
+        else this.dismissPrompt()
       })
     }
   }
