@@ -150,3 +150,15 @@ Vendor contract checked 2026-09-08 against the
 [official documentation source](https://github.com/ComposioHQ/composio/blob/next/docs/content/docs/extending-sessions/custom-mcp.mdx).
 Authenticated Composio interoperability remains a release QA gate until recorded
 against the intended test account; documentation alone does not establish it.
+
+## Complimentary setup access for an existing legacy account
+
+Maintainers can set `DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_EMAILS` on the hosted
+server to a comma-separated list of verified account email addresses. This
+allows the desktop setup panel for those authenticated accounts only while they
+retain grandfathered Cloud Sync entitlement. It does not create a Stripe
+customer or subscription, change billing status, grant workspace membership,
+or modify notes, tokens, or device links. Remote MCP still requires its normal
+workspace-scoped token and server authorization. Remove an address to revoke
+this setup visibility exception; separately revoke any existing agent tokens
+if remote access must end. Keep actual account addresses out of Git.

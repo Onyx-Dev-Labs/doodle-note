@@ -56,6 +56,22 @@ test("account endpoint exposes paid and active-trial eligibility for the authent
     assert.equal(free.workspaceId, "free-work");
     assert.equal(free.remoteMcpEligible, false);
     assert.equal(free.entitled, false);
+    // Complimentary access only applies to the authenticated, verified legacy owner.
+    process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_EMAILS = " PAID@example.test ";
+    await db.execute(sql`update subscriptions set status='grandfathered',grandfathered=true where user_id='paid-owner'`);
+    const legacyBefore = await db.execute(sql`select * from subscriptions where user_id='paid-owner'`);
+    const complimentary = await (await GET(request(paidToken))).json();
+    assert.equal(complimentary.remoteMcpEligible, true);
+    assert.equal(complimentary.accountId, "paid-owner");
+    assert.equal(complimentary.workspaceId, "paid-work");
+    assert.equal(complimentary.entitled, true);
+    assert.deepEqual((await db.execute(sql`select * from subscriptions where user_id='paid-owner'`)).rows, legacyBefore.rows);
+    assert.equal((await (await GET(request(freeToken))).json()).remoteMcpEligible, false);
+    await db.execute(sql`update "user" set email_verified=false where id='paid-owner'`);
+    assert.equal((await (await GET(request(paidToken))).json()).remoteMcpEligible, false);
+    await db.execute(sql`update "user" set email_verified=true where id='paid-owner'`);
+    delete process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_EMAILS;
+    assert.equal((await (await GET(request(paidToken))).json()).remoteMcpEligible, false);
     process.env.DOODLENOTE_SELF_HOSTED = "true";
     const selfHosted = await (await GET(request(paidToken))).json();
     assert.equal(selfHosted.entitled, true);
