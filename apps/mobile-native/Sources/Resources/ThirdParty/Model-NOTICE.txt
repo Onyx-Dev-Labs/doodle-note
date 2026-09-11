@@ -17,3 +17,11 @@ Model weights are not included in this source repository or app bundle.
 FluidAudio is Apache-2.0; its license accompanies this notice.
 The pinned package also includes separately licensed clustering and text-processing components.
 Their notices must be included in the final distribution license inventory.
+
+Optional remembered-voice embedding evaluation:
+FluidInference speaker-diarization-coreml, revision 1ed7a662fdc7109e36d822db793ee6eebdaf8594, wespeaker.mlmodelc.
+Source and attribution: https://huggingface.co/FluidInference/speaker-diarization-coreml
+Converted by FluidInference from pyannote/WeSpeaker speaker embedding work.
+Model card declares Creative Commons Attribution 4.0: https://creativecommons.org/licenses/by/4.0/
+Assets are downloaded explicitly from the source and SHA-256 verified; no weights are bundled.
+Physical qualification and complete attribution review remain prerequisites for distribution.

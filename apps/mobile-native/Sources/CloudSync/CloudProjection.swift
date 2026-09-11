@@ -131,20 +131,10 @@ struct CloudProjection {
                            bytes[8],bytes[9],bytes[10],bytes[11],bytes[12],bytes[13],bytes[14],bytes[15]))
     }
     private func assignedSpeaker(_ passage: TranscriptPassage, annotations: SpeakerAnnotations) -> String? {
-        let duration = passage.end - passage.start
-        guard duration > 0 else { return nil }
-        let grouped = Dictionary(grouping: annotations.turns.filter { $0.start < passage.end && $0.end > passage.start }, by: \.key)
-        let coverage = grouped.mapValues { turns -> Double in
-            var end = passage.start
-            return turns.sorted { $0.start < $1.start }.reduce(0) { total, turn in
-                let contribution = max(0, min(turn.end, passage.end) - max(end, max(turn.start, passage.start)))
-                end = max(end, min(turn.end, passage.end))
-                return total + contribution
-            }
+        switch SpeakerAttribution.decide(turns: annotations.turns, start: passage.start, end: passage.end) {
+        case .speaker(let key, let provisional): return provisional ? nil : key
+        default: return nil
         }
-        let active = coverage.filter { $0.value / duration >= 0.1 }
-        guard active.count == 1, let candidate = active.first, candidate.value / duration >= 0.65 else { return nil }
-        return candidate.key
     }
     private func date(_ value: Date) -> String {
         let formatter = ISO8601DateFormatter()

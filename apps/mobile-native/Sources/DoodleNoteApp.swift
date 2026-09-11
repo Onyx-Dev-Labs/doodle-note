@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct DoodleNoteApp: App {
     @State private var library: NoteLibrary
-    @State private var recording = RecordingSession()
+    @State private var recording: RecordingSession
     @AppStorage("mobileSetupComplete") private var setupComplete = false
     @AppStorage("appLanguage") private var appLanguage = SpokenLanguage.english.rawValue
     @State private var calendar: CalendarCoordinator?
@@ -29,7 +29,8 @@ struct DoodleNoteApp: App {
         let fixtureID = fixtureArgument.flatMap { UUID(uuidString: String($0.dropFirst("--fixture-id=".count))) } ?? UUID()
         let calendarFixture = testing && ProcessInfo.processInfo.arguments.contains("--calendar-fixture")
         let searchFixture = testing && ProcessInfo.processInfo.arguments.contains("--search-fixture")
-        let testDirectory = (storageFixture || calendarFixture || searchFixture || localizationFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
+        let speakerFixture = testing && ProcessInfo.processInfo.arguments.contains("--speaker-identity-fixture")
+        let testDirectory = (storageFixture || calendarFixture || searchFixture || localizationFixture || speakerFixture) ? "DoodleNoteStorageUITests/" + fixtureID.uuidString : "DoodleNoteUITests"
         let root = testing
             ? URL.applicationSupportDirectory.appendingPathComponent(testDirectory, isDirectory: true) : base
         if storageFixture { try? StorageUITestFixture.prepare(root: root) }
@@ -38,6 +39,7 @@ struct DoodleNoteApp: App {
         let root = base
         #endif
         _library = State(initialValue: NoteLibrary(root: root))
+        _recording = State(initialValue: RecordingSession(voiceRoot: root.appendingPathComponent("VoiceProfiles")))
         _cloud = State(initialValue: try? CloudSyncCoordinator(root: root))
         #if DEBUG
         _calendar = State(initialValue: calendarFixture ? try? CalendarUIFixture.make(root: root) : try? CalendarAppFactory.make(root: root))
@@ -177,7 +179,7 @@ struct LibraryView: View {
             }
         } detail: {
             if let selection, library.note(selection) != nil {
-                NoteEditor(id: selection, library: library, recording: recording).id(selection)
+                NoteEditor(id: selection, library: library, recording: recording, calendar: calendar).id(selection)
             } else {
                 ContentUnavailableView("Choose a note", systemImage: "note.text",
                     description: Text("Your notes stay on this device. No account is required."))

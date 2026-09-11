@@ -10,12 +10,12 @@ This checkpoint includes the native foundation, journaled audio recovery, and an
 - Atomic local note documents containing typed text, PencilKit drawings, transcript passages, and capture state. Unreadable/future-format documents remain untouched. A previously active recording is marked interrupted when reopening.
 - Microphone pipeline with a bounded writer queue and rolling PCM CAF files. Closed chunks remain independently readable; normal stopping drains the queue and closes the final chunk. Disk/backlog errors stop capture visibly. Live speech failure leaves audio capture running.
 - Local playback across saved chunks and passage timestamp navigation. Journaled open PCM tails are repaired into separate validated copies on startup; originals remain untouched.
-- Optional streaming speaker labels using a pinned FluidAudio/Sortformer model, explicit checksum-verified download, four speaker slots, provisional labels, and manually confirmed names scoped to each recording session. Speaker processing has a separate bounded queue so a slow model cannot silently drop saved audio.
+- Optional streaming speaker labels using a pinned FluidAudio/Sortformer model, explicit checksum-verified download, four speaker slots, provisional labels, confirmed names, and optional device-local remembered voices. Speaker processing has a separate bounded queue so a slow model cannot silently drop saved audio. Voice profiles are excluded from notes sync, archive copies and generation payloads.
 - Apple's SpeechAnalyzer/SpeechTranscriber integration with runtime device/locale/installed-asset checks, explicit model download, bounded input, audio conversion, provisional/final results, and cancellation requested after a finalization timeout. No network transcription fallback.
 - English, Danish, Spanish, French, and German are selectable **spoken-language candidates**. This does not establish recognition availability or accuracy for all five on real hardware. This foundation's interface is still English; the accepted five-language UI remains required work.
 - PencilKit canvas with a tool picker, drawing persistence, zoom, and ordinary system text entry. Physical Pencil, Scribble, pressure/latency, and accessibility acceptance are still open.
 
-The app has no sync, calendar, external AI, or voice-profile connections yet. Microphone audio never enters those services in this checkpoint. Speech model acquisition uses Apple's asset service when requested. The optional speaker model download retrieves four pinned public files from Hugging Face (240,139,774 bytes); inference runs locally. Model assets are outside note storage and excluded from operating-system backup.
+The optional speaker model download retrieves four pinned public files from Hugging Face (240,139,774 bytes); inference runs locally. Model assets and voice profiles are outside note documents and excluded from operating-system backup. Microphone audio never enters cloud notes sync or optional external AI.
 
 ## Build and test
 
@@ -44,7 +44,7 @@ Note writes currently encode the complete document. Transcript UI is lazy, but i
 
 ## Next implementation gates
 
-1. Evaluate the integrated streaming diarization candidate with real three/four-speaker material. Add optional device-local voice references and final/live identity reconciliation. Current names are manually confirmed per session, not automatic recognition of known people. Resolve model redistribution notices before release; see [speaker evaluation](docs/speaker-evaluation.md).
+1. Qualify live three/four-speaker labeling, remembered-voice matching and unknown rejection on physical iPhone and iPad with authorized material. Resolve model redistribution notices before release; see [speaker evaluation](docs/speaker-evaluation.md).
 2. Run the integrated mic/transcript/speaker/Pencil path on physical iPhone and iPad, using authorized test material. Measure five-language recognition, attribution, latency, thermals, memory, storage, interruption/route behavior, screen lock, restart, and complete two-hour preservation. Simulator success cannot satisfy this gate.
 3. Add audio import, recovery/retry controls for unsupported damaged recordings, complete model management and readiness UX, and all five interface languages. Preserve the full approved scope if the first engine candidate fails.
 4. Implement local summary versions and six meeting formats, source-grounded meeting/library Q&A, full-history retrieval, and optional explicitly enabled text AI providers.
