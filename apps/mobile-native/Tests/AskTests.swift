@@ -67,6 +67,19 @@ final class AskGenerationTests: XCTestCase {
         XCTAssertFalse(result.unsupportedCensus); XCTAssertEqual(result.claims.count, 2)
         XCTAssertEqual(Set(result.claims.flatMap(\.evidenceIDs)), Set(result.evidence.map(\.id)))
     }
+    func testTitleAndConfirmedSpeakerContextReachBothGenerationStages() async throws {
+        var note = NoteRecord(); note.title = "Project Alpha"
+        note.passages = [.init(start: 12, end: 14, text: "I agreed to send the proposal.", isFinal: true, speakerName: "Morgan")]
+        let engine = AskTestEngine()
+        let result = try await AskGenerator(engine: engine).answer(question: "Who agreed to send the proposal in Project Alpha?", input: input([note]), language: .english) { _, _ in }
+        XCTAssertEqual(result.evidence.first?.speaker, "Morgan"); XCTAssertEqual(result.evidence.first?.audioTime, 12)
+        let payloads = try await engine.inputs.map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+        let selection = try XCTUnwrap(payloads.first { $0["source"] != nil })
+        XCTAssertEqual(selection["speaker"] as? String, "Morgan"); XCTAssertEqual(selection["title"] as? String, "Project Alpha")
+        XCTAssertEqual(selection["noteID"] as? String, note.id.uuidString)
+        let synthesis = try XCTUnwrap(payloads.first { $0["evidence"] != nil }?["evidence"] as? [[String: Any]])
+        XCTAssertEqual(synthesis.first?["speaker"] as? String, "Morgan"); XCTAssertEqual(synthesis.first?["title"] as? String, "Project Alpha")
+    }
     func testUnsupportedEntityCensusDoesNotPretendToCountNotes() async throws {
         var note = NoteRecord(); note.text = "Alice owns one task."
         let result = try await AskGenerator(engine: AskTestEngine(.entityCensus)).answer(question: "How many tasks?", input: input([note]), language: .english) { _, _ in }

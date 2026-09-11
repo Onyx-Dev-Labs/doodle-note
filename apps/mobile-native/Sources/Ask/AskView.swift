@@ -99,6 +99,7 @@ struct AskView: View {
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(item.title.isEmpty ? L10n.text("Untitled note") : item.title).font(.headline)
                                         Text(L10n.key(item.anchor.askLabel)).font(.caption)
+                                        if let speaker = item.speaker { Text(speaker).font(.caption).foregroundStyle(.secondary) }
                                         Text(item.quote).textSelection(.enabled)
                                         Text("Open original passage").font(.caption)
                                     }
@@ -139,6 +140,7 @@ private struct AskCitationView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text(L10n.key(evidence.anchor.askLabel)).font(.headline)
+                    if let speaker = evidence.speaker { Text(speaker).font(.caption) }
                     if let text { Text(text).textSelection(.enabled) }
                     if let problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
                     if let audioTime = evidence.audioTime, text != nil, !(library.disk?.audioFiles(for: evidence.anchor.noteID).isEmpty ?? true) {
