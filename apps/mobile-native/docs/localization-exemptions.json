@@ -99,5 +99,9 @@
   },
   "CloudSync/CloudAuthorization.swift": {
     "DoodleNote iPhone / iPad": "Stable device authorization label, not app display text."
+  },
+  "Exports/NoteExport.swift": {
+    "assets/ink-\\(index + 1).png": "Fixed safe archive-relative asset path.",
+    " \\(index + 1)](\\(name))\\n\\n": "Markdown image number and reference syntax."
   }
 }

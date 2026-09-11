@@ -9,6 +9,7 @@ struct NoteEditor: View {
     @State private var pane = 0
     @State private var player = LocalPlayback()
     @State private var showSpeakers = false
+    @State private var showExport = false
     @State private var confirmAudioRemoval = false
     @State private var inkSession = InkEditingSession()
     @State private var showDetails = false
@@ -91,6 +92,7 @@ struct NoteEditor: View {
             }
             if editingText != nil { Button("Done typing") { editingText = nil }.accessibilityIdentifier("doneTyping") }
             Menu("Note storage", systemImage: "ellipsis.circle") {
+                Button("Share note", systemImage: "square.and.arrow.up") { editingText = nil; showExport = true }.accessibilityIdentifier("shareNote")
                 Button("Move to Trash", role: .destructive) {
                     player.stop()
                     Task { await library.performStorage(.trash, id: id,
@@ -101,6 +103,7 @@ struct NoteEditor: View {
                 }
             }.disabled(transcription.busy || recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
         }
+        .sheet(isPresented: $showExport) { NoteExportView(note: note) }
         .alert("Remove this device's audio?", isPresented: $confirmAudioRemoval) {
             Button("Remove audio", role: .destructive) {
                 player.stop()
@@ -149,7 +152,7 @@ struct NoteEditor: View {
         }
         .onChange(of: pane) { _, value in if value != 0 { editingText = nil } }
         .onDisappear { player.stop(); transcription.cancel(noteID: id, library: library); Task { await library.flush() } }
-        .onChange(of: library.authenticationGeneration) { _, _ in transcription.cancel(noteID: id, library: library); editingPassage = nil }
+        .onChange(of: library.authenticationGeneration) { _, _ in transcription.cancel(noteID: id, library: library); editingPassage = nil; showExport = false }
         .onChange(of: recording.noteID) { _, value in if value != nil { player.stop() } }
         .onChange(of: recording.busy) { _, value in if value { player.stop() } }
     }
