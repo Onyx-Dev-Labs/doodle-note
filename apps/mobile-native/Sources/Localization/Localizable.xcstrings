@@ -457,6 +457,40 @@
         }
       }
     },
+    "%lld notes are unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld notes are unavailable"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld noter er utilgængelige"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld notas no disponibles"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld notes indisponibles"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Notizen nicht verfügbar"
+          }
+        }
+      }
+    },
     "%lld sources": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -1212,6 +1246,210 @@
         }
       }
     },
+    "Answer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svar"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Respuesta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwort"
+          }
+        }
+      }
+    },
+    "Answer canceled. No completed answer was saved.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer canceled. No completed answer was saved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svar annulleret. Intet færdigt svar blev gemt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Respuesta cancelada. No se guardó ninguna respuesta completa."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réponse annulée. Aucune réponse complète enregistrée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwort abgebrochen. Keine vollständige Antwort gespeichert."
+          }
+        }
+      }
+    },
+    "Answer language": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer language"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svarsprog"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idioma de respuesta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Langue de réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwortsprache"
+          }
+        }
+      }
+    },
+    "Answer view": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer view"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svarvisning"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vista de respuesta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Affichage de la réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwortansicht"
+          }
+        }
+      }
+    },
+    "Answers show original evidence in its original language. Matching is generated on this device and may need correction.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers show original evidence in its original language. Matching is generated on this device and may need correction."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svar viser originale kilder på originalsproget. Match findes på denne enhed og kan kræve rettelse."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las respuestas muestran evidencia original en su idioma. Las coincidencias se generan en este dispositivo y pueden necesitar corrección."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les réponses montrent les preuves dans leur langue d’origine. Les correspondances sont générées sur cet appareil et peuvent nécessiter une correction."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antworten zeigen Originalbelege in ihrer Sprache. Die Zuordnung erfolgt auf diesem Gerät und muss eventuell korrigiert werden."
+          }
+        }
+      }
+    },
+    "Answers use saved sources from when you asked. New recording content is not included until you ask again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers use saved sources from when you asked. New recording content is not included until you ask again."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svar bruger gemte kilder fra da du spurgte. Nyt optagelsesindhold medtages først, når du spørger igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las respuestas usan fuentes guardadas al preguntar. El contenido nuevo de la grabación no se incluye hasta que preguntes de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les réponses utilisent les sources enregistrées au moment de la question. Le nouveau contenu ne sera inclus qu’à la prochaine question."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antworten nutzen gespeicherte Quellen vom Zeitpunkt Ihrer Frage. Neue Aufnahmeinhalte werden erst bei einer erneuten Frage einbezogen."
+          }
+        }
+      }
+    },
     "App language": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -1388,6 +1626,346 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Apples Generierungsmodell auf dem Gerät ist nicht verfügbar."
+          }
+        }
+      }
+    },
+    "Archive could not be processed. Check the password, file integrity, available space and supported archive version.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive could not be processed. Check the password, file integrity, available space and supported archive version."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivet kunne ikke behandles. Kontrollér adgangskode, filintegritet, ledig plads og understøttet arkivversion."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo procesar el archivo. Comprueba la contraseña, la integridad del archivo, el espacio disponible y la versión compatible."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de traiter l’archive. Vérifiez le mot de passe, l’intégrité du fichier, l’espace disponible et la version prise en charge."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Archiv konnte nicht verarbeitet werden. Prüfe Passwort, Dateiintegrität, freien Speicher und unterstützte Archivversion."
+          }
+        }
+      }
+    },
+    "Archive export cancelled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive export cancelled."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiveksport annulleret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportación del archivo cancelada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportation de l’archive annulée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivexport abgebrochen."
+          }
+        }
+      }
+    },
+    "Archive operation cancelled. Existing notes are unchanged.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive operation cancelled. Existing notes are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivhandling annulleret. Eksisterende noter er uændrede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Operación cancelada. Las notas existentes no han cambiado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opération annulée. Les notes existantes sont inchangées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivvorgang abgebrochen. Vorhandene Notizen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Archive password": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive password"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivadgangskode"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contraseña del archivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mot de passe de l’archive"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivpasswort"
+          }
+        }
+      }
+    },
+    "Archive restored to Only on this device.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive restored to Only on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiv gendannet til Kun på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivo restaurado en Solo en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive restaurée dans Uniquement sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiv unter Nur auf diesem Gerät wiederhergestellt."
+          }
+        }
+      }
+    },
+    "Ask": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spørg"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preguntar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Demander"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fragen"
+          }
+        }
+      }
+    },
+    "Ask a question": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask a question"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stil et spørgsmål"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haz una pregunta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Poser une question"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine Frage stellen"
+          }
+        }
+      }
+    },
+    "Ask this library": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask this library"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spørg dette bibliotek"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pregunta a esta biblioteca"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interroger cette bibliothèque"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Bibliothek fragen"
+          }
+        }
+      }
+    },
+    "Ask this meeting": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask this meeting"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spørg dette møde"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pregunta sobre esta reunión"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interroger cette réunion"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zu diesem Meeting fragen"
+          }
+        }
+      }
+    },
+    "Ask your notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask your notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spørg dine noter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pregunta a tus notas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interroger vos notes"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deine Notizen fragen"
           }
         }
       }
@@ -1700,6 +2278,74 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Audio bleibt auf dem ursprünglichen Gerät. Beim Entfernen bleiben Text, Transkript, Tinte und Zusammenfassungsversionen erhalten."
+          }
+        }
+      }
+    },
+    "Back up the selected library, including note history, ink and audio. Credentials and saved voice profiles are excluded.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back up the selected library, including note history, ink and audio. Credentials and saved voice profiles are excluded."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sikkerhedskopiér det valgte bibliotek med notehistorik, tegninger og lyd. Loginoplysninger og gemte stemmeprofiler medtages ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haz una copia de la biblioteca seleccionada con el historial de notas, dibujos y audio. Se excluyen las credenciales y los perfiles de voz guardados."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sauvegardez la bibliothèque sélectionnée avec l’historique des notes, les dessins et l’audio. Les identifiants et profils vocaux enregistrés sont exclus."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sichere die ausgewählte Bibliothek mit Notizverlauf, Zeichnungen und Audio. Zugangsdaten und gespeicherte Stimmprofile sind ausgeschlossen."
+          }
+        }
+      }
+    },
+    "Backup & restore": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup & restore"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sikkerhedskopi og gendannelse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copia de seguridad y restauración"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sauvegarde et restauration"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sichern und Wiederherstellen"
           }
         }
       }
@@ -2172,6 +2818,42 @@
         }
       }
     },
+    "Cancel export": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel export"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuller eksport"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar exportación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler l’export"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export abbrechen"
+          }
+        }
+      }
+    },
     "Cancel generation": {
       "extractionState": "manual",
       "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -2383,6 +3065,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Transkription abbrechen"
+          }
+        }
+      }
+    },
+    "Cancel voice model download": {
+      "localizations": {
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuller download af stemmemodel"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download des Stimmmodells abbrechen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel voice model download"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar descarga del modelo de voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler le téléchargement du modèle vocal"
           }
         }
       }
@@ -2819,6 +3535,76 @@
         }
       }
     },
+    "Choose at least one nonempty section to export.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose at least one nonempty section to export."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vælg mindst ét afsnit med indhold til eksport."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elige al menos una sección con contenido para exportar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez au moins une section non vide à exporter."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle mindestens einen Abschnitt mit Inhalt für den Export."
+          }
+        }
+      }
+    },
+    "Choose encrypted archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose encrypted archive"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vælg krypteret arkiv"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elegir archivo cifrado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir une archive chiffrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsseltes Archiv auswählen"
+          }
+        }
+      }
+    },
     "Choose which version becomes current. The other version remains in cloud history.": {
       "extractionState": "manual",
       "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
@@ -2887,6 +3673,41 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Kundenbedarf"
+          }
+        }
+      }
+    },
+    "Close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Luk"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cerrar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fermer"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schließen"
           }
         }
       }
@@ -3250,6 +4071,40 @@
         }
       }
     },
+    "Confirm password": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm password"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bekræft adgangskode"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmar contraseña"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmer le mot de passe"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passwort bestätigen"
+          }
+        }
+      }
+    },
     "Confirm permanent deletion before continuing.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -3282,6 +4137,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Bestätige die endgültige Löschung, bevor du fortfährst."
+          }
+        }
+      }
+    },
+    "Confirm suggested name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm suggested name"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bekræft foreslået navn"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmar nombre sugerido"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmer le nom suggéré"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorgeschlagenen Namen bestätigen"
           }
         }
       }
@@ -3676,6 +4565,110 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Korrekturen wurden trotz geänderter Textgrenzen beibehalten. Prüfe das Transkript."
+          }
+        }
+      }
+    },
+    "Could not save this voice. Notes and recordings are unchanged.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save this voice. Notes and recordings are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne stemme kunne ikke gemmes. Noter og optagelser er uændrede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "No se pudo guardar esta voz. Las notas y grabaciones no cambian."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Impossible d’enregistrer cette voix. Les notes et enregistrements sont inchangés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme konnte nicht gespeichert werden. Notizen und Aufnahmen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Count matching notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Count matching notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tæl matchende noter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contar notas coincidentes"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compter les notes correspondantes"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passende Notizen zählen"
+          }
+        }
+      }
+    },
+    "Counts or exhaustive lists of people, tasks and events are not supported yet. Ask about specific evidence, or count matching notes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Counts or exhaustive lists of people, tasks and events are not supported yet. Ask about specific evidence, or count matching notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optælling eller komplette lister over personer, opgaver og begivenheder understøttes endnu ikke. Spørg om konkrete kilder, eller tæl matchende noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no se admiten recuentos ni listas exhaustivas de personas, tareas y eventos. Pregunta por evidencia concreta o cuenta notas coincidentes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les décomptes ou listes exhaustives de personnes, tâches et événements ne sont pas encore pris en charge. Demandez des preuves précises ou comptez les notes correspondantes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zählungen oder vollständige Listen von Personen, Aufgaben und Ereignissen werden noch nicht unterstützt. Fragen Sie nach konkreten Belegen oder zählen Sie passende Notizen."
           }
         }
       }
@@ -4292,6 +5285,40 @@
         }
       }
     },
+    "Download a separate 30 MB model to remember voices. Accuracy needs testing on your device.": {
+      "localizations": {
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download en separat model på 30 MB for at huske stemmer. Nøjagtigheden skal testes på din enhed."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lade ein separates 30-MB-Modell herunter, um Stimmen zu speichern. Die Genauigkeit muss auf deinem Gerät getestet werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download a separate 30 MB model to remember voices. Accuracy needs testing on your device."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga un modelo separado de 30 MB para recordar voces. La precisión debe probarse en tu dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargez un modèle distinct de 30 Mo pour mémoriser les voix. La précision doit être testée sur votre appareil."
+          }
+        }
+      }
+    },
     "Download or repair speaker model": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -4544,6 +5571,40 @@
         }
       }
     },
+    "Download voice recognition model": {
+      "localizations": {
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download model til stemmegenkendelse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell zur Stimmerkennung herunterladen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download voice recognition model"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descargar modelo de reconocimiento de voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Télécharger le modèle de reconnaissance vocale"
+          }
+        }
+      }
+    },
     "Downloading the speaker model (240 MB)…": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -4612,6 +5673,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Sprachmodell wird geladen…"
+          }
+        }
+      }
+    },
+    "Draft answer. Verify each claim against its original citations.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft answer. Verify each claim against its original citations."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Udkast til svar. Kontrollér hver påstand mod originalkilderne."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Borrador de respuesta. Verifica cada afirmación con sus citas originales."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brouillon de réponse. Vérifiez chaque affirmation avec ses citations originales."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwortentwurf. Prüfen Sie jede Aussage anhand ihrer Originalbelege."
           }
         }
       }
@@ -5084,6 +6179,108 @@
         }
       }
     },
+    "Encrypted archive saved.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted archive saved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Krypteret arkiv gemt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivo cifrado guardado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive chiffrée enregistrée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsseltes Archiv gespeichert."
+          }
+        }
+      }
+    },
+    "Encrypted backup": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted backup"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Krypteret sikkerhedskopi"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copia de seguridad cifrada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sauvegarde chiffrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsselte Sicherung"
+          }
+        }
+      }
+    },
+    "Enter a question of at most 500 characters.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a question of at most 500 characters."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indtast et spørgsmål på højst 500 tegn."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Introduce una pregunta de hasta 500 caracteres."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saisissez une question de 500 caractères maximum."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geben Sie eine Frage mit höchstens 500 Zeichen ein."
+          }
+        }
+      }
+    },
     "Eraser": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -5156,6 +6353,74 @@
         }
       }
     },
+    "Evidence": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evidence"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kilder"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evidencia"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preuves"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Belege"
+          }
+        }
+      }
+    },
+    "Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Præcise antal personer, opgaver og begivenheder understøttes endnu ikke. Bed om en liste med kilder, eller tæl matchende noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no se admiten recuentos exactos de personas, tareas y eventos. Pide una lista con citas o cuenta notas coincidentes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les décomptes exacts de personnes, tâches et événements ne sont pas encore pris en charge. Demandez une liste citée ou comptez les notes correspondantes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exakte Zählungen von Personen, Aufgaben und Ereignissen werden noch nicht unterstützt. Fragen Sie nach einer Liste mit Quellen oder zählen Sie passende Notizen."
+          }
+        }
+      }
+    },
     "Existing desktop notes": {
       "extractionState": "manual",
       "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
@@ -5224,6 +6489,150 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Vorhandene lokale Notizen bleiben in ihrer aktuellen Bibliothek. Neue Notizen in der Cloud-Bibliothek werden synchronisiert, sobald der Dienst verfügbar ist."
+          }
+        }
+      }
+    },
+    "Export canceled. Your original note is preserved.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export canceled. Your original note is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eksport annulleret. Din oprindelige note er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportación cancelada. Tu nota original se conserva."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export annulé. Votre note originale est conservée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export abgebrochen. Deine ursprüngliche Notiz bleibt erhalten."
+          }
+        }
+      }
+    },
+    "Export format": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export format"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eksportformat"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Formato de exportación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format d’exportation"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportformat"
+          }
+        }
+      }
+    },
+    "Export shared.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export shared."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eksport delt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportación compartida."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export partagé."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export geteilt."
+          }
+        }
+      }
+    },
+    "Exports use the current notes, transcript and drawing. Choose summary versions below. Audio and saved voices are never included.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exports use the current notes, transcript and drawing. Choose summary versions below. Audio and saved voices are never included."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eksporter bruger de aktuelle noter, transskriptionen og tegningen. Vælg opsummeringsversioner nedenfor. Lyd og gemte stemmer medtages aldrig."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las exportaciones usan las notas, la transcripción y el dibujo actuales. Elige las versiones del resumen abajo. Nunca se incluyen audio ni voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les exports utilisent les notes, la transcription et le dessin actuels. Choisissez les versions du résumé ci-dessous. L’audio et les voix enregistrées ne sont jamais inclus."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exporte verwenden die aktuellen Notizen, das Transkript und die Zeichnung. Wähle unten Zusammenfassungsversionen. Audio und gespeicherte Stimmen werden nie einbezogen."
           }
         }
       }
@@ -5696,42 +7105,6 @@
         }
       }
     },
-    "Google account %@": {
-      "comment": "Fallback account label; the stable provider identifier remains unchanged. Machine draft translations await human review.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Google account %@"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Google-konto %@"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Cuenta de Google %@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Compte Google %@"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Google-Konto %@"
-          }
-        }
-      }
-    },
     "Google Calendar": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -5764,6 +7137,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Google Kalender"
+          }
+        }
+      }
+    },
+    "Google account %@": {
+      "comment": "Fallback account label; the stable provider identifier remains unchanged. Machine draft translations await human review.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google account %@"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Google-konto %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cuenta de Google %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Compte Google %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Google-Konto %@"
           }
         }
       }
@@ -5908,6 +7317,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Importierte Desktop-Notizen"
+          }
+        }
+      }
+    },
+    "Include retained Trash": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include retained Trash"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medtag bevaret papirkurv"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incluir la papelera conservada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inclure la corbeille conservée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufbewahrten Papierkorb einschließen"
           }
         }
       }
@@ -6128,6 +7571,42 @@
         }
       }
     },
+    "Known participants": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known participants"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Kendte deltagere"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Participantes conocidos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Participants connus"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bekannte Teilnehmende"
+          }
+        }
+      }
+    },
     "Language": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -6232,6 +7711,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Bibliothek"
+          }
+        }
+      }
+    },
+    "List matching notes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List matching notes"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vis matchende noter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listar notas coincidentes"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lister les notes correspondantes"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passende Notizen auflisten"
           }
         }
       }
@@ -6596,6 +8109,40 @@
         }
       }
     },
+    "Local audio is unavailable. The original transcript is still readable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local audio is unavailable. The original transcript is still readable."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokal lyd er ikke tilgængelig. Den originale transskription kan stadig læses."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El audio local no está disponible. La transcripción original sigue siendo legible."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’audio local est indisponible. La transcription originale reste lisible."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokales Audio ist nicht verfügbar. Das Originaltranskript bleibt lesbar."
+          }
+        }
+      }
+    },
     "Local audio playback failed. Original files are preserved.": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -6700,6 +8247,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Ausschließlich lokale Notizen bleiben verfügbar. Verbinden Sie dasselbe Konto erneut, um seine zwischengespeicherten Notizen zu öffnen."
+          }
+        }
+      }
+    },
+    "Markdown (.zip)": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown (.zip)"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown (.zip)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown (.zip)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown (.zip)"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markdown (.zip)"
           }
         }
       }
@@ -7064,6 +8647,40 @@
         }
       }
     },
+    "Model-identified matching notes: %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model-identified matching notes: %lld"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matchende noter fundet af modellen: %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notas coincidentes identificadas por el modelo: %lld"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes correspondantes identifiées par le modèle : %lld"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vom Modell erkannte passende Notizen: %lld"
+          }
+        }
+      }
+    },
     "Models": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -7136,42 +8753,6 @@
         }
       }
     },
-    "Move to folder": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move to folder"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Flyt til mappe"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Mover a carpeta"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Déplacer vers un dossier"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "In Ordner verschieben"
-          }
-        }
-      }
-    },
     "Move to Trash": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -7204,6 +8785,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "In den Papierkorb verschieben"
+          }
+        }
+      }
+    },
+    "Move to folder": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to folder"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Flyt til mappe"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mover a carpeta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Déplacer vers un dossier"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "In Ordner verschieben"
           }
         }
       }
@@ -7276,6 +8893,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Namen gelten für diese Aufnahmesitzung. Das Wiedererkennen von Stimmen über Meetings hinweg wird noch entwickelt."
+          }
+        }
+      }
+    },
+    "Need a clear finalized solo stretch before remembering this voice.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Need a clear finalized solo stretch before remembering this voice."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Der skal være et tydeligt, færdigt soloafsnit, før denne stemme kan huskes."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Hace falta un tramo final en solitario y claro antes de recordar esta voz."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Il faut un passage solo finalisé et net avant de mémoriser cette voix."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Es braucht eine klare, abgeschlossene Solo-Passage, bevor diese Stimme gespeichert werden kann."
           }
         }
       }
@@ -7456,6 +9109,112 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Keine passenden gespeicherten Inhalte in dieser Bibliothek."
+          }
+        }
+      }
+    },
+    "No saved typed notes or transcript are available in this scope.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No saved typed notes or transcript are available in this scope."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen gemte noter eller transskriptioner i dette omfang."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hay notas ni transcripciones guardadas en este ámbito."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune note ni transcription enregistrée dans ce périmètre."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine gespeicherten Notizen oder Transkripte in diesem Umfang verfügbar."
+          }
+        }
+      }
+    },
+    "No saved voices yet.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No saved voices yet."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ingen gemte stemmer endnu."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aún no hay voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aucune voix enregistrée pour le moment."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Noch keine gespeicherten Stimmen."
+          }
+        }
+      }
+    },
+    "No summary versions yet.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No summary versions yet."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen opsummeringsversioner endnu."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todavía no hay versiones del resumen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune version du résumé pour le moment."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Zusammenfassungsversionen."
           }
         }
       }
@@ -8000,42 +9759,6 @@
         }
       }
     },
-    "Open active recording": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open active recording"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Åbn aktiv optagelse"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Abrir grabación activa"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Ouvrir l’enregistrement actif"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Aktive Aufnahme öffnen"
-          }
-        }
-      }
-    },
     "Open DoodleNote to join or take notes.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -8068,6 +9791,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Öffne DoodleNote, um teilzunehmen oder Notizen zu machen."
+          }
+        }
+      }
+    },
+    "Open active recording": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open active recording"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Åbn aktiv optagelse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Abrir grabación activa"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Ouvrir l’enregistrement actif"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Aktive Aufnahme öffnen"
           }
         }
       }
@@ -8140,6 +9899,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Notiz öffnen"
+          }
+        }
+      }
+    },
+    "Open original passage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open original passage"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åbn original passage"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir pasaje original"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir le passage original"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originalpassage öffnen"
           }
         }
       }
@@ -8356,6 +10149,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Originalquelle"
+          }
+        }
+      }
+    },
+    "PDF": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PDF"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PDF"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PDF"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PDF"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PDF"
           }
         }
       }
@@ -8612,6 +10441,40 @@
         }
       }
     },
+    "Play original audio": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play original audio"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afspil original lyd"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reproducir audio original"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lire l’audio original"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originalaudio abspielen"
+          }
+        }
+      }
+    },
     "Play passage": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -8756,6 +10619,112 @@
         }
       }
     },
+    "Possible voice match: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Possible voice match: %@"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muligt stemmematch: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posible coincidencia de voz: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Correspondance vocale possible : %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Möglicher Stimmabgleich: %@"
+          }
+        }
+      }
+    },
+    "Prepare export": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepare export"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forbered eksport"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparar exportación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparer l’export"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export vorbereiten"
+          }
+        }
+      }
+    },
+    "Preparing export…": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing export…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forbereder eksport…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparando exportación…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparation de l’export…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export wird vorbereitet…"
+          }
+        }
+      }
+    },
     "Preparing or finalizing recording…": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -8896,6 +10865,40 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Alle %lld Quellenteile wurden verarbeitet. Prüfen Sie die Quellenangaben unten."
+          }
+        }
+      }
+    },
+    "Processing archive…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processing archive…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behandler arkiv…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Procesando archivo…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traitement de l’archive…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiv wird verarbeitet…"
           }
         }
       }
@@ -9368,6 +11371,42 @@
         }
       }
     },
+    "Recording works without saved voices.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording works without saved voices."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Optagelse fungerer uden gemte stemmer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Se puede grabar sin voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "L’enregistrement fonctionne sans voix enregistrées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Die Aufnahme funktioniert ohne gespeicherte Stimmen."
+          }
+        }
+      }
+    },
     "Recordings and voice profiles stay on their original device. Transcripts, typed notes, summaries and drawings can sync.": {
       "extractionState": "manual",
       "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
@@ -9692,6 +11731,42 @@
         }
       }
     },
+    "Remember this voice": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remember this voice"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Husk denne stemme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Recordar esta voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Mémoriser cette voix"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme merken"
+          }
+        }
+      }
+    },
     "Remind me": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -9944,6 +12019,42 @@
         }
       }
     },
+    "Remove saved voice": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove saved voice"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fjern gemt stemme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Eliminar voz guardada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Supprimer la voix enregistrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeicherte Stimme entfernen"
+          }
+        }
+      }
+    },
     "Remove speaker model": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -10012,6 +12123,112 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Audio dieses Geräts entfernen?"
+          }
+        }
+      }
+    },
+    "Remove this saved voice from this device?": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove this saved voice from this device?"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fjern denne gemte stemme fra denne enhed?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "¿Quitar esta voz guardada de este dispositivo?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retirer cette voix enregistrée de cet appareil ?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese gespeicherte Stimme von diesem Gerät entfernen?"
+          }
+        }
+      }
+    },
+    "Remove voice from this device": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove voice from this device"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Fjern stemmen fra denne enhed"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Quitar la voz de este dispositivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Retirer la voix de cet appareil"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stimme von diesem Gerät entfernen"
+          }
+        }
+      }
+    },
+    "Remove voice recognition model": {
+      "localizations": {
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjern model til stemmegenkendelse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell zur Stimmerkennung entfernen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove voice recognition model"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar modelo de reconocimiento de voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer le modèle de reconnaissance vocale"
           }
         }
       }
@@ -10120,6 +12337,74 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Wiederherstellen"
+          }
+        }
+      }
+    },
+    "Restore archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore archive"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gendan arkiv"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar archivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurer l’archive"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiv wiederherstellen"
+          }
+        }
+      }
+    },
+    "Restored notes are new copies in Only on this device. Existing notes stay unchanged. Included Trash gets a new 30-day recovery period. Sync requires a separate deliberate choice.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restored notes are new copies in Only on this device. Existing notes stay unchanged. Included Trash gets a new 30-day recovery period. Sync requires a separate deliberate choice."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gendannede noter er nye kopier i Kun på denne enhed. Eksisterende noter ændres ikke. Medtaget papirkurv får en ny gendannelsesperiode på 30 dage. Synkronisering kræver et særskilt valg."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las notas restauradas son copias nuevas en Solo en este dispositivo. Las existentes no cambian. La papelera incluida recibe otros 30 días de recuperación. La sincronización requiere una elección aparte."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les notes restaurées sont de nouvelles copies dans Uniquement sur cet appareil. Les notes existantes restent inchangées. La corbeille incluse bénéficie de 30 nouveaux jours de récupération. La synchronisation nécessite un choix distinct."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wiederhergestellte Notizen sind neue Kopien unter Nur auf diesem Gerät. Vorhandene Notizen bleiben unverändert. Der enthaltene Papierkorb erhält eine neue Wiederherstellungsfrist von 30 Tagen. Synchronisierung muss separat ausgewählt werden."
           }
         }
       }
@@ -10483,6 +12768,74 @@
         }
       }
     },
+    "Reviewed %lld notes and %lld source fragments": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewed %lld notes and %lld source fragments"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gennemgået %lld noter og %lld kildefragmenter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisadas %lld notas y %lld fragmentos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld notes et %lld fragments examinés"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Notizen und %lld Quellfragmente geprüft"
+          }
+        }
+      }
+    },
+    "Reviewed %lld of %lld source fragments": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviewed %lld of %lld source fragments"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gennemgået %lld af %lld kildefragmenter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisados %lld de %lld fragmentos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld fragments examinés sur %lld"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld von %lld Quellfragmenten geprüft"
+          }
+        }
+      }
+    },
     "Save as selected version": {
       "extractionState": "manual",
       "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -10554,6 +12907,40 @@
         }
       }
     },
+    "Save encrypted archive to Files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save encrypted archive to Files"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gem krypteret arkiv i Arkiver"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardar archivo cifrado en Archivos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer l’archive chiffrée dans Fichiers"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsseltes Archiv in Dateien sichern"
+          }
+        }
+      }
+    },
     "Save version": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -10590,6 +12977,78 @@
         }
       }
     },
+    "Saved voices": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved voices"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gemte stemmer"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Voces guardadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Voix enregistrées"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeicherte Stimmen"
+          }
+        }
+      }
+    },
+    "Saved voices stay on this device. They are not synced or backed up.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved voices stay on this device. They are not synced or backed up."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gemte stemmer bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Las voces guardadas permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les voix enregistrées restent sur cet appareil. Elles ne sont ni synchronisées ni sauvegardées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Gespeicherte Stimmen bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert."
+          }
+        }
+      }
+    },
     "Saving changes…": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -10622,6 +13081,74 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Änderungen werden gespeichert…"
+          }
+        }
+      }
+    },
+    "Scope: all saved typed notes and transcripts in this library, including older notes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scope: all saved typed notes and transcripts in this library, including older notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Omfang: alle gemte noter og transskriptioner i dette bibliotek, også ældre noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ámbito: todas las notas y transcripciones guardadas en esta biblioteca, incluidas las antiguas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Périmètre : toutes les notes et transcriptions enregistrées dans cette bibliothèque, même anciennes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Umfang: alle gespeicherten Notizen und Transkripte dieser Bibliothek, auch ältere."
+          }
+        }
+      }
+    },
+    "Scope: this meeting's saved typed notes and transcript.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scope: this meeting's saved typed notes and transcript."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Omfang: dette mødes gemte noter og transskription."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ámbito: notas y transcripción guardadas de esta reunión."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Périmètre : notes et transcription enregistrées de cette réunion."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Umfang: gespeicherte Notizen und Transkript dieses Meetings."
           }
         }
       }
@@ -10874,6 +13401,114 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Ausgewählte Version"
+          }
+        }
+      }
+    },
+    "Share note": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share note"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Del note"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartir nota"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partager la note"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notiz teilen"
+          }
+        }
+      }
+    },
+    "Sharing canceled. Your original note is preserved.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sharing canceled. Your original note is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deling annulleret. Din oprindelige note er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se canceló el uso compartido. Tu nota original se conserva."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partage annulé. Votre note originale est conservée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teilen abgebrochen. Deine ursprüngliche Notiz bleibt erhalten."
+          }
+        }
+      }
+    },
+    "Sharing failed. Your original note is preserved.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sharing failed. Your original note is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deling mislykkedes. Din oprindelige note er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo compartir. Tu nota original se conserva."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le partage a échoué. Votre note originale est conservée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teilen fehlgeschlagen. Deine ursprüngliche Notiz bleibt erhalten."
           }
         }
       }
@@ -11585,6 +14220,40 @@
         }
       }
     },
+    "Some sources are missing, unsaved or unfinished. This is partial evidence, not a complete count or list.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some sources are missing, unsaved or unfinished. This is partial evidence, not a complete count or list."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nogle kilder mangler, er ikke gemt eller er ufærdige. Dette er delvise kilder, ikke en komplet optælling eller liste."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faltan fuentes o están sin guardar o terminar. Es evidencia parcial, no un recuento ni lista completos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Certaines sources manquent ou ne sont pas enregistrées ou terminées. Ces preuves sont partielles, pas un décompte ni une liste complète."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einige Quellen fehlen, sind ungespeichert oder unvollständig. Dies sind Teilbelege, keine vollständige Zählung oder Liste."
+          }
+        }
+      }
+    },
     "Source": {
       "comment": "App-owned UI. Non-English text is a machine draft pending qualified human review.",
       "extractionState": "manual",
@@ -11622,8 +14291,6 @@
       }
     },
     "Source %lld": {
-      "extractionState": "manual",
-      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -11633,26 +14300,60 @@
         },
         "da": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Kilde %lld"
           }
         },
         "es": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Fuente %lld"
           }
         },
         "fr": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Source %lld"
           }
         },
         "de": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Quelle %lld"
+          }
+        }
+      }
+    },
+    "Source evidence": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source evidence"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kildefund"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evidencia original"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preuves originales"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originalbelege"
           }
         }
       }
@@ -13169,6 +15870,42 @@
         }
       }
     },
+    "That saved voice is unavailable. Notes and recordings are unchanged.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That saved voice is unavailable. Notes and recordings are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Den gemte stemme er utilgængelig. Noter og optagelser er uændrede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esa voz guardada no está disponible. Las notas y grabaciones no cambian."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette voix enregistrée est indisponible. Les notes et enregistrements sont inchangés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese gespeicherte Stimme ist nicht verfügbar. Notizen und Aufnahmen bleiben unverändert."
+          }
+        }
+      }
+    },
     "The 30-day recovery period has ended.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -13201,6 +15938,74 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Die 30-tägige Wiederherstellungsfrist ist abgelaufen."
+          }
+        }
+      }
+    },
+    "The answer could not be linked to original evidence. Try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The answer could not be linked to original evidence. Try again."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svaret kunne ikke knyttes til originale kilder. Prøv igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo vincular la respuesta a evidencia original. Inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La réponse n’a pas pu être reliée aux preuves originales. Réessayez."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Antwort konnte nicht mit Originalbelegen verknüpft werden. Erneut versuchen."
+          }
+        }
+      }
+    },
+    "The available evidence is insufficient to answer this question.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The available evidence is insufficient to answer this question."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De tilgængelige kilder er utilstrækkelige til at besvare spørgsmålet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La evidencia disponible no basta para responder esta pregunta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les preuves disponibles ne suffisent pas à répondre à cette question."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die verfügbaren Belege reichen zur Beantwortung dieser Frage nicht aus."
           }
         }
       }
@@ -13241,6 +16046,42 @@
         }
       }
     },
+    "The document could not be exported completely. Your original note is preserved.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The document could not be exported completely. Your original note is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dokumentet kunne ikke eksporteres fuldstændigt. Din oprindelige note er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo exportar el documento completo. Tu nota original se conserva."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le document n’a pas pu être exporté intégralement. Votre note originale est conservée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Dokument konnte nicht vollständig exportiert werden. Deine ursprüngliche Notiz bleibt erhalten."
+          }
+        }
+      }
+    },
     "The download is verified before use. Completed files are kept for retry after an interruption. Speaker accuracy still requires device qualification.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -13273,6 +16114,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Der Download wird vor der Nutzung geprüft. Fertige Dateien bleiben nach einer Unterbrechung für erneute Versuche erhalten. Die Sprechergenauigkeit erfordert weiterhin Geräteprüfungen."
+          }
+        }
+      }
+    },
+    "The drawing could not be exported. Your original note is preserved.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The drawing could not be exported. Your original note is preserved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tegningen kunne ikke eksporteres. Din oprindelige note er bevaret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo exportar el dibujo. Tu nota original se conserva."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le dessin n’a pas pu être exporté. Votre note originale est conservée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Zeichnung konnte nicht exportiert werden. Deine ursprüngliche Notiz bleibt erhalten."
           }
         }
       }
@@ -13922,6 +16799,40 @@
         }
       }
     },
+    "The sources or library changed. Ask again to use the current content.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sources or library changed. Ask again to use the current content."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kilderne eller biblioteket er ændret. Spørg igen for at bruge aktuelt indhold."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las fuentes o la biblioteca cambiaron. Pregunta de nuevo para usar el contenido actual."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les sources ou la bibliothèque ont changé. Posez à nouveau la question."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quellen oder Bibliothek geändert. Fragen Sie erneut, um aktuelle Inhalte zu verwenden."
+          }
+        }
+      }
+    },
     "The speaker model download failed. Please try again.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -14317,6 +17228,40 @@
         }
       }
     },
+    "This counts notes with selected evidence, not people, tasks or individual events. Review the sources before relying on the result.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This counts notes with selected evidence, not people, tasks or individual events. Review the sources before relying on the result."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dette tæller noter med udvalgte kilder, ikke personer, opgaver eller enkelte begivenheder. Gennemgå kilderne før brug."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuenta notas con evidencia seleccionada, no personas, tareas ni eventos. Revisa las fuentes antes de confiar en el resultado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce nombre compte les notes avec des preuves sélectionnées, pas les personnes, tâches ou événements. Vérifiez les sources avant de vous y fier."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gezählt werden Notizen mit ausgewählten Belegen, keine Personen, Aufgaben oder Ereignisse. Prüfen Sie die Quellen vor Verwendung."
+          }
+        }
+      }
+    },
     "This device does not support Apple's on-device generation model.": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -14349,6 +17294,78 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Dieses Gerät unterstützt Apples lokales Generierungsmodell nicht."
+          }
+        }
+      }
+    },
+    "This does not change names already confirmed in notes.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This does not change names already confirmed in notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Dette ændrer ikke navne, der allerede er bekræftet i noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esto no cambia los nombres ya confirmados en las notas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cela ne modifie pas les noms déjà confirmés dans les notes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Bereits in Notizen bestätigte Namen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "This export is too large. Export fewer sections at a time.": {
+      "comment": "ONY-263 export interface. Machine draft; human language review pending.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This export is too large. Export fewer sections at a time."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Denne eksport er for stor. Eksportér færre afsnit ad gangen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta exportación es demasiado grande. Exporta menos secciones a la vez."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cet export est trop volumineux. Exportez moins de sections à la fois."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieser Export ist zu groß. Exportiere weniger Abschnitte auf einmal."
           }
         }
       }
@@ -14889,6 +17906,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Diese Quellenversion ist nicht verfügbar. Die ursprüngliche Notiz wurde nicht geändert."
+          }
+        }
+      }
+    },
+    "This voice is remembered on this device only.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This voice is remembered on this device only."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Denne stemme huskes kun på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Esta voz se recuerda solo en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Cette voix est mémorisée uniquement sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Diese Stimme wird nur auf diesem Gerät gespeichert."
           }
         }
       }
@@ -15465,6 +18518,40 @@
         }
       }
     },
+    "Typed notes and transcript may disagree. Both are shown with their source labels; the app does not resolve conflicting claims.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typed notes and transcript may disagree. Both are shown with their source labels; the app does not resolve conflicting claims."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noter og transskription kan være uenige. Begge vises med kildetype; appen afgør ikke modstridende påstande."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las notas y la transcripción pueden discrepar. Se muestran con etiquetas de fuente; la app no resuelve afirmaciones contradictorias."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les notes et la transcription peuvent diverger. Les deux affichent leur type de source ; l’app ne tranche pas les contradictions."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notizen und Transkript können sich widersprechen. Beide zeigen ihren Quellentyp; die App löst widersprüchliche Aussagen nicht auf."
+          }
+        }
+      }
+    },
     "Unassigned speaker": {
       "extractionState": "manual",
       "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
@@ -15497,6 +18584,42 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Nicht zugeordneter Sprecher"
+          }
+        }
+      }
+    },
+    "Uncertain speaker": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uncertain speaker"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usikker taler"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Orador no identificado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Locuteur incertain"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Unsichere Stimme"
           }
         }
       }
@@ -15753,6 +18876,40 @@
         }
       }
     },
+    "Use at least 12 characters. Keep your password safe; it cannot be recovered.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use at least 12 characters. Keep your password safe; it cannot be recovered."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brug mindst 12 tegn. Opbevar adgangskoden sikkert; den kan ikke gendannes."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa al menos 12 caracteres. Guarda la contraseña; no se puede recuperar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisez au moins 12 caractères. Conservez votre mot de passe ; il ne peut pas être récupéré."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verwende mindestens 12 Zeichen. Bewahre dein Passwort sicher auf; es kann nicht wiederhergestellt werden."
+          }
+        }
+      }
+    },
     "Use cloud library %@": {
       "extractionState": "manual",
       "comment": "App-owned cloud UI. Machine draft; language-qualified review pending.",
@@ -15861,6 +19018,42 @@
         }
       }
     },
+    "Use suggested name": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use suggested name"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Brug foreslået navn"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Usar nombre sugerido"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Utiliser le nom suggéré"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Vorgeschlagenen Namen verwenden"
+          }
+        }
+      }
+    },
     "User correction": {
       "extractionState": "manual",
       "localizations": {
@@ -15928,6 +19121,112 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Zu prüfende Versionen"
+          }
+        }
+      }
+    },
+    "Voice profiles stay on this device. They are not synced or backed up.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice profiles stay on this device. They are not synced or backed up."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stemmeprofiler bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los perfiles de voz permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les profils vocaux restent sur cet appareil. Ils ne sont ni synchronisés ni sauvegardés."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stimmprofile bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert."
+          }
+        }
+      }
+    },
+    "Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices.": {
+      "extractionState": "manual",
+      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stemmeprofiler bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke. Optagelse fungerer uden gemte stemmer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Los perfiles de voz permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad. Se puede grabar sin voces guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Les profils vocaux restent sur cet appareil. Ils ne sont ni synchronisés ni sauvegardés. L’enregistrement fonctionne sans voix enregistrées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "needs_review",
+            "value": "Stimmprofile bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert. Die Aufnahme funktioniert ohne gespeicherte Stimmen."
+          }
+        }
+      }
+    },
+    "Voice recognition model": {
+      "localizations": {
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model til stemmegenkendelse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modell zur Stimmerkennung"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice recognition model"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelo de reconocimiento de voz"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle de reconnaissance vocale"
           }
         }
       }
@@ -16432,892 +19731,6 @@
           "stringUnit": {
             "state": "needs_review",
             "value": "Zoom %lld%%"
-          }
-        }
-      }
-    },
-    "Remember this voice": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remember this voice"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Husk denne stemme"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Recordar esta voz"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Mémoriser cette voix"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Diese Stimme merken"
-          }
-        }
-      }
-    },
-    "Remove saved voice": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove saved voice"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Fjern gemt stemme"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Eliminar voz guardada"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Supprimer la voix enregistrée"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Gespeicherte Stimme entfernen"
-          }
-        }
-      }
-    },
-    "Remove voice from this device": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove voice from this device"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Fjern stemmen fra denne enhed"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Quitar la voz de este dispositivo"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Retirer la voix de cet appareil"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Stimme von diesem Gerät entfernen"
-          }
-        }
-      }
-    },
-    "Saved voices": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saved voices"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Gemte stemmer"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Voces guardadas"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Voix enregistrées"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Gespeicherte Stimmen"
-          }
-        }
-      }
-    },
-    "Known participants": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Known participants"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Kendte deltagere"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Participantes conocidos"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Participants connus"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Bekannte Teilnehmende"
-          }
-        }
-      }
-    },
-    "No saved voices yet.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No saved voices yet."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Ingen gemte stemmer endnu."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Aún no hay voces guardadas."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Aucune voix enregistrée pour le moment."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Noch keine gespeicherten Stimmen."
-          }
-        }
-      }
-    },
-    "Voice profiles stay on this device. They are not synced or backed up.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Voice profiles stay on this device. They are not synced or backed up."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Stemmeprofiler bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Los perfiles de voz permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Les profils vocaux restent sur cet appareil. Ils ne sont ni synchronisés ni sauvegardés."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Stimmprofile bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert."
-          }
-        }
-      }
-    },
-    "Recording works without saved voices.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recording works without saved voices."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Optagelse fungerer uden gemte stemmer."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Se puede grabar sin voces guardadas."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "L’enregistrement fonctionne sans voix enregistrées."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Die Aufnahme funktioniert ohne gespeicherte Stimmen."
-          }
-        }
-      }
-    },
-    "Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Voice profiles stay on this device. They are not synced or backed up. Recording works without saved voices."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Stemmeprofiler bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke. Optagelse fungerer uden gemte stemmer."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Los perfiles de voz permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad. Se puede grabar sin voces guardadas."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Les profils vocaux restent sur cet appareil. Ils ne sont ni synchronisés ni sauvegardés. L’enregistrement fonctionne sans voix enregistrées."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Stimmprofile bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert. Die Aufnahme funktioniert ohne gespeicherte Stimmen."
-          }
-        }
-      }
-    },
-    "Use suggested name": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use suggested name"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Brug foreslået navn"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Usar nombre sugerido"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Utiliser le nom suggéré"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Vorgeschlagenen Namen verwenden"
-          }
-        }
-      }
-    },
-    "Remove this saved voice from this device?": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove this saved voice from this device?"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Fjern denne gemte stemme fra denne enhed?"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "¿Quitar esta voz guardada de este dispositivo?"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Retirer cette voix enregistrée de cet appareil ?"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Diese gespeicherte Stimme von diesem Gerät entfernen?"
-          }
-        }
-      }
-    },
-    "This does not change names already confirmed in notes.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This does not change names already confirmed in notes."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Dette ændrer ikke navne, der allerede er bekræftet i noter."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Esto no cambia los nombres ya confirmados en las notas."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Cela ne modifie pas les noms déjà confirmés dans les notes."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Bereits in Notizen bestätigte Namen bleiben unverändert."
-          }
-        }
-      }
-    },
-    "Uncertain speaker": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uncertain speaker"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Usikker taler"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Orador no identificado"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Locuteur incertain"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Unsichere Stimme"
-          }
-        }
-      }
-    },
-    "Could not save this voice. Notes and recordings are unchanged.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Could not save this voice. Notes and recordings are unchanged."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Denne stemme kunne ikke gemmes. Noter og optagelser er uændrede."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "No se pudo guardar esta voz. Las notas y grabaciones no cambian."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Impossible d’enregistrer cette voix. Les notes et enregistrements sont inchangés."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Diese Stimme konnte nicht gespeichert werden. Notizen und Aufnahmen bleiben unverändert."
-          }
-        }
-      }
-    },
-    "That saved voice is unavailable. Notes and recordings are unchanged.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "That saved voice is unavailable. Notes and recordings are unchanged."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Den gemte stemme er utilgængelig. Noter og optagelser er uændrede."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Esa voz guardada no está disponible. Las notas y grabaciones no cambian."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Cette voix enregistrée est indisponible. Les notes et enregistrements sont inchangés."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Diese gespeicherte Stimme ist nicht verfügbar. Notizen und Aufnahmen bleiben unverändert."
-          }
-        }
-      }
-    },
-    "Need a clear finalized solo stretch before remembering this voice.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Need a clear finalized solo stretch before remembering this voice."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Der skal være et tydeligt, færdigt soloafsnit, før denne stemme kan huskes."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Hace falta un tramo final en solitario y claro antes de recordar esta voz."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Il faut un passage solo finalisé et net avant de mémoriser cette voix."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Es braucht eine klare, abgeschlossene Solo-Passage, bevor diese Stimme gespeichert werden kann."
-          }
-        }
-      }
-    },
-    "Saved voices stay on this device. They are not synced or backed up.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saved voices stay on this device. They are not synced or backed up."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Gemte stemmer bliver på denne enhed. De synkroniseres eller sikkerhedskopieres ikke."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Las voces guardadas permanecen en este dispositivo. No se sincronizan ni se incluyen en copias de seguridad."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Les voix enregistrées restent sur cet appareil. Elles ne sont ni synchronisées ni sauvegardées."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Gespeicherte Stimmen bleiben auf diesem Gerät. Sie werden nicht synchronisiert oder gesichert."
-          }
-        }
-      }
-    },
-    "This voice is remembered on this device only.": {
-      "extractionState": "manual",
-      "comment": "App-owned UI. Non-English translations are machine drafts; qualified human review pending.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This voice is remembered on this device only."
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Denne stemme huskes kun på denne enhed."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Esta voz se recuerda solo en este dispositivo."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Cette voix est mémorisée uniquement sur cet appareil."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "needs_review",
-            "value": "Diese Stimme wird nur auf diesem Gerät gespeichert."
-          }
-        }
-      }
-    },
-    "Cancel voice model download": {
-      "localizations": {
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Annuller download af stemmemodel"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download des Stimmmodells abbrechen"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cancel voice model download"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cancelar descarga del modelo de voz"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Annuler le téléchargement du modèle vocal"
-          }
-        }
-      }
-    },
-    "Download a separate 30 MB model to remember voices. Accuracy needs testing on your device.": {
-      "localizations": {
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download en separat model på 30 MB for at huske stemmer. Nøjagtigheden skal testes på din enhed."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lade ein separates 30-MB-Modell herunter, um Stimmen zu speichern. Die Genauigkeit muss auf deinem Gerät getestet werden."
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download a separate 30 MB model to remember voices. Accuracy needs testing on your device."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Descarga un modelo separado de 30 MB para recordar voces. La precisión debe probarse en tu dispositivo."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Téléchargez un modèle distinct de 30 Mo pour mémoriser les voix. La précision doit être testée sur votre appareil."
-          }
-        }
-      }
-    },
-    "Download voice recognition model": {
-      "localizations": {
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download model til stemmegenkendelse"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modell zur Stimmerkennung herunterladen"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download voice recognition model"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Descargar modelo de reconocimiento de voz"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Télécharger le modèle de reconnaissance vocale"
-          }
-        }
-      }
-    },
-    "Remove voice recognition model": {
-      "localizations": {
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fjern model til stemmegenkendelse"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modell zur Stimmerkennung entfernen"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove voice recognition model"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eliminar modelo de reconocimiento de voz"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Supprimer le modèle de reconnaissance vocale"
-          }
-        }
-      }
-    },
-    "Voice recognition model": {
-      "localizations": {
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Model til stemmegenkendelse"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modell zur Stimmerkennung"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Voice recognition model"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modelo de reconocimiento de voz"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modèle de reconnaissance vocale"
-          }
-        }
-      }
-    },
-    "Possible voice match: %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Possible voice match: %@"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Muligt stemmematch: %@"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Posible coincidencia de voz: %@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Correspondance vocale possible : %@"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Möglicher Stimmabgleich: %@"
-          }
-        }
-      }
-    },
-    "Confirm suggested name": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confirm suggested name"
-          }
-        },
-        "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bekræft foreslået navn"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confirmar nombre sugerido"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Confirmer le nom suggéré"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vorgeschlagenen Namen bestätigen"
           }
         }
       }
