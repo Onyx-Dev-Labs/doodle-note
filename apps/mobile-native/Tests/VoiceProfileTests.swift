@@ -166,3 +166,54 @@ import XCTest
         XCTAssertTrue(VoiceProfileCatalog().profiles.isEmpty)
     }
 }
+
+@MainActor final class VoiceEmbeddingSafetyTests: XCTestCase {
+    func testRejectsLegacyEnergyVectorsAndNonfiniteInput() {
+        XCTAssertNil(VoicePrint.normalize([Float](repeating: 1, count: 32)))
+        XCTAssertNil(VoicePrint.normalize([Float](repeating: .nan, count: 256)))
+        XCTAssertNil(VoicePrint.normalize([Float](repeating: 0, count: 256)))
+    }
+    func testAnyOverlapCannotEnrollAnotherVoice() {
+        let session = UUID()
+        var annotations = SpeakerAnnotations()
+        let solo = SpeakerTurn(sessionID: session, slot: 0, start: 0, end: 10, isFinal: true)
+        annotations.replace(sessionID: session, with: [solo,
+            SpeakerTurn(sessionID: session, slot: 1, start: 4, end: 4.1, isFinal: true)])
+        XCTAssertFalse(SpeakerEnrollment.canEnroll(key: solo.key, annotations: annotations))
+    }
+    func testPinnedVoiceManifestUsesRealEmbeddingModel() throws {
+        let url = try XCTUnwrap(Bundle.main.url(forResource: "voice-manifest", withExtension: "json"))
+        let manifest = try JSONDecoder().decode(SpeakerModelManifest.self, from: Data(contentsOf: url))
+        XCTAssertEqual(manifest.revision, "1ed7a662fdc7109e36d822db793ee6eebdaf8594")
+        XCTAssertEqual(manifest.package, "wespeaker.mlmodelc")
+        XCTAssertEqual(manifest.files.reduce(0) { $0 + $1.size }, 29_408_036)
+    }
+}
+
+@MainActor final class VoiceEmbeddingInferenceTests: XCTestCase {
+    func testPinnedModelExtractsFiniteEmbeddingWhenProvided() async throws {
+        guard let path = ProcessInfo.processInfo.environment["DOODLENOTE_VOICE_MODEL_ROOT"] else {
+            throw XCTSkip("Opt-in model interface test; no human voice accuracy claim.")
+        }
+        let manifestURL = try XCTUnwrap(Bundle.main.url(forResource: "voice-manifest", withExtension: "json"))
+        let manifest = try JSONDecoder().decode(SpeakerModelManifest.self, from: Data(contentsOf: manifestURL))
+        let store = SpeakerModelStore(root: URL(fileURLWithPath: path), manifest: manifest)
+        let worker = VoiceEmbeddingWorker(store: store)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("tone.caf")
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000))
+        buffer.frameLength = 48_000
+        for i in 0..<48_000 { buffer.floatChannelData![0][i] = Float(sin(Double(i) * 440 * 2 * .pi / 16_000)) * 0.2 }
+        do { let file = try AVAudioFile(forWriting: url, settings: format.settings); try file.write(from: buffer) }
+        let plan = try AudioTimeline.read(directory: root, origin: 0)
+        let session = UUID()
+        let turn = SpeakerTurn(sessionID: session, slot: 0, start: 0, end: 3, isFinal: true)
+        var annotations = SpeakerAnnotations(); annotations.replace(sessionID: session, with: [turn])
+        let embedding = try await worker.probe(key: turn.key, annotations: annotations, plan: plan)
+        XCTAssertEqual(embedding?.count, 256)
+        XCTAssertTrue(embedding?.allSatisfy({ $0.isFinite }) == true)
+    }
+}

@@ -72,6 +72,18 @@ struct ModelSettingsView: View {
                     }
                     Text("The download is verified before use. Completed files are kept for retry after an interruption. Speaker accuracy still requires device qualification.").font(.footnote)
                 }.disabled(captureActive || recording.speakers.state == .preparing)
+                Section("Voice recognition model") {
+                    Text(L10n.key(recording.voiceEmbedding.ready ? "Ready" : "Not available"))
+                    Text("Download a separate 30 MB model to remember voices. Accuracy needs testing on your device.")
+                    if recording.voiceEmbedding.downloading {
+                        ProgressView(value: recording.voiceEmbedding.progress)
+                        Button("Cancel voice model download") { recording.voiceEmbedding.cancel() }
+                    } else {
+                        Button("Download voice recognition model") { recording.voiceEmbedding.download() }
+                        Button("Remove voice recognition model", role: .destructive) { Task { await recording.voiceEmbedding.remove() } }
+                    }
+                    if let problem = recording.voiceEmbedding.problem { Text(L10n.message(problem)) }
+                }.disabled(captureActive)
                 Section("Saved voices") {
                     Text(L10n.message(recording.voices.detail))
                     if recording.voices.profiles.isEmpty {
@@ -104,6 +116,7 @@ struct ModelSettingsView: View {
                 await recording.speech.check(language)
                 await recording.speakers.check()
                 await recording.voices.refresh()
+                await recording.voiceEmbedding.check()
                 generation = await engine.readiness(language: language)
             }
             .confirmationDialog("Remove downloaded speaker assets?", isPresented: $confirmingRemoval, titleVisibility: .visible) {

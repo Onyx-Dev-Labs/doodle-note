@@ -450,15 +450,16 @@ struct NoteEditor: View {
            let slot = annotations.turns.first(where: { $0.key == key })?.slot {
             embedding = VoicePrint.normalize((0..<VoiceMatcher.embeddingDimension).map { $0 == slot % VoiceMatcher.embeddingDimension ? 1 : 0 })
         } else {
-            embedding = rememberEmbedding(key: key, annotations: annotations)
+            embedding = await rememberEmbedding(key: key, annotations: annotations)
         }
         #else
-        embedding = rememberEmbedding(key: key, annotations: annotations)
+        embedding = await rememberEmbedding(key: key, annotations: annotations)
         #endif
         guard let embedding else {
-            recording.voices.problem = VoiceProfileError.enrollment.localizedDescription
+            recording.voices.problem = recording.voiceEmbedding.ready ? VoiceProfileError.enrollment.localizedDescription : L10n.text("Download voice recognition model")
             return
         }
+        guard canEdit, library.note(id)?.speakerAnnotations == annotations else { return }
         do {
             _ = try await recording.voices.remember(name: name, embedding: embedding)
         } catch {
@@ -466,9 +467,9 @@ struct NoteEditor: View {
         }
     }
 
-    private func rememberEmbedding(key: String, annotations: SpeakerAnnotations) -> [Float]? {
+    private func rememberEmbedding(key: String, annotations: SpeakerAnnotations) async -> [Float]? {
         guard SpeakerEnrollment.canEnroll(key: key, annotations: annotations),
               let disk = library.disk, let plan = try? disk.playbackTimeline(for: id) else { return nil }
-        return SpeakerIdentity.probe(for: key, annotations: annotations, plan: plan)
+        return await recording.voiceEmbedding.probe(key: key, annotations: annotations, plan: plan)
     }
 }

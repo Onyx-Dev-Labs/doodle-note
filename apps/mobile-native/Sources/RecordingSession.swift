@@ -13,6 +13,9 @@ final class RecordingSession {
     let speech = LocalSpeech()
     let speakers = StreamingSpeakers()
     let voices: VoiceProfiles
+    let voiceEmbedding = VoiceEmbedding()
+    private var identityTask: Task<Void, Never>?
+    private var identityChecked: [String: TimeInterval] = [:]
     private var hardware: (any CaptureHardware)?
     private var writer: AudioChunkWriter?
     private var captureFailed = false
@@ -73,7 +76,7 @@ final class RecordingSession {
         captureFailed = false
         lastReport = nil
         problem = nil
-        Task { await voices.refresh() }
+        Task { await voices.refresh(); await voiceEmbedding.check() }
         defer { preparingNoteID = nil; busy = false }
         guard await recordPermission() else {
             if !canceled { problem = CaptureError.microphone.localizedDescription }
@@ -230,13 +233,36 @@ final class RecordingSession {
         library.update(id) { note in
             var annotations = note.speakerAnnotations ?? SpeakerAnnotations()
             annotations.replace(sessionID: sessionID, with: turns)
-            if let disk = library.disk, let plan = try? disk.playbackTimeline(for: id) {
-                let snapshot = annotations
-                SpeakerIdentity.reconcile(&annotations, selected: voices.selectedProfiles) { key in
-                    SpeakerIdentity.probe(for: key, annotations: snapshot, plan: plan)
+            note.speakerAnnotations = annotations
+        }
+        matchVoices(id: id, library: library)
+    }
+
+    private func matchVoices(id: UUID, library: NoteLibrary) {
+        guard identityTask == nil, voiceEmbedding.ready, !voices.selectedProfiles.isEmpty,
+              let annotations = library.note(id)?.speakerAnnotations,
+              let plan = try? library.disk?.playbackTimeline(for: id) else { return }
+        let selected = voices.selectedProfiles
+        let eligible = annotations.speakerKeys.filter { key in
+            annotations.confirmedName(for: key) == nil &&
+            SpeakerEnrollment.soloFinalDuration(for: key, annotations: annotations) >= max(2, (identityChecked[key] ?? -8) + 10)
+        }
+        guard !eligible.isEmpty else { return }
+        identityTask = Task {
+            defer { identityTask = nil }
+            for key in eligible {
+                let duration = SpeakerEnrollment.soloFinalDuration(for: key, annotations: annotations)
+                guard let probe = await voiceEmbedding.probe(key: key, annotations: annotations, plan: plan) else { continue }
+                guard !Task.isCancelled, voices.selectedProfiles == selected,
+                      let current = library.note(id), current.metadata?.cloudReadOnly != true,
+                      current.speakerAnnotations?.turns.filter({ $0.key == key }) == annotations.turns.filter({ $0.key == key }) else { return }
+                identityChecked[key] = duration
+                library.update(id) { note in
+                    guard var latest = note.speakerAnnotations, latest.confirmedName(for: key) == nil else { return }
+                    SpeakerIdentity.reconcile(&latest, selected: selected) { $0 == key ? probe : nil }
+                    note.speakerAnnotations = latest
                 }
             }
-            note.speakerAnnotations = annotations
         }
     }
 

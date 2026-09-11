@@ -20,12 +20,4 @@ enum SpeakerIdentity {
         }
     }
 
-    static func probe(for key: String, annotations: SpeakerAnnotations, plan: AudioTimeline.Plan) -> [Float]? {
-        let intervals = SpeakerEnrollment.soloFinalIntervals(for: key, annotations: annotations)
-        guard SpeakerEnrollment.soloFinalDuration(for: key, annotations: annotations) >= VoiceMatcher.minSoloSeconds else {
-            return nil
-        }
-        guard let samples = try? VoicePrint.samples(plan: plan, intervals: intervals) else { return nil }
-        return VoicePrint.embedding(samples)
-    }
 }

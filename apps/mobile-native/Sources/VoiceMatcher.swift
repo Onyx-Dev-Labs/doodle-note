@@ -7,7 +7,7 @@ enum VoiceMatcher {
     static let acceptCosine: Float = 0.82
     static let minMargin: Float = 0.10
     static let minSoloSeconds: TimeInterval = 2
-    static let embeddingDimension = 32
+    static let embeddingDimension = 256
 
     enum Decision: Equatable, Sendable {
         case identified(UUID)
@@ -16,7 +16,7 @@ enum VoiceMatcher {
     }
 
     static func cosine(_ left: [Float], _ right: [Float]) -> Float? {
-        guard left.count == right.count, left.count == embeddingDimension else { return nil }
+        guard left.count == right.count, left.count == embeddingDimension, left.allSatisfy({ $0.isFinite }), right.allSatisfy({ $0.isFinite }) else { return nil }
         var dot: Float = 0, leftNorm: Float = 0, rightNorm: Float = 0
         for index in left.indices {
             dot += left[index] * right[index]
@@ -44,35 +44,8 @@ enum VoiceMatcher {
 }
 
 enum VoicePrint {
-    static func embedding(_ samples: [Float]) -> [Float]? {
-        let frame = 512
-        guard samples.count >= frame else { return nil }
-        var bins = [Float](repeating: 0, count: VoiceMatcher.embeddingDimension)
-        var offset = 0
-        var frames = 0
-        while offset + frame <= samples.count {
-            for bin in 0..<VoiceMatcher.embeddingDimension {
-                let start = bin * frame / VoiceMatcher.embeddingDimension
-                let end = (bin + 1) * frame / VoiceMatcher.embeddingDimension
-                var energy: Float = 0
-                for index in start..<end {
-                    let sample = samples[offset + index]
-                    energy += sample * sample
-                }
-                bins[bin] += energy
-            }
-            offset += frame / 2
-            frames += 1
-        }
-        guard frames > 0 else { return nil }
-        let total = bins.reduce(0, +)
-        guard total > 1e-6 else { return nil }
-        let logs = bins.map { log(1 + $0 / total) }
-        return normalize(logs)
-    }
-
     static func normalize(_ values: [Float]) -> [Float]? {
-        guard values.count == VoiceMatcher.embeddingDimension else { return nil }
+        guard values.count == VoiceMatcher.embeddingDimension, values.allSatisfy({ $0.isFinite }) else { return nil }
         let norm = sqrt(values.reduce(0) { $0 + $1 * $1 })
         guard norm > 1e-8 else { return nil }
         return values.map { $0 / norm }
@@ -81,17 +54,21 @@ enum VoicePrint {
     static func samples(plan: AudioTimeline.Plan, intervals: [(TimeInterval, TimeInterval)]) throws -> [Float] {
         var collected: [Float] = []
         for (start, end) in intervals where end > start {
+            try Task.checkCancellation()
+            if collected.count >= 160_000 { break }
             var cursor = start
             while cursor < end - 0.000_5 {
                 let (index, offset) = try plan.resolve(cursor)
                 let segment = plan.segments[index]
                 guard segment.available else { throw AudioTimeline.Failure.unavailable }
-                let available = min(end, segment.end) - cursor
+                let available = min(min(end, segment.end) - cursor, Double(160_000 - collected.count) / 16_000)
+                guard available > 0.000_5 else { break }
+                try Task.checkCancellation()
                 collected += try read(segment.url, from: offset, duration: available)
                 cursor += available
             }
         }
-        return collected
+        return Array(collected.prefix(160_000))
     }
 
     private static func read(_ url: URL, from offset: TimeInterval, duration: TimeInterval) throws -> [Float] {
@@ -122,7 +99,7 @@ enum SpeakerEnrollment {
             let coverage = SpeakerAttribution.coverage(turns: others, start: turn.start, end: turn.end)
             let overlap = coverage.values.reduce(0, +)
             let duration = turn.end - turn.start
-            guard duration > 0, overlap / duration < SpeakerAttribution.overlapFloor else { continue }
+            guard duration > 0, overlap == 0 else { continue }
             result.append((turn.start, turn.end))
         }
         return result
