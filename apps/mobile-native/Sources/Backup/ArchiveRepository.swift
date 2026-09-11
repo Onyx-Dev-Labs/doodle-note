@@ -6,16 +6,19 @@ extension LibraryRepository {
         try authorize(libraryID, identities: identities)
         // Read without startup migration/recovery: exporting must never mutate its source.
         let unpublished = try disk.unpublishedArchiveIDs()
+        var sourceMetadataBytes = 0, sourceNoteCount = 0
         let notes = try FileManager.default.contentsOfDirectory(at: disk.root, includingPropertiesForKeys: nil)
             .filter { UUID(uuidString: $0.lastPathComponent).map { !unpublished.contains($0) } == true }
             .compactMap { directory -> NoteRecord? in
+                try ArchiveSourcePaths.directory(directory, root: disk.root)
                 let file = directory.appendingPathComponent("note.json")
                 if !FileManager.default.fileExists(atPath: file.path) { return nil } // Purged tombstone.
-                guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max) <= EncryptedArchive.manifestLimit else {
-                    throw EncryptedArchive.Failure.limits
-                }
+                let size = try ArchiveSourcePaths.file(file, root: disk.root, maximum: EncryptedArchive.manifestLimit)
                 let note = try JSONDecoder().decode(NoteRecord.self, from: Data(contentsOf: file))
                 guard note.schemaVersion == 2, note.id.uuidString == directory.lastPathComponent else { throw EncryptedArchive.Failure.unsupported }
+                guard note.metadata?.libraryID == libraryID else { return nil }
+                guard sourceNoteCount < 1000, sourceMetadataBytes <= EncryptedArchive.manifestLimit - size else { throw EncryptedArchive.Failure.limits }
+                sourceNoteCount += 1; sourceMetadataBytes += size
                 return note
             }
         var documents: [EncryptedArchive.Document] = [], entries: [EncryptedArchive.Entry] = []
@@ -26,11 +29,21 @@ extension LibraryRepository {
             guard note.captureState != .recording else { throw EncryptedArchive.Failure.busy }
             let directory = disk.directory(for: note.id)
             let history = directory.appendingPathComponent("revisions")
-            let revisions = try FileManager.default.contentsOfDirectory(at: history, includingPropertiesForKeys: nil)
-                .filter { $0.pathExtension == "json" }.map { try JSONDecoder().decode(NoteRevision.self, from: Data(contentsOf: $0)) }
+            try ArchiveSourcePaths.directory(history, root: disk.root)
+            let revisionFiles = try FileManager.default.contentsOfDirectory(at: history, includingPropertiesForKeys: nil)
+            guard revisionFiles.count <= 100_000 else { throw EncryptedArchive.Failure.limits }
+            let revisions = try revisionFiles.filter { $0.pathExtension == "json" }.map { file in
+                let size = try ArchiveSourcePaths.file(file, root: disk.root, maximum: EncryptedArchive.manifestLimit)
+                guard sourceMetadataBytes <= EncryptedArchive.manifestLimit - size else { throw EncryptedArchive.Failure.limits }
+                sourceMetadataBytes += size
+                let revision = try JSONDecoder().decode(NoteRevision.self, from: Data(contentsOf: file))
+                guard revision.id.uuidString + ".json" == file.lastPathComponent else { throw EncryptedArchive.Failure.invalid }
+                return revision
+            }
             documents.append(.init(note: note, revisions: revisions, lifecycle: lifecycle))
             let audio = directory.appendingPathComponent("audio")
             if FileManager.default.fileExists(atPath: audio.path) {
+                try ArchiveSourcePaths.directory(audio, root: disk.root)
                 let values: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
                 for file in try FileManager.default.contentsOfDirectory(at: audio, includingPropertiesForKeys: Array(values)).sorted(by: { $0.path < $1.path }) {
                     let properties = try file.resourceValues(forKeys: values)
@@ -114,7 +127,7 @@ extension LibraryRepository {
                 let file = stage.directory(for: id).appendingPathComponent(entry.path)
                 try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true,
                                        attributes: [.protectionKey: FileProtectionType.complete])
-                guard FileManager.default.createFile(atPath: file.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete]) else {
+                guard !FileManager.default.fileExists(atPath: file.path), FileManager.default.createFile(atPath: file.path, contents: nil, attributes: [.protectionKey: FileProtectionType.complete]) else {
                     throw EncryptedArchive.Failure.invalid
                 }
                 handle = try FileHandle(forWritingTo: file); handles[key] = handle
@@ -181,5 +194,27 @@ extension NoteDiskStore {
         }
         let stage = root.appendingPathComponent(".archive-staging")
         if FileManager.default.fileExists(atPath: stage.path) { try FileManager.default.removeItem(at: stage) }
+    }
+}
+
+private enum ArchiveSourcePaths {
+    static func contained(_ url: URL, root: URL) throws {
+        let prefix = root.standardizedFileURL.path + "/"
+        guard url.standardizedFileURL.path.hasPrefix(prefix) else { throw EncryptedArchive.Failure.invalid }
+        let relative = String(url.standardizedFileURL.path.dropFirst(prefix.count))
+        let expected = root.resolvingSymlinksInPath().appendingPathComponent(relative).standardizedFileURL.path
+        guard url.resolvingSymlinksInPath().path == expected else { throw EncryptedArchive.Failure.invalid }
+    }
+    static func directory(_ url: URL, root: URL) throws {
+        try contained(url, root: root)
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values.isDirectory == true, values.isSymbolicLink != true else { throw EncryptedArchive.Failure.invalid }
+    }
+    static func file(_ url: URL, root: URL, maximum: Int) throws -> Int {
+        try contained(url, root: root)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, let size = values.fileSize else { throw EncryptedArchive.Failure.invalid }
+        guard size <= maximum else { throw EncryptedArchive.Failure.limits }
+        return size
     }
 }

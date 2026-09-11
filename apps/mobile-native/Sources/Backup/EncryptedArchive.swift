@@ -57,7 +57,7 @@ enum EncryptedArchive {
         var paths = Set<String>(), total: Int64 = 0
         for entry in manifest.entries {
             guard ids.contains(entry.noteID), validPath(entry.path), entry.size >= 0,
-                  entry.size <= totalLimit, paths.insert(entry.noteID.uuidString + "/" + entry.path).inserted else { throw Failure.invalid }
+                  entry.size <= totalLimit, paths.insert(entry.noteID.uuidString + "/" + entry.path.lowercased()).inserted else { throw Failure.invalid }
             guard total <= totalLimit - entry.size else { throw Failure.limits }; total += entry.size
         }
         for document in manifest.documents {

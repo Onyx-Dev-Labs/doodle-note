@@ -54,20 +54,29 @@ struct ArchiveView: View {
                 clearExport()
             }
         }
+        .onChange(of: library.authenticationGeneration) { _, _ in invalidateExport() }
+        .onChange(of: library.selectedLibraryID) { _, _ in invalidateExport() }
         .onDisappear { if task == nil { clearExport(); password = ""; confirmation = "" } }
     }
 
+    private func invalidateExport() { task?.cancel(); clearExport(); password = ""; confirmation = "" }
     private func clearExport() { if let exporting { try? FileManager.default.removeItem(at: exporting) }; exporting = nil }
     private func export() {
         let secret = password, trash = includeTrash, scope = library.selectedLibraryID, identities = library.identities
+        let authentication = library.authenticationGeneration
         failed = false; status = nil
         task = Task {
             defer { task = nil; password = ""; confirmation = "" }
             do {
                 guard await library.flush(), let repository = library.cloudRepository else { throw EncryptedArchive.Failure.busy }
+                guard !Task.isCancelled, library.authenticationGeneration == authentication, library.selectedLibraryID == scope else {
+                    throw CancellationError()
+                }
                 let url = URL.temporaryDirectory.appendingPathComponent("DoodleNote-\(UUID().uuidString).doodlenote")
                 try await repository.exportArchive(libraryID: scope, identities: identities, includeTrash: trash, password: secret, to: url)
-                if Task.isCancelled { try? FileManager.default.removeItem(at: url); throw CancellationError() }
+                if Task.isCancelled || library.authenticationGeneration != authentication || library.selectedLibraryID != scope {
+                    try? FileManager.default.removeItem(at: url); throw CancellationError()
+                }
                 exporting = url
             } catch { report(error) }
         }

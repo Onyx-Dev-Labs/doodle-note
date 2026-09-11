@@ -84,10 +84,40 @@ final class ArchiveTests: XCTestCase, @unchecked Sendable {
         let doc = EncryptedArchive.Document(note: note, revisions: [NoteRevision(note)], lifecycle: lifecycle)
         var manifest = EncryptedArchive.Manifest(documents: [doc], entries: [.init(noteID: note.id, path: "audio/foo.caf", size: EncryptedArchive.totalLimit + 1)])
         XCTAssertThrowsError(try EncryptedArchive.validate(manifest))
+        manifest = .init(documents: [doc], entries: [
+            .init(noteID: note.id, path: "audio/Foo.caf", size: 0),
+            .init(noteID: note.id, path: "audio/foo.caf", size: 0)])
+        XCTAssertThrowsError(try EncryptedArchive.validate(manifest))
         manifest = .init(documents: [doc], entries: [])
         manifest.version = 99
         XCTAssertThrowsError(try EncryptedArchive.validate(manifest))
         XCTAssertThrowsError(try EncryptedArchive.derive(password: "short", salt: Data(repeating: 0, count: 16)))
+    }
+    func testExportRejectsSymlinkAncestorsAndOversizeHistoryBeforeReading() async throws {
+        for component in ["audio", "revisions", "note"] {
+            let disk = try NoteDiskStore(root: directory()), note = try fixture(disk)
+            _ = try disk.audioDirectory(for: note.id)
+            let target = component == "note" ? disk.directory(for: note.id) : disk.directory(for: note.id).appendingPathComponent(component)
+            let outside = try directory().appendingPathComponent("outside")
+            try FileManager.default.moveItem(at: target, to: outside)
+            try FileManager.default.createSymbolicLink(at: target, withDestinationURL: outside)
+            let output = try directory().appendingPathComponent("rejected.doodlenote")
+            do {
+                try await LibraryRepository(disk: disk).exportArchive(libraryID: LibraryRecord.localID, identities: [], includeTrash: true, password: password, to: output)
+                XCTFail("Must reject symlink ancestor")
+            } catch {}
+            XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+        }
+        let disk = try NoteDiskStore(root: directory()), note = try fixture(disk)
+        let huge = disk.directory(for: note.id).appendingPathComponent("revisions/" + UUID().uuidString + ".json")
+        FileManager.default.createFile(atPath: huge.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: huge)
+        try handle.truncate(atOffset: UInt64(EncryptedArchive.manifestLimit + 1)); try handle.close()
+        do {
+            try await LibraryRepository(disk: disk).exportArchive(libraryID: LibraryRecord.localID, identities: [], includeTrash: true,
+                password: password, to: directory().appendingPathComponent("too-big.doodlenote"))
+            XCTFail("Must reject huge history before JSON allocation")
+        } catch EncryptedArchive.Failure.limits {} catch { XCTFail("Expected bound failure: \(error)") }
     }
     func testAuthenticatedMaliciousManifestIsRejectedBeforeStaging() async throws {
         let source = try NoteDiskStore(root: directory()), destination = try NoteDiskStore(root: directory())
