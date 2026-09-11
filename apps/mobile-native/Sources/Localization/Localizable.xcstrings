@@ -17555,6 +17555,40 @@
           }
         }
       }
+    },
+    "Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Præcise antal personer, opgaver og begivenheder understøttes endnu ikke. Bed om en liste med kilder, eller tæl matchende noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no se admiten recuentos exactos de personas, tareas y eventos. Pide una lista con citas o cuenta notas coincidentes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les décomptes exacts de personnes, tâches et événements ne sont pas encore pris en charge. Demandez une liste citée ou comptez les notes correspondantes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exakte Zählungen von Personen, Aufgaben und Ereignissen werden noch nicht unterstützt. Fragen Sie nach einer Liste mit Quellen oder zählen Sie passende Notizen."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -16,6 +16,7 @@ struct AskView: View {
         #endif
     }
     @State private var question = ""
+    @FocusState private var questionFocused: Bool
     @State private var language = SpokenLanguage.english
     @State private var mode = 0
     @State private var citation: AskEvidence?
@@ -33,7 +34,7 @@ struct AskView: View {
                         }.disabled(controller.busy)
                         Text("Scope: all saved typed notes and transcripts in this library, including older notes.").font(.caption)
                     }
-                    TextField("Ask a question", text: $question, axis: .vertical).lineLimit(2...5).accessibilityIdentifier("askQuestion")
+                    TextField("Ask a question", text: $question, axis: .vertical).lineLimit(2...5).focused($questionFocused).accessibilityIdentifier("askQuestion")
                     Picker("Answer language", selection: $language) { ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) } }
                     Picker("Answer view", selection: $mode) {
                         Text("Evidence").tag(0); Text("Count matching notes").tag(1); Text("List matching notes").tag(2)
@@ -54,7 +55,7 @@ struct AskView: View {
                 if let answer = controller.answer, controller.identity == NoteSearchController.identity(library) {
                     Section("Answer") {
                         if answer.unsupportedCensus {
-                            Text("Counts or exhaustive lists of people, tasks and events are not supported yet. Ask about specific evidence, or count matching notes.")
+                            Text("Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes.")
                         }
                         if !answer.claims.isEmpty {
                             Text("Draft answer. Verify each claim against its original citations.").font(.caption).foregroundStyle(.orange)
@@ -107,7 +108,10 @@ struct AskView: View {
                 }
             }
             .navigationTitle(L10n.text("Ask"))
-            .toolbar { Button("Done") { controller.cancel(); dismiss() } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { controller.cancel(); dismiss() } }
+                ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done typing") { questionFocused = false }.accessibilityIdentifier("askDoneTyping") }
+            }
             .sheet(item: $citation) { AskCitationView(evidence: $0, library: library, recording: recording) }
             .onChange(of: library.authenticationGeneration) { _, _ in controller.cancel(); citation = nil }
             .onChange(of: library.selectedLibraryID) { _, _ in controller.cancel(); citation = nil }

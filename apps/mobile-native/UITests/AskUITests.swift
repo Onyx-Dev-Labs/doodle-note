@@ -10,7 +10,8 @@ import XCTest
             body.tap(); body.typeText("The launch review is on Friday."); app.buttons["doneTyping"].tap()
             app.buttons["Editor navigation"].tap(); app.buttons["askMeeting"].tap()
             let question = app.textFields["askQuestion"].exists ? app.textFields["askQuestion"] : app.textViews["askQuestion"]
-            XCTAssertTrue(question.waitForExistence(timeout: 5)); question.tap(); question.typeText("When is the review?\n")
+            XCTAssertTrue(question.waitForExistence(timeout: 5)); question.tap(); question.typeText("When is the review?")
+            app.buttons["askDoneTyping"].tap()
             app.buttons["askSubmit"].tap()
             if unavailable {
                 XCTAssertTrue(app.staticTexts["askProblem"].waitForExistence(timeout: 10))

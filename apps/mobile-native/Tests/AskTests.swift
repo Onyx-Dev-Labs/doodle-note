@@ -58,6 +58,13 @@ final class AskGenerationTests: XCTestCase {
         let answer = try await AskGenerator(engine: AskTestEngine(.unsupported)).answer(question: "Who owns Apollo?", input: input([note], unavailable: 1), language: .english) { _, _ in }
         XCTAssertTrue(answer.evidence.isEmpty); XCTAssertTrue(answer.incomplete); XCTAssertEqual(answer.unavailableCount, 1)
     }
+    func testActionItemListUsesAllEvidenceAndProducesCitedAnswer() async throws {
+        var note = NoteRecord(); note.text = "Alex agreed to send the proposal."
+        note.passages = [.init(start: 0, end: 1, text: "Morgan agreed to review it.", isFinal: true)]
+        let result = try await AskGenerator(engine: AskTestEngine()).answer(question: "What are the action items from this meeting?", input: input([note]), language: .english) { _, _ in }
+        XCTAssertFalse(result.unsupportedCensus); XCTAssertEqual(result.claims.count, 2)
+        XCTAssertEqual(Set(result.claims.flatMap(\.evidenceIDs)), Set(result.evidence.map(\.id)))
+    }
     func testUnsupportedEntityCensusDoesNotPretendToCountNotes() async throws {
         var note = NoteRecord(); note.text = "Alice owns one task."
         let result = try await AskGenerator(engine: AskTestEngine(.entityCensus)).answer(question: "How many tasks?", input: input([note]), language: .english) { _, _ in }
