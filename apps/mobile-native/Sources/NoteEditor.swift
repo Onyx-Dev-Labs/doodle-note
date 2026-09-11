@@ -83,6 +83,7 @@ struct NoteEditor: View {
         }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showExport) { NoteExportView(note: note, library: library) }
         .toolbar {
             Menu("Editor navigation", systemImage: "rectangle.split.2x1") {
                 Button("Personal notes") { pane = 0; editingText = .personalNotes }
@@ -103,7 +104,6 @@ struct NoteEditor: View {
                 }
             }.disabled(transcription.busy || recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
         }
-        .sheet(isPresented: $showExport) { NoteExportView(note: note, library: library) }
         .alert("Remove this device's audio?", isPresented: $confirmAudioRemoval) {
             Button("Remove audio", role: .destructive) {
                 player.stop()

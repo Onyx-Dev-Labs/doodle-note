@@ -82,8 +82,9 @@ extension NoteDiskStore {
     func lifecycleRecords() throws -> [NoteLifecycle] {
         let directory = root.appendingPathComponent("lifecycle", isDirectory: true)
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let unpublished = try unpublishedArchiveIDs()
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }.map { file in
+            .filter { $0.pathExtension == "json" && UUID(uuidString: $0.deletingPathExtension().lastPathComponent).map({ !unpublished.contains($0) }) == true }.map { file in
                 let record = try JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: file))
                 guard record.schemaVersion == 1, record.noteID.uuidString + ".json" == file.lastPathComponent else {
                     throw LibraryDataError.invalidDocument
