@@ -3,6 +3,9 @@ import UIKit
 
 struct NoteExportView: View {
     let note: NoteRecord
+    @Bindable var library: NoteLibrary
+    @State private var access: NoteExportAccess
+    @State private var invalidated = false
     @Environment(\.dismiss) private var dismiss
     @State private var selection = NoteExportSelection()
     @State private var format = NoteExportFormat.pdf
@@ -11,6 +14,25 @@ struct NoteExportView: View {
     @State private var artifact: NoteExportArtifact?
     @State private var retainedArtifact: NoteExportArtifact?
     @State private var job: Task<NoteExportArtifact, Error>?
+
+    init(note: NoteRecord, library: NoteLibrary) {
+        self.note = note
+        self.library = library
+        _access = State(initialValue: NoteExportAccess(generation: library.authenticationGeneration,
+            libraryID: library.selectedLibraryID))
+    }
+
+    private var noteAvailable: Bool {
+        !invalidated && library.note(note.id)?.metadata?.libraryID == access.libraryID
+    }
+
+    private func invalidate() {
+        invalidated = true
+        job?.cancel()
+        artifact = nil
+        cleanup()
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
@@ -62,11 +84,18 @@ struct NoteExportView: View {
                 NoteExporter.removeExpiredArtifacts()
                 if let id = note.metadata?.selectedSummaryID { selection.summaryIDs = [id] }
             }
-            .onDisappear { job?.cancel(); cleanup() }
+            .onChange(of: library.authenticationGeneration) { _, _ in invalidate() }
+            .onChange(of: library.selectedLibraryID) { _, _ in invalidate() }
+            .onChange(of: noteAvailable) { _, available in if !available { invalidate() } }
+            .onDisappear { invalidated = true; job?.cancel(); cleanup() }
         }
     }
 
     private func prepare() {
+        guard access.permits(generation: library.authenticationGeneration, libraryID: library.selectedLibraryID, noteAvailable: noteAvailable) else {
+            invalidate()
+            return
+        }
         problem = nil
         do {
             let document = try NoteExportDocument(note: note, selection: selection)
@@ -78,7 +107,11 @@ struct NoteExportView: View {
                 do {
                     let result = try await task.value
                     if task.isCancelled { result.cleanup() }
-                    else { retainedArtifact = result; artifact = result }
+                    else if let accepted = access.accept(result, generation: library.authenticationGeneration,
+                        libraryID: library.selectedLibraryID, noteAvailable: noteAvailable) {
+                        retainedArtifact = accepted
+                        artifact = accepted
+                    } else { invalidate() }
                 } catch is CancellationError { problem = "Export canceled. Your original note is preserved." }
                 catch { problem = error.localizedDescription }
                 busy = false

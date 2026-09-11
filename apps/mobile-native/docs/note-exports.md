@@ -8,6 +8,8 @@ PDF uses Core Text pagination and selectable text with system font fallback. Tra
 
 Markdown packages contain `note.md` plus every referenced `assets/ink-N.png`. The ZIP is standards-compliant, stored without compression, UTF-8 flagged, with CRC32 and fixed relative paths. Text is escaped as literal Markdown, including HTML and image syntax, so a user-authored remote image cannot implicitly load when the document opens. Text is not translated. Plain source formatting is preserved, rather than interpreting generated Markdown as rich layout.
 
+The export sheet captures its authorization generation and library ID. Sign-out, revoked access, library switch, or note unavailability cancels preparation, dismisses sharing and cleans temporary output. Completed background work rechecks scope before surfacing an artifact, so late results cannot cross an account boundary.
+
 Exports run on a cancellable background task. No note mutation occurs. Failures remove the operation's UUID temporary directory; successful/canceled sharing removes it on dismissal. Leftovers after process death expire after 24 hours, cleaned only from the feature's own temporary root. Output directories use file protection until first unlock. Markdown ink assets are capped at 32 MiB total and drawings at 256 tiles; the operation visibly refuses larger exports without silently omitting content. ZIP64 sizes are rejected explicitly.
 
 ## Verification

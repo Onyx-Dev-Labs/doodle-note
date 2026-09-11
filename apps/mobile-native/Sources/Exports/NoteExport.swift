@@ -70,6 +70,24 @@ struct NoteExportArtifact: Identifiable, Sendable {
     func cleanup() { try? FileManager.default.removeItem(at: directory) }
 }
 
+/// Captured when the sheet opens. A late result cannot cross a sign-out or library switch.
+struct NoteExportAccess: Sendable {
+    let generation: UUID
+    let libraryID: UUID
+
+    func permits(generation: UUID, libraryID: UUID, noteAvailable: Bool) -> Bool {
+        self.generation == generation && self.libraryID == libraryID && noteAvailable
+    }
+
+    func accept(_ artifact: NoteExportArtifact, generation: UUID, libraryID: UUID, noteAvailable: Bool) -> NoteExportArtifact? {
+        guard permits(generation: generation, libraryID: libraryID, noteAvailable: noteAvailable) else {
+            artifact.cleanup()
+            return nil
+        }
+        return artifact
+    }
+}
+
 enum NoteExporter {
     static let temporaryRoot = FileManager.default.temporaryDirectory.appendingPathComponent("DoodleNoteExports", isDirectory: true)
 

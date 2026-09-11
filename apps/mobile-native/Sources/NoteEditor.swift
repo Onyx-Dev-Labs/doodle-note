@@ -103,7 +103,7 @@ struct NoteEditor: View {
                 }
             }.disabled(transcription.busy || recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
         }
-        .sheet(isPresented: $showExport) { NoteExportView(note: note) }
+        .sheet(isPresented: $showExport) { NoteExportView(note: note, library: library) }
         .alert("Remove this device's audio?", isPresented: $confirmAudioRemoval) {
             Button("Remove audio", role: .destructive) {
                 player.stop()

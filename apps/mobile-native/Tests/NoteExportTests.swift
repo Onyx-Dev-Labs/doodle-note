@@ -128,6 +128,20 @@ final class NoteExportTests: XCTestCase {
         XCTAssertThrowsError(try NoteExporter.create(doc, format: .pdf))
     }
 
+    func testLateExportResultIsRemovedAfterRevocationOrLibrarySwitch() throws {
+        let generation = UUID(), library = UUID()
+        let scope = NoteExportAccess(generation: generation, libraryID: library)
+        let document = try NoteExportDocument(note: fixture(), selection: NoteExportSelection())
+        for (currentGeneration, currentLibrary, available) in [(UUID(), library, true), (generation, UUID(), true), (generation, library, false)] {
+            let artifact = try NoteExporter.create(document, format: .pdf)
+            XCTAssertNil(scope.accept(artifact, generation: currentGeneration, libraryID: currentLibrary, noteAvailable: available))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: artifact.directory.path))
+        }
+        let artifact = try NoteExporter.create(document, format: .pdf)
+        XCTAssertNotNil(scope.accept(artifact, generation: generation, libraryID: library, noteAvailable: true))
+        artifact.cleanup()
+    }
+
     func testMarkdownDoesNotInterpretUserHTMLOrRemoteImages() {
         let rendered = NoteExporter.markdownLiteral("![private](https://example.com/pixel) <script> & text")
         XCTAssertFalse(rendered.contains("![private]("))
