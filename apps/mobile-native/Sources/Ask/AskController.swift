@@ -23,7 +23,12 @@ import Observation
         task = Task {
             defer { busy = false; task = nil }
             do {
-                _ = await library.flush()
+                if let noteID {
+                    guard await library.flush(noteID: noteID) else { throw AskFailure.changed }
+                } else {
+                    // A failed save remains excluded and counted as unavailable by searchInput.
+                    _ = await library.flush()
+                }
                 try Task.checkCancellation()
                 guard library.selectedLibraryID == startingLibrary, library.authenticationGeneration == authentication else { throw AskFailure.changed }
                 let snapshotIdentity = NoteSearchController.identity(library)
@@ -51,5 +56,20 @@ import Observation
     func cancel() {
         token = UUID(); task?.cancel(); answer = nil; problem = nil
         if busy { canceled = true }
+    }
+}
+
+@MainActor enum AskCitationAccess {
+    static func resolve(_ anchor: SourceAnchor, library: NoteLibrary,
+                        reader: (@MainActor (SourceAnchor) async throws -> String?)? = nil) async throws -> String? {
+        let selection = library.selectedLibraryID
+        let authentication = library.authenticationGeneration
+        guard anchor.libraryID == selection else { throw NoteSearchError.unauthorized }
+        let text: String?
+        if let reader { text = try await reader(anchor) }
+        else { text = try await library.resolveSearchSource(anchor) }
+        try Task.checkCancellation()
+        guard library.selectedLibraryID == selection, library.authenticationGeneration == authentication else { throw NoteSearchError.stale }
+        return text
     }
 }

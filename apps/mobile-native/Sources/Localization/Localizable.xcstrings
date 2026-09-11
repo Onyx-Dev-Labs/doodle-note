@@ -11622,8 +11622,6 @@
       }
     },
     "Source %lld": {
-      "extractionState": "manual",
-      "comment": "App-owned summary UI. Non-English translations are machine drafts; qualified human review pending.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -11633,25 +11631,25 @@
         },
         "da": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Kilde %lld"
           }
         },
         "es": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Fuente %lld"
           }
         },
         "fr": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Source %lld"
           }
         },
         "de": {
           "stringUnit": {
-            "state": "needs_review",
+            "state": "translated",
             "value": "Quelle %lld"
           }
         }
@@ -17452,6 +17450,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "Quellen oder Bibliothek geändert. Fragen Sie erneut, um aktuelle Inhalte zu verwenden."
+          }
+        }
+      }
+    },
+    "Answer": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svar"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Respuesta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réponse"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwort"
+          }
+        }
+      }
+    },
+    "Draft answer. Verify each claim against its original citations.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draft answer. Verify each claim against its original citations."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Udkast til svar. Kontrollér hver påstand mod originalkilderne."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Borrador de respuesta. Verifica cada afirmación con sus citas originales."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brouillon de réponse. Vérifiez chaque affirmation avec ses citations originales."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antwortentwurf. Prüfen Sie jede Aussage anhand ihrer Originalbelege."
+          }
+        }
+      }
+    },
+    "Counts or exhaustive lists of people, tasks and events are not supported yet. Ask about specific evidence, or count matching notes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Counts or exhaustive lists of people, tasks and events are not supported yet. Ask about specific evidence, or count matching notes."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optælling eller komplette lister over personer, opgaver og begivenheder understøttes endnu ikke. Spørg om konkrete kilder, eller tæl matchende noter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no se admiten recuentos ni listas exhaustivas de personas, tareas y eventos. Pregunta por evidencia concreta o cuenta notas coincidentes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les décomptes ou listes exhaustives de personnes, tâches et événements ne sont pas encore pris en charge. Demandez des preuves précises ou comptez les notes correspondantes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zählungen oder vollständige Listen von Personen, Aufgaben und Ereignissen werden noch nicht unterstützt. Fragen Sie nach konkreten Belegen oder zählen Sie passende Notizen."
           }
         }
       }

@@ -102,6 +102,8 @@
   },
   "Ask/AskGeneration.swift": {
     "typed notes": "Model source-type wire value, not interface text.",
-    "verbatim quote": "Model JSON schema example, not interface text."
+    "verbatim quote": "Model JSON schema example, not interface text.",
+    "exact original quote": "Model JSON schema example, not interface text.",
+    "answer sentence": "Model JSON schema example, not interface text."
   }
 }

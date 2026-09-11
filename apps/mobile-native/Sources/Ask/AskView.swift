@@ -52,21 +52,45 @@ struct AskView: View {
                 if controller.canceled { Text("Answer canceled. No completed answer was saved.").foregroundStyle(.secondary) }
                 if let problem = controller.problem { Text(L10n.message(problem)).foregroundStyle(.orange).accessibilityIdentifier("askProblem") }
                 if let answer = controller.answer, controller.identity == NoteSearchController.identity(library) {
-                    Section("Source evidence") {
+                    Section("Answer") {
+                        if answer.unsupportedCensus {
+                            Text("Counts or exhaustive lists of people, tasks and events are not supported yet. Ask about specific evidence, or count matching notes.")
+                        }
+                        if !answer.claims.isEmpty {
+                            Text("Draft answer. Verify each claim against its original citations.").font(.caption).foregroundStyle(.orange)
+                            ForEach(answer.claims) { claim in
+                                Text(claim.text)
+                                ForEach(claim.evidenceIDs, id: \.self) { sourceID in
+                                    if let item = answer.evidence.first(where: { $0.id == sourceID }) {
+                                        Button(L10n.format("Source %lld", sourceID + 1)) { citation = item }
+                                    }
+                                }
+                            }
+                        }
                         Text(L10n.format("Reviewed %lld notes and %lld source fragments", answer.scannedNotes, answer.scannedParts)).font(.caption)
-                        if answer.incomplete {
+                        if answer.incomplete && !answer.unsupportedCensus {
                             Text("Some sources are missing, unsaved or unfinished. This is partial evidence, not a complete count or list.").foregroundStyle(.orange)
                         }
                         if answer.unavailableCount > 0 { Text(L10n.format("%lld notes are unavailable", answer.unavailableCount)) }
-                        if answer.evidence.isEmpty { Text("The available evidence is insufficient to answer this question.") }
+                        if answer.claims.isEmpty && !answer.noteCensus && !answer.unsupportedCensus { Text("The available evidence is insufficient to answer this question.") }
                         else {
-                            if mode != 0 && !answer.incomplete {
+                            if (mode != 0 || answer.noteCensus) && !answer.incomplete {
                                 Text(L10n.format("Model-identified matching notes: %lld", answer.matchingNotes)).font(.headline)
                                 Text("This counts notes with selected evidence, not people, tasks or individual events. Review the sources before relying on the result.").font(.caption)
                             }
                             if answer.hasBothSourceKinds {
                                 Text("Typed notes and transcript may disagree. Both are shown with their source labels; the app does not resolve conflicting claims.").foregroundStyle(.orange)
                             }
+                            if mode == 2 {
+                                ForEach(Array(Set(answer.evidence.map { $0.anchor.noteID })).sorted { $0.uuidString < $1.uuidString }, id: \.self) { id in
+                                    if let first = answer.evidence.first(where: { $0.anchor.noteID == id }) {
+                                        Text(first.title.isEmpty ? L10n.text("Untitled note") : first.title).font(.headline)
+                                        ForEach(answer.evidence.filter { $0.anchor.noteID == id }) { item in
+                                            Button(item.quote) { citation = item }
+                                        }
+                                    }
+                                }
+                            } else {
                             ForEach(answer.evidence) { item in
                                 Button { citation = item } label: {
                                     VStack(alignment: .leading, spacing: 6) {
@@ -76,6 +100,7 @@ struct AskView: View {
                                         Text("Open original passage").font(.caption)
                                     }
                                 }.accessibilityIdentifier("askCitation")
+                            }
                             }
                         }
                     }
@@ -131,7 +156,7 @@ private struct AskCitationView: View {
             .task(id: NoteSearchController.identity(library)) {
                 player.stop(); text = nil
                 do {
-                    text = try await library.resolveSearchSource(evidence.anchor)
+                    text = try await AskCitationAccess.resolve(evidence.anchor, library: library)
                     if text == nil { problem = "This source version is unavailable. The original note has not been changed." }
                 } catch { problem = "This source is no longer available in the current library." }
             }.onDisappear { player.stop() }
