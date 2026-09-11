@@ -2,6 +2,7 @@ name: Mac release
 
 # Builds, signs, notarizes, and publishes the Mac updater feed.
 # Required repo secrets:
+#   DOODLENOTE_GOOGLE_CLIENT_SECRET (Desktop client, not Web)
 #   BLOB_READ_WRITE_TOKEN
 #   MAC_CSC_LINK (base64 .p12) + MAC_CSC_KEY_PASSWORD
 #   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
@@ -38,10 +39,12 @@ jobs:
 
       - name: Package Mac app (signed + notarized)
         run: |
+          node apps/desktop/scripts/check-google-oauth.mjs
           pnpm --filter doodle-note-mcp build
           pnpm --filter desktop exec electron-vite build
           pnpm --filter desktop exec electron-builder --mac
         env:
+          DOODLENOTE_GOOGLE_CLIENT_SECRET: ${{ secrets.DOODLENOTE_GOOGLE_CLIENT_SECRET }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
