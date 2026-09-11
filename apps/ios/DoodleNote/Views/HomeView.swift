@@ -42,6 +42,7 @@ struct HomeView: View {
                 .listRowBackground(Color.cream)
                 .listRowSeparator(.hidden)
 
+                WatchInboxSection()
                 meetingsList
             }
             .listStyle(.plain)

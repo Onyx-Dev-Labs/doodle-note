@@ -32,6 +32,9 @@ jobs:
         working-directory: apps/ios
         run: xcodegen generate
 
+      - name: Install watchOS platform for embedded companion
+        run: xcodebuild -downloadPlatform watchOS
+
       - name: Run iOS unit tests
         working-directory: apps/ios
         shell: bash
