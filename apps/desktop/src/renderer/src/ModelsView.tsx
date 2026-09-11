@@ -1,3 +1,4 @@
+import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
@@ -421,18 +422,6 @@ export default function ModelsView({
     }
   }
 
-  const [googleConnecting, setGoogleConnecting] = useState(false)
-
-  const connectGoogle = async (): Promise<void> => {
-    if (googleConnecting) return
-    setGoogleConnecting(true)
-    try {
-      setCalState(await window.calendar.connectGoogle())
-    } finally {
-      setGoogleConnecting(false)
-    }
-  }
-
   const syncCalendar = async (): Promise<void> => {
     if (syncing) return
     setSyncing(true)
@@ -757,17 +746,10 @@ export default function ModelsView({
                       {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="ms-signin"
-                    disabled={googleConnecting}
-                    onClick={() => void connectGoogle()}
-                  >
+                  <GoogleCalendarPending buttonClassName="ms-signin">
                     <GoogleLogo />
-                    <span>
-                      {googleConnecting ? 'Waiting for your browser…' : 'Sign in with Google'}
-                    </span>
-                  </button>
+                    <span>Sign in with Google</span>
+                  </GoogleCalendarPending>
                   {!calState.builtIn && (
                     <button
                       type="button"
@@ -839,15 +821,10 @@ export default function ModelsView({
                       </button>
                     )}
                     {!calState.googleSignedIn && (
-                      <button
-                        type="button"
-                        className="provider-btn"
-                        disabled={googleConnecting}
-                        onClick={() => void connectGoogle()}
-                      >
+                      <GoogleCalendarPending buttonClassName="provider-btn">
                         <GoogleLogo />
-                        {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
-                      </button>
+                        Connect Google
+                      </GoogleCalendarPending>
                     )}
                     {calState.googleSignedIn && (
                       <button
