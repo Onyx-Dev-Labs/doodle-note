@@ -1,7 +1,6 @@
 {
   "status": "machine-draft",
   "humanReviewRequired": true,
-  "catalogSHA256": "fa4ae97728cbd0c660cc22112c6eb0bcd3c1b62fef4567873fd7409e44c2fd48",
   "languages": {
     "en": {
       "reviewer": null,
@@ -33,5 +32,6 @@
     "Language-qualified review of all strings and flows",
     "Physical VoiceOver and expanded Dynamic Type on iPhone and iPad",
     "Repeat qualification after downstream capture, sync and search features land"
-  ]
+  ],
+  "catalogSHA256": "89cb58295fff3a9dfac8328890ca5dd80c2bd9ef24edba2a1b1183bd5050e9f0"
 }
