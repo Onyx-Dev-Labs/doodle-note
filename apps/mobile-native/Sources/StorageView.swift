@@ -23,6 +23,10 @@ struct StorageView: View {
                     Text("Audio stays on its original device. Removing audio keeps your text, transcript, ink and summary versions.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section {
+                    NavigationLink("Backup & restore") { ArchiveView(library: library) }
+                        .disabled(blocked).accessibilityIdentifier("archiveSettings")
+                }
                 Section("Trash") {
                     if library.trashNotes.isEmpty { Text("Trash is empty").foregroundStyle(.secondary) }
                     ForEach(library.trashNotes) { note in

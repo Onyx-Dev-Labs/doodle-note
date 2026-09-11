@@ -16435,6 +16435,584 @@
           }
         }
       }
+    },
+    "Encrypted backup": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted backup"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Krypteret sikkerhedskopi"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copia de seguridad cifrada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sauvegarde chiffrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsselte Sicherung"
+          }
+        }
+      }
+    },
+    "Archive password": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive password"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivadgangskode"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contraseña del archivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mot de passe de l’archive"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivpasswort"
+          }
+        }
+      }
+    },
+    "Confirm password": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm password"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bekræft adgangskode"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmar contraseña"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmer le mot de passe"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passwort bestätigen"
+          }
+        }
+      }
+    },
+    "Include retained Trash": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include retained Trash"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medtag bevaret papirkurv"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incluir la papelera conservada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inclure la corbeille conservée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufbewahrten Papierkorb einschließen"
+          }
+        }
+      }
+    },
+    "Save encrypted archive to Files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save encrypted archive to Files"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gem krypteret arkiv i Arkiver"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardar archivo cifrado en Archivos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrer l’archive chiffrée dans Fichiers"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsseltes Archiv in Dateien sichern"
+          }
+        }
+      }
+    },
+    "Restore archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore archive"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gendan arkiv"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar archivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurer l’archive"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiv wiederherstellen"
+          }
+        }
+      }
+    },
+    "Choose encrypted archive": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose encrypted archive"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vælg krypteret arkiv"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elegir archivo cifrado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir une archive chiffrée"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsseltes Archiv auswählen"
+          }
+        }
+      }
+    },
+    "Processing archive…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processing archive…"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behandler arkiv…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Procesando archivo…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traitement de l’archive…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiv wird verarbeitet…"
+          }
+        }
+      }
+    },
+    "Backup & restore": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup & restore"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sikkerhedskopi og gendannelse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copia de seguridad y restauración"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sauvegarde et restauration"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sichern und Wiederherstellen"
+          }
+        }
+      }
+    },
+    "Encrypted archive saved.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encrypted archive saved."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Krypteret arkiv gemt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivo cifrado guardado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive chiffrée enregistrée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verschlüsseltes Archiv gespeichert."
+          }
+        }
+      }
+    },
+    "Archive export cancelled.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive export cancelled."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiveksport annulleret."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportación del archivo cancelada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportation de l’archive annulée."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivexport abgebrochen."
+          }
+        }
+      }
+    },
+    "Archive restored to Only on this device.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive restored to Only on this device."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkiv gendannet til Kun på denne enhed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivo restaurado en Solo en este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive restaurée dans Uniquement sur cet appareil."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archiv unter Nur auf diesem Gerät wiederhergestellt."
+          }
+        }
+      }
+    },
+    "Archive operation cancelled. Existing notes are unchanged.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive operation cancelled. Existing notes are unchanged."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivhandling annulleret. Eksisterende noter er uændrede."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Operación cancelada. Las notas existentes no han cambiado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opération annulée. Les notes existantes sont inchangées."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archivvorgang abgebrochen. Vorhandene Notizen bleiben unverändert."
+          }
+        }
+      }
+    },
+    "Archive could not be processed. Check the password, file integrity, available space and supported archive version.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive could not be processed. Check the password, file integrity, available space and supported archive version."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arkivet kunne ikke behandles. Kontrollér adgangskode, filintegritet, ledig plads og understøttet arkivversion."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo procesar el archivo. Comprueba la contraseña, la integridad del archivo, el espacio disponible y la versión compatible."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de traiter l’archive. Vérifiez le mot de passe, l’intégrité du fichier, l’espace disponible et la version prise en charge."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Archiv konnte nicht verarbeitet werden. Prüfe Passwort, Dateiintegrität, freien Speicher und unterstützte Archivversion."
+          }
+        }
+      }
+    },
+    "Use at least 12 characters. Keep your password safe; it cannot be recovered.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use at least 12 characters. Keep your password safe; it cannot be recovered."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brug mindst 12 tegn. Opbevar adgangskoden sikkert; den kan ikke gendannes."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa al menos 12 caracteres. Guarda la contraseña; no se puede recuperar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisez au moins 12 caractères. Conservez votre mot de passe ; il ne peut pas être récupéré."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verwende mindestens 12 Zeichen. Bewahre dein Passwort sicher auf; es kann nicht wiederhergestellt werden."
+          }
+        }
+      }
+    },
+    "Back up the selected library, including note history, ink and audio. Credentials and saved voice profiles are excluded.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back up the selected library, including note history, ink and audio. Credentials and saved voice profiles are excluded."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sikkerhedskopiér det valgte bibliotek med notehistorik, tegninger og lyd. Loginoplysninger og gemte stemmeprofiler medtages ikke."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haz una copia de la biblioteca seleccionada con el historial de notas, dibujos y audio. Se excluyen las credenciales y los perfiles de voz guardados."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sauvegardez la bibliothèque sélectionnée avec l’historique des notes, les dessins et l’audio. Les identifiants et profils vocaux enregistrés sont exclus."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sichere die ausgewählte Bibliothek mit Notizverlauf, Zeichnungen und Audio. Zugangsdaten und gespeicherte Stimmprofile sind ausgeschlossen."
+          }
+        }
+      }
+    },
+    "Restored notes are new copies in Only on this device. Existing notes stay unchanged. Included Trash gets a new 30-day recovery period. Sync requires a separate deliberate choice.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restored notes are new copies in Only on this device. Existing notes stay unchanged. Included Trash gets a new 30-day recovery period. Sync requires a separate deliberate choice."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gendannede noter er nye kopier i Kun på denne enhed. Eksisterende noter ændres ikke. Medtaget papirkurv får en ny gendannelsesperiode på 30 dage. Synkronisering kræver et særskilt valg."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las notas restauradas son copias nuevas en Solo en este dispositivo. Las existentes no cambian. La papelera incluida recibe otros 30 días de recuperación. La sincronización requiere una elección aparte."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les notes restaurées sont de nouvelles copies dans Uniquement sur cet appareil. Les notes existantes restent inchangées. La corbeille incluse bénéficie de 30 nouveaux jours de récupération. La synchronisation nécessite un choix distinct."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wiederhergestellte Notizen sind neue Kopien unter Nur auf diesem Gerät. Vorhandene Notizen bleiben unverändert. Der enthaltene Papierkorb erhält eine neue Wiederherstellungsfrist von 30 Tagen. Synchronisierung muss separat ausgewählt werden."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

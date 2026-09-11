@@ -1,0 +1,33 @@
+# Encrypted mobile archives (ONY-264)
+
+From **Options > Storage & Trash > Backup & restore**, export the selected accessible library to Files. A password of 12 to 1,024 UTF-8 bytes is required; the app never saves or recovers it. Retained Trash is included by default and can be excluded. Stop recording and wait for pending note writes first.
+
+Restoration creates new note IDs in **Only on this device**. Existing copies and conflicting versions remain untouched; repeated restoration deliberately creates another complete copy. Retained revision and summary IDs and their source anchors are remapped consistently to each new note. Cloud ownership, folder membership, calendar linkage and read-only transport state are cleared. Restored Trash remains in Trash with a fresh local 30-day window. Nothing is enrolled in sync. Account-library archives require access authorization at export, but restore independently without an account. External copies cannot be removed by deleting notes or uninstalling the app.
+
+## Version 1 container
+
+Extension: `.doodlenote`. Eight ASCII bytes `DNOTE001`, followed by a cryptographically random 16-byte salt. A 32-byte key is derived using platform CommonCrypto PBKDF2-HMAC-SHA256, exactly 600,000 iterations. Parameters are fixed for this version, so an untrusted file cannot request unbounded derivation work. A future parameter change requires another version.
+
+Each record is an unsigned 64-bit big-endian sealed length followed by a CryptoKit AES-256-GCM combined box (random 12-byte nonce, ciphertext, 16-byte tag). Associated data is the complete 24-byte header plus the record's unsigned 64-bit big-endian index. Record zero is a JSON manifest, then file data in manifest order in blocks no larger than 1 MiB, followed by an authenticated `END` record. No additional trailing bytes are accepted. Empty files are described by the manifest without a data record. Header substitution, reordering, truncation, tamper and wrong passwords fail authentication. There is no compression or ZIP extraction.
+
+The authenticated manifest records schema version 1, note documents, immutable revisions, lifecycle metadata, and `{noteID,path,size}` audio entries. Only regular `audio/<ASCII basename>.caf` or `.json` files are eligible. Note directories, credentials, catalogs, cloud journals, calendar tokens, models and saved voice-profile stores are never recursively copied. Ink is retained as the original PencilKit data inside each note. Audio and capture journals retain their bytes. The container does not embed or reference arbitrary filesystem paths.
+
+Bounds: 1,000 notes, 50,000 audio entries, 100,000 revisions per note, 32 MiB encoded manifest, 8 GiB total audio bytes, and at most 1 MiB cleartext audio per crypto operation. Declared sizes, unique IDs/paths, ownership, document versions and retained history are validated. Unsupported or too-large libraries fail visibly rather than silently exporting a subset. No password, decrypted archive or note content appears in diagnostics.
+
+## Transactions and failure handling
+
+Export writes only ciphertext to an app temporary file. Cancellation/error removes the incomplete ciphertext; Files receives a copy of the completed encrypted file. No plaintext export file is produced. A process crash may leave ciphertext in the OS temporary directory; no password accompanies it.
+
+Restore performs one bounded complete authentication pass before creating any restored note content, then authenticates again while writing to an app-private staging directory protected by iOS Data Protection. This directory contains the intended restored application data, never a plaintext archive in Files or shared temporary storage. The final tag and EOF are checked again before publication. Staging and journal files are excluded from note enumeration. New random IDs are reserved in a durable journal, all staged outputs are moved into place, and one atomic journal publication makes the entire batch visible. Cancellation/error rolls back unpublished IDs; startup recovers an interrupted journal and removes staging. If cleanup is temporarily impossible, library enumeration continues hiding unpublished IDs. Published batches survive interrupted cleanup. A rollback never deletes a pre-existing note.
+
+The repository actor serializes storage changes; UI flushes outstanding edits first. Restore does not execute processing jobs, connect accounts, download models, or infer speaker identities. Files-provider permissions and low-space errors are surfaced without replacing source data.
+
+## Evidence and remaining review
+
+Automated coverage: complete two-hour 16-kHz synthetic PCM (115,200,000 frames) plus nonempty editable PencilKit ink; byte hashes, note/history/summary/source retention; repeated-copy restore; wrong password/tamper/truncation/trailing bytes; unsupported version/resource/path rejection; Trash selection and local-only account restore; interrupted publication and startup rollback. Synthetic duration tests establish byte/frame preservation, not microphone reliability, human speech accuracy or battery performance.
+
+Before release, a cryptography reviewer should review the container framing, nonce/KDF use and transactional parser. Product QA must export through the real Files provider, reinstall a test build and restore the authorized archive, independently checking note/history counts and two-hour audio duration. Test cancellation, insufficient storage, Files permission loss, lock/unlock, VoiceOver and large text. Review all five machine-draft translations. No native distribution, production migration or service activation is part of this change.
+
+References checked September 11, 2026: [OWASP password derivation guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html), [OWASP cryptographic storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html), [Apple CryptoKit authenticated sealing](https://developer.apple.com/documentation/cryptokit/aes/gcm/seal(_:using:nonce:authenticating:)). PBKDF2 is used for native platform availability; this is not a claim of FIPS certification or an independent security audit.
+
+Local initial verification note: the first simulator test command compiled the app and unit/UI test bundles, but was deliberately interrupted before test execution because concurrent simulator first boots exhausted host memory. This is not a passing test result. The final serial test result is recorded separately in the PR.
