@@ -99,5 +99,9 @@
   },
   "CloudSync/CloudAuthorization.swift": {
     "DoodleNote iPhone / iPad": "Stable device authorization label, not app display text."
+  },
+  "Ask/AskGeneration.swift": {
+    "typed notes": "Model source-type wire value, not interface text.",
+    "verbatim quote": "Model JSON schema example, not interface text."
   }
 }
