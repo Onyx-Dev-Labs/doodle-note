@@ -29,6 +29,61 @@ enum VoiceProfileError: LocalizedError {
 actor VoiceProfileStore {
     let root: URL
     private var file: URL { root.appendingPathComponent("profiles.json") }
+    private var observationSequence: UInt64 = 0
+
+    struct Snapshot: Sendable {
+        let sequence: UInt64
+        let catalog: VoiceProfileCatalog
+    }
+
+    private func snapshot(_ catalog: VoiceProfileCatalog) -> Snapshot {
+        observationSequence += 1
+        return Snapshot(sequence: observationSequence, catalog: catalog)
+    }
+
+    func current() throws -> Snapshot { snapshot(try load()) }
+
+    /// The complete read-modify-write has no suspension point and one actor owner.
+    func remember(name: String, embedding: [Float], replacing id: UUID? = nil) throws
+        -> (profile: VoiceProfile, snapshot: Snapshot) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let vector = VoicePrint.normalize(embedding) else { throw VoiceProfileError.enrollment }
+        var next = try load()
+        let now = Date()
+        let profile: VoiceProfile
+        if let id {
+            // A deleted replacement must not silently become a newly remembered voice.
+            guard let index = next.profiles.firstIndex(where: { $0.id == id }) else { throw VoiceProfileError.invalid }
+            profile = VoiceProfile(id: id, name: trimmed, embedding: vector,
+                createdAt: next.profiles[index].createdAt, updatedAt: now)
+            next.profiles[index] = profile
+        } else {
+            profile = VoiceProfile(id: UUID(), name: trimmed, embedding: vector, createdAt: now, updatedAt: now)
+            next.profiles.append(profile)
+        }
+        if !next.selectedIDs.contains(profile.id) { next.selectedIDs.append(profile.id) }
+        try save(next)
+        return (profile, snapshot(next))
+    }
+
+    func remove(_ id: UUID) throws -> Snapshot {
+        var next = try load()
+        next.profiles.removeAll { $0.id == id }
+        next.selectedIDs.removeAll { $0 == id }
+        try save(next)
+        return snapshot(next)
+    }
+
+    func setSelected(_ id: UUID, enabled: Bool) throws -> Snapshot {
+        var next = try load()
+        // A toggle queued after removal is a no-op, never a catalog replacement.
+        guard next.profiles.contains(where: { $0.id == id }) else { return snapshot(next) }
+        if enabled {
+            if !next.selectedIDs.contains(id) { next.selectedIDs.append(id) }
+        } else { next.selectedIDs.removeAll { $0 == id } }
+        try save(next)
+        return snapshot(next)
+    }
 
     init(root: URL) { self.root = root }
 
@@ -116,71 +171,63 @@ final class VoiceProfiles {
         store = VoiceProfileStore(root: root)
     }
 
+    init(store: VoiceProfileStore) { self.store = store }
+
+    private var acceptedSequence: UInt64 = 0
+    private var requestSequence: UInt64 = 0
+
+    private func beginRequest() -> UInt64 {
+        requestSequence += 1
+        return requestSequence
+    }
+
+    /// Awaited actor replies may resume out of order on MainActor. Refreshes and mutations
+    /// share the actor's observation sequence so neither stale data nor status can regress.
+    @discardableResult func apply(_ snapshot: VoiceProfileStore.Snapshot, detail message: String? = nil) -> Bool {
+        guard snapshot.sequence > acceptedSequence else { return false }
+        acceptedSequence = snapshot.sequence
+        catalog = snapshot.catalog
+        detail = message ?? (catalog.profiles.isEmpty
+            ? "Recording works without saved voices."
+            : "Saved voices stay on this device. They are not synced or backed up.")
+        problem = nil
+        return true
+    }
+
+    private func reportFailure(for request: UInt64) {
+        guard request == requestSequence else { return }
+        problem = VoiceProfileError.storage.localizedDescription
+    }
+
     func refresh() async {
-        do {
-            catalog = try await store.load()
-            detail = catalog.profiles.isEmpty
-                ? "Recording works without saved voices."
-                : "Saved voices stay on this device. They are not synced or backed up."
-            problem = nil
-        } catch {
-            problem = VoiceProfileError.storage.localizedDescription
-        }
+        let request = beginRequest()
+        do { apply(try await store.current()) }
+        catch { reportFailure(for: request) }
     }
 
     func remember(name: String, embedding: [Float], replacing id: UUID? = nil) async throws -> VoiceProfile {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw VoiceProfileError.enrollment }
-        guard let vector = VoicePrint.normalize(embedding) else { throw VoiceProfileError.enrollment }
-        var next = catalog
-        let now = Date()
-        let profile: VoiceProfile
-        if let id, let index = next.profiles.firstIndex(where: { $0.id == id }) {
-            profile = VoiceProfile(id: id, name: trimmed, embedding: vector,
-                createdAt: next.profiles[index].createdAt, updatedAt: now)
-            next.profiles[index] = profile
-        } else {
-            profile = VoiceProfile(id: UUID(), name: trimmed, embedding: vector, createdAt: now, updatedAt: now)
-            next.profiles.append(profile)
+        let request = beginRequest()
+        do {
+            let result = try await store.remember(name: name, embedding: embedding, replacing: id)
+            apply(result.snapshot, detail: "This voice is remembered on this device only.")
+            return result.profile
+        } catch {
+            reportFailure(for: request)
+            throw error
         }
-        if !next.selectedIDs.contains(profile.id) { next.selectedIDs.append(profile.id) }
-        try await store.save(next)
-        catalog = next
-        detail = "This voice is remembered on this device only."
-        problem = nil
-        return profile
     }
 
     func remove(_ id: UUID) async throws {
-        var next = catalog
-        next.profiles.removeAll { $0.id == id }
-        next.selectedIDs.removeAll { $0 == id }
-        try await store.save(next)
-        catalog = next
-        detail = catalog.profiles.isEmpty
-            ? "Recording works without saved voices."
-            : "Saved voices stay on this device. They are not synced or backed up."
-        problem = nil
+        let request = beginRequest()
+        do { apply(try await store.remove(id)) }
+        catch { reportFailure(for: request); throw error }
     }
 
-    func removeWithFeedback(_ id: UUID) async {
-        do { try await remove(id) } catch { problem = VoiceProfileError.storage.localizedDescription }
-    }
+    func removeWithFeedback(_ id: UUID) async { try? await remove(id) }
 
     func setSelected(_ id: UUID, enabled: Bool) async {
-        guard catalog.profiles.contains(where: { $0.id == id }) else { return }
-        var next = catalog
-        if enabled {
-            if !next.selectedIDs.contains(id) { next.selectedIDs.append(id) }
-        } else {
-            next.selectedIDs.removeAll { $0 == id }
-        }
-        do {
-            try await store.save(next)
-            catalog = next
-            problem = nil
-        } catch {
-            problem = VoiceProfileError.storage.localizedDescription
-        }
+        let request = beginRequest()
+        do { apply(try await store.setSelected(id, enabled: enabled)) }
+        catch { reportFailure(for: request) }
     }
 }

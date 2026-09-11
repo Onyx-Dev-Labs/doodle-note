@@ -447,7 +447,9 @@ struct NoteEditor: View {
     }
 
     private func remember(_ key: String) async {
-        guard let annotations = library.note(id)?.speakerAnnotations else { return }
+        guard canEdit, let annotations = library.note(id)?.speakerAnnotations else { return }
+        let scope = library.selectedLibraryID
+        let authentication = library.authenticationGeneration
         let name = annotations.confirmedName(for: key) ?? ""
         guard !name.isEmpty else {
             recording.voices.problem = VoiceProfileError.enrollment.localizedDescription
@@ -468,7 +470,8 @@ struct NoteEditor: View {
             recording.voices.problem = recording.voiceEmbedding.ready ? VoiceProfileError.enrollment.localizedDescription : L10n.text("Download voice recognition model")
             return
         }
-        guard canEdit, library.note(id)?.speakerAnnotations == annotations else { return }
+        guard canEdit, library.selectedLibraryID == scope, library.authenticationGeneration == authentication,
+              library.note(id)?.speakerAnnotations == annotations else { return }
         do {
             _ = try await recording.voices.remember(name: name, embedding: embedding)
         } catch {
