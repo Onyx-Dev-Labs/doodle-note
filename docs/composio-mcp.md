@@ -161,4 +161,10 @@ customer or subscription, change billing status, grant workspace membership,
 or modify notes, tokens, or device links. Remote MCP still requires its normal
 workspace-scoped token and server authorization. Remove an address to revoke
 this setup visibility exception; separately revoke any existing agent tokens
-if remote access must end. Keep actual account addresses out of Git.
+if remote access must end. For legacy owners whose email verification predates the current auth flow,
+maintainers may instead set `DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_ACCOUNT_IDS`
+to a comma-separated list of immutable, independently confirmed existing user IDs.
+This applies the same grandfathered entitlement requirement and never changes
+email verification. The ID is taken from the authenticated device, not request
+parameters. Remove the ID to revoke this exception. Keep actual account
+addresses and IDs out of Git.
