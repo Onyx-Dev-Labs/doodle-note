@@ -5,8 +5,13 @@ private actor AskTestEngine: LocalGenerationEngine {
     enum Mode { case relevant, unsupported, injection, invalid, slow, missing, entityCensus, noteCensus, badSynthesis, delayed }
     let mode: Mode
     private(set) var inputs: [String] = []
+    private(set) var contracts: [LocalGenerationContract] = []
     init(_ mode: Mode = .relevant) { self.mode = mode }
     func readiness(language: SpokenLanguage) -> GenerationReadiness { .init(available: mode != .missing, detail: "Fixture unavailable") }
+    func generate(instructions: String, source: String, language: SpokenLanguage, contract: LocalGenerationContract) async throws -> String {
+        contracts.append(contract)
+        return try await generate(instructions: instructions, source: source, language: language)
+    }
     func generate(instructions: String, source: String, language: SpokenLanguage) async throws -> String {
         if mode == .slow { try await Task.sleep(for: .seconds(30)) }
         inputs.append(source)
@@ -65,7 +70,7 @@ final class AskGenerationTests: XCTestCase {
         var note = NoteRecord(); note.text = "Alex agreed to send the proposal."
         note.passages = [.init(start: 0, end: 1, text: "Morgan agreed to review it.", isFinal: true)]
         let result = try await AskGenerator(engine: AskTestEngine()).answer(question: "What are the action items from this meeting?", input: input([note]), language: .english) { _, _ in }
-        XCTAssertFalse(result.unsupportedCensus); XCTAssertEqual(result.claims.count, 2)
+        XCTAssertEqual(result.claims.count, 2)
         XCTAssertEqual(Set(result.claims.flatMap(\.evidenceIDs)), Set(result.evidence.map(\.id)))
     }
     func testTitleAndConfirmedSpeakerContextReachBothGenerationStages() async throws {
@@ -81,10 +86,11 @@ final class AskGenerationTests: XCTestCase {
         let synthesis = try XCTUnwrap(payloads.first { $0["evidence"] != nil }?["evidence"] as? [[String: Any]])
         XCTAssertEqual(synthesis.first?["speaker"] as? String, "Morgan"); XCTAssertEqual(synthesis.first?["title"] as? String, "Project Alpha")
     }
-    func testUnsupportedEntityCensusDoesNotPretendToCountNotes() async throws {
+    func testExactEntityCountQuestionRemainsDraftEvidenceWithoutNoteCensus() async throws {
         var note = NoteRecord(); note.text = "Alice owns one task."
         let result = try await AskGenerator(engine: AskTestEngine(.entityCensus)).answer(question: "How many tasks?", input: input([note]), language: .english) { _, _ in }
-        XCTAssertTrue(result.unsupportedCensus); XCTAssertTrue(result.claims.isEmpty); XCTAssertTrue(result.evidence.isEmpty)
+        XCTAssertFalse(result.noteCensus); XCTAssertEqual(result.mode, .answer)
+        XCTAssertEqual(result.claims.count, 1); XCTAssertEqual(result.evidence.first?.quote, note.text)
     }
     func testCompleteNoteCensusHasOriginalEvidenceWithoutInventedSynthesis() async throws {
         var first = NoteRecord(); first.text = "Apollo meeting."
@@ -101,6 +107,8 @@ final class AskGenerationTests: XCTestCase {
         XCTAssertEqual(answer.claims.count, 1); XCTAssertEqual(answer.claims.first?.evidenceIDs, [0])
         let inputs = await engine.inputs
         XCTAssertTrue(inputs.contains { $0.contains("\"evidence\":") })
+        let contracts = await engine.contracts
+        XCTAssertEqual(contracts, [.askEvidence, .askSynthesis])
     }
     func testNoteListRequiresExplicitModeEvenWhenClassificationIsNone() async throws {
         var note = NoteRecord(); note.text = "Sam will test encrypted backup and restore."

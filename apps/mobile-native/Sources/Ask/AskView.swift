@@ -56,7 +56,7 @@ struct AskView: View {
                     Section("Answer") {
                         Text("Answers use saved sources from when you asked. New recording content is not included until you ask again.").font(.caption)
                         if let date = controller.snapshotDate { Text(L10n.date(date)).font(.caption) }
-                        if answer.unsupportedCensus {
+                        if answer.mode == .answer {
                             Text("Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes.")
                         }
                         if !answer.claims.isEmpty {
@@ -71,11 +71,11 @@ struct AskView: View {
                             }
                         }
                         Text(L10n.format("Reviewed %lld notes and %lld source fragments", answer.scannedNotes, answer.scannedParts)).font(.caption)
-                        if answer.incomplete && !answer.unsupportedCensus {
+                        if answer.incomplete {
                             Text("Some sources are missing, unsaved or unfinished. This is partial evidence, not a complete count or list.").foregroundStyle(.orange)
                         }
                         if answer.unavailableCount > 0 { Text(L10n.format("%lld notes are unavailable", answer.unavailableCount)) }
-                        if answer.claims.isEmpty && !answer.noteCensus && !answer.unsupportedCensus { Text("The available evidence is insufficient to answer this question.") }
+                        if answer.claims.isEmpty && !answer.noteCensus { Text("The available evidence is insufficient to answer this question.") }
                         else {
                             if answer.noteCensus && !answer.incomplete {
                                 Text(L10n.format("Model-identified matching notes: %lld", answer.matchingNotes)).font(.headline)
