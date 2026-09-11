@@ -5,6 +5,7 @@ struct NoteEditor: View {
     let id: UUID
     @Bindable var library: NoteLibrary
     @Bindable var recording: RecordingSession
+    var calendar: CalendarCoordinator? = nil
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var pane = 0
     @State private var player = LocalPlayback()
@@ -16,6 +17,7 @@ struct NoteEditor: View {
     @State private var editingPassage: TranscriptPassage?
     @State private var correctionText = ""
     @State private var correctionProblem: String?
+    @State private var removingProfile: UUID?
     private enum TextFocus: Hashable { case title, personalNotes }
     @FocusState private var editingText: TextFocus?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -144,6 +146,20 @@ struct NoteEditor: View {
                     TranscriptPassage(start: 0, end: 8, text: "Let’s keep the sketch beside the meeting notes while we explore this idea.", isFinal: true, speakerName: "Fixture speaker 1"),
                     TranscriptPassage(start: 8, end: 16, text: "We can review the next steps together, then keep this drawing editable.", isFinal: true, speakerName: "Fixture speaker 2")
                 ] }
+            }
+            if ProcessInfo.processInfo.arguments.contains("--speaker-identity-fixture"), note.speakerAnnotations == nil {
+                let session = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+                var annotations = SpeakerAnnotations()
+                annotations.replace(sessionID: session, with: (0..<4).map {
+                    SpeakerTurn(sessionID: session, slot: $0, start: Double($0 * 4), end: Double($0 * 4 + 3), isFinal: true)
+                })
+                library.update(id) {
+                    $0.speakerAnnotations = annotations
+                    $0.passages = (0..<4).map {
+                        TranscriptPassage(start: Double($0 * 4), end: Double($0 * 4 + 3),
+                            text: "Synthetic speaker turn \($0 + 1).", isFinal: true)
+                    }
+                }
             }
             #endif
         }
@@ -332,6 +348,11 @@ struct NoteEditor: View {
         }.padding().background(.bar)
     }
 
+    private var inviteeSuggestions: [String] {
+        guard let event = note.metadata?.event else { return [] }
+        return calendar?.upcoming.first { $0.key == event }?.invitees ?? []
+    }
+
     private var speakerSettings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
@@ -347,19 +368,120 @@ struct NoteEditor: View {
                 }
                 if let annotations = note.speakerAnnotations {
                     ForEach(annotations.speakerKeys, id: \.self) { key in
-                        TextField(annotations.name(for: key, localized: true), text: Binding(
-                            get: { library.note(id)?.speakerAnnotations?.names[key] ?? "" },
-                            set: { name in library.update(id) { $0.speakerAnnotations?.names[key] = name.trimmingCharacters(in: .whitespacesAndNewlines) } }))
-                            .textFieldStyle(.roundedBorder).disabled(!canEdit)
+                        speakerRow(key, annotations: annotations)
                     }
                 }
-                Text("Names apply to this recording session. Remembering voices across meetings is still being built.")
+                if !inviteeSuggestions.isEmpty {
+                    Text("Calendar invitees are suggestions, not identified voices. Confirm speaker names yourself.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(inviteeSuggestions, id: \.self) { name in
+                        Text(name).font(.caption)
+                    }
+                }
+                Text("Voice profiles stay on this device. They are not synced or backed up.")
                     .font(.caption).foregroundStyle(.secondary)
+                Text(L10n.message(recording.voices.detail)).font(.caption).foregroundStyle(.secondary)
+                if let problem = recording.voices.problem {
+                    Text(L10n.message(problem)).font(.caption).foregroundStyle(.orange)
+                }
+                if recording.voices.profiles.isEmpty {
+                    Text("No saved voices yet.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Known participants").font(.subheadline.bold())
+                    ForEach(recording.voices.profiles) { profile in
+                        HStack {
+                            Toggle(profile.name, isOn: Binding(
+                                get: { recording.voices.catalog.selectedIDs.contains(profile.id) },
+                                set: { enabled in Task { await recording.voices.setSelected(profile.id, enabled: enabled) } }))
+                            .accessibilityIdentifier("selectVoice-\(profile.id.uuidString)")
+                            Button("Remove saved voice", role: .destructive) { removingProfile = profile.id }
+                                .accessibilityIdentifier("removeVoice-\(profile.id.uuidString)")
+                        }
+                    }
+                }
                 HStack {
                     Link("Model source", destination: URL(string: "https://huggingface.co/FluidInference/diar-streaming-sortformer-coreml")!)
                     Link("Model license", destination: URL(string: "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/")!)
                 }.font(.caption)
             }.padding()
-        }.frame(maxHeight: 240).background(.quaternary.opacity(0.3))
+        }
+        .frame(maxHeight: 320).background(.quaternary.opacity(0.3))
+        .task { await recording.voices.refresh(); await recording.voiceEmbedding.check() }
+        .confirmationDialog("Remove this saved voice from this device?", isPresented: Binding(
+            get: { removingProfile != nil }, set: { if !$0 { removingProfile = nil } }), titleVisibility: .visible) {
+            Button("Remove voice from this device", role: .destructive) {
+                guard let id = removingProfile else { return }
+                Task { await recording.voices.removeWithFeedback(id) }
+                removingProfile = nil
+            }
+        } message: { Text("This does not change names already confirmed in notes.") }
+    }
+
+    private func speakerRow(_ key: String, annotations: SpeakerAnnotations) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField(annotations.name(for: key, localized: true), text: Binding(
+                get: { library.note(id)?.speakerAnnotations?.confirmedName(for: key) ?? "" },
+                set: { name in library.update(id) { $0.speakerAnnotations?.confirm(name, for: key) } }))
+            .textFieldStyle(.roundedBorder).disabled(!canEdit)
+            .accessibilityIdentifier("speakerName-\(key)")
+            if !inviteeSuggestions.isEmpty && canEdit {
+                Menu("Use suggested name") {
+                    ForEach(inviteeSuggestions, id: \.self) { name in
+                        Button(name) { library.update(id) { $0.speakerAnnotations?.confirm(name, for: key) } }
+                    }
+                }.font(.caption)
+            }
+            if annotations.confirmedName(for: key) == nil,
+               let suggestion = recording.voiceSuggestion(for: key, noteID: id, library: library) {
+                Text(L10n.format("Possible voice match: %@", suggestion)).font(.caption)
+                Button("Confirm suggested name") {
+                    guard canEdit, recording.voiceSuggestion(for: key, noteID: id, library: library) == suggestion else { return }
+                    library.update(id) { $0.speakerAnnotations?.confirm(suggestion, for: key) }
+                }
+                    .disabled(!canEdit)
+            }
+            Button("Remember this voice") { Task { await remember(key) } }
+                .disabled(!canEdit)
+                .accessibilityIdentifier("rememberVoice")
+        }
+    }
+
+    private func remember(_ key: String) async {
+        guard canEdit, let annotations = library.note(id)?.speakerAnnotations else { return }
+        let scope = library.selectedLibraryID
+        let authentication = library.authenticationGeneration
+        let name = annotations.confirmedName(for: key) ?? ""
+        guard !name.isEmpty else {
+            recording.voices.problem = VoiceProfileError.enrollment.localizedDescription
+            return
+        }
+        let embedding: [Float]?
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--speaker-identity-fixture"),
+           let slot = annotations.turns.first(where: { $0.key == key })?.slot {
+            embedding = VoicePrint.normalize((0..<VoiceMatcher.embeddingDimension).map { $0 == slot % VoiceMatcher.embeddingDimension ? 1 : 0 })
+        } else {
+            embedding = await rememberEmbedding(key: key, annotations: annotations)
+        }
+        #else
+        embedding = await rememberEmbedding(key: key, annotations: annotations)
+        #endif
+        guard let embedding else {
+            recording.voices.problem = recording.voiceEmbedding.ready ? VoiceProfileError.enrollment.localizedDescription : L10n.text("Download voice recognition model")
+            return
+        }
+        guard canEdit, library.selectedLibraryID == scope, library.authenticationGeneration == authentication,
+              library.note(id)?.speakerAnnotations == annotations else { return }
+        do {
+            _ = try await recording.voices.remember(name: name, embedding: embedding)
+        } catch {
+            recording.voices.problem = (error as? LocalizedError)?.errorDescription ?? VoiceProfileError.storage.localizedDescription
+        }
+    }
+
+    private func rememberEmbedding(key: String, annotations: SpeakerAnnotations) async -> [Float]? {
+        guard SpeakerEnrollment.canEnroll(key: key, annotations: annotations),
+              let disk = library.disk, let plan = try? disk.playbackTimeline(for: id) else { return nil }
+        return await recording.voiceEmbedding.probe(key: key, annotations: annotations, plan: plan)
     }
 }
