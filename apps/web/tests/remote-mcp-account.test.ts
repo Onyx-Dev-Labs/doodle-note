@@ -69,6 +69,13 @@ test("account endpoint exposes paid and active-trial eligibility for the authent
     assert.equal((await (await GET(request(freeToken))).json()).remoteMcpEligible, false);
     await db.execute(sql`update "user" set email_verified=false where id='paid-owner'`);
     assert.equal((await (await GET(request(paidToken))).json()).remoteMcpEligible, false);
+    // An explicit immutable account ID also supports pre-verification legacy owners.
+    process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_ACCOUNT_IDS = " paid-owner , free-owner ";
+    assert.equal((await (await GET(request(paidToken))).json()).remoteMcpEligible, true);
+    assert.equal((await (await GET(request(freeToken))).json()).remoteMcpEligible, false);
+    assert.deepEqual((await db.execute(sql`select * from subscriptions where user_id='paid-owner'`)).rows, legacyBefore.rows);
+    delete process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_ACCOUNT_IDS;
+    assert.equal((await (await GET(request(paidToken))).json()).remoteMcpEligible, false);
     await db.execute(sql`update "user" set email_verified=true where id='paid-owner'`);
     delete process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_EMAILS;
     assert.equal((await (await GET(request(paidToken))).json()).remoteMcpEligible, false);

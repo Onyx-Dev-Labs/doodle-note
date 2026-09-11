@@ -16,6 +16,11 @@ export async function GET(request: Request) {
     // Never substitute a paid Stripe status or broaden Cloud Sync entitlement.
     const complimentaryEmails = (process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_EMAILS ?? "")
       .split(",").map((email) => email.trim().toLowerCase()).filter(Boolean);
+    const complimentaryAccountIds = (process.env.DOODLENOTE_REMOTE_MCP_COMPLIMENTARY_ACCOUNT_IDS ?? "")
+      .split(",").map((id) => id.trim()).filter(Boolean);
+    if (!remoteMcpEligible && entitlement.entitled && entitlement.reason === "grandfathered") {
+      remoteMcpEligible = complimentaryAccountIds.includes(device.userId);
+    }
     if (!remoteMcpEligible && entitlement.entitled && entitlement.reason === "grandfathered" && complimentaryEmails.length) {
       const [account] = await getDb().select({ email: user.email, verified: user.emailVerified })
         .from(user).where(eq(user.id, device.userId)).limit(1);
