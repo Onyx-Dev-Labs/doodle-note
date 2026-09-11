@@ -9,6 +9,7 @@ struct NoteDiskStore: Sendable {
         self.root = root
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        try recoverArchiveRestore()
     }
 
     func directory(for id: UUID) -> URL { root.appendingPathComponent(id.uuidString, isDirectory: true) }
@@ -134,13 +135,14 @@ struct NoteDiskStore: Sendable {
 
     func load(persistRecovery: ((NoteRecord) throws -> Void)? = nil, beforeMigrationCommit: (() throws -> Void)? = nil, recoverRecording: Bool = true) throws
         -> (notes: [NoteRecord], unreadable: [String], audioProblems: [String], recoveryWriteProblems: [String], migrationProblems: [String]) {
+        let unpublished = try unpublishedArchiveIDs()
         let dirs = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         var notes: [NoteRecord] = []
         var unreadable: [String] = []
         var audioProblems: [String] = []
         var recoveryWriteProblems: [String] = []
         var migrationProblems: [String] = []
-        for dir in dirs where UUID(uuidString: dir.lastPathComponent) != nil {
+        for dir in dirs where UUID(uuidString: dir.lastPathComponent).map({ !unpublished.contains($0) }) == true {
             do {
                 if let id = UUID(uuidString: dir.lastPathComponent), FileManager.default.fileExists(atPath: lifecycleURL(id).path) {
                     let state = try JSONDecoder().decode(NoteLifecycle.self, from: Data(contentsOf: lifecycleURL(id)))
