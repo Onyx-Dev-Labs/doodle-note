@@ -2,7 +2,7 @@ import XCTest
 @testable import DoodleNoteNative
 
 private actor AskTestEngine: LocalGenerationEngine {
-    enum Mode { case relevant, unsupported, injection, invalid, slow, missing, entityCensus, noteCensus, badSynthesis }
+    enum Mode { case relevant, unsupported, injection, invalid, slow, missing, entityCensus, noteCensus, badSynthesis, delayed }
     let mode: Mode
     private(set) var inputs: [String] = []
     init(_ mode: Mode = .relevant) { self.mode = mode }
@@ -10,6 +10,7 @@ private actor AskTestEngine: LocalGenerationEngine {
     func generate(instructions: String, source: String, language: SpokenLanguage) async throws -> String {
         if mode == .slow { try await Task.sleep(for: .seconds(30)) }
         inputs.append(source)
+        if mode == .delayed { try await Task.sleep(for: .milliseconds(100)) }
         let value = try JSONSerialization.jsonObject(with: Data(source.utf8)) as! [String: Any]
         if mode == .invalid { return "not json" }
         if let text = value["source"] as? String {
@@ -118,6 +119,27 @@ final class AskGenerationTests: XCTestCase {
         library.revokeAccountAccess(.init(accountID: "fixture", workspaceID: "test"))
         try await finish(controller)
         XCTAssertNil(controller.answer)
+    }
+    func testLiveEditsPreserveQuestionSnapshotButTrashInvalidatesIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = NoteLibrary(root: root); await library.waitUntilLoaded()
+        let note = try XCTUnwrap(library.create()); library.update(note) { $0.text = "Original snapshot." }; _ = await library.flush()
+        let engine = AskTestEngine(.delayed)
+        let controller = AskController(engine: engine)
+        controller.ask("What was said?", noteID: note, language: .english, library: library)
+        for _ in 0..<100 {
+            if !(await engine.inputs).isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        library.update(note) { $0.text = "New live content." }; _ = await library.flush()
+        try await finish(controller)
+        let answer = try XCTUnwrap(controller.answer)
+        XCTAssertTrue(controller.isValid(library)); XCTAssertEqual(answer.evidence.first?.quote, "Original snapshot.")
+        let source = try await AskCitationAccess.resolve(answer.evidence[0].anchor, library: library)
+        XCTAssertEqual(source, "Original snapshot.")
+        await library.performStorage(.trash, id: note, captureActive: false)
+        XCTAssertFalse(controller.isValid(library))
     }
     func testSourceReaderRejectsScopeSwitchDuringAwait() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

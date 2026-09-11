@@ -10,7 +10,10 @@ import Observation
     private(set) var completed = 0
     private(set) var total = 0
     private(set) var answer: AskAnswer?
-    private(set) var identity = ""
+    private(set) var snapshotDate: Date?
+    private var snapshotScope: UUID?
+    private var snapshotAuthentication: UUID?
+    private var sourceNoteIDs: Set<UUID> = []
     private(set) var problem: String?
 
     init(engine: any LocalGenerationEngine = AppleLocalGeneration()) { generator = AskGenerator(engine: engine) }
@@ -20,6 +23,7 @@ import Observation
         busy = true; canceled = false; answer = nil; problem = nil; completed = 0; total = 0
         let startingLibrary = library.selectedLibraryID
         let authentication = library.authenticationGeneration
+        snapshotScope = startingLibrary; snapshotAuthentication = authentication; sourceNoteIDs = []; snapshotDate = nil
         task = Task {
             defer { busy = false; task = nil }
             do {
@@ -31,7 +35,6 @@ import Observation
                 }
                 try Task.checkCancellation()
                 guard library.selectedLibraryID == startingLibrary, library.authenticationGeneration == authentication else { throw AskFailure.changed }
-                let snapshotIdentity = NoteSearchController.identity(library)
                 var input = library.searchInput(generation: 0)
                 if let noteID {
                     input = NoteSearchInput(libraryID: input.libraryID, authorized: input.authorized,
@@ -39,15 +42,28 @@ import Observation
                         unavailableCount: input.notes.contains { $0.id == noteID } ? 0 : 1,
                         incompleteReason: input.incompleteReason)
                 }
+                sourceNoteIDs = Set(input.notes.map(\.id)); snapshotDate = Date()
                 let value = try await generator.answer(question: question, input: input, language: language) { [weak self] done, count in
                     await self?.progress(done, count, request: request)
                 }
                 try Task.checkCancellation()
-                guard token == request, snapshotIdentity == NoteSearchController.identity(library) else { throw AskFailure.changed }
-                identity = snapshotIdentity; answer = value
+                guard token == request, isValid(library) else { throw AskFailure.changed }
+                answer = value
             } catch is CancellationError { canceled = true }
             catch { if token == request { problem = error.localizedDescription } }
         }
+    }
+    func isValid(_ library: NoteLibrary) -> Bool {
+        guard let snapshotScope, let snapshotAuthentication else { return true }
+        return library.selectedLibraryID == snapshotScope && library.authenticationGeneration == snapshotAuthentication &&
+            sourceNoteIDs.allSatisfy { id in
+                guard let note = library.note(id) else { return false }
+                return note.metadata?.libraryID == snapshotScope && note.schemaVersion == 2
+            }
+    }
+    static func accessIdentity(_ library: NoteLibrary) -> String {
+        ([library.selectedLibraryID.uuidString, library.authenticationGeneration.uuidString] +
+            library.visibleNotes.map { $0.id.uuidString }.sorted()).joined(separator: "|")
     }
     private func progress(_ done: Int, _ count: Int, request: UUID) {
         guard token == request else { return }

@@ -52,8 +52,10 @@ struct AskView: View {
                 }
                 if controller.canceled { Text("Answer canceled. No completed answer was saved.").foregroundStyle(.secondary) }
                 if let problem = controller.problem { Text(L10n.message(problem)).foregroundStyle(.orange).accessibilityIdentifier("askProblem") }
-                if let answer = controller.answer, controller.identity == NoteSearchController.identity(library) {
+                if let answer = controller.answer, controller.isValid(library) {
                     Section("Answer") {
+                        Text("Answers use saved sources from when you asked. New recording content is not included until you ask again.").font(.caption)
+                        if let date = controller.snapshotDate { Text(L10n.date(date)).font(.caption) }
                         if answer.unsupportedCensus {
                             Text("Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes.")
                         }
@@ -113,6 +115,7 @@ struct AskView: View {
                 ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done typing") { questionFocused = false }.accessibilityIdentifier("askDoneTyping") }
             }
             .sheet(item: $citation) { AskCitationView(evidence: $0, library: library, recording: recording) }
+            .onChange(of: controller.isValid(library)) { _, valid in if !valid { controller.cancel(); citation = nil } }
             .onChange(of: library.authenticationGeneration) { _, _ in controller.cancel(); citation = nil }
             .onChange(of: library.selectedLibraryID) { _, _ in controller.cancel(); citation = nil }
             .onDisappear { controller.cancel() }
@@ -157,7 +160,7 @@ private struct AskCitationView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).padding()
             }.navigationTitle(L10n.text("Source"))
             .toolbar { Button("Done") { player.stop(); dismiss() } }
-            .task(id: NoteSearchController.identity(library)) {
+            .task(id: AskController.accessIdentity(library)) {
                 player.stop(); text = nil
                 do {
                     text = try await AskCitationAccess.resolve(evidence.anchor, library: library)

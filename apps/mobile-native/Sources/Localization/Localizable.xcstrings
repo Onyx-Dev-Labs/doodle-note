@@ -17589,6 +17589,40 @@
           }
         }
       }
+    },
+    "Answers use saved sources from when you asked. New recording content is not included until you ask again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answers use saved sources from when you asked. New recording content is not included until you ask again."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Svar bruger gemte kilder fra da du spurgte. Nyt optagelsesindhold medtages først, når du spørger igen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las respuestas usan fuentes guardadas al preguntar. El contenido nuevo de la grabación no se incluye hasta que preguntes de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les réponses utilisent les sources enregistrées au moment de la question. Le nouveau contenu ne sera inclus qu’à la prochaine question."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Antworten nutzen gespeicherte Quellen vom Zeitpunkt Ihrer Frage. Neue Aufnahmeinhalte werden erst bei einer erneuten Frage einbezogen."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
