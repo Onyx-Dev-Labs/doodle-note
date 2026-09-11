@@ -406,12 +406,12 @@ struct NoteEditor: View {
             }.padding()
         }
         .frame(maxHeight: 320).background(.quaternary.opacity(0.3))
-        .task { await recording.voices.refresh() }
+        .task { await recording.voices.refresh(); await recording.voiceEmbedding.check() }
         .confirmationDialog("Remove this saved voice from this device?", isPresented: Binding(
             get: { removingProfile != nil }, set: { if !$0 { removingProfile = nil } }), titleVisibility: .visible) {
             Button("Remove voice from this device", role: .destructive) {
                 guard let id = removingProfile else { return }
-                Task { try? await recording.voices.remove(id) }
+                Task { await recording.voices.removeWithFeedback(id) }
                 removingProfile = nil
             }
         } message: { Text("This does not change names already confirmed in notes.") }
@@ -430,6 +430,15 @@ struct NoteEditor: View {
                         Button(name) { library.update(id) { $0.speakerAnnotations?.confirm(name, for: key) } }
                     }
                 }.font(.caption)
+            }
+            if annotations.confirmedName(for: key) == nil,
+               let suggestion = recording.voiceSuggestion(for: key, noteID: id, library: library) {
+                Text(L10n.format("Possible voice match: %@", suggestion)).font(.caption)
+                Button("Confirm suggested name") {
+                    guard canEdit, recording.voiceSuggestion(for: key, noteID: id, library: library) == suggestion else { return }
+                    library.update(id) { $0.speakerAnnotations?.confirm(suggestion, for: key) }
+                }
+                    .disabled(!canEdit)
             }
             Button("Remember this voice") { Task { await remember(key) } }
                 .disabled(!canEdit)

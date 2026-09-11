@@ -86,6 +86,7 @@ struct ModelSettingsView: View {
                 }.disabled(captureActive)
                 Section("Saved voices") {
                     Text(L10n.message(recording.voices.detail))
+                    if let problem = recording.voices.problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
                     if recording.voices.profiles.isEmpty {
                         Text("No saved voices yet.").font(.footnote)
                     }
@@ -95,7 +96,7 @@ struct ModelSettingsView: View {
                                 get: { recording.voices.catalog.selectedIDs.contains(profile.id) },
                                 set: { enabled in Task { await recording.voices.setSelected(profile.id, enabled: enabled) } }))
                             Button("Remove saved voice", role: .destructive) {
-                                Task { try? await recording.voices.remove(profile.id) }
+                                Task { await recording.voices.removeWithFeedback(profile.id) }
                             }
                         }
                     }

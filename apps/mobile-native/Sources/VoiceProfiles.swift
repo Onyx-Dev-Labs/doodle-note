@@ -163,6 +163,10 @@ final class VoiceProfiles {
         problem = nil
     }
 
+    func removeWithFeedback(_ id: UUID) async {
+        do { try await remove(id) } catch { problem = VoiceProfileError.storage.localizedDescription }
+    }
+
     func setSelected(_ id: UUID, enabled: Bool) async {
         guard catalog.profiles.contains(where: { $0.id == id }) else { return }
         var next = catalog

@@ -102,7 +102,14 @@ enum SpeakerEnrollment {
             guard duration > 0, overlap == 0 else { continue }
             result.append((turn.start, turn.end))
         }
-        return result
+        // Union duplicate/overlapping intervals; repeated diarizer snapshots are not extra speech.
+        var union: [(TimeInterval, TimeInterval)] = []
+        for interval in result.sorted(by: { $0.0 < $1.0 }) {
+            if let last = union.last, interval.0 <= last.1 {
+                union[union.count - 1].1 = max(last.1, interval.1)
+            } else { union.append(interval) }
+        }
+        return union
     }
 
     static func soloFinalDuration(for key: String, annotations: SpeakerAnnotations) -> TimeInterval {

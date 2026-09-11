@@ -15,6 +15,11 @@ final class RecordingSession {
     let voices: VoiceProfiles
     let voiceEmbedding = VoiceEmbedding()
     private var identityTask: Task<Void, Never>?
+    private(set) var voiceSuggestions: [String: String] = [:]
+    private var suggestionTurns: [String: [SpeakerTurn]] = [:]
+    private var suggestionScope: UUID?
+    private var suggestionAuth: UUID?
+    private var suggestionProfiles: [VoiceProfile] = []
     private var identityChecked: [String: TimeInterval] = [:]
     private var hardware: (any CaptureHardware)?
     private var writer: AudioChunkWriter?
@@ -243,6 +248,8 @@ final class RecordingSession {
               let annotations = library.note(id)?.speakerAnnotations,
               let plan = try? library.disk?.playbackTimeline(for: id) else { return }
         let selected = voices.selectedProfiles
+        let scope = library.selectedLibraryID
+        let auth = library.authenticationGeneration
         let eligible = annotations.speakerKeys.filter { key in
             annotations.confirmedName(for: key) == nil &&
             SpeakerEnrollment.soloFinalDuration(for: key, annotations: annotations) >= max(2, (identityChecked[key] ?? -8) + 10)
@@ -254,16 +261,27 @@ final class RecordingSession {
                 let duration = SpeakerEnrollment.soloFinalDuration(for: key, annotations: annotations)
                 guard let probe = await voiceEmbedding.probe(key: key, annotations: annotations, plan: plan) else { continue }
                 guard !Task.isCancelled, voices.selectedProfiles == selected,
+                      library.selectedLibraryID == scope, library.authenticationGeneration == auth,
                       let current = library.note(id), current.metadata?.cloudReadOnly != true,
                       current.speakerAnnotations?.turns.filter({ $0.key == key }) == annotations.turns.filter({ $0.key == key }) else { return }
                 identityChecked[key] = duration
-                library.update(id) { note in
-                    guard var latest = note.speakerAnnotations, latest.confirmedName(for: key) == nil else { return }
-                    SpeakerIdentity.reconcile(&latest, selected: selected) { $0 == key ? probe : nil }
-                    note.speakerAnnotations = latest
-                }
+                let latest = current.speakerAnnotations ?? SpeakerAnnotations()
+                let matches = SpeakerIdentity.suggestions(annotations: latest, selected: selected) { $0 == key ? probe : nil }
+                if suggestionScope != scope || suggestionAuth != auth || suggestionProfiles != selected { voiceSuggestions = [:] }
+                suggestionScope = scope; suggestionAuth = auth; suggestionProfiles = selected
+                voiceSuggestions[key] = matches[key]
+                suggestionTurns[key] = annotations.turns.filter { $0.key == key }
+
             }
         }
+    }
+
+    func voiceSuggestion(for key: String, noteID: UUID, library: NoteLibrary) -> String? {
+        guard suggestionScope == library.selectedLibraryID, suggestionAuth == library.authenticationGeneration,
+              suggestionProfiles == voices.selectedProfiles,
+              let note = library.note(noteID), note.metadata?.cloudReadOnly != true,
+              note.speakerAnnotations?.turns.filter({ $0.key == key }) == suggestionTurns[key] else { return nil }
+        return voiceSuggestions[key]
     }
 
     private func installObservers(_ hardware: any CaptureHardware, library: NoteLibrary, token: UUID) {

@@ -79,7 +79,7 @@ import XCTest
         let session = UUID()
         let key = SpeakerTurn(sessionID: session, slot: 0, start: 0, end: 3, isFinal: true).key
         annotations.replace(sessionID: session, with: [SpeakerTurn(sessionID: session, slot: 0, start: 0, end: 3, isFinal: true)])
-        SpeakerIdentity.reconcile(&annotations, selected: voices.selectedProfiles) { _ in unit(1) }
+        _ = SpeakerIdentity.suggestions(annotations: annotations, selected: voices.selectedProfiles) { _ in unit(1) }
         XCTAssertNil(annotations.confirmedName(for: key))
         XCTAssertTrue(annotations.uncertain.contains(key) || annotations.confirmedName(for: key) == nil)
         await voices.refresh()
@@ -97,12 +97,15 @@ import XCTest
         var annotations = SpeakerAnnotations()
         let session = UUID()
         annotations.replace(sessionID: session, with: [SpeakerTurn(sessionID: session, slot: 0, start: 0, end: 3, isFinal: true)])
-        SpeakerIdentity.reconcile(&annotations, selected: voices.selectedProfiles) { _ in unit(0) }
+        let suggestions = SpeakerIdentity.suggestions(annotations: annotations, selected: voices.selectedProfiles) { _ in unit(0) }
+        XCTAssertNil(annotations.confirmedName(for: annotations.speakerKeys[0]), "Unqualified machine output is not a confirmed name")
+        XCTAssertEqual(suggestions[annotations.speakerKeys[0]], "Alex")
+        annotations.confirm(suggestions[annotations.speakerKeys[0]]!, for: annotations.speakerKeys[0])
         XCTAssertEqual(annotations.confirmedName(for: annotations.speakerKeys[0]), "Alex")
         await voices.setSelected(saved.id, enabled: false)
         var next = SpeakerAnnotations()
         next.replace(sessionID: session, with: annotations.turns)
-        SpeakerIdentity.reconcile(&next, selected: voices.selectedProfiles) { _ in unit(0) }
+        XCTAssertTrue(SpeakerIdentity.suggestions(annotations: next, selected: voices.selectedProfiles) { _ in unit(0) }.isEmpty)
         XCTAssertNil(next.confirmedName(for: annotations.speakerKeys[0]), "Unselected profiles are not matched")
         try await voices.remove(saved.id)
         XCTAssertTrue(voices.profiles.isEmpty)
@@ -180,6 +183,15 @@ import XCTest
         annotations.replace(sessionID: session, with: [solo,
             SpeakerTurn(sessionID: session, slot: 1, start: 4, end: 4.1, isFinal: true)])
         XCTAssertFalse(SpeakerEnrollment.canEnroll(key: solo.key, annotations: annotations))
+    }
+    func testDuplicateIntervalsDoNotInflateEnrollmentDuration() {
+        let session = UUID()
+        var annotations = SpeakerAnnotations()
+        let turn = SpeakerTurn(sessionID: session, slot: 0, start: 0, end: 1.2, isFinal: true)
+        annotations.replace(sessionID: session, with: [turn, turn,
+            SpeakerTurn(sessionID: session, slot: 0, start: 0.5, end: 1.5, isFinal: true)])
+        XCTAssertEqual(SpeakerEnrollment.soloFinalDuration(for: turn.key, annotations: annotations), 1.5)
+        XCTAssertFalse(SpeakerEnrollment.canEnroll(key: turn.key, annotations: annotations))
     }
     func testPinnedVoiceManifestUsesRealEmbeddingModel() throws {
         let url = try XCTUnwrap(Bundle.main.url(forResource: "voice-manifest", withExtension: "json"))
