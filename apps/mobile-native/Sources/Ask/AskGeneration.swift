@@ -15,10 +15,13 @@ struct AskClaim: Identifiable, Sendable {
     let text: String
     let evidenceIDs: [Int]
 }
+enum AskAnswerMode: Int, Sendable { case answer, countNotes, listNotes }
+
 struct AskAnswer: Sendable {
+    var mode: AskAnswerMode = .answer
     var claims: [AskClaim] = []
     var unsupportedCensus = false
-    var noteCensus = false
+    var noteCensus: Bool { mode != .answer }
     let evidence: [AskEvidence]
     let scannedNotes: Int
     let scannedParts: Int
@@ -62,7 +65,7 @@ actor AskGenerator {
     private struct EvidenceInput: Encodable { let source: Int; let text: String; let kind: String; let noteID: UUID; let title: String; let speaker: String? }
     private struct SynthesisInput: Encodable { let question: String; let evidence: [EvidenceInput] }
 
-    func answer(question: String, input: NoteSearchInput, language: SpokenLanguage,
+    func answer(question: String, input: NoteSearchInput, language: SpokenLanguage, mode: AskAnswerMode = .answer,
                 progress: @escaping @Sendable (Int, Int) async -> Void) async throws -> AskAnswer {
         guard input.authorized else { throw NoteSearchError.unauthorized }
         guard Set(input.notes.map(\.id)).count == input.notes.count,
@@ -77,7 +80,7 @@ actor AskGenerator {
         try Task.checkCancellation()
         guard let intent = try? JSONDecoder().decode(Intent.self, from: Data(intentResponse.utf8)) else { throw AskFailure.invalid }
         if intent.census == .unsupported {
-            return AskAnswer(unsupportedCensus: true, evidence: [], scannedNotes: 0, scannedParts: 0,
+            return AskAnswer(mode: mode, unsupportedCensus: true, evidence: [], scannedNotes: 0, scannedParts: 0,
                 unavailableCount: input.unavailableCount, incomplete: true)
         }
         var sources: [(String, SummarySource)] = []
@@ -114,7 +117,8 @@ actor AskGenerator {
             await progress(index + 1, sources.count)
         }
         var claims: [AskClaim] = []
-        if intent.census == .none {
+        if mode == .answer {
+            // Classification cannot turn an ordinary question into a note census. Only the user selects that mode.
             // Synthesize every evidence batch; no first/top-k-only answer. Each sentence retains exact original citations.
             var batches: [[AskEvidence]] = []
             var batch: [AskEvidence] = []
@@ -148,7 +152,7 @@ actor AskGenerator {
                 }
             }
         }
-        return AskAnswer(claims: claims, noteCensus: intent.census == .notes, evidence: evidence, scannedNotes: input.notes.count, scannedParts: sources.count,
+        return AskAnswer(mode: mode, claims: claims, evidence: evidence, scannedNotes: input.notes.count, scannedParts: sources.count,
             unavailableCount: input.unavailableCount,
             incomplete: input.unavailableCount > 0 || input.incompleteReason != nil || input.notes.contains(where: SummaryGenerator.isIncomplete))
     }

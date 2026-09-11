@@ -17,7 +17,7 @@ import Observation
     private(set) var problem: String?
 
     init(engine: any LocalGenerationEngine = AppleLocalGeneration()) { generator = AskGenerator(engine: engine) }
-    func ask(_ question: String, noteID: UUID?, language: SpokenLanguage, library: NoteLibrary) {
+    func ask(_ question: String, noteID: UUID?, language: SpokenLanguage, mode: AskAnswerMode = .answer, library: NoteLibrary) {
         guard !busy else { return }
         let request = UUID(); token = request
         busy = true; canceled = false; answer = nil; problem = nil; completed = 0; total = 0
@@ -43,7 +43,7 @@ import Observation
                         incompleteReason: input.incompleteReason)
                 }
                 sourceNoteIDs = Set(input.notes.map(\.id)); snapshotDate = Date()
-                let value = try await generator.answer(question: question, input: input, language: language) { [weak self] done, count in
+                let value = try await generator.answer(question: question, input: input, language: language, mode: mode) { [weak self] done, count in
                     await self?.progress(done, count, request: request)
                 }
                 try Task.checkCancellation()

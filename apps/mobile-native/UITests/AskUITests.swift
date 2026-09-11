@@ -17,6 +17,8 @@ import XCTest
                 XCTAssertTrue(app.staticTexts["askProblem"].waitForExistence(timeout: 10))
                 XCTAssertFalse(app.buttons["askCitation"].exists)
             } else {
+                XCTAssertTrue(app.staticTexts["Draft answer. Verify each claim against its original citations."].waitForExistence(timeout: 10))
+                XCTAssertFalse(app.staticTexts["Model-identified matching notes: 1"].exists)
                 let citation = app.buttons["askCitation"].firstMatch
                 for _ in 0..<5 where !citation.isHittable { app.swipeUp() }
                 XCTAssertTrue(citation.waitForExistence(timeout: 10)); citation.tap()

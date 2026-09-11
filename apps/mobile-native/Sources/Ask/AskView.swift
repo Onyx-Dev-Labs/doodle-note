@@ -18,7 +18,7 @@ struct AskView: View {
     @State private var question = ""
     @FocusState private var questionFocused: Bool
     @State private var language = SpokenLanguage.english
-    @State private var mode = 0
+    @State private var mode = AskAnswerMode.answer
     @State private var citation: AskEvidence?
 
     var body: some View {
@@ -37,10 +37,10 @@ struct AskView: View {
                     TextField("Ask a question", text: $question, axis: .vertical).lineLimit(2...5).focused($questionFocused).accessibilityIdentifier("askQuestion")
                     Picker("Answer language", selection: $language) { ForEach(SpokenLanguage.allCases) { Text($0.name).tag($0) } }
                     Picker("Answer view", selection: $mode) {
-                        Text("Evidence").tag(0); Text("Count matching notes").tag(1); Text("List matching notes").tag(2)
-                    }
+                        Text("Answer").tag(AskAnswerMode.answer); Text("Count matching notes").tag(AskAnswerMode.countNotes); Text("List matching notes").tag(AskAnswerMode.listNotes)
+                    }.disabled(controller.busy)
                     Text("Answers show original evidence in its original language. Matching is generated on this device and may need correction.").font(.caption)
-                    Button("Ask", systemImage: "questionmark.bubble") { controller.ask(question, noteID: noteID, language: language, library: library) }
+                    Button("Ask", systemImage: "questionmark.bubble") { controller.ask(question, noteID: noteID, language: language, mode: mode, library: library) }
                         .disabled(controller.busy || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("askSubmit")
                 }
                 if controller.busy {
@@ -77,14 +77,14 @@ struct AskView: View {
                         if answer.unavailableCount > 0 { Text(L10n.format("%lld notes are unavailable", answer.unavailableCount)) }
                         if answer.claims.isEmpty && !answer.noteCensus && !answer.unsupportedCensus { Text("The available evidence is insufficient to answer this question.") }
                         else {
-                            if (mode != 0 || answer.noteCensus) && !answer.incomplete {
+                            if answer.noteCensus && !answer.incomplete {
                                 Text(L10n.format("Model-identified matching notes: %lld", answer.matchingNotes)).font(.headline)
                                 Text("This counts notes with selected evidence, not people, tasks or individual events. Review the sources before relying on the result.").font(.caption)
                             }
                             if answer.hasBothSourceKinds {
                                 Text("Typed notes and transcript may disagree. Both are shown with their source labels; the app does not resolve conflicting claims.").foregroundStyle(.orange)
                             }
-                            if mode == 2 {
+                            if answer.mode == .listNotes {
                                 ForEach(Array(Set(answer.evidence.map { $0.anchor.noteID })).sorted { $0.uuidString < $1.uuidString }, id: \.self) { id in
                                     if let first = answer.evidence.first(where: { $0.anchor.noteID == id }) {
                                         Text(first.title.isEmpty ? L10n.text("Untitled note") : first.title).font(.headline)
