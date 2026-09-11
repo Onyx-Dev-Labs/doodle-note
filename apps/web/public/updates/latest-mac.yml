@@ -1,11 +1,11 @@
-version: 0.4.25
+version: 0.4.24
 files:
-  - url: DoodleNote-0.4.25-arm64-mac.zip
-    sha512: xYhQrczu+nLlNugGVqfmaJTaL10nnz4jOIlPxIXqr8KaMCcfQgE2TscSJJpEuGQwUEfLXegUyT6Yh3uKCZ5qIg==
-    size: 186134650
-  - url: DoodleNote-0.4.25-arm64.dmg
-    sha512: VGnwzYjhWgPv5T5vcfYKgV51AjI8xY/pRTZL8hJ/mNd/3suCiXW6gq4gcUdOPN4cgBU/74di4Q5Eoe1E8Ya++A==
-    size: 188078006
-path: DoodleNote-0.4.25-arm64-mac.zip
-sha512: xYhQrczu+nLlNugGVqfmaJTaL10nnz4jOIlPxIXqr8KaMCcfQgE2TscSJJpEuGQwUEfLXegUyT6Yh3uKCZ5qIg==
-releaseDate: '2026-09-11T13:59:02.960Z'
+  - url: DoodleNote-0.4.24-arm64-mac.zip
+    sha512: WjSY24P+Mw4gHxG1SiIKyv7XK+YYZvddS+jhWPMX2IDoy2wvmimFnMBNF/zUtVptHmGwhf4d9fgxtw3gkVft0Q==
+    size: 185983132
+  - url: DoodleNote-0.4.24-arm64.dmg
+    sha512: hIr5Z1W4w6d82HP2HQ+LQ0lhdFk/ns+hssX6WZUbJlsyIaM7k9ICBhyOIsc+LmTqNh+OOV8qyIfI9XST3ts8iQ==
+    size: 187862249
+path: DoodleNote-0.4.24-arm64-mac.zip
+sha512: WjSY24P+Mw4gHxG1SiIKyv7XK+YYZvddS+jhWPMX2IDoy2wvmimFnMBNF/zUtVptHmGwhf4d9fgxtw3gkVft0Q==
+releaseDate: '2026-09-08T17:08:54.404Z'

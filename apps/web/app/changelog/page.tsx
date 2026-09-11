@@ -9,14 +9,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
-    version: "0.4.25",
+    version: "0.4.26",
     date: "September 11, 2026",
     highlights: [
       "Generate notes automatically after Stop, resume recordings, and regenerate notes from the latest transcript",
       "Use one dog and calendar tray with Compact and Full Island views for today's meetings",
       "Reuse installed local notes models and get clearer recording startup and setup feedback",
       "Cancel and retry abandoned Cloud connections",
-      "Restore Google Calendar connection and refresh with clearer recovery messages and preserved cached meetings",
+      "Temporarily disable new Google Calendar connections while awaiting Google verification approval",
     ],
   },
   {
