@@ -1,6 +1,6 @@
 # Encrypted mobile archives (ONY-264)
 
-From **Options > Storage & Trash > Backup & restore**, export the selected accessible library to Files. A password of 12 to 1,024 UTF-8 bytes is required; the app never saves or recovers it. Retained Trash is included by default and can be excluded. Stop recording and wait for pending note writes first.
+From **Options > Storage & Trash > Backup & restore**, export the selected accessible library to Files. A password of at least 12 characters and at most 1,024 UTF-8 bytes is required; the app never saves or recovers it. Retained Trash is included by default and can be excluded. Stop recording and wait for pending note writes first.
 
 Restoration creates new note IDs in **Only on this device**. Existing copies and conflicting versions remain untouched; repeated restoration deliberately creates another complete copy. Retained revision and summary IDs and their source anchors are remapped consistently to each new note. Cloud ownership, folder membership, calendar linkage and read-only transport state are cleared. Restored Trash remains in Trash with a fresh local 30-day window. Nothing is enrolled in sync. Account-library archives require access authorization at export, but restore independently without an account. External copies cannot be removed by deleting notes or uninstalling the app.
 
@@ -12,7 +12,7 @@ Each record is an unsigned 64-bit big-endian sealed length followed by a CryptoK
 
 The authenticated manifest records schema version 1, note documents, immutable revisions, lifecycle metadata, and `{noteID,path,size}` audio entries. Only regular `audio/<ASCII basename>.caf` or `.json` files are eligible. Note directories, credentials, catalogs, cloud journals, calendar tokens, models and saved voice-profile stores are never recursively copied. Ink is retained as the original PencilKit data inside each note. Audio and capture journals retain their bytes. The container does not embed or reference arbitrary filesystem paths.
 
-Bounds: 1,000 notes, 50,000 audio entries, 100,000 revisions per note, 32 MiB encoded manifest, 8 GiB total audio bytes, and at most 1 MiB cleartext audio per crypto operation. Declared sizes, unique IDs/paths, ownership, document versions and retained history are validated. Unsupported or too-large libraries fail visibly rather than silently exporting a subset. No password, decrypted archive or note content appears in diagnostics.
+Bounds: 1,000 notes, 50,000 audio entries, 100,000 revisions per note, 32 MiB encoded manifest, 8 GiB total audio bytes, and at most 1 MiB cleartext audio per crypto operation. Declared sizes, unique IDs/paths, ownership, document versions and retained history are validated. Unsupported/read-only future cloud documents or too-large libraries fail visibly rather than silently exporting a subset. No password, decrypted archive or note content appears in diagnostics.
 
 ## Transactions and failure handling
 

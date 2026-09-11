@@ -12,7 +12,7 @@ struct ArchiveView: View {
     @State private var task: Task<Void, Never>?
     @State private var status: String?
     @State private var failed = false
-    private var valid: Bool { (12...1024).contains(password.utf8.count) }
+    private var valid: Bool { password.count >= 12 && password.utf8.count <= 1024 }
 
     var body: some View {
         Form {

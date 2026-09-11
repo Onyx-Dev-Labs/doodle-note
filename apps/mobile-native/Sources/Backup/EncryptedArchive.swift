@@ -29,7 +29,7 @@ enum EncryptedArchive {
     }
 
     static func derive(password: String, salt: Data) throws -> SymmetricKey {
-        guard (12...1024).contains(password.utf8.count), salt.count == 16 else { throw Failure.password }
+        guard password.count >= 12, password.utf8.count <= 1024, salt.count == 16 else { throw Failure.password }
         var output = [UInt8](repeating: 0, count: 32)
         let bytes = Array(password.utf8)
         let result = bytes.withUnsafeBytes { pass in salt.withUnsafeBytes { salt in
@@ -62,7 +62,7 @@ enum EncryptedArchive {
         }
         for document in manifest.documents {
             let note = document.note
-            guard note.schemaVersion == 2, let metadata = note.metadata,
+            guard note.schemaVersion == 2, let metadata = note.metadata, metadata.cloudReadOnly != true,
                   note.captureState != .recording, document.lifecycle.noteID == note.id,
                   document.lifecycle.libraryID == metadata.libraryID, document.lifecycle.schemaVersion == 1,
                   document.lifecycle.state != .purged, !document.lifecycle.cleanupPending,
