@@ -7,6 +7,7 @@ struct AskEvidence: Identifiable, Sendable {
     let title: String
     let quote: String
     let anchor: SourceAnchor
+    let audioTime: TimeInterval?
 }
 struct AskClaim: Identifiable, Sendable {
     let id: Int
@@ -101,7 +102,11 @@ actor AskGenerator {
             for quote in output.quotes {
                 guard !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, item.1.text.contains(quote) else { throw AskFailure.invalid }
                 if !evidence.contains(where: { $0.anchor == item.1.anchor && $0.quote == quote }) {
-                    evidence.append(.init(id: evidence.count, title: item.0, quote: quote, anchor: item.1.anchor))
+                    let audioTime: TimeInterval?
+                    if case .transcript(let passageID) = item.1.anchor.content {
+                        audioTime = input.notes.first { $0.id == item.1.anchor.noteID }?.passages.first { $0.id == passageID }?.start
+                    } else { audioTime = nil }
+                    evidence.append(.init(id: evidence.count, title: item.0, quote: quote, anchor: item.1.anchor, audioTime: audioTime))
                 }
             }
             await progress(index + 1, sources.count)

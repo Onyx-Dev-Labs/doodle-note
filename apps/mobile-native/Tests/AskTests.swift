@@ -52,6 +52,7 @@ final class AskGenerationTests: XCTestCase {
             XCTAssertEqual(answer.claims.count, 2)
             XCTAssertEqual(answer.evidence[0].anchor.content, .personalParagraph(0))
             XCTAssertEqual(answer.evidence[1].anchor.content, .transcript(note.passages[0].id))
+            XCTAssertEqual(answer.evidence[1].audioTime, note.passages[0].start)
         }
     }
     func testInsufficientEvidenceAndPartialCensus() async throws {

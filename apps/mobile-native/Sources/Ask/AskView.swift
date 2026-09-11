@@ -119,7 +119,7 @@ struct AskView: View {
             .onChange(of: library.authenticationGeneration) { _, _ in controller.cancel(); citation = nil }
             .onChange(of: library.selectedLibraryID) { _, _ in controller.cancel(); citation = nil }
             .onDisappear { controller.cancel() }
-            .onAppear { language = noteID.flatMap { library.note($0)?.language } ?? .english }
+            .onAppear { language = noteID.flatMap { library.note($0)?.language } ?? SpokenLanguage(rawValue: UserDefaults.standard.string(forKey: "appLanguage") ?? "") ?? .english }
         }
     }
 }
@@ -134,10 +134,6 @@ private struct AskCitationView: View {
     @State private var text: String?
     @State private var problem: String?
     @State private var player = LocalPlayback()
-    private var passage: TranscriptPassage? {
-        guard case .transcript(let id) = evidence.anchor.content else { return nil }
-        return library.note(evidence.anchor.noteID)?.passages.first { $0.id == id }
-    }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -145,17 +141,17 @@ private struct AskCitationView: View {
                     Text(L10n.key(evidence.anchor.askLabel)).font(.headline)
                     if let text { Text(text).textSelection(.enabled) }
                     if let problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
-                    if let passage, text != nil, !(library.disk?.audioFiles(for: evidence.anchor.noteID).isEmpty ?? true) {
+                    if let audioTime = evidence.audioTime, text != nil, !(library.disk?.audioFiles(for: evidence.anchor.noteID).isEmpty ?? true) {
                         Button(player.isPlaying ? "Stop playback" : "Play original audio") {
                             if player.isPlaying { player.stop() }
                             else {
                                 do {
                                     guard recording.permitsPlayback, let disk = library.disk else { return }
-                                    player.play(plan: try disk.playbackTimeline(for: evidence.anchor.noteID), at: passage.start)
+                                    player.play(plan: try disk.playbackTimeline(for: evidence.anchor.noteID), at: audioTime)
                                 } catch { problem = error.localizedDescription }
                             }
                         }.disabled(!recording.permitsPlayback)
-                    } else if passage != nil { Text("Local audio is unavailable. The original transcript is still readable.").font(.caption) }
+                    } else if evidence.audioTime != nil { Text("Local audio is unavailable. The original transcript is still readable.").font(.caption) }
                     if let problem = player.problem { Text(L10n.message(problem)).foregroundStyle(.orange) }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding()
             }.navigationTitle(L10n.text("Source"))
