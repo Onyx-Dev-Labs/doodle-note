@@ -54,6 +54,7 @@ final class WatchRecorder: NSObject, AVAudioRecorderDelegate {
                 AVLinearPCMIsBigEndianKey: false
             ])
             audio.delegate = self
+            audio.isMeteringEnabled = true
             guard audio.record(forDuration: 86_400) else { throw CocoaError(.fileWriteUnknown) }
             recorder = audio
             current = recording
@@ -62,6 +63,13 @@ final class WatchRecorder: NSObject, AVAudioRecorderDelegate {
             self.error = "Could not start recording: \(error.localizedDescription)"
             try? AVAudioSession.sharedInstance().setActive(false)
         }
+    }
+
+    /// Sampled by the visible view only. No metering timer runs in background.
+    func sampleLevel() -> Double {
+        guard let recorder, recorder.isRecording else { return 0 }
+        recorder.updateMeters()
+        return max(0, min(1, Double(recorder.averagePower(forChannel: 0) + 50) / 50))
     }
 
     func stop() {

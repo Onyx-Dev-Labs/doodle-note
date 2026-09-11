@@ -65,7 +65,7 @@ development team locally.
 The Debug build includes a native watchOS 26+ companion (`DoodleNoteWatch` scheme).
 The paired iPhone must run Doodle Note on iOS 26+. The watch uses its own microphone;
 the phone does not need to be reachable to start or save a recording. Open the app
-on the watch and tap **Start recording**, then **Stop & save**. Audio background
+on the watch and tap **Record**, then **Stop & save**. Audio background
 mode is declared for a foreground-started recording to continue with the screen
 asleep. Actual behavior still requires the paired-device acceptance checks below.
 
@@ -119,3 +119,24 @@ xcodebuild -project DoodleNote.xcodeproj -scheme DoodleNoteWatch \
 
 Apple references: [background audio](https://developer.apple.com/documentation/watchkit/playing-background-audio),
 [file transfer](https://developer.apple.com/documentation/watchconnectivity/wcsession/transferfile(_:metadata:)).
+
+
+### Watch visual design
+
+The watch mirrors the Mac app's dark olive palette, cream serif headings,
+sage accents, and original dog mascot. Record and Stop stay in a fixed bottom
+control area; the waveform icon in the top navigation opens the recordings
+library. Metering samples the actual recorder at 5 Hz only while the app is
+active and the display is not dimmed. Reduced Motion disables animated meter
+transitions. The iPhone inbox follows the existing adaptive cream/sage theme.
+
+Design screenshots: [ready](docs/watch-preview.png),
+[recording on 40mm](docs/watch-recording-preview.png),
+[saved](docs/watch-saved-preview.png),
+[library](docs/watch-library-preview.png), and
+[iPhone inbox](docs/watch-inbox-preview.png).
+Recording, saved, and library screenshots use isolated synthetic fixtures.
+They are visual checks, not evidence of real audio capture or paired transfer.
+Debug-only `-watchPreview ready|recording|saved|library|preparing|error` launch
+arguments render the same presentation components without microphone access,
+WatchConnectivity activation, or changes to saved recordings.

@@ -92,6 +92,10 @@ final class SmokeTests: XCTestCase {
         inbox.tap()
         XCTAssertTrue(app.navigationBars["Watch recordings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No watch recordings"].exists)
+        let preview = XCTAttachment(screenshot: app.screenshot())
+        preview.name = "Branded watch inbox"
+        preview.lifetime = .keepAlways
+        add(preview)
         XCTAssertFalse(app.buttons["Stop"].exists)
     }
 

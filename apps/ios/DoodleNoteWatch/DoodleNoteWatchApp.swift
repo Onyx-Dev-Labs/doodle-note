@@ -8,7 +8,11 @@ struct DoodleNoteWatchApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG
-            WatchRecordingView()
+            if let screen = WatchDesignPreview.requested {
+                WatchDesignPreview(screen: screen)
+            } else {
+                WatchRecordingView()
+            }
             #else
             Text("Apple Watch recording is in development.")
             #endif
@@ -18,8 +22,12 @@ struct DoodleNoteWatchApp: App {
 
 struct WatchRecordingView: View {
     @Environment(\.scenePhase) private var phase
+    @Environment(\.isLuminanceReduced) private var isDimmed
     @State private var transfer: WatchTransfer
     @State private var recorder: WatchRecorder
+    @State private var showLibrary = false
+    @State private var showSaved = false
+    @State private var levels = Array(repeating: 0.0, count: 24)
 
     init() {
         let transfer = WatchTransfer.shared
@@ -27,67 +35,89 @@ struct WatchRecordingView: View {
         _recorder = State(initialValue: WatchRecorder(store: transfer.store) { transfer.sendPending() })
     }
 
+    private var mode: WatchCaptureScreen.Mode {
+        if let recording = recorder.current { return .recording(recording.startedAt) }
+        if recorder.preparing { return .preparing }
+        return showSaved ? .saved : .ready
+    }
+
+    private var shouldMeter: Bool { recorder.current != nil && phase == .active && !isDimmed }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                Text("Doodle Note").font(.headline)
-                if let recording = recorder.current {
-                    Label("Recording", systemImage: "mic.fill").foregroundStyle(.red)
-                    Text(recording.startedAt, style: .timer).font(.title2.monospacedDigit())
-                    Button("Stop & save", systemImage: "stop.fill") { recorder.stop() }
-                        .tint(.red).buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("watch.stop")
-                } else {
-                    Button {
+        NavigationStack {
+            WatchCaptureScreen(mode: mode, levels: levels,
+                recordingCount: transfer.recordings.filter { $0.status != .recording }.count,
+                error: recorder.error ?? transfer.error,
+                onPrimary: {
+                    if recorder.current != nil { recorder.stop() }
+                    else {
+                        showSaved = false
                         Task { await recorder.start() }
-                    } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: "mic.fill").font(.largeTitle)
-                            Text(recorder.preparing ? "Preparing…" : "Start recording")
-                        }.frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
-                    .tint(.green).buttonStyle(.borderedProminent)
-                    .disabled(recorder.preparing)
-                    .accessibilityIdentifier("watch.start")
-                    Text("Uses this watch’s microphone.").font(.caption2).foregroundStyle(.secondary)
-                }
-                if let error = recorder.error ?? transfer.error {
-                    Text(error).font(.caption2).foregroundStyle(.orange)
-                }
-                if !transfer.recordings.isEmpty {
-                    Divider()
-                    ForEach(transfer.recordings) { recording in
-                        VStack(alignment: .leading) {
-                            Text(recording.startedAt, format: .dateTime.month().day().hour().minute())
-                            Text(status(recording)).foregroundStyle(.secondary)
-                        }.font(.caption2).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Button("Retry transfer") { transfer.sendPending() }
-                        .disabled(recorder.current != nil)
-                }
-            }.padding(.horizontal, 4)
+                },
+                onLibrary: { showLibrary = true })
+            .navigationDestination(isPresented: $showLibrary) {
+                WatchLibraryScreen(recordings: transfer.recordings.filter { $0.status != .recording },
+                    error: transfer.error, canRetry: recorder.current == nil,
+                    retry: { transfer.sendPending() })
+            }
+        }
+        .tint(WatchTheme.sage)
+        .onChange(of: recorder.current?.id) { oldID, newID in
+            if oldID != nil && newID == nil { showSaved = recorder.error == nil }
+            if newID != nil { levels = Array(repeating: 0, count: 24) }
         }
         .onChange(of: phase) { _, phase in
             if phase == .active, recorder.current == nil { transfer.sendPending() }
         }
-    }
-
-    private func status(_ recording: WatchRecording) -> String {
-        switch recording.status {
-        case .received, .transcribed: "Saved on iPhone"
-        case .ready: "Saved here · waiting for iPhone"
-        case .recording: "Recording"
-        case .interrupted: "Interrupted · audio retained"
+        .task(id: shouldMeter) {
+            guard shouldMeter else { return }
+            while !Task.isCancelled {
+                levels.removeFirst()
+                levels.append(recorder.sampleLevel())
+                do { try await Task.sleep(for: .milliseconds(200)) }
+                catch { return }
+            }
         }
     }
 }
 
+#if DEBUG
+/// Explicit launch argument for simulator design review. Uses no recording or
+/// connectivity services; never makes a fixture look like a real saved file.
+struct WatchDesignPreview: View {
+    static var requested: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "-watchPreview"), args.indices.contains(index + 1) else { return nil }
+        return args[index + 1]
+    }
+    let screen: String
+    private let samples = [0.1, 0.2, 0.1, 0.4, 0.65, 0.95, 0.7, 0.3, 0.15, 0.3, 0.5, 0.8,
+                           0.55, 0.25, 0.1, 0.2, 0.4, 0.65, 0.4, 0.2, 0.1, 0.3, 0.5, 0.25]
+
+    var body: some View {
+        NavigationStack {
+            if screen == "library" {
+                WatchLibraryScreen(recordings: [
+                    WatchRecording(startedAt: Date(timeIntervalSince1970: 1_789_142_400), duration: 1422, status: .ready),
+                    WatchRecording(startedAt: Date(timeIntervalSince1970: 1_789_138_800), duration: 804, status: .received)
+                ])
+            } else {
+                WatchCaptureScreen(mode: screen == "recording" ? .recording(.now.addingTimeInterval(-83))
+                                   : screen == "saved" ? .saved : screen == "preparing" ? .preparing : .ready,
+                    levels: samples, recordingCount: screen == "saved" ? 1 : 0,
+                    error: screen == "error" ? "Allow microphone access in Settings to record a meeting." : nil)
+            }
+        }.tint(WatchTheme.sage)
+    }
+}
+#endif
 
 @MainActor
 final class WatchApplicationDelegate: NSObject, WKApplicationDelegate {
     func applicationDidFinishLaunching() {
         #if DEBUG
-        _ = WatchTransfer.shared
+        if WatchDesignPreview.requested == nil { _ = WatchTransfer.shared }
         #endif
     }
 

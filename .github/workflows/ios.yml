@@ -33,7 +33,18 @@ jobs:
         run: xcodegen generate
 
       - name: Install watchOS platform for embedded companion
-        run: xcodebuild -downloadPlatform watchOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Start CoreSimulator before Xcode's platform downloader connects.
+          xcrun simctl list runtimes
+          for attempt in 1 2 3; do
+            if xcodebuild -downloadPlatform watchOS; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          exit 1
 
       - name: Run iOS unit tests
         working-directory: apps/ios
