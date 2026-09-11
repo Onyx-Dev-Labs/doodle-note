@@ -1,3 +1,5 @@
+import type { RecordingState } from '../../shared/recording-api'
+import { prepareRecordingMeeting } from './lib/recording-start'
 import { CloudNotesView } from './CloudNotesView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -43,8 +45,12 @@ const BANNER_TTL_PAST_START_MS = 10 * 60_000
  * read the same fetch, re-run whenever homeRefresh bumps.
  */
 function App(): React.JSX.Element {
+  const recordingState = useRef<RecordingState>({ phase: 'idle', eligible: false, meetingId: null })
+  const handlingStart = useRef<string | null>(null)
+  const [recordingError, setRecordingError] = useState<string | null>(null)
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [autoRecordRequestId, setAutoRecordRequestId] = useState<string | null>(null)
   const [autoRecordId, setAutoRecordId] = useState<string | null>(null)
   /** Only manually-created documents get the empty save/discard decision. */
   const [newDraftId, setNewDraftId] = useState<string | null>(null)
@@ -138,6 +144,11 @@ function App(): React.JSX.Element {
   }, [])
 
   const openMeeting = useCallback((id: string, isNewManualDraft = false) => {
+    const active = recordingState.current
+    if (active.phase !== 'idle' && active.meetingId !== id) {
+      setView('editor')
+      return
+    }
     setMeetingId(id)
     setNewDraftId(isNewManualDraft ? id : null)
     setView('editor')
@@ -149,6 +160,14 @@ function App(): React.JSX.Element {
       calendarEventId?: string
       kind?: 'note'
     }): Promise<void> => {
+      if (prefill?.kind !== 'note') {
+        await window.recording.requestStart()
+        return
+      }
+      if (recordingState.current.phase !== 'idle') {
+        setView('editor')
+        return
+      }
       const id =
         typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
@@ -166,7 +185,6 @@ function App(): React.JSX.Element {
       // Fresh meetings start recording immediately; opening an existing
       // meeting from the list never does. Quick notes never auto-record —
       // typing is their default, the rec pill is there when wanted.
-      if (prefill?.kind !== 'note') setAutoRecordId(id)
       openMeeting(id, prefill?.calendarEventId === undefined)
     },
     [openMeeting]
@@ -180,23 +198,14 @@ function App(): React.JSX.Element {
    */
   const startCalendarMeeting = useCallback(
     async (ev: { eventId: string; subject: string }): Promise<void> => {
-      setBanner((b) => (b !== null && b.eventId === ev.eventId ? null : b))
-      try {
-        const list = await window.meetings.list()
-        const existing = list.find((m) => m.calendarEventId === ev.eventId && !m.trashedAt)
-        if (existing) {
-          openMeeting(existing.id)
-          return
-        }
-        await newMeeting({
-          title: ev.subject.trim(),
-          calendarEventId: ev.eventId
-        })
-      } catch {
-        // Creation failed — the user can still start one manually.
-      }
+      await window.recording.requestStart({
+        action: 'start',
+        eventId: ev.eventId,
+        subject: ev.subject,
+        startIso: new Date().toISOString()
+      })
     },
-    [newMeeting, openMeeting]
+    []
   )
 
   const startFromCalendarEvent = useCallback(
@@ -205,6 +214,48 @@ function App(): React.JSX.Element {
     },
     [startCalendarMeeting]
   )
+
+  useEffect(() => {
+    const offState = window.recording.onState((state) => {
+      recordingState.current = state
+    })
+    const offStart = window.recording.onStart((request) => {
+      if (handlingStart.current === request.id) return
+      handlingStart.current = request.id
+      setBanner(null)
+      setRecordingError(null)
+      void prepareRecordingMeeting(request, window.meetings, window.recording, () =>
+        crypto.randomUUID()
+      )
+        .then((id) => {
+          if (!id) return
+          // attach() has already reserved this document in main. Mirror it
+          // synchronously so the normal navigation guard accepts it.
+          recordingState.current = { ...recordingState.current, phase: 'starting', meetingId: id }
+          setAutoRecordRequestId(request.id)
+          setAutoRecordId(id)
+          openMeeting(id, !request.event.eventId)
+        })
+        .catch(() =>
+          setRecordingError(
+            'Could not prepare this recording. Check available disk space and try Record now again.'
+          )
+        )
+        .finally(() => {
+          handlingStart.current = null
+        })
+    })
+    return () => {
+      offStart()
+      offState()
+    }
+  }, [openMeeting])
+
+  useEffect(() => {
+    void window.recording.ready(!wizardOpen && !tourOpen).then((state) => {
+      recordingState.current = state
+    })
+  }, [wizardOpen, tourOpen])
 
   /* ---- calendar state + meeting-start prompts (window.calendar) ---- */
 
@@ -625,6 +676,7 @@ function App(): React.JSX.Element {
             meetingId={meetingId}
             visible={view === 'editor'}
             autoRecord={meetingId === autoRecordId}
+            autoRecordRequestId={autoRecordRequestId}
             isNewDraft={meetingId === newDraftId}
             onAutoRecordStarted={() => setAutoRecordId(null)}
             onDraftSettled={() =>
@@ -640,6 +692,12 @@ function App(): React.JSX.Element {
         </div>
       )}
 
+      {recordingError && (
+        <div className="meeting-banner no-drag" role="alert">
+          <span>{recordingError}</span>
+          <button onClick={() => setRecordingError(null)}>Dismiss</button>
+        </div>
+      )}
       {wizardOpen && <FirstRunWizard onFinish={closeWizard} />}
 
       {!wizardOpen && tourOpen && (
@@ -649,7 +707,9 @@ function App(): React.JSX.Element {
             setSettingsJump({ section: 'model', n: Date.now() })
             setView('settings')
           }}
-          onNewMeeting={() => void newMeeting()}
+          onNewMeeting={() => {
+            void window.recording.ready(true).then(() => newMeeting())
+          }}
           onClose={() => setTourOpen(false)}
         />
       )}
@@ -677,7 +737,11 @@ function App(): React.JSX.Element {
           >
             Start taking notes
           </button>
-          <button type="button" className="mb-dismiss" onClick={() => setBanner(null)}>
+          <button
+            type="button"
+            className="mb-dismiss"
+            onClick={() => void window.calendar.dismissPrompt()}
+          >
             Dismiss
           </button>
         </div>

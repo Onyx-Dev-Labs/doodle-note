@@ -1,3 +1,14 @@
+import {
+  RECORDING_REQUEST_CHANNEL,
+  RECORDING_READY_CHANNEL,
+  RECORDING_DELIVER_CHANNEL,
+  RECORDING_ATTACH_CHANNEL,
+  RECORDING_CANCEL_CHANNEL,
+  RECORDING_STATE_CHANNEL,
+  type RecordingApi,
+  type RecordingStartRequest,
+  type RecordingState
+} from '../shared/recording-api'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   ENGINE_AUDIO_CHANNEL,
@@ -149,8 +160,10 @@ import {
 } from '../shared/media-api'
 import {
   SYNC_CONNECT_CHANNEL,
+  SYNC_CANCEL_CONNECT_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
+  SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SHARE_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
@@ -167,6 +180,7 @@ import {
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_DISMISS_PROMPT_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
   CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
@@ -369,6 +383,28 @@ const foldersApi: FoldersApi = {
   }
 }
 
+const recordingApi: RecordingApi = {
+  requestStart: (event) => ipcRenderer.invoke(RECORDING_REQUEST_CHANNEL, event),
+  ready: (eligible) => ipcRenderer.invoke(RECORDING_READY_CHANNEL, eligible),
+  attach: (requestId, meetingId) =>
+    ipcRenderer.invoke(RECORDING_ATTACH_CHANNEL, requestId, meetingId),
+  cancel: (requestId) => ipcRenderer.invoke(RECORDING_CANCEL_CHANNEL, requestId),
+  onStart(cb) {
+    const listener = (_event: IpcRendererEvent, request: RecordingStartRequest): void => cb(request)
+    ipcRenderer.on(RECORDING_DELIVER_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(RECORDING_DELIVER_CHANNEL, listener)
+    }
+  },
+  onState(cb) {
+    const listener = (_event: IpcRendererEvent, state: RecordingState): void => cb(state)
+    ipcRenderer.on(RECORDING_STATE_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(RECORDING_STATE_CHANNEL, listener)
+    }
+  }
+}
+
 const calendarApi: CalendarApi = {
   getState(): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_GET_STATE_CHANNEL) as Promise<CalendarState>
@@ -402,6 +438,10 @@ const calendarApi: CalendarApi = {
     return ipcRenderer.invoke(CALENDAR_REFRESH_CHANNEL) as Promise<CalendarState>
   },
 
+  dismissPrompt(): Promise<void> {
+    return ipcRenderer.invoke(CALENDAR_DISMISS_PROMPT_CHANNEL) as Promise<void>
+  },
+
   onEvents(cb: (state: CalendarState) => void): () => void {
     return subscribe(CALENDAR_EVENTS_CHANNEL, cb)
   },
@@ -412,6 +452,9 @@ const calendarApi: CalendarApi = {
 }
 
 const syncApi: SyncApi = {
+  getRemoteMcpEligibility(): Promise<boolean> {
+    return ipcRenderer.invoke(SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL) as Promise<boolean>
+  },
   reader(request: unknown): Promise<unknown> {
     return ipcRenderer.invoke('sync:reader', request)
   },
@@ -425,6 +468,10 @@ const syncApi: SyncApi = {
 
   connect(): Promise<SyncStatus> {
     return ipcRenderer.invoke(SYNC_CONNECT_CHANNEL) as Promise<SyncStatus>
+  },
+
+  cancelConnect(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_CANCEL_CONNECT_CHANNEL) as Promise<SyncStatus>
   },
 
   disconnect(): Promise<SyncStatus> {
@@ -576,6 +623,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
+    contextBridge.exposeInMainWorld('recording', recordingApi)
     contextBridge.exposeInMainWorld('sync', syncApi)
     contextBridge.exposeInMainWorld('media', mediaApi)
     contextBridge.exposeInMainWorld('detect', detectApi)
@@ -600,6 +648,8 @@ if (process.contextIsolated) {
   window.folders = foldersApi
   // @ts-ignore (defined in index.d.ts)
   window.calendar = calendarApi
+  // @ts-ignore (defined in index.d.ts)
+  window.recording = recordingApi
   // @ts-ignore (defined in index.d.ts)
   window.sync = syncApi
   // @ts-ignore (defined in index.d.ts)

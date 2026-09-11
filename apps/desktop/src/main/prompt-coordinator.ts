@@ -4,7 +4,7 @@ import type { CalendarEvent, CalendarStartMeetingEvent } from '../shared/calenda
 export const MIC_CALENDAR_MATCH_LOOKAHEAD_MS = 5 * 60_000
 /** Calendar ids remain unique enough to suppress repeats for a full day. */
 const CALENDAR_PROMPT_RETENTION_MS = 24 * 60 * 60_000
-/** Ad-hoc prompts retain the existing five-minute quiet period. */
+/** Retain deduplication for repeats; distinct mic sessions have their own key. */
 const AD_HOC_PROMPT_RETENTION_MS = 5 * 60_000
 
 export interface PromptCoordinatorState {
@@ -43,15 +43,22 @@ export function setPromptRecording(
 
 /**
  * Keep the in-app action banner as persistent state, then choose one external
- * attention surface. Native notifications are preferred; the floating panel
- * remains a fallback for platforms/builds where they are unavailable.
+ * attention surface. macOS uses the branded panel in the background; other
+ * platforms retain native notifications and the existing panel fallback.
  */
 export function planPromptDelivery(
   hasWindow: boolean,
   windowFocusedAndVisible: boolean,
   notificationSupported: boolean,
-  hasPanel: boolean
+  hasPanel: boolean,
+  platform: NodeJS.Platform = process.platform
 ): PromptDeliveryPlan {
+  if (platform === 'darwin') {
+    return {
+      banner: hasWindow,
+      external: !windowFocusedAndVisible && hasPanel ? 'panel' : null
+    }
+  }
   return {
     banner: hasWindow,
     external: notificationSupported
@@ -135,6 +142,7 @@ function matchingCalendarEvent(
 
 function promptKey(prompt: CalendarStartMeetingEvent): string {
   if (prompt.eventId) return `calendar:${prompt.eventId}`
+  if (prompt.detectionId) return `mic-session:${prompt.detectionId}`
   return `adhoc:${prompt.subject.trim().toLowerCase() || 'meeting'}`
 }
 

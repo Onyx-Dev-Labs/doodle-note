@@ -16,6 +16,7 @@ import {
   FolderIcon,
   ImportIcon,
   PencilIcon,
+  PlusIcon,
   TrashIcon,
   UsersIcon
 } from './icons'
@@ -727,6 +728,7 @@ export default function HomeView({
           <button
             type="button"
             className="pill-btn new-menu-trigger"
+            aria-label="+ New"
             aria-haspopup="menu"
             aria-expanded={newMenuOpen}
             onClick={() => {
@@ -735,10 +737,8 @@ export default function HomeView({
               setNewMenuOpen((open) => !open)
             }}
           >
-            + New{' '}
-            <span className="new-menu-chevron" aria-hidden="true">
-              ⌄
-            </span>
+            <PlusIcon size={12} />
+            <span>New</span>
           </button>
           {newMenuOpen && (
             <div className="new-menu-popover" role="menu" aria-label="Create or import">

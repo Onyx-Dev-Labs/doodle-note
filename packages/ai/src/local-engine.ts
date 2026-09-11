@@ -28,6 +28,8 @@ function loadNodeLlamaCpp(): Promise<NodeLlamaCpp> {
 export interface LocalEngineOptions {
   /** node-llama-cpp model URI (hf:...) or an absolute GGUF path. */
   modelUri: string
+  /** Verified local artifact; preserves the catalog URI as the public engine ID. */
+  modelPath?: string
   /** Where models live; the desktop app passes its userData models dir. */
   modelsDir?: string
   /** Download progress (0..1); only fires when the model isn't cached yet. */
@@ -59,7 +61,7 @@ export class LocalNotesEngine implements NotesEngine {
   async prepare(): Promise<void> {
     if (this.model) return
     const { getLlama, resolveModelFile } = await loadNodeLlamaCpp()
-    this.modelPath = await resolveModelFile(this.options.modelUri, {
+    this.modelPath = this.options.modelPath ?? await resolveModelFile(this.options.modelUri, {
       directory: this.options.modelsDir ?? DEFAULT_MODELS_DIR,
       cli: false,
       onProgress: ({ totalSize, downloadedSize }) => {

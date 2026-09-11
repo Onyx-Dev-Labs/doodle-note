@@ -135,6 +135,8 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
         return { ...base, livePartials: { ...base.livePartials, [ev.channel]: ev.text } }
       }
       return { ...base, partial: ev.text }
+    case 'capture-finalized':
+      return base
     case 'timings':
       // Segment-building raw material; surfaced in the raw log only for now.
       return base

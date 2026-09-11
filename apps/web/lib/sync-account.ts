@@ -9,6 +9,7 @@ export async function syncAccountResponse(
   device: SyncDeviceAuth,
   entitled: boolean,
   enabled: boolean,
+  remoteMcpEligible = false,
 ): Promise<Response> {
   let available = false;
   let libraries: Array<{ id: string }> = [];
@@ -26,6 +27,7 @@ export async function syncAccountResponse(
     workspaceId: device.organizationId,
     workspaceName: device.organizationName,
     entitled,
+    remoteMcpEligible,
     syncAvailable: available,
     libraries,
   }, { headers: privateHeaders });

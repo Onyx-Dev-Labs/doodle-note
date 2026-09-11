@@ -9,6 +9,26 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.26",
+    date: "September 11, 2026",
+    highlights: [
+      "Generate notes automatically after Stop, resume recordings, and regenerate notes from the latest transcript",
+      "Use one dog and calendar tray with Compact and Full Island views for today's meetings",
+      "Reuse installed local notes models and get clearer recording startup and setup feedback",
+      "Cancel and retry abandoned Cloud connections",
+      "Temporarily disable new Google Calendar connections while awaiting Google verification approval",
+    ],
+  },
+  {
+    version: "0.4.24",
+    date: "September 8, 2026",
+    highlights: [
+      "Set up Composio and other remote MCP clients from Integrations with a separate server URL and authentication guide",
+      "Manage agent tokens within the selected cloud workspace",
+      "Keep local MCP client setup available alongside remote connections",
+    ],
+  },
+  {
     version: "0.4.23",
     date: "September 7, 2026",
     highlights: [

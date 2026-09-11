@@ -158,19 +158,18 @@ enum LiveSession {
             }
         }
         if let pipeline = micPipeline {
-            // Explicitly request mic access BEFORE touching the audio hardware:
-            // this is what makes macOS actually show the permission prompt
-            // (attributed to the app that launched us). Starting the engine
-            // without permission fails with an opaque '!dev' kAUStartIO error.
-            Events.emit(["event": "status", "stage": "requesting_permission", "permission": "microphone"])
-            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            // Only first use requests consent. A saved setup flag cannot replace
+            // checking the current OS authorization before touching the mic.
+            let granted = await MicrophoneAuthorization.authorize(willRequest: {
+                Events.emit(["event": "status", "stage": "requesting_permission", "permission": "microphone"])
+            })
             guard granted else {
                 throw EngineError.internalError(
-                    "Microphone permission denied. Open System Settings → Privacy & Security → Microphone, "
-                        + "enable it for the app running DoodleNote (Electron during development), then try again."
+                    "Microphone access is off. Open System Settings → Privacy & Security → Microphone, "
+                        + "enable DoodleNote, then try recording again."
                 )
             }
-            Events.emit(["event": "status", "stage": "permission_granted", "permission": "microphone"])
+            Events.emit(["event": "status", "stage": "starting_capture", "channel": "mic"])
             // AEC is opt-in (`--aec on`): Apple's voice processing fails to
             // initialize on some setups, and its teardown/retry can leave the
             // fallback mic silently dead. Cross-channel transcript dedup
@@ -684,8 +683,16 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
         self.pipeline = pipeline
         super.init()
 
-        Events.emit(["event": "status", "stage": "requesting_permission", "permission": "screen_system_audio"])
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        // Querying shareable content can prompt on first use, but is also required
+        // on authorized starts. Do not claim the OS is awaiting consent here.
+        Events.emit(["event": "status", "stage": "starting_capture", "channel": "system"])
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        } catch {
+            Events.log("system audio setup failed: \(error)")
+            throw EngineError.systemAudio(error)
+        }
         guard let display = content.displays.first else {
             throw EngineError.internalError("no display available for system audio capture")
         }
@@ -708,7 +715,12 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, Syst
     }
 
     func start() async throws {
-        try await stream?.startCapture()
+        do {
+            try await stream?.startCapture()
+        } catch {
+            Events.log("system audio start failed: \(error)")
+            throw EngineError.systemAudio(error)
+        }
         // Registered only once capture is live: from here on, a process that
         // dies without stopCapture strands the tap's "System Audio Recording"
         // attribution in Control Center.

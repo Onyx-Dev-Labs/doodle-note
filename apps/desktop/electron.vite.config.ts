@@ -4,6 +4,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
+    define: {
+      __DOODLENOTE_GOOGLE_CLIENT_SECRET__: JSON.stringify(
+        process.env.DOODLENOTE_GOOGLE_CLIENT_SECRET?.trim() ?? ''
+      )
+    },
     // electron-vite externalizes every package.json dependency of the main
     // build by default. @repo/ai is unbuilt workspace TS source, so it must
     // be BUNDLED (excluded here); its native dep node-llama-cpp must stay

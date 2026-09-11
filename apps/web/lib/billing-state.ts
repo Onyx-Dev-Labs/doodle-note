@@ -30,6 +30,13 @@ export interface SubscriptionState {
   currentPeriodEnd: Date | null;
 }
 
+/** Setup visibility permits paid subscriptions and active trials, but not grace access. */
+export function isRemoteMcpEligible(entitlement: Entitlement): boolean {
+  return entitlement.entitled &&
+    (entitlement.subscriptionStatus === "active" || entitlement.subscriptionStatus === "trialing") &&
+    (entitlement.reason === "active" || entitlement.reason === "trialing" || entitlement.reason === "grandfathered");
+}
+
 const SERVING_STATUSES = new Set(["trialing", "active", "past_due"]);
 const CHECKOUT_RETRY_STATUSES = new Set([
   "none",

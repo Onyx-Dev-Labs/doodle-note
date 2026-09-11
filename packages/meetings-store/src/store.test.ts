@@ -70,6 +70,42 @@ test("rejects unsafe ids for reads and writes", () => {
   }
 });
 
+test("generated transcript baseline survives added capture and reopening", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    store.upsert({
+      id: "resumed",
+      enhancedMarkdown: "Saved notes",
+      enhancedTranscriptSegmentCount: 1,
+    });
+    store.upsert({
+      id: "resumed",
+      segments: [segment("Before"), segment("After", 1000, 2000)],
+    });
+    const reopened = new MeetingFileStore(dir).get("resumed");
+    assert.equal(reopened?.enhancedTranscriptSegmentCount, 1);
+    assert.equal(reopened?.segments.length, 2);
+    store.upsert({
+      id: "resumed",
+      enhancedMarkdown: "Updated notes",
+      enhancedTranscriptSegmentCount: 2,
+    });
+    assert.equal(
+      new MeetingFileStore(dir).get("resumed")?.enhancedTranscriptSegmentCount,
+      2,
+    );
+    for (const invalid of [-1, 1.5, NaN, Infinity]) {
+      store.upsert({ id: "invalid", enhancedTranscriptSegmentCount: invalid });
+      assert.equal(
+        store.get("invalid")?.enhancedTranscriptSegmentCount,
+        undefined,
+      );
+    }
+  } finally {
+    cleanup();
+  }
+});
+
 test("list sorts newest-first and carries kind/trash markers", () => {
   const { store, cleanup } = tempStore();
   try {

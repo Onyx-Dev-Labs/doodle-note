@@ -362,7 +362,10 @@ a,
 
 .folder-add {
   flex-shrink: 0;
-  display: none;
+  /* Reserve the action's space so revealing it cannot resize the row. */
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -372,8 +375,10 @@ a,
   font-size: 11px;
 }
 
-.nav-item:hover .folder-add {
-  display: flex;
+.nav-item:hover .folder-add,
+.nav-item:focus-within .folder-add {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .folder-add:hover {
@@ -456,17 +461,12 @@ a,
 }
 
 .new-menu-trigger {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-width: 82px;
   justify-content: center;
-}
-
-.new-menu-chevron {
-  color: var(--muted);
-  font-size: 12px;
-  transform: translateY(-1px);
+  gap: 4px;
+  padding: 6px 12px;
+  line-height: 16px;
 }
 
 .new-menu-popover {
@@ -1267,6 +1267,10 @@ button.fp-row:hover {
 }
 
 .back-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -2209,15 +2213,30 @@ button.fp-row:hover {
   color: var(--ink);
 }
 
-.enhance-error-bar {
+.meeting-generation-actions {
   position: absolute;
-  bottom: 84px;
+  bottom: 96px;
   left: 50%;
   transform: translateX(-50%);
+  width: min(600px, calc(100% - 48px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 21;
+  pointer-events: none;
+}
+
+.meeting-generation-actions > * {
+  pointer-events: auto;
+}
+
+.enhance-error-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: min(600px, calc(100% - 48px));
+  max-width: 100%;
+  flex-wrap: wrap;
   background: var(--card);
   border: 1px solid var(--danger-border);
   border-radius: 10px;
@@ -2226,6 +2245,11 @@ button.fp-row:hover {
   color: var(--danger);
   box-shadow: var(--shadow-pill);
   z-index: 21;
+}
+
+.enhance-error-bar > span {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
 }
 
 .enhance-error-bar button {
@@ -3135,11 +3159,16 @@ button.fp-row:hover {
 }
 
 /* generate-notes CTA (centered button above the pill bar) */
+.generate-cta-notice {
+  margin: 0;
+  color: var(--accent-deep);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .generate-cta-wrap {
-  position: absolute;
-  left: 50%;
-  bottom: 96px;
-  transform: translateX(-50%);
+  position: relative;
   display: flex;
   gap: 2px;
   z-index: 5;
@@ -3158,6 +3187,9 @@ button.fp-row:hover {
 }
 
 .generate-cta-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px 14px;
   border-radius: 0 999px 999px 0;
   font-size: 11px;
@@ -3351,21 +3383,38 @@ button.fp-row:hover {
 }
 
 .folder-menu-btn {
-  display: none;
-  margin-left: 4px;
-  padding: 0 5px;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  opacity: 0;
+  pointer-events: none;
   border-radius: 6px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
 }
 
-.folder-row:hover .folder-menu-btn {
-  display: inline-flex;
+.folder-row .nav-count {
+  /* Share a stable slot with the overlaid options button. */
+  min-width: 22px;
+  text-align: right;
 }
 
-.folder-row:hover .nav-count {
-  display: none;
+.folder-row:hover .folder-menu-btn,
+.folder-row:focus-within .folder-menu-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.folder-row:hover .nav-count,
+.folder-row:focus-within .nav-count {
+  visibility: hidden;
 }
 
 .folder-menu-btn:hover {
@@ -3453,10 +3502,25 @@ button.fp-row:hover {
   cursor: default;
 }
 
-/* Google sign-in placeholder */
-.ms-signin.google-soon {
+/* Explain why Google connection controls are temporarily unavailable. */
+.google-calendar-pending {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.google-calendar-pending > button:disabled {
   opacity: 0.55;
-  cursor: default;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
+.google-calendar-pending-note {
+  max-width: 230px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .soon-badge {
@@ -3992,6 +4056,36 @@ button.fp-row:hover {
 .wz-ok { color: var(--accent-deep); font-weight: 600; }
 .wz-bad { color: #b4543a; font-weight: 600; }
 
+.wizard-loading {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  flex: 0 0 24px;
+  gap: 3px;
+  height: 6px;
+  color: var(--accent-deep);
+}
+
+.wizard-loading > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: wizard-loading-pulse 1.2s ease-in-out infinite;
+}
+
+.wizard-loading > span:nth-child(2) { animation-delay: 0.2s; }
+.wizard-loading > span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes wizard-loading-pulse {
+  0%, 80%, 100% { opacity: 0.4; }
+  40% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wizard-loading > span { animation: none; opacity: 1; }
+}
+
 .wizard-progress {
   width: 100%;
   height: 6px;
@@ -4037,3 +4131,49 @@ button.fp-row:hover {
 }
 
 .wizard-skip:hover { color: var(--ink); }
+
+/* Remote setup is independent of the local-agent opt-in. */
+.remote-mcp-url {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.remote-mcp-steps {
+  padding-left: 22px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.remote-mcp-steps li {
+  margin-bottom: 10px;
+}
+.remote-mcp code {
+  overflow-wrap: anywhere;
+}
+.remote-mcp summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.remote-mcp details p {
+  margin-top: 12px;
+}
+.remote-mcp pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.remote-mcp .calendar-note { color: var(--ink); }
+.remote-mcp .calendar-actions { flex-wrap: wrap; }

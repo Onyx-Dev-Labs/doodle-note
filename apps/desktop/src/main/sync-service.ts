@@ -1,7 +1,6 @@
 import { cloudReaderClient } from './cloud-reader-client'
+import { remoteMcpEligibilityClient } from './remote-mcp-eligibility'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { createServer, type Server } from 'node:http'
-import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { ipcMain, safeStorage, shell } from 'electron'
 import type { TranscriptSegment } from '../shared/engine-events'
@@ -9,9 +8,11 @@ import { defaultSpeakerId, defaultSpeakerLabel, sanitizeSpeakerName } from '@rep
 import { MEETINGS_CHANGED_EVENT_CHANNEL, type MeetingRecord } from '../shared/meetings-api'
 import {
   SYNC_CONNECT_CHANNEL,
+  SYNC_CANCEL_CONNECT_CHANNEL,
   SYNC_SHARE_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
+  SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
@@ -22,6 +23,7 @@ import type { FolderRecord } from '../shared/folders-api'
 import type { FoldersService } from './folders-service'
 import type { MeetingsService } from './meetings-service'
 import { contentHash, mediaRefs, rewriteMedia, syncableSegments } from './sync-content-hash'
+import { DeviceLinkAttempt } from './device-link-attempt'
 import { EMPTY_SYNC_CONFIG, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
 import {
   decideFolderPull,
@@ -33,7 +35,6 @@ import {
 /** Cloud base URL; override with DOODLE_SYNC_URL for local web-dev testing. */
 const DEFAULT_BASE_URL = 'https://www.doodlenote.ai'
 
-const LINK_TIMEOUT_MS = 5 * 60_000
 const PUSH_DEBOUNCE_MS = 5_000
 const PUSH_INTERVAL_MS = 5 * 60_000
 /** Pull pages are capped server-side; this bounds a runaway loop. */
@@ -54,10 +55,11 @@ export class SyncService {
   private readonly baseUrl: string
   private syncing = false
   private pulling = false
-  private linking = false
+  private statusRevision = 0
+  private connectionRevision = 0
   private lastError: string | undefined
   private debounceTimer: NodeJS.Timeout | null = null
-  private linkServer: Server | null = null
+  private linkAttempt: DeviceLinkAttempt | null = null
 
   private readonly attachmentsDir: string
 
@@ -81,7 +83,14 @@ export class SyncService {
     }))
     ipcMain.handle('sync:reader', (_event, request: unknown) => reader(request))
     ipcMain.handle(SYNC_GET_STATUS_CHANNEL, () => this.status())
+    const remoteMcpEligible = remoteMcpEligibilityClient(() => ({
+      token: this.token(),
+      baseUrl: this.baseUrl,
+      revision: this.connectionRevision
+    }))
+    ipcMain.handle(SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL, () => remoteMcpEligible())
     ipcMain.handle(SYNC_CONNECT_CHANNEL, () => this.connect())
+    ipcMain.handle(SYNC_CANCEL_CONNECT_CHANNEL, () => this.cancelConnect())
     ipcMain.handle(SYNC_DISCONNECT_CHANNEL, () => this.disconnect())
     ipcMain.handle(SYNC_SET_ENABLED_CHANNEL, (_e, enabled: unknown) =>
       this.setEnabled(Boolean(enabled))
@@ -146,6 +155,8 @@ export class SyncService {
 
   status(): SyncStatus {
     return {
+      statusRevision: this.statusRevision,
+      connectionRevision: this.connectionRevision,
       connected: Boolean(this.token()),
       ...(this.config.email ? { email: this.config.email } : {}),
       ...(this.config.workspaceName ? { workspaceName: this.config.workspaceName } : {}),
@@ -154,12 +165,13 @@ export class SyncService {
       ...(this.config.lastSyncAt ? { lastSyncAt: this.config.lastSyncAt } : {}),
       pendingCount: this.pendingMeetings().length + this.config.pendingDeletes.length,
       ...(this.lastError ? { lastError: this.lastError } : {}),
-      linking: this.linking,
+      linking: this.linkAttempt !== null,
       baseUrl: this.baseUrl
     }
   }
 
   private emitStatus(): void {
+    this.statusRevision++
     this.broadcast(SYNC_STATUS_EVENT_CHANNEL, this.status())
   }
 
@@ -170,77 +182,54 @@ export class SyncService {
    * the web app's /link-device page, and wait for it to deliver a sync token.
    */
   async connect(): Promise<SyncStatus> {
-    if (this.linking) return this.status()
-    this.linking = true
+    if (this.linkAttempt) return this.status()
+    const attempt = new DeviceLinkAttempt(this.baseUrl, (url) => shell.openExternal(url))
+    this.linkAttempt = attempt
     this.lastError = undefined
     this.emitStatus()
+    attempt.start()
 
     try {
-      const token = await new Promise<{ token: string; email: string; workspace: string }>(
-        (resolve, reject) => {
-          const server = createServer((req, res) => {
-            const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-            if (url.pathname !== '/callback') {
-              res.writeHead(404).end()
-              return
-            }
-            const token = url.searchParams.get('token') ?? ''
-            const email = url.searchParams.get('email') ?? ''
-            const workspace = url.searchParams.get('workspace') ?? ''
-            if (token.startsWith('dnsy_')) {
-              // Land the user in their web meetings library — they're already
-              // signed in there from the approval page.
-              res.writeHead(302, { Location: `${this.baseUrl}/app` })
-              res.end()
-              resolve({ token, email, workspace })
-            } else {
-              res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-              res.end(
-                '<html><body style="font-family:-apple-system,sans-serif;background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>Connection failed</h2><p>Return to DoodleNote and try connecting again.</p></div></body></html>'
-              )
-              reject(new Error('The browser did not return a valid token'))
-            }
-          })
-          this.linkServer = server
-          const timeout = setTimeout(() => {
-            reject(new Error('Sign-in timed out — try again'))
-          }, LINK_TIMEOUT_MS)
-          timeout.unref()
-          server.on('error', reject)
-          server.listen(0, '127.0.0.1', () => {
-            const address = server.address()
-            const port = typeof address === 'object' && address ? address.port : 0
-            const query = new URLSearchParams({
-              port: String(port),
-              name: hostname().replace(/\.local$/, '') || 'Computer'
-            })
-            void shell.openExternal(`${this.baseUrl}/link-device?${query}`)
-          })
-        }
-      )
-
-      this.config.tokenEnc = safeStorage.encryptString(token.token).toString('base64')
-      this.config.email = token.email
-      this.config.workspaceName = token.workspace
-      this.config.enabled = true
-      this.writeConfig()
-      // First sync right away — the whole point of connecting.
-      void this.syncCycle()
-    } catch (error) {
-      this.lastError = error instanceof Error ? error.message : 'Could not connect'
+      const token = await attempt.result
+      // Cancellation/disconnect can retire this attempt before its continuation runs.
+      if (this.linkAttempt !== attempt) return this.status()
+      if (token.kind !== 'linked') {
+        if (token.kind === 'error') this.lastError = token.message
+      } else {
+        this.config.tokenEnc = safeStorage.encryptString(token.token).toString('base64')
+        this.connectionRevision++
+        this.config.email = token.email
+        this.config.workspaceName = token.workspace
+        this.config.enabled = true
+        this.writeConfig()
+        // First sync right away — the whole point of connecting.
+        void this.syncCycle()
+      }
+    } catch {
+      if (this.linkAttempt === attempt) this.lastError = 'Could not save the connection — try again'
     } finally {
-      this.linkServer?.close()
-      this.linkServer = null
-      this.linking = false
-      this.emitStatus()
+      if (this.linkAttempt === attempt) {
+        this.linkAttempt = null
+        this.emitStatus()
+      }
     }
     return this.status()
   }
 
+  /** Cancels only the unfinished browser flow, preserving account and local data. */
+  cancelConnect(): SyncStatus {
+    const attempt = this.linkAttempt
+    if (!attempt) return this.status()
+    this.linkAttempt = null
+    attempt.cancel()
+    this.lastError = undefined
+    this.emitStatus()
+    return this.status()
+  }
+
   disconnect(): SyncStatus {
-    this.linkServer?.close()
-    this.linkServer = null
-    this.linking = false
+    this.cancelConnect()
+    this.connectionRevision++
     this.config = { ...EMPTY_SYNC_CONFIG }
     this.writeConfig()
     this.lastError = undefined

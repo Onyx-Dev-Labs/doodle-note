@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { safeStorage, shell } from 'electron'
 import { BUILT_IN_GOOGLE_CLIENT_ID } from '../shared/google-app'
+import { googleClientSecret, googleConfigurationError, googleTokenError } from './google-oauth'
 import type { CalendarAccount, CalendarEvent, CalendarInfo } from '../shared/calendar-api'
 
 const SCOPES = 'openid email https://www.googleapis.com/auth/calendar.readonly'
@@ -32,7 +33,10 @@ export class GoogleCalendarClient {
   private tokens: StoredTokens | null = null
   private access: AccessToken | null = null
 
-  constructor(userDataDir: string) {
+  constructor(
+    userDataDir: string,
+    private readonly clientSecret = googleClientSecret()
+  ) {
     this.cachePath = join(userDataDir, 'google-token-cache')
     this.tokens = this.readCache()
   }
@@ -47,6 +51,7 @@ export class GoogleCalendarClient {
 
   /** Browser OAuth: resolves once Google redirects back to the loopback. */
   async connect(): Promise<CalendarAccount> {
+    if (!this.clientSecret) throw googleConfigurationError()
     const verifier = randomBytes(32).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
     const state = randomBytes(16).toString('hex')
@@ -60,8 +65,9 @@ export class GoogleCalendarClient {
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(
-          '<html><body style="font-family:-apple-system,sans-serif;background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>Google Calendar connected</h2><p>You can close this tab and return to DoodleNote.</p></div></body></html>'
+          '<html><body style="font-family:-apple-system,sans-serif;background:#f7f5ee;color:#26281f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>Return to DoodleNote</h2><p>You can close this tab and return to DoodleNote.</p></div></body></html>'
         )
+        clearTimeout(timeout)
         server.close()
         const returnedState = url.searchParams.get('state')
         const code = url.searchParams.get('code')
@@ -78,7 +84,10 @@ export class GoogleCalendarClient {
         reject(new Error('Google sign-in timed out — try again'))
       }, AUTH_TIMEOUT_MS)
       timeout.unref()
-      server.on('error', reject)
+      server.on('error', (error) => {
+        clearTimeout(timeout)
+        reject(error)
+      })
       server.listen(0, '127.0.0.1', () => {
         const address = server.address()
         const port = typeof address === 'object' && address ? address.port : 0
@@ -93,13 +102,19 @@ export class GoogleCalendarClient {
           code_challenge_method: 'S256',
           state
         })
-        void shell.openExternal(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+        void shell
+          .openExternal(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+          .catch(() => {
+            clearTimeout(timeout)
+            server.close()
+            reject(new Error('Google Calendar could not open your browser. Try connecting again.'))
+          })
         // Rebuild the redirect_uri for the token exchange below.
         this.pendingRedirect = `http://127.0.0.1:${port}/callback`
       })
     })
 
-    const body = await tokenRequest({
+    const body = await tokenRequest(this.clientSecret, {
       grant_type: 'authorization_code',
       code,
       code_verifier: verifier,
@@ -128,7 +143,7 @@ export class GoogleCalendarClient {
     if (this.access && Date.now() < this.access.expiresAtMs - 60_000) {
       return this.access.token
     }
-    const body = await tokenRequest({
+    const body = await tokenRequest(this.clientSecret, {
       grant_type: 'refresh_token',
       refresh_token: this.tokens.refreshToken
     })
@@ -142,7 +157,9 @@ export class GoogleCalendarClient {
     const res = await fetch(
       'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=50',
       { headers: { Authorization: `Bearer ${token}` } }
-    )
+    ).catch(() => {
+      throw new Error('Google Calendar could not be reached. Check your connection and try again.')
+    })
     if (!res.ok) throw new Error(await googleErrorMessage(res))
     const body = (await res.json()) as { items?: unknown[] }
     const calendars: CalendarInfo[] = []
@@ -180,7 +197,9 @@ export class GoogleCalendarClient {
     const res = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(rawId)}/events?${params}`,
       { headers: { Authorization: `Bearer ${token}` } }
-    )
+    ).catch(() => {
+      throw new Error('Google Calendar could not be reached. Check your connection and try again.')
+    })
     if (!res.ok) throw new Error(await googleErrorMessage(res))
     const body = (await res.json()) as { items?: unknown[] }
     const events: CalendarEvent[] = []
@@ -222,18 +241,35 @@ interface TokenResponse {
   id_token?: string
 }
 
-async function tokenRequest(params: Record<string, string>): Promise<TokenResponse> {
+async function tokenRequest(
+  clientSecret: string,
+  params: Record<string, string>
+): Promise<TokenResponse> {
+  if (!clientSecret) throw googleConfigurationError()
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
+      ...params,
       client_id: BUILT_IN_GOOGLE_CLIENT_ID,
-      ...params
+      client_secret: clientSecret
     })
+  }).catch(() => {
+    throw new Error('Google Calendar could not be reached. Check your connection and try again.')
   })
-  const body = (await res.json()) as TokenResponse & { error_description?: string; error?: string }
-  if (!res.ok || typeof body.access_token !== 'string') {
-    throw new Error(body.error_description ?? body.error ?? `Google token error ${res.status}`)
+  const body = (await res.json().catch(() => ({}))) as TokenResponse & {
+    error_description?: string
+    error?: string
+  }
+  if (
+    !res.ok ||
+    typeof body.access_token !== 'string' ||
+    !body.access_token ||
+    typeof body.expires_in !== 'number' ||
+    !Number.isFinite(body.expires_in) ||
+    body.expires_in <= 0
+  ) {
+    throw googleTokenError(body.error, body.error_description, res.status)
   }
   return body
 }
@@ -294,8 +330,13 @@ function normalizeGoogleEvent(raw: unknown, calendar: CalendarInfo): CalendarEve
 
 async function googleErrorMessage(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { error?: { message?: string } }
-    return body.error?.message ?? `Google Calendar error ${res.status}`
+    await res.json()
+    if (res.status === 401)
+      return 'Google Calendar authorization expired. Open Settings > Calendar and reconnect Google.'
+    if (res.status === 403)
+      return 'Google Calendar access was denied. Check your Google account permissions and reconnect.'
+    if (res.status === 429) return 'Google Calendar is rate-limiting requests. Try again shortly.'
+    return `Google Calendar request failed (HTTP ${res.status}). Try again.`
   } catch {
     return `Google Calendar error ${res.status}`
   }

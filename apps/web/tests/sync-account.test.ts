@@ -30,7 +30,7 @@ test("native identity proof reopens lapsed identity but never authorizes data or
     const identity = await syncAccountResponse(db, device!, false, false);
     assert.equal(identity.headers.get("cache-control"), "private, no-store");
     assert.deepEqual(await identity.json(), { accountId: "cache-owner", workspaceId: "cache-work",
-      workspaceName: "Work", entitled: false, syncAvailable: false, libraries: [] });
+      workspaceName: "Work", entitled: false, remoteMcpEligible: false, syncAvailable: false, libraries: [] });
     const { GET: pull } = await import("../app/api/sync/pull/route");
     const { POST: push } = await import("../app/api/sync/push/route");
     assert.equal((await pull(request)).status, 401);

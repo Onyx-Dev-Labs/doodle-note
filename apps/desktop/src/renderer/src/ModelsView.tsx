@@ -1,3 +1,4 @@
+import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
@@ -6,7 +7,7 @@ import {
 } from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
-import type { SyncStatus } from '../../shared/sync-api'
+import { useSyncConnection } from './lib/use-sync-connection'
 import type { AgentAccessStatus, McpClientId, McpServerSpec } from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
@@ -15,10 +16,12 @@ import {
   CLOUD_PROVIDERS,
   type CloudProvider,
   type EngineChoice,
+  type DownloadProgressEvent,
   type NotesModelInfo,
   type NotesModelsResponse,
   type NotesSettingsView
 } from '../../shared/notes-api'
+import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
 import mascotUrl from './assets/mascot-square.png'
 
 function lastSyncLabel(iso: string): string {
@@ -188,7 +191,9 @@ export default function ModelsView({
   }
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
-  const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
+  const [downloading, setDownloading] = useState<(DownloadProgressEvent & { id: string }) | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
 
   /** The user's own name; labels their lines instead of "You". */
@@ -203,8 +208,13 @@ export default function ModelsView({
   const cloudFormSeeded = useRef(false)
 
   /* ---- cloud sync ---- */
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
-  const [linkPending, setLinkPending] = useState(false)
+  const {
+    status: syncStatus,
+    error: syncError,
+    adoptStatus: adoptSyncStatus,
+    connect: connectSync,
+    cancel: cancelSync
+  } = useSyncConnection(active)
 
   /* ---- integrations: agent access ---- */
   const [agentAccess, setAgentAccess] = useState<AgentAccessStatus | null>(null)
@@ -386,33 +396,12 @@ export default function ModelsView({
 
   useEffect(() => {
     if (active) {
-      void window.sync
-        .getStatus()
-        .then(setSyncStatus)
-        .catch(() => setSyncStatus(null))
-    }
-  }, [active])
-
-  useEffect(() => window.sync.onStatus(setSyncStatus), [])
-
-  useEffect(() => {
-    if (active) {
       void window.detect
         .getState()
         .then(setDetect)
         .catch(() => setDetect(null))
     }
   }, [active])
-
-  const connectSync = async (): Promise<void> => {
-    if (linkPending) return
-    setLinkPending(true)
-    try {
-      setSyncStatus(await window.sync.connect())
-    } finally {
-      setLinkPending(false)
-    }
-  }
 
   const saveCalendarConfig = async (): Promise<void> => {
     const state = await window.calendar.setConfig({
@@ -430,18 +419,6 @@ export default function ModelsView({
       setCalState(await window.calendar.connect())
     } finally {
       setConnecting(false)
-    }
-  }
-
-  const [googleConnecting, setGoogleConnecting] = useState(false)
-
-  const connectGoogle = async (): Promise<void> => {
-    if (googleConnecting) return
-    setGoogleConnecting(true)
-    try {
-      setCalState(await window.calendar.connectGoogle())
-    } finally {
-      setGoogleConnecting(false)
     }
   }
 
@@ -524,18 +501,23 @@ export default function ModelsView({
   useEffect(
     () =>
       window.notes.onDownloadProgress((ev) => {
-        setDownloading((d) => (d && d.id === ev.modelId ? { ...d, progress: ev.progress } : d))
+        setDownloading((d) => (d && d.id === ev.modelId ? { ...d, ...ev } : d))
       }),
     []
   )
 
   const activate = async (modelId: string): Promise<void> => {
     setError(null)
-    setDownloading({ id: modelId, progress: 0 })
-    const result = await window.notes.activateModel(modelId)
-    setDownloading(null)
-    if (!result.ok) setError(result.error ?? 'activation failed')
-    refresh()
+    setDownloading({ id: modelId, modelId, progress: 0, stage: 'checking' })
+    try {
+      const result = await window.notes.activateModel(modelId)
+      if (!result.ok) setError(result.error ?? 'Activation failed. Please retry.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Activation failed. Please retry.')
+    } finally {
+      setDownloading(null)
+      refresh()
+    }
   }
 
   const saveProfileName = async (): Promise<void> => {
@@ -544,6 +526,23 @@ export default function ModelsView({
     setProfileName(view.profileName ?? '')
     setProfileSaved(true)
     setTimeout(() => setProfileSaved(false), 2000)
+  }
+
+  const [savingAutoNotes, setSavingAutoNotes] = useState(false)
+  const toggleAutoNotes = async (): Promise<void> => {
+    setSavingAutoNotes(true)
+    setError(null)
+    try {
+      const view = await window.notes.setSettings({
+        autoGenerateNotesAfterStop: settings?.autoGenerateNotesAfterStop === false
+      })
+      setSettings(view)
+      if (view.error) setError(view.error)
+    } catch {
+      setError('Could not save automatic notes preference. Please try again.')
+    } finally {
+      setSavingAutoNotes(false)
+    }
   }
 
   const chooseEngine = async (choice: EngineChoice): Promise<void> => {
@@ -575,12 +574,20 @@ export default function ModelsView({
     if (downloading?.id === m.id) {
       const pct = Math.round(downloading.progress * 100)
       return (
-        <div className="model-progress">
-          <div className="progress-track">
-            <div className="progress-bar" style={{ width: `${pct}%` }} />
-          </div>
+        <div className="model-progress" role="status" aria-live="polite">
+          {downloading.stage === 'downloading' && (
+            <div className="progress-track">
+              <div className="progress-bar" style={{ width: `${pct}%` }} />
+            </div>
+          )}
           <span className="progress-label">
-            {downloading.progress > 0 ? `downloading… ${pct}%` : 'preparing…'}
+            {downloading.stage === 'downloading'
+              ? `Downloading… ${pct}%`
+              : downloading.stage === 'loading'
+                ? 'Loading local model…'
+                : downloading.stage === 'verifying'
+                  ? 'Verifying download…'
+                  : 'Checking local models…'}
           </span>
         </div>
       )
@@ -650,10 +657,18 @@ export default function ModelsView({
                 machine.
               </p>
 
-              {error && <div className="models-error">{error}</div>}
+              {error && (
+                <div className="models-error" role="alert">
+                  {error}
+                </div>
+              )}
 
               <div className="model-cards">
-                {data === null && <span className="placeholder">loading models…</span>}
+                {data === null && (
+                  <span className="placeholder" role="status">
+                    Checking local models…
+                  </span>
+                )}
                 {data?.models.map((m) => (
                   <div
                     key={m.id}
@@ -731,17 +746,10 @@ export default function ModelsView({
                       {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="ms-signin"
-                    disabled={googleConnecting}
-                    onClick={() => void connectGoogle()}
-                  >
+                  <GoogleCalendarPending buttonClassName="ms-signin">
                     <GoogleLogo />
-                    <span>
-                      {googleConnecting ? 'Waiting for your browser…' : 'Sign in with Google'}
-                    </span>
-                  </button>
+                    <span>Sign in with Google</span>
+                  </GoogleCalendarPending>
                   {!calState.builtIn && (
                     <button
                       type="button"
@@ -813,15 +821,10 @@ export default function ModelsView({
                       </button>
                     )}
                     {!calState.googleSignedIn && (
-                      <button
-                        type="button"
-                        className="provider-btn"
-                        disabled={googleConnecting}
-                        onClick={() => void connectGoogle()}
-                      >
+                      <GoogleCalendarPending buttonClassName="provider-btn">
                         <GoogleLogo />
-                        {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
-                      </button>
+                        Connect Google
+                      </GoogleCalendarPending>
                     )}
                     {calState.googleSignedIn && (
                       <button
@@ -845,14 +848,15 @@ export default function ModelsView({
                           <MenuBarIcon />
                         </span>
                         <span className="cal-row-main">
-                          <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                          <span className="cal-row-label">Full Island in menu bar</span>
                           <span className="cal-row-sub">
-                            Display your next meeting and time until it starts in the macOS menu bar
+                            Show today’s next meeting beside the dog. Turn off for the compact dog
+                            icon.
                           </span>
                         </span>
                         <Toggle
                           checked={calState.prefs.showMenuBar}
-                          label="Show upcoming meetings in menu bar"
+                          label="Full Island in menu bar"
                           onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
                         />
                       </div>
@@ -1211,6 +1215,11 @@ export default function ModelsView({
                 share them on the web.
               </p>
 
+              {syncError && (
+                <div className="models-error" role="alert">
+                  {syncError}
+                </div>
+              )}
               {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
 
               {syncStatus === null ? (
@@ -1220,19 +1229,24 @@ export default function ModelsView({
                   <button
                     type="button"
                     className="ms-signin"
-                    disabled={linkPending || syncStatus.linking}
+                    disabled={syncStatus.linking}
                     onClick={() => void connectSync()}
                   >
                     <span>
-                      {linkPending || syncStatus.linking
+                      {syncStatus.linking
                         ? 'Waiting for your browser…'
                         : 'Connect DoodleNote Cloud'}
                     </span>
                   </button>
-                  {(linkPending || syncStatus.linking) && (
-                    <span className="calendar-note">
-                      approve the connection in your browser, then come back
-                    </span>
+                  {syncStatus.linking && (
+                    <>
+                      <button type="button" className="pill-btn" onClick={() => void cancelSync()}>
+                        Cancel
+                      </button>
+                      <span className="calendar-note" role="status">
+                        Approve in your browser, or cancel to try again if you closed it.
+                      </span>
+                    </>
                   )}
                 </div>
               ) : (
@@ -1271,18 +1285,23 @@ export default function ModelsView({
                         checked={syncStatus.enabled}
                         label="Sync meetings to the cloud"
                         onChange={() => {
-                          void window.sync.setEnabled(!syncStatus.enabled).then(setSyncStatus)
+                          void window.sync.setEnabled(!syncStatus.enabled).then(adoptSyncStatus)
                         }}
                       />
                     </div>
                   </div>
 
                   <div className="calendar-actions">
+                    {syncStatus.linking && (
+                      <button type="button" onClick={() => void cancelSync()}>
+                        Cancel
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={syncStatus.syncing || !syncStatus.enabled}
                       onClick={() => {
-                        void window.sync.syncNow().then(setSyncStatus)
+                        void window.sync.syncNow().then(adoptSyncStatus)
                       }}
                     >
                       {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
@@ -1290,7 +1309,7 @@ export default function ModelsView({
                     <button
                       type="button"
                       onClick={() => {
-                        void window.sync.disconnect().then(setSyncStatus)
+                        void window.sync.disconnect().then(adoptSyncStatus)
                       }}
                     >
                       Disconnect
@@ -1303,12 +1322,18 @@ export default function ModelsView({
 
           {section === 'integrations' && (
             <>
+              {active && syncStatus?.connected && (
+                <PaidRemoteMcpSetup
+                  key={`${syncStatus.baseUrl}:${syncStatus.connectionRevision}`}
+                  baseUrl={syncStatus.baseUrl}
+                />
+              )}
               <section className="keys-section calendar-section">
-                <h3>Agent access</h3>
+                <h3>Local MCP</h3>
                 <p className="models-sub">
                   Let AI tools on this computer (Claude, Codex, and other MCP clients) read your
                   meetings, notes, and transcripts. Read-only, off by default, and local — nothing
-                  is uploaded. Turning this off revokes access immediately.
+                  is uploaded. Turning this off revokes local access immediately.
                 </p>
                 {agentError && <div className="models-error">{agentError}</div>}
                 {agentAccess === null ? (
@@ -1377,7 +1402,7 @@ export default function ModelsView({
                       ))}
                       <div className="cal-row">
                         <span className="cal-row-main">
-                          <span className="cal-row-label">Other MCP clients</span>
+                          <span className="cal-row-label">Other local MCP clients</span>
                           <span className="cal-row-sub">
                             Copy a ready-made config snippet — no build steps, the server ships
                             inside DoodleNote
@@ -1400,6 +1425,24 @@ export default function ModelsView({
 
           {section === 'model' && (
             <section className="keys-section">
+              <h3>Meeting notes</h3>
+              <div className="cal-row">
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Generate notes automatically after Stop</span>
+                  <span className="cal-row-sub">
+                    After you stop recording or a detected meeting ends, generate notes once the
+                    transcript is saved. Uses your selected model and template. On-device processing
+                    stays local; your configured external provider receives text and may charge
+                    usage fees. Audio is not sent for note generation.
+                  </span>
+                </span>
+                <Toggle
+                  checked={settings?.autoGenerateNotesAfterStop !== false}
+                  disabled={!settings || savingAutoNotes}
+                  onChange={() => void toggleAutoNotes()}
+                  label="Generate notes automatically after Stop"
+                />
+              </div>
               <h3>AI keys (optional)</h3>
               <p className="models-sub">
                 On-device is the default and needs no account. Add your own API key only if you want
