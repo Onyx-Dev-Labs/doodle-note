@@ -41,7 +41,7 @@ final class NoteExportTests: XCTestCase {
     func testPDFContainsEveryLanguageAndFinalTextAcrossManyPages() throws {
         var note = fixture()
         note.ink = Data()
-        note.text = (0..<120).map { index in "Row \(index) " + languages.joined(separator: " / ") }.joined(separator: "\n") + "\nFINAL_SENTINEL"
+        note.text = (0..<120).map { index in "Row \(index) " + languages.joined(separator: " / ") }.joined(separator: "\n") + "\nFinal passage preserved."
         let artifact = try NoteExporter.create(NoteExportDocument(note: note, selection: NoteExportSelection()), format: .pdf)
         defer { artifact.cleanup() }
         let pdf = try XCTUnwrap(PDFDocument(url: artifact.file))
@@ -49,7 +49,7 @@ final class NoteExportTests: XCTestCase {
         let text = try XCTUnwrap(pdf.string)
         for value in languages { XCTAssertTrue(text.contains(value), value) }
         for index in 0..<120 { XCTAssertTrue(text.contains("Row \(index) ")) }
-        XCTAssertTrue(text.contains("FINAL_SENTINEL"))
+        XCTAssertTrue(text.contains("Final passage preserved."))
         XCTAssertTrue(text.contains("Transcript preserved"))
         XCTAssertTrue(text.contains("Camille"))
         add(XCTAttachment(contentsOfFile: artifact.file))
@@ -119,6 +119,13 @@ final class NoteExportTests: XCTestCase {
         artifact.cleanup(); artifact.cleanup()
         XCTAssertEqual(try Data(contentsOf: sentinel), Data("keep".utf8))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["keep.txt"])
+    }
+
+    func testErasedDrawingIsEmptyInsteadOfTitleOnlyExport() throws {
+        var note = NoteRecord()
+        note.ink = PKDrawing().dataRepresentation()
+        let doc = try NoteExportDocument(note: note, selection: NoteExportSelection())
+        XCTAssertThrowsError(try NoteExporter.create(doc, format: .pdf))
     }
 
     func testMarkdownDoesNotInterpretUserHTMLOrRemoteImages() {

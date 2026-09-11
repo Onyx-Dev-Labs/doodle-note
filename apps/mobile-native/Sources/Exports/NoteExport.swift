@@ -91,6 +91,7 @@ enum NoteExporter {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
             let tiles = try inkTiles(document.ink)
+            guard !document.sections.isEmpty || !tiles.isEmpty else { throw NoteExportError.empty }
             if format == .pdf { try pdf(document, tiles: tiles, to: file) }
             else {
                 var text = "# " + markdownLiteral(document.title) + "\n\n"

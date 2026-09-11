@@ -22,3 +22,9 @@ Generate with `xcodegen generate --spec apps/mobile-native/project.yml`. Run the
 4. With Airplane Mode enabled, repeat export to Files. Use large text and VoiceOver to verify all selections and the Close/Prepare controls remain usable.
 
 Physical-device share destinations, VoiceOver and qualified human translation review remain release QA. The new non-English strings are machine drafts. No schema migration, network permission, paid resource or model download is added.
+
+## Recorded local evidence (2026-09-11)
+
+Xcode26.6/iOS26.5 iPhone17Pro simulator: all nine export unit tests passed. The native UI test passed empty selection, preparation, system share-sheet presentation, cancel, and original-note retention. Results are `/tmp/doodlenote-ony263-accepted.xcresult` (final unit run) and `/tmp/doodlenote-ony263-final.xcresult` (unit plus UI run before the additional erased-ink guard). No physical-device claim is made.
+
+[Selection screenshot](qa/ony263/selection.png), [native share sheet](qa/ony263/share-sheet.png), [ink PDF](qa/ony263/ink.pdf), and [Markdown package](qa/ony263/markdown.zip) contain only synthetic fixtures. Independent macOS PDFKit rendering confirms readable ink and intact final text; `/usr/bin/unzip -t` verifies both PNGs and `note.md` CRCs. A six-page multilingual fixture retains every numbered row and the final paragraph. PDFKit text extraction can reposition an underscore in reading order despite its correct visual position, so pagination assertions use ordinary prose rather than underscore-separated sentinel text.

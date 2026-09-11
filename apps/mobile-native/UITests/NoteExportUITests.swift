@@ -20,10 +20,10 @@ import XCTest
         app.buttons["shareNote"].tap()
         let selection = XCTAttachment(screenshot: app.screenshot()); selection.name = "Export format and content selection"; selection.lifetime = .keepAlways; add(selection)
         app.buttons["prepareExport"].tap()
-        XCTAssertTrue(app.buttons["Copy"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.cells["Copy"].waitForExistence(timeout: 15))
         let share = XCTAttachment(screenshot: app.screenshot()); share.name = "Native PDF share sheet"; share.lifetime = .keepAlways; add(share)
         // The system share sheet's Close button dismisses only the share operation.
-        app.buttons["Close"].firstMatch.tap()
+        app.buttons["header.closeButton"].tap()
         XCTAssertTrue(app.buttons["prepareExport"].waitForExistence(timeout: 5))
         app.buttons["Close"].tap()
         XCTAssertTrue(notes.waitForExistence(timeout: 5))
