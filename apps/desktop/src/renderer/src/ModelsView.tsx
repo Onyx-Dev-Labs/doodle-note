@@ -1,3 +1,4 @@
+import CloudModelPicker from './CloudModelPicker'
 import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -37,8 +38,10 @@ function lastSyncLabel(iso: string): string {
 const MODEL_PLACEHOLDERS: Record<CloudProvider, string> = {
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-5',
-  groq: 'llama-3.3-70b-versatile',
-  openrouter: 'anthropic/claude-sonnet-4.5',
+  groq: 'retired provider',
+  grok: 'grok-4.6',
+  openrouter: 'retired provider',
+  gemini: 'gemini-3.8-flash',
   ollama: 'llama3.1'
 }
 
@@ -205,6 +208,8 @@ export default function ModelsView({
   const [cloudModel, setCloudModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
+  const [catalogRevision, setCatalogRevision] = useState(0)
+  const [dataPolicyConfirmed, setDataPolicyConfirmed] = useState(false)
   const cloudFormSeeded = useRef(false)
 
   /* ---- cloud sync ---- */
@@ -489,6 +494,7 @@ export default function ModelsView({
           cloudFormSeeded.current = true
           setProvider(view.cloud.provider)
           setCloudModel(view.cloud.model ?? '')
+          setDataPolicyConfirmed(view.cloud.dataPolicyConfirmed === true)
         }
       })
       .catch(() => setSettings(null))
@@ -556,6 +562,7 @@ export default function ModelsView({
     const view = await window.notes.setSettings({
       cloud: {
         provider,
+        dataPolicyConfirmed,
         ...(cloudModel.trim() ? { model: cloudModel.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
       }
@@ -566,6 +573,7 @@ export default function ModelsView({
       setError(view.error)
     } else if (view.cloud?.hasKey) {
       setKeySaved(true)
+      setCatalogRevision((n) => n + 1)
       setTimeout(() => setKeySaved(false), 2000)
     }
   }
@@ -593,7 +601,11 @@ export default function ModelsView({
       )
     }
     if (m.active) {
-      return <span className="badge badge-active">Active</span>
+      return engineChoice === 'local' ? (
+        <span className="badge badge-active">Active</span>
+      ) : (
+        <span className="model-note">Selected for on-device use</span>
+      )
     }
     if (!m.available) {
       return <span className="model-note">needs {m.minRamGB} GB RAM</span>
@@ -649,7 +661,19 @@ export default function ModelsView({
         <div className="settings-content">
           {section === 'model' && (
             <section className="keys-section">
-              <h3>On-device model</h3>
+              <h3>Active notes model</h3>
+              <p className="models-sub" role="status">
+                {engineChoice === 'cloud'
+                  ? settings?.cloud?.hasKey &&
+                    (settings.cloud.provider === 'ollama' || settings.cloud.dataPolicyConfirmed)
+                    ? `Active: ${CLOUD_PROVIDERS.find((p) => p.id === settings.cloud?.provider)?.label ?? settings.cloud.provider} · ${settings.cloud.model || MODEL_PLACEHOLDERS[settings.cloud.provider]}`
+                    : 'Cloud selected. Complete the provider setup below before generating notes.'
+                  : `Active: ${data?.models.find((m) => m.active)?.label ?? 'On-device model'} · On-device`}
+              </p>
+              {engineChoice === 'cloud' && (
+                <p className="models-sub">On-device models are not selected for note generation.</p>
+              )}
+              <h3>On-device models</h3>
               <p className="models-sub">
                 DoodleNote polishes your meeting notes with a model that runs entirely on this
                 computer
@@ -672,7 +696,7 @@ export default function ModelsView({
                 {data?.models.map((m) => (
                   <div
                     key={m.id}
-                    className={`model-card${m.available ? '' : ' unavailable'}${m.active ? ' is-active' : ''}`}
+                    className={`model-card${m.available ? '' : ' unavailable'}${m.active && engineChoice === 'local' ? ' is-active' : ''}`}
                   >
                     <div className="model-head">
                       <span className="model-label">{m.label}</span>
@@ -1474,44 +1498,105 @@ export default function ModelsView({
                 </label>
               </div>
 
+              <p className="models-sub">
+                External AI receives meeting titles (including Google Calendar titles), notes,
+                transcripts, and chat context. Use an API account with model training and data
+                sharing disabled. Consumer chat subscriptions are not API plans. On-device models
+                process content locally without sending it to the model publisher.
+              </p>
+              {(provider === 'groq' || provider === 'openrouter') && (
+                <p className="models-sub">
+                  Groq and OpenRouter have been replaced by direct Grok and Gemini integrations.
+                  Choose a provider and enter its own API key. Existing keys are never reused with
+                  another provider. Your notes are unchanged.
+                </p>
+              )}
+              {provider !== 'ollama' && provider !== 'groq' && provider !== 'openrouter' && (
+                <label className="models-sub">
+                  <input
+                    type="checkbox"
+                    checked={dataPolicyConfirmed}
+                    onChange={(e) => setDataPolicyConfirmed(e.target.checked)}
+                  />
+                  I authorize sending meeting content to this API provider and confirm its account
+                  settings do not allow model training or data sharing for training.
+                  {provider === 'gemini' &&
+                    ' My Gemini API key belongs to a project with active Cloud Billing; unpaid Gemini API use is not permitted.'}
+                </label>
+              )}
+
               <div className="key-form">
                 <select
                   value={provider}
-                  onChange={(e) => setProvider(e.target.value as CloudProvider)}
+                  onChange={(e) => {
+                    setProvider(e.target.value as CloudProvider)
+                    setApiKey('')
+                    setCloudModel('')
+                    setKeySaved(false)
+                    setDataPolicyConfirmed(false)
+                  }}
                 >
+                  {(provider === 'groq' || provider === 'openrouter') && (
+                    <option value={provider} disabled>
+                      {provider === 'groq' ? 'Groq' : 'OpenRouter'} (retired; choose a provider)
+                    </option>
+                  )}
                   {CLOUD_PROVIDERS.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}
                     </option>
                   ))}
                 </select>
-                <input
-                  type="text"
-                  spellCheck={false}
-                  placeholder={`model (optional, e.g. ${MODEL_PLACEHOLDERS[provider]})`}
-                  value={cloudModel}
-                  onChange={(e) => setCloudModel(e.target.value)}
-                />
+
                 <input
                   type="password"
                   placeholder={
                     provider === 'ollama'
                       ? 'no key needed — uses localhost:11434'
-                      : settings?.cloud?.hasKey
+                      : settings?.cloud?.provider === provider && settings.cloud.hasKey
                         ? '••••••••  (key saved)'
                         : 'API key'
                   }
                   disabled={provider === 'ollama'}
                   value={provider === 'ollama' ? '' : apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  onChange={(e) => {
+                    setApiKey(e.target.value)
+                    setDataPolicyConfirmed(false)
+                  }}
                 />
-                <button type="button" onClick={() => void saveCloudKey()}>
+                <button
+                  type="button"
+                  disabled={
+                    provider === 'groq' ||
+                    provider === 'openrouter' ||
+                    (provider !== 'ollama' && !dataPolicyConfirmed)
+                  }
+                  onClick={() => void saveCloudKey()}
+                >
                   Save
                 </button>
-                {(keySaved || settings?.cloud?.hasKey) && (
+                {(keySaved ||
+                  (settings?.cloud?.provider === provider && settings.cloud.hasKey)) && (
                   <span className="key-saved">key saved ✓</span>
                 )}
               </div>
+              {provider !== 'groq' && provider !== 'openrouter' && (
+                <CloudModelPicker
+                  key={provider}
+                  provider={provider}
+                  saved={
+                    settings?.cloud?.provider === provider &&
+                    settings.cloud.hasKey &&
+                    !apiKey.trim()
+                  }
+                  revision={catalogRevision}
+                  value={cloudModel}
+                  defaultModel={MODEL_PLACEHOLDERS[provider]}
+                  onChange={setCloudModel}
+                  onSave={() => void saveCloudKey()}
+                  canSave={provider === 'ollama' || dataPolicyConfirmed}
+                />
+              )}
             </section>
           )}
         </div>

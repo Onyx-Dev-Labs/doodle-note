@@ -1,3 +1,4 @@
+import { fetchCloudModels } from './cloud-models'
 import { app, ipcMain, safeStorage } from 'electron'
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,6 +30,8 @@ import {
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
   NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
+  NOTES_CLOUD_MODELS_CHANNEL,
+  type CloudModelsResult,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
   type AskRequest,
@@ -67,6 +70,7 @@ const MAX_GLOBAL_HISTORY_SENT = 6
 
 /** What actually lands in userData/settings.json. */
 interface StoredCloudSettings {
+  dataPolicyConfirmed?: boolean
   provider: CloudProvider
   model?: string
   /** base64 of safeStorage.encryptString(key). The plaintext never hits
@@ -119,6 +123,18 @@ export class NotesService {
   }
 
   registerIpc(): void {
+    ipcMain.handle(
+      NOTES_CLOUD_MODELS_CHANNEL,
+      async (_event, provider: unknown): Promise<CloudModelsResult> => {
+        const cloud = this.settings.cloud
+        if (!cloud || provider !== cloud.provider)
+          return { models: [], error: 'Save this provider’s API key first.' }
+        if (cloud.provider === 'groq' || cloud.provider === 'openrouter')
+          return { models: [], error: 'Select a supported provider.' }
+        const key = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
+        return fetchCloudModels(cloud.provider, key ?? '')
+      }
+    )
     ipcMain.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
     ipcMain.handle(NOTES_ACTIVATE_MODEL_CHANNEL, (_event, modelId: unknown) =>
       this.activateModel(String(modelId))
@@ -453,10 +469,16 @@ export class NotesService {
     if (this.activateBusy) throw new Error('A model is being prepared. Try again when it finishes.')
     const { engineChoice, cloud } = this.settings
     if (engineChoice === 'cloud' && cloud) {
+      if (cloud.provider === 'groq' || cloud.provider === 'openrouter') {
+        throw new Error(
+          'Groq and OpenRouter are retired. Select Grok (xAI), paid Gemini, or another provider in Settings and enter its own API key. Your notes and stored settings are preserved.'
+        )
+      }
       const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
       if (apiKey || cloud.provider === 'ollama') {
         return new CloudNotesEngine({
           provider: cloud.provider,
+          dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
           apiKey: apiKey ?? '',
           ...(cloud.model ? { model: cloud.model } : {})
         })
@@ -497,6 +519,7 @@ export class NotesService {
         ? {
             cloud: {
               provider: cloud.provider,
+              dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
               ...(cloud.model ? { model: cloud.model } : {}),
               // "Usable", strictly speaking: Ollama is keyless by design.
               hasKey: Boolean(cloud.apiKeyEncrypted) || cloud.provider === 'ollama'
@@ -524,7 +547,7 @@ export class NotesService {
       this.settings.autoGenerateNotesAfterStop = update.autoGenerateNotesAfterStop
     }
 
-    const validProviders: CloudProvider[] = ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']
+    const validProviders: CloudProvider[] = ['anthropic', 'openai', 'grok', 'gemini', 'ollama']
     if (update.cloud === null) {
       delete this.settings.cloud
     } else if (update.cloud && validProviders.includes(update.cloud.provider as CloudProvider)) {
@@ -534,7 +557,7 @@ export class NotesService {
           ? update.cloud.model.trim()
           : undefined
       const previous = this.settings.cloud
-      // Keys are provider-specific: switching provider drops the old key.
+      // Keys are provider-specific: never reuse one for a different provider.
       let apiKeyEncrypted =
         previous && previous.provider === provider ? previous.apiKeyEncrypted : undefined
 
@@ -547,14 +570,15 @@ export class NotesService {
         }
       }
 
-      if (apiKeyEncrypted || provider === 'ollama') {
+      if (!error && (apiKeyEncrypted || provider === 'ollama')) {
         this.settings.cloud = {
           provider,
+          dataPolicyConfirmed: update.cloud.dataPolicyConfirmed === true,
           ...(model ? { model } : {}),
           ...(apiKeyEncrypted ? { apiKeyEncrypted } : {})
         }
-      } else {
-        delete this.settings.cloud
+      } else if (!error) {
+        error = 'Enter an API key for the selected provider. Your previous settings are preserved.'
       }
     }
 
@@ -601,6 +625,7 @@ export class NotesService {
       ) {
         settings.cloud = {
           provider: cloud.provider,
+          dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
           ...(typeof cloud.model === 'string' && cloud.model ? { model: cloud.model } : {}),
           ...(typeof cloud.apiKeyEncrypted === 'string'
             ? { apiKeyEncrypted: cloud.apiKeyEncrypted }

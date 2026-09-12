@@ -9,6 +9,18 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.27",
+    date: "September 12, 2026",
+    highlights: [
+      "Choose models from your AI provider's catalog using your saved API key",
+      "See the active notes provider in Settings and which model generated each note",
+      "Use direct paid Gemini and xAI Grok integrations in place of OpenRouter and Groq",
+      "Review clear AI data-use requirements before sending meeting content to a cloud provider",
+      "Existing OpenRouter and Groq users must select a supported provider and enter its own key; notes and Cloud Sync data are preserved",
+      "New Google Calendar connections remain unavailable pending Google verification",
+    ],
+  },
+  {
     version: "0.4.26",
     date: "September 11, 2026",
     highlights: [

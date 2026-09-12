@@ -10,6 +10,12 @@
 import type { TranscriptSegment } from './engine-events'
 import type { MeetingParticipant } from '@repo/meetings-store/types'
 
+export const NOTES_CLOUD_MODELS_CHANNEL = 'notes:cloud-models'
+export interface CloudModelsResult {
+  models: Array<{ id: string; label: string }>
+  error?: string
+}
+
 export const NOTES_MODELS_CHANNEL = 'notes:models'
 export const NOTES_TEMPLATES_CHANNEL = 'notes:templates'
 export const NOTES_ACTIVATE_MODEL_CHANNEL = 'notes:activate-model'
@@ -31,7 +37,9 @@ export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
 /** main → renderer: streamed tokens during a cross-meeting ask run. */
 export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
-export type CloudProvider = 'anthropic' | 'openai' | 'groq' | 'openrouter' | 'ollama'
+// Retired IDs remain readable so an update preserves existing encrypted settings.
+export type CloudProvider =
+  'anthropic' | 'openai' | 'grok' | 'gemini' | 'groq' | 'openrouter' | 'ollama'
 
 export const CLOUD_PROVIDERS: ReadonlyArray<{
   id: CloudProvider
@@ -40,8 +48,8 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 }> = [
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'openai', label: 'OpenAI' },
-  { id: 'groq', label: 'Groq' },
-  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'grok', label: 'Grok (xAI)' },
+  { id: 'gemini', label: 'Google Gemini (paid API)' },
   { id: 'ollama', label: 'Ollama (local)', keyOptional: true }
 ]
 export type EngineChoice = 'local' | 'cloud'
@@ -83,6 +91,7 @@ export interface NotesSettingsView {
   cloud?: {
     provider: CloudProvider
     model?: string
+    dataPolicyConfirmed?: boolean
     hasKey: boolean
   }
   /** Set when part of an update could not be applied (e.g. no encryption). */
@@ -102,6 +111,7 @@ export interface NotesSettingsUpdate {
   cloud?: {
     provider: CloudProvider
     model?: string
+    dataPolicyConfirmed?: boolean
     apiKey?: string
   } | null
 }
@@ -216,6 +226,7 @@ export interface NotesApi {
   templates(): Promise<NotesTemplateInfo[]>
   models(): Promise<NotesModelsResponse>
   activateModel(modelId: string): Promise<ActivateModelResult>
+  cloudModels(provider: CloudProvider): Promise<CloudModelsResult>
   getSettings(): Promise<NotesSettingsView>
   setSettings(update: NotesSettingsUpdate): Promise<NotesSettingsView>
   enhance(input: EnhanceRequest): Promise<EnhanceResult>

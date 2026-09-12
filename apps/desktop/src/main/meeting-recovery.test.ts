@@ -77,7 +77,15 @@ test('existing generated notes retain generation, setup and transcription recove
 })
 
 test('every supported cloud provider survives settings reload', () => {
-  for (const provider of ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']) {
+  for (const provider of [
+    'anthropic',
+    'openai',
+    'grok',
+    'gemini',
+    'groq',
+    'openrouter',
+    'ollama'
+  ]) {
     assert.equal(isStoredCloudProvider(provider), true, provider)
   }
   assert.equal(isStoredCloudProvider('not-a-provider'), false)
