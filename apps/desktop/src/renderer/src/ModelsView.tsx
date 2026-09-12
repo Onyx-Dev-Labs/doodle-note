@@ -1,3 +1,4 @@
+import CloudModelPicker from './CloudModelPicker'
 import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -207,6 +208,7 @@ export default function ModelsView({
   const [cloudModel, setCloudModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
+  const [catalogRevision, setCatalogRevision] = useState(0)
   const [dataPolicyConfirmed, setDataPolicyConfirmed] = useState(false)
   const cloudFormSeeded = useRef(false)
 
@@ -571,6 +573,7 @@ export default function ModelsView({
       setError(view.error)
     } else if (view.cloud?.hasKey) {
       setKeySaved(true)
+      setCatalogRevision((n) => n + 1)
       setTimeout(() => setKeySaved(false), 2000)
     }
   }
@@ -1544,13 +1547,7 @@ export default function ModelsView({
                     </option>
                   ))}
                 </select>
-                <input
-                  type="text"
-                  spellCheck={false}
-                  placeholder={`model (optional, e.g. ${MODEL_PLACEHOLDERS[provider]})`}
-                  value={cloudModel}
-                  onChange={(e) => setCloudModel(e.target.value)}
-                />
+
                 <input
                   type="password"
                   placeholder={
@@ -1583,6 +1580,23 @@ export default function ModelsView({
                   <span className="key-saved">key saved ✓</span>
                 )}
               </div>
+              {provider !== 'groq' && provider !== 'openrouter' && (
+                <CloudModelPicker
+                  key={provider}
+                  provider={provider}
+                  saved={
+                    settings?.cloud?.provider === provider &&
+                    settings.cloud.hasKey &&
+                    !apiKey.trim()
+                  }
+                  revision={catalogRevision}
+                  value={cloudModel}
+                  defaultModel={MODEL_PLACEHOLDERS[provider]}
+                  onChange={setCloudModel}
+                  onSave={() => void saveCloudKey()}
+                  canSave={provider === 'ollama' || dataPolicyConfirmed}
+                />
+              )}
             </section>
           )}
         </div>

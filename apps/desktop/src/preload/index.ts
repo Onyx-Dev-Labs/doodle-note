@@ -68,6 +68,9 @@ import {
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
   NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
+  NOTES_CLOUD_MODELS_CHANNEL,
+  type CloudModelsResult,
+  type CloudProvider,
   NOTES_SET_SETTINGS_CHANNEL,
   NOTES_TEMPLATES_CHANNEL,
   type ActivateModelResult,
@@ -285,6 +288,10 @@ const notesApi: NotesApi = {
 
   activateModel(modelId: string): Promise<ActivateModelResult> {
     return ipcRenderer.invoke(NOTES_ACTIVATE_MODEL_CHANNEL, modelId) as Promise<ActivateModelResult>
+  },
+
+  cloudModels(provider: CloudProvider): Promise<CloudModelsResult> {
+    return ipcRenderer.invoke(NOTES_CLOUD_MODELS_CHANNEL, provider) as Promise<CloudModelsResult>
   },
 
   getSettings(): Promise<NotesSettingsView> {

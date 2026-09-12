@@ -9,6 +9,7 @@ import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import * as api from '../shared/notes-api'
 import * as recovery from '../shared/meeting-recovery'
+import { fetchCloudModels } from './cloud-models'
 import * as autoNotes from '../shared/auto-notes'
 
 // Real settings load/save and engine-selection code; only native dependencies are stubbed.
@@ -32,6 +33,7 @@ test('retired settings survive reload, block requests, and never migrate keys to
         }
       }
     },
+    './cloud-models': { fetchCloudModels },
     'node:fs': fs,
     'node:path': path,
     '@repo/ai': {

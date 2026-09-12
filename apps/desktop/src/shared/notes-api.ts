@@ -10,6 +10,12 @@
 import type { TranscriptSegment } from './engine-events'
 import type { MeetingParticipant } from '@repo/meetings-store/types'
 
+export const NOTES_CLOUD_MODELS_CHANNEL = 'notes:cloud-models'
+export interface CloudModelsResult {
+  models: Array<{ id: string; label: string }>
+  error?: string
+}
+
 export const NOTES_MODELS_CHANNEL = 'notes:models'
 export const NOTES_TEMPLATES_CHANNEL = 'notes:templates'
 export const NOTES_ACTIVATE_MODEL_CHANNEL = 'notes:activate-model'
@@ -220,6 +226,7 @@ export interface NotesApi {
   templates(): Promise<NotesTemplateInfo[]>
   models(): Promise<NotesModelsResponse>
   activateModel(modelId: string): Promise<ActivateModelResult>
+  cloudModels(provider: CloudProvider): Promise<CloudModelsResult>
   getSettings(): Promise<NotesSettingsView>
   setSettings(update: NotesSettingsUpdate): Promise<NotesSettingsView>
   enhance(input: EnhanceRequest): Promise<EnhanceResult>

@@ -1,3 +1,4 @@
+import { fetchCloudModels } from './cloud-models'
 import { app, ipcMain, safeStorage } from 'electron'
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,6 +30,8 @@ import {
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
   NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
+  NOTES_CLOUD_MODELS_CHANNEL,
+  type CloudModelsResult,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
   type AskRequest,
@@ -120,6 +123,18 @@ export class NotesService {
   }
 
   registerIpc(): void {
+    ipcMain.handle(
+      NOTES_CLOUD_MODELS_CHANNEL,
+      async (_event, provider: unknown): Promise<CloudModelsResult> => {
+        const cloud = this.settings.cloud
+        if (!cloud || provider !== cloud.provider)
+          return { models: [], error: 'Save this provider’s API key first.' }
+        if (cloud.provider === 'groq' || cloud.provider === 'openrouter')
+          return { models: [], error: 'Select a supported provider.' }
+        const key = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
+        return fetchCloudModels(cloud.provider, key ?? '')
+      }
+    )
     ipcMain.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
     ipcMain.handle(NOTES_ACTIVATE_MODEL_CHANNEL, (_event, modelId: unknown) =>
       this.activateModel(String(modelId))

@@ -30,6 +30,12 @@ The desktop's downloaded local models are Qwen3 4B, Llama 3.1 8B, and Gemma 3 12
 
 The repository also contains iOS code with on-device Apple Foundation Models and optional direct Anthropic API access (default claude-opus-4-8). This desktop patch does not retrofit the new confirmation into iOS. Disclose any mobile distribution included in the review separately; do not represent the desktop safeguards as covering every build in this repository.
 
+## Provider model discovery
+
+The updated desktop reads model catalogs with the saved provider key in the main process. Only model IDs and display labels reach the renderer. Requests contain no meeting content, follow no redirects, and use a bounded timeout. OpenAI's general catalog is filtered by text-model naming; Gemini uses generation-method metadata. The catalog is not a guarantee of endpoint compatibility, billing, quota, or future access. Users explicitly save a selection, and can refresh or enter a custom ID when needed.
+
+Catalog endpoints: OpenAI `/v1/models`, Anthropic `/v1/models` (paginated), xAI `/v1/language-models`, Gemini `/v1beta/models` (paginated), and local Ollama `/v1/models`. Sources: [OpenAI](https://developers.openai.com/api/reference/resources/models/methods/list), [Anthropic](https://platform.claude.com/docs/en/api/models/list), [xAI](https://docs.x.ai/developers/rest-api-reference/inference/models), [Gemini](https://ai.google.dev/api/models).
+
 ## Terms and safeguards
 
 - [Google Limited Use policy](https://developers.google.com/terms/api-services-user-data-policy): applies to raw and derived Google user data. The privacy page now includes the affirmative Limited Use statement and offline inference disclosure.
