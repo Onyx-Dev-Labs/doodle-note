@@ -5,6 +5,7 @@ options:
   bundleIdPrefix: com.doodlenote
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "26.0"
   createIntermediateGroups: true
 packages:
   FluidAudio:
@@ -14,6 +15,12 @@ packages:
     url: https://github.com/twilio/twilio-voice-ios
     from: 6.10.0
 schemes:
+  DoodleNoteWatch:
+    build:
+      targets:
+        DoodleNoteWatch: all
+    run:
+      config: Debug
   DoodleNote:
     build:
       targets:
@@ -26,6 +33,32 @@ schemes:
         - DoodleNoteTests
         - DoodleNoteUITests
 targets:
+  DoodleNoteWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - DoodleNoteWatch
+      - Shared
+    info:
+      path: DoodleNoteWatch/Info.plist
+      properties:
+        CFBundleDisplayName: Doodle Note
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.doodlenote.ios
+        NSMicrophoneUsageDescription: Doodle Note uses your watch microphone to record meetings and transfers the audio to your paired iPhone for transcription.
+        UIBackgroundModes: [audio]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.doodlenote.ios.watch
+        MARKETING_VERSION: 0.4.8
+        CURRENT_PROJECT_VERSION: 1
+        DEVELOPMENT_TEAM: VTZW6K32K4
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "4"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   DoodleNoteTests:
     type: bundle.unit-test
     platform: iOS
@@ -59,7 +92,10 @@ targets:
     platform: iOS
     sources:
       - DoodleNote
+      - Shared
     dependencies:
+      - target: DoodleNoteWatch
+        embed: true
       - package: FluidAudio
         product: FluidAudio
       - package: TwilioVoice
