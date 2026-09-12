@@ -25,6 +25,9 @@ struct AskView: View {
         NavigationStack {
             Form {
                 Section("Ask your notes") {
+                    #if DEBUG
+                    if AskUIFixture.enabled { Text("Synthetic ask fixture").font(.caption).accessibilityIdentifier("askFixtureBanner") }
+                    #endif
                     if let noteID {
                         Text(library.note(noteID)?.title ?? L10n.text("Untitled note"))
                         Text("Scope: this meeting's saved typed notes and transcript.").font(.caption)
@@ -60,9 +63,11 @@ struct AskView: View {
                             Text("Exact counts of people, tasks and events are not supported yet. Ask for a cited list, or count matching notes.")
                         }
                         if !answer.claims.isEmpty {
-                            Text("Draft answer. Verify each claim against its original citations.").font(.caption).foregroundStyle(.orange)
+                            Text("Draft answer. Verify each claim against its original citations.")
+                                .font(.caption).foregroundStyle(.orange)
+                                .accessibilityIdentifier("askDraftBanner")
                             ForEach(answer.claims) { claim in
-                                Text(claim.text)
+                                Text(claim.text).accessibilityIdentifier("askClaimText")
                                 ForEach(claim.evidenceIDs, id: \.self) { sourceID in
                                     if let item = answer.evidence.first(where: { $0.id == sourceID }) {
                                         Button(L10n.format("Source %lld", sourceID + 1)) { citation = item }
@@ -70,12 +75,17 @@ struct AskView: View {
                                 }
                             }
                         }
-                        Text(L10n.format("Reviewed %lld notes and %lld source fragments", answer.scannedNotes, answer.scannedParts)).font(.caption)
+                        Text(L10n.format("Reviewed %lld notes and %lld source fragments", answer.scannedNotes, answer.scannedParts))
+                            .font(.caption)
+                            .accessibilityIdentifier("askReviewed")
                         if answer.incomplete {
                             Text("Some sources are missing, unsaved or unfinished. This is partial evidence, not a complete count or list.").foregroundStyle(.orange)
                         }
                         if answer.unavailableCount > 0 { Text(L10n.format("%lld notes are unavailable", answer.unavailableCount)) }
-                        if answer.claims.isEmpty && !answer.noteCensus { Text("The available evidence is insufficient to answer this question.") }
+                        if answer.claims.isEmpty && !answer.noteCensus {
+                            Text("The available evidence is insufficient to answer this question.")
+                                .accessibilityIdentifier("askInsufficient")
+                        }
                         else {
                             if answer.noteCensus && !answer.incomplete {
                                 Text(L10n.format("Model-identified matching notes: %lld", answer.matchingNotes)).font(.headline)
