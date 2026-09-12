@@ -598,7 +598,11 @@ export default function ModelsView({
       )
     }
     if (m.active) {
-      return <span className="badge badge-active">Active</span>
+      return engineChoice === 'local' ? (
+        <span className="badge badge-active">Active</span>
+      ) : (
+        <span className="model-note">Selected for on-device use</span>
+      )
     }
     if (!m.available) {
       return <span className="model-note">needs {m.minRamGB} GB RAM</span>
@@ -654,7 +658,19 @@ export default function ModelsView({
         <div className="settings-content">
           {section === 'model' && (
             <section className="keys-section">
-              <h3>On-device model</h3>
+              <h3>Active notes model</h3>
+              <p className="models-sub" role="status">
+                {engineChoice === 'cloud'
+                  ? settings?.cloud?.hasKey &&
+                    (settings.cloud.provider === 'ollama' || settings.cloud.dataPolicyConfirmed)
+                    ? `Active: ${CLOUD_PROVIDERS.find((p) => p.id === settings.cloud?.provider)?.label ?? settings.cloud.provider} · ${settings.cloud.model || MODEL_PLACEHOLDERS[settings.cloud.provider]}`
+                    : 'Cloud selected. Complete the provider setup below before generating notes.'
+                  : `Active: ${data?.models.find((m) => m.active)?.label ?? 'On-device model'} · On-device`}
+              </p>
+              {engineChoice === 'cloud' && (
+                <p className="models-sub">On-device models are not selected for note generation.</p>
+              )}
+              <h3>On-device models</h3>
               <p className="models-sub">
                 DoodleNote polishes your meeting notes with a model that runs entirely on this
                 computer
@@ -677,7 +693,7 @@ export default function ModelsView({
                 {data?.models.map((m) => (
                   <div
                     key={m.id}
-                    className={`model-card${m.available ? '' : ' unavailable'}${m.active ? ' is-active' : ''}`}
+                    className={`model-card${m.available ? '' : ' unavailable'}${m.active && engineChoice === 'local' ? ' is-active' : ''}`}
                   >
                     <div className="model-head">
                       <span className="model-label">{m.label}</span>

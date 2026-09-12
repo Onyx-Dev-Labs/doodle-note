@@ -74,7 +74,7 @@ export class CloudNotesEngine implements NotesEngine {
 
   constructor(options: CloudEngineOptions) {
     this.options = options
-    this.id = `cloud:${options.provider}:${options.model ?? 'default'}`
+    this.id = `cloud:${options.provider}:${options.model?.trim() || CLOUD_PROVIDER_PRESETS[options.provider]?.defaultModel || 'default'}`
     const preset = CLOUD_PROVIDER_PRESETS[options.provider]
     if (!preset)
       throw new Error(
