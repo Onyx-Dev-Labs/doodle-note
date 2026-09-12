@@ -31,7 +31,9 @@ export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
 /** main → renderer: streamed tokens during a cross-meeting ask run. */
 export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
-export type CloudProvider = 'anthropic' | 'openai' | 'groq' | 'openrouter' | 'ollama'
+// Retired IDs remain readable so an update preserves existing encrypted settings.
+export type CloudProvider =
+  'anthropic' | 'openai' | 'grok' | 'gemini' | 'groq' | 'openrouter' | 'ollama'
 
 export const CLOUD_PROVIDERS: ReadonlyArray<{
   id: CloudProvider
@@ -40,8 +42,8 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 }> = [
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'openai', label: 'OpenAI' },
-  { id: 'groq', label: 'Groq' },
-  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'grok', label: 'Grok (xAI)' },
+  { id: 'gemini', label: 'Google Gemini (paid API)' },
   { id: 'ollama', label: 'Ollama (local)', keyOptional: true }
 ]
 export type EngineChoice = 'local' | 'cloud'
@@ -83,6 +85,7 @@ export interface NotesSettingsView {
   cloud?: {
     provider: CloudProvider
     model?: string
+    dataPolicyConfirmed?: boolean
     hasKey: boolean
   }
   /** Set when part of an update could not be applied (e.g. no encryption). */
@@ -102,6 +105,7 @@ export interface NotesSettingsUpdate {
   cloud?: {
     provider: CloudProvider
     model?: string
+    dataPolicyConfirmed?: boolean
     apiKey?: string
   } | null
 }

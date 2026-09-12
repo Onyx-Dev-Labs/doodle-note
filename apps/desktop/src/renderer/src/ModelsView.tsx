@@ -37,8 +37,10 @@ function lastSyncLabel(iso: string): string {
 const MODEL_PLACEHOLDERS: Record<CloudProvider, string> = {
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-5',
-  groq: 'llama-3.3-70b-versatile',
-  openrouter: 'anthropic/claude-sonnet-4.5',
+  groq: 'retired provider',
+  grok: 'grok-4.6',
+  openrouter: 'retired provider',
+  gemini: 'gemini-3.8-flash',
   ollama: 'llama3.1'
 }
 
@@ -205,6 +207,7 @@ export default function ModelsView({
   const [cloudModel, setCloudModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
+  const [dataPolicyConfirmed, setDataPolicyConfirmed] = useState(false)
   const cloudFormSeeded = useRef(false)
 
   /* ---- cloud sync ---- */
@@ -489,6 +492,7 @@ export default function ModelsView({
           cloudFormSeeded.current = true
           setProvider(view.cloud.provider)
           setCloudModel(view.cloud.model ?? '')
+          setDataPolicyConfirmed(view.cloud.dataPolicyConfirmed === true)
         }
       })
       .catch(() => setSettings(null))
@@ -556,6 +560,7 @@ export default function ModelsView({
     const view = await window.notes.setSettings({
       cloud: {
         provider,
+        dataPolicyConfirmed,
         ...(cloudModel.trim() ? { model: cloudModel.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
       }
@@ -1474,11 +1479,49 @@ export default function ModelsView({
                 </label>
               </div>
 
+              <p className="models-sub">
+                External AI receives meeting titles (including Google Calendar titles), notes,
+                transcripts, and chat context. Use an API account with model training and data
+                sharing disabled. Consumer chat subscriptions are not API plans. On-device models
+                process content locally without sending it to the model publisher.
+              </p>
+              {(provider === 'groq' || provider === 'openrouter') && (
+                <p className="models-sub">
+                  Groq and OpenRouter have been replaced by direct Grok and Gemini integrations.
+                  Choose a provider and enter its own API key. Existing keys are never reused with
+                  another provider. Your notes are unchanged.
+                </p>
+              )}
+              {provider !== 'ollama' && provider !== 'groq' && provider !== 'openrouter' && (
+                <label className="models-sub">
+                  <input
+                    type="checkbox"
+                    checked={dataPolicyConfirmed}
+                    onChange={(e) => setDataPolicyConfirmed(e.target.checked)}
+                  />
+                  I authorize sending meeting content to this API provider and confirm its account
+                  settings do not allow model training or data sharing for training.
+                  {provider === 'gemini' &&
+                    ' My Gemini API key belongs to a project with active Cloud Billing; unpaid Gemini API use is not permitted.'}
+                </label>
+              )}
+
               <div className="key-form">
                 <select
                   value={provider}
-                  onChange={(e) => setProvider(e.target.value as CloudProvider)}
+                  onChange={(e) => {
+                    setProvider(e.target.value as CloudProvider)
+                    setApiKey('')
+                    setCloudModel('')
+                    setKeySaved(false)
+                    setDataPolicyConfirmed(false)
+                  }}
                 >
+                  {(provider === 'groq' || provider === 'openrouter') && (
+                    <option value={provider} disabled>
+                      {provider === 'groq' ? 'Groq' : 'OpenRouter'} (retired; choose a provider)
+                    </option>
+                  )}
                   {CLOUD_PROVIDERS.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}
@@ -1497,18 +1540,30 @@ export default function ModelsView({
                   placeholder={
                     provider === 'ollama'
                       ? 'no key needed — uses localhost:11434'
-                      : settings?.cloud?.hasKey
+                      : settings?.cloud?.provider === provider && settings.cloud.hasKey
                         ? '••••••••  (key saved)'
                         : 'API key'
                   }
                   disabled={provider === 'ollama'}
                   value={provider === 'ollama' ? '' : apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  onChange={(e) => {
+                    setApiKey(e.target.value)
+                    setDataPolicyConfirmed(false)
+                  }}
                 />
-                <button type="button" onClick={() => void saveCloudKey()}>
+                <button
+                  type="button"
+                  disabled={
+                    provider === 'groq' ||
+                    provider === 'openrouter' ||
+                    (provider !== 'ollama' && !dataPolicyConfirmed)
+                  }
+                  onClick={() => void saveCloudKey()}
+                >
                   Save
                 </button>
-                {(keySaved || settings?.cloud?.hasKey) && (
+                {(keySaved ||
+                  (settings?.cloud?.provider === provider && settings.cloud.hasKey)) && (
                   <span className="key-saved">key saved ✓</span>
                 )}
               </div>

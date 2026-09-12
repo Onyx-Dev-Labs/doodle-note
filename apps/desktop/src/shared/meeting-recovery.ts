@@ -46,10 +46,12 @@ export function transcriptCheckpointDelayMs(
 /** Providers whose encrypted settings can be restored after an app restart. */
 export function isStoredCloudProvider(
   value: unknown
-): value is 'anthropic' | 'openai' | 'groq' | 'openrouter' | 'ollama' {
+): value is 'anthropic' | 'openai' | 'grok' | 'gemini' | 'groq' | 'openrouter' | 'ollama' {
   return (
     value === 'anthropic' ||
     value === 'openai' ||
+    value === 'grok' ||
+    value === 'gemini' ||
     value === 'groq' ||
     value === 'openrouter' ||
     value === 'ollama'
