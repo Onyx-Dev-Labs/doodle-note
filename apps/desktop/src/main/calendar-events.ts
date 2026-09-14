@@ -91,7 +91,14 @@ export function resolveVisibleCalendars(
   if (calendars.length === 0) return []
   const fallback = calendars.filter((c) => c.isDefault)
   const defaults = fallback.length > 0 ? fallback : [calendars[0] as CalendarInfo]
-  if (visibleCalendarIds === null) return defaults
+  if (visibleCalendarIds === null) {
+    if (!calendars.some((c) => c.accountId)) return defaults
+    return [...new Set(calendars.map((c) => c.accountId))].flatMap((id) => {
+      const owned = calendars.filter((c) => c.accountId === id)
+      const primary = owned.filter((c) => c.isDefault)
+      return primary.length ? primary : owned.slice(0, 1)
+    })
+  }
   const wanted = new Set(visibleCalendarIds)
   const visible = calendars.filter((c) => wanted.has(c.id))
   // Account-scoped selections never enable unrelated calendars after a provider failure.

@@ -213,3 +213,25 @@ test('menu bar rejects invalid event intervals', () => {
   ]
   assert.equal(nextTrayEvent(invalid, NOW), null)
 })
+
+test('meeting links accept HTTPS and reject executable, malformed and credential-bearing URLs', async () => {
+  const { calendarJoinUrl } = await import('../shared/calendar-api')
+  assert.equal(
+    calendarJoinUrl('https://meet.google.com/aaa-bbbb-ccc'),
+    'https://meet.google.com/aaa-bbbb-ccc'
+  )
+  assert.equal(
+    calendarJoinUrl('https://teams.microsoft.com/l/meetup-join/fixture'),
+    'https://teams.microsoft.com/l/meetup-join/fixture'
+  )
+  for (const value of [
+    undefined,
+    '',
+    'javascript:alert(1)',
+    'file:///tmp/a',
+    'http://example.test',
+    'https://user:password@example.test',
+    'not a url'
+  ])
+    assert.equal(calendarJoinUrl(value), undefined)
+})

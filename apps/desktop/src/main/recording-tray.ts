@@ -72,7 +72,7 @@ export class RecordingTray {
           label: `${new Date(event.startIso).toLocaleTimeString(undefined, {
             hour: 'numeric',
             minute: '2-digit'
-          })} — ${event.subject.trim() || 'Untitled meeting'}`,
+          })} — ${event.subject.trim() || 'Untitled meeting'}${event.sourceLabel ? ` (${event.sourceLabel})` : ''}${event.stale ? ' · May be out of date' : ''}`,
           enabled: false
         })),
         ...(meetings.length

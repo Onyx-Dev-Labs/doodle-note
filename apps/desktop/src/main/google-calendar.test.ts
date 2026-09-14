@@ -243,3 +243,61 @@ test('storage failure during verified Google migration reports recovery and pres
   assert.deepEqual(readFileSync(cache), before)
   assert.equal(existsSync(store.path), false)
 })
+
+test('two Google subjects add independently, deduplicate, restore and remove only their own credentials', async (t) => {
+  const { client, dir } = setup(t)
+  const codec = {
+    isEncryptionAvailable: () => true,
+    encryptString: (s: string) => Buffer.from(`encrypted:${s}`),
+    decryptString: (b: Buffer) => b.toString().replace(/^encrypted:/, '')
+  }
+  let subject = 'first'
+  const networkFetch = globalThis.fetch
+  browser = async (url) => {
+    const auth = new URL(url)
+    assert.equal(auth.searchParams.get('prompt'), 'select_account consent')
+    const callback = new URL(auth.searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', auth.searchParams.get('state')!)
+    await networkFetch(callback)
+  }
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = String(input)
+    if (url.includes('/userinfo'))
+      return response({ sub: subject, email: `${subject}@example.test` })
+    if (url.includes('/token'))
+      return response({
+        access_token: `access-${subject}`,
+        refresh_token: `refresh-${subject}`,
+        expires_in: 3600
+      })
+    return response({ items: [{ id: 'primary', summary: 'Calendar', primary: true }] })
+  })
+  await client.connect()
+  // Re-open the shared store after the first independent client committed.
+  const shared = new CalendarAccountStore(dir, codec)
+  const firstId = client.accountId!
+  shared.update(firstId, shared.epoch(firstId), (e) => {
+    e.visibleCalendarIds = []
+  })
+  subject = 'second'
+  const second = new GoogleCalendarClient(dir, secret, shared, null)
+  await second.connect()
+  const secondId = second.accountId!
+  assert.notEqual(firstId, secondId)
+  assert.equal(shared.views().length, 2)
+  await new GoogleCalendarClient(dir, secret, shared, null).connect()
+  assert.equal(shared.views().length, 2)
+  assert.deepEqual(shared.get(firstId)?.visibleCalendarIds, [])
+  const restarted = new CalendarAccountStore(dir, codec)
+  assert.equal(
+    new GoogleCalendarClient(dir, secret, restarted, firstId).account?.email,
+    'first@example.test'
+  )
+  const restoredSecond = new GoogleCalendarClient(dir, secret, restarted, secondId)
+  assert.equal(restoredSecond.account?.email, 'second@example.test')
+  restoredSecond.disconnect()
+  const after = new CalendarAccountStore(dir, codec)
+  assert.equal(after.views().length, 1)
+  assert.equal(after.get(firstId)?.view.email, 'first@example.test')
+})

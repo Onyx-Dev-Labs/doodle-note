@@ -727,6 +727,9 @@ function App(): React.JSX.Element {
             ) : (
               <>
                 <strong>{banner.subject}</strong> is starting
+                {banner.sourceLabel && (
+                  <small style={{ display: 'block' }}>{banner.sourceLabel}</small>
+                )}
               </>
             )}
           </span>

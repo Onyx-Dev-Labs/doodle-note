@@ -176,6 +176,9 @@ import {
   type SyncStatus
 } from '../shared/sync-api'
 import {
+  CALENDAR_ACCOUNT_CONNECT_CHANNEL,
+  CALENDAR_ACCOUNT_REMOVE_CHANNEL,
+  CALENDAR_AUTH_CANCEL_CHANNEL,
   CALENDAR_CONNECT_CHANNEL,
   CALENDAR_CONNECT_GOOGLE_CHANNEL,
   CALENDAR_DISCONNECT_CHANNEL,
@@ -413,6 +416,10 @@ const recordingApi: RecordingApi = {
 }
 
 const calendarApi: CalendarApi = {
+  connectAccount: (provider, accountId) =>
+    ipcRenderer.invoke(CALENDAR_ACCOUNT_CONNECT_CHANNEL, { provider, accountId }),
+  removeAccount: (accountId) => ipcRenderer.invoke(CALENDAR_ACCOUNT_REMOVE_CHANNEL, accountId),
+  cancelAuth: () => ipcRenderer.invoke(CALENDAR_AUTH_CANCEL_CHANNEL),
   getState(): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_GET_STATE_CHANNEL) as Promise<CalendarState>
   },

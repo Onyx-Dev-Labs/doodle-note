@@ -1,3 +1,4 @@
+import { calendarPages } from './calendar-http'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -5,6 +6,7 @@ import { join } from 'node:path'
 import { safeStorage, shell } from 'electron'
 import { BUILT_IN_GOOGLE_CLIENT_ID } from '../shared/google-app'
 import { googleClientSecret, googleConfigurationError, googleTokenError } from './google-oauth'
+import { calendarJoinUrl } from '../shared/calendar-api'
 import type { CalendarAccount, CalendarEvent, CalendarInfo } from '../shared/calendar-api'
 import { CalendarAccountStore } from './calendar-account-store'
 import { scopeCalendar, scopeEvent, type CalendarIdentity } from './calendar-identity'
@@ -45,11 +47,17 @@ export class GoogleCalendarClient {
   constructor(
     userDataDir: string,
     private readonly clientSecret = googleClientSecret(),
-    accounts?: CalendarAccountStore
+    accounts?: CalendarAccountStore,
+    accountId?: string | null
   ) {
     this.accounts = accounts ?? new CalendarAccountStore(userDataDir, safeStorage)
     this.cachePath = join(userDataDir, 'google-token-cache')
-    const existing = this.accounts.entries('google')[0]
+    const existing =
+      accountId === null
+        ? undefined
+        : accountId
+          ? this.accounts.get(accountId)
+          : this.accounts.entries('google')[0]
     if (existing) {
       this.connectionId = existing.view.id
       this.connectionEpoch = this.accounts.epoch(existing.view.id)
@@ -66,7 +74,8 @@ export class GoogleCalendarClient {
         this.restoreError =
           'Google account credentials could not be restored. Reconnect Google Calendar.'
       }
-    } else if (!this.accounts.migrated('google')) this.tokens = this.readCache()
+    } else if (accountId !== null && !this.accounts.migrated('google'))
+      this.tokens = this.readCache()
   }
 
   get identity(): CalendarIdentity | undefined {
@@ -160,7 +169,7 @@ export class GoogleCalendarClient {
           response_type: 'code',
           scope: SCOPES,
           access_type: 'offline',
-          prompt: 'consent', // guarantees a refresh_token on every connect
+          prompt: 'select_account consent', // guarantees a refresh_token on every connect
           code_challenge: challenge,
           code_challenge_method: 'S256',
           state
@@ -263,19 +272,21 @@ export class GoogleCalendarClient {
   }
 
   /** The account's calendars with canonical account-scoped IDs. */
-  async fetchCalendars(): Promise<CalendarInfo[]> {
+  async fetchCalendars(signal?: AbortSignal): Promise<CalendarInfo[]> {
     await this.initialize()
     const token = await this.getAccessToken()
-    const res = await fetch(
+    const identity = this.identity
+    if (!identity)
+      throw new Error('Google account identity is unavailable. Reconnect this account.')
+    const items = await calendarPages(
       'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=50',
-      { headers: { Authorization: `Bearer ${token}` } }
-    ).catch(() => {
-      throw new Error('Google Calendar could not be reached. Check your connection and try again.')
-    })
-    if (!res.ok) throw new Error(await googleErrorMessage(res))
-    const body = (await res.json()) as { items?: unknown[] }
+      token,
+      'google',
+      {},
+      signal
+    )
     const calendars: CalendarInfo[] = []
-    for (const raw of body.items ?? []) {
+    for (const raw of items) {
       const item = raw as {
         id?: string
         summary?: string
@@ -290,13 +301,13 @@ export class GoogleCalendarClient {
         isDefault: item.primary === true,
         canEdit: false
       }
-      calendars.push(this.identity ? scopeCalendar(this.identity, calendar) : calendar)
+      calendars.push(scopeCalendar(identity, calendar))
     }
     return calendars
   }
 
   /** Events for one calendar over the next LOOKAHEAD_DAYS. */
-  async fetchEvents(calendar: CalendarInfo): Promise<CalendarEvent[]> {
+  async fetchEvents(calendar: CalendarInfo, signal?: AbortSignal): Promise<CalendarEvent[]> {
     await this.initialize()
     if (calendar.accountId && calendar.accountId !== this.connectionId)
       throw new Error('Google calendar belongs to another account.')
@@ -310,26 +321,26 @@ export class GoogleCalendarClient {
       orderBy: 'startTime',
       maxResults: '50'
     })
-    const res = await fetch(
+    const identity = this.identity
+    if (!identity)
+      throw new Error('Google account identity is unavailable. Reconnect this account.')
+    const items = await calendarPages(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(rawId)}/events?${params}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    ).catch(() => {
-      throw new Error('Google Calendar could not be reached. Check your connection and try again.')
-    })
-    if (!res.ok) throw new Error(await googleErrorMessage(res))
-    const body = (await res.json()) as { items?: unknown[] }
+      token,
+      'google',
+      {},
+      signal
+    )
     const events: CalendarEvent[] = []
-    for (const raw of body.items ?? []) {
+    for (const raw of items) {
       const event = normalizeGoogleEvent(raw, calendar)
       if (event)
         events.push(
-          this.identity
-            ? scopeEvent(
-                this.identity,
-                calendar.accountId ? calendar : scopeCalendar(this.identity, calendar),
-                event
-              )
-            : event
+          scopeEvent(
+            identity,
+            calendar.accountId ? calendar : scopeCalendar(identity, calendar),
+            event
+          )
         )
     }
     return events
@@ -353,7 +364,8 @@ export class GoogleCalendarClient {
   private async fetchIdentity(token: string): Promise<{ subject: string; email: string }> {
     const response = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
       headers: { Authorization: `Bearer ${token}` },
-      redirect: 'error'
+      redirect: 'error',
+      signal: AbortSignal.timeout(20_000)
     })
     if (!response.ok)
       throw new Error('Google account identity could not be verified. Reconnect Google Calendar.')
@@ -384,6 +396,8 @@ async function tokenRequest(
   if (!clientSecret) throw googleConfigurationError()
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
+    redirect: 'error',
+    signal: AbortSignal.timeout(20_000),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       ...params,
@@ -430,8 +444,10 @@ function normalizeGoogleEvent(raw: unknown, calendar: CalendarInfo): CalendarEve
   if (!startIso || !endIso) return null
 
   const joinUrl =
-    item.hangoutLink ??
-    item.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri
+    calendarJoinUrl(item.hangoutLink) ??
+    calendarJoinUrl(
+      item.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri
+    )
   const hasAttendees = Array.isArray(item.attendees) && item.attendees.length > 1
 
   return {
@@ -449,19 +465,5 @@ function normalizeGoogleEvent(raw: unknown, calendar: CalendarInfo): CalendarEve
     ...(item.organizer?.displayName || item.organizer?.email
       ? { organizer: item.organizer.displayName ?? item.organizer.email }
       : {})
-  }
-}
-
-async function googleErrorMessage(res: Response): Promise<string> {
-  try {
-    await res.json()
-    if (res.status === 401)
-      return 'Google Calendar authorization expired. Open Settings > Calendar and reconnect Google.'
-    if (res.status === 403)
-      return 'Google Calendar access was denied. Check your Google account permissions and reconnect.'
-    if (res.status === 429) return 'Google Calendar is rate-limiting requests. Try again shortly.'
-    return `Google Calendar request failed (HTTP ${res.status}). Try again.`
-  } catch {
-    return `Google Calendar error ${res.status}`
   }
 }

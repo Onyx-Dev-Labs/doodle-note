@@ -92,9 +92,11 @@ remain separate approval gates under `docs/RELEASING.md`.
 
 ### Google Calendar in official desktop builds
 
-Downloaded official apps use DoodleNote's **Desktop** OAuth client. Users only
-select Connect Google and consent to read-only Calendar access; they do not need
-Node, a fork, Google Cloud setup, or a personal application secret.
+Downloaded official apps use DoodleNote's **Desktop** OAuth client. New Google
+connections remain disabled until the shipped registration's approval and exact
+scopes are verified. Once enabled, users select Add Google account and consent
+to read-only Calendar access; they do not need Node, a fork, Google Cloud setup,
+or a personal application secret.
 
 Maintainers supply `DOODLENOTE_GOOGLE_CLIENT_SECRET` in the build environment from
 secure credential storage. It must belong to the Desktop client declared in
@@ -125,3 +127,37 @@ verified branding/domain ownership, and verified declarations matching the
 actual `openid email https://www.googleapis.com/auth/calendar.readonly` request.
 OAuth verification requires a real working-flow demo; a successful unit test or
 branding check is not Google approval.
+
+
+### Multiple calendar accounts
+
+Settings > Calendar groups calendars under each connected identity. Add selects
+that account's default calendar; reconnecting the same identity preserves its
+choices. A reconnect cannot replace it with a different identity. Remove deletes
+only that account's local calendar credentials and cache, leaving saved notes,
+recordings, other accounts and cloud login intact.
+
+Calendar sync processes up to three accounts at once and two calendars per
+account. It follows all pages in the 14-day window, with explicit errors at 100
+pages or 10,000 results per list. Short transient retries are bounded to three
+attempts; longer provider Retry-After windows defer that account while others
+continue. Failed calendars retain their last data with a stale/error label.
+Same invitations received by different accounts remain separate, attributed
+entries with separate event-linked notes.
+
+Synthetic regression checks (no live credentials or capture):
+
+```sh
+pnpm --filter desktop test
+pnpm --filter desktop typecheck
+pnpm --filter desktop lint
+pnpm --filter desktop build
+DOODLE_PLAYWRIGHT_MODULE=/path/to/playwright node apps/desktop/scripts/test-calendar-accounts.cjs
+DOODLE_PLAYWRIGHT_MODULE=/path/to/playwright node apps/desktop/scripts/test-prompt-start.cjs
+```
+
+Before release, use an authorized test profile with two Microsoft organizations
+and two Google identities. Check restart, silent renewal, duplicate add, wrong
+reconnect, removal during sync, per-account visibility, offline recovery and
+recording/notes from each source. Google approval/configuration, actual provider
+handoff, VoiceOver and recorded audio remain separate from fixture evidence.
