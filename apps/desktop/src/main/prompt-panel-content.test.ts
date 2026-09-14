@@ -67,3 +67,29 @@ describe('prompt panel content and placement', () => {
     }
   })
 })
+
+it('both prompt surfaces label only usable calendar links Record & Join', () => {
+  for (const platform of ['darwin', 'win32'] as const) {
+    const linked = decodeURIComponent(
+      panelDataUrl({ ...prompt, joinUrl: 'https://meet.google.com/aaa-bbbb-ccc' }, false, platform)
+    )
+    assert.match(linked, />Record &amp; Join<\/a>/)
+    assert.equal((linked.match(/href="doodle-panel:\/\/start"/g) ?? []).length, 1)
+    for (const joinUrl of [undefined, 'javascript:alert(1)', 'file:///tmp/test']) {
+      assert.doesNotMatch(
+        decodeURIComponent(panelDataUrl({ ...prompt, joinUrl }, false, platform)),
+        /Record &amp; Join/
+      )
+    }
+    assert.doesNotMatch(
+      decodeURIComponent(
+        panelDataUrl(
+          { ...prompt, adHoc: true, joinUrl: 'https://meet.google.com/aaa-bbbb-ccc' },
+          false,
+          platform
+        )
+      ),
+      /Record &amp; Join/
+    )
+  }
+})

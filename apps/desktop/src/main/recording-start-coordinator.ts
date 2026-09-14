@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { CalendarStartMeetingEvent } from '../shared/calendar-api'
+import { calendarJoinUrl, type CalendarStartMeetingEvent } from '../shared/calendar-api'
 import type { EngineEvent } from '../shared/engine-events'
 import type { RecordingStartRequest, RecordingState } from '../shared/recording-api'
 
@@ -10,14 +10,18 @@ export class RecordingStartCoordinator {
   private rendererReady = false
   private delivered = false
   private engineClaimed = false
+  private joinTarget?: { requestId: string; url: string }
 
   constructor(
     private readonly deliver: (request: RecordingStartRequest) => void,
-    private readonly changed: (state: RecordingState) => void
+    private readonly changed: (state: RecordingState) => void,
+    private readonly openExternal: (url: string) => Promise<void> = async () => {
+      throw new Error('Meeting link opener unavailable.')
+    }
   ) {}
 
   snapshot(): RecordingState {
-    return { ...this.state }
+    return { ...this.state, ...(this.state.join ? { join: { ...this.state.join } } : {}) }
   }
   get busy(): boolean {
     return this.state.phase !== 'idle'
@@ -43,9 +47,49 @@ export class RecordingStartCoordinator {
     if (!this.state.eligible || this.busy) return false
     this.pending = { id: randomUUID(), event: { ...event, action: 'start' } }
     this.state.phase = 'requested'
+    this.joinTarget = undefined
+    delete this.state.join
+    const url =
+      event.joinRequested && event.eventId && !event.adHoc
+        ? calendarJoinUrl(event.joinUrl)
+        : undefined
+    if (url) {
+      this.joinTarget = { requestId: this.pending.id, url }
+      this.state.join = { requestId: this.pending.id, subject: event.subject, status: 'opening' }
+      void this.launchJoin(this.joinTarget)
+    }
     this.publish()
     this.flush()
     return true
+  }
+
+  /** Retry only the accepted link. This path cannot reserve or start capture. */
+  async retryJoin(requestId: string): Promise<void> {
+    if (this.joinTarget?.requestId !== requestId || this.state.join?.status !== 'failed') return
+    this.state.join.status = 'opening'
+    this.publish()
+    await this.launchJoin(this.joinTarget)
+  }
+
+  dismissJoin(requestId: string): void {
+    if (this.joinTarget?.requestId !== requestId) return
+    this.joinTarget = undefined
+    delete this.state.join
+    this.publish()
+  }
+
+  private async launchJoin(target: { requestId: string; url: string }): Promise<void> {
+    let status: 'opened' | 'failed' = 'opened'
+    try {
+      // The host focuses/creates the recording window before handing off to the meeting app.
+      await Promise.resolve()
+      await this.openExternal(target.url)
+    } catch {
+      status = 'failed'
+    }
+    if (this.joinTarget !== target || !this.state.join) return
+    this.state.join.status = status
+    this.publish()
   }
 
   attach(requestId: string, meetingId: string): boolean {

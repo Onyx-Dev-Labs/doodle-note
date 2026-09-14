@@ -11,6 +11,8 @@ import {
 import { RecordingStartCoordinator } from './recording-start-coordinator'
 import { RecordingTray } from './recording-tray'
 import {
+  RECORDING_JOIN_RETRY_CHANNEL,
+  RECORDING_JOIN_DISMISS_CHANNEL,
   RECORDING_REQUEST_CHANNEL,
   RECORDING_READY_CHANNEL,
   RECORDING_DELIVER_CHANNEL,
@@ -157,11 +159,12 @@ const recording = new RecordingStartCoordinator(
     recordingTray?.update(state)
     mainWindow?.webContents.send(RECORDING_STATE_CHANNEL, state)
     calendarService?.setRecordingActive(state.phase !== 'idle')
-  }
+  },
+  (url) => shell.openExternal(url)
 )
 
 function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
-  if (event?.eventId) {
+  if (event) {
     const resolved = calendarService?.resolveStart(event)
     if (!resolved) return false
     event = resolved
@@ -532,6 +535,15 @@ app.whenReady().then(() => {
     (event, prompt?: CalendarStartMeetingEvent) =>
       event.sender === mainWindow?.webContents && requestRecordingStart(prompt)
   )
+  ipcMain.handle(RECORDING_JOIN_RETRY_CHANNEL, (event, requestId: unknown) => {
+    if (event.sender === mainWindow?.webContents && typeof requestId === 'string')
+      return recording.retryJoin(requestId)
+    return undefined
+  })
+  ipcMain.handle(RECORDING_JOIN_DISMISS_CHANNEL, (event, requestId: unknown) => {
+    if (event.sender === mainWindow?.webContents && typeof requestId === 'string')
+      recording.dismissJoin(requestId)
+  })
   ipcMain.handle(RECORDING_READY_CHANNEL, (event, eligible: boolean) => {
     if (event.sender !== mainWindow?.webContents) return recording.snapshot()
     return recording.ready(eligible === true)

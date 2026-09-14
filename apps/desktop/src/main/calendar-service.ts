@@ -282,7 +282,8 @@ export class CalendarService {
 
   /** Every recording entry point resolves aliases against current main-process ownership. */
   resolveStart(event: CalendarStartMeetingEvent): CalendarStartMeetingEvent | null {
-    if (!event.eventId) return { ...event, legacyEventId: undefined }
+    if (!event.eventId)
+      return { ...event, legacyEventId: undefined, joinUrl: undefined, joinRequested: false }
     const current = this.visibleEvents().find((e) => e.id === event.eventId)
     return current
       ? {
@@ -290,6 +291,9 @@ export class CalendarService {
           subject: current.subject,
           startIso: current.startIso,
           sourceLabel: current.sourceLabel,
+          joinUrl: calendarJoinUrl(current.joinUrl),
+          joinRequested: event.joinRequested === true,
+          adHoc: false,
           legacyEventId: current.legacyEventId
         }
       : null
@@ -1149,7 +1153,11 @@ export class CalendarService {
     this.promptState = decision.state
     if (!decision.prompt) return
     const source = this.visibleEvents().find((e) => e.id === decision.prompt?.eventId)
-    const payload = { ...decision.prompt, sourceLabel: source?.sourceLabel }
+    const payload = {
+      ...decision.prompt,
+      sourceLabel: source?.sourceLabel,
+      joinUrl: calendarJoinUrl(source?.joinUrl)
+    }
     this.activePrompt = payload
 
     // A mic signal correlated to a calendar event owns that event's one prompt,
@@ -1193,7 +1201,11 @@ export class CalendarService {
 
   /** One click anywhere = meeting created + recording (renderer handles it). */
   private actOnPromptStart(prompt: CalendarStartMeetingEvent): void {
-    const payload = { ...prompt, action: 'start' as const }
+    const payload = {
+      ...prompt,
+      action: 'start' as const,
+      joinRequested: !!calendarJoinUrl(prompt.joinUrl)
+    }
     this.promptPanel?.close()
     if (this.requestRecordingStart) {
       this.requestRecordingStart(payload)

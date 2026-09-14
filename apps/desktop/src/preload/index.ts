@@ -1,4 +1,6 @@
 import {
+  RECORDING_JOIN_RETRY_CHANNEL,
+  RECORDING_JOIN_DISMISS_CHANNEL,
   RECORDING_REQUEST_CHANNEL,
   RECORDING_READY_CHANNEL,
   RECORDING_DELIVER_CHANNEL,
@@ -394,6 +396,8 @@ const foldersApi: FoldersApi = {
 }
 
 const recordingApi: RecordingApi = {
+  retryJoin: (requestId) => ipcRenderer.invoke(RECORDING_JOIN_RETRY_CHANNEL, requestId),
+  dismissJoin: (requestId) => ipcRenderer.invoke(RECORDING_JOIN_DISMISS_CHANNEL, requestId),
   requestStart: (event) => ipcRenderer.invoke(RECORDING_REQUEST_CHANNEL, event),
   ready: (eligible) => ipcRenderer.invoke(RECORDING_READY_CHANNEL, eligible),
   attach: (requestId, meetingId) =>

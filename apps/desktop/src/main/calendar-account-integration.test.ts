@@ -5,7 +5,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AccountInfo, ICachePlugin } from '@azure/msal-node'
-import type { CalendarState, CalendarStartMeetingEvent } from '../shared/calendar-api'
+import type {
+  CalendarState,
+  CalendarStartMeetingEvent,
+  CalendarEvent
+} from '../shared/calendar-api'
 import { CalendarAccountStore } from './calendar-account-store'
 import { scopeCalendar, scopeEvent } from './calendar-identity'
 
@@ -144,6 +148,7 @@ type Service = InstanceType<typeof CalendarService> & {
   // Private methods exercised via an isolated test adapter below.
 }
 interface ServiceAccess {
+  rawEvents: CalendarEvent[]
   activePrompt?: CalendarStartMeetingEvent
   ready: Promise<void>
   refreshBusy: boolean
@@ -458,4 +463,27 @@ test('successful Graph refresh removes cancelled meetings', async (t) => {
   await access(service).refreshEvents()
   assert.equal(access(service).state().events.length, 0)
   assert.equal(access(service).state().error, undefined)
+})
+
+test('record-and-join resolves the owning event link and rejects renderer-supplied or unlinked destinations', async (t) => {
+  const { service } = setup(t)
+  await idle(service)
+  const owned = access(service).rawEvents.find((e) => e.provider === 'google')!
+  owned.joinUrl = 'https://meet.google.com/aaa-bbbb-ccc'
+  const request = {
+    action: 'start' as const,
+    eventId: owned.id,
+    subject: 'wrong title',
+    startIso: owned.startIso,
+    joinRequested: true,
+    joinUrl: 'https://other.example.test/wrong'
+  }
+  const result = service.resolveStart(request)!
+  assert.equal(result.joinUrl, owned.joinUrl)
+  assert.equal(result.subject, owned.subject)
+  assert.equal(result.joinRequested, true)
+  assert.equal(service.resolveStart({ ...request, eventId: '' })?.joinUrl, undefined)
+  assert.equal(service.resolveStart({ ...request, eventId: 'missing' }), null)
+  owned.joinUrl = 'javascript:alert(1)'
+  assert.equal(service.resolveStart(request)?.joinUrl, undefined)
 })
