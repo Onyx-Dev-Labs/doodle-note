@@ -84,6 +84,21 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Untitled note"].waitForNonExistence(timeout: 5))
     }
 
+    @MainActor
+    func testWatchInboxOpensWithoutStartingPhoneRecording() throws {
+        let app = launch()
+        let inbox = app.buttons["Watch recordings"]
+        XCTAssertTrue(inbox.waitForExistence(timeout: 10))
+        inbox.tap()
+        XCTAssertTrue(app.navigationBars["Watch recordings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No watch recordings"].exists)
+        let preview = XCTAttachment(screenshot: app.screenshot())
+        preview.name = "Branded watch inbox"
+        preview.lifetime = .keepAlways
+        add(preview)
+        XCTAssertFalse(app.buttons["Stop"].exists)
+    }
+
     /// The unfinished phone-call recorder must not be discoverable in the MVP.
     @MainActor
     func testPhoneCallsAreHiddenForMVP() throws {
