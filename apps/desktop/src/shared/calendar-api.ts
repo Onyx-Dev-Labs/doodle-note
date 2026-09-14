@@ -17,6 +17,9 @@ export const CALENDAR_CONNECT_GOOGLE_CHANNEL = 'calendar:connect-google'
 export const CALENDAR_DISCONNECT_GOOGLE_CHANNEL = 'calendar:disconnect-google'
 export const CALENDAR_DISMISS_PROMPT_CHANNEL = 'calendar:dismiss-prompt'
 export const CALENDAR_REFRESH_CHANNEL = 'calendar:refresh'
+export const CALENDAR_ACCOUNT_CONNECT_CHANNEL = 'calendar:account-connect'
+export const CALENDAR_ACCOUNT_REMOVE_CHANNEL = 'calendar:account-remove'
+export const CALENDAR_AUTH_CANCEL_CHANNEL = 'calendar:auth-cancel'
 /** main → renderer: full CalendarState after every refresh / auth change. */
 export const CALENDAR_EVENTS_CHANNEL = 'calendar:events'
 /** main → renderer: a meeting is starting (banner prompt or notification click). */
@@ -24,6 +27,8 @@ export const CALENDAR_START_MEETING_CHANNEL = 'calendar:start-meeting'
 
 /** One upcoming event, normalized from a connected calendar provider. */
 export interface CalendarEvent {
+  sourceLabel?: string
+  stale?: boolean
   /** Explicit source ownership; absent only in pre-account cache fixtures. */
   accountId?: string
   provider?: CalendarProvider
@@ -98,11 +103,17 @@ export type CalendarProvider = 'microsoft' | 'google'
 export interface CalendarConnection extends CalendarAccount {
   id: string
   provider: CalendarProvider
+  syncing?: boolean
+  error?: string
+  lastSyncIso?: string
+  stale?: boolean
 }
 
 /** The one snapshot the renderer works from. */
 export interface CalendarState {
   connections?: CalendarConnection[]
+  connecting?: { provider: CalendarProvider; accountId?: string }
+  googleAvailable?: boolean
   /** A registration is available (built-in, or saved Client/Tenant IDs). */
   configured: boolean
   /** True when the app ships with a built-in registration — Settings shows one-click sign-in. */
@@ -139,6 +150,7 @@ export interface CalendarConfigUpdate {
 
 /** Payload of CALENDAR_START_MEETING_CHANNEL. */
 export interface CalendarStartMeetingEvent {
+  sourceLabel?: string
   legacyEventId?: string
   /**
    * 'prompt' — show the in-app banner (watcher fired; the user hasn't acted).
@@ -159,6 +171,9 @@ export interface CalendarStartMeetingEvent {
 
 /** API surface exposed on `window.calendar` by the preload script. */
 export interface CalendarApi {
+  connectAccount(provider: CalendarProvider, accountId?: string): Promise<CalendarState>
+  removeAccount(accountId: string): Promise<CalendarState>
+  cancelAuth(): Promise<CalendarState>
   getState(): Promise<CalendarState>
   setConfig(config: CalendarConfigUpdate): Promise<CalendarState>
   /** Partial display-prefs update; persists and rebroadcasts. */
@@ -176,4 +191,17 @@ export interface CalendarApi {
   dismissPrompt(): Promise<void>
   onEvents(cb: (state: CalendarState) => void): () => void
   onStartMeeting(cb: (ev: CalendarStartMeetingEvent) => void): () => void
+}
+
+/** Calendar metadata may contain arbitrary text; only ordinary HTTPS meeting links are actionable. */
+export function calendarJoinUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname && !url.username && !url.password
+      ? url.href
+      : undefined
+  } catch {
+    return undefined
+  }
 }

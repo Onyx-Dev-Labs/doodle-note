@@ -23,6 +23,7 @@ const msAccount = {
   name: 'Fixture'
 } as AccountInfo
 let authorize: () => Promise<void> = async () => {}
+let selectedAccount = msAccount
 class FakeMSAL {
   records: AccountInfo[] = []
   constructor(private options: { cache?: { cachePlugin: ICachePlugin } }) {}
@@ -61,8 +62,8 @@ class FakeMSAL {
   }
   async acquireTokenInteractive(): Promise<{ accessToken: string; account: AccountInfo }> {
     await authorize()
-    this.records = [msAccount]
-    return { accessToken: 'synthetic-ms-access', account: msAccount }
+    this.records = [selectedAccount]
+    return { accessToken: 'synthetic-ms-access', account: selectedAccount }
   }
 }
 const rawCalendar = {
@@ -90,9 +91,10 @@ class FakeGoogle {
   constructor(
     _dir: string,
     _secret: unknown,
-    private store: CalendarAccountStore
+    private store: CalendarAccountStore,
+    id?: string | null
   ) {
-    this.accountId = store.entries('google')[0]?.view.id
+    this.accountId = id === null ? undefined : (id ?? store.entries('google')[0]?.view.id)
   }
   get signedIn(): boolean {
     return !!this.accountId
@@ -146,6 +148,9 @@ interface ServiceAccess {
   ready: Promise<void>
   refreshBusy: boolean
   state(): CalendarState
+  connectAccount(provider: 'microsoft' | 'google', id?: string): Promise<CalendarState>
+  removeAccount(id: string): Promise<CalendarState>
+  cancelAuth(): CalendarState
   connect(): Promise<CalendarState>
   disconnect(): Promise<CalendarState>
   refreshEvents(): Promise<void>
@@ -379,4 +384,78 @@ test('global menu preferences do not rewrite account selections or require unloc
   assert.equal(state.prefs.showMenuBar, false)
   assert.equal(state.error, undefined)
   assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
+})
+
+test('adding a second Microsoft tenant preserves selection; duplicate add deduplicates; wrong reconnect and cancelled add preserve both accounts', async (t) => {
+  const { dir, service } = setup(t)
+  await idle(service)
+  const original = access(service)
+    .state()
+    .connections!.find((c) => c.provider === 'microsoft')!
+  const googleCalendar = access(service)
+    .state()
+    .calendars.find((c) => c.provider === 'google')!
+  access(service).setPrefs({ visibleCalendarIds: [googleCalendar.id] })
+  await idle(service)
+  selectedAccount = {
+    ...msAccount,
+    tenantId: 'tenant-b',
+    localAccountId: 'other-object',
+    username: 'second@example.test'
+  }
+  t.after(() => {
+    selectedAccount = msAccount
+    authorize = async () => {}
+  })
+  let state = await access(service).connectAccount('microsoft')
+  assert.equal(state.connections?.length, 3)
+  assert.equal(state.events.filter((e) => e.provider === 'microsoft').length, 1)
+  const second = state.connections!.find((c) => c.email === 'second@example.test')!
+  state = await access(service).connectAccount('microsoft')
+  assert.equal(state.connections?.length, 3)
+  const before = readFileSync(join(dir, 'calendar-accounts-v2'))
+  state = await access(service).connectAccount('microsoft', original.id)
+  assert.match(state.error!, /targeted Microsoft account/)
+  assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
+  let finish: () => void = () => {}
+  authorize = () =>
+    new Promise<void>((resolve) => {
+      finish = resolve
+    })
+  const pending = access(service).connectAccount('microsoft')
+  access(service).cancelAuth()
+  finish()
+  await pending
+  assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
+  await access(service).removeAccount(second.id)
+  assert.equal(access(service).state().connections?.length, 2)
+  assert.deepEqual(new CalendarAccountStore(dir, codec).get(original.id)?.visibleCalendarIds, [])
+})
+
+test('successful Graph refresh removes cancelled meetings', async (t) => {
+  const { service } = setup(t, [msAccount], false)
+  await idle(service)
+  assert.equal(access(service).state().events.length, 1)
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (url: string | URL | Request) =>
+      new Response(
+        JSON.stringify({
+          value: String(url).includes('/calendarView?')
+            ? [
+                {
+                  id: 'raw-event',
+                  isCancelled: true,
+                  start: { dateTime: rawEvent.startIso },
+                  end: { dateTime: rawEvent.endIso }
+                }
+              ]
+            : [{ id: rawCalendar.id, name: 'Calendar', isDefaultCalendar: true }]
+        })
+      )
+  )
+  await access(service).refreshEvents()
+  assert.equal(access(service).state().events.length, 0)
+  assert.equal(access(service).state().error, undefined)
 })

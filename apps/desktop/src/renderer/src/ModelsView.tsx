@@ -417,11 +417,14 @@ export default function ModelsView({
     if (state.configured && !state.error) setEditingCalConfig(false)
   }
 
-  const connectCalendar = async (): Promise<void> => {
+  const connectCalendar = async (
+    provider: 'microsoft' | 'google' = 'microsoft',
+    accountId?: string
+  ): Promise<void> => {
     if (connecting) return
     setConnecting(true)
     try {
-      setCalState(await window.calendar.connect())
+      setCalState(await window.calendar.connectAccount(provider, accountId))
     } finally {
       setConnecting(false)
     }
@@ -435,10 +438,6 @@ export default function ModelsView({
     } finally {
       setSyncing(false)
     }
-  }
-
-  const disconnectCalendar = async (): Promise<void> => {
-    setCalState(await window.calendar.disconnect())
   }
 
   /** Partial display-prefs update; main persists and echoes the new state. */
@@ -456,11 +455,11 @@ export default function ModelsView({
    */
   const visibleCalendarIds = (state: CalendarState): Set<string> => {
     if (state.prefs.visibleCalendarIds !== null) return new Set(state.prefs.visibleCalendarIds)
-    const defaults = state.calendars.filter((c) => c.isDefault).map((c) => c.id)
-    if (defaults.length === 0 && state.calendars.length > 0) {
-      const first = state.calendars[0]
-      if (first) return new Set([first.id])
-    }
+    const defaults = (state.connections ?? []).flatMap((account) => {
+      const calendars = state.calendars.filter((c) => c.accountId === account.id)
+      const primary = calendars.filter((c) => c.isDefault)
+      return (primary.length ? primary : calendars.slice(0, 1)).map((c) => c.id)
+    })
     return new Set(defaults)
   }
 
@@ -717,9 +716,9 @@ export default function ModelsView({
             <section className="keys-section calendar-section">
               <h3>Calendar</h3>
               <p className="models-sub">
-                Sign in with any Microsoft account — work, school, or personal — to see the
-                week&rsquo;s meetings on Home and get a nudge to take notes the moment one starts.
-                DoodleNote only reads your calendar.
+                Connect your work and personal accounts to see their upcoming meetings together.
+                Each account keeps its own calendars and sign-in. DoodleNote only reads your
+                calendar.
               </p>
 
               {calState?.error && <div className="models-error">{calState.error}</div>}
@@ -757,112 +756,175 @@ export default function ModelsView({
                     (client) ID and Directory (tenant) ID from there.
                   </p>
                 </>
-              ) : !calState.signedIn ? (
-                <div className="calendar-actions">
-                  <button
-                    type="button"
-                    className="ms-signin"
-                    disabled={connecting}
-                    onClick={() => void connectCalendar()}
-                  >
-                    <MicrosoftLogo />
-                    <span>
-                      {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
-                    </span>
-                  </button>
-                  <GoogleCalendarPending buttonClassName="ms-signin">
-                    <GoogleLogo />
-                    <span>Sign in with Google</span>
-                  </GoogleCalendarPending>
-                  {!calState.builtIn && (
+              ) : null}
+              {calState && (
+                <div className="calendar-connected">
+                  <div className="calendar-actions">
                     <button
                       type="button"
-                      className="calendar-ghost"
-                      onClick={() => setEditingCalConfig(true)}
+                      className="provider-btn"
+                      disabled={!calState.configured || connecting || !!calState.connecting}
+                      onClick={() => void connectCalendar('microsoft')}
                     >
-                      Edit IDs
+                      <MicrosoftLogo /> Add Microsoft account
                     </button>
-                  )}
-                  {connecting && (
-                    <span className="calendar-note">
-                      finish signing in in your browser, then come back
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <div className="calendar-connected">
-                  <span className="calendar-status">
-                    {calState.msSignedIn && (
-                      <>
-                        Microsoft: <strong>{calState.account?.email ?? 'connected'}</strong>
-                      </>
-                    )}
-                    {calState.msSignedIn && calState.googleSignedIn && ' · '}
-                    {calState.googleSignedIn && (
-                      <>
-                        Google: <strong>{calState.googleAccount?.email ?? 'connected'}</strong>
-                      </>
-                    )}
-                    {calState.lastSyncIso && (
-                      <span className="calendar-note">
-                        {' '}
-                        · {lastSyncLabel(calState.lastSyncIso)}
-                      </span>
-                    )}
-                  </span>
-                  <div className="calendar-actions">
-                    <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
-                      {syncing ? 'Syncing…' : 'Sync now'}
-                    </button>
-                    {calState.msSignedIn && calState.error && (
-                      <button
-                        type="button"
-                        disabled={connecting}
-                        onClick={() => void connectCalendar()}
-                      >
-                        {connecting ? 'Waiting for your browser…' : 'Sign in again'}
-                      </button>
-                    )}
-                    {!calState.msSignedIn && (
+                    {calState.googleAvailable ? (
                       <button
                         type="button"
                         className="provider-btn"
-                        disabled={connecting}
-                        onClick={() => void connectCalendar()}
+                        disabled={connecting || !!calState.connecting}
+                        onClick={() => void connectCalendar('google')}
                       >
-                        <MicrosoftLogo />
-                        {connecting ? 'Waiting for your browser…' : 'Connect Microsoft'}
+                        <GoogleLogo /> Add Google account
                       </button>
-                    )}
-                    {calState.msSignedIn && (
-                      <button
-                        type="button"
-                        className="provider-btn"
-                        onClick={() => void disconnectCalendar()}
-                      >
-                        <MicrosoftLogo />
-                        Disconnect Microsoft
-                      </button>
-                    )}
-                    {!calState.googleSignedIn && (
+                    ) : (
                       <GoogleCalendarPending buttonClassName="provider-btn">
-                        <GoogleLogo />
-                        Connect Google
+                        <GoogleLogo /> Add Google account
                       </GoogleCalendarPending>
                     )}
-                    {calState.googleSignedIn && (
+                    {calState.signedIn && (
                       <button
                         type="button"
-                        className="provider-btn"
-                        onClick={() => {
-                          void window.calendar.disconnectGoogle().then(setCalState)
-                        }}
+                        disabled={syncing || calState.connections?.some((c) => c.syncing)}
+                        onClick={() => void syncCalendar()}
                       >
-                        <GoogleLogo />
-                        Disconnect Google
+                        {syncing || calState.connections?.some((c) => c.syncing)
+                          ? 'Syncing…'
+                          : 'Sync now'}
+                      </button>
+                    )}
+                    {!calState.builtIn && !editingCalConfig && (
+                      <button
+                        type="button"
+                        className="calendar-ghost"
+                        onClick={() => setEditingCalConfig(true)}
+                      >
+                        Edit Microsoft IDs
                       </button>
                     )}
                   </div>
+                  {calState.connecting && (
+                    <div className="calendar-actions" role="status">
+                      <span>Finish signing in in your browser.</span>
+                      <button
+                        type="button"
+                        onClick={() => void window.calendar.cancelAuth().then(adoptCalState)}
+                      >
+                        Cancel sign-in
+                      </button>
+                    </div>
+                  )}
+                  {calState.tenantId &&
+                    !['common', 'organizations', 'consumers'].includes(
+                      calState.tenantId.toLowerCase()
+                    ) && (
+                      <p className="calendar-note">
+                        This custom Microsoft registration is restricted to its configured
+                        organization. Accounts from other organizations may require a different
+                        registration.
+                      </p>
+                    )}
+                  {!calState.signedIn && (
+                    <p className="calendar-note">
+                      Add an account to choose calendars and see upcoming meetings.
+                    </p>
+                  )}
+                  {(calState.connections ?? []).map((account) => (
+                    <section
+                      className="cal-subcard"
+                      key={account.id}
+                      aria-label={`${account.provider === 'microsoft' ? 'Microsoft' : 'Google'} ${account.email}`}
+                    >
+                      <div className="cal-subcard-head" style={{ flexWrap: 'wrap', gap: 8 }}>
+                        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                          {account.provider === 'microsoft' ? 'Microsoft 365' : 'Google'} ·{' '}
+                          {account.email}
+                          {account.name && (
+                            <span className="cal-row-sub" style={{ display: 'block' }}>
+                              {account.name}
+                            </span>
+                          )}
+                        </span>
+                        <div className="calendar-actions">
+                          <button
+                            type="button"
+                            disabled={
+                              connecting ||
+                              !!calState.connecting ||
+                              (account.provider === 'google' && !calState.googleAvailable)
+                            }
+                            aria-label={`Reconnect ${account.email}`}
+                            onClick={() => void connectCalendar(account.provider, account.id)}
+                          >
+                            Reconnect
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${account.email}`}
+                            onClick={() =>
+                              void window.calendar.removeAccount(account.id).then(adoptCalState)
+                            }
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      <p className="calendar-note" role="status">
+                        {account.syncing
+                          ? 'Syncing…'
+                          : account.stale
+                            ? 'Calendar data may be out of date.'
+                            : 'Connected.'}
+                        {account.lastSyncIso && ` ${lastSyncLabel(account.lastSyncIso)}`}
+                      </p>
+                      {account.error && (
+                        <p className="models-error" role="alert">
+                          {account.error}
+                        </p>
+                      )}
+                      {calState.calendars
+                        .filter((c) => c.accountId === account.id)
+                        .map((cal) => {
+                          const visible = visibleCalendarIds(calState)
+                          const isOn = visible.has(cal.id)
+                          const lastOne =
+                            isOn && calState.calendars.filter((c) => visible.has(c.id)).length === 1
+                          return (
+                            <div key={cal.id} className="cal-row">
+                              <span
+                                className="cal-dot"
+                                style={{ background: cal.colorHex }}
+                                aria-hidden="true"
+                              />
+                              <span className="cal-row-main">
+                                <span className="cal-row-label">{cal.name}</span>
+                              </span>
+                              <Toggle
+                                checked={isOn}
+                                disabled={lastOne}
+                                label={`Show ${cal.name} from ${account.email} in Coming up`}
+                                title={lastOne ? 'At least one calendar stays visible' : undefined}
+                                onChange={() => toggleCalendar(calState, cal.id)}
+                              />
+                            </div>
+                          )
+                        })}
+                      {!calState.calendars.some((c) => c.accountId === account.id) && (
+                        <p className="calendar-note">
+                          No calendars synced yet. Use Sync now to retry.
+                        </p>
+                      )}
+                    </section>
+                  ))}
+                  {calState.signedIn && (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => setCalPrefs({ visibleCalendarIds: null })}
+                    >
+                      Use each account’s default calendar
+                    </button>
+                  )}
 
                   <div className="cal-subcard">
                     <div className="cal-subcard-head">Display</div>
@@ -904,52 +966,6 @@ export default function ModelsView({
                         }
                       />
                     </div>
-                  </div>
-
-                  <div className="cal-subcard">
-                    <div className="cal-subcard-head">
-                      Visible calendars
-                      <button
-                        type="button"
-                        className="link-btn cal-reset"
-                        title="Back to your default calendar only"
-                        onClick={() => setCalPrefs({ visibleCalendarIds: null })}
-                      >
-                        Reset
-                      </button>
-                    </div>
-                    {calState.calendars.length === 0 ? (
-                      <div className="cal-row">
-                        <span className="calendar-note">
-                          No calendars synced yet — hit Sync now above
-                        </span>
-                      </div>
-                    ) : (
-                      calState.calendars.map((cal) => {
-                        const visible = visibleCalendarIds(calState)
-                        const isOn = visible.has(cal.id)
-                        const lastOne = isOn && visible.size === 1
-                        return (
-                          <div key={cal.id} className="cal-row">
-                            <span
-                              className="cal-dot"
-                              style={{ background: cal.colorHex }}
-                              aria-hidden="true"
-                            />
-                            <span className="cal-row-main">
-                              <span className="cal-row-label">{cal.name}</span>
-                            </span>
-                            <Toggle
-                              checked={isOn}
-                              disabled={lastOne}
-                              label={`Show ${cal.name} in Coming up`}
-                              title={lastOne ? 'At least one calendar stays visible' : undefined}
-                              onChange={() => toggleCalendar(calState, cal.id)}
-                            />
-                          </div>
-                        )
-                      })
-                    )}
                   </div>
                 </div>
               )}

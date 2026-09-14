@@ -305,6 +305,12 @@ function ComingUpCard({
                           <span className="cu-subject">
                             {event.subject.trim() || 'Untitled meeting'}
                           </span>
+                          {event.sourceLabel && (
+                            <span className="cu-time">
+                              {event.sourceLabel}
+                              {event.stale ? ' · May be out of date' : ''}
+                            </span>
+                          )}
                           <span className="cu-time">
                             {eventTimeLabel(event)}
                             {event.isOnlineMeeting && event.joinUrl !== undefined && (

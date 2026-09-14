@@ -96,6 +96,19 @@ async function main() {
   const show = async (id) => {
     const next = runtime.waitForEvent('window')
     await runtime.evaluate((_, event) => {
+      // Main resolves only events in its current selected snapshot (ONY-307/308).
+      global.qaCalendar.rawEvents = [
+        {
+          id: event.eventId,
+          calendarId: '',
+          subject: event.subject,
+          startIso: event.startIso,
+          endIso: new Date(Date.parse(event.startIso) + 3600000).toISOString(),
+          isAllDay: false,
+          isOnlineMeeting: false,
+          hasParticipants: true
+        }
+      ]
       setImmediate(() => global.qaCalendar.deliverPrompt(event))
     }, fixture(id))
     const panel = await next

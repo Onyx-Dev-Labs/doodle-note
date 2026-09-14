@@ -18,7 +18,9 @@ export function legacyPanelDataUrl(prompt: CalendarStartMeetingEvent, dark: bool
     : `${escapeHtml(prompt.subject)} is starting`
   const sub = prompt.adHoc
     ? 'Want DoodleNote to record and take notes?'
-    : 'Want DoodleNote to take notes?'
+    : prompt.sourceLabel
+      ? escapeHtml(prompt.sourceLabel)
+      : 'Want DoodleNote to take notes?'
   // Follows nativeTheme, which the renderer keeps in sync with the in-app pref.
   const c = dark
     ? {
@@ -152,6 +154,7 @@ export function panelDataUrl(
   </style></head><body><section class="card" aria-label="Meeting detected">
     <img class="logo" src="${escapeHtml(logoDataUrl)}" alt="DoodleNote logo" width="42" height="42">
     <div class="content"><h1 title="${escapeHtml(heading)}">${escapeHtml(heading)}</h1>
+    ${prompt.sourceLabel ? `<div style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(prompt.sourceLabel)}">${escapeHtml(prompt.sourceLabel)}</div>` : ''}
     <div class="brand"><span class="name">DoodleNote</span>
       <span class="paw-walk" aria-hidden="true">${[1, 2, 3, 4].map(() => `<span class="paw">${paw}</span>`).join('')}</span>
     </div></div><a class="go" href="doodle-panel://start">Record now</a>
