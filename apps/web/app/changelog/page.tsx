@@ -9,6 +9,18 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.30",
+    date: "September 14, 2026",
+    highlights: [
+      "Connect multiple Microsoft 365 accounts and see their selected calendars together on Mac",
+      "Identify each event's account and manage calendar selections, reconnects, and errors independently",
+      "Use Record & Join from meeting prompts to start recording and open the correct meeting link",
+      "Retry opening a meeting link without starting another recording",
+      "Remove the obsolete Mobile cloud notes sidebar button",
+      "New Google Calendar connections remain unavailable pending verification",
+    ],
+  },
+  {
     version: "0.4.27",
     date: "September 12, 2026",
     highlights: [
