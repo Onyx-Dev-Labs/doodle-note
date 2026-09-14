@@ -111,3 +111,131 @@ test('tray resources include transparent standard and Retina images with correct
   const config = readFileSync('electron-builder.yml', 'utf8')
   assert.match(config, /from: resources\/tray\s+to: tray\s+filter: \["\*\.png"\]/)
 })
+
+test('Record & Join opens once per accepted action across duplicate delivery and delayed renderer readiness', async () => {
+  const delivered: RecordingStartRequest[] = []
+  const opened: string[] = []
+  const c = new RecordingStartCoordinator(
+    (r) => delivered.push(r),
+    () => {},
+    async (url) => {
+      opened.push(url)
+    }
+  )
+  c.ready(true)
+  c.rendererGone()
+  const linked = {
+    ...event,
+    eventId: 'canonical-google-event',
+    joinRequested: true,
+    joinUrl: 'https://meet.google.com/aaa-bbbb-ccc'
+  }
+  assert.equal(c.request(linked), true)
+  assert.equal(c.request(linked), false)
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.deepEqual(opened, [linked.joinUrl])
+  assert.equal(c.snapshot().phase, 'requested', 'link launch is not capture success')
+  assert.equal(delivered.length, 0)
+  c.ready(true)
+  c.ready(true)
+  c.rendererGone()
+  c.ready(true)
+  assert.equal(new Set(delivered.map((r) => r.id)).size, 1)
+  assert.equal(opened.length, 1)
+  c.attach(delivered[0]!.id, 'existing-note')
+  c.beginEngine('existing-note')
+  assert.equal(c.snapshot().phase, 'starting')
+  c.handle({ event: 'ready' })
+  assert.equal(c.snapshot().phase, 'recording')
+  c.stop()
+  assert.equal(c.request(linked), false)
+  assert.equal(opened.length, 1)
+})
+
+test('Join failure preserves recording and join-only retry cannot reserve capture or replay concurrent retry', async () => {
+  const delivered: RecordingStartRequest[] = []
+  let launches = 0,
+    fail = true
+  const c = new RecordingStartCoordinator(
+    (r) => delivered.push(r),
+    () => {},
+    async () => {
+      launches++
+      if (fail) throw new Error('synthetic OS failure')
+    }
+  )
+  c.ready(true)
+  c.request({
+    ...event,
+    eventId: 'canonical-ms-event',
+    joinRequested: true,
+    joinUrl: 'https://teams.microsoft.com/l/meetup-join/fixture'
+  })
+  const requestId = delivered[0]!.id
+  c.attach(requestId, 'existing-note')
+  c.beginEngine('existing-note')
+  c.handle({ event: 'ready' })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(c.snapshot().join?.status, 'failed')
+  assert.equal(c.snapshot().phase, 'recording')
+  await c.retryJoin('wrong-request')
+  assert.equal(launches, 1)
+  fail = false
+  await Promise.all([c.retryJoin(requestId), c.retryJoin(requestId)])
+  assert.equal(launches, 2)
+  assert.equal(c.snapshot().join?.status, 'opened')
+  assert.equal(c.snapshot().phase, 'recording')
+  assert.equal(delivered.length, 1)
+  c.handle({ event: 'spawn-error', message: 'synthetic capture failure' })
+  assert.equal(c.snapshot().phase, 'idle')
+  assert.equal(c.snapshot().join?.status, 'opened', 'capture failure cannot change link outcome')
+})
+
+test('standalone notes, unlinked detections and invalid URLs never launch; stale launch completion cannot replace a later state', async () => {
+  const delivered: RecordingStartRequest[] = []
+  let finish: () => void = () => {},
+    launches = 0
+  const c = new RecordingStartCoordinator(
+    (r) => delivered.push(r),
+    () => {},
+    async () => {
+      launches++
+      await new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    }
+  )
+  c.ready(true)
+  for (const candidate of [
+    { ...event, eventId: 'event', joinUrl: 'https://meet.google.com/aaa-bbbb-ccc' },
+    { ...event, joinRequested: true, joinUrl: 'https://meet.google.com/aaa-bbbb-ccc' },
+    {
+      ...event,
+      eventId: 'event',
+      adHoc: true,
+      joinRequested: true,
+      joinUrl: 'https://meet.google.com/aaa-bbbb-ccc'
+    },
+    { ...event, eventId: 'event', joinRequested: true, joinUrl: 'javascript:alert(1)' }
+  ]) {
+    c.request(candidate)
+    c.cancel(delivered.at(-1)!.id)
+  }
+  await Promise.resolve()
+  assert.equal(launches, 0)
+  c.request({
+    ...event,
+    eventId: 'event',
+    joinRequested: true,
+    joinUrl: 'https://teams.microsoft.com/l/meetup-join/test'
+  })
+  await Promise.resolve()
+  const first = delivered.at(-1)!.id
+  c.cancel(first)
+  c.request(event)
+  finish()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(c.snapshot().join, undefined)
+  assert.equal(c.snapshot().phase, 'requested')
+})

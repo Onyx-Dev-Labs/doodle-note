@@ -1,4 +1,4 @@
-import type { CalendarStartMeetingEvent } from '../shared/calendar-api'
+import { calendarJoinUrl, type CalendarStartMeetingEvent } from '../shared/calendar-api'
 
 export const PANEL_WIDTH = 340
 export const PANEL_HEIGHT = 108
@@ -61,7 +61,7 @@ export function legacyPanelDataUrl(prompt: CalendarStartMeetingEvent, dark: bool
   <div class="head"><h1>${heading}</h1></div>
   <p>${sub}</p>
   <div class="row">
-    <a class="go" href="doodle-panel://start">✎ Take notes</a>
+    <a class="go" href="doodle-panel://start">${calendarJoinUrl(prompt.joinUrl) && prompt.eventId && !prompt.adHoc ? 'Record &amp; Join' : '✎ Take notes'}</a>
     <a class="no" href="doodle-panel://dismiss">Dismiss</a>
   </div>
   </div></body></html>`
@@ -157,7 +157,7 @@ export function panelDataUrl(
     ${prompt.sourceLabel ? `<div style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(prompt.sourceLabel)}">${escapeHtml(prompt.sourceLabel)}</div>` : ''}
     <div class="brand"><span class="name">DoodleNote</span>
       <span class="paw-walk" aria-hidden="true">${[1, 2, 3, 4].map(() => `<span class="paw">${paw}</span>`).join('')}</span>
-    </div></div><a class="go" href="doodle-panel://start">Record now</a>
+    </div></div><a class="go" href="doodle-panel://start">${calendarJoinUrl(prompt.joinUrl) && prompt.eventId && !prompt.adHoc ? 'Record &amp; Join' : 'Record now'}</a>
     <a class="dismiss" href="doodle-panel://dismiss" aria-label="Dismiss meeting prompt" title="Dismiss (Esc)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a>
   </section></body></html>`
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`

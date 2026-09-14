@@ -1,4 +1,4 @@
-import type { RecordingState } from '../../shared/recording-api'
+import type { RecordingState, RecordingJoinState } from '../../shared/recording-api'
 import { prepareRecordingMeeting } from './lib/recording-start'
 import { CloudNotesView } from './CloudNotesView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -47,6 +47,7 @@ const BANNER_TTL_PAST_START_MS = 10 * 60_000
 function App(): React.JSX.Element {
   const recordingState = useRef<RecordingState>({ phase: 'idle', eligible: false, meetingId: null })
   const handlingStart = useRef<string | null>(null)
+  const [joinState, setJoinState] = useState<RecordingJoinState | undefined>()
   const [recordingError, setRecordingError] = useState<string | null>(null)
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
@@ -197,9 +198,10 @@ function App(): React.JSX.Element {
    * instead of minting a duplicate.
    */
   const startCalendarMeeting = useCallback(
-    async (ev: { eventId: string; subject: string }): Promise<void> => {
+    async (ev: { eventId: string; subject: string; joinUrl?: string }): Promise<void> => {
       await window.recording.requestStart({
         action: 'start',
+        joinRequested: !!ev.joinUrl,
         eventId: ev.eventId,
         subject: ev.subject,
         startIso: new Date().toISOString()
@@ -218,6 +220,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const offState = window.recording.onState((state) => {
       recordingState.current = state
+      setJoinState(state.join)
     })
     const offStart = window.recording.onStart((request) => {
       if (handlingStart.current === request.id) return
@@ -254,6 +257,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     void window.recording.ready(!wizardOpen && !tourOpen).then((state) => {
       recordingState.current = state
+      setJoinState(state.join)
     })
   }, [wizardOpen, tourOpen])
 
@@ -615,13 +619,6 @@ function App(): React.JSX.Element {
           <div className="sidebar-spacer" />
 
           <div className="sidebar-bottom">
-            <button
-              type="button"
-              className={view === 'cloud' ? 'nav-item on' : 'nav-item'}
-              onClick={() => setView('cloud')}
-            >
-              Mobile cloud notes
-            </button>
             <div className="privacy-badge">
               <LockIcon size={12} /> Local &amp; private
             </div>
@@ -692,6 +689,33 @@ function App(): React.JSX.Element {
         </div>
       )}
 
+      {joinState && joinState.status !== 'opened' && (
+        <div
+          className="meeting-banner no-drag"
+          role={joinState.status === 'failed' ? 'alert' : 'status'}
+          style={{ top: 'auto', bottom: 80, borderRadius: 16, flexWrap: 'wrap' }}
+        >
+          <span>
+            {joinState.status === 'opening'
+              ? 'Opening meeting…'
+              : `Could not open “${joinState.subject}”. Try Join again or open it from your calendar.`}
+          </span>
+          {joinState.status === 'failed' && (
+            <button
+              type="button"
+              onClick={() => void window.recording.retryJoin(joinState.requestId)}
+            >
+              Join again
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void window.recording.dismissJoin(joinState.requestId)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {recordingError && (
         <div className="meeting-banner no-drag" role="alert">
           <span>{recordingError}</span>
@@ -738,7 +762,9 @@ function App(): React.JSX.Element {
             className="mb-start"
             onClick={() => void startCalendarMeeting(banner)}
           >
-            Start taking notes
+            {banner.joinUrl && banner.eventId && !banner.adHoc
+              ? 'Record & Join'
+              : 'Start taking notes'}
           </button>
           <button
             type="button"

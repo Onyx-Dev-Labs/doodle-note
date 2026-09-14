@@ -150,6 +150,10 @@ export interface CalendarConfigUpdate {
 
 /** Payload of CALENDAR_START_MEETING_CHANNEL. */
 export interface CalendarStartMeetingEvent {
+  /** Main-owned normalized link used to label the pre-meeting action. */
+  joinUrl?: string
+  /** Explicit pre-meeting activation; Home Take notes leaves this false. */
+  joinRequested?: boolean
   sourceLabel?: string
   legacyEventId?: string
   /**

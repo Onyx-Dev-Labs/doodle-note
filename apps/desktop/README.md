@@ -161,3 +161,28 @@ and two Google identities. Check restart, silent renewal, duplicate add, wrong
 reconnect, removal during sync, per-account visibility, offline recovery and
 recording/notes from each source. Google approval/configuration, actual provider
 handoff, VoiceOver and recorded audio remain separate from fixture evidence.
+
+### Record & Join from a meeting prompt
+
+Calendar prompts with a valid HTTPS meeting link offer **Record & Join**. Main
+resolves the link from the selected event and opens it only after accepting the
+recording reservation. Repeated delivery cannot launch the link again. Recording
+indicators still wait for the engine's ready event. Home's separate Join and
+Take notes actions and unlinked recording prompts retain their existing behavior.
+
+A link-launch failure does not cancel capture. **Join again** retries only the
+accepted link and cannot reserve another recording. The failure state survives a
+renderer reload; the destination remains in main and is never accepted from retry
+IPC. Invalid schemes and URLs containing credentials are not actionable.
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/path/to/playwright node apps/desktop/scripts/test-record-and-join.cjs
+```
+
+This smoke uses an intercepted opener and synthetic engine in a temporary
+profile. It covers panel/banner keyboard actions, closed-main-window startup,
+repeated activation, event-note reuse, independent failures and join-only retry.
+It is not proof of actual meeting-app handoff or recorded audio. Forced renderer
+reload returns to Home, so the fixture stops its retained capture through engine
+IPC after proving the join retry survives without another capture start; full
+editor/session restoration is not added by this feature.
