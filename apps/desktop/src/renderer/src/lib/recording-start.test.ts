@@ -99,3 +99,49 @@ test('storage failure cancels the reservation and reports recovery to the caller
   )
   assert.deepEqual(cancelled, ['request-1'])
 })
+
+test('a proven legacy link upgrades only the reference and retains notes and speaker edits', async () => {
+  const { meetings, writes, records } = fixture()
+  const old = {
+    id: 'old',
+    calendarEventId: 'legacy-event',
+    rawNotesMarkdown: 'Keep my notes',
+    participants: [{ id: 'far', name: 'Manual name' }]
+  } as unknown as MeetingRecord
+  records.push(old)
+  const result = await prepareRecordingMeeting(
+    {
+      ...request,
+      event: { ...request.event, eventId: 'cal2:event:new', legacyEventId: 'legacy-event' }
+    },
+    meetings,
+    { attach: async () => true, cancel: async () => {} },
+    () => 'new'
+  )
+  assert.equal(result, 'old')
+  assert.deepEqual(writes, [{ ...old, calendarEventId: 'cal2:event:new' }])
+})
+
+test('unproven and ambiguous legacy links cannot attach a different account or recurrence', async () => {
+  for (const ambiguous of [false, true]) {
+    const { meetings, records } = fixture()
+    records.push({ id: 'old', calendarEventId: 'legacy-event' } as MeetingRecord)
+    if (ambiguous) records.push({ id: 'other', calendarEventId: 'legacy-event' } as MeetingRecord)
+    assert.equal(
+      await prepareRecordingMeeting(
+        {
+          ...request,
+          event: {
+            ...request.event,
+            eventId: 'cal2:event:new',
+            ...(ambiguous ? { legacyEventId: 'legacy-event' } : {})
+          }
+        },
+        meetings,
+        { attach: async () => true, cancel: async () => {} },
+        () => 'new'
+      ),
+      'new'
+    )
+  }
+})

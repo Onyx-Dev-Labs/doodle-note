@@ -22,9 +22,17 @@ export const CALENDAR_EVENTS_CHANNEL = 'calendar:events'
 /** main → renderer: a meeting is starting (banner prompt or notification click). */
 export const CALENDAR_START_MEETING_CHANNEL = 'calendar:start-meeting'
 
-/** One upcoming event, normalized from Microsoft Graph. */
+/** One upcoming event, normalized from a connected calendar provider. */
 export interface CalendarEvent {
-  /** Graph event id (opaque, can be long). */
+  /** Explicit source ownership; absent only in pre-account cache fixtures. */
+  accountId?: string
+  provider?: CalendarProvider
+  providerEventId?: string
+  /** Original occurrence identity, independent of its current scheduled time. */
+  occurrenceId?: string
+  /** Proven legacy note reference, supplied only for an unambiguous migration. */
+  legacyEventId?: string
+  /** Opaque canonical event key; raw only in legacy input. */
   id: string
   subject: string
   /** Absolute instants (UTC ISO); render in local time. */
@@ -32,7 +40,7 @@ export interface CalendarEvent {
   endIso: string
   isAllDay: boolean
   isOnlineMeeting: boolean
-  /** Graph id of the calendar this event came from ('' for legacy cache entries). */
+  /** Canonical source calendar key ('' in some legacy cache entries). */
   calendarId: string
   /** Accent color inherited from the owning calendar (resolved hex). */
   colorHex?: string
@@ -47,6 +55,9 @@ export interface CalendarEvent {
 
 /** One calendar from GET /me/calendars, normalized. */
 export interface CalendarInfo {
+  accountId?: string
+  provider?: CalendarProvider
+  providerCalendarId?: string
   id: string
   name: string
   /** Resolved accent hex (Graph hexColor, or a mapped named color, or the sage fallback). */
@@ -81,8 +92,17 @@ export interface CalendarAccount {
   name?: string
 }
 
+export type CalendarProvider = 'microsoft' | 'google'
+
+/** No credentials or provider token claims cross IPC. */
+export interface CalendarConnection extends CalendarAccount {
+  id: string
+  provider: CalendarProvider
+}
+
 /** The one snapshot the renderer works from. */
 export interface CalendarState {
+  connections?: CalendarConnection[]
   /** A registration is available (built-in, or saved Client/Tenant IDs). */
   configured: boolean
   /** True when the app ships with a built-in registration — Settings shows one-click sign-in. */
@@ -119,6 +139,7 @@ export interface CalendarConfigUpdate {
 
 /** Payload of CALENDAR_START_MEETING_CHANNEL. */
 export interface CalendarStartMeetingEvent {
+  legacyEventId?: string
   /**
    * 'prompt' — show the in-app banner (watcher fired; the user hasn't acted).
    * 'start'   — create the meeting and start recording now (the user clicked

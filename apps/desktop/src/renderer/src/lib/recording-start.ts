@@ -10,11 +10,18 @@ export async function prepareRecordingMeeting(
 ): Promise<string | null> {
   try {
     const event = request.event
-    const existing = event.eventId
-      ? (await meetings.list()).find((m) => m.calendarEventId === event.eventId && !m.trashedAt)
-      : undefined
+    const records = event.eventId ? (await meetings.list()).filter((m) => !m.trashedAt) : []
+    const legacy = event.legacyEventId
+      ? records.filter((m) => m.calendarEventId === event.legacyEventId)
+      : []
+    const existing =
+      records.find((m) => m.calendarEventId === event.eventId) ??
+      (legacy.length === 1 ? legacy[0] : undefined)
     const meetingId = existing?.id ?? id()
     if (!(await recording.attach(request.id, meetingId))) return null
+    if (existing && existing.calendarEventId !== event.eventId) {
+      await meetings.upsert({ ...existing, calendarEventId: event.eventId })
+    }
     if (!existing) {
       await meetings.upsert({
         id: meetingId,
