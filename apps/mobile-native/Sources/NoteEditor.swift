@@ -14,6 +14,7 @@ struct NoteEditor: View {
     @State private var confirmAudioRemoval = false
     @State private var inkSession = InkEditingSession()
     @State private var showDetails = false
+    @State private var showAsk = false
     @State private var transcription = SavedTranscription()
     @State private var editingPassage: TranscriptPassage?
     @State private var correctionText = ""
@@ -92,6 +93,7 @@ struct NoteEditor: View {
                 Button("Drawing") { pane = 1; editingText = nil }
                 Button("Transcript") { pane = 2; editingText = nil }
                 Button("Summary") { pane = 3; editingText = nil }
+                Button("Ask this meeting") { editingText = nil; showAsk = true }.accessibilityIdentifier("askMeeting")
             }
             if editingText != nil { Button("Done typing") { editingText = nil }.accessibilityIdentifier("doneTyping") }
             Menu("Note storage", systemImage: "ellipsis.circle") {
@@ -106,6 +108,7 @@ struct NoteEditor: View {
                 }
             }.disabled(transcription.busy || recording.busy || recording.noteID != nil || library.storageBusy || note.schemaVersion != 2)
         }
+        .sheet(isPresented: $showAsk) { AskView(library: library, recording: recording, noteID: id) }
         .alert("Remove this device's audio?", isPresented: $confirmAudioRemoval) {
             Button("Remove audio", role: .destructive) {
                 player.stop()
