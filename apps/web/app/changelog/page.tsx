@@ -9,7 +9,7 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
-    version: "0.4.30",
+    version: "0.4.31",
     date: "September 14, 2026",
     highlights: [
       "Connect multiple Microsoft 365 accounts and see their selected calendars together on Mac",
