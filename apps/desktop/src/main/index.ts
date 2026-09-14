@@ -161,6 +161,11 @@ const recording = new RecordingStartCoordinator(
 )
 
 function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
+  if (event?.eventId) {
+    const resolved = calendarService?.resolveStart(event)
+    if (!resolved) return false
+    event = resolved
+  }
   const accepted = recording.request(
     event ?? {
       action: 'start',

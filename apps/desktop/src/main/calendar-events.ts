@@ -94,7 +94,8 @@ export function resolveVisibleCalendars(
   if (visibleCalendarIds === null) return defaults
   const wanted = new Set(visibleCalendarIds)
   const visible = calendars.filter((c) => wanted.has(c.id))
-  return visible.length > 0 ? visible : defaults
+  // Account-scoped selections never enable unrelated calendars after a provider failure.
+  return visible.length > 0 || calendars.some((c) => c.accountId) ? visible : defaults
 }
 
 /** The event the macOS menu bar shows: the soonest timed event still running

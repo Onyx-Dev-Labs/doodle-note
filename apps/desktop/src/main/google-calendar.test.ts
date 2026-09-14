@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { test, type TestContext } from 'node:test'
 import { createRequire } from 'node:module'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { CalendarAccountStore } from './calendar-account-store'
 
 const require = createRequire(import.meta.url)
 const loader = require('node:module') as { _load: (id: string, ...args: unknown[]) => unknown }
@@ -15,6 +16,7 @@ loader._load = (id, ...args) =>
     ? {
         shell: { openExternal: (url: string) => browser(url) },
         safeStorage: {
+          isEncryptionAvailable: () => true,
           encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
           decryptString: (value: Buffer) => value.toString().replace(/^encrypted:/, '')
         }
@@ -50,7 +52,7 @@ function setup(
 }
 
 test('initial exchange includes desktop credential, PKCE and matching redirect; restart refresh uses same credential', async (t) => {
-  const { client, cache, dir } = setup(t)
+  const { client, dir } = setup(t)
   const networkFetch = globalThis.fetch
   const grants: string[] = []
   let auth: URL
@@ -63,6 +65,8 @@ test('initial exchange includes desktop credential, PKCE and matching redirect; 
   }
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
+    if (url === 'https://openidconnect.googleapis.com/v1/userinfo')
+      return response({ sub: 'fixture-subject', email: 'qa@example.test' })
     if (url === 'https://oauth2.googleapis.com/token') {
       const params = new URLSearchParams(init?.body as URLSearchParams)
       assert.equal(params.get('client_secret'), secret)
@@ -89,7 +93,7 @@ test('initial exchange includes desktop credential, PKCE and matching redirect; 
     return response({ items: [{ id: 'primary', summary: 'Test calendar', primary: true }] })
   })
   await client.connect()
-  assert.match(readFileSync(cache, 'utf8'), /^encrypted:/)
+  assert.match(readFileSync(join(dir, 'calendar-accounts-v2'), 'utf8'), /^encrypted:/)
   await client.fetchCalendars()
   await new GoogleCalendarClient(dir, secret).fetchCalendars()
   assert.deepEqual(grants, ['authorization_code', 'refresh_token'])
@@ -108,6 +112,8 @@ test('Google missing-client-secret response gives application recovery without l
   const { client, cache } = setup(t, true)
   let failed = true
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (String(input) === 'https://openidconnect.googleapis.com/v1/userinfo')
+      return response({ sub: 'fixture-subject', email: 'qa@example.test' })
     if (String(input) === 'https://oauth2.googleapis.com/token') {
       if (failed)
         return response(
@@ -138,6 +144,8 @@ test('expired access token refreshes, invalid grant requests reconnect, disconne
   let refreshes = 0
   let revoked = false
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (String(input) === 'https://openidconnect.googleapis.com/v1/userinfo')
+      return response({ sub: 'fixture-subject', email: 'qa@example.test' })
     if (String(input) === 'https://oauth2.googleapis.com/token') {
       refreshes++
       return revoked
@@ -159,4 +167,79 @@ test('expired access token refreshes, invalid grant requests reconnect, disconne
   assert.equal(client.signedIn, false)
   assert.throws(() => readFileSync(cache))
   assert.equal(readFileSync(join(dir, 'notes-fixture'), 'utf8'), 'preserve')
+})
+
+test('wrong-account reconnect leaves the original credential and selections intact', async (t) => {
+  const { client, dir } = setup(t, true)
+  const networkFetch = globalThis.fetch
+  let subject = 'original-subject'
+  browser = async (url) => {
+    const auth = new URL(url)
+    const callback = new URL(auth.searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', auth.searchParams.get('state')!)
+    await networkFetch(callback)
+  }
+  t.mock.method(globalThis, 'fetch', async (input) =>
+    String(input).endsWith('/userinfo')
+      ? response({ sub: subject, email: 'same@example.test' })
+      : response({
+          access_token: 'fixture-access',
+          refresh_token: 'fixture-refresh',
+          expires_in: 3600
+        })
+  )
+  await client.initialize()
+  const before = readFileSync(join(dir, 'calendar-accounts-v2'))
+  subject = 'different-subject'
+  await assert.rejects(client.connect(), /Choose the connected Google account/)
+  assert.equal(client.identity?.subject, 'original-subject')
+  assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
+})
+
+test('disconnect during identity resolution discards the late result across restart', async (t) => {
+  const { client, dir } = setup(t, true)
+  let finish: (response: Response) => void = () => {}
+  let entered: () => void = () => {}
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    if (String(input).endsWith('/userinfo')) {
+      entered()
+      return new Promise<Response>((resolve) => {
+        finish = resolve
+      })
+    }
+    return response({ access_token: 'fixture-access', expires_in: 3600 })
+  })
+  const pending = client.initialize()
+  await started
+  client.disconnect()
+  finish(response({ sub: 'late-subject', email: 'same@example.test' }))
+  await pending
+  assert.equal(client.signedIn, false)
+  assert.equal(new GoogleCalendarClient(dir, secret).signedIn, false)
+})
+
+test('storage failure during verified Google migration reports recovery and preserves the legacy source', async (t) => {
+  const { dir, cache } = setup(t, true)
+  const before = readFileSync(cache)
+  const store = new CalendarAccountStore(dir, {
+    isEncryptionAvailable: () => true,
+    encryptString: () => {
+      throw new Error('private-provider-payload')
+    },
+    decryptString: (b) => b.toString().replace(/^encrypted:/, '')
+  })
+  const client = new GoogleCalendarClient(dir, secret, store)
+  t.mock.method(globalThis, 'fetch', async (input) =>
+    String(input).endsWith('/userinfo')
+      ? response({ sub: 'verified-subject', email: 'same@example.test' })
+      : response({ access_token: 'fixture-access', expires_in: 3600 })
+  )
+  await assert.rejects(client.initialize(), /Calendar storage.*keychain and disk/)
+  assert.equal(client.accountId, undefined)
+  assert.deepEqual(readFileSync(cache), before)
+  assert.equal(existsSync(store.path), false)
 })
