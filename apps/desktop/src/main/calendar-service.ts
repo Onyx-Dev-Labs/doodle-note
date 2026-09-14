@@ -566,7 +566,8 @@ export class CalendarService {
       next.visibleCalendarIds = ids
     }
     try {
-      this.accounts.setSelection(next.visibleCalendarIds, this.activeAccountIds())
+      if (visibilityChanged)
+        this.accounts.setSelection(next.visibleCalendarIds, this.activeAccountIds())
     } catch (err) {
       this.lastError = friendlyError(err)
       this.broadcastState()

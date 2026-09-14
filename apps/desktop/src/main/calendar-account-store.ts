@@ -241,7 +241,8 @@ export class CalendarAccountStore {
       mkdirSync(dirname(this.path), { recursive: true })
       const serialized = JSON.stringify(next)
       writeFileSync(temp, this.encryption.encryptString(serialized), { mode: 0o600, flag: 'wx' })
-      const fd = openSync(temp, 'r')
+      // Windows FlushFileBuffers requires a handle opened for writing.
+      const fd = openSync(temp, 'r+')
       try {
         fsyncSync(fd)
       } finally {

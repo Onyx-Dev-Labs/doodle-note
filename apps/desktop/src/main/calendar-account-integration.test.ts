@@ -149,7 +149,7 @@ interface ServiceAccess {
   connect(): Promise<CalendarState>
   disconnect(): Promise<CalendarState>
   refreshEvents(): Promise<void>
-  setPrefs(prefs: { visibleCalendarIds: string[] }): CalendarState
+  setPrefs(prefs: { visibleCalendarIds?: string[]; showMenuBar?: boolean }): CalendarState
 }
 const access = (s: Service): ServiceAccess => s as unknown as ServiceAccess
 async function idle(s: Service): Promise<void> {
@@ -346,15 +346,14 @@ test('selection writes survive restart and a failed sync save cannot claim a new
   await idle(service)
   const before = readFileSync(join(dir, 'calendar-accounts-v2'))
   const sync = access(service).state().lastSyncIso
-  const encrypt = codec.encryptString
-  t.mock.method(codec, 'encryptString', () => {
+  const encrypt = t.mock.method(codec, 'encryptString', () => {
     throw new Error('fixture disk failure')
   })
   await access(service).refreshEvents()
   assert.match(access(service).state().error!, /Calendar storage/)
   assert.equal(access(service).state().lastSyncIso, sync)
   assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
-  t.mock.method(codec, 'encryptString', encrypt)
+  encrypt.mock.restore()
   service.dispose()
   const restarted = new CalendarService(
     dir,
@@ -369,4 +368,15 @@ test('selection writes survive restart and a failed sync save cannot claim a new
       .state()
       .events.every((e) => e.provider === 'google')
   )
+})
+
+test('global menu preferences do not rewrite account selections or require unlocked credentials', async (t) => {
+  const { dir, service } = setup(t)
+  await idle(service)
+  const before = readFileSync(join(dir, 'calendar-accounts-v2'))
+  t.mock.method(codec, 'isEncryptionAvailable', () => false)
+  const state = access(service).setPrefs({ showMenuBar: false })
+  assert.equal(state.prefs.showMenuBar, false)
+  assert.equal(state.error, undefined)
+  assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
 })
