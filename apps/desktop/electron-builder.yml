@@ -38,6 +38,9 @@ mac:
   # pnpm supportedArchitectures installs every platform's native binaries so
   # cross-builds work; each platform ships only its own.
   files:
+    # Platform files replace the shared allowlist. Keep it explicit so local
+    # installers, source, and QA artifacts cannot be bundled into the app.
+    - out/**
     - "!**/node_modules/@node-llama-cpp/win-*/**"
     - "!**/node_modules/@node-llama-cpp/linux-*/**"
     - "!**/node_modules/@node-llama-cpp/mac-x64/**"
