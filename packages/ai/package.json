@@ -14,10 +14,10 @@
     "long-meeting-smoke": "tsx scripts/long-meeting-smoke.ts"
   },
   "dependencies": {
-    "ai": "^7.0.15",
-    "@ai-sdk/anthropic": "^4.0.8",
-    "@ai-sdk/openai": "^4.0.7",
-    "node-llama-cpp": "^3.20.0"
+    "ai": "^7.0.106",
+    "@ai-sdk/anthropic": "^4.0.57",
+    "@ai-sdk/openai": "^4.0.70",
+    "node-llama-cpp": "^3.21.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.1",
