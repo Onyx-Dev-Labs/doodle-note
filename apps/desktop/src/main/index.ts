@@ -537,7 +537,6 @@ app.whenReady().then(async () => {
     const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
     captureBase = captureMeeting?.segments ?? []
     captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
-    if (captureMeetingId) meetingsService.ownCapture(captureMeetingId)
     session.bindMeeting(captureMeetingId)
     engine.start(request.command, request.filePath, opts)
   })
