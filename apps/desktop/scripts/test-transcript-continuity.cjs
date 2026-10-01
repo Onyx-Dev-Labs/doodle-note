@@ -51,7 +51,7 @@ async function main() {
       const listeners = new Set()
       const noEvent = () => () => {}
       window.qa = {starts:0,stops:0,snapshot:null,saves:[],parts:[],send: event => listeners.forEach(cb => cb(event))}
-      const meeting = {id:'qa',title:'Transcript arrow QA',rawNotesMarkdown:'Synthetic test content.',segments:[],participants:[],echoSuppressed:0}
+      const meeting = window.qa.meeting = {id:'qa',title:'Transcript arrow QA',rawNotesMarkdown:'Synthetic test content.',segments:[],participants:[],echoSuppressed:0}
       window.meetings = {get:async()=>meeting,upsert:async patch=>{Object.assign(meeting,patch);window.qa.saves.push(patch);return meeting}}
       window.engine = {
         snapshot:async()=>window.qa.snapshot,onEvent:cb=>{listeners.add(cb);return()=>listeners.delete(cb)},listInputDevices:async()=>[],
@@ -62,8 +62,10 @@ async function main() {
       window.audio = {list:async()=>window.qa.parts,read:async()=>null}
       const progressListeners=new Set()
       window.importer = {onProgress:cb=>{progressListeners.add(cb);return()=>progressListeners.delete(cb)},retranscribe:async()=>{meeting.segments=[{id:'batch-replacement',channel:'mic',speaker:'You',text:'Only the rebuilt transcript remains.',startMs:0,endMs:1000,confidence:1}];return {id:'qa'}}}
+      window.qa.refreshImported=()=>progressListeners.forEach(cb=>cb({meetingId:'qa',stage:'completed'}))
       window.qa.completeBackground=(meetingId='qa',stage='completed')=>{meeting.segments=[{id:'retry-result',channel:'mic',speaker:'You',text:'Background retry replaced the transcript.',startMs:0,endMs:1000,confidence:1}];progressListeners.forEach(cb=>cb({meetingId,stage}))}
 
+      Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.qa.clipboard=text}}})
       window.folders = {list:async()=>[]}
       window.detect = {getState:async()=>({platform:'darwin'}),onMeetingEnded:noEvent}
     })
@@ -110,9 +112,50 @@ async function main() {
     assert.equal(await page.getByText('Only the rebuilt transcript remains.',{exact:true}).count(),0)
     await page.evaluate(()=>window.qaFlushLibrary())
     assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>'segments' in s || 'echoSuppressed' in s)),false)
+    // Legacy recordings reused seg_N in each session/part. Replay both native-QA
+    // counts with synthetic text; never use the real captured transcript here.
+    for (const [firstCount, secondCount] of [[5,8],[3,4]]) {
+      await page.evaluate(({firstCount,secondCount})=>{
+        const part=(count,epoch,label)=>Array.from({length:count},(_,i)=>({
+          id:'seg_'+(i+1),channel:'mic',speaker:'You',text:label+' synthetic line '+(i+1),
+          startMs:i*2000,endMs:i*2000+1000,absoluteStartMs:epoch+i*2000,confidence:1
+        }));
+        window.qa.meeting.segments=[...part(firstCount,100000,'First'),...part(secondCount,200000,'Second')];
+        window.qa.snapshot=null;
+        window.qa.parts=[{url:'first-part',startEpochMs:100000,durationMs:30000},{url:'second-part',startEpochMs:200000,durationMs:30000}];
+        window.qa.send({event:'audio'});
+        // Invoke the existing matching-completion refresh without changing data.
+        window.qa.refreshImported();
+      },{firstCount,secondCount});
+      await page.getByText('First synthetic line 1',{exact:true}).waitFor();
+      assert.equal(await page.locator('.tp-row:not(.tp-partial)').count(),firstCount+secondCount);
+      // A snapshot of the latest part must not duplicate it or hide the first.
+      await page.evaluate(()=>{window.qa.snapshot={meetingId:'qa',phase:'ended',segments:window.qa.meeting.segments.filter(s=>s.absoluteStartMs>=200000),partials:{}}});
+      await page.getByRole('button',{name:'Minimize transcript'}).click();
+      await page.getByRole('button',{name:'Show transcript',exact:true}).click();
+      await settle();
+      assert.equal(await page.locator('.tp-row:not(.tp-partial)').count(),firstCount+secondCount);
+      await page.getByTitle('Copy transcript',{exact:true}).click();
+      const copied=await page.evaluate(()=>window.qa.clipboard);
+      assert.equal(copied.split('\n').length,firstCount+secondCount);
+      assert.match(copied,/First synthetic line 1/);
+      assert.match(copied,new RegExp('Second synthetic line '+secondCount));
+      for (const [index,label] of [['0','First'],['1','Second']]) {
+        await page.getByRole('combobox',{name:'Recording part'}).selectOption(index);
+        await page.evaluate(()=>{
+          const audio=document.querySelector('.tp-audio audio');
+          Object.defineProperty(audio,'paused',{configurable:true,get:()=>false});
+          audio.currentTime=0.5;
+          audio.dispatchEvent(new Event('timeupdate',{bubbles:true}));
+        });
+        await settle();
+        assert.equal(await page.locator('.tp-playing').count(),1);
+        assert.match(await page.locator('.tp-playing').innerText(),new RegExp(label+' synthetic line 1'));
+      }
+    }
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
-    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush and Resume')
+    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy and part highlighting')
   } finally { await browser.close(); server.close() }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
