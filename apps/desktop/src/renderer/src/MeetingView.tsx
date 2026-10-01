@@ -534,7 +534,9 @@ export default function MeetingView({
       if (snapshot.captureId !== recoveredCaptureRef.current) {
         recoveredCaptureRef.current = snapshot.captureId
         generationRef.current.startCapture(snapshot.captureId)
-        if (snapshot.phase !== 'starting') generationRef.current.markReady()
+        // Restoring an already finished capture must not generate notes a second time.
+        if (snapshot.phase === 'recording' || snapshot.phase === 'finishing')
+          generationRef.current.markReady()
       }
       if (snapshot.phase === 'ended')
         generationRef.current.finalize(snapshot.error, snapshot.captureId)
