@@ -4232,3 +4232,106 @@ button.fp-row:hover {
   outline: 2px solid #789668;
   outline-offset: 2px;
 }
+
+/* Docked transcript: both panes remain in flow above the recorder controls. */
+.meeting-split {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+.meeting-split > .editor-scroll {
+  min-width: 0;
+  width: 100%;
+}
+.meeting-split.is-open {
+  display: grid;
+  grid-template-rows: minmax(0, var(--notes-share)) 12px minmax(0, 1fr);
+  padding: 0 16px;
+  margin-bottom: 94px;
+}
+.meeting-split.is-open > .editor-scroll {
+  grid-row: 1;
+  padding-bottom: 16px;
+}
+.meeting-split.is-open > .transcript-panel {
+  grid-row: 3;
+  position: relative;
+  inset: auto;
+  transform: none;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  box-shadow: none;
+  z-index: auto;
+}
+.meeting-split.is-open .editor-col {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.meeting-split.is-wide.is-open {
+  grid-template-columns: minmax(0, var(--notes-share)) 12px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.meeting-split.is-wide.is-open > .editor-scroll {
+  grid-column: 1;
+  grid-row: 1;
+}
+.meeting-split.is-wide.is-open > .transcript-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+.transcript-divider {
+  grid-row: 2;
+  cursor: row-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  outline-offset: -2px;
+}
+.transcript-divider span {
+  width: 32px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--border);
+}
+.transcript-divider:hover,
+.transcript-divider:focus-visible {
+  background: color-mix(in srgb, var(--accent-deep) 14%, transparent);
+}
+.transcript-divider:focus-visible {
+  outline: 2px solid var(--accent-deep);
+}
+.is-wide > .transcript-divider {
+  grid-column: 2;
+  grid-row: 1;
+  cursor: col-resize;
+}
+.is-wide > .transcript-divider span {
+  width: 3px;
+  height: 32px;
+}
+.meeting-split .tp-head,
+.meeting-split .tp-audio {
+  flex-wrap: wrap;
+}
+.meeting-split .tp-actions {
+  flex-wrap: wrap;
+}
+.meeting-split .tp-audio audio {
+  min-width: 150px;
+}
+.meeting-split .tp-audio-part {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.meeting-split .tp-audio-part select {
+  max-width: 130px;
+  color: var(--ink);
+  background: var(--card);
+}
