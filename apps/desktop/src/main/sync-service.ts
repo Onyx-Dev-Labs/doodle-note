@@ -24,7 +24,13 @@ import {
 import type { FolderRecord } from '../shared/folders-api'
 import type { FoldersService } from './folders-service'
 import type { MeetingsService } from './meetings-service'
-import { contentHash, mediaRefs, rewriteMedia, syncableSegments } from './sync-content-hash'
+import {
+  contentHash,
+  mediaRefs,
+  rewriteMedia,
+  syncableSegments,
+  supportsCloudSync
+} from './sync-content-hash'
 import { DeviceLinkAttempt } from './device-link-attempt'
 import { EMPTY_SYNC_CONFIG, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
 import {
@@ -256,10 +262,14 @@ export class SyncService {
    * then mint or fetch its public share link.
    */
   async share(meetingId: string): Promise<ShareResult> {
-    const token = this.token()
-    if (!token) return { error: 'Connect cloud sync in Settings first' }
     const record = this.meetings.readAll().find((r) => r.id === meetingId && !r.trashedAt)
     if (!record) return { error: 'Meeting not found' }
+    if (!supportsCloudSync(record))
+      return {
+        error: 'Imported text transcripts stay on this computer. Export this note to share it.'
+      }
+    const token = this.token()
+    if (!token) return { error: 'Connect cloud sync in Settings first' }
 
     try {
       await this.uploadReferencedMedia(record, token)
@@ -302,7 +312,7 @@ export class SyncService {
   private pendingMeetings(): MeetingRecord[] {
     return this.meetings
       .readAll()
-      .filter((record) => !record.trashedAt)
+      .filter((record) => !record.trashedAt && supportsCloudSync(record))
       .filter(
         (record) => this.config.pushed[record.id] !== contentHash(record, this.config.mediaUrls)
       )

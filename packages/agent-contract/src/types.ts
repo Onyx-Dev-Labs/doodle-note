@@ -50,8 +50,9 @@ export interface AgentTranscriptSegment {
   /** Display label: a real name when known, else "You" / "Them". */
   speaker: string;
   text: string;
-  start_ms: number;
-  end_ms: number;
+  /** Absent for imported text without audio timing. */
+  start_ms?: number;
+  end_ms?: number;
 }
 
 export interface AgentTranscript {

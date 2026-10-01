@@ -1,3 +1,4 @@
+import type { TextImporterApi } from '../shared/text-import-api'
 import type { StorageApi } from '../shared/storage-api'
 import type { RecordingApi } from '../shared/recording-api'
 import type { AudioApi } from '../shared/audio-api'
@@ -33,6 +34,7 @@ declare global {
     integrations: IntegrationsApi
     audio: AudioApi
     importer: ImporterApi
+    textImporter: TextImporterApi
     wizard: WizardApi
     exporter: ExporterApi
   }

@@ -1,4 +1,10 @@
 import {
+  TEXT_IMPORT_PREVIEW,
+  TEXT_IMPORT_COMMIT,
+  TEXT_IMPORT_CANCEL,
+  type TextImporterApi
+} from '../shared/text-import-api'
+import {
   STORAGE_STATUS_CHANNEL,
   STORAGE_RETRY_CHANNEL,
   STORAGE_PROGRESS_CHANNEL,
@@ -593,6 +599,12 @@ const integrationsApi: IntegrationsApi = {
   }
 }
 
+const textImporterApi: TextImporterApi = {
+  preview: () => ipcRenderer.invoke(TEXT_IMPORT_PREVIEW),
+  commit: (token) => ipcRenderer.invoke(TEXT_IMPORT_COMMIT, token),
+  cancel: (token) => ipcRenderer.invoke(TEXT_IMPORT_CANCEL, token)
+}
+
 const importerApi: ImporterApi = {
   getStatus(): Promise<ImportProgress | null> {
     return ipcRenderer.invoke(IMPORT_STATUS_CHANNEL) as Promise<ImportProgress | null>
@@ -689,6 +701,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
     contextBridge.exposeInMainWorld('audio', audioApi)
     contextBridge.exposeInMainWorld('importer', importerApi)
+    contextBridge.exposeInMainWorld('textImporter', textImporterApi)
     contextBridge.exposeInMainWorld('wizard', wizardApi)
     contextBridge.exposeInMainWorld('exporter', exporterApi)
   } catch (error) {
@@ -723,6 +736,7 @@ if (process.contextIsolated) {
   window.audio = audioApi
   // @ts-ignore (defined in index.d.ts)
   window.importer = importerApi
+  Object.assign(window, { textImporter: textImporterApi })
   // @ts-ignore (defined in index.d.ts)
   window.wizard = wizardApi
   // @ts-ignore (defined in index.d.ts)

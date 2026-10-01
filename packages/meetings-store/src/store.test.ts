@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -207,4 +207,15 @@ test("unavailable library guard rejects reads and writes instead of treating it 
   } finally {
     cleanup();
   }
+});
+
+
+test("failed atomic replacement leaves no partial meeting or temporary file", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    mkdirSync(join(dir, "blocked.json"));
+    assert.throws(() => store.upsert({ id: "blocked", title: "Cannot commit" }));
+    assert.equal(store.get("blocked"), null);
+    assert.deepEqual(readdirSync(dir), ["blocked.json"]);
+  } finally { cleanup(); }
 });

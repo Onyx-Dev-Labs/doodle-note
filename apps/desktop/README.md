@@ -250,3 +250,19 @@ without restarting; play a retained recording, inspect notes/transcripts and
 attachments, then record/import new content. Check its files use the new folder.
 Reject an occupied/unwritable destination and retry after restoring access.
 Disconnect/reconnect a test external drive and verify the same library resumes.
+
+## Importing a text transcript
+
+Choose **New → Import transcript (.txt)** on Mac or Windows. Preview the content,
+then confirm to create a new local meeting document. Cancel creates nothing.
+Supported files are UTF-8 plain text (optional BOM), up to 2 MB and 10,000 speaker
+sections. CRLF/CR line endings are normalized. Standalone `[Speaker N]` headers
+identify repeat speakers; other labels remain literal text. Unlabeled text uses
+“Speaker” rather than guessing “You” or “Them”.
+
+Text imports contain no audio, timestamps or transcription confidence. Search,
+notes generation, Ask, speaker renaming and Markdown/PDF export remain available.
+Create a new meeting to record audio. These transcripts are explicitly local-only:
+the existing cloud schema requires audio timing, so sync and share links exclude
+them without affecting ordinary recorded meetings. Export to share their content.
+They move with the rest of the library when its folder changes.

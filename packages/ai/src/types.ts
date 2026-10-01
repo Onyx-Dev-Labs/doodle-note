@@ -3,7 +3,7 @@ export interface MergeSegment {
   /** Display label: a real name when known, else 'You' / 'Them'. */
   speaker: string
   text: string
-  startMs: number
+  startMs?: number
 }
 
 /** A named speaker the prompts should attribute by name. */
