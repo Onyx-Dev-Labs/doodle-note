@@ -9,6 +9,18 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.32",
+    date: "October 1, 2026",
+    highlights: [
+      "Mac: choose a library folder in Settings and transfer recordings, notes, transcripts, and attachments without restarting",
+      "Keep complete transcripts when hiding the window, resuming recordings, or reopening older multipart recordings",
+      "Import stereo recordings once and follow transcription progress with Cancel and Retry",
+      "Import TXT transcripts with speaker labels and keep notes beside a resizable transcript pane",
+      "Choose local Whisper for imported recordings and re-transcription; downloaded models work without another download",
+      "New Google Calendar connections remain unavailable pending verification",
+    ],
+  },
+  {
     version: "0.4.31",
     date: "September 14, 2026",
     highlights: [
