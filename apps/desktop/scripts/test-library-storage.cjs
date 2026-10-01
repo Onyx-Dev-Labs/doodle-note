@@ -28,6 +28,7 @@ source = source.replace(
   'const recording = new RecordingStartCoordinator(',
   'const recording = global.testRecording = new RecordingStartCoordinator('
 )
+source = source.replace('const meetingsService = new MeetingsService(', 'const meetingsService = global.testMeetings = new MeetingsService(')
 fs.writeFileSync(path.join(temp, 'source.cjs'), source)
 fs.writeFileSync(
   path.join(temp, 'main.cjs'),
@@ -83,8 +84,8 @@ async function launch() {
     let page = await launch()
     const section = page.getByRole('region', { name: 'Library storage' })
     await expect(section.getByText(profile, { exact: true })).toBeVisible()
-    await page.evaluate(async () => {
-      await window.meetings.upsert({
+    await runtime.evaluate(() => {
+      global.testMeetings.upsert({
         id: 'fixture-meeting',
         title: 'Synthetic storage test',
         rawNotesMarkdown: 'Keep these notes',
@@ -100,8 +101,8 @@ async function launch() {
           }
         ]
       })
-      await window.folders.create('Fixture folder')
     })
+    await page.evaluate(() => window.folders.create('Fixture folder'))
     const audioDir = path.join(profile, 'audio/fixture-meeting/1000')
     fs.mkdirSync(audioDir, { recursive: true })
     fs.writeFileSync(path.join(audioDir, 'audio.wav'), Buffer.alloc(64, 0))
