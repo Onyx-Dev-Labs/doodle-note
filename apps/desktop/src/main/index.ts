@@ -485,6 +485,13 @@ app.whenReady().then(async () => {
       })
       return
     }
+    if (request.opts?.meetingId && importService.isWorkingOn(request.opts.meetingId)) {
+      broadcastEngineEvent({
+        event: 'spawn-error',
+        message: 'Wait for re-transcription to finish or cancel it before resuming this recording.'
+      })
+      return
+    }
     if (!recording.beginEngine(request.opts?.meetingId)) return
     assertLibrary()
     // Our own capture holds the mic — the ad-hoc meeting detector must not
@@ -559,6 +566,9 @@ app.whenReady().then(async () => {
       ? (filePath, onProgress, options) =>
           winBatchTranscriber!.transcribe(filePath, onProgress, options)
       : undefined
+  )
+  importService.setCaptureGuard(
+    (meetingId) => recording.busy && recording.snapshot().meetingId === meetingId
   )
   importService.registerIpc()
 

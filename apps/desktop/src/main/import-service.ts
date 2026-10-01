@@ -42,6 +42,16 @@ export class ImportService {
   private readonly jobs = new ImportJobs((state) => this.broadcast(IMPORT_PROGRESS_CHANNEL, state))
   private retrySource: { jobId: string; filePath?: string; meetingId?: string } | null = null
 
+  private captureActive: (meetingId: string) => boolean = () => false
+
+  setCaptureGuard(guard: (meetingId: string) => boolean): void {
+    this.captureActive = guard
+  }
+
+  isWorkingOn(meetingId: string): boolean {
+    return this.jobs.busy && this.jobs.snapshot()?.meetingId === meetingId
+  }
+
   get isBusy(): boolean {
     return this.picking || this.jobs.busy
   }
@@ -180,8 +190,13 @@ export class ImportService {
     if (!this.platformTranscriber && !existsSync(this.enginePath)) {
       return { error: 'The transcription engine is not available on this platform yet.' }
     }
+    if (this.captureActive(meetingId)) {
+      return {
+        error: 'Stop recording and wait for it to finish before re-transcribing this meeting.'
+      }
+    }
     const record = this.meetings.get(meetingId)
-    if (!record) return { error: 'Meeting not found.' }
+    if (!record || record.trashedAt) return { error: 'Meeting not found.' }
     const parts = this.audio.listPaths(meetingId)
     if (parts.length === 0) {
       return { error: 'This meeting has no saved recording to re-transcribe.' }
@@ -233,6 +248,12 @@ export class ImportService {
           }
           all.sort((a, b) => (a.absoluteStartMs ?? a.startMs) - (b.absoluteStartMs ?? b.startMs))
           return context.commit(() => {
+            const current = this.meetings.get(meetingId)
+            if (!current || current.trashedAt) {
+              throw new Error(
+                'This meeting was deleted or moved to Trash. No transcript was saved.'
+              )
+            }
             this.meetings.upsert({ id: meetingId, segments: all, echoSuppressed })
             return { meetingId, segmentCount: all.length }
           })
