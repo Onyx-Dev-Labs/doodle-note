@@ -59,7 +59,8 @@ export class WinBatchTranscriber {
 
   constructor(
     private readonly ensureEngineReady: (
-      onEvent?: (event: WizardPreflightEvent) => void
+      onEvent?: (event: WizardPreflightEvent) => void,
+      signal?: AbortSignal
     ) => Promise<WizardPreflightResult>
   ) {}
 
@@ -114,11 +115,12 @@ export class WinBatchTranscriber {
       reject(new Error(`Could not read that audio file: ${String(error)}`))
       return
     }
+    checkImportCanceled(options.signal)
     const readiness = await this.ensureEngineReady((event) => {
       if (event.stage === 'download') {
         onProgress?.({ stage: 'downloading_model', progress: event.progress })
       }
-    })
+    }, options.signal)
     checkImportCanceled(options.signal)
     if (!readiness.ok) {
       reject(new Error(readiness.error ?? 'The Windows transcription engine is not ready.'))
