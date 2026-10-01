@@ -1,7 +1,12 @@
 import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { EngineChannel, EngineEvent, TranscriptSegment } from '../shared/engine-events'
+import type {
+  EngineChannel,
+  EngineEvent,
+  EngineSessionSnapshot,
+  TranscriptSegment
+} from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
 import { reconcileRefinedTranscript } from './transcript-refinement'
 
@@ -22,6 +27,25 @@ export class TranscriptSession {
   private saved = false
   private error: string | undefined
   private captureId: string | undefined
+  private meetingId: string | undefined
+  private phase: EngineSessionSnapshot['phase'] = 'starting'
+  private partials: Partial<Record<EngineChannel, string>> = {}
+
+  bindMeeting(meetingId?: string): void {
+    this.meetingId = meetingId
+  }
+
+  snapshot(meetingId: string): EngineSessionSnapshot | null {
+    if (meetingId !== this.meetingId || !this.assembler) return null
+    return {
+      meetingId,
+      captureId: this.captureId,
+      phase: this.phase,
+      segments: [...this.segments],
+      partials: { ...this.partials },
+      error: this.error
+    }
+  }
 
   private get sessionsDir(): string {
     return resolveLibraryPath(this.sessionsDirSource)
@@ -30,7 +54,8 @@ export class TranscriptSession {
   constructor(
     private readonly broadcast: (ev: EngineEvent) => void,
     private readonly sessionsDirSource: LibraryPath,
-    private readonly assertAvailable: () => void = () => {}
+    private readonly assertAvailable: () => void = () => {},
+    private readonly checkpoint: (segments: TranscriptSegment[], ended: boolean) => void = () => {}
   ) {}
 
   handle(ev: EngineEvent): void {
@@ -44,6 +69,18 @@ export class TranscriptSession {
         this.saved = false
         this.error = undefined
         this.captureId = ev.captureId
+        this.phase = 'starting'
+        this.partials = {}
+        return
+      case 'ready':
+        this.phase = 'recording'
+        return
+      case 'partial':
+        if (ev.channel) this.partials[ev.channel] = ev.text
+        return
+      case 'status':
+        if (['finishing', 'saving_audio', 'refining_transcript'].includes(ev.stage ?? ''))
+          this.phase = 'finishing'
         return
       case 'channel_start':
         this.assembler?.setChannelEpoch(ev.channel, ev.epochMs)
@@ -55,6 +92,7 @@ export class TranscriptSession {
         return
       case 'final':
         if (this.assembler && ev.channel) {
+          delete this.partials[ev.channel]
           this.finals[ev.channel] = ev.text
           this.publish(this.assembler.flush(ev.channel))
         }
@@ -64,6 +102,7 @@ export class TranscriptSession {
           this.publish(this.assembler.flush())
           this.segments = reconcileRefinedTranscript(this.segments, ev.transcripts)
           for (const transcript of ev.transcripts) this.finals[transcript.channel] = transcript.text
+          this.persistCheckpoint(false)
           this.broadcast({ event: 'segments-replaced', segments: this.segments })
         }
         return
@@ -87,13 +126,26 @@ export class TranscriptSession {
   private publish(newSegments: TranscriptSegment[]): void {
     if (newSegments.length === 0) return
     this.segments.push(...newSegments)
+    this.persistCheckpoint(false)
     this.broadcast({ event: 'segments', segments: newSegments })
+  }
+
+  private persistCheckpoint(ended: boolean): void {
+    try {
+      this.checkpoint(this.segments, ended)
+    } catch (error) {
+      this.error = `Could not save the meeting transcript: ${String(error)}. Keep the recording and retry.`
+      this.broadcast({ event: 'error', message: this.error })
+    }
   }
 
   private finish(exitError?: string): void {
     if (!this.assembler || this.saved) return
     this.publish(this.assembler.flush())
     this.saved = true
+    this.phase = 'ended'
+    this.partials = {}
+    this.persistCheckpoint(true)
     const error = this.error ?? exitError
     if (this.segments.length === 0) {
       this.broadcast({

@@ -35,6 +35,7 @@ import {
   ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
+  ENGINE_SNAPSHOT_CHANNEL,
   type EngineCaptureControl,
   type EngineCaptureStatus,
   type EngineBatchControl,
@@ -210,6 +211,7 @@ import {
 } from '../shared/calendar-api'
 
 const engineApi: EngineApi = {
+  snapshot: (meetingId) => ipcRenderer.invoke(ENGINE_SNAPSHOT_CHANNEL, meetingId),
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void {
     const request: EngineStartRequest = { command, filePath, opts }
     ipcRenderer.send(ENGINE_START_CHANNEL, request)

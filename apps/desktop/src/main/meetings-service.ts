@@ -18,11 +18,26 @@ import {
  * the exact same data the app writes.
  */
 export class MeetingsService extends MeetingFileStore {
+  // Main owns a captured meeting's transcript, including delayed renderer writes after Stop.
+  // Notes, title and speaker edits remain renderer-owned. Retranscription writes directly.
+  private capturedMeetings = new Set<string>()
+  ownCapture(id: string): void {
+    this.capturedMeetings.add(id)
+  }
+  rendererUpsert(patch: MeetingUpsert): ReturnType<MeetingFileStore['upsert']> {
+    if (patch.id && this.capturedMeetings.has(patch.id)) {
+      const notes = { ...patch }
+      delete notes.segments
+      delete notes.echoSuppressed
+      return this.upsert(notes)
+    }
+    return this.upsert(patch)
+  }
   registerIpc(): void {
     libraryIpc.handle(MEETINGS_LIST_CHANNEL, () => this.list())
     libraryIpc.handle(MEETINGS_GET_CHANNEL, (_event, id: unknown) => this.get(String(id)))
     libraryIpc.handle(MEETINGS_UPSERT_CHANNEL, (_event, patch: unknown) =>
-      this.upsert((patch ?? {}) as MeetingUpsert)
+      this.rendererUpsert((patch ?? {}) as MeetingUpsert)
     )
     libraryIpc.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
     libraryIpc.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>

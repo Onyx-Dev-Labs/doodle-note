@@ -101,3 +101,85 @@ test('a session persistence failure produces an explicit failed completion after
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('main checkpoints and recovers hidden-renderer capture without a subscriber', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'doodlenote-hidden-capture-'))
+  const checkpoints: Array<{ text: string; ended: boolean }> = []
+  try {
+    const session = new TranscriptSession(
+      () => {},
+      dir,
+      () => {},
+      (segments, ended) => {
+        checkpoints.push({ text: segments.map((s) => s.text).join(' '), ended })
+      }
+    )
+    session.bindMeeting('meeting-a')
+    session.handle({
+      event: 'started',
+      command: 'live',
+      binaryPath: 'synthetic',
+      captureId: 'capture-a'
+    })
+    session.handle({ event: 'ready', channels: ['mic'] })
+    session.handle({ event: 'partial', channel: 'mic', text: 'A partial' })
+    assert.equal(session.snapshot('meeting-b'), null)
+    assert.equal(session.snapshot('meeting-a')?.partials.mic, 'A partial')
+    session.handle({
+      event: 'timings',
+      channel: 'mic',
+      tokens: [{ token: ' Synthetic speech.', startSec: 0, endSec: 1, confidence: 1 }]
+    })
+    session.handle({ event: 'final', channel: 'mic', text: 'Synthetic speech.' })
+    assert.ok(checkpoints.some((c) => c.text === 'Synthetic speech.' && !c.ended))
+    session.handle({ event: 'done' })
+    const snapshot = session.snapshot('meeting-a')!
+    assert.equal(snapshot.captureId, 'capture-a')
+    assert.equal(snapshot.phase, 'ended')
+    assert.deepEqual(snapshot.partials, {})
+    assert.equal(snapshot.segments.length, 1)
+    assert.equal(checkpoints.at(-1)?.ended, true)
+    snapshot.segments.length = 0
+    assert.equal(session.snapshot('meeting-a')?.segments.length, 1)
+    session.bindMeeting('meeting-b')
+    session.handle({
+      event: 'started',
+      command: 'live',
+      binaryPath: 'synthetic',
+      captureId: 'capture-b'
+    })
+    assert.equal(session.snapshot('meeting-a'), null)
+    assert.equal(session.snapshot('meeting-b')?.segments.length, 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('checkpoint failure is reported at finalization while the recovery session survives', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'doodlenote-checkpoint-failure-'))
+  const events: EngineEvent[] = []
+  try {
+    const session = new TranscriptSession(
+      (event) => events.push(event),
+      dir,
+      () => {},
+      () => {
+        throw new Error('synthetic disk failure')
+      }
+    )
+    session.handle({ event: 'started', command: 'live', binaryPath: 'synthetic' })
+    session.handle({
+      event: 'timings',
+      channel: 'mic',
+      tokens: [{ token: ' Keep this.', startSec: 0, endSec: 1, confidence: 1 }]
+    })
+    session.handle({ event: 'done' })
+    assert.ok(events.some((event) => event.event === 'session-saved'))
+    assert.match(
+      (events.at(-1) as { error: string }).error,
+      /Could not save the meeting transcript/
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

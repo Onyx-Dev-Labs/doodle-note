@@ -50,6 +50,7 @@ export type EngineBatchMessage =
 export const ENGINE_EVENT_CHANNEL = 'engine:event'
 export const ENGINE_START_CHANNEL = 'engine:start'
 export const ENGINE_STOP_CHANNEL = 'engine:stop'
+export const ENGINE_SNAPSHOT_CHANNEL = 'engine:snapshot'
 /** renderer → main (invoke): list audio input devices (macOS engine). */
 export const ENGINE_LIST_DEVICES_CHANNEL = 'engine:list-devices'
 /** renderer → main: switch the mic channel's input device (mid-session too). */
@@ -261,7 +262,17 @@ export interface EngineSegmentsReplacedEvent {
   segments: TranscriptSegment[]
 }
 
+export interface EngineSessionSnapshot {
+  meetingId: string
+  captureId?: string
+  phase: 'starting' | 'recording' | 'finishing' | 'ended'
+  segments: TranscriptSegment[]
+  partials: Partial<Record<EngineChannel, string>>
+  error?: string
+}
+
 export type EngineLifecycleEvent =
+  | { event: 'session-snapshot'; snapshot: EngineSessionSnapshot }
   | EngineStartedEvent
   | EngineSpawnErrorEvent
   | EngineExitEvent
@@ -277,6 +288,7 @@ export type EngineEvent = EngineSidecarEvent | EngineLifecycleEvent
 /** API surface exposed on `window.engine` by the preload script. */
 export interface EngineApi {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void
+  snapshot(meetingId: string): Promise<EngineSessionSnapshot | null>
   stop(): void
   onEvent(cb: (event: EngineEvent) => void): () => void
   /** Audio input devices for the mic picker; [] where unsupported (Windows). */

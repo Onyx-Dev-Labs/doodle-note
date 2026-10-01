@@ -69,6 +69,8 @@ import {
   ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
+  ENGINE_SNAPSHOT_CHANNEL,
+  type TranscriptSegment,
   type EngineEvent,
   type EngineInputDevice,
   type EngineCaptureStatus,
@@ -226,7 +228,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   })
 
@@ -433,11 +436,41 @@ app.whenReady().then(async () => {
       })
   }, 10_000).unref()
 
+  const meetingsService = new MeetingsService(() => join(libraryRoot(), 'meetings'), assertLibrary)
+  meetingsService.registerIpc()
+  let captureMeetingId: string | undefined
+  let captureBase: TranscriptSegment[] = []
+  let captureBaseEcho = 0
   const session = new TranscriptSession(
     broadcastEngineEvent,
     () => join(libraryRoot(), 'sessions'),
-    assertLibrary
+    assertLibrary,
+    (segments, ended) => {
+      if (!captureMeetingId) return
+      meetingsService.upsert({
+        id: captureMeetingId,
+        segments: [...captureBase, ...segments.filter((segment) => !segment.echo)],
+        echoSuppressed: captureBaseEcho + segments.filter((segment) => segment.echo).length,
+        ...(ended ? { endedAt: new Date().toISOString() } : {})
+      })
+    }
   )
+
+  ipcMain.handle(ENGINE_SNAPSHOT_CHANNEL, (event, meetingId: unknown) => {
+    if (event.sender !== mainWindow?.webContents || typeof meetingId !== 'string') return null
+    const snapshot = session.snapshot(meetingId)
+    // A later authoritative re-transcription supersedes a completed live capture.
+    if (snapshot?.phase === 'ended') {
+      const saved = meetingsService.get(meetingId)?.segments ?? []
+      if (
+        !snapshot.segments
+          .filter((s) => !s.echo)
+          .every((s) => saved.some((current) => current.id === s.id && current.text === s.text))
+      )
+        return null
+    }
+    return snapshot
+  })
 
   // Persistent event log: every engine event, timestamped, so failed sessions
   // can be diagnosed from disk instead of reproduced. Token arrays collapse to
@@ -500,6 +533,12 @@ app.whenReady().then(async () => {
     if (request.command === 'live' && opts.meetingId && opts.persistAudio !== false) {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }
+    captureMeetingId = request.command === 'live' ? opts.meetingId : undefined
+    const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
+    captureBase = captureMeeting?.segments ?? []
+    captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
+    if (captureMeetingId) meetingsService.ownCapture(captureMeetingId)
+    session.bindMeeting(captureMeetingId)
     engine.start(request.command, request.filePath, opts)
   })
 
@@ -526,10 +565,7 @@ app.whenReady().then(async () => {
     }
   })
 
-  // Meetings store first: NotesService reads it to gather cross-meeting
-  // context for the Home-level "ask anything".
-  const meetingsService = new MeetingsService(() => join(libraryRoot(), 'meetings'), assertLibrary)
-  meetingsService.registerIpc()
+  // NotesService reads the main-owned meetings store for cross-meeting context.
 
   notesService = new NotesService(
     app.getPath('userData'),

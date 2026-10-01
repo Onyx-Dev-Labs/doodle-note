@@ -97,6 +97,18 @@ function formatClock(totalSec: number): string {
 function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
   const active = ACTIVE_PHASES.includes(state.phase)
   switch (ev.event) {
+    case 'session-snapshot': {
+      const snapshot = ev.snapshot
+      return {
+        ...state,
+        phase: snapshot.phase,
+        segments: snapshot.segments.filter((s) => !s.echo),
+        partials: snapshot.partials,
+        echoCount: snapshot.segments.filter((s) => s.echo).length,
+        error: snapshot.error ?? state.error,
+        statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
+      }
+    }
     case 'started':
       if (ev.command !== 'live') {
         // A file run from the dev console superseded any live session.
@@ -153,7 +165,13 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       }
     case 'capture-finalized':
       if (!active && state.phase !== 'ended') return state
-      return { ...state, phase: 'ended', statusText: '', partials: {} }
+      return {
+        ...state,
+        phase: 'ended',
+        statusText: '',
+        partials: {},
+        error: ev.error ?? state.error
+      }
     case 'error':
       return { ...state, error: ev.message }
     case 'spawn-error':
@@ -499,12 +517,49 @@ export default function MeetingView({
 
   /* ---- engine events ---- */
 
+  const eventRevisionRef = useRef(0)
+  const recoveredCaptureRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    let cancelled = false
+    const recover = async (): Promise<void> => {
+      if (!window.engine.snapshot) return
+      const revision = eventRevisionRef.current
+      const snapshot = await window.engine.snapshot(meetingId).catch(() => null)
+      if (cancelled || !snapshot) return
+      // A response must never replace events delivered after its request.
+      if (revision !== eventRevisionRef.current) {
+        void recover()
+        return
+      }
+      if (snapshot.captureId !== recoveredCaptureRef.current) {
+        recoveredCaptureRef.current = snapshot.captureId
+        generationRef.current.startCapture(snapshot.captureId)
+        if (snapshot.phase !== 'starting') generationRef.current.markReady()
+      }
+      if (snapshot.phase === 'ended')
+        generationRef.current.finalize(snapshot.error, snapshot.captureId)
+      const event: EngineEvent = { event: 'session-snapshot', snapshot }
+      stateRef.current = sessionReducer(stateRef.current, event)
+      dispatch(event)
+    }
+    void recover()
+    window.addEventListener('focus', recover)
+    document.addEventListener('visibilitychange', recover)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', recover)
+      document.removeEventListener('visibilitychange', recover)
+    }
+  }, [meetingId, transcriptOpen])
+
   useEffect(
     () =>
       window.engine.onEvent((ev) => {
+        eventRevisionRef.current++
         if (ev.event === 'started' && ev.command === 'live') {
           // Fold the previous session's segments into the saved pool before
           // the reducer resets, so nothing is lost across re-records.
+          recoveredCaptureRef.current = ev.captureId
           generationRef.current.startCapture(ev.captureId)
           const prev = stateRef.current
           if (prev.segments.length > 0) {
@@ -746,7 +801,11 @@ export default function MeetingView({
   const allSegments = useMemo(
     () =>
       labelSegments(
-        [...savedSegments, ...state.segments].sort((a, b) => segmentTime(a) - segmentTime(b)),
+        [
+          ...new Map(
+            [...savedSegments, ...state.segments].map((segment) => [segment.id, segment])
+          ).values()
+        ].sort((a, b) => segmentTime(a) - segmentTime(b)),
         roster
       ),
     [savedSegments, state.segments, roster]
@@ -1684,9 +1743,25 @@ export default function MeetingView({
                 }}
               />
               {audioParts.length > 1 && (
-                <span className="tp-audio-part">
-                  Part {Math.min(activePart, audioParts.length - 1) + 1}/{audioParts.length}
-                </span>
+                <label className="tp-audio-part">
+                  Recording part
+                  <select
+                    aria-label="Recording part"
+                    value={Math.min(activePart, audioParts.length - 1)}
+                    onChange={(event) => {
+                      audioRef.current?.pause()
+                      pendingSeekSecRef.current = 0
+                      setPlayingSegId(null)
+                      setActivePart(Number(event.target.value))
+                    }}
+                  >
+                    {audioParts.map((part, index) => (
+                      <option key={part.url} value={index}>
+                        Part {index + 1} of {audioParts.length}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
             </div>
           )}

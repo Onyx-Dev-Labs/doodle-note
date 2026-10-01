@@ -135,6 +135,7 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
         return { ...base, livePartials: { ...base.livePartials, [ev.channel]: ev.text } }
       }
       return { ...base, partial: ev.text }
+    case 'session-snapshot':
     case 'capture-finalized':
       return base
     case 'timings':
