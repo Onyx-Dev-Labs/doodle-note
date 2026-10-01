@@ -1,3 +1,7 @@
+import {
+  normalizeBatchSettings,
+  type BatchTranscriptionSettings
+} from '../shared/batch-transcription'
 import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
 import { fetchCloudModels } from './cloud-models'
@@ -81,6 +85,7 @@ interface StoredCloudSettings {
 }
 
 interface StoredSettings {
+  batchTranscription?: BatchTranscriptionSettings
   autoGenerateNotesAfterStop?: boolean
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
@@ -517,10 +522,15 @@ export class NotesService {
 
   /* ---- settings ---- */
 
+  batchTranscriptionSettings(): BatchTranscriptionSettings {
+    return normalizeBatchSettings(this.settings.batchTranscription)
+  }
+
   private settingsView(): NotesSettingsView {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
+      batchTranscription: this.batchTranscriptionSettings(),
       autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(
         this.settings.autoGenerateNotesAfterStop
       ),
@@ -543,6 +553,8 @@ export class NotesService {
   private applySettings(update: NotesSettingsUpdate): NotesSettingsView {
     let error: string | undefined
     const previousSettings = { ...this.settings }
+    if (update.batchTranscription)
+      this.settings.batchTranscription = normalizeBatchSettings(update.batchTranscription)
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
@@ -614,6 +626,14 @@ export class NotesService {
     try {
       const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as Partial<StoredSettings>
       const settings: StoredSettings = {
+        batchTranscription: normalizeBatchSettings(
+          raw.batchTranscription ?? {
+            parakeetModel:
+              (raw as { transcriptionLanguage?: string }).transcriptionLanguage === 'multilingual'
+                ? 'v3'
+                : 'v2'
+          }
+        ),
         autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(raw.autoGenerateNotesAfterStop),
         engineChoice: raw.engineChoice === 'cloud' ? 'cloud' : 'local'
       }

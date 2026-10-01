@@ -1,4 +1,6 @@
 import { beginRecordableMeeting } from './capture-eligibility'
+import { transcribeWithWhisper } from './whisper-transcriber'
+import { transcribeFileToSegments } from './import-logic'
 import { libraryActivity } from './library-activity'
 import {
   app,
@@ -604,7 +606,25 @@ app.whenReady().then(async () => {
     winBatchTranscriber
       ? (filePath, onProgress, options) =>
           winBatchTranscriber!.transcribe(filePath, onProgress, options)
-      : undefined
+      : (filePath, onProgress, options) =>
+          options?.settings?.backend === 'whisper'
+            ? transcribeWithWhisper(
+                resolveEngineBinary(),
+                app.isPackaged
+                  ? join(process.resourcesPath, 'engine', 'whisper-cli')
+                  : join(__dirname, '../../../../engine/.build/whisper/whisper-cli'),
+                join(app.getPath('userData'), 'models', 'whisper'),
+                filePath,
+                onProgress,
+                options
+              )
+            : transcribeFileToSegments(resolveEngineBinary(), filePath, onProgress, options),
+    () =>
+      notesService?.batchTranscriptionSettings() ?? {
+        backend: 'parakeet',
+        parakeetModel: 'v2',
+        language: 'auto'
+      }
   )
   importService.registerIpc()
   new TextImportService(meetingsService).registerIpc()

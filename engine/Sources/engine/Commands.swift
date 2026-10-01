@@ -158,7 +158,7 @@ enum Commands {
     /// AVAudioFile reads the existing audio imports directly. An MP4 video is
     /// first normalized to a temporary audio-only M4A so video tracks never
     /// enter the ASR path and the same channel splitter can process both.
-    private static func prepareAudioFile(_ sourceURL: URL) async throws -> PreparedAudioFile {
+    static func prepareAudioFile(_ sourceURL: URL) async throws -> PreparedAudioFile {
         do {
             let file = try AVAudioFile(forReading: sourceURL)
             guard file.length > 0 else {
@@ -282,7 +282,7 @@ enum Commands {
     }
 }
 
-private struct PreparedAudioFile {
+struct PreparedAudioFile {
     let url: URL
     let temporaryDirectory: URL?
 
