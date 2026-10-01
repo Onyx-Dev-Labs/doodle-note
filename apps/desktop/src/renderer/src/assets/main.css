@@ -2204,6 +2204,12 @@ button.fp-row:hover {
   z-index: 30;
 }
 
+/* Keep Home feedback below its draggable title bar so dismissal receives clicks. */
+.home > .toast {
+  top: 60px;
+  -webkit-app-region: no-drag;
+}
+
 .toast button {
   color: var(--muted);
   font-size: 12px;
