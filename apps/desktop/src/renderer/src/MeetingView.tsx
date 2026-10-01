@@ -1082,6 +1082,16 @@ export default function MeetingView({
       }
       const record = await window.meetings.get(meetingId)
       if (record) {
+        // The successful batch result replaces both persisted and live-session pools.
+        // Otherwise the last capture's old IDs/wording remain beside the new transcript.
+        generationRef.current.invalidate()
+        eventRevisionRef.current++
+        const reset: EngineEvent = {
+          event: 'session-snapshot',
+          snapshot: { meetingId, phase: 'ended', segments: [], partials: {} }
+        }
+        stateRef.current = sessionReducer(stateRef.current, reset)
+        dispatch(reset)
         setSavedSegments(record.segments.filter((s) => !s.echo))
         if (record.segments.some((segment) => segment.source === 'text')) setTranscriptOpen(true)
         setSavedEcho(record.echoSuppressed)
