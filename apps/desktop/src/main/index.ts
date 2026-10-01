@@ -596,7 +596,9 @@ app.whenReady().then(async () => {
   notesService.registerIpc()
 
   if (engine instanceof WinEngineHost) {
-    winBatchTranscriber = new WinBatchTranscriber((onEvent) => engine.preflight(onEvent))
+    winBatchTranscriber = new WinBatchTranscriber((onEvent, signal) =>
+      engine.preflight(onEvent, signal)
+    )
     winBatchTranscriber.registerIpc()
     engine.setFinalRefiner((filePath, onProgress) =>
       winBatchTranscriber!.transcribe(filePath, onProgress)

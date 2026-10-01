@@ -15,6 +15,7 @@ import { WinSessionRecorder } from './win-audio-recorder'
 import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import type { BatchProgress, BatchTranscription } from './import-logic'
+import { ImportCanceledError } from './import-jobs'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
@@ -368,22 +369,39 @@ export class WinEngineHost {
     })
   }
 
-  /** Wait for the Windows speech model and native recognizer to be ready. */
-  preflight(onEvent?: (event: WizardPreflightEvent) => void): Promise<WizardPreflightResult> {
-    if (onEvent) {
-      onEvent(this.lastWarmupEvent)
-      this.warmupListeners.add(onEvent)
-    }
-    if (this.warmupResult) {
-      if (onEvent) this.warmupListeners.delete(onEvent)
-      return Promise.resolve(this.warmupResult)
-    }
-    return new Promise((resolve) => {
-      const finish = (result: WizardPreflightResult): void => {
+  /** Cancel only this wait; the shared engine keeps warming up for other consumers. */
+  preflight(
+    onEvent?: (event: WizardPreflightEvent) => void,
+    signal?: AbortSignal
+  ): Promise<WizardPreflightResult> {
+    return new Promise((resolve, reject) => {
+      const cleanup = (): void => {
         if (onEvent) this.warmupListeners.delete(onEvent)
+        this.warmupWaiters.delete(finish)
+        signal?.removeEventListener('abort', abort)
+      }
+      const finish = (result: WizardPreflightResult): void => {
+        cleanup()
         resolve(result)
       }
+      const abort = (): void => {
+        cleanup()
+        reject(new ImportCanceledError())
+      }
+      if (signal?.aborted) {
+        abort()
+        return
+      }
       this.warmupWaiters.add(finish)
+      if (onEvent) this.warmupListeners.add(onEvent)
+      signal?.addEventListener('abort', abort, { once: true })
+      try {
+        onEvent?.(this.lastWarmupEvent)
+        if (this.warmupResult) finish(this.warmupResult)
+      } catch (error) {
+        cleanup()
+        reject(error)
+      }
     })
   }
 
