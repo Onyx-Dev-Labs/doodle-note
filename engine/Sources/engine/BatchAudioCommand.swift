@@ -6,11 +6,12 @@ import Foundation
 /// for the optional native Whisper backend. Does not load or download any model.
 enum BatchAudioCommand {
     static func run(_ options: CLIOptions) async throws {
-        let prepared = try await Commands.prepareAudioFile(options.requireFile())
-        defer { prepared.removeTemporaryFiles() }
         guard let directory = options.values["output-dir"] else {
             throw EngineError.usage("prepare-batch-audio requires --output-dir")
         }
+        let prepared = try await Commands.prepareAudioFile(
+            options.requireFile(), temporaryParent: URL(fileURLWithPath: directory))
+        defer { prepared.removeTemporaryFiles() }
         let file = try AVAudioFile(forReading: prepared.url)
         let format = file.processingFormat
         let split = options.values["channels"] == "split"

@@ -108,7 +108,8 @@ test('cancel waits for a resistant child to exit, and later jobs still run', asy
   const timer = setTimeout(() => controller.abort(), 150)
   await assert.rejects(running, { name: 'AbortError' })
   clearTimeout(timer)
-  assert.ok(Date.now() - start >= 1800)
+  // Windows terminates on SIGTERM immediately; POSIX can ignore it until escalation.
+  if (process.platform !== 'win32') assert.ok(Date.now() - start >= 1800)
   assert.equal((await runBatchChild(process.execPath, ['-e', "console.log('ok')"])).trim(), 'ok')
 })
 
