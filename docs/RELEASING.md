@@ -64,6 +64,7 @@ On a Mac with a supported Xcode and Swift environment, also run:
 
 ```sh
 pnpm engine:build
+pnpm whisper:build
 ```
 
 The normal push and pull-request checks are defined in
@@ -80,6 +81,10 @@ packaging command is defined by the desktop package:
 pnpm engine:build
 pnpm --filter desktop package
 ```
+
+The Mac package command builds the pinned Whisper CLI before bundling. It requires
+CMake and an Apple Silicon compiler. This build embeds Metal shaders and the
+license notice; it does not download a speech model. See [WHISPER.md](WHISPER.md).
 
 `apps/desktop/electron-builder.yml` configures the Developer ID identity,
 hardened runtime, ZIP and DMG targets, and notarization. Local packaging can

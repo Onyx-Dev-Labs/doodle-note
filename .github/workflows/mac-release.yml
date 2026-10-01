@@ -34,6 +34,9 @@ jobs:
       - name: Build Swift transcription engine
         run: swift build -c release --package-path engine
 
+      - name: Build pinned Whisper batch engine
+        run: pnpm whisper:build
+
       - name: Build brand assets
         run: pnpm --filter desktop brand:build
 
