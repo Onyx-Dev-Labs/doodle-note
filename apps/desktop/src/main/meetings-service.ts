@@ -1,3 +1,4 @@
+import { rendererMeetingPatch } from './meeting-write-ownership'
 import { libraryIpc } from './library-ipc'
 import { MeetingFileStore } from '@repo/meetings-store'
 import type { MeetingUpsert } from '@repo/meetings-store'
@@ -12,26 +13,14 @@ import {
 /**
  * The Electron face of the meetings store: IPC registration on top of the
  * shared MeetingFileStore (one JSON document per meeting under
- * userData/meetings/). The renderer drives all writes (debounced upserts of
- * the active meeting); the store validates, merges and persists. All store
+ * the selected library's meetings directory). Main capture/import services own
+ * transcripts; renderer upserts edit notes and metadata. All store
  * logic lives in @repo/meetings-store so the standalone MCP server reads
  * the exact same data the app writes.
  */
 export class MeetingsService extends MeetingFileStore {
-  // Main owns a captured meeting's transcript, including delayed renderer writes after Stop.
-  // Notes, title and speaker edits remain renderer-owned. Retranscription writes directly.
-  private capturedMeetings = new Set<string>()
-  ownCapture(id: string): void {
-    this.capturedMeetings.add(id)
-  }
   rendererUpsert(patch: MeetingUpsert): ReturnType<MeetingFileStore['upsert']> {
-    if (patch.id && this.capturedMeetings.has(patch.id)) {
-      const notes = { ...patch }
-      delete notes.segments
-      delete notes.echoSuppressed
-      return this.upsert(notes)
-    }
-    return this.upsert(patch)
+    return this.upsert(rendererMeetingPatch(patch))
   }
   registerIpc(): void {
     libraryIpc.handle(MEETINGS_LIST_CHANNEL, () => this.list())
