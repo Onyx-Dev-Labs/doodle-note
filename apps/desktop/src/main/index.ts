@@ -1,6 +1,7 @@
 import { beginRecordableMeeting } from './capture-eligibility'
 import { transcribeWithWhisper } from './whisper-transcriber'
 import { transcribeFileToSegments } from './import-logic'
+import { persistCaptureTranscript } from './capture-transcript-checkpoint'
 import { libraryActivity } from './library-activity'
 import {
   app,
@@ -450,12 +451,14 @@ app.whenReady().then(async () => {
     assertLibrary,
     (segments, ended) => {
       if (!captureMeetingId) return
-      meetingsService.upsert({
-        id: captureMeetingId,
-        segments: [...captureBase, ...segments.filter((segment) => !segment.echo)],
-        echoSuppressed: captureBaseEcho + segments.filter((segment) => segment.echo).length,
-        ...(ended ? { endedAt: new Date().toISOString() } : {})
-      })
+      persistCaptureTranscript(
+        meetingsService,
+        captureMeetingId,
+        captureBase,
+        captureBaseEcho,
+        segments,
+        ended
+      )
     }
   )
 
