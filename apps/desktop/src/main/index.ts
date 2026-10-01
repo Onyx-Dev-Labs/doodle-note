@@ -592,7 +592,8 @@ app.whenReady().then(async () => {
     audioService,
     broadcast,
     winBatchTranscriber
-      ? (filePath, onProgress) => winBatchTranscriber!.transcribe(filePath, onProgress)
+      ? (filePath, onProgress, options) =>
+          winBatchTranscriber!.transcribe(filePath, onProgress, options)
       : undefined
   )
   importService.registerIpc()

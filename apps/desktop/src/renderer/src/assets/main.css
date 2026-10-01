@@ -4177,3 +4177,58 @@ button.fp-row:hover {
 
 .remote-mcp .calendar-note { color: var(--ink); }
 .remote-mcp .calendar-actions { flex-wrap: wrap; }
+
+
+.import-progress-panel {
+  position: fixed;
+  z-index: 150;
+  right: 24px;
+  bottom: 24px;
+  width: min(390px, calc(100vw - 48px));
+  padding: 16px;
+  border: 1px solid var(--border, #deddd2);
+  border-radius: 14px;
+  background: var(--surface, #fffef9);
+  color: var(--text, #282b24);
+  box-shadow: 0 8px 30px #0002;
+  font-size: 13px;
+}
+.import-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.import-progress-panel p {
+  margin: 8px 0;
+  line-height: 1.45;
+}
+.import-progress-label {
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.import-progress-panel progress {
+  width: 100%;
+  accent-color: #789668;
+}
+.import-progress-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.import-progress-panel button {
+  cursor: pointer;
+  border: 1px solid #d8d8cb;
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 5px 9px;
+}
+.import-progress-panel button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.import-progress-panel button:focus-visible {
+  outline: 2px solid #789668;
+  outline-offset: 2px;
+}

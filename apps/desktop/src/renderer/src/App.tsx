@@ -1,3 +1,4 @@
+import { ImportProgressPanel } from './ImportProgressPanel'
 import type { RecordingState, RecordingJoinState } from '../../shared/recording-api'
 import { prepareRecordingMeeting } from './lib/recording-start'
 import { CloudNotesView } from './CloudNotesView'
@@ -18,7 +19,7 @@ import mascotUrl from './assets/mascot-square.png'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
 import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
-import { decodeWinBatchAudio } from './lib/win-batch-decode'
+import { decodeWinBatchAudio, cancelWinBatchAudio } from './lib/win-batch-decode'
 import {
   CalendarIcon,
   FolderIcon,
@@ -141,6 +142,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.engine.onBatchControl((control) => {
       if (control.action === 'decode') void decodeWinBatchAudio(control.jobId)
+      else cancelWinBatchAudio(control.jobId)
     })
   }, [])
 
@@ -722,6 +724,7 @@ function App(): React.JSX.Element {
           <button onClick={() => setRecordingError(null)}>Dismiss</button>
         </div>
       )}
+      <ImportProgressPanel onOpen={openMeeting} />
       {wizardOpen && <FirstRunWizard onFinish={closeWizard} />}
 
       {!wizardOpen && tourOpen && (

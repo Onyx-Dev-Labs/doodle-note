@@ -60,6 +60,9 @@ import {
 } from '../shared/audio-api'
 import {
   IMPORT_AUDIO_CHANNEL,
+  IMPORT_STATUS_CHANNEL,
+  IMPORT_CANCEL_CHANNEL,
+  IMPORT_RETRY_CHANNEL,
   IMPORT_PROGRESS_CHANNEL,
   IMPORT_RETRANSCRIBE_CHANNEL,
   type ImporterApi,
@@ -591,6 +594,15 @@ const integrationsApi: IntegrationsApi = {
 }
 
 const importerApi: ImporterApi = {
+  getStatus(): Promise<ImportProgress | null> {
+    return ipcRenderer.invoke(IMPORT_STATUS_CHANNEL) as Promise<ImportProgress | null>
+  },
+  cancel(jobId: string): Promise<ImportProgress | null> {
+    return ipcRenderer.invoke(IMPORT_CANCEL_CHANNEL, jobId) as Promise<ImportProgress | null>
+  },
+  retry(jobId: string): Promise<ImportResult> {
+    return ipcRenderer.invoke(IMPORT_RETRY_CHANNEL, jobId) as Promise<ImportResult>
+  },
   importAudio(): Promise<ImportResult> {
     return ipcRenderer.invoke(IMPORT_AUDIO_CHANNEL) as Promise<ImportResult>
   },
