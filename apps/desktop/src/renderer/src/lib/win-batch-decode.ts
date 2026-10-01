@@ -1,15 +1,31 @@
 import type { EngineChannel } from '../../../shared/engine-events'
 
+const activeDecoders = new Map<string, AbortController>()
+export function cancelWinBatchAudio(jobId: string): void {
+  activeDecoders.get(jobId)?.abort()
+}
+
 const TARGET_SAMPLE_RATE = 16_000
 const CHUNK_SAMPLES = TARGET_SAMPLE_RATE * 2
 
 /** Decode an imported file with Chromium and stream 16 kHz PCM back to main. */
 export async function decodeWinBatchAudio(jobId: string): Promise<void> {
+  const controller = new AbortController()
+  activeDecoders.set(jobId, controller)
   let context: AudioContext | null = null
+  const check = (): void => {
+    controller.signal.throwIfAborted()
+  }
+  const close = (): void => {
+    if (context) void context.close().catch(() => {})
+  }
+  controller.signal.addEventListener('abort', close, { once: true })
   try {
     const encoded = await window.engine.readBatchAudio(jobId)
+    check()
     context = new AudioContext()
     const decoded = await context.decodeAudioData(encoded.slice(0))
+    check()
     const channelCount = Math.min(2, Math.max(1, decoded.numberOfChannels))
     const channels: EngineChannel[] = channelCount > 1 ? ['mic', 'system'] : ['mic']
 
@@ -25,6 +41,7 @@ export async function decodeWinBatchAudio(jobId: string): Promise<void> {
     source.start()
     const rendered = await offline.startRendering()
 
+    check()
     await window.engine.sendBatchMessage({
       type: 'begin',
       jobId,
@@ -32,6 +49,7 @@ export async function decodeWinBatchAudio(jobId: string): Promise<void> {
       audioSeconds: decoded.duration
     })
     for (let offset = 0; offset < rendered.length; offset += CHUNK_SAMPLES) {
+      check()
       const end = Math.min(rendered.length, offset + CHUNK_SAMPLES)
       for (let channel = 0; channel < channels.length; channel += 1) {
         await window.engine.sendBatchMessage({
@@ -47,6 +65,7 @@ export async function decodeWinBatchAudio(jobId: string): Promise<void> {
     }
     await window.engine.sendBatchMessage({ type: 'end', jobId })
   } catch (error) {
+    if (controller.signal.aborted) return
     const detail = error instanceof Error && error.message.trim() ? ` ${error.message}` : ''
     await window.engine
       .sendBatchMessage({
@@ -58,6 +77,8 @@ export async function decodeWinBatchAudio(jobId: string): Promise<void> {
       })
       .catch(() => {})
   } finally {
-    if (context) void context.close().catch(() => {})
+    activeDecoders.delete(jobId)
+    controller.signal.removeEventListener('abort', close)
+    close()
   }
 }

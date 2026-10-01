@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { TranscriptSegment } from '../shared/engine-events'
 import type { EngineChannel, EngineTokenTiming } from '../shared/engine-events'
+import { checkImportCanceled, ImportCanceledError } from './import-jobs'
 import { SegmentAssembler } from './segmenter'
 
 /** Batch imports use mixed audio unless a saved DoodleNote part proves split origin. */
@@ -54,6 +55,12 @@ export function transcribeFileToSegments(
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>
     try {
+      checkImportCanceled(options.signal)
+    } catch (error) {
+      reject(error)
+      return
+    }
+    try {
       child = spawn(
         enginePath,
         ['transcribe', '--file', filePath, '--channels', options.channels ?? 'mixed'],
@@ -70,11 +77,22 @@ export function transcribeFileToSegments(
     let audioSeconds = 0
     let engineError: string | null = null
     let settled = false
+    let stopError: Error | undefined
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    const stop = (error: Error): void => {
+      if (settled || stopError) return
+      stopError = error
+      child.kill('SIGTERM')
+      killTimer = setTimeout(() => child.kill('SIGKILL'), 1500)
+    }
+    const abort = (): void => stop(new ImportCanceledError())
 
     const finish = (err?: Error): void => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      clearTimeout(killTimer)
+      options.signal?.removeEventListener('abort', abort)
       if (err) reject(err)
       else {
         resolve({
@@ -84,9 +102,11 @@ export function transcribeFileToSegments(
       }
     }
     const timeout = setTimeout(() => {
-      child.kill('SIGKILL')
-      finish(new Error('transcription timed out'))
+      stop(new Error('Transcription timed out.'))
     }, TIMEOUT_MS)
+
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
 
     let buffer = ''
     child.stdout?.setEncoding('utf8')
@@ -143,7 +163,8 @@ export function transcribeFileToSegments(
     })
     child.on('error', (err) => finish(new Error(`engine failed to start: ${err.message}`)))
     child.on('close', (code) => {
-      if (engineError) finish(new Error(engineError))
+      if (stopError) finish(stopError)
+      else if (engineError) finish(new Error(engineError))
       else if (code !== 0) finish(new Error(`engine exited with code ${code}`))
       else finish()
     })

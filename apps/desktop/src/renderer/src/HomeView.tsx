@@ -414,9 +414,14 @@ export default function HomeView({
       const result = await window.importer.importAudio()
       setImportState('idle')
       if (result.meetingId) onOpenMeeting(result.meetingId)
-      else if (result.error) setImportState(result.error)
+      else if (result.error) {
+        setImportState(result.error)
+        setShareNotice(result.error)
+      }
     } catch (err) {
-      setImportState(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setImportState(message)
+      setShareNotice(message)
     }
   }
 

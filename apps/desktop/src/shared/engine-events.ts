@@ -32,7 +32,7 @@ export type EngineCaptureStatus =
   | { type: 'error' | 'switch-error'; sessionId: number; message: string }
 
 export interface EngineBatchControl {
-  action: 'decode'
+  action: 'decode' | 'cancel'
   jobId: string
 }
 
