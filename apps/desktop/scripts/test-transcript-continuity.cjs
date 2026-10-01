@@ -50,7 +50,7 @@ async function main() {
     await page.addInitScript(() => {
       const listeners = new Set()
       const noEvent = () => () => {}
-      window.qa = {starts:0,stops:0,snapshot:null,saves:[],send: event => listeners.forEach(cb => cb(event))}
+      window.qa = {starts:0,stops:0,snapshot:null,saves:[],parts:[],send: event => listeners.forEach(cb => cb(event))}
       const meeting = {id:'qa',title:'Transcript arrow QA',rawNotesMarkdown:'Synthetic test content.',segments:[],participants:[],echoSuppressed:0}
       window.meetings = {get:async()=>meeting,upsert:async patch=>{Object.assign(meeting,patch);window.qa.saves.push(patch);return meeting}}
       window.engine = {
@@ -59,7 +59,8 @@ async function main() {
         stop:()=>{window.qa.stops++;window.qa.send({event:'status',stage:'finishing'})},setInputDevice:()=>{}
       }
       window.notes = {onAskToken:noEvent,onEnhanceProgress:noEvent,models:async()=>({models:[],ramGB:16}),getSettings:async()=>({engineChoice:'local'}),templates:async()=>[]}
-      window.audio = {list:async()=>[]}
+      window.audio = {list:async()=>window.qa.parts,read:async()=>null}
+      window.importer = {retranscribe:async()=>{meeting.segments=[{id:'batch-replacement',channel:'mic',speaker:'You',text:'Only the rebuilt transcript remains.',startMs:0,endMs:1000,confidence:1}];return {id:'qa'}}}
       window.folders = {list:async()=>[]}
       window.detect = {getState:async()=>({platform:'darwin'}),onMeetingEnded:noEvent}
     })
@@ -89,6 +90,12 @@ async function main() {
     await page.getByRole('button',{name:'Show transcript',exact:true}).click()
     assert.equal(await page.getByText('Recovered from main checkpoint.',{exact:true}).count(),1)
     assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>s.segments?.some(x=>x.id==='hidden2'))),true)
+    await page.evaluate(()=>{window.qa.parts=[{url:'synthetic-recording',startEpochMs:1000,durationMs:1000}];window.qa.send({event:'audio'})})
+    page.once('dialog',dialog=>dialog.accept())
+    await page.getByRole('button',{name:'Re-transcribe',exact:true}).click()
+    await page.getByText('Only the rebuilt transcript remains.',{exact:true}).waitFor()
+    assert.equal(await page.getByText('Synthetic hidden capture survives.',{exact:true}).count(),0)
+    assert.equal(await page.getByText('Recovered from main checkpoint.',{exact:true}).count(),0)
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
     console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, terminal persistence and Resume')
