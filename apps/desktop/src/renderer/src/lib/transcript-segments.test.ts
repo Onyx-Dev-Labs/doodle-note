@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { TranscriptSegment } from '../../../shared/engine-events'
-import { mergeTranscriptSegments } from './transcript-segments'
+import { mergeTranscriptSegments, reconcileTranscriptSegments } from './transcript-segments'
 
 function part(count: number, epoch: number, label: string): TranscriptSegment[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -75,4 +75,34 @@ test('untimed text keeps provenance and order without manufactured audio fields'
   assert.equal(rows[0]!.source, 'text')
   assert.equal('startMs' in rows[0]!, false)
   assert.equal('absoluteStartMs' in rows[0]!, false)
+})
+
+test('recovered ended snapshots promote once across repeated Resume without wrapping source IDs', () => {
+  for (const modernIds of [false, true]) {
+    const first = part(3, 100000, 'First')
+    const second = part(4, 200000, 'Second')
+    if (modernIds) {
+      for (const segment of first) segment.id = `session-one-${segment.id}`
+      for (const segment of second) segment.id = `session-two-${segment.id}`
+    }
+    let saved = [...first, ...second]
+    const originalIds = saved.map((s) => s.id)
+    const originalViewIds = mergeTranscriptSegments(saved, second).map((s) => s.id)
+    for (let resume = 0; resume < 2; resume++) {
+      saved = reconcileTranscriptSegments(saved, second)
+      assert.equal(saved.length, 7)
+      assert.deepEqual(
+        saved.map((s) => s.id),
+        originalIds
+      )
+      assert.deepEqual(
+        mergeTranscriptSegments(saved, []).map((s) => s.id),
+        originalViewIds
+      )
+    }
+    const third = part(2, 300000, 'Third')
+    saved = reconcileTranscriptSegments(saved, third)
+    assert.equal(saved.length, 9, 'a truly new session is still appended')
+    assert.equal(reconcileTranscriptSegments(saved, third).length, 9)
+  }
 })

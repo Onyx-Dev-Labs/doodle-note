@@ -153,6 +153,21 @@ async function main() {
         assert.match(await page.locator('.tp-playing').innerText(),new RegExp(label+' synthetic line 1'));
       }
     }
+    // Recover the completed latest part, Resume, Stop, and recover it again.
+    // Promotion must merge raw copies, never append them or recycle view IDs.
+    for (let cycle=0;cycle<2;cycle++) {
+      await page.getByTitle('Resume recording',{exact:true}).click();
+      await send({event:'ready',channels:['mic']});
+      assert.equal(await page.locator('.tp-row:not(.tp-partial)').count(),7,'Resume after recovery preserves exactly seven legacy rows');
+      await page.getByRole('button',{name:'Stop recording',exact:true}).click();
+      await send({event:'done'});
+      await send({event:'capture-finalized'});
+      await page.getByRole('button',{name:'Show transcript',exact:true}).click();
+      await settle();
+      assert.equal(await page.locator('.tp-row:not(.tp-partial)').count(),7);
+      await page.getByTitle('Copy transcript',{exact:true}).click();
+      assert.equal((await page.evaluate(()=>window.qa.clipboard)).split('\n').length,7);
+    }
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
     console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy and part highlighting')
