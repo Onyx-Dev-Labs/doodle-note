@@ -23,7 +23,7 @@ import {
 } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
-import { meetingPrimaryAction, transcriptCheckpointDelayMs } from '../../shared/meeting-recovery'
+import { meetingPrimaryAction } from '../../shared/meeting-recovery'
 import {
   defaultSpeakerId,
   defaultSpeakerLabel,
@@ -333,7 +333,6 @@ export default function MeetingView({
   const docViewRef = useRef<'notes' | 'enhanced'>('notes')
   const applyingRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const stateRef = useRef(state)
   const startedAtRef = useRef<string | null>(null)
   const recordStartRef = useRef<number | null>(null)
@@ -520,6 +519,44 @@ export default function MeetingView({
 
   const eventRevisionRef = useRef(0)
   const recoveredCaptureRef = useRef<string | undefined>(undefined)
+  const transcriptRefreshRevision = useRef(0)
+  const refreshTranscript = useCallback(async (): Promise<void> => {
+    const revision = ++transcriptRefreshRevision.current
+    // Invalidate a pending live snapshot read before loading the authoritative replacement.
+    eventRevisionRef.current++
+    const record = await window.meetings.get(meetingId)
+    if (
+      !record ||
+      !mountedRef.current ||
+      revision !== transcriptRefreshRevision.current ||
+      ACTIVE_PHASES.includes(stateRef.current.phase)
+    )
+      return
+    generationRef.current.invalidate()
+    eventRevisionRef.current++
+    const reset: EngineEvent = {
+      event: 'session-snapshot',
+      snapshot: { meetingId, phase: 'ended', segments: [], partials: {}, error: '' }
+    }
+    stateRef.current = sessionReducer(stateRef.current, reset)
+    dispatch(reset)
+    setSavedSegments(record.segments.filter((segment) => !segment.echo))
+    setSavedEcho(record.echoSuppressed)
+  }, [meetingId])
+
+  // Retry can finish in the app-level progress panel while this editor stays mounted.
+  // Completion belongs to the meeting, not to the button that originally started the job.
+  useEffect(
+    () =>
+      window.importer?.onProgress?.((progress: { stage: string; meetingId: string }) => {
+        if (progress.stage === 'completed' && progress.meetingId === meetingId) {
+          void refreshTranscript().catch((error) =>
+            dispatch({ event: 'error', message: String(error) })
+          )
+        }
+      }),
+    [meetingId, refreshTranscript]
+  )
   useEffect(() => {
     let cancelled = false
     const recover = async (): Promise<void> => {
@@ -813,17 +850,6 @@ export default function MeetingView({
       ),
     [savedSegments, state.segments, roster]
   )
-  const transcriptCheckpointRef = useRef({
-    segments: allSegments,
-    echoSuppressed: savedEcho + state.echoCount
-  })
-  useEffect(() => {
-    transcriptCheckpointRef.current = {
-      segments: allSegments,
-      echoSuppressed: savedEcho + state.echoCount
-    }
-  }, [allSegments, savedEcho, state.echoCount])
-
   /** Assign a name once and apply it to every line that speaker owns. */
   const applyRename = useCallback(
     (speakerId: string, name: string): void => {
@@ -837,41 +863,6 @@ export default function MeetingView({
     },
     [roster, persist]
   )
-
-  useEffect(() => {
-    const delay = transcriptCheckpointDelayMs(phase, allSegments.length)
-    if (delay === null) {
-      if (sessionSaveTimerRef.current !== null) {
-        clearTimeout(sessionSaveTimerRef.current)
-        sessionSaveTimerRef.current = null
-      }
-      return
-    }
-    const saveTranscript = (): void => {
-      sessionSaveTimerRef.current = null
-      const checkpoint = transcriptCheckpointRef.current
-      persist({
-        segments: checkpoint.segments,
-        echoSuppressed: checkpoint.echoSuppressed,
-        ...(phase === 'ended' ? { endedAt: new Date().toISOString() } : {})
-      })
-    }
-    if (delay === 0) {
-      if (sessionSaveTimerRef.current !== null) {
-        clearTimeout(sessionSaveTimerRef.current)
-        sessionSaveTimerRef.current = null
-      }
-      saveTranscript()
-      return
-    }
-    // Throttle rather than debounce. Continuous speech can add segments every
-    // second; resetting this timer on every segment would postpone the first
-    // crash-safe checkpoint indefinitely.
-    if (sessionSaveTimerRef.current !== null) return
-    sessionSaveTimerRef.current = setTimeout(() => {
-      saveTranscript()
-    }, delay)
-  }, [phase, allSegments.length, persist])
 
   // A session that ends with zero transcript is otherwise indistinguishable
   // from success ("I hit stop and nothing happened") — say so explicitly.
@@ -895,15 +886,11 @@ export default function MeetingView({
       registerLibrarySave(async () => {
         if (!contentLoadedRef.current || discardingRef.current) return
         if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
-        if (sessionSaveTimerRef.current !== null) clearTimeout(sessionSaveTimerRef.current)
         saveTimerRef.current = null
-        sessionSaveTimerRef.current = null
         await window.meetings.upsert({
           id: meetingId,
           title: titleValueRef.current,
-          rawNotesMarkdown: roughMarkdownRef.current,
-          segments: transcriptCheckpointRef.current.segments,
-          echoSuppressed: transcriptCheckpointRef.current.echoSuppressed
+          rawNotesMarkdown: roughMarkdownRef.current
         })
       }),
     [meetingId]
@@ -1081,21 +1068,7 @@ export default function MeetingView({
         dispatch({ event: 'error', message: result.error })
         return
       }
-      const record = await window.meetings.get(meetingId)
-      if (record) {
-        // The successful batch result replaces both persisted and live-session pools.
-        // Otherwise the last capture's old IDs/wording remain beside the new transcript.
-        generationRef.current.invalidate()
-        eventRevisionRef.current++
-        const reset: EngineEvent = {
-          event: 'session-snapshot',
-          snapshot: { meetingId, phase: 'ended', segments: [], partials: {} }
-        }
-        stateRef.current = sessionReducer(stateRef.current, reset)
-        dispatch(reset)
-        setSavedSegments(record.segments.filter((s) => !s.echo))
-        setSavedEcho(record.echoSuppressed)
-      }
+      await refreshTranscript()
     } catch (err) {
       dispatch({ event: 'error', message: err instanceof Error ? err.message : String(err) })
     } finally {
@@ -1205,8 +1178,8 @@ export default function MeetingView({
         throw new Error(
           'Set up your selected notes model or provider in Settings, then choose Generate notes.'
         )
-      // Read rough notes immediately before the request, and save the finalized
-      // transcript independently of AI success. No audio goes to this pipeline.
+      // Save only rough notes here. Main owns the transcript independently of AI success.
+      // No audio goes to this pipeline.
       if (docViewRef.current === 'notes') roughMarkdownRef.current = docToMarkdown(editor.getJSON())
       const rawNotesMarkdown = roughMarkdownRef.current
       const shouldGenerateTitle =
@@ -1221,9 +1194,7 @@ export default function MeetingView({
       }
       await window.meetings.upsert({
         id: meetingId,
-        rawNotesMarkdown,
-        segments: allSegments,
-        echoSuppressed: totalEcho
+        rawNotesMarkdown
       })
       if (!current())
         throw new Error(
@@ -1515,10 +1486,6 @@ export default function MeetingView({
     if (saveTimerRef.current !== null) {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
-    }
-    if (sessionSaveTimerRef.current !== null) {
-      clearTimeout(sessionSaveTimerRef.current)
-      sessionSaveTimerRef.current = null
     }
     if (capturing) window.engine.stop()
     try {
