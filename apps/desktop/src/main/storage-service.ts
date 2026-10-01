@@ -1,8 +1,12 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
+import { libraryActivity } from './library-activity'
 import { LibraryStorage } from './library-storage'
 import {
   STORAGE_CANCEL_CHANNEL,
+  STORAGE_RETRY_CHANNEL,
+  STORAGE_PROGRESS_CHANNEL,
+  type StorageProgress,
   STORAGE_CHOOSE_CHANNEL,
   STORAGE_OPEN_CHANNEL,
   STORAGE_STATUS_CHANNEL,
@@ -71,25 +75,50 @@ export async function prepareLibrary(userData: string): Promise<LibraryStorage |
   }
 }
 
-export function registerStorageIpc(storage: LibraryStorage, busy: () => boolean): void {
+export function registerStorageIpc(
+  storage: LibraryStorage,
+  busy: () => boolean,
+  moved: (previousRoot: string) => void
+): void {
   const result = async (action: () => void | Promise<void>): Promise<StorageResult> => {
     try {
       await action()
       return { status: storage.status() }
     } catch (error) {
       return {
+        status: storage.status(),
         error:
           error instanceof Error ? error.message : 'The storage change failed. Please try again.'
       }
     }
   }
   let choosing = false
+  const transfer = async (event: Electron.IpcMainInvokeEvent, parent?: string): Promise<void> => {
+    const progress = (value: StorageProgress): void => {
+      if (!event.sender.isDestroyed()) event.sender.send(STORAGE_PROGRESS_CHANNEL, value)
+    }
+    progress({ phase: 'waiting' })
+    await libraryActivity.exclusive(async () => {
+      if (busy()) throw new Error('Finish recording or importing before moving the library.')
+      if (parent) storage.schedule(parent)
+      const previous = storage.root
+      await storage.finishPending(progress)
+      if (storage.root !== previous) {
+        try {
+          moved(previous)
+        } catch {
+          throw new Error(
+            'Your library moved, but agent access could not be updated. Restore access to its configuration and reopen DoodleNote before using connected agents.'
+          )
+        }
+      }
+    })
+  }
   ipcMain.handle(STORAGE_STATUS_CHANNEL, () => storage.status())
   ipcMain.handle(STORAGE_OPEN_CHANNEL, () =>
     result(async () => {
       storage.assertAvailable()
-      const error = await shell.openPath(storage.root)
-      if (error)
+      if (await shell.openPath(storage.root))
         throw new Error(
           'Finder could not open the library folder. Check its permissions and try again.'
         )
@@ -97,26 +126,34 @@ export function registerStorageIpc(storage: LibraryStorage, busy: () => boolean)
   )
   ipcMain.handle(STORAGE_CANCEL_CHANNEL, () =>
     result(() => {
+      if (libraryActivity.moving || choosing)
+        throw new Error('Wait for the current transfer to finish.')
       storage.cancel()
     })
   )
-  ipcMain.handle(STORAGE_CHOOSE_CHANNEL, () =>
+  ipcMain.handle(STORAGE_RETRY_CHANNEL, (event) =>
     result(async () => {
       if (choosing || busy())
-        throw new Error('Finish recording or importing before changing the library location.')
+        throw new Error('Finish recording or importing before moving the library.')
+      await transfer(event)
+    })
+  )
+  ipcMain.handle(STORAGE_CHOOSE_CHANNEL, (event) =>
+    result(async () => {
+      if (choosing || libraryActivity.moving || busy())
+        throw new Error('Finish recording or importing before moving the library.')
       choosing = true
       try {
         const selection = await dialog.showOpenDialog({
           title: 'Choose a library location',
-          buttonLabel: 'Choose location',
+          buttonLabel: 'Move library here',
           message:
-            'DoodleNote will create a DoodleNote Library folder here. Your existing library will be copied and verified the next time you open the app.',
+            'DoodleNote will create a DoodleNote Library folder here and move your library now. Your original files will be kept as a recovery copy.',
           properties: ['openDirectory', 'createDirectory']
         })
         if (selection.canceled || !selection.filePaths[0]) return
-        if (busy())
-          throw new Error('Finish recording or importing before changing the library location.')
-        storage.schedule(selection.filePaths[0])
+        if (busy()) throw new Error('Finish recording or importing before moving the library.')
+        await transfer(event, selection.filePaths[0])
       } finally {
         choosing = false
       }

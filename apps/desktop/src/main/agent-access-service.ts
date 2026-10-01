@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -83,8 +84,12 @@ export class AgentAccessService {
   private readonly configPath: string
   private readonly clients: McpClientDef[]
 
+  private get meetingsDir(): string {
+    return resolveLibraryPath(this.meetingsDirSource)
+  }
+
   constructor(
-    private readonly meetingsDir: string,
+    private readonly meetingsDirSource: LibraryPath,
     private readonly server: McpServerSpec,
     home = homedir()
   ) {
@@ -119,14 +124,14 @@ export class AgentAccessService {
   }
 
   registerIpc(): void {
-    ipcMain.handle(AGENT_ACCESS_GET_CHANNEL, () => this.status())
-    ipcMain.handle(AGENT_ACCESS_SET_CHANNEL, (_event, enabled: unknown) =>
+    libraryIpc.handle(AGENT_ACCESS_GET_CHANNEL, () => this.status())
+    libraryIpc.handle(AGENT_ACCESS_SET_CHANNEL, (_event, enabled: unknown) =>
       this.setEnabled(Boolean(enabled))
     )
-    ipcMain.handle(AGENT_ACCESS_CONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
+    libraryIpc.handle(AGENT_ACCESS_CONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
       this.setClientConnected(String(id) as McpClientId, true)
     )
-    ipcMain.handle(AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
+    libraryIpc.handle(AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
       this.setClientConnected(String(id) as McpClientId, false)
     )
   }

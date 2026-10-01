@@ -1,5 +1,8 @@
 import {
   STORAGE_STATUS_CHANNEL,
+  STORAGE_RETRY_CHANNEL,
+  STORAGE_PROGRESS_CHANNEL,
+  type StorageProgress,
   STORAGE_CHOOSE_CHANNEL,
   STORAGE_CANCEL_CHANNEL,
   STORAGE_OPEN_CHANNEL,
@@ -645,6 +648,15 @@ if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('storage', {
       status: () => ipcRenderer.invoke(STORAGE_STATUS_CHANNEL),
+      retry: () => ipcRenderer.invoke(STORAGE_RETRY_CHANNEL),
+      onProgress: (callback) => {
+        const listener = (_event: Electron.IpcRendererEvent, progress: StorageProgress): void =>
+          callback(progress)
+        ipcRenderer.on(STORAGE_PROGRESS_CHANNEL, listener)
+        return () => {
+          ipcRenderer.removeListener(STORAGE_PROGRESS_CHANNEL, listener)
+        }
+      },
       choose: () => ipcRenderer.invoke(STORAGE_CHOOSE_CHANNEL),
       cancel: () => ipcRenderer.invoke(STORAGE_CANCEL_CHANNEL),
       open: () => ipcRenderer.invoke(STORAGE_OPEN_CHANNEL)

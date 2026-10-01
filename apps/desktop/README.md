@@ -189,62 +189,64 @@ editor/session restoration is not added by this feature.
 
 ## Choose a Mac library location
 
-In **Settings → General → Library storage**, use **Choose folder…** to select a
-location. DoodleNote creates a new **DoodleNote Library** folder there. Finish
-recording/importing and your edits, quit DoodleNote, then reopen it. New content
-continues to use the current folder until that next launch. **Cancel change**
-removes a pending selection without moving anything.
+In **Settings → General → Library storage**, choose a folder. DoodleNote creates
+**DoodleNote Library** there, finishes pending saves, copies and verifies your
+files, and immediately uses the new location. The app stays open. A progress
+dialog pauses editing during the transfer. Finish active recording or importing
+before changing the location; background library operations drain before copying,
+and later operations queue until the transfer succeeds or fails. If existing
+work does not finish within 30 seconds, the transfer does not start.
 
-Before starting its normal services, the app copies and verifies the existing
-library, then switches to the new location. Recordings, meeting JSON (notes and
-transcripts), pasted attachments, folders, Home chat and session recovery files
-move together. AI models, sign-ins, cloud/calendar configuration, app preferences
-and caches remain in application support. **Open in Finder** opens the active
-library. Recordings are in `audio/<meetingId>/<sessionEpochMs>/`; notes and
-transcripts are stored in `meetings/<meetingId>.json`. Copy files out if needed;
-manually moving or renaming managed files can break playback and references.
+Recordings, meeting JSON (notes/transcripts), pasted attachments, folders, Home
+chat and session recovery move together. AI models, sign-ins, cloud/calendar
+configuration, app preferences and caches remain in application support. **Open
+in Finder** opens the active library. Audio lives in
+`audio/<meetingId>/<sessionEpochMs>/`; meeting documents in `meetings/<meetingId>.json`.
+Copy files out if needed. Manually moving managed files can break references.
 
-The previous location is kept as a recovery copy and shown in Settings. It is
-not updated with later edits, and retaining it uses additional disk space. The
-transfer never overwrites another library. If a copy fails, the original remains
-active and the next launch offers Retry, Cancel transfer or Quit. An incomplete
-transfer may leave a hidden `.doodlenote-transfer-*` staging folder at the chosen
-location; do not use it as a library. Retry reuses only this app's transfer slot.
+The original files remain as a recovery copy. This copy uses additional disk
+space and is not updated after the switch. Existing libraries are never
+merged or overwritten. A failed transfer leaves the original active and offers
+**Retry transfer** or **Cancel change** in Settings. The app does not need to
+restart to retry. An interrupted transfer can also recover on the next launch.
+Hidden `.doodlenote-transfer-*` folders may remain after failures; these are
+transaction staging, not active libraries. Retry only removes its own verified
+staging folder. Force-quitting or disconnecting a drive can interrupt a transfer.
+Normal quit/window-close is blocked while the transfer holds the library lock.
 
-Keep external drives connected. If the active folder becomes unavailable,
-DoodleNote stops capture and blocks library operations with a Retry/Quit dialog.
-It never silently creates an empty replacement at the default location. A drive
-disconnected during recording can leave an incomplete recording. Reconnect the
-drive before retrying. A missing or corrupt location setting must be recovered;
-do not delete `library-location.json` as a troubleshooting shortcut.
+Keep external drives connected. A missing/replaced active root stops capture and
+blocks library operations with Retry/Quit, without silently creating an empty
+replacement. Recording interrupted by a disconnect may be incomplete. Restore a
+corrupt `library-location.json`; do not delete it as a troubleshooting shortcut.
 
-The setting uses Electron's actual user-data profile. The standard installed Mac
-profile is `~/Library/Application Support/DoodleNote`; development normally uses
-`desktop` or `DOODLE_USER_DATA`. No existing library is adopted from the folder
-picker. Models, cloud storage and other platforms are not reconfigured by this
-setting. The app follows the new meeting path for existing local agent consent;
-restart older running MCP clients after updating the app so they load the new
-server. A development profile does not redirect another profile's agent config.
+The initial location is Electron's actual user-data profile, usually
+`~/Library/Application Support/DoodleNote` for the installed Mac app. Development
+uses `desktop` or `DOODLE_USER_DATA`. Existing agent consent follows the new path
+without being enabled automatically; restart older MCP clients after updating
+the app to load the new server. Development profiles do not redirect another
+profile's agent configuration. Windows/mobile storage UI is unchanged.
 
 Do not downgrade to a build without library-location support after transferring:
-that build would open the old snapshot. Recovery or rollback must preserve the
-latest active library and be explicitly planned. Packaging, signing, release,
-updater behavior and real external-drive interruption testing remain release QA
-steps separate from source tests.
+it would open the stale original snapshot. Any rollback must preserve the latest
+active library. Packaging, signing, updater behavior and physical-drive/recording
+acceptance remain separate release gates.
 
-The synthetic Mac UI check uses a temporary profile and fixtures, intercepts the
-native folder picker and Finder opener, and stubs the capture engine. It checks
-selection/cancellation, restart transfer, retained content, new writes, errors,
-agent path/consent and persistence; it does not prove recording or physical-drive
-behavior. After `pnpm --filter desktop build`, run from the repository root:
+After `pnpm --filter desktop build`, run the synthetic Mac UI check from the root:
 
 ```sh
 DOODLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/test \
   node apps/desktop/scripts/test-library-storage.cjs
 ```
 
-The script prints the fixture and screenshot paths. Use only disposable test data
-for native QA: choose a folder, restart, play an existing recording, import/record
-a new meeting, and confirm both appear in the new library. Cancel a pending change,
-reject an occupied destination, then disconnect/reconnect a test external drive
-and verify Retry resumes the same library without creating a replacement.
+The test isolates a temporary profile, intercepts the native picker/Finder and
+stubs capture. It checks same-process transfer, recording-busy rejection,
+progress, background drain, queued writes, failure/cancel/retry, new-write paths,
+retained content, agent consent and restart persistence. It prints screenshot
+and fixture locations. This does not prove native picker/Finder, real capture,
+physical-drive reliability or signed installed-app acceptance.
+
+Human QA with disposable data: choose a folder and confirm the path updates
+without restarting; play a retained recording, inspect notes/transcripts and
+attachments, then record/import new content. Check its files use the new folder.
+Reject an occupied/unwritable destination and retry after restoring access.
+Disconnect/reconnect a test external drive and verify the same library resumes.

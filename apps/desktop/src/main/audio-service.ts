@@ -1,3 +1,5 @@
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
 import { spawn } from 'node:child_process'
 import {
   copyFileSync,
@@ -10,7 +12,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { ipcMain, protocol } from 'electron'
+import { protocol } from 'electron'
 import {
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
@@ -56,21 +58,25 @@ export class AudioService {
   /** Session dir handed to the engine for the active capture, if any. */
   private activeSessionDir: string | null = null
 
+  private get baseDir(): string {
+    return resolveLibraryPath(this.baseDirSource)
+  }
+
   constructor(
-    private readonly baseDir: string,
+    private readonly baseDirSource: LibraryPath,
     private readonly engineBinary: string,
     private readonly assertAvailable: () => void = () => {}
   ) {}
 
   registerIpc(): void {
-    ipcMain.handle(AUDIO_LIST_CHANNEL, (_event, meetingId: unknown) =>
+    libraryIpc.handle(AUDIO_LIST_CHANNEL, (_event, meetingId: unknown) =>
       this.list(String(meetingId ?? ''))
     )
     // Playback bytes travel over IPC, not the protocol: Chromium's media
     // loader through protocol.handle failed three different ways (resumed
     // loads corrupted, tail requests for moov-at-end files, CORS on fetch).
     // A structured-clone copy of a local file is fast and boring.
-    ipcMain.handle(AUDIO_READ_CHANNEL, (_event, url: unknown): AudioFileData | null => {
+    libraryIpc.handle(AUDIO_READ_CHANNEL, (_event, url: unknown): AudioFileData | null => {
       const resolved = this.resolvePartUrl(String(url ?? ''))
       if (!resolved) return null
       try {
@@ -79,11 +85,11 @@ export class AudioService {
         return null
       }
     })
-    ipcMain.handle(AUDIO_DELETE_CHANNEL, (_event, meetingId: unknown) =>
+    libraryIpc.handle(AUDIO_DELETE_CHANNEL, (_event, meetingId: unknown) =>
       this.deleteFor(String(meetingId ?? ''))
     )
-    ipcMain.handle(AUDIO_CLEAR_ALL_CHANNEL, () => this.clearAll())
-    ipcMain.handle(AUDIO_USAGE_CHANNEL, () => this.usage())
+    libraryIpc.handle(AUDIO_CLEAR_ALL_CHANNEL, () => this.clearAll())
+    libraryIpc.handle(AUDIO_USAGE_CHANNEL, () => this.usage())
   }
 
   /** Validate a doodle-audio:// part URL; null unless it maps to a real file. */

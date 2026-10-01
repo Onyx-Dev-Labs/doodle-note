@@ -1,3 +1,4 @@
+import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EngineChannel, EngineEvent, TranscriptSegment } from '../shared/engine-events'
@@ -22,9 +23,13 @@ export class TranscriptSession {
   private error: string | undefined
   private captureId: string | undefined
 
+  private get sessionsDir(): string {
+    return resolveLibraryPath(this.sessionsDirSource)
+  }
+
   constructor(
     private readonly broadcast: (ev: EngineEvent) => void,
-    private readonly sessionsDir: string,
+    private readonly sessionsDirSource: LibraryPath,
     private readonly assertAvailable: () => void = () => {}
   ) {}
 

@@ -1,3 +1,4 @@
+import { libraryActivity } from './library-activity'
 import {
   app,
   dialog,
@@ -167,6 +168,7 @@ const recording = new RecordingStartCoordinator(
 )
 
 function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
+  if (libraryActivity.moving) return false
   if (event) {
     const resolved = calendarService?.resolveStart(event)
     if (!resolved) return false
@@ -230,6 +232,10 @@ function createWindow(): void {
 
   mainWindow = window
   window.on('close', (event) => {
+    if (libraryActivity.moving) {
+      event.preventDefault()
+      return
+    }
     // Keep the document renderer alive while it owns a recording.
     if (process.platform === 'darwin' && recording.busy && !quitting) {
       event.preventDefault()
@@ -286,7 +292,7 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
-  const libraryRoot = storage?.root ?? app.getPath('userData')
+  const libraryRoot = (): string => storage?.root ?? app.getPath('userData')
   // Block the main event loop at the recovery dialog rather than letting stores
   // mistake an unplugged volume for a new, empty library. Stop capture first.
   const assertLibrary = (): void => {
@@ -412,7 +418,7 @@ app.whenReady().then(async () => {
   // Saved meeting audio: session dirs for the engine's checkpoint recording,
   // playback serving, crash recovery, deletion. Local-only — never synced.
   const audioService = new AudioService(
-    join(libraryRoot, 'audio'),
+    () => join(libraryRoot(), 'audio'),
     resolveEngineBinary(),
     assertLibrary
   )
@@ -420,14 +426,16 @@ app.whenReady().then(async () => {
   audioService.registerProtocol()
   // Recover audio from sessions a crash cut short — after launch settles.
   setTimeout(() => {
-    void audioService.recoverOrphans().catch((err) => {
-      console.error('[audio] orphan recovery failed:', err)
-    })
+    void libraryActivity
+      .run(() => audioService.recoverOrphans())
+      .catch((err) => {
+        console.error('[audio] orphan recovery failed:', err)
+      })
   }, 10_000).unref()
 
   const session = new TranscriptSession(
     broadcastEngineEvent,
-    join(libraryRoot, 'sessions'),
+    () => join(libraryRoot(), 'sessions'),
     assertLibrary
   )
 
@@ -469,8 +477,15 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.on(ENGINE_START_CHANNEL, (event, request: EngineStartRequest) => {
-    if (event.sender !== mainWindow?.webContents || !recording.beginEngine(request.opts?.meetingId))
+    if (event.sender !== mainWindow?.webContents) return
+    if (libraryActivity.moving) {
+      broadcastEngineEvent({
+        event: 'spawn-error',
+        message: 'Wait for the library transfer to finish before recording.'
+      })
       return
+    }
+    if (!recording.beginEngine(request.opts?.meetingId)) return
     assertLibrary()
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
@@ -513,7 +528,7 @@ app.whenReady().then(async () => {
 
   // Meetings store first: NotesService reads it to gather cross-meeting
   // context for the Home-level "ask anything".
-  const meetingsService = new MeetingsService(join(libraryRoot, 'meetings'), assertLibrary)
+  const meetingsService = new MeetingsService(() => join(libraryRoot(), 'meetings'), assertLibrary)
   meetingsService.registerIpc()
 
   notesService = new NotesService(
@@ -559,7 +574,7 @@ app.whenReady().then(async () => {
   exportService.registerIpc()
 
   const foldersService = new FoldersService(
-    join(libraryRoot, 'folders.json'),
+    () => join(libraryRoot(), 'folders.json'),
     meetingsService,
     assertLibrary
   )
@@ -648,7 +663,11 @@ app.whenReady().then(async () => {
   // app state is written synchronously as it changes, and child processes
   // (transcription engine, micmon) exit on their own via stdin-close
   // watchdogs, so skipping native teardown loses nothing.
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    if (libraryActivity.moving) {
+      event.preventDefault()
+      return
+    }
     quitting = true
     recordingTray?.dispose()
     calendarService?.dispose()
@@ -678,7 +697,7 @@ app.whenReady().then(async () => {
 
   // Integrations: local MCP access remains off until enabled in Settings.
   const agentAccessService = new AgentAccessService(
-    join(libraryRoot, 'meetings'),
+    () => join(libraryRoot(), 'meetings'),
     resolveMcpServerSpec()
   )
   const previousLibrary = storage?.status().recoveryPath
@@ -703,10 +722,15 @@ app.whenReady().then(async () => {
   foldersService.onDidWrite = (change) => syncService.onFoldersChanged(change.deletedId)
 
   // Image attachments for the notes editor (doodle-media:// protocol).
-  const mediaService = new MediaService(join(libraryRoot, 'attachments'), assertLibrary)
+  const mediaService = new MediaService(() => join(libraryRoot(), 'attachments'), assertLibrary)
   mediaService.registerIpc()
   mediaService.registerProtocol()
-  if (storage) registerStorageIpc(storage, () => recording.busy || importService.isBusy)
+  if (storage)
+    registerStorageIpc(
+      storage,
+      () => recording.busy || importService.isBusy,
+      (previous) => agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
+    )
 
   // A fresh look at the app deserves fresh events (throttled inside).
   app.on('browser-window-focus', (_event, window) => calendarService?.onWindowFocus(window))

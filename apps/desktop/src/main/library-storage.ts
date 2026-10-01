@@ -16,7 +16,7 @@ import {
 import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, readdir, lstat, rm, statfs } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
-import type { StorageStatus } from '../shared/storage-api'
+import type { StorageProgress, StorageStatus } from '../shared/storage-api'
 
 /** Only user content moves. Auth, sync cursors, settings and models stay put. */
 export const LIBRARY_ENTRIES = [
@@ -86,7 +86,7 @@ async function manifest(root: string): Promise<FileEntry[]> {
   return result
 }
 
-/** Pure filesystem controller. finishPending runs before ANY library writers start. */
+/** Pure filesystem controller. callers hold an exclusive library-operation barrier during transfer. */
 export class LibraryStorage {
   private config: Config
   readonly configPath: string
@@ -177,7 +177,8 @@ export class LibraryStorage {
     return this.status()
   }
 
-  async finishPending(): Promise<void> {
+  async finishPending(progress: (value: StorageProgress) => void = () => {}): Promise<void> {
+    progress({ phase: 'verifying' })
     this.assertAvailable()
     const pending = this.config.pending
     if (!pending) return
@@ -235,6 +236,8 @@ export class LibraryStorage {
       }
       await mkdir(stage, { mode: 0o700 })
       atomicJson(join(stage, MARKER), { id: token })
+      let copied = 0
+      progress({ phase: 'copying', completedBytes: 0, totalBytes: bytes })
       for (const file of source) {
         const destination = join(stage, file.name)
         if (file.directory) await mkdir(destination, { recursive: true, mode: 0o700 })
@@ -253,7 +256,10 @@ export class LibraryStorage {
             closeSync(fd)
           }
         }
+        copied += file.size
+        progress({ phase: 'copying', completedBytes: copied, totalBytes: bytes })
       }
+      progress({ phase: 'verifying' })
       this.assertAvailable()
       if (
         JSON.stringify(source) !== JSON.stringify(await manifest(stage)) ||

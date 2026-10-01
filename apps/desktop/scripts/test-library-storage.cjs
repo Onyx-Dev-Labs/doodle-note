@@ -19,6 +19,15 @@ source = source.replace(
   'new EngineProcess(resolveEngineBinary())',
   'global.mockEngine(new EngineProcess(resolveEngineBinary()))'
 )
+assert.ok(source.includes('const libraryActivity = new LibraryActivity();'))
+source = source.replace(
+  'const libraryActivity = new LibraryActivity();',
+  'const libraryActivity = global.testLibraryActivity = new LibraryActivity();'
+)
+source = source.replace(
+  'const recording = new RecordingStartCoordinator(',
+  'const recording = global.testRecording = new RecordingStartCoordinator('
+)
 fs.writeFileSync(path.join(temp, 'source.cjs'), source)
 fs.writeFileSync(
   path.join(temp, 'main.cjs'),
@@ -108,25 +117,53 @@ async function launch() {
     await runtime.evaluate((_, selected) => {
       global.selection = { canceled: false, filePaths: [selected] }
     }, destination)
+    // Reproduce active capture without opening a microphone or starting the engine.
+    await runtime.evaluate(() => global.testRecording.beginEngine('busy-fixture'))
     await section.getByRole('button', { name: 'Choose folder…' }).click()
-    await expect(
-      section.getByText('Ready to transfer on next launch', { exact: true })
-    ).toBeVisible()
-    await section.getByRole('button', { name: 'Cancel change' }).click()
-    await expect(
-      section.getByText('Ready to transfer on next launch', { exact: true })
-    ).toHaveCount(0)
+    await expect(section.getByRole('alert')).toContainText('Finish recording or importing')
+    assert.equal((await page.evaluate(() => window.storage.status())).pendingPath, undefined)
+    await runtime.evaluate(() => global.testRecording.handle({ event: 'exit', code: 0 }))
+    // Hold an in-flight background operation; a late renderer save must wait.
+    await runtime.evaluate(() => {
+      global.testLibraryActivity.run(
+        () =>
+          new Promise((resolve) => {
+            global.releaseBackground = resolve
+          })
+      )
+    })
+    const originalPid = runtime.process().pid
     await section.getByRole('button', { name: 'Choose folder…' }).click()
-    await expect(
-      section.getByText('Ready to transfer on next launch', { exact: true })
-    ).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Moving library' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: 'Moving library' })).toBeVisible()
+    const captureError = await page.evaluate(
+      () => new Promise((resolve) => {
+        const remove = window.engine.onEvent((event) => {
+          if (event.event === 'spawn-error') { remove(); resolve(event.message) }
+        })
+        window.engine.start('live', undefined, { meetingId: 'blocked-capture' })
+      })
+    )
+    assert.match(captureError, /Wait for the library transfer/)
+    assert.equal(await runtime.evaluate(() => global.testRecording.busy), false)
+    await page.evaluate(() => {
+      window.queuedStorageSave = window.meetings.upsert({
+        id: 'queued-during-transfer',
+        title: 'Queued during transfer'
+      })
+    })
+    assert.equal(fs.existsSync(path.join(profile, 'meetings/queued-during-transfer.json')), false)
+    await page.screenshot({ path: path.join(evidence, 'storage-progress.png') })
+    await runtime.evaluate(() => global.releaseBackground())
+    let target = path.join(destination, 'DoodleNote Library')
+    await expect(section.getByText(target, { exact: true })).toBeVisible()
+    await page.evaluate(() => window.queuedStorageSave)
+    assert.ok(fs.existsSync(path.join(target, 'meetings/queued-during-transfer.json')))
+    assert.equal(fs.existsSync(path.join(profile, 'meetings/queued-during-transfer.json')), false)
+    assert.equal(runtime.process().pid, originalPid, 'same app process after transfer')
     await section.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: path.join(evidence, 'storage-pending.png') })
-    assert.equal(fs.existsSync(path.join(destination, 'DoodleNote Library')), false)
-    await runtime.close()
-    runtime = null
-    page = await launch()
-    const target = path.join(destination, 'DoodleNote Library')
+    await page.screenshot({ path: path.join(evidence, 'storage-live.png') })
     const status = await page.evaluate(() => window.storage.status())
     assert.equal(status.currentPath, target)
     assert.equal(status.pendingPath, undefined)
@@ -157,6 +194,29 @@ async function launch() {
     assert.equal((await page.evaluate(() => window.storage.status())).pendingPath, undefined)
     await storage.scrollIntoViewIfNeeded()
     await page.screenshot({ path: path.join(evidence, 'storage-transferred.png') })
+    const second = path.join(temp, 'Second drive')
+    fs.mkdirSync(second)
+    const link = path.join(target, 'attachments/unsafe-link.png')
+    fs.symlinkSync(path.join(target, 'attachments/fixture.png'), link)
+    await runtime.evaluate((_, selected) => {
+      global.selection = { canceled: false, filePaths: [selected] }
+    }, second)
+    await storage.getByRole('button', { name: 'Choose folder…' }).click()
+    await expect(storage.getByRole('alert')).toContainText('link or unsupported')
+    assert.equal((await page.evaluate(() => window.storage.status())).currentPath, target)
+    await storage.getByRole('button', { name: 'Cancel change' }).click()
+    assert.equal((await page.evaluate(() => window.storage.status())).pendingPath, undefined)
+    await storage.getByRole('button', { name: 'Choose folder…' }).click()
+    await expect(storage.getByRole('alert')).toContainText('link or unsupported')
+    fs.unlinkSync(link)
+    await storage.getByRole('button', { name: 'Retry transfer' }).click()
+    target = path.join(second, 'DoodleNote Library')
+    await expect
+      .poll(() => page.evaluate(() => window.storage.status()).then((status) => status.currentPath))
+      .toBe(target)
+    await expect(storage.getByText(target, { exact: true })).toBeVisible()
+    assert.equal(runtime.process().pid, originalPid)
+    assert.equal((await page.evaluate(() => window.storage.status())).pendingPath, undefined)
     await runtime.close()
     runtime = null
     page = await launch()
@@ -172,8 +232,11 @@ async function launch() {
         fixture: temp,
         checks: [
           'picker cancellation',
-          'pending change cancellation',
-          'restart transfer',
+          'active recording rejection and recording start blocked during transfer',
+          'progress dialog and background-operation drain',
+          'queued save uses new root',
+          'failed transfer cancellation and same-process retry',
+          'live transfer in same process',
           'notes/transcripts/folders/audio/attachments/chat retained',
           'new write routing',
           'source retained',
@@ -184,8 +247,19 @@ async function launch() {
         ]
       })
     )
+  } catch (error) {
+    console.error(error)
+    throw error
   } finally {
-    if (runtime) await runtime.close()
+    if (runtime) {
+      await runtime.evaluate(() => global.releaseBackground?.()).catch(() => {})
+      await runtime
+        .evaluate(async () => {
+          await global.testLibraryActivity?.run(() => {})
+        })
+        .catch(() => {})
+      await runtime.close()
+    }
   }
 })().catch((error) => {
   console.error(error)

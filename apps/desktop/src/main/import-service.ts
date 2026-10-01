@@ -1,7 +1,8 @@
+import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog } from 'electron'
 import type { MeetingFileStore } from '@repo/meetings-store'
 import type { TranscriptSegment } from '../shared/engine-events'
 import {
@@ -50,8 +51,8 @@ export class ImportService {
   ) {}
 
   registerIpc(): void {
-    ipcMain.handle(IMPORT_AUDIO_CHANNEL, () => this.importAudio())
-    ipcMain.handle(IMPORT_RETRANSCRIBE_CHANNEL, (_event, meetingId: unknown) =>
+    libraryIpc.handle(IMPORT_AUDIO_CHANNEL, () => this.importAudio())
+    libraryIpc.handle(IMPORT_RETRANSCRIBE_CHANNEL, (_event, meetingId: unknown) =>
       this.retranscribe(String(meetingId ?? ''))
     )
   }

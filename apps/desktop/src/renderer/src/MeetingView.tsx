@@ -1,3 +1,4 @@
+import { registerLibrarySave } from './lib/library-flush'
 import { generatedModelLabel } from './lib/generated-model-label'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
@@ -826,6 +827,25 @@ export default function MeetingView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (phase === 'ended') setTranscriptOpen(false)
   }, [phase])
+
+  useEffect(
+    () =>
+      registerLibrarySave(async () => {
+        if (!contentLoadedRef.current || discardingRef.current) return
+        if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
+        if (sessionSaveTimerRef.current !== null) clearTimeout(sessionSaveTimerRef.current)
+        saveTimerRef.current = null
+        sessionSaveTimerRef.current = null
+        await window.meetings.upsert({
+          id: meetingId,
+          title: titleValueRef.current,
+          rawNotesMarkdown: roughMarkdownRef.current,
+          segments: transcriptCheckpointRef.current.segments,
+          echoSuppressed: transcriptCheckpointRef.current.echoSuppressed
+        })
+      }),
+    [meetingId]
+  )
 
   // Flush pending note edits when leaving the view entirely.
   useEffect(() => {

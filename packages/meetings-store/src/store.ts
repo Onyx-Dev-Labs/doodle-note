@@ -40,9 +40,11 @@ export class MeetingFileStore {
   onDidWrite: ((change: { deletedId?: string }) => void) | null = null;
 
   constructor(
-    readonly dir: string,
+    private readonly directory: string | (() => string),
     private readonly assertAvailable: () => void = () => {},
   ) {}
+
+  get dir(): string { return typeof this.directory === "function" ? this.directory() : this.directory; }
 
   /* ---- queries ---- */
 

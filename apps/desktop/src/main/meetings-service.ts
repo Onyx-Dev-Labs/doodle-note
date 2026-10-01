@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { libraryIpc } from './library-ipc'
 import { MeetingFileStore } from '@repo/meetings-store'
 import type { MeetingUpsert } from '@repo/meetings-store'
 import {
@@ -19,13 +19,13 @@ import {
  */
 export class MeetingsService extends MeetingFileStore {
   registerIpc(): void {
-    ipcMain.handle(MEETINGS_LIST_CHANNEL, () => this.list())
-    ipcMain.handle(MEETINGS_GET_CHANNEL, (_event, id: unknown) => this.get(String(id)))
-    ipcMain.handle(MEETINGS_UPSERT_CHANNEL, (_event, patch: unknown) =>
+    libraryIpc.handle(MEETINGS_LIST_CHANNEL, () => this.list())
+    libraryIpc.handle(MEETINGS_GET_CHANNEL, (_event, id: unknown) => this.get(String(id)))
+    libraryIpc.handle(MEETINGS_UPSERT_CHANNEL, (_event, patch: unknown) =>
       this.upsert((patch ?? {}) as MeetingUpsert)
     )
-    ipcMain.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
-    ipcMain.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>
+    libraryIpc.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
+    libraryIpc.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>
       this.search(String(query ?? ''))
     )
   }

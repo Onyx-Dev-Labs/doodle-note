@@ -1,3 +1,5 @@
+import { libraryActivity } from './library-activity'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { cloudReaderClient } from './cloud-reader-client'
 import { remoteMcpEligibilityClient } from './remote-mcp-eligibility'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -61,17 +63,18 @@ export class SyncService {
   private debounceTimer: NodeJS.Timeout | null = null
   private linkAttempt: DeviceLinkAttempt | null = null
 
-  private readonly attachmentsDir: string
+  private get attachmentsDir(): string {
+    return join(resolveLibraryPath(this.libraryRoot), 'attachments')
+  }
 
   constructor(
     userDataDir: string,
     private readonly meetings: MeetingsService,
     private readonly folders: FoldersService,
     private readonly broadcast: (channel: string, payload: unknown) => void,
-    libraryRoot = userDataDir
+    private readonly libraryRoot: LibraryPath = userDataDir
   ) {
     this.configPath = join(userDataDir, 'sync.json')
-    this.attachmentsDir = join(libraryRoot, 'attachments')
     this.baseUrl = process.env.DOODLE_SYNC_URL || DEFAULT_BASE_URL
     this.config = this.readConfig()
   }
@@ -98,7 +101,7 @@ export class SyncService {
     )
     ipcMain.handle(SYNC_NOW_CHANNEL, () => this.syncNow())
     ipcMain.handle(SYNC_SHARE_CHANNEL, (_event, meetingId: unknown) =>
-      this.share(String(meetingId))
+      libraryActivity.run(() => this.share(String(meetingId)))
     )
 
     setInterval(() => {
@@ -114,8 +117,10 @@ export class SyncService {
 
   /** Push first (our edits win), then pull what other devices recorded. */
   private async syncCycle(): Promise<void> {
-    await this.pushAll()
-    await this.pullAll()
+    await libraryActivity.run(async () => {
+      await this.pushAll()
+      await this.pullAll()
+    })
   }
 
   /** FoldersService calls this after every write; deletes pass deletedId. */
@@ -131,7 +136,7 @@ export class SyncService {
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null
-      void this.pushAll()
+      void libraryActivity.run(() => this.pushAll())
     }, PUSH_DEBOUNCE_MS)
     this.debounceTimer.unref?.()
   }
@@ -147,7 +152,7 @@ export class SyncService {
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null
-      void this.pushAll()
+      void libraryActivity.run(() => this.pushAll())
     }, PUSH_DEBOUNCE_MS)
     this.debounceTimer.unref?.()
   }
@@ -241,7 +246,7 @@ export class SyncService {
   setEnabled(enabled: boolean): SyncStatus {
     this.config.enabled = enabled && Boolean(this.token())
     this.writeConfig()
-    if (this.config.enabled) void this.pushAll()
+    if (this.config.enabled) void libraryActivity.run(() => this.pushAll())
     this.emitStatus()
     return this.status()
   }
