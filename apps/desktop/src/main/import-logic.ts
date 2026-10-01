@@ -1,3 +1,4 @@
+import type { BatchTranscriptionSettings } from '../shared/batch-transcription'
 import { spawn } from 'node:child_process'
 import type { TranscriptSegment } from '../shared/engine-events'
 import type { EngineChannel, EngineTokenTiming } from '../shared/engine-events'
@@ -8,6 +9,7 @@ import { SegmentAssembler } from './segmenter'
 export interface BatchOptions {
   channels?: 'mixed' | 'split'
   signal?: AbortSignal
+  settings?: BatchTranscriptionSettings
 }
 
 /** Buffer batch tokens so acoustic echo comparison is independent of event order.
@@ -63,7 +65,15 @@ export function transcribeFileToSegments(
     try {
       child = spawn(
         enginePath,
-        ['transcribe', '--file', filePath, '--channels', options.channels ?? 'mixed'],
+        [
+          'transcribe',
+          '--file',
+          filePath,
+          '--channels',
+          options.channels ?? 'mixed',
+          '--model',
+          options.settings?.parakeetModel ?? 'v2'
+        ],
         {
           stdio: ['ignore', 'pipe', 'pipe']
         }

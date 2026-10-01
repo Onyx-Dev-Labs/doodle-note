@@ -35,7 +35,8 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
-    "engine:build": "swift build -c release --package-path engine"
+    "engine:build": "swift build -c release --package-path engine",
+    "whisper:build": "bash apps/desktop/scripts/build-whisper.sh"
   },
   "devDependencies": {
     "turbo": "^2.5.0"

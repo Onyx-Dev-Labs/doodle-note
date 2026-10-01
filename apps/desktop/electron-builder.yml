@@ -30,6 +30,12 @@ mac:
       filter: ["*.png"]
     - from: ../../engine/.build/release/engine
       to: engine/engine
+    - from: ../../engine/.build/whisper/whisper-cli
+      to: engine/whisper-cli
+    - from: ../../engine/.build/whisper/whisper-LICENSE.txt
+      to: engine/whisper-LICENSE.txt
+    - from: resources/whisper-model-LICENSE.txt
+      to: engine/whisper-model-LICENSE.txt
     # Keep the opaque artwork under a new bundle resource name. macOS can
     # retain an app icon across in-place auto-updates when CFBundleIconFile
     # keeps pointing at icon.icns, even though the file contents changed.
