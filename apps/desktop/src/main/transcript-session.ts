@@ -146,7 +146,8 @@ export class TranscriptSession {
     this.phase = 'ended'
     this.partials = {}
     this.persistCheckpoint(true)
-    const error = this.error ?? exitError
+    this.error ??= exitError
+    const error = this.error
     if (this.segments.length === 0) {
       this.broadcast({
         event: 'capture-finalized',
@@ -183,6 +184,7 @@ export class TranscriptSession {
       })
     } catch (err) {
       const message = `Failed to save session: ${String(err)}`
+      this.error = message
       this.broadcast({ event: 'error', message })
       this.broadcast({
         event: 'capture-finalized',

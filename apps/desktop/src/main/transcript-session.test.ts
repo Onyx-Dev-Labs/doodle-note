@@ -68,8 +68,10 @@ test('abnormal exit preserves available transcript but does not report successfu
   try {
     const session = new TranscriptSession((event) => events.push(event), dir)
     session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
+    session.bindMeeting('failed-capture')
     session.handle({ event: 'exit', code: 1, signal: null })
     assert.match((events.at(-1) as { error: string }).error, /before finalization/)
+    assert.match(session.snapshot('failed-capture')?.error ?? '', /before finalization/)
     session.handle({ event: 'done' })
     assert.equal(events.length, 1)
   } finally {
@@ -93,6 +95,8 @@ test('a session persistence failure produces an explicit failed completion after
     session.handle({ event: 'done' })
     assert.ok(events.some((event) => event.event === 'segments'))
     assert.match((events.at(-1) as { error: string }).error, /Failed to save session/)
+    session.bindMeeting('failed-save')
+    assert.match(session.snapshot('failed-save')?.error ?? '', /Failed to save session/)
     assert.equal(
       events.some((event) => event.event === 'session-saved'),
       false
