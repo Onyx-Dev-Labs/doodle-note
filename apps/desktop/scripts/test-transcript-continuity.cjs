@@ -19,7 +19,7 @@ async function main() {
   await build({
     stdin: {
       contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
-        import MeetingView from './MeetingView'; import './assets/main.css';
+        import MeetingView from './MeetingView'; import './assets/main.css'; import {flushLibrarySaves} from './lib/library-flush'; window.qaFlushLibrary=flushLibrarySaves;
         createRoot(document.getElementById('root')).render(<MeetingView meetingId="qa" visible={true}
           autoRecord={false} isNewDraft={false} onAutoRecordStarted={()=>{}} onDraftSettled={()=>{}}
           onDiscardDraft={async()=>{}} onBack={()=>{}} onOpenSettings={()=>{}}/>);`,
@@ -60,7 +60,10 @@ async function main() {
       }
       window.notes = {onAskToken:noEvent,onEnhanceProgress:noEvent,models:async()=>({models:[],ramGB:16}),getSettings:async()=>({engineChoice:'local'}),templates:async()=>[]}
       window.audio = {list:async()=>window.qa.parts,read:async()=>null}
-      window.importer = {retranscribe:async()=>{meeting.segments=[{id:'batch-replacement',channel:'mic',speaker:'You',text:'Only the rebuilt transcript remains.',startMs:0,endMs:1000,confidence:1}];return {id:'qa'}}}
+      const progressListeners=new Set()
+      window.importer = {onProgress:cb=>{progressListeners.add(cb);return()=>progressListeners.delete(cb)},retranscribe:async()=>{meeting.segments=[{id:'batch-replacement',channel:'mic',speaker:'You',text:'Only the rebuilt transcript remains.',startMs:0,endMs:1000,confidence:1}];return {id:'qa'}}}
+      window.qa.completeBackground=(meetingId='qa',stage='completed')=>{meeting.segments=[{id:'retry-result',channel:'mic',speaker:'You',text:'Background retry replaced the transcript.',startMs:0,endMs:1000,confidence:1}];progressListeners.forEach(cb=>cb({meetingId,stage}))}
+
       window.folders = {list:async()=>[]}
       window.detect = {getState:async()=>({platform:'darwin'}),onMeetingEnded:noEvent}
     })
@@ -89,16 +92,27 @@ async function main() {
     await page.getByTitle('Resume recording',{exact:true}).waitFor()
     await page.getByRole('button',{name:'Show transcript',exact:true}).click()
     assert.equal(await page.getByText('Recovered from main checkpoint.',{exact:true}).count(),1)
-    assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>s.segments?.some(x=>x.id==='hidden2'))),true)
+    assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>'segments' in s || 'echoSuppressed' in s)),false)
     await page.evaluate(()=>{window.qa.parts=[{url:'synthetic-recording',startEpochMs:1000,durationMs:1000}];window.qa.send({event:'audio'})})
     page.once('dialog',dialog=>dialog.accept())
     await page.getByRole('button',{name:'Re-transcribe',exact:true}).click()
     await page.getByText('Only the rebuilt transcript remains.',{exact:true}).waitFor()
     assert.equal(await page.getByText('Synthetic hidden capture survives.',{exact:true}).count(),0)
     assert.equal(await page.getByText('Recovered from main checkpoint.',{exact:true}).count(),0)
+    await page.evaluate(()=>window.qa.completeBackground('different-meeting'))
+    await settle()
+    assert.equal(await page.getByText('Only the rebuilt transcript remains.',{exact:true}).count(),1)
+    await page.evaluate(()=>window.qa.completeBackground('qa','failed'))
+    await settle()
+    assert.equal(await page.getByText('Only the rebuilt transcript remains.',{exact:true}).count(),1)
+    await page.evaluate(()=>window.qa.completeBackground())
+    await page.getByText('Background retry replaced the transcript.',{exact:true}).waitFor()
+    assert.equal(await page.getByText('Only the rebuilt transcript remains.',{exact:true}).count(),0)
+    await page.evaluate(()=>window.qaFlushLibrary())
+    assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>'segments' in s || 'echoSuppressed' in s)),false)
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
-    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, terminal persistence and Resume')
+    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush and Resume')
   } finally { await browser.close(); server.close() }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
