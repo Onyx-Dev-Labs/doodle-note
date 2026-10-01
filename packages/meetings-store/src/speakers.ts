@@ -18,7 +18,7 @@ import type {
   MeetingChannel,
   MeetingParticipant,
   ParticipantSource,
-  TranscriptSegment,
+  MeetingTranscriptSegment,
 } from "./types";
 
 /** The DoodleNote user — always the mic channel. */
@@ -32,17 +32,17 @@ export const DEFAULT_FAR_LABEL = "Them";
 /** Matches the cloud `speaker` column cap in apps/web sync push. */
 export const MAX_SPEAKER_NAME_LENGTH = 40;
 
-export function defaultSpeakerId(channel: MeetingChannel): string {
-  return channel === "mic" ? SELF_SPEAKER_ID : FAR_SPEAKER_ID;
+export function defaultSpeakerId(channel: MeetingChannel | "text"): string {
+  return channel === "text" ? "text-unknown" : channel === "mic" ? SELF_SPEAKER_ID : FAR_SPEAKER_ID;
 }
 
-export function defaultSpeakerLabel(channel: MeetingChannel): string {
-  return channel === "mic" ? DEFAULT_SELF_LABEL : DEFAULT_FAR_LABEL;
+export function defaultSpeakerLabel(channel: MeetingChannel | "text"): string {
+  return channel === "text" ? "Speaker" : channel === "mic" ? DEFAULT_SELF_LABEL : DEFAULT_FAR_LABEL;
 }
 
 /** Segments recorded before speaker ids fall back to their channel default. */
 export function speakerIdOf(
-  segment: Pick<TranscriptSegment, "channel" | "speakerId">,
+  segment: Pick<MeetingTranscriptSegment, "channel" | "speakerId">,
 ): string {
   const id = segment.speakerId?.trim();
   return id !== undefined && id.length > 0
@@ -70,7 +70,7 @@ export function findParticipant(
 
 /** The label a segment should display: participant name, else its own label. */
 export function speakerLabel(
-  segment: Pick<TranscriptSegment, "channel" | "speaker" | "speakerId">,
+  segment: Pick<MeetingTranscriptSegment, "channel" | "speaker" | "speakerId">,
   participants?: readonly MeetingParticipant[],
 ): string {
   const named = findParticipant(participants, speakerIdOf(segment));
@@ -82,7 +82,7 @@ export function speakerLabel(
 }
 
 /** Every segment with its label resolved — what readers/exporters render. */
-export function labelSegments<T extends TranscriptSegment>(
+export function labelSegments<T extends MeetingTranscriptSegment>(
   segments: readonly T[],
   participants?: readonly MeetingParticipant[],
 ): T[] {
@@ -109,7 +109,7 @@ export function upsertParticipant(
  * participant and relabels every segment that shares the speaker id. An
  * empty name clears the assignment and restores the channel defaults.
  */
-export function renameSpeaker<T extends TranscriptSegment>(
+export function renameSpeaker<T extends MeetingTranscriptSegment>(
   input: {
     segments: readonly T[];
     participants?: readonly MeetingParticipant[];
@@ -207,7 +207,7 @@ export function normalizeParticipants(raw: unknown): MeetingParticipant[] {
  * decisions and action items to the right person.
  */
 export function speakerInfos(
-  segments: readonly TranscriptSegment[],
+  segments: readonly MeetingTranscriptSegment[],
   participants?: readonly MeetingParticipant[],
 ): { label: string; isSelf: boolean }[] {
   const byLabel = new Map<string, { label: string; isSelf: boolean }>();
@@ -223,7 +223,7 @@ export function speakerInfos(
 
 /** Distinct speakers in a transcript, in first-spoken order. */
 export function speakerIdsIn(
-  segments: readonly Pick<TranscriptSegment, "channel" | "speakerId">[],
+  segments: readonly Pick<MeetingTranscriptSegment, "channel" | "speakerId">[],
 ): string[] {
   const ids: string[] = [];
   for (const segment of segments) {

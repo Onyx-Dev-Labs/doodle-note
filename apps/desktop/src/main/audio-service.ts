@@ -1,3 +1,5 @@
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
 import { spawn } from 'node:child_process'
 import {
   copyFileSync,
@@ -10,7 +12,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
-import { ipcMain, protocol } from 'electron'
+import { protocol } from 'electron'
 import {
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
@@ -23,6 +25,7 @@ import {
 } from '../shared/audio-api'
 import type { EngineAudioEvent } from '../shared/engine-events'
 import { isWinCheckpointDir, mergeWinSession } from './win-audio-recorder'
+import { batchChannelsForPart } from './import-channels'
 import { AUDIO_FILES, importedPlaybackFilename, playbackMime } from './import-media'
 
 export { IMPORTABLE_EXTENSIONS } from './import-media'
@@ -56,20 +59,25 @@ export class AudioService {
   /** Session dir handed to the engine for the active capture, if any. */
   private activeSessionDir: string | null = null
 
+  private get baseDir(): string {
+    return resolveLibraryPath(this.baseDirSource)
+  }
+
   constructor(
-    private readonly baseDir: string,
-    private readonly engineBinary: string
+    private readonly baseDirSource: LibraryPath,
+    private readonly engineBinary: string,
+    private readonly assertAvailable: () => void = () => {}
   ) {}
 
   registerIpc(): void {
-    ipcMain.handle(AUDIO_LIST_CHANNEL, (_event, meetingId: unknown) =>
+    libraryIpc.handle(AUDIO_LIST_CHANNEL, (_event, meetingId: unknown) =>
       this.list(String(meetingId ?? ''))
     )
     // Playback bytes travel over IPC, not the protocol: Chromium's media
     // loader through protocol.handle failed three different ways (resumed
     // loads corrupted, tail requests for moov-at-end files, CORS on fetch).
     // A structured-clone copy of a local file is fast and boring.
-    ipcMain.handle(AUDIO_READ_CHANNEL, (_event, url: unknown): AudioFileData | null => {
+    libraryIpc.handle(AUDIO_READ_CHANNEL, (_event, url: unknown): AudioFileData | null => {
       const resolved = this.resolvePartUrl(String(url ?? ''))
       if (!resolved) return null
       try {
@@ -78,15 +86,16 @@ export class AudioService {
         return null
       }
     })
-    ipcMain.handle(AUDIO_DELETE_CHANNEL, (_event, meetingId: unknown) =>
+    libraryIpc.handle(AUDIO_DELETE_CHANNEL, (_event, meetingId: unknown) =>
       this.deleteFor(String(meetingId ?? ''))
     )
-    ipcMain.handle(AUDIO_CLEAR_ALL_CHANNEL, () => this.clearAll())
-    ipcMain.handle(AUDIO_USAGE_CHANNEL, () => this.usage())
+    libraryIpc.handle(AUDIO_CLEAR_ALL_CHANNEL, () => this.clearAll())
+    libraryIpc.handle(AUDIO_USAGE_CHANNEL, () => this.usage())
   }
 
   /** Validate a doodle-audio:// part URL; null unless it maps to a real file. */
   private resolvePartUrl(raw: string): { path: string; mime: string } | null {
+    this.assertAvailable()
     let url: URL
     try {
       url = new URL(raw)
@@ -112,6 +121,7 @@ export class AudioService {
   /** Call after app ready (protocol.handle requires it). */
   registerProtocol(): void {
     protocol.handle('doodle-audio', (request) => {
+      this.assertAvailable()
       const respond = (response: Response): Response => {
         if (process.env.DOODLE_AUDIO_DEBUG) {
           console.log(
@@ -168,6 +178,7 @@ export class AudioService {
    * engine creates it (and its checkpoints/) on first write.
    */
   beginSession(meetingId: string): string | null {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return null
     const dir = join(this.baseDir, meetingId, String(Date.now()))
     this.activeSessionDir = dir
@@ -179,6 +190,7 @@ export class AudioService {
    * next to the file so list() can report timing without probing the audio.
    */
   onAudioSaved(event: EngineAudioEvent): void {
+    this.assertAvailable()
     const dir = this.activeSessionDir
     this.activeSessionDir = null
     if (!dir || audioFileIn(dir) === null) return
@@ -186,6 +198,7 @@ export class AudioService {
   }
 
   list(meetingId: string): AudioPart[] {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return []
     const meetingDir = join(this.baseDir, meetingId)
     let sessions: string[]
@@ -230,6 +243,7 @@ export class AudioService {
    * false when the extension isn't importable.
    */
   addImportedPart(meetingId: string, sourcePath: string, durationMs: number): boolean {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return false
     const filename = importedPlaybackFilename(sourcePath)
     if (filename === null) return false
@@ -238,7 +252,7 @@ export class AudioService {
     try {
       mkdirSync(dir, { recursive: true })
       copyFileSync(sourcePath, join(dir, filename))
-      this.writePartMeta(dir, epoch, durationMs)
+      this.writePartMeta(dir, epoch, durationMs, 'mixed')
       return true
     } catch (err) {
       console.error('[audio] failed to store imported audio:', err)
@@ -248,27 +262,33 @@ export class AudioService {
   }
 
   /** Parts with filesystem paths — for re-transcription, not the renderer. */
-  listPaths(meetingId: string): Array<{ path: string; startEpochMs: number }> {
+  listPaths(
+    meetingId: string
+  ): Array<{ path: string; startEpochMs: number; channels: 'mixed' | 'split' }> {
     return this.list(meetingId).map((part) => {
       const url = new URL(part.url)
       const [, session, file] = url.pathname.split('/')
       return {
         path: join(this.baseDir, url.host, session as string, file as string),
-        startEpochMs: part.startEpochMs
+        startEpochMs: part.startEpochMs,
+        channels: batchChannelsForPart(join(this.baseDir, url.host, session as string))
       }
     })
   }
 
   deleteFor(meetingId: string): void {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return
     rmSync(join(this.baseDir, meetingId), { recursive: true, force: true })
   }
 
   clearAll(): void {
+    this.assertAvailable()
     rmSync(this.baseDir, { recursive: true, force: true })
   }
 
   usage(): AudioUsage {
+    this.assertAvailable()
     let totalBytes = 0
     let meetingCount = 0
     let meetings: string[]
@@ -302,6 +322,7 @@ export class AudioService {
    * for the next launch to retry.
    */
   async recoverOrphans(): Promise<void> {
+    this.assertAvailable()
     const orphans: string[] = []
     let meetings: string[]
     try {
@@ -412,12 +433,18 @@ export class AudioService {
     })
   }
 
-  private writePartMeta(dir: string, startEpochMs: number, durationMs: number): void {
+  private writePartMeta(
+    dir: string,
+    startEpochMs: number,
+    durationMs: number,
+    channels: 'mixed' | 'split' = 'split'
+  ): void {
     try {
       mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, 'part.json'), JSON.stringify({ startEpochMs, durationMs }))
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ startEpochMs, durationMs, channels }))
     } catch (err) {
       console.error('[audio] failed to write part metadata:', err)
+      if (channels === 'mixed') throw err
     }
   }
 }

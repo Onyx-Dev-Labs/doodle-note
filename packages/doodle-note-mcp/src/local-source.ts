@@ -1,3 +1,5 @@
+import { accessSync, constants } from "node:fs";
+import { dirname } from "node:path";
 import type {
   AgentMeetingNotes,
   AgentMeetingSummary,
@@ -19,10 +21,18 @@ import type { MeetingRecord } from "@repo/meetings-store";
  * way the app's display layer filters them.
  */
 export class LocalMeetingSource implements MeetingSource {
-  private readonly store: MeetingFileStore;
+  constructor(private readonly meetingsDir: string | (() => string)) {}
 
-  constructor(meetingsDir: string) {
-    this.store = new MeetingFileStore(meetingsDir);
+  private get store(): MeetingFileStore {
+    const dir =
+      typeof this.meetingsDir === "function"
+        ? this.meetingsDir()
+        : this.meetingsDir;
+    // Reload consent/path for each request. A running client must not continue
+    // serving a stale recovery copy after the desktop library moves.
+    return new MeetingFileStore(dir, () =>
+      accessSync(dirname(dir), constants.R_OK),
+    );
   }
 
   async listRecent(limit: number): Promise<AgentMeetingSummary[]> {

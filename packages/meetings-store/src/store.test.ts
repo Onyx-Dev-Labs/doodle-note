@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -183,6 +183,65 @@ test("onDidWrite fires with deletedId on trash and delete", () => {
     store.upsert({ id: "m1", trashedAt: new Date().toISOString() });
     store.delete("m1");
     assert.deepEqual(events, [{}, { deletedId: "m1" }, { deletedId: "m1" }]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unavailable library guard rejects reads and writes instead of treating it as empty", () => {
+  const { dir, cleanup } = tempStore();
+  let available = true;
+  const store = new MeetingFileStore(dir, () => {
+    if (!available) throw new Error("disconnected");
+  });
+  try {
+    store.upsert({ id: "retained", title: "Retain me" });
+    available = false;
+    assert.throws(() => store.list(), /disconnected/);
+    assert.throws(() => store.get("retained"), /disconnected/);
+    assert.throws(() => store.upsert({ id: "new-note" }), /disconnected/);
+    assert.throws(() => store.delete("retained"), /disconnected/);
+    available = true;
+    assert.equal(store.get("retained")?.title, "Retain me");
+    assert.equal(store.get("new-note"), null);
+  } finally {
+    cleanup();
+  }
+});
+
+
+test("failed atomic replacement leaves no partial meeting or temporary file", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    mkdirSync(join(dir, "blocked.json"));
+    assert.throws(() => store.upsert({ id: "blocked", title: "Cannot commit" }));
+    assert.equal(store.get("blocked"), null);
+    assert.deepEqual(readdirSync(dir), ["blocked.json"]);
+  } finally { cleanup(); }
+});
+
+test("batch provenance and a neutral imported speaker survive reopening", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    const batchTranscription = {
+      backend: "whisper" as const,
+      parakeetModel: "v2" as const,
+      language: "da",
+    };
+    store.upsert({
+      id: "batch-test",
+      batchTranscription,
+      segments: [
+        {
+          ...segment("Et møde"),
+          speaker: "Speaker",
+          speakerId: "imported-speaker",
+        },
+      ],
+    });
+    const reopened = new MeetingFileStore(dir).get("batch-test");
+    assert.deepEqual(reopened?.batchTranscription, batchTranscription);
+    assert.equal(reopened?.segments[0]?.speaker, "Speaker");
   } finally {
     cleanup();
   }

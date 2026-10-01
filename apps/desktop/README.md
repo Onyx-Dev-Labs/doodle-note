@@ -186,3 +186,83 @@ It is not proof of actual meeting-app handoff or recorded audio. Forced renderer
 reload returns to Home, so the fixture stops its retained capture through engine
 IPC after proving the join retry survives without another capture start; full
 editor/session restoration is not added by this feature.
+
+## Choose a Mac library location
+
+In **Settings → General → Library storage**, choose a folder. DoodleNote creates
+**DoodleNote Library** there, finishes pending saves, copies and verifies your
+files, and immediately uses the new location. The app stays open. A progress
+dialog pauses editing during the transfer. Finish active recording or importing
+before changing the location; background library operations drain before copying,
+and later operations queue until the transfer succeeds or fails. If existing
+work does not finish within 30 seconds, the transfer does not start.
+
+Recordings, meeting JSON (notes/transcripts), pasted attachments, folders, Home
+chat and session recovery move together. AI models, sign-ins, cloud/calendar
+configuration, app preferences and caches remain in application support. **Open
+in Finder** opens the active library. Audio lives in
+`audio/<meetingId>/<sessionEpochMs>/`; meeting documents in `meetings/<meetingId>.json`.
+Copy files out if needed. Manually moving managed files can break references.
+
+The original files remain as a recovery copy. This copy uses additional disk
+space and is not updated after the switch. Existing libraries are never
+merged or overwritten. A failed transfer leaves the original active and offers
+**Retry transfer** or **Cancel change** in Settings. The app does not need to
+restart to retry. An interrupted transfer can also recover on the next launch.
+Hidden `.doodlenote-transfer-*` folders may remain after failures; these are
+transaction staging, not active libraries. Retry only removes its own verified
+staging folder. Force-quitting or disconnecting a drive can interrupt a transfer.
+Normal quit/window-close is blocked while the transfer holds the library lock.
+
+Keep external drives connected. A missing/replaced active root stops capture and
+blocks library operations with Retry/Quit, without silently creating an empty
+replacement. Recording interrupted by a disconnect may be incomplete. Restore a
+corrupt `library-location.json`; do not delete it as a troubleshooting shortcut.
+
+The initial location is Electron's actual user-data profile, usually
+`~/Library/Application Support/DoodleNote` for the installed Mac app. Development
+uses `desktop` or `DOODLE_USER_DATA`. Existing agent consent follows the new path
+without being enabled automatically; restart older MCP clients after updating
+the app to load the new server. Development profiles do not redirect another
+profile's agent configuration. Windows/mobile storage UI is unchanged.
+
+Do not downgrade to a build without library-location support after transferring:
+it would open the stale original snapshot. Any rollback must preserve the latest
+active library. Packaging, signing, updater behavior and physical-drive/recording
+acceptance remain separate release gates.
+
+After `pnpm --filter desktop build`, run the synthetic Mac UI check from the root:
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/test \
+  node apps/desktop/scripts/test-library-storage.cjs
+```
+
+The test isolates a temporary profile, intercepts the native picker/Finder and
+stubs capture. It checks same-process transfer, recording-busy rejection,
+progress, background drain, queued writes, failure/cancel/retry, new-write paths,
+retained content, agent consent and restart persistence. It prints screenshot
+and fixture locations. This does not prove native picker/Finder, real capture,
+physical-drive reliability or signed installed-app acceptance.
+
+Human QA with disposable data: choose a folder and confirm the path updates
+without restarting; play a retained recording, inspect notes/transcripts and
+attachments, then record/import new content. Check its files use the new folder.
+Reject an occupied/unwritable destination and retry after restoring access.
+Disconnect/reconnect a test external drive and verify the same library resumes.
+
+## Importing a text transcript
+
+Choose **New → Import transcript (.txt)** on Mac or Windows. Preview the content,
+then confirm to create a new local meeting document. Cancel creates nothing.
+Supported files are UTF-8 plain text (optional BOM), up to 2 MB and 10,000 speaker
+sections. CRLF/CR line endings are normalized. Standalone `[Speaker N]` headers
+identify repeat speakers; other labels remain literal text. Unlabeled text uses
+“Speaker” rather than guessing “You” or “Them”.
+
+Text imports contain no audio, timestamps or transcription confidence. Search,
+notes generation, Ask, speaker renaming and Markdown/PDF export remain available.
+Create a new meeting to record audio. These transcripts are explicitly local-only:
+the existing cloud schema requires audio timing, so sync and share links exclude
+them without affecting ordinary recorded meetings. Export to share their content.
+They move with the rest of the library when its folder changes.

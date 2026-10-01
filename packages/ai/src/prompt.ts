@@ -75,7 +75,9 @@ function formatTimestamp(ms: number): string {
 
 /** `[m:ss] Speaker: text`, one line per segment — shared by merge + ask prompts. */
 export function formatTranscript(segments: MergeSegment[]): string {
-  return segments.map((s) => `[${formatTimestamp(s.startMs)}] ${s.speaker}: ${s.text}`).join('\n')
+  return segments
+    .map((s) => `${s.startMs === undefined ? '' : `[${formatTimestamp(s.startMs)}] `}${s.speaker}: ${s.text}`)
+    .join('\n')
 }
 
 /**

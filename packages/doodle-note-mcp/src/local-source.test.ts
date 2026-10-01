@@ -148,3 +148,44 @@ test("has_transcript is false when the only segments are echo", async () => {
     cleanup();
   }
 });
+
+test("a running agent follows library path changes and rechecks revoked access", async () => {
+  const first = mkdtempSync(join(tmpdir(), "doodle-mcp-first-"));
+  const second = mkdtempSync(join(tmpdir(), "doodle-mcp-second-"));
+  let current = first;
+  let enabled = true;
+  const source = new LocalMeetingSource(() => {
+    if (!enabled) throw new Error("disabled");
+    return current;
+  });
+  try {
+    new MeetingFileStore(first).upsert({ id: "old-note", title: "Old copy" });
+    new MeetingFileStore(second).upsert({
+      id: "new-note",
+      title: "Current library",
+    });
+    assert.equal((await source.listRecent(10))[0]?.title, "Old copy");
+    current = second;
+    assert.equal((await source.listRecent(10))[0]?.title, "Current library");
+    assert.equal(await source.getMeeting("old-note"), null);
+    enabled = false;
+    await assert.rejects(source.listRecent(10), /disabled/);
+  } finally {
+    rmSync(first, { recursive: true, force: true });
+    rmSync(second, { recursive: true, force: true });
+  }
+});
+
+test("text imports expose their text without fabricated timestamps", async () => {
+  const { source, store, cleanup } = fixture();
+  try {
+    store.upsert({ id: "text-only", title: "Imported transcript", segments: [
+      { id: "text-1", source: "text", channel: "text", speaker: "Speaker 2", speakerId: "text-speaker-2", text: "Synthetic notes for the garden." }
+    ] });
+    const transcript = await source.getTranscript("text-only");
+    assert.equal(transcript?.text, "Speaker 2: Synthetic notes for the garden.");
+    assert.equal(transcript?.segments[0]?.start_ms, undefined);
+    assert.equal(transcript?.segments[0]?.end_ms, undefined);
+    assert.equal(transcript?.duration_min, undefined);
+  } finally { cleanup(); }
+});

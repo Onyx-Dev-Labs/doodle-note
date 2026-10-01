@@ -1,3 +1,9 @@
+import {
+  normalizeBatchSettings,
+  WHISPER_LANGUAGES,
+  type BatchTranscriptionSettings
+} from '../../shared/batch-transcription'
+import { StorageSettings } from './StorageSettings'
 import CloudModelPicker from './CloudModelPicker'
 import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -556,6 +562,14 @@ export default function ModelsView({
     setSettings(view)
   }
 
+  const chooseBatch = async (update: Partial<BatchTranscriptionSettings>): Promise<void> => {
+    const view = await window.notes.setSettings({
+      batchTranscription: { ...normalizeBatchSettings(settings?.batchTranscription), ...update }
+    })
+    setSettings(view)
+    if (view.error) setError(view.error)
+  }
+
   const saveCloudKey = async (): Promise<void> => {
     setError(null)
     const view = await window.notes.setSettings({
@@ -998,6 +1012,67 @@ export default function ModelsView({
                 </div>
               </section>
 
+              {detect?.platform === 'darwin' && (
+                <section className="keys-section">
+                  <h3>Recording transcription</h3>
+                  <p className="models-sub">
+                    Choose the local engine for imported audio and Re-transcribe. Live captions keep
+                    using Parakeet.
+                  </p>
+                  <label className="models-sub">
+                    Batch engine
+                    <select
+                      aria-label="Batch transcription engine"
+                      value={settings?.batchTranscription?.backend ?? 'parakeet'}
+                      onChange={(event) =>
+                        void chooseBatch({ backend: event.target.value as 'parakeet' | 'whisper' })
+                      }
+                    >
+                      <option value="parakeet">Parakeet (default)</option>
+                      <option value="whisper">Whisper large-v3-turbo</option>
+                    </select>
+                  </label>
+                  {(settings?.batchTranscription?.backend ?? 'parakeet') === 'parakeet' ? (
+                    <label className="models-sub">
+                      Parakeet language
+                      <select
+                        aria-label="Parakeet batch language"
+                        value={settings?.batchTranscription?.parakeetModel ?? 'v2'}
+                        onChange={(event) =>
+                          void chooseBatch({ parakeetModel: event.target.value as 'v2' | 'v3' })
+                        }
+                      >
+                        <option value="v2">English</option>
+                        <option value="v3">Multilingual</option>
+                      </select>
+                    </label>
+                  ) : (
+                    <>
+                      <p className="models-sub">
+                        Your first Whisper import downloads a verified 1.62 GB model from Hugging
+                        Face. You can cancel or retry from import progress. Once downloaded, it
+                        works offline. Audio stays on this Mac. Models stay in application support
+                        when you move the library.
+                      </p>
+                      <label className="models-sub">
+                        Recording language
+                        <select
+                          aria-label="Whisper recording language"
+                          value={settings?.batchTranscription?.language ?? 'auto'}
+                          onChange={(event) => void chooseBatch({ language: event.target.value })}
+                        >
+                          {WHISPER_LANGUAGES.map(([code, label]) => (
+                            <option key={code} value={code}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  )}
+                </section>
+              )}
+
               <section className="keys-section">
                 <h3>Appearance</h3>
                 <div className="theme-seg" role="radiogroup" aria-label="Appearance">
@@ -1167,6 +1242,7 @@ export default function ModelsView({
                 )}
               </section>
 
+              {detect?.platform === 'darwin' && <StorageSettings />}
               <section className="keys-section">
                 <h3>Meeting recordings</h3>
                 <p className="models-sub">

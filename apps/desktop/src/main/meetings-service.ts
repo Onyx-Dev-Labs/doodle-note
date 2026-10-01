@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { rendererMeetingPatch } from './meeting-write-ownership'
+import { libraryIpc } from './library-ipc'
 import { MeetingFileStore } from '@repo/meetings-store'
 import type { MeetingUpsert } from '@repo/meetings-store'
 import {
@@ -12,20 +13,23 @@ import {
 /**
  * The Electron face of the meetings store: IPC registration on top of the
  * shared MeetingFileStore (one JSON document per meeting under
- * userData/meetings/). The renderer drives all writes (debounced upserts of
- * the active meeting); the store validates, merges and persists. All store
+ * the selected library's meetings directory). Main capture/import services own
+ * transcripts; renderer upserts edit notes and metadata. All store
  * logic lives in @repo/meetings-store so the standalone MCP server reads
  * the exact same data the app writes.
  */
 export class MeetingsService extends MeetingFileStore {
+  rendererUpsert(patch: MeetingUpsert): ReturnType<MeetingFileStore['upsert']> {
+    return this.upsert(rendererMeetingPatch(patch))
+  }
   registerIpc(): void {
-    ipcMain.handle(MEETINGS_LIST_CHANNEL, () => this.list())
-    ipcMain.handle(MEETINGS_GET_CHANNEL, (_event, id: unknown) => this.get(String(id)))
-    ipcMain.handle(MEETINGS_UPSERT_CHANNEL, (_event, patch: unknown) =>
-      this.upsert((patch ?? {}) as MeetingUpsert)
+    libraryIpc.handle(MEETINGS_LIST_CHANNEL, () => this.list())
+    libraryIpc.handle(MEETINGS_GET_CHANNEL, (_event, id: unknown) => this.get(String(id)))
+    libraryIpc.handle(MEETINGS_UPSERT_CHANNEL, (_event, patch: unknown) =>
+      this.rendererUpsert((patch ?? {}) as MeetingUpsert)
     )
-    ipcMain.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
-    ipcMain.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>
+    libraryIpc.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
+    libraryIpc.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>
       this.search(String(query ?? ''))
     )
   }

@@ -1,5 +1,4 @@
-/* =====================================================================
-   DoodleNote — light, warm, Mac-native product theme.
+/* ==============================================================   DoodleNote — light, warm, Mac-native product theme.
    The old dark developer palette survives only inside .dev-dark below.
    ===================================================================== */
 
@@ -2204,6 +2203,12 @@ button.fp-row:hover {
   z-index: 30;
 }
 
+/* Keep Home feedback below its draggable title bar so dismissal receives clicks. */
+.home > .toast {
+  top: 60px;
+  -webkit-app-region: no-drag;
+}
+
 .toast button {
   color: var(--muted);
   font-size: 12px;
@@ -2814,8 +2819,7 @@ button.fp-row:hover {
   transform: translateX(15px);
 }
 
-/* =====================================================================
-   Dev console — the old dark developer palette, scoped to .dev-dark so
+/* ==============================================================   Dev console — the old dark developer palette, scoped to .dev-dark so
    it can never leak into the product surfaces.
    ===================================================================== */
 
@@ -4177,3 +4181,182 @@ button.fp-row:hover {
 
 .remote-mcp .calendar-note { color: var(--ink); }
 .remote-mcp .calendar-actions { flex-wrap: wrap; }
+
+
+.import-progress-panel {
+  position: fixed;
+  z-index: 150;
+  right: 24px;
+  bottom: 24px;
+  width: min(390px, calc(100vw - 48px));
+  padding: 16px;
+  border: 1px solid var(--border, #deddd2);
+  border-radius: 14px;
+  background: var(--surface, #fffef9);
+  color: var(--text, #282b24);
+  box-shadow: 0 8px 30px #0002;
+  font-size: 13px;
+}
+.import-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.import-progress-panel p {
+  margin: 8px 0;
+  line-height: 1.45;
+}
+.import-progress-label {
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.import-progress-panel progress {
+  width: 100%;
+  accent-color: #789668;
+}
+.import-progress-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.import-progress-panel button {
+  cursor: pointer;
+  border: 1px solid #d8d8cb;
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 5px 9px;
+}
+.import-progress-panel button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.import-progress-panel button:focus-visible {
+  outline: 2px solid #789668;
+  outline-offset: 2px;
+}
+
+/* Docked transcript: both panes remain in flow above the recorder controls. */
+.meeting-split {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+.meeting-split > .editor-scroll {
+  min-width: 0;
+  width: 100%;
+}
+.meeting-split.is-open {
+  display: grid;
+  grid-template-rows: minmax(0, var(--notes-share)) 12px minmax(0, 1fr);
+  padding: 0 16px;
+  margin-bottom: 94px;
+}
+.meeting-split.is-open > .editor-scroll {
+  grid-row: 1;
+  padding-bottom: 16px;
+}
+.meeting-split.is-open > .transcript-panel {
+  grid-row: 3;
+  position: relative;
+  inset: auto;
+  transform: none;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  box-shadow: none;
+  z-index: auto;
+}
+.meeting-split.is-open .editor-col {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.meeting-split.is-wide.is-open {
+  grid-template-columns: minmax(0, var(--notes-share)) 12px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.meeting-split.is-wide.is-open > .editor-scroll {
+  grid-column: 1;
+  grid-row: 1;
+}
+.meeting-split.is-wide.is-open > .transcript-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+.transcript-divider {
+  grid-row: 2;
+  cursor: row-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  outline-offset: -2px;
+}
+.transcript-divider span {
+  width: 32px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--border);
+}
+.transcript-divider:hover,
+.transcript-divider:focus-visible {
+  background: color-mix(in srgb, var(--accent-deep) 14%, transparent);
+}
+.transcript-divider:focus-visible {
+  outline: 2px solid var(--accent-deep);
+}
+.is-wide > .transcript-divider {
+  grid-column: 2;
+  grid-row: 1;
+  cursor: col-resize;
+}
+.is-wide > .transcript-divider span {
+  width: 3px;
+  height: 32px;
+}
+.meeting-split .tp-head,
+.meeting-split .tp-audio {
+  flex-wrap: wrap;
+}
+.meeting-split .tp-actions {
+  flex-wrap: wrap;
+}
+.meeting-split .tp-audio audio {
+  min-width: 150px;
+}
+.meeting-split .tp-audio-part {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.meeting-split .tp-audio-part select {
+  max-width: 130px;
+  color: var(--ink);
+  background: var(--card);
+}
+.text-import-dialog {
+  color: var(--body);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  width: min(680px, 90vw);
+  max-height: 85vh;
+  box-shadow: var(--shadow-panel);
+}
+.text-import-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.text-import-dialog h2 { margin-top: 0; color: var(--ink); }
+.text-import-local { font-size: 12px; color: var(--muted); margin: 12px 20px; }
+.text-import-dialog .text-import-local { margin: 12px 0; }
+.text-import-preview { max-height: 40vh; overflow: auto; padding: 16px; background: var(--card-soft); border: 1px solid var(--border); border-radius: 8px; user-select: text; }
+.text-import-preview p, .tp-imported > .tp-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.text-import-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.text-import-actions button { padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--sage-fill); color: var(--ink); }
+.text-import-actions button:disabled { opacity: .6; cursor: default; }
+
+.tp-imported { grid-template-columns: 76px minmax(0, 1fr); }

@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     console.error(err instanceof ConfigError ? err.message : String(err));
     process.exit(1);
   }
-  const source = new LocalMeetingSource(config.meetingsDir);
+  const source = new LocalMeetingSource(() => loadConfig().meetingsDir);
   const server = createServer(source, VERSION);
   await server.connect(new StdioServerTransport());
   console.error(

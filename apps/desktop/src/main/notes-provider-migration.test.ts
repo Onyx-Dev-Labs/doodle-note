@@ -1,3 +1,6 @@
+import * as batchTranscription from '../shared/batch-transcription'
+import { LibraryActivity } from './library-activity'
+import * as libraryPath from './library-path'
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import * as fs from 'node:fs'
@@ -16,6 +19,7 @@ import * as autoNotes from '../shared/auto-notes'
 test('retired settings survive reload, block requests, and never migrate keys to new providers', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dn-provider-test-'))
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const activity = new LibraryActivity()
   let decryptions = 0
   const exports: Record<string, new (...args: unknown[]) => { registerIpc(): void }> = {}
   const deps: Record<string, unknown> = {
@@ -33,6 +37,13 @@ test('retired settings survive reload, block requests, and never migrate keys to
         }
       }
     },
+    './library-path': libraryPath,
+    './library-ipc': {
+      libraryIpc: {
+        handle: (key: string, fn: (...args: unknown[]) => unknown) =>
+          handlers.set(key, (...args) => activity.run(() => fn(...args)))
+      }
+    },
     './cloud-models': { fetchCloudModels },
     'node:fs': fs,
     'node:path': path,
@@ -45,6 +56,7 @@ test('retired settings survive reload, block requests, and never migrate keys to
     },
     '@repo/meetings-store': { sanitizeSpeakerName: (value: string) => value.trim() },
     '../shared/notes-api': api,
+    '../shared/batch-transcription': batchTranscription,
     '../shared/auto-notes': autoNotes,
     '../shared/meeting-recovery': recovery,
     './model-paths': { modelSearchDirectories: () => [] }
@@ -79,19 +91,21 @@ test('retired settings survive reload, block requests, and never migrate keys to
       writeFileSync(settingsPath, original)
       const service = new exports.NotesService!(dir, () => {}, { list: () => [] })
       service.registerIpc()
-      const get = (): api.NotesSettingsView =>
-        handlers.get(api.NOTES_GET_SETTINGS_CHANNEL)!(null) as api.NotesSettingsView
-      const set = (cloud: api.NotesSettingsUpdate['cloud']): api.NotesSettingsView =>
-        handlers.get(api.NOTES_SET_SETTINGS_CHANNEL)!(null, { cloud }) as api.NotesSettingsView
-      assert.equal(get().cloud?.provider, retired)
+      const get = (): Promise<api.NotesSettingsView> =>
+        handlers.get(api.NOTES_GET_SETTINGS_CHANNEL)!(null) as Promise<api.NotesSettingsView>
+      const set = (cloud: api.NotesSettingsUpdate['cloud']): Promise<api.NotesSettingsView> =>
+        handlers.get(api.NOTES_SET_SETTINGS_CHANNEL)!(null, {
+          cloud
+        }) as Promise<api.NotesSettingsView>
+      assert.equal((await get()).cloud?.provider, retired)
       assert.equal(readFileSync(settingsPath, 'utf8'), original)
       const engine = service as unknown as { pickEngine(): Promise<unknown> }
       await assert.rejects(engine.pickEngine(), /retired/)
       assert.equal(decryptions, 0)
-      const missingKey = set({ provider: 'grok', dataPolicyConfirmed: true })
+      const missingKey = await set({ provider: 'grok', dataPolicyConfirmed: true })
       assert.match(missingKey.error ?? '', /Enter an API key/)
       assert.equal(missingKey.cloud?.provider, retired)
-      const saved = set({
+      const saved = await set({
         provider: 'gemini',
         apiKey: 'new-fixture-key',
         dataPolicyConfirmed: true
@@ -100,11 +114,19 @@ test('retired settings survive reload, block requests, and never migrate keys to
       assert.equal(saved.cloud?.dataPolicyConfirmed, true)
       const reloaded = new exports.NotesService!(dir, () => {}, { list: () => [] })
       reloaded.registerIpc()
-      assert.equal(get().cloud?.dataPolicyConfirmed, true)
-      assert.equal(get().profileName, 'Fixture Owner')
-      const unconfirmed = set({ provider: 'gemini', apiKey: 'another-fixture-key' })
+      assert.equal((await get()).cloud?.dataPolicyConfirmed, true)
+      assert.equal((await get()).profileName, 'Fixture Owner')
+      const unconfirmed = await set({ provider: 'gemini', apiKey: 'another-fixture-key' })
       assert.equal(unconfirmed.cloud?.dataPolicyConfirmed, false)
       assert.equal(readFileSync(notePath, 'utf8'), 'unchanged meeting fixture')
+      await handlers.get(api.NOTES_SET_SETTINGS_CHANNEL)!(null, {
+        batchTranscription: { backend: 'whisper', parakeetModel: 'v3', language: 'da' }
+      })
+      const withBatch = new exports.NotesService!(dir, () => {}, { list: () => [] })
+      withBatch.registerIpc()
+      assert.equal((await get()).batchTranscription?.backend, 'whisper')
+      assert.equal((await get()).batchTranscription?.language, 'da')
+      assert.equal((await get()).batchTranscription?.parakeetModel, 'v3')
     }
   } finally {
     rmSync(dir, { recursive: true, force: true })

@@ -1,5 +1,11 @@
+import {
+  normalizeBatchSettings,
+  type BatchTranscriptionSettings
+} from '../shared/batch-transcription'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
 import { fetchCloudModels } from './cloud-models'
-import { app, ipcMain, safeStorage } from 'electron'
+import { app, safeStorage } from 'electron'
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -79,6 +85,7 @@ interface StoredCloudSettings {
 }
 
 interface StoredSettings {
+  batchTranscription?: BatchTranscriptionSettings
   autoGenerateNotesAfterStop?: boolean
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
@@ -98,7 +105,9 @@ export type NotesBroadcast = (channel: string, payload: unknown) => void
  */
 export class NotesService {
   private readonly settingsPath: string
-  private readonly globalChatPath: string
+  private get globalChatPath(): string {
+    return join(resolveLibraryPath(this.libraryRoot), 'global-chat.json')
+  }
   private readonly modelStore: LocalModelStore
   private settings: StoredSettings
   private localEngine: LocalNotesEngine | null = null
@@ -112,10 +121,11 @@ export class NotesService {
     userDataDir: string,
     private readonly broadcast: NotesBroadcast,
     /** Read-only view of the meetings store, for cross-meeting context. */
-    private readonly meetings: MeetingsService
+    private readonly meetings: MeetingsService,
+    private readonly libraryRoot: LibraryPath = userDataDir,
+    private readonly assertAvailable: () => void = () => {}
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
-    this.globalChatPath = join(userDataDir, 'global-chat.json')
     this.modelStore = new LocalModelStore(
       modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR)
     )
@@ -123,7 +133,7 @@ export class NotesService {
   }
 
   registerIpc(): void {
-    ipcMain.handle(
+    libraryIpc.handle(
       NOTES_CLOUD_MODELS_CHANNEL,
       async (_event, provider: unknown): Promise<CloudModelsResult> => {
         const cloud = this.settings.cloud
@@ -135,29 +145,29 @@ export class NotesService {
         return fetchCloudModels(cloud.provider, key ?? '')
       }
     )
-    ipcMain.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
-    ipcMain.handle(NOTES_ACTIVATE_MODEL_CHANNEL, (_event, modelId: unknown) =>
+    libraryIpc.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
+    libraryIpc.handle(NOTES_ACTIVATE_MODEL_CHANNEL, (_event, modelId: unknown) =>
       this.activateModel(String(modelId))
     )
-    ipcMain.handle(NOTES_GET_SETTINGS_CHANNEL, () => this.settingsView())
-    ipcMain.handle(NOTES_SET_SETTINGS_CHANNEL, (_event, update: unknown) =>
+    libraryIpc.handle(NOTES_GET_SETTINGS_CHANNEL, () => this.settingsView())
+    libraryIpc.handle(NOTES_SET_SETTINGS_CHANNEL, (_event, update: unknown) =>
       this.applySettings((update ?? {}) as NotesSettingsUpdate)
     )
-    ipcMain.handle(NOTES_TEMPLATES_CHANNEL, async () => {
+    libraryIpc.handle(NOTES_TEMPLATES_CHANNEL, async () => {
       const { NOTE_TEMPLATES } = await import('@repo/ai')
       return NOTE_TEMPLATES.map((t) => ({ id: t.id, label: t.label, description: t.description }))
     })
-    ipcMain.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
+    libraryIpc.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
       this.enhance((request ?? {}) as EnhanceRequest)
     )
-    ipcMain.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
+    libraryIpc.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
       this.ask((request ?? {}) as AskRequest)
     )
-    ipcMain.handle(NOTES_ASK_GLOBAL_CHANNEL, (_event, request: unknown) =>
+    libraryIpc.handle(NOTES_ASK_GLOBAL_CHANNEL, (_event, request: unknown) =>
       this.askGlobal((request ?? {}) as GlobalAskRequest)
     )
-    ipcMain.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () => this.loadGlobalChat())
-    ipcMain.handle(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL, () => {
+    libraryIpc.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () => this.loadGlobalChat())
+    libraryIpc.handle(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL, () => {
       this.saveGlobalChat([])
     })
   }
@@ -297,7 +307,11 @@ export class NotesService {
           typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
         speakers: speakerInfos(kept, request.participants),
-        ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
+        ...(kept.some((s) => s.endMs !== undefined)
+          ? {
+              durationMs: Math.max(...kept.flatMap((s) => (s.endMs === undefined ? [] : [s.endMs])))
+            }
+          : {}),
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
       const engine = await this.pickEngine(request.automaticAfterStop === true)
@@ -447,6 +461,7 @@ export class NotesService {
   /* ---- global chat persistence (userData/global-chat.json) ---- */
 
   private loadGlobalChat(): GlobalChatEntry[] {
+    this.assertAvailable()
     try {
       const raw = JSON.parse(readFileSync(this.globalChatPath, 'utf8'))
       return Array.isArray(raw) ? raw.filter(isGlobalChatEntry) : []
@@ -456,6 +471,7 @@ export class NotesService {
   }
 
   private saveGlobalChat(entries: GlobalChatEntry[]): void {
+    this.assertAvailable()
     try {
       writeFileSync(this.globalChatPath, JSON.stringify(entries, null, 2))
     } catch (err) {
@@ -506,10 +522,15 @@ export class NotesService {
 
   /* ---- settings ---- */
 
+  batchTranscriptionSettings(): BatchTranscriptionSettings {
+    return normalizeBatchSettings(this.settings.batchTranscription)
+  }
+
   private settingsView(): NotesSettingsView {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
+      batchTranscription: this.batchTranscriptionSettings(),
       autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(
         this.settings.autoGenerateNotesAfterStop
       ),
@@ -532,6 +553,8 @@ export class NotesService {
   private applySettings(update: NotesSettingsUpdate): NotesSettingsView {
     let error: string | undefined
     const previousSettings = { ...this.settings }
+    if (update.batchTranscription)
+      this.settings.batchTranscription = normalizeBatchSettings(update.batchTranscription)
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
@@ -603,6 +626,14 @@ export class NotesService {
     try {
       const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as Partial<StoredSettings>
       const settings: StoredSettings = {
+        batchTranscription: normalizeBatchSettings(
+          raw.batchTranscription ?? {
+            parakeetModel:
+              (raw as { transcriptionLanguage?: string }).transcriptionLanguage === 'multilingual'
+                ? 'v3'
+                : 'v2'
+          }
+        ),
         autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(raw.autoGenerateNotesAfterStop),
         engineChoice: raw.engineChoice === 'cloud' ? 'cloud' : 'local'
       }

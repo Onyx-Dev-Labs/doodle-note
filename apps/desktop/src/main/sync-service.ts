@@ -1,3 +1,5 @@
+import { libraryActivity } from './library-activity'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { cloudReaderClient } from './cloud-reader-client'
 import { remoteMcpEligibilityClient } from './remote-mcp-eligibility'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -22,7 +24,13 @@ import {
 import type { FolderRecord } from '../shared/folders-api'
 import type { FoldersService } from './folders-service'
 import type { MeetingsService } from './meetings-service'
-import { contentHash, mediaRefs, rewriteMedia, syncableSegments } from './sync-content-hash'
+import {
+  contentHash,
+  mediaRefs,
+  rewriteMedia,
+  syncableSegments,
+  supportsCloudSync
+} from './sync-content-hash'
 import { DeviceLinkAttempt } from './device-link-attempt'
 import { EMPTY_SYNC_CONFIG, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
 import {
@@ -61,16 +69,18 @@ export class SyncService {
   private debounceTimer: NodeJS.Timeout | null = null
   private linkAttempt: DeviceLinkAttempt | null = null
 
-  private readonly attachmentsDir: string
+  private get attachmentsDir(): string {
+    return join(resolveLibraryPath(this.libraryRoot), 'attachments')
+  }
 
   constructor(
     userDataDir: string,
     private readonly meetings: MeetingsService,
     private readonly folders: FoldersService,
-    private readonly broadcast: (channel: string, payload: unknown) => void
+    private readonly broadcast: (channel: string, payload: unknown) => void,
+    private readonly libraryRoot: LibraryPath = userDataDir
   ) {
     this.configPath = join(userDataDir, 'sync.json')
-    this.attachmentsDir = join(userDataDir, 'attachments')
     this.baseUrl = process.env.DOODLE_SYNC_URL || DEFAULT_BASE_URL
     this.config = this.readConfig()
   }
@@ -97,7 +107,7 @@ export class SyncService {
     )
     ipcMain.handle(SYNC_NOW_CHANNEL, () => this.syncNow())
     ipcMain.handle(SYNC_SHARE_CHANNEL, (_event, meetingId: unknown) =>
-      this.share(String(meetingId))
+      libraryActivity.run(() => this.share(String(meetingId)))
     )
 
     setInterval(() => {
@@ -113,8 +123,10 @@ export class SyncService {
 
   /** Push first (our edits win), then pull what other devices recorded. */
   private async syncCycle(): Promise<void> {
-    await this.pushAll()
-    await this.pullAll()
+    await libraryActivity.run(async () => {
+      await this.pushAll()
+      await this.pullAll()
+    })
   }
 
   /** FoldersService calls this after every write; deletes pass deletedId. */
@@ -130,7 +142,7 @@ export class SyncService {
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null
-      void this.pushAll()
+      void libraryActivity.run(() => this.pushAll())
     }, PUSH_DEBOUNCE_MS)
     this.debounceTimer.unref?.()
   }
@@ -146,7 +158,7 @@ export class SyncService {
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null
-      void this.pushAll()
+      void libraryActivity.run(() => this.pushAll())
     }, PUSH_DEBOUNCE_MS)
     this.debounceTimer.unref?.()
   }
@@ -240,7 +252,7 @@ export class SyncService {
   setEnabled(enabled: boolean): SyncStatus {
     this.config.enabled = enabled && Boolean(this.token())
     this.writeConfig()
-    if (this.config.enabled) void this.pushAll()
+    if (this.config.enabled) void libraryActivity.run(() => this.pushAll())
     this.emitStatus()
     return this.status()
   }
@@ -250,10 +262,14 @@ export class SyncService {
    * then mint or fetch its public share link.
    */
   async share(meetingId: string): Promise<ShareResult> {
-    const token = this.token()
-    if (!token) return { error: 'Connect cloud sync in Settings first' }
     const record = this.meetings.readAll().find((r) => r.id === meetingId && !r.trashedAt)
     if (!record) return { error: 'Meeting not found' }
+    if (!supportsCloudSync(record))
+      return {
+        error: 'Imported text transcripts stay on this computer. Export this note to share it.'
+      }
+    const token = this.token()
+    if (!token) return { error: 'Connect cloud sync in Settings first' }
 
     try {
       await this.uploadReferencedMedia(record, token)
@@ -296,7 +312,7 @@ export class SyncService {
   private pendingMeetings(): MeetingRecord[] {
     return this.meetings
       .readAll()
-      .filter((record) => !record.trashedAt)
+      .filter((record) => !record.trashedAt && supportsCloudSync(record))
       .filter(
         (record) => this.config.pushed[record.id] !== contentHash(record, this.config.mediaUrls)
       )

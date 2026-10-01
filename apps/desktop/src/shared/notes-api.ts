@@ -1,3 +1,4 @@
+import type { BatchTranscriptionSettings } from './batch-transcription'
 /**
  * Shared notes/AI IPC contract, used by main + preload + renderer.
  *
@@ -7,7 +8,7 @@
  * web tsconfig never touch node-only code.
  */
 
-import type { TranscriptSegment } from './engine-events'
+import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
 import type { MeetingParticipant } from '@repo/meetings-store/types'
 
 export const NOTES_CLOUD_MODELS_CHANNEL = 'notes:cloud-models'
@@ -82,6 +83,7 @@ export interface ActivateModelResult {
 
 /** Settings as exposed to the renderer — the API key never crosses IPC. */
 export interface NotesSettingsView {
+  batchTranscription?: BatchTranscriptionSettings
   engineChoice: EngineChoice
   /** Missing stored values default on; applies to manual and detected stops. */
   autoGenerateNotesAfterStop?: boolean
@@ -100,6 +102,7 @@ export interface NotesSettingsView {
 
 /** Partial update; omitted fields are left untouched. */
 export interface NotesSettingsUpdate {
+  batchTranscription?: BatchTranscriptionSettings
   engineChoice?: EngineChoice
   autoGenerateNotesAfterStop?: boolean
   /** The user's own name; empty string clears it back to "You". */
