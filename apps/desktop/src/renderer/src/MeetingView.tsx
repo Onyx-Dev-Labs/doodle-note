@@ -1,5 +1,5 @@
 import { TranscriptSplit } from './TranscriptSplit'
-import { mergeTranscriptSegments } from './lib/transcript-segments'
+import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
 import { registerLibrarySave } from './lib/library-flush'
 import { generatedModelLabel } from './lib/generated-model-label'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -601,7 +601,7 @@ export default function MeetingView({
           generationRef.current.startCapture(ev.captureId)
           const prev = stateRef.current
           if (prev.segments.length > 0) {
-            setSavedSegments((s) => [...s, ...prev.segments])
+            setSavedSegments((s) => reconcileTranscriptSegments(s, prev.segments))
           }
           if (prev.echoCount > 0) setSavedEcho((n) => n + prev.echoCount)
           recordStartRef.current = null
