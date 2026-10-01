@@ -125,7 +125,7 @@ async function main() {
     await page.getByTitle('Resume recording',{exact:true}).waitFor()
     await page.getByRole('button',{name:'Show transcript',exact:true}).click()
     assert.equal(await page.getByText('Recovered from main checkpoint.',{exact:true}).count(),1)
-    assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>s.segments?.some(x=>x.id==='hidden2'))),true)
+    assert.equal(await page.evaluate(()=>window.qa.saves.some(s=>'segments' in s || 'echoSuppressed' in s)),false)
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     await page.evaluate(()=>{window.qa.parts=[{url:'synthetic-part-1',startEpochMs:1000,durationMs:1000},{url:'synthetic-part-2',startEpochMs:2000,durationMs:1000}];window.qa.send({event:'audio'})})
     await page.getByRole('combobox',{name:'Recording part'}).selectOption('1')
