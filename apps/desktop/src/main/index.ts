@@ -521,6 +521,13 @@ app.whenReady().then(async () => {
       })
       return
     }
+    if (request.opts?.meetingId && importService.isWorkingOn(request.opts.meetingId)) {
+      broadcastEngineEvent({
+        event: 'spawn-error',
+        message: 'Wait for re-transcription to finish or cancel it before resuming this recording.'
+      })
+      return
+    }
     if (
       !beginRecordableMeeting(
         request.command === 'live' && request.opts?.meetingId
@@ -531,6 +538,7 @@ app.whenReady().then(async () => {
       )
     )
       return
+
     assertLibrary()
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
@@ -625,6 +633,9 @@ app.whenReady().then(async () => {
         parakeetModel: 'v2',
         language: 'auto'
       }
+  )
+  importService.setCaptureGuard(
+    (meetingId) => recording.busy && recording.snapshot().meetingId === meetingId
   )
   importService.registerIpc()
   new TextImportService(meetingsService).registerIpc()
