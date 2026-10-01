@@ -112,10 +112,12 @@ export class NotesService {
     userDataDir: string,
     private readonly broadcast: NotesBroadcast,
     /** Read-only view of the meetings store, for cross-meeting context. */
-    private readonly meetings: MeetingsService
+    private readonly meetings: MeetingsService,
+    libraryRoot = userDataDir,
+    private readonly assertAvailable: () => void = () => {}
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
-    this.globalChatPath = join(userDataDir, 'global-chat.json')
+    this.globalChatPath = join(libraryRoot, 'global-chat.json')
     this.modelStore = new LocalModelStore(
       modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR)
     )
@@ -447,6 +449,7 @@ export class NotesService {
   /* ---- global chat persistence (userData/global-chat.json) ---- */
 
   private loadGlobalChat(): GlobalChatEntry[] {
+    this.assertAvailable()
     try {
       const raw = JSON.parse(readFileSync(this.globalChatPath, 'utf8'))
       return Array.isArray(raw) ? raw.filter(isGlobalChatEntry) : []
@@ -456,6 +459,7 @@ export class NotesService {
   }
 
   private saveGlobalChat(entries: GlobalChatEntry[]): void {
+    this.assertAvailable()
     try {
       writeFileSync(this.globalChatPath, JSON.stringify(entries, null, 2))
     } catch (err) {

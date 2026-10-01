@@ -23,7 +23,10 @@ const SAFE_NAME = /^[a-z0-9-]+\.[a-z0-9]+$/
  * file:// would be blocked, and in the packaged app alike).
  */
 export class MediaService {
-  constructor(private readonly dir: string) {}
+  constructor(
+    private readonly dir: string,
+    private readonly assertAvailable: () => void = () => {}
+  ) {}
 
   registerIpc(): void {
     ipcMain.handle(MEDIA_SAVE_CHANNEL, (_event, request: unknown) =>
@@ -34,6 +37,7 @@ export class MediaService {
   /** Call after app ready (protocol.handle requires it). */
   registerProtocol(): void {
     protocol.handle('doodle-media', (request) => {
+      this.assertAvailable()
       // doodle-media://<uuid>.<ext> — the name parses as the URL host.
       const name = new URL(request.url).host
       if (!SAFE_NAME.test(name)) return new Response('bad name', { status: 400 })
@@ -42,6 +46,7 @@ export class MediaService {
   }
 
   private save(request: Partial<MediaSaveRequest>): MediaSaveResult {
+    this.assertAvailable()
     const mime = typeof request.mime === 'string' ? request.mime : ''
     const ext = MEDIA_ACCEPTED_MIME[mime]
     if (!ext) return { error: `Unsupported image type: ${mime || 'unknown'}` }

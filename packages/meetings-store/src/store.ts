@@ -39,7 +39,10 @@ export class MeetingFileStore {
    */
   onDidWrite: ((change: { deletedId?: string }) => void) | null = null;
 
-  constructor(readonly dir: string) {}
+  constructor(
+    readonly dir: string,
+    private readonly assertAvailable: () => void = () => {},
+  ) {}
 
   /* ---- queries ---- */
 
@@ -120,6 +123,7 @@ export class MeetingFileStore {
   /* ---- writes ---- */
 
   upsert(patch: MeetingUpsert): MeetingRecord {
+    this.assertAvailable();
     const id = typeof patch.id === "string" ? patch.id : "";
     if (!SAFE_ID.test(id)) {
       throw new Error(`Invalid meeting id: ${JSON.stringify(patch.id)}`);
@@ -136,6 +140,7 @@ export class MeetingFileStore {
   }
 
   delete(id: string): void {
+    this.assertAvailable();
     if (!SAFE_ID.test(id)) return;
     rmSync(join(this.dir, `${id}.json`), { force: true });
     this.onDidWrite?.({ deletedId: id });
@@ -144,6 +149,7 @@ export class MeetingFileStore {
   /* ---- disk ---- */
 
   private listFiles(): string[] {
+    this.assertAvailable();
     try {
       return readdirSync(this.dir).filter((f) => f.endsWith(".json"));
     } catch {
@@ -152,6 +158,7 @@ export class MeetingFileStore {
   }
 
   private readFile(name: string): MeetingRecord | null {
+    this.assertAvailable();
     try {
       const raw = JSON.parse(
         readFileSync(join(this.dir, name), "utf8"),

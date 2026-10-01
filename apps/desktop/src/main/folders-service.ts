@@ -24,7 +24,8 @@ export class FoldersService {
 
   constructor(
     private readonly file: string,
-    private readonly meetings: MeetingsService
+    private readonly meetings: MeetingsService,
+    private readonly assertAvailable: () => void = () => {}
   ) {}
 
   registerIpc(): void {
@@ -37,6 +38,7 @@ export class FoldersService {
   }
 
   list(): FolderRecord[] {
+    this.assertAvailable()
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8'))
       return Array.isArray(raw) ? raw.filter(isFolderRecord) : []
@@ -96,6 +98,7 @@ export class FoldersService {
   }
 
   private save(folders: FolderRecord[]): void {
+    this.assertAvailable()
     writeFileSync(this.file, JSON.stringify(folders, null, 2))
   }
 }

@@ -187,3 +187,24 @@ test("onDidWrite fires with deletedId on trash and delete", () => {
     cleanup();
   }
 });
+
+test("unavailable library guard rejects reads and writes instead of treating it as empty", () => {
+  const { dir, cleanup } = tempStore();
+  let available = true;
+  const store = new MeetingFileStore(dir, () => {
+    if (!available) throw new Error("disconnected");
+  });
+  try {
+    store.upsert({ id: "retained", title: "Retain me" });
+    available = false;
+    assert.throws(() => store.list(), /disconnected/);
+    assert.throws(() => store.get("retained"), /disconnected/);
+    assert.throws(() => store.upsert({ id: "new-note" }), /disconnected/);
+    assert.throws(() => store.delete("retained"), /disconnected/);
+    available = true;
+    assert.equal(store.get("retained")?.title, "Retain me");
+    assert.equal(store.get("new-note"), null);
+  } finally {
+    cleanup();
+  }
+});

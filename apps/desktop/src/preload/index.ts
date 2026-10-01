@@ -1,4 +1,11 @@
 import {
+  STORAGE_STATUS_CHANNEL,
+  STORAGE_CHOOSE_CHANNEL,
+  STORAGE_CANCEL_CHANNEL,
+  STORAGE_OPEN_CHANNEL,
+  type StorageApi
+} from '../shared/storage-api'
+import {
   RECORDING_JOIN_RETRY_CHANNEL,
   RECORDING_JOIN_DISMISS_CHANNEL,
   RECORDING_REQUEST_CHANNEL,
@@ -636,6 +643,12 @@ const audioApi: AudioApi = {
 
 if (process.contextIsolated) {
   try {
+    contextBridge.exposeInMainWorld('storage', {
+      status: () => ipcRenderer.invoke(STORAGE_STATUS_CHANNEL),
+      choose: () => ipcRenderer.invoke(STORAGE_CHOOSE_CHANNEL),
+      cancel: () => ipcRenderer.invoke(STORAGE_CANCEL_CHANNEL),
+      open: () => ipcRenderer.invoke(STORAGE_OPEN_CHANNEL)
+    } satisfies StorageApi)
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)

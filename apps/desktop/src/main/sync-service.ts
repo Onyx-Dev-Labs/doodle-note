@@ -67,10 +67,11 @@ export class SyncService {
     userDataDir: string,
     private readonly meetings: MeetingsService,
     private readonly folders: FoldersService,
-    private readonly broadcast: (channel: string, payload: unknown) => void
+    private readonly broadcast: (channel: string, payload: unknown) => void,
+    libraryRoot = userDataDir
   ) {
     this.configPath = join(userDataDir, 'sync.json')
-    this.attachmentsDir = join(userDataDir, 'attachments')
+    this.attachmentsDir = join(libraryRoot, 'attachments')
     this.baseUrl = process.env.DOODLE_SYNC_URL || DEFAULT_BASE_URL
     this.config = this.readConfig()
   }

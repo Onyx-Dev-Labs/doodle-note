@@ -24,7 +24,8 @@ export class TranscriptSession {
 
   constructor(
     private readonly broadcast: (ev: EngineEvent) => void,
-    private readonly sessionsDir: string
+    private readonly sessionsDir: string,
+    private readonly assertAvailable: () => void = () => {}
   ) {}
 
   handle(ev: EngineEvent): void {
@@ -99,6 +100,7 @@ export class TranscriptSession {
     }
 
     try {
+      this.assertAvailable()
       mkdirSync(this.sessionsDir, { recursive: true })
       const stamp = (this.startedAtIso ?? new Date().toISOString()).replace(/[:.]/g, '-')
       const path = join(this.sessionsDir, `session-${stamp}.json`)

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -89,6 +90,32 @@ export class AgentAccessService {
   ) {
     this.configPath = process.env.DOODLE_NOTE_MCP_CONFIG ?? join(home, '.doodlenote', 'mcp.json')
     this.clients = clientDefs(home)
+  }
+
+  /** Preserve consent while following a successfully relocated library. */
+  refreshLibraryPath(previousMeetingsDir: string): void {
+    const raw = this.tryRead(this.configPath)
+    if (raw === null) return
+    let config: Record<string, unknown>
+    try {
+      config = JSON.parse(raw)
+    } catch {
+      return // Do not replace malformed configuration.
+    }
+    if (
+      config &&
+      typeof config.enabled === 'boolean' &&
+      config.meetingsDir === previousMeetingsDir &&
+      config.meetingsDir !== this.meetingsDir
+    ) {
+      const temporary = `${this.configPath}.${randomUUID()}.tmp`
+      writeFileSync(
+        temporary,
+        JSON.stringify({ ...config, meetingsDir: this.meetingsDir }, null, 2) + '\n',
+        { flag: 'wx', mode: 0o600 }
+      )
+      renameSync(temporary, this.configPath)
+    }
   }
 
   registerIpc(): void {

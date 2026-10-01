@@ -58,7 +58,8 @@ export class AudioService {
 
   constructor(
     private readonly baseDir: string,
-    private readonly engineBinary: string
+    private readonly engineBinary: string,
+    private readonly assertAvailable: () => void = () => {}
   ) {}
 
   registerIpc(): void {
@@ -87,6 +88,7 @@ export class AudioService {
 
   /** Validate a doodle-audio:// part URL; null unless it maps to a real file. */
   private resolvePartUrl(raw: string): { path: string; mime: string } | null {
+    this.assertAvailable()
     let url: URL
     try {
       url = new URL(raw)
@@ -112,6 +114,7 @@ export class AudioService {
   /** Call after app ready (protocol.handle requires it). */
   registerProtocol(): void {
     protocol.handle('doodle-audio', (request) => {
+      this.assertAvailable()
       const respond = (response: Response): Response => {
         if (process.env.DOODLE_AUDIO_DEBUG) {
           console.log(
@@ -168,6 +171,7 @@ export class AudioService {
    * engine creates it (and its checkpoints/) on first write.
    */
   beginSession(meetingId: string): string | null {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return null
     const dir = join(this.baseDir, meetingId, String(Date.now()))
     this.activeSessionDir = dir
@@ -179,6 +183,7 @@ export class AudioService {
    * next to the file so list() can report timing without probing the audio.
    */
   onAudioSaved(event: EngineAudioEvent): void {
+    this.assertAvailable()
     const dir = this.activeSessionDir
     this.activeSessionDir = null
     if (!dir || audioFileIn(dir) === null) return
@@ -186,6 +191,7 @@ export class AudioService {
   }
 
   list(meetingId: string): AudioPart[] {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return []
     const meetingDir = join(this.baseDir, meetingId)
     let sessions: string[]
@@ -230,6 +236,7 @@ export class AudioService {
    * false when the extension isn't importable.
    */
   addImportedPart(meetingId: string, sourcePath: string, durationMs: number): boolean {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return false
     const filename = importedPlaybackFilename(sourcePath)
     if (filename === null) return false
@@ -260,15 +267,18 @@ export class AudioService {
   }
 
   deleteFor(meetingId: string): void {
+    this.assertAvailable()
     if (!SAFE_MEETING_ID.test(meetingId)) return
     rmSync(join(this.baseDir, meetingId), { recursive: true, force: true })
   }
 
   clearAll(): void {
+    this.assertAvailable()
     rmSync(this.baseDir, { recursive: true, force: true })
   }
 
   usage(): AudioUsage {
+    this.assertAvailable()
     let totalBytes = 0
     let meetingCount = 0
     let meetings: string[]
@@ -302,6 +312,7 @@ export class AudioService {
    * for the next launch to retry.
    */
   async recoverOrphans(): Promise<void> {
+    this.assertAvailable()
     const orphans: string[] = []
     let meetings: string[]
     try {

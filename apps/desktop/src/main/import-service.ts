@@ -34,6 +34,10 @@ export class ImportService {
   /** One batch job at a time keeps memory and thermal behavior sane. */
   private busy = false
 
+  get isBusy(): boolean {
+    return this.busy
+  }
+
   constructor(
     private readonly enginePath: string,
     private readonly meetings: MeetingFileStore,

@@ -1,3 +1,4 @@
+import { StorageSettings } from './StorageSettings'
 import CloudModelPicker from './CloudModelPicker'
 import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -1167,6 +1168,7 @@ export default function ModelsView({
                 )}
               </section>
 
+              {detect?.platform === 'darwin' && <StorageSettings />}
               <section className="keys-section">
                 <h3>Meeting recordings</h3>
                 <p className="models-sub">

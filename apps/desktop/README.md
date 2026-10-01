@@ -186,3 +186,65 @@ It is not proof of actual meeting-app handoff or recorded audio. Forced renderer
 reload returns to Home, so the fixture stops its retained capture through engine
 IPC after proving the join retry survives without another capture start; full
 editor/session restoration is not added by this feature.
+
+## Choose a Mac library location
+
+In **Settings → General → Library storage**, use **Choose folder…** to select a
+location. DoodleNote creates a new **DoodleNote Library** folder there. Finish
+recording/importing and your edits, quit DoodleNote, then reopen it. New content
+continues to use the current folder until that next launch. **Cancel change**
+removes a pending selection without moving anything.
+
+Before starting its normal services, the app copies and verifies the existing
+library, then switches to the new location. Recordings, meeting JSON (notes and
+transcripts), pasted attachments, folders, Home chat and session recovery files
+move together. AI models, sign-ins, cloud/calendar configuration, app preferences
+and caches remain in application support. **Open in Finder** opens the active
+library. Recordings are in `audio/<meetingId>/<sessionEpochMs>/`; notes and
+transcripts are stored in `meetings/<meetingId>.json`. Copy files out if needed;
+manually moving or renaming managed files can break playback and references.
+
+The previous location is kept as a recovery copy and shown in Settings. It is
+not updated with later edits, and retaining it uses additional disk space. The
+transfer never overwrites another library. If a copy fails, the original remains
+active and the next launch offers Retry, Cancel transfer or Quit. An incomplete
+transfer may leave a hidden `.doodlenote-transfer-*` staging folder at the chosen
+location; do not use it as a library. Retry reuses only this app's transfer slot.
+
+Keep external drives connected. If the active folder becomes unavailable,
+DoodleNote stops capture and blocks library operations with a Retry/Quit dialog.
+It never silently creates an empty replacement at the default location. A drive
+disconnected during recording can leave an incomplete recording. Reconnect the
+drive before retrying. A missing or corrupt location setting must be recovered;
+do not delete `library-location.json` as a troubleshooting shortcut.
+
+The setting uses Electron's actual user-data profile. The standard installed Mac
+profile is `~/Library/Application Support/DoodleNote`; development normally uses
+`desktop` or `DOODLE_USER_DATA`. No existing library is adopted from the folder
+picker. Models, cloud storage and other platforms are not reconfigured by this
+setting. The app follows the new meeting path for existing local agent consent;
+restart older running MCP clients after updating the app so they load the new
+server. A development profile does not redirect another profile's agent config.
+
+Do not downgrade to a build without library-location support after transferring:
+that build would open the old snapshot. Recovery or rollback must preserve the
+latest active library and be explicitly planned. Packaging, signing, release,
+updater behavior and real external-drive interruption testing remain release QA
+steps separate from source tests.
+
+The synthetic Mac UI check uses a temporary profile and fixtures, intercepts the
+native folder picker and Finder opener, and stubs the capture engine. It checks
+selection/cancellation, restart transfer, retained content, new writes, errors,
+agent path/consent and persistence; it does not prove recording or physical-drive
+behavior. After `pnpm --filter desktop build`, run from the repository root:
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/test \
+  node apps/desktop/scripts/test-library-storage.cjs
+```
+
+The script prints the fixture and screenshot paths. Use only disposable test data
+for native QA: choose a folder, restart, play an existing recording, import/record
+a new meeting, and confirm both appear in the new library. Cancel a pending change,
+reject an occupied destination, then disconnect/reconnect a test external drive
+and verify Retry resumes the same library without creating a replacement.

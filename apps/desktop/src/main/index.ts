@@ -1,5 +1,6 @@
 import {
   app,
+  dialog,
   shell,
   BrowserWindow,
   desktopCapturer,
@@ -28,6 +29,7 @@ import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'nod
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { prepareLibrary, registerStorageIpc } from './storage-service'
 import { AudioService } from './audio-service'
 import { ImportService } from './import-service'
 import { WizardService } from './wizard-service'
@@ -129,14 +131,14 @@ if (process.env.DOODLE_USER_DATA && !app.isPackaged) {
   app.setPath('userData', process.env.DOODLE_USER_DATA)
 }
 
-// One owner per Windows profile: two mains would share the update cache and
-// could independently launch installers or write the same meeting library.
-if (process.platform === 'win32') {
+// One owner per desktop profile. Mac library transfers must finish before any
+// other app instance can write; Windows also shares the updater cache.
+if (process.platform === 'win32' || process.platform === 'darwin') {
   if (!app.requestSingleInstanceLock()) app.exit(0)
   app.on('second-instance', () => {
     // Do not recreate a window while the installer is waiting for us to quit.
     void app.whenReady().then(() => {
-      if (!isQuittingForUpdate()) focusMainWindow()
+      if (libraryReady && !isQuittingForUpdate()) focusMainWindow()
     })
   })
 }
@@ -152,6 +154,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null
 let recordingTray: RecordingTray | null = null
 let quitting = false
+let libraryReady = false
 const recording = new RecordingStartCoordinator(
   (request: RecordingStartRequest) =>
     mainWindow?.webContents.send(RECORDING_DELIVER_CHANNEL, request),
@@ -275,8 +278,43 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   migrateDevUserData()
+  const storage =
+    process.platform === 'darwin' ? await prepareLibrary(app.getPath('userData')) : null
+  if (process.platform === 'darwin' && !storage) {
+    app.quit()
+    return
+  }
+  const libraryRoot = storage?.root ?? app.getPath('userData')
+  // Block the main event loop at the recovery dialog rather than letting stores
+  // mistake an unplugged volume for a new, empty library. Stop capture first.
+  const assertLibrary = (): void => {
+    if (!storage) return
+    for (;;) {
+      try {
+        storage.assertAvailable()
+        return
+      } catch {
+        if (engine.running) engine.stop()
+        const response = dialog.showMessageBoxSync({
+          type: 'error',
+          title: 'Library disconnected',
+          message: 'Reconnect your library folder to continue.',
+          detail:
+            'Recording has been stopped. Reconnect the drive or restore folder access, then retry. A recording interrupted by a disconnected drive may be incomplete. DoodleNote will not create an empty replacement library.',
+          buttons: ['Retry', 'Quit'],
+          defaultId: 0,
+          cancelId: 1
+        })
+        if (response !== 0) {
+          app.exit(0)
+          throw new Error('Library unavailable')
+        }
+      }
+    }
+  }
+  if (storage) setInterval(assertLibrary, 2000).unref()
 
   // Warm the engine once per launch. macOS: Swift preflight primes the
   // CoreML cache only. Permission setup belongs to the visible first-run wizard.
@@ -374,8 +412,9 @@ app.whenReady().then(() => {
   // Saved meeting audio: session dirs for the engine's checkpoint recording,
   // playback serving, crash recovery, deletion. Local-only — never synced.
   const audioService = new AudioService(
-    join(app.getPath('userData'), 'audio'),
-    resolveEngineBinary()
+    join(libraryRoot, 'audio'),
+    resolveEngineBinary(),
+    assertLibrary
   )
   audioService.registerIpc()
   audioService.registerProtocol()
@@ -388,7 +427,8 @@ app.whenReady().then(() => {
 
   const session = new TranscriptSession(
     broadcastEngineEvent,
-    join(app.getPath('userData'), 'sessions')
+    join(libraryRoot, 'sessions'),
+    assertLibrary
   )
 
   // Persistent event log: every engine event, timestamped, so failed sessions
@@ -431,6 +471,7 @@ app.whenReady().then(() => {
   ipcMain.on(ENGINE_START_CHANNEL, (event, request: EngineStartRequest) => {
     if (event.sender !== mainWindow?.webContents || !recording.beginEngine(request.opts?.meetingId))
       return
+    assertLibrary()
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
     if (request.command === 'live') calendarService?.setRecordingActive(true)
@@ -472,10 +513,16 @@ app.whenReady().then(() => {
 
   // Meetings store first: NotesService reads it to gather cross-meeting
   // context for the Home-level "ask anything".
-  const meetingsService = new MeetingsService(join(app.getPath('userData'), 'meetings'))
+  const meetingsService = new MeetingsService(join(libraryRoot, 'meetings'), assertLibrary)
   meetingsService.registerIpc()
 
-  notesService = new NotesService(app.getPath('userData'), broadcast, meetingsService)
+  notesService = new NotesService(
+    app.getPath('userData'),
+    broadcast,
+    meetingsService,
+    libraryRoot,
+    assertLibrary
+  )
   notesService.registerIpc()
 
   if (engine instanceof WinEngineHost) {
@@ -512,8 +559,9 @@ app.whenReady().then(() => {
   exportService.registerIpc()
 
   const foldersService = new FoldersService(
-    join(app.getPath('userData'), 'folders.json'),
-    meetingsService
+    join(libraryRoot, 'folders.json'),
+    meetingsService,
+    assertLibrary
   )
   foldersService.registerIpc()
 
@@ -623,15 +671,27 @@ app.whenReady().then(() => {
     app.getPath('userData'),
     meetingsService,
     foldersService,
-    broadcast
+    broadcast,
+    libraryRoot
   )
   syncService.registerIpc()
 
   // Integrations: local MCP access remains off until enabled in Settings.
   const agentAccessService = new AgentAccessService(
-    join(app.getPath('userData'), 'meetings'),
+    join(libraryRoot, 'meetings'),
     resolveMcpServerSpec()
   )
+  const previousLibrary = storage?.status().recoveryPath
+  if (previousLibrary) {
+    try {
+      agentAccessService.refreshLibraryPath(join(previousLibrary, 'meetings'))
+    } catch {
+      dialog.showErrorBox(
+        'Update agent access',
+        'Your library moved, but the local agent configuration could not be updated. Restore access to that configuration file, then reopen DoodleNote before using connected agents. They may still show the original copy.'
+      )
+    }
+  }
   agentAccessService.registerIpc()
 
   // Store writes fan out to cloud sync and local recording cleanup.
@@ -643,13 +703,15 @@ app.whenReady().then(() => {
   foldersService.onDidWrite = (change) => syncService.onFoldersChanged(change.deletedId)
 
   // Image attachments for the notes editor (doodle-media:// protocol).
-  const mediaService = new MediaService(join(app.getPath('userData'), 'attachments'))
+  const mediaService = new MediaService(join(libraryRoot, 'attachments'), assertLibrary)
   mediaService.registerIpc()
   mediaService.registerProtocol()
+  if (storage) registerStorageIpc(storage, () => recording.busy || importService.isBusy)
 
   // A fresh look at the app deserves fresh events (throttled inside).
   app.on('browser-window-focus', (_event, window) => calendarService?.onWindowFocus(window))
 
+  libraryReady = true
   createWindow()
 
   app.on('activate', function () {

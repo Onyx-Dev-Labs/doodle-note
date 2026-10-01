@@ -148,3 +148,30 @@ test("has_transcript is false when the only segments are echo", async () => {
     cleanup();
   }
 });
+
+test("a running agent follows library path changes and rechecks revoked access", async () => {
+  const first = mkdtempSync(join(tmpdir(), "doodle-mcp-first-"));
+  const second = mkdtempSync(join(tmpdir(), "doodle-mcp-second-"));
+  let current = first;
+  let enabled = true;
+  const source = new LocalMeetingSource(() => {
+    if (!enabled) throw new Error("disabled");
+    return current;
+  });
+  try {
+    new MeetingFileStore(first).upsert({ id: "old-note", title: "Old copy" });
+    new MeetingFileStore(second).upsert({
+      id: "new-note",
+      title: "Current library",
+    });
+    assert.equal((await source.listRecent(10))[0]?.title, "Old copy");
+    current = second;
+    assert.equal((await source.listRecent(10))[0]?.title, "Current library");
+    assert.equal(await source.getMeeting("old-note"), null);
+    enabled = false;
+    await assert.rejects(source.listRecent(10), /disabled/);
+  } finally {
+    rmSync(first, { recursive: true, force: true });
+    rmSync(second, { recursive: true, force: true });
+  }
+});
