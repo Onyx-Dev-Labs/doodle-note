@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { defaultSpeakerId, defaultSpeakerLabel } from '@repo/meetings-store'
 import type { EngineChannel, EngineTokenTiming, TranscriptSegment } from '../shared/engine-events'
 
@@ -71,6 +72,8 @@ export class SegmentAssembler {
   }
   /** Finalized system-channel words, kept for echo matching against the mic. */
   private systemHistory: Word[] = []
+  // One namespace per capture/batch part, including parts without wall-clock epochs.
+  private readonly sessionId = randomUUID()
   private nextId = 1
 
   constructor(config: Partial<SegmenterConfig> = {}) {
@@ -175,7 +178,7 @@ export class SegmentAssembler {
     const epochMs = state.epochMs
 
     const segment: TranscriptSegment = {
-      id: `seg_${this.nextId++}`,
+      id: `seg_${this.sessionId}_${this.nextId++}`,
       channel,
       speaker: defaultSpeakerLabel(channel),
       speakerId: defaultSpeakerId(channel),

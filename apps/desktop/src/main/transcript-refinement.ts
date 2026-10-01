@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { defaultSpeakerId, defaultSpeakerLabel } from '@repo/meetings-store'
 import type { EngineChannel, TranscriptSegment } from '../shared/engine-events'
 
@@ -38,7 +39,7 @@ export function reconcileChannelSegments(
     const endMs = Math.max(0, Math.round((refined.audioSeconds ?? 0) * 1000))
     return [
       {
-        id: `refined_${refined.channel}_1`,
+        id: `refined_${randomUUID()}_${refined.channel}_1`,
         channel: refined.channel,
         speaker: defaultSpeakerLabel(refined.channel),
         speakerId: defaultSpeakerId(refined.channel),

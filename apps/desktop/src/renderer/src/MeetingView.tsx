@@ -1,4 +1,5 @@
 import { TranscriptSplit } from './TranscriptSplit'
+import { mergeTranscriptSegments } from './lib/transcript-segments'
 import { registerLibrarySave } from './lib/library-flush'
 import { generatedModelLabel } from './lib/generated-model-label'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -838,11 +839,9 @@ export default function MeetingView({
   const allSegments = useMemo(
     () =>
       labelSegments(
-        [
-          ...new Map(
-            [...savedSegments, ...state.segments].map((segment) => [segment.id, segment])
-          ).values()
-        ].sort((a, b) => segmentTime(a) - segmentTime(b)),
+        mergeTranscriptSegments(savedSegments, state.segments).sort(
+          (a, b) => segmentTime(a) - segmentTime(b)
+        ),
         roster
       ),
     [savedSegments, state.segments, roster]

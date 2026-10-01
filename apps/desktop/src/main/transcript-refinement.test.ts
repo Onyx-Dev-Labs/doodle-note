@@ -103,8 +103,11 @@ test('a final-only channel gets a bounded fallback segment', () => {
     text: 'A newly detected speaker.',
     audioSeconds: 3.25
   })
+  assert.match(result[0]!.id, /^refined_[0-9a-f-]+_system_1$/)
+  const another = reconcileChannelSegments([], { channel: 'system', text: 'Another session.' })
+  assert.notEqual(result[0]!.id, another[0]!.id)
   assert.deepEqual(result[0], {
-    id: 'refined_system_1',
+    id: result[0]!.id,
     channel: 'system',
     speaker: 'Them',
     speakerId: 'far',
