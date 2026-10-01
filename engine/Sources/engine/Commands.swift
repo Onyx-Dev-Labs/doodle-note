@@ -158,7 +158,9 @@ enum Commands {
     /// AVAudioFile reads the existing audio imports directly. An MP4 video is
     /// first normalized to a temporary audio-only M4A so video tracks never
     /// enter the ASR path and the same channel splitter can process both.
-    static func prepareAudioFile(_ sourceURL: URL) async throws -> PreparedAudioFile {
+    static func prepareAudioFile(
+        _ sourceURL: URL, temporaryParent: URL = FileManager.default.temporaryDirectory
+    ) async throws -> PreparedAudioFile {
         do {
             let file = try AVAudioFile(forReading: sourceURL)
             guard file.length > 0 else {
@@ -184,7 +186,7 @@ enum Commands {
                     "MP4 audio is not supported: \(sourceURL.lastPathComponent)")
             }
 
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            let directory = temporaryParent.appendingPathComponent(
                 "doodlenote-import-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true)
