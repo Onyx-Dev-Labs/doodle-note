@@ -244,7 +244,9 @@ export class LibraryStorage {
             destination,
             constants.COPYFILE_EXCL
           )
-          const fd = openSync(destination, 'r')
+          // Windows requires write access to flush a file handle. Keep Mac
+          // read-only source permissions usable when verifying a copied library.
+          const fd = openSync(destination, process.platform === 'win32' ? 'r+' : 'r')
           try {
             fsyncSync(fd)
           } finally {
