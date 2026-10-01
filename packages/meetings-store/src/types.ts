@@ -59,6 +59,12 @@ export interface MeetingChatEntry {
 
 /** Full meeting document as stored on disk. */
 export interface MeetingRecord {
+  /** Last successful batch pass; live capture remains independent. */
+  batchTranscription?: {
+    backend: "parakeet" | "whisper";
+    parakeetModel: "v2" | "v3";
+    language: string;
+  };
   id: string;
   /**
    * What this document is: a meeting (default when absent) or a standalone

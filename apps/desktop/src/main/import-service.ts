@@ -1,3 +1,7 @@
+import {
+  normalizeBatchSettings,
+  type BatchTranscriptionSettings
+} from '../shared/batch-transcription'
 import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
@@ -55,7 +59,8 @@ export class ImportService {
       filePath: string,
       onProgress?: (progress: BatchProgress) => void,
       options?: BatchOptions
-    ) => Promise<BatchTranscription>
+    ) => Promise<BatchTranscription>,
+    private readonly batchSettings?: () => BatchTranscriptionSettings
   ) {}
 
   registerIpc(): void {
@@ -129,6 +134,7 @@ export class ImportService {
       return { error: 'Could not read that file.' }
     }
 
+    const settings = normalizeBatchSettings(this.batchSettings?.())
     const meetingId = randomUUID()
     let storedAudio = false
     try {
@@ -137,7 +143,8 @@ export class ImportService {
         async (context) => {
           this.retrySource = { jobId: this.jobs.snapshot()!.jobId, filePath }
           const result = await this.transcribe(filePath, this.toBatchProgress(context), {
-            signal: context.signal
+            signal: context.signal,
+            settings
           })
           checkImportCanceled(context.signal)
           const kept = result.segments.filter((s) => !s.echo)
@@ -161,7 +168,8 @@ export class ImportService {
               endedAt: now.toISOString(),
               rawNotesMarkdown: '',
               segments: kept,
-              echoSuppressed: result.segments.length - kept.length
+              echoSuppressed: result.segments.length - kept.length,
+              batchTranscription: settings
             })
             return { meetingId }
           })
@@ -182,6 +190,7 @@ export class ImportService {
     }
     const record = this.meetings.get(meetingId)
     if (!record) return { error: 'Meeting not found.' }
+    const settings = normalizeBatchSettings(this.batchSettings?.())
     const parts = this.audio.listPaths(meetingId)
     if (parts.length === 0) {
       return { error: 'This meeting has no saved recording to re-transcribe.' }
@@ -202,7 +211,7 @@ export class ImportService {
               result = await this.transcribe(
                 part.path,
                 this.toBatchProgress(context, index + 1, parts.length),
-                { channels: part.channels, signal: context.signal }
+                { channels: part.channels, signal: context.signal, settings }
               )
             } catch (error) {
               checkImportCanceled(context.signal)
@@ -233,7 +242,12 @@ export class ImportService {
           }
           all.sort((a, b) => (a.absoluteStartMs ?? a.startMs) - (b.absoluteStartMs ?? b.startMs))
           return context.commit(() => {
-            this.meetings.upsert({ id: meetingId, segments: all, echoSuppressed })
+            this.meetings.upsert({
+              id: meetingId,
+              segments: all,
+              echoSuppressed,
+              batchTranscription: settings
+            })
             return { meetingId, segmentCount: all.length }
           })
         }

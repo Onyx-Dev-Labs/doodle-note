@@ -208,3 +208,30 @@ test("unavailable library guard rejects reads and writes instead of treating it 
     cleanup();
   }
 });
+
+test("batch provenance and a neutral imported speaker survive reopening", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    const batchTranscription = {
+      backend: "whisper" as const,
+      parakeetModel: "v2" as const,
+      language: "da",
+    };
+    store.upsert({
+      id: "batch-test",
+      batchTranscription,
+      segments: [
+        {
+          ...segment("Et møde"),
+          speaker: "Speaker",
+          speakerId: "imported-speaker",
+        },
+      ],
+    });
+    const reopened = new MeetingFileStore(dir).get("batch-test");
+    assert.deepEqual(reopened?.batchTranscription, batchTranscription);
+    assert.equal(reopened?.segments[0]?.speaker, "Speaker");
+  } finally {
+    cleanup();
+  }
+});

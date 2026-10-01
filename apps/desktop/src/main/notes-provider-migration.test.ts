@@ -1,3 +1,4 @@
+import * as batchTranscription from '../shared/batch-transcription'
 import { LibraryActivity } from './library-activity'
 import * as libraryPath from './library-path'
 import assert from 'node:assert/strict'
@@ -55,6 +56,7 @@ test('retired settings survive reload, block requests, and never migrate keys to
     },
     '@repo/meetings-store': { sanitizeSpeakerName: (value: string) => value.trim() },
     '../shared/notes-api': api,
+    '../shared/batch-transcription': batchTranscription,
     '../shared/auto-notes': autoNotes,
     '../shared/meeting-recovery': recovery,
     './model-paths': { modelSearchDirectories: () => [] }
@@ -117,6 +119,14 @@ test('retired settings survive reload, block requests, and never migrate keys to
       const unconfirmed = await set({ provider: 'gemini', apiKey: 'another-fixture-key' })
       assert.equal(unconfirmed.cloud?.dataPolicyConfirmed, false)
       assert.equal(readFileSync(notePath, 'utf8'), 'unchanged meeting fixture')
+      await handlers.get(api.NOTES_SET_SETTINGS_CHANNEL)!(null, {
+        batchTranscription: { backend: 'whisper', parakeetModel: 'v3', language: 'da' }
+      })
+      const withBatch = new exports.NotesService!(dir, () => {}, { list: () => [] })
+      withBatch.registerIpc()
+      assert.equal((await get()).batchTranscription?.backend, 'whisper')
+      assert.equal((await get()).batchTranscription?.language, 'da')
+      assert.equal((await get()).batchTranscription?.parakeetModel, 'v3')
     }
   } finally {
     rmSync(dir, { recursive: true, force: true })

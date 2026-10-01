@@ -181,6 +181,15 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     : [];
   return {
     id: raw.id,
+    ...(raw.batchTranscription &&
+    (raw.batchTranscription.backend === "parakeet" ||
+      raw.batchTranscription.backend === "whisper") &&
+    (raw.batchTranscription.parakeetModel === "v2" ||
+      raw.batchTranscription.parakeetModel === "v3") &&
+    typeof raw.batchTranscription.language === "string" &&
+    /^(auto|[a-z]{2,3})$/.test(raw.batchTranscription.language)
+      ? { batchTranscription: raw.batchTranscription }
+      : {}),
     // Only "note" is stored; anything else normalizes to the meeting default.
     ...(raw.kind === "note" ? { kind: "note" as const } : {}),
     title: typeof raw.title === "string" ? raw.title : "",

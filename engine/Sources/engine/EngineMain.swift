@@ -14,6 +14,8 @@ struct EngineMain {
         let options = CLIOptions(args.dropFirst())
         do {
             switch command {
+            case "prepare-batch-audio":
+                try await BatchAudioCommand.run(options)
             case "transcribe":
                 try await Commands.transcribe(options)
             case "stream":
