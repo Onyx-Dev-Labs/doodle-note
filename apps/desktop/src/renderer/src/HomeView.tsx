@@ -1,3 +1,5 @@
+import TextImportDialog from './TextImportDialog'
+import type { TextImportPreview } from '../../shared/text-import-api'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CalendarEvent, CalendarState } from '../../shared/calendar-api'
 import type { FolderRecord } from '../../shared/folders-api'
@@ -387,6 +389,9 @@ export default function HomeView({
   /** Transient share feedback: message shown as a toast under the topbar. */
   const [shareNotice, setShareNotice] = useState<string | null>(null)
   /** 'idle' | 'running' | an error message. */
+  const [textPreview, setTextPreview] = useState<TextImportPreview | null>(null)
+  const [textPicking, setTextPicking] = useState(false)
+  const [textImportError, setTextImportError] = useState<string | null>(null)
   const [importState, setImportState] = useState<'idle' | 'running' | string>('idle')
 
   const exportMeeting = async (id: string, format: 'md' | 'pdf'): Promise<void> => {
@@ -403,6 +408,22 @@ export default function HomeView({
     } catch (err) {
       setShareNotice(err instanceof Error ? err.message : String(err))
       setTimeout(() => setShareNotice(null), 5000)
+    }
+  }
+
+  const runTextImport = async (): Promise<void> => {
+    if (textPicking) return
+    setNewMenuOpen(false)
+    setTextPicking(true)
+    setTextImportError(null)
+    try {
+      const result = await window.textImporter.preview()
+      if (result.preview) setTextPreview(result.preview)
+      else if (result.error) setTextImportError(result.error)
+    } catch {
+      setTextImportError('Could not open the transcript. Please try again.')
+    } finally {
+      setTextPicking(false)
     }
   }
 
@@ -795,11 +816,40 @@ export default function HomeView({
                   <small>Transcribe an existing recording</small>
                 </span>
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={textPicking}
+                onClick={() => void runTextImport()}
+              >
+                <span className="new-menu-icon">
+                  <DocIcon size={16} />
+                </span>
+                <span>
+                  <strong>Import transcript (.txt)</strong>
+                  <small>Use text without an audio recording</small>
+                </span>
+              </button>
             </div>
           )}
         </div>
       </div>
 
+      {textPreview && (
+        <TextImportDialog
+          preview={textPreview}
+          onClose={() => setTextPreview(null)}
+          onImported={onOpenMeeting}
+        />
+      )}
+      {textImportError && (
+        <div className="toast" role="alert">
+          {textImportError}
+          <button type="button" onClick={() => setTextImportError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {shareNotice !== null && (
         <div className="share-notice" role="status">
           {shareNotice}

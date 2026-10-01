@@ -2,9 +2,11 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   defaultSpeakerLabel,
@@ -19,7 +21,7 @@ import type {
   MeetingSearchHit,
   MeetingSummary,
   MeetingUpsert,
-  TranscriptSegment,
+  MeetingTranscriptSegment,
 } from "./types";
 
 /** Meeting ids are renderer-minted UUIDs; anything else never touches disk. */
@@ -133,10 +135,13 @@ export class MeetingFileStore {
     const existing = this.get(id);
     const merged = normalizeRecord({ ...(existing ?? {}), ...patch, id });
     mkdirSync(this.dir, { recursive: true });
-    writeFileSync(
-      join(this.dir, `${id}.json`),
-      JSON.stringify(merged, null, 2),
-    );
+    const temporary = join(this.dir, `.${id}-${randomUUID()}.tmp`);
+    try {
+      writeFileSync(temporary, JSON.stringify(merged, null, 2), { flag: "wx" });
+      renameSync(temporary, join(this.dir, `${id}.json`));
+    } finally {
+      rmSync(temporary, { force: true });
+    }
     this.onDidWrite?.(merged.trashedAt ? { deletedId: id } : {});
     return merged;
   }
@@ -177,7 +182,7 @@ export class MeetingFileStore {
 export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
   const participants = normalizeParticipants(raw.participants);
   const segments = Array.isArray(raw.segments)
-    ? (raw.segments as TranscriptSegment[]).map(normalizeSegment)
+    ? (raw.segments as MeetingTranscriptSegment[]).map(normalizeSegment)
     : [];
   return {
     id: raw.id,
@@ -230,7 +235,7 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
  * give every segment a stable id and a non-empty label so readers never see
  * a blank speaker.
  */
-function normalizeSegment(segment: TranscriptSegment): TranscriptSegment {
+function normalizeSegment(segment: MeetingTranscriptSegment): MeetingTranscriptSegment {
   const speakerId = speakerIdOf(segment);
   const speaker =
     (typeof segment.speaker === "string"
@@ -261,13 +266,13 @@ function isChatEntry(entry: unknown): entry is MeetingChatEntry {
  * filters defensively — the app's display layer does the same), ordered by
  * wall clock across the two channels.
  */
-export function spokenSegments(record: MeetingRecord): TranscriptSegment[] {
+export function spokenSegments(record: MeetingRecord): MeetingTranscriptSegment[] {
   return record.segments
     .filter((s) => !s.echo)
     .slice()
     .sort(
       (a, b) =>
-        (a.absoluteStartMs ?? a.startMs) - (b.absoluteStartMs ?? b.startMs),
+        (a.absoluteStartMs ?? a.startMs ?? 0) - (b.absoluteStartMs ?? b.startMs ?? 0),
     );
 }
 
@@ -278,7 +283,7 @@ export function durationMinOf(record: MeetingRecord): number | undefined {
       return Math.max(1, Math.round(ms / 60_000));
   }
   if (record.segments.length > 0) {
-    const ms = Math.max(...record.segments.map((s) => s.endMs));
+    const ms = Math.max(...record.segments.flatMap((s) => s.endMs === undefined ? [] : [s.endMs]));
     if (Number.isFinite(ms) && ms > 0)
       return Math.max(1, Math.round(ms / 60_000));
   }

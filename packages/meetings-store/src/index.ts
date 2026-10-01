@@ -29,6 +29,8 @@ export type {
   MeetingParticipant,
   ParticipantSource,
   TranscriptSegment,
+  TextTranscriptSegment,
+  MeetingTranscriptSegment,
   MeetingChatEntry,
   MeetingRecord,
   MeetingSummary,

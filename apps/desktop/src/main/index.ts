@@ -1,3 +1,4 @@
+import { beginRecordableMeeting } from './capture-eligibility'
 import { libraryActivity } from './library-activity'
 import {
   app,
@@ -33,6 +34,7 @@ import icon from '../../resources/icon.png?asset'
 import { prepareLibrary, registerStorageIpc } from './storage-service'
 import { AudioService } from './audio-service'
 import { ImportService } from './import-service'
+import { TextImportService } from './text-import-service'
 import { WizardService } from './wizard-service'
 import { ExportService } from './export-service'
 import { CalendarService } from './calendar-service'
@@ -485,7 +487,16 @@ app.whenReady().then(async () => {
       })
       return
     }
-    if (!recording.beginEngine(request.opts?.meetingId)) return
+    if (
+      !beginRecordableMeeting(
+        request.command === 'live' && request.opts?.meetingId
+          ? meetingsService.get(request.opts.meetingId)
+          : null,
+        () => recording.beginEngine(request.opts?.meetingId),
+        (message) => broadcastEngineEvent({ event: 'spawn-error', message })
+      )
+    )
+      return
     assertLibrary()
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
@@ -560,6 +571,7 @@ app.whenReady().then(async () => {
       : undefined
   )
   importService.registerIpc()
+  new TextImportService(meetingsService).registerIpc()
 
   // First-run setup wizard: visible preflight + permission status.
   const wizardService = new WizardService(

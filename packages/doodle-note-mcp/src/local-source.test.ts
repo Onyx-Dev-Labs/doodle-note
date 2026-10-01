@@ -175,3 +175,17 @@ test("a running agent follows library path changes and rechecks revoked access",
     rmSync(second, { recursive: true, force: true });
   }
 });
+
+test("text imports expose their text without fabricated timestamps", async () => {
+  const { source, store, cleanup } = fixture();
+  try {
+    store.upsert({ id: "text-only", title: "Imported transcript", segments: [
+      { id: "text-1", source: "text", channel: "text", speaker: "Speaker 2", speakerId: "text-speaker-2", text: "Synthetic notes for the garden." }
+    ] });
+    const transcript = await source.getTranscript("text-only");
+    assert.equal(transcript?.text, "Speaker 2: Synthetic notes for the garden.");
+    assert.equal(transcript?.segments[0]?.start_ms, undefined);
+    assert.equal(transcript?.segments[0]?.end_ms, undefined);
+    assert.equal(transcript?.duration_min, undefined);
+  } finally { cleanup(); }
+});

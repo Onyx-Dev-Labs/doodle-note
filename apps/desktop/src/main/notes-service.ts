@@ -302,7 +302,11 @@ export class NotesService {
           typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
         speakers: speakerInfos(kept, request.participants),
-        ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
+        ...(kept.some((s) => s.endMs !== undefined)
+          ? {
+              durationMs: Math.max(...kept.flatMap((s) => (s.endMs === undefined ? [] : [s.endMs])))
+            }
+          : {}),
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
       const engine = await this.pickEngine(request.automaticAfterStop === true)

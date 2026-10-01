@@ -7,7 +7,7 @@
  * web tsconfig never touch node-only code.
  */
 
-import type { TranscriptSegment } from './engine-events'
+import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
 import type { MeetingParticipant } from '@repo/meetings-store/types'
 
 export const NOTES_CLOUD_MODELS_CHANNEL = 'notes:cloud-models'
