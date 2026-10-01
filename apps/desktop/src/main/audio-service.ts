@@ -25,6 +25,7 @@ import {
 } from '../shared/audio-api'
 import type { EngineAudioEvent } from '../shared/engine-events'
 import { isWinCheckpointDir, mergeWinSession } from './win-audio-recorder'
+import { batchChannelsForPart } from './import-channels'
 import { AUDIO_FILES, importedPlaybackFilename, playbackMime } from './import-media'
 
 export { IMPORTABLE_EXTENSIONS } from './import-media'
@@ -251,7 +252,7 @@ export class AudioService {
     try {
       mkdirSync(dir, { recursive: true })
       copyFileSync(sourcePath, join(dir, filename))
-      this.writePartMeta(dir, epoch, durationMs)
+      this.writePartMeta(dir, epoch, durationMs, 'mixed')
       return true
     } catch (err) {
       console.error('[audio] failed to store imported audio:', err)
@@ -261,13 +262,16 @@ export class AudioService {
   }
 
   /** Parts with filesystem paths — for re-transcription, not the renderer. */
-  listPaths(meetingId: string): Array<{ path: string; startEpochMs: number }> {
+  listPaths(
+    meetingId: string
+  ): Array<{ path: string; startEpochMs: number; channels: 'mixed' | 'split' }> {
     return this.list(meetingId).map((part) => {
       const url = new URL(part.url)
       const [, session, file] = url.pathname.split('/')
       return {
         path: join(this.baseDir, url.host, session as string, file as string),
-        startEpochMs: part.startEpochMs
+        startEpochMs: part.startEpochMs,
+        channels: batchChannelsForPart(join(this.baseDir, url.host, session as string))
       }
     })
   }
@@ -429,12 +433,18 @@ export class AudioService {
     })
   }
 
-  private writePartMeta(dir: string, startEpochMs: number, durationMs: number): void {
+  private writePartMeta(
+    dir: string,
+    startEpochMs: number,
+    durationMs: number,
+    channels: 'mixed' | 'split' = 'split'
+  ): void {
     try {
       mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, 'part.json'), JSON.stringify({ startEpochMs, durationMs }))
+      writeFileSync(join(dir, 'part.json'), JSON.stringify({ startEpochMs, durationMs, channels }))
     } catch (err) {
       console.error('[audio] failed to write part metadata:', err)
+      if (channels === 'mixed') throw err
     }
   }
 }

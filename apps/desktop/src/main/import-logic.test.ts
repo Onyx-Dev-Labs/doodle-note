@@ -31,7 +31,7 @@ test('mono import: real speech becomes mic-channel segments', { skip: !available
     assert.match(text, /errors/)
     for (const segment of result.segments) {
       assert.equal(segment.channel, 'mic')
-      assert.equal(segment.speaker, 'You')
+      assert.equal(segment.speaker, 'Speaker')
       assert.ok(segment.endMs > segment.startMs)
     }
   } finally {
@@ -56,7 +56,7 @@ test('stereo re-transcription: channels keep their speakers', { skip: !available
       stereo
     ])
 
-    const result = await transcribeFileToSegments(ENGINE, stereo)
+    const result = await transcribeFileToSegments(ENGINE, stereo, undefined, { channels: 'split' })
     const micText = result.segments
       .filter((s) => s.channel === 'mic' && !s.echo)
       .map((s) => s.text)
@@ -120,6 +120,34 @@ test(
         () => transcribeFileToSegments(ENGINE, video),
         /no decodable audio track/i
       )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+)
+
+test(
+  'dual-mono AAC imports once and retranscribes consistently',
+  { skip: !available },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'import-dualmono-'))
+    try {
+      const speech = join(dir, 'speech.aiff')
+      const stereo = join(dir, 'stereo.wav')
+      const m4a = join(dir, 'dual.m4a')
+      execFileSync('say', ['-o', speech, 'We should review the budget together'])
+      execFileSync('swift', [
+        join(__dirname, '..', '..', 'test-fixtures', 'make-stereo.swift'),
+        speech,
+        speech,
+        stereo
+      ])
+      execFileSync('afconvert', ['-f', 'm4af', '-d', 'aac', stereo, m4a])
+      for (let pass = 0; pass < 2; pass++) {
+        const result = await transcribeFileToSegments(ENGINE, m4a)
+        assert.equal(result.segments.filter((s) => /budget/i.test(s.text)).length, 1)
+        assert.ok(result.segments.every((s) => s.speaker === 'Speaker' && !s.echo))
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

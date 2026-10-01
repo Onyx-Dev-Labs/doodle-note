@@ -3,17 +3,32 @@ import type { TranscriptSegment } from '../shared/engine-events'
 import type { EngineChannel, EngineTokenTiming } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
 
-/**
- * Batch-transcribe an audio file into transcript segments — the pipeline
- * behind import and re-transcription. Electron-free so it can be integration-
- * tested under node against the real engine binary.
- *
- * Runs `engine transcribe --channels split`: stereo meeting recordings decode
- * per channel (L = mic "You", R = system "Them"), mono imports land on the
- * mic channel. The engine emits the live protocol's timings/final events, so
- * the exact same SegmentAssembler (pause-cutting, echo suppression) shapes
- * the result.
+/** Batch imports use mixed audio unless a saved DoodleNote part proves split origin. */
+export interface BatchOptions {
+  channels?: 'mixed' | 'split'
+  signal?: AbortSignal
+}
+
+/** Buffer batch tokens so acoustic echo comparison is independent of event order.
+ * Keep all system words: unlike live capture, batch channel events can span hours.
  */
+export function assembleBatchTokens(
+  tokens: Record<EngineChannel, EngineTokenTiming[]>,
+  channels: 'mixed' | 'split'
+): TranscriptSegment[] {
+  const assembler = new SegmentAssembler({ systemMemorySec: Infinity })
+  const segments: TranscriptSegment[] = []
+  for (const channel of ['system', 'mic'] as const) {
+    segments.push(...assembler.addTimings(channel, tokens[channel]), ...assembler.flush(channel))
+  }
+  return segments
+    .sort((a, b) => a.startMs - b.startMs)
+    .map((segment) =>
+      channels === 'mixed'
+        ? { ...segment, speaker: 'Speaker', speakerId: 'imported-speaker' }
+        : segment
+    )
+}
 
 export interface BatchTranscription {
   /** All assembled segments, echo-flagged ones included, sorted by startMs. */
@@ -33,21 +48,25 @@ const TIMEOUT_MS = 30 * 60_000
 export function transcribeFileToSegments(
   enginePath: string,
   filePath: string,
-  onProgress?: (progress: BatchProgress) => void
+  onProgress?: (progress: BatchProgress) => void,
+  options: BatchOptions = {}
 ): Promise<BatchTranscription> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(enginePath, ['transcribe', '--file', filePath, '--channels', 'split'], {
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
+      child = spawn(
+        enginePath,
+        ['transcribe', '--file', filePath, '--channels', options.channels ?? 'mixed'],
+        {
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
     } catch (err) {
       reject(new Error(`could not start the transcription engine: ${String(err)}`))
       return
     }
 
-    const assembler = new SegmentAssembler()
-    const segments: TranscriptSegment[] = []
+    const tokens: Record<EngineChannel, EngineTokenTiming[]> = { mic: [], system: [] }
     let audioSeconds = 0
     let engineError: string | null = null
     let settled = false
@@ -58,9 +77,10 @@ export function transcribeFileToSegments(
       clearTimeout(timeout)
       if (err) reject(err)
       else {
-        segments.push(...assembler.flush())
-        segments.sort((a, b) => a.startMs - b.startMs)
-        resolve({ segments, audioSeconds })
+        resolve({
+          segments: assembleBatchTokens(tokens, options.channels ?? 'mixed'),
+          audioSeconds
+        })
       }
     }
     const timeout = setTimeout(() => {
@@ -101,12 +121,11 @@ export function transcribeFileToSegments(
             onProgress?.({ stage: 'downloading_model', progress: ev.progress })
             break
           case 'timings':
-            if (ev.channel && Array.isArray(ev.tokens)) {
-              segments.push(...assembler.addTimings(ev.channel, ev.tokens))
+            if ((ev.channel === 'mic' || ev.channel === 'system') && Array.isArray(ev.tokens)) {
+              tokens[ev.channel].push(...ev.tokens)
             }
             break
           case 'final':
-            if (ev.channel) segments.push(...assembler.flush(ev.channel))
             break
           case 'error':
             engineError = String(ev.message ?? 'transcription failed')

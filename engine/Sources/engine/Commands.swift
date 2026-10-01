@@ -38,8 +38,24 @@ enum Commands {
             return
         }
 
+        Events.emit(["event": "status", "stage": "transcribing"])
         var decoderState = try TdtDecoderState()
         let result = try await manager.transcribe(url, decoderState: &decoderState)
+
+        // Mixed external stereo is a single sound scene, not mic/system speakers.
+        // Emit the same segment protocol as split capture while decoding it once.
+        if options.values["channels"] == "mixed" {
+            if let timings = result.tokenTimings {
+                for offset in stride(from: 0, to: timings.count, by: 1_000) {
+                    let end = min(offset + 1_000, timings.count)
+                    Events.emit(["event": "timings", "channel": "mic", "tokens": Timings.payload(Array(timings[offset..<end]))])
+                }
+            }
+            Events.emit(["event": "final", "channel": "mic", "text": result.text])
+            let file = try AVAudioFile(forReading: url)
+            Events.emit(["event": "done", "audioSeconds": Double(file.length) / file.processingFormat.sampleRate])
+            return
+        }
 
         // The URL transcribe path reports duration 0 in FluidAudio 0.15.4 — measure it ourselves.
         let audioFile = try AVAudioFile(forReading: url)

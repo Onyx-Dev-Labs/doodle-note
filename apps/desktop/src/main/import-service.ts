@@ -17,6 +17,7 @@ import { AudioService } from './audio-service'
 import { IMPORTABLE_EXTENSIONS } from './import-media'
 import {
   transcribeFileToSegments,
+  type BatchOptions,
   type BatchProgress,
   type BatchTranscription
 } from './import-logic'
@@ -46,7 +47,8 @@ export class ImportService {
     private readonly broadcast: (channel: string, payload: unknown) => void,
     private readonly platformTranscriber?: (
       filePath: string,
-      onProgress?: (progress: BatchProgress) => void
+      onProgress?: (progress: BatchProgress) => void,
+      options?: BatchOptions
     ) => Promise<BatchTranscription>
   ) {}
 
@@ -156,7 +158,8 @@ export class ImportService {
         this.progress({ kind: 'retranscribe', meetingId, stage: 'starting' })
         const result = await this.transcribe(
           part.path,
-          this.toBatchProgress('retranscribe', meetingId)
+          this.toBatchProgress('retranscribe', meetingId),
+          { channels: part.channels }
         )
         for (const segment of result.segments) {
           if (segment.echo) {
@@ -189,10 +192,11 @@ export class ImportService {
 
   private transcribe(
     filePath: string,
-    onProgress: (progress: BatchProgress) => void
+    onProgress: (progress: BatchProgress) => void,
+    options: BatchOptions = {}
   ): Promise<BatchTranscription> {
     return this.platformTranscriber
-      ? this.platformTranscriber(filePath, onProgress)
-      : transcribeFileToSegments(this.enginePath, filePath, onProgress)
+      ? this.platformTranscriber(filePath, onProgress, options)
+      : transcribeFileToSegments(this.enginePath, filePath, onProgress, options)
   }
 }
