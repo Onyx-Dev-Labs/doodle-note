@@ -29,12 +29,12 @@
     "prepublishOnly": "pnpm test && pnpm build"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@repo/agent-contract": "workspace:*",
     "@repo/meetings-store": "workspace:*",
     "@types/node": "^22.19.1",
-    "esbuild": "^0.25.0",
-    "tsx": "^4.23.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
   "engines": {
