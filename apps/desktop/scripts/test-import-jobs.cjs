@@ -69,6 +69,17 @@ let runtime
     const state=await page.evaluate(()=>window.importer.getStatus())
     const record=await page.evaluate(id=>window.meetings.get(id),state.meetingId)
     assert.equal(record.segments[0].text,'Synthetic fixture transcript')
+    // The completion action must reveal the transcript, including repeated
+    // requests for a meeting whose editor is already mounted with it hidden.
+    await page.getByRole('button',{name:'Open transcript',exact:true}).click()
+    await page.getByText('Synthetic fixture transcript',{exact:true}).waitFor({timeout:5000})
+    await page.getByRole('button',{name:'Hide transcript',exact:true}).click()
+    await page.getByRole('button',{name:'Open transcript',exact:true}).click()
+    await page.getByText('Synthetic fixture transcript',{exact:true}).waitFor({timeout:5000})
+    await page.getByRole('button',{name:'Hide transcript',exact:true}).click()
+    await page.getByRole('button',{name:'Back to home',exact:true}).click()
+    await page.getByRole('button',{name:'Open transcript',exact:true}).click()
+    await page.getByText('Synthetic fixture transcript',{exact:true}).waitFor({timeout:5000})
     // Failed/canceled rebuild preserves transcript and notes, including parts.
     await page.evaluate(id=>window.meetings.upsert({id,rawNotesMarkdown:'Keep fixture notes'}),state.meetingId)
     await runtime.evaluate(()=>{global.testImporter.audio.listPaths=()=>[{path:'first.wav',startEpochMs:1000},{path:'second.wav',startEpochMs:2000}];let count=0;global.testImporter.platformTranscriber=async()=>{if(++count===2)throw new Error('Synthetic corrupt part');return{audioSeconds:1,segments:[{id:'replacement',channel:'mic',speaker:'You',text:'Replacement must not persist',startMs:0,endMs:1000,confidence:1}]}}})
@@ -101,6 +112,17 @@ let runtime
     assert.match((await page.evaluate(()=>window.pendingRebuild)).error,/deleted/)
     assert.equal(await page.evaluate(id=>window.meetings.get(id),state.meetingId),null)
 
-    console.log(JSON.stringify({passed:true,profile,checks:['persistent navigation status','reload snapshot','cancel waits for worker exit','no canceled meeting','retry commits once','multipart failure preserves transcript and notes','capture exclusion both directions','trash and deletion cannot resurrect transcript']}))
-  } finally {if(runtime)await runtime.close()}
+    console.log(JSON.stringify({passed:true,profile,checks:['persistent navigation status','reload snapshot','cancel waits for worker exit','no canceled meeting','retry commits once','open completed transcript from another view and repeatedly after hiding','multipart failure preserves transcript and notes','capture exclusion both directions','trash and deletion cannot resurrect transcript']}))
+  } catch(error) {
+    console.error(error)
+    process.exitCode=1
+  } finally {
+    if(runtime){
+      // Windows Electron can retain its tray/launcher after the test closes
+      // the window. Terminate only this harness's isolated child process tree.
+      if(process.platform==='win32'){
+        require('node:child_process').execFileSync('taskkill',['/pid',String(runtime.process().pid),'/T','/F'],{stdio:'ignore'})
+      } else await runtime.close()
+    }
+  }
 })().catch(error=>{console.error(error);process.exitCode=1})

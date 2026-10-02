@@ -16,6 +16,10 @@ unsigned test candidate. Do not publish or change updater feeds from this PR.
 - Applicable shared features already exist: TXT import, docked/resizable notes
   and transcript, hidden-panel continuity, multipart recovery, import job
   progress/cancellation/retry. Test before adding product changes.
+- Reproduced and fixed: the import completion action opened the note while
+  leaving its transcript hidden. It now explicitly reveals that panel, including
+  repeated requests, without remounting the editor. The isolated Electron import
+  regression failed on the original build and passed after the fix.
 - Mac library relocation and native Whisper remain Mac-only. Windows storage,
   capture drain, Sherpa final transcription and privacy behavior are preserved.
 

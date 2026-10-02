@@ -241,6 +241,7 @@ function imageFilesFrom(list: FileList | null | undefined): File[] {
 export default function MeetingView({
   meetingId,
   visible,
+  openTranscriptRequestId,
   autoRecord,
   autoRecordRequestId,
   isNewDraft,
@@ -252,6 +253,8 @@ export default function MeetingView({
 }: {
   meetingId: string
   visible: boolean
+  /** Each completion action reveals the panel without remounting the editor. */
+  openTranscriptRequestId?: number
   /** True when this meeting was just created via "+ New meeting" — recording starts automatically. */
   autoRecord: boolean
   autoRecordRequestId: string | null
@@ -283,6 +286,13 @@ export default function MeetingView({
   const [enhanceProgressText, setEnhanceProgressText] = useState<string | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  useEffect(() => {
+    if (openTranscriptRequestId === undefined) return
+    // An explicit navigation action opens the requested panel.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTranscriptOpen(true)
+    setChatOpen(false)
+  }, [openTranscriptRequestId])
   const [chatThread, setChatThread] = useState<MeetingChatEntry[]>([])
   const [askText, setAskText] = useState('')
   /** The question currently being answered; null when no ask is in flight. */
