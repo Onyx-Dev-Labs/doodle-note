@@ -168,9 +168,38 @@ async function main() {
       await page.getByTitle('Copy transcript',{exact:true}).click();
       assert.equal((await page.evaluate(()=>window.qa.clipboard)).split('\n').length,7);
     }
+    // Imported audio uses file-relative timing; Resume uses wall-clock timing.
+    // Joining those domains must not render epoch-sized elapsed timestamps.
+    await page.evaluate(()=>{
+      window.qa.snapshot=null;
+      window.qa.meeting.segments=[
+        {id:'imported',channel:'mic',speaker:'Speaker',speakerId:'imported-speaker',text:'Imported synthetic phrase.',startMs:0,endMs:10000,confidence:1},
+        {id:'resumed',channel:'system',speaker:'Them',text:'Resumed synthetic phrase.',startMs:3000,endMs:6000,absoluteStartMs:1790979993000,confidence:1}
+      ];
+      window.qa.parts=[{url:'imported-part',startEpochMs:1790979921059,durationMs:12000},{url:'resumed-part',startEpochMs:1790979990000,durationMs:40000}];
+      window.qa.send({event:'audio'});
+      window.qa.refreshImported();
+    });
+    await page.getByText('Imported synthetic phrase.',{exact:true}).waitFor();
+    await settle();
+    // No real audio decoder in this renderer harness; assert the actual part
+    // selection that feeds the player (native QA checks playable fixtures).
+    await page.evaluate(()=>{HTMLMediaElement.prototype.play=()=>Promise.resolve()});
+    await page.getByText('Resumed synthetic phrase.',{exact:true}).click();
+    assert.equal(await page.getByRole('combobox',{name:'Recording part'}).inputValue(),'1');
+    await page.evaluate(()=>{
+      const audio=document.querySelector('.tp-audio audio');
+      Object.defineProperty(audio,'paused',{configurable:true,get:()=>false});
+      audio.currentTime=0.5;audio.dispatchEvent(new Event('timeupdate',{bubbles:true}));
+    });
+    await settle();
+    assert.equal(await page.locator('.tp-playing').count(),0,'recorded part must not highlight an imported row');
+    await page.getByText('Imported synthetic phrase.',{exact:true}).click();
+    assert.equal(await page.getByRole('combobox',{name:'Recording part'}).inputValue(),'0','imported row seeks the imported part after Resume');
+    assert.deepEqual(await page.locator('.tp-row .tp-time').allTextContents(),['0:00','0:15'],'import/Resume timestamps use the saved audio timeline');
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
-    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy and part highlighting')
+    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy, part highlighting, imported/recorded timestamps and part selection')
   } finally { await browser.close(); server.close() }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

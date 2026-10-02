@@ -1,5 +1,6 @@
 import { TranscriptSplit } from './TranscriptSplit'
 import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
+import { transcriptAudioPosition, transcriptDisplayTime } from './lib/transcript-audio'
 import { registerLibrarySave } from './lib/library-flush'
 import { generatedModelLabel } from './lib/generated-model-label'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
@@ -241,6 +242,7 @@ function imageFilesFrom(list: FileList | null | undefined): File[] {
 export default function MeetingView({
   meetingId,
   visible,
+  openTranscriptRequestId,
   autoRecord,
   autoRecordRequestId,
   isNewDraft,
@@ -252,6 +254,8 @@ export default function MeetingView({
 }: {
   meetingId: string
   visible: boolean
+  /** Each completion action reveals the panel without remounting the editor. */
+  openTranscriptRequestId?: number
   /** True when this meeting was just created via "+ New meeting" — recording starts automatically. */
   autoRecord: boolean
   autoRecordRequestId: string | null
@@ -283,6 +287,13 @@ export default function MeetingView({
   const [enhanceProgressText, setEnhanceProgressText] = useState<string | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  useEffect(() => {
+    if (openTranscriptRequestId === undefined) return
+    // An explicit navigation action opens the requested panel.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTranscriptOpen(true)
+    setChatOpen(false)
+  }, [openTranscriptRequestId])
   const [chatThread, setChatThread] = useState<MeetingChatEntry[]>([])
   const [askText, setAskText] = useState('')
   /** The question currently being answered; null when no ask is in flight. */
@@ -1021,21 +1032,9 @@ export default function MeetingView({
   // loses it. Fallback: a segment's channel-relative startMs is within the
   // capture-start gap (≈1s) of its file position in the current part.
   const seekToSegment = (segment: TranscriptSegment): void => {
-    if (segment.source === 'text') return
-    if (audioParts.length === 0) return
-    let partIndex = Math.min(activePart, audioParts.length - 1)
-    let offsetSec = Math.max(0, segment.startMs / 1000)
-    const abs = segment.absoluteStartMs
-    if (typeof abs === 'number') {
-      partIndex = 0
-      for (let i = audioParts.length - 1; i >= 0; i--) {
-        if (audioParts[i]!.startEpochMs <= abs) {
-          partIndex = i
-          break
-        }
-      }
-      offsetSec = Math.max(0, (abs - audioParts[partIndex]!.startEpochMs) / 1000)
-    }
+    const position = transcriptAudioPosition(segment, audioParts, activePart)
+    if (!position) return
+    const { partIndex, offsetSec } = position
     const el = audioRef.current
     if (partIndex !== activePart || !el) {
       pendingSeekSecRef.current = offsetSec
@@ -1079,15 +1078,11 @@ export default function MeetingView({
     const part = audioParts[activePart]
     const el = audioRef.current
     if (!part || !el || el.paused) return
-    const epochMs = part.startEpochMs + el.currentTime * 1000
     let current: string | null = null
     for (const s of allSegments) {
-      // Same fallback as seekToSegment for sync-stripped segments.
-      const t =
-        typeof s.absoluteStartMs === 'number'
-          ? s.absoluteStartMs
-          : part.startEpochMs + (s.startMs ?? 0)
-      if (t > epochMs) break
+      const position = transcriptAudioPosition(s, audioParts, activePart)
+      if (!position || position.partIndex !== activePart) continue
+      if (position.offsetSec > el.currentTime) break
       current = s.id
     }
     setPlayingSegId(current)
@@ -1528,7 +1523,13 @@ export default function MeetingView({
     folderId !== null ? (folders.find((f) => f.id === folderId)?.name ?? null) : null
 
   const transcriptEmpty = allSegments.length === 0 && Object.values(state.partials).every((p) => !p)
-  const firstSegmentTime = allSegments.length > 0 ? segmentTime(allSegments[0]!) : 0
+  const hasImportedAudio =
+    audioParts.some((part) => part.startEpochMs === 0) ||
+    allSegments.some((segment) => segment.speakerId === 'imported-speaker')
+  const firstTimedSegment = allSegments.find((segment) => segment.source !== 'text')
+  const firstSegmentTime = firstTimedSegment
+    ? transcriptDisplayTime(firstTimedSegment, audioParts, hasImportedAudio)
+    : 0
 
   return (
     <div className="editor-page">
@@ -1820,7 +1821,11 @@ export default function MeetingView({
                       <span className="tp-text">{s.text}</span>
                       {s.source !== 'text' && (
                         <span className="tp-time">
-                          {formatClock((segmentTime(s) - firstSegmentTime) / 1000)}
+                          {formatClock(
+                            (transcriptDisplayTime(s, audioParts, hasImportedAudio) -
+                              firstSegmentTime) /
+                              1000
+                          )}
                         </span>
                       )}
                     </div>
