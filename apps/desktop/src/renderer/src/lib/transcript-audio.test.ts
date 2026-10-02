@@ -24,7 +24,7 @@ const recorded: MeetingTranscriptSegment = {
   absoluteStartMs: 1790979993000
 }
 const parts = [
-  { url: 'import', startEpochMs: 0, durationMs: 12000 },
+  { url: 'import', startEpochMs: 1790979921059, durationMs: 12000 },
   { url: 'record', startEpochMs: 1790979990000, durationMs: 40000 }
 ]
 
@@ -46,7 +46,7 @@ test('recorded-only wall-clock ordering and legacy active-part fallback remain i
     { ...parts[1]!, startEpochMs: 100000 },
     { ...parts[1]!, startEpochMs: 200000 }
   ]
-  assert.deepEqual(transcriptAudioPosition(imported, legacyParts, 1), {
+  assert.deepEqual(transcriptAudioPosition({ ...imported, speakerId: 'self' }, legacyParts, 1), {
     partIndex: 1,
     offsetSec: 0
   })
@@ -58,6 +58,7 @@ test('untimed TXT rows never acquire playback positions or timestamps', () => {
     source: 'text',
     channel: 'text',
     speaker: 'Speaker',
+    speakerId: 'text-speaker-1',
     text: 'Synthetic plain text'
   }
   assert.equal(transcriptAudioPosition(text, parts), null)

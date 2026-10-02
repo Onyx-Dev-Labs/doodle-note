@@ -21,9 +21,13 @@ export function transcriptAudioPosition(
       offsetSec: Math.max(0, (segment.absoluteStartMs - parts[partIndex]!.startEpochMs) / 1000)
     }
   }
-  // An imported part has no wall-clock anchor. It remains the source for its
-  // relative rows even after Resume selects a later recording in the player.
-  const importedPart = parts.findIndex((part) => part.startEpochMs === 0)
+  // Imports create the meeting's first part. Its metadata stores import time,
+  // but its original transcript is file-relative and retains imported identity.
+  // Do not seek that row in whichever later recording happens to be selected.
+  const importedPart =
+    segment.speakerId === 'imported-speaker'
+      ? 0
+      : parts.findIndex((part) => part.startEpochMs === 0)
   return {
     partIndex: importedPart >= 0 ? importedPart : Math.min(activePart, parts.length - 1),
     offsetSec: Math.max(0, segment.startMs / 1000)
@@ -41,7 +45,11 @@ export function transcriptDisplayTime(
   const position = transcriptAudioPosition(segment, parts)
   if (!position) return segment.startMs
   // While capture is running, its saved part may not have arrived yet.
-  if (segment.absoluteStartMs !== undefined && parts[position.partIndex]!.startEpochMs === 0) {
+  if (
+    segment.absoluteStartMs !== undefined &&
+    position.partIndex === 0 &&
+    segment.speakerId !== 'imported-speaker'
+  ) {
     return parts.reduce((sum, part) => sum + part.durationMs, 0) + segment.startMs
   }
   return (

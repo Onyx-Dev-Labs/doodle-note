@@ -176,7 +176,7 @@ async function main() {
         {id:'imported',channel:'mic',speaker:'Speaker',speakerId:'imported-speaker',text:'Imported synthetic phrase.',startMs:0,endMs:10000,confidence:1},
         {id:'resumed',channel:'system',speaker:'Them',text:'Resumed synthetic phrase.',startMs:3000,endMs:6000,absoluteStartMs:1790979993000,confidence:1}
       ];
-      window.qa.parts=[{url:'imported-part',startEpochMs:0,durationMs:12000},{url:'resumed-part',startEpochMs:1790979990000,durationMs:40000}];
+      window.qa.parts=[{url:'imported-part',startEpochMs:1790979921059,durationMs:12000},{url:'resumed-part',startEpochMs:1790979990000,durationMs:40000}];
       window.qa.send({event:'audio'});
       window.qa.refreshImported();
     });
