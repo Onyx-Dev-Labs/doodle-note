@@ -604,7 +604,7 @@ app.whenReady().then(async () => {
     )
     winBatchTranscriber.registerIpc()
     engine.setFinalRefiner((filePath, onProgress) =>
-      winBatchTranscriber!.transcribe(filePath, onProgress)
+      winBatchTranscriber!.transcribe(filePath, onProgress, { channels: 'split' })
     )
   }
 
