@@ -20,6 +20,12 @@ unsigned test candidate. Do not publish or change updater feeds from this PR.
   leaving its transcript hidden. It now explicitly reveals that panel, including
   repeated requests, without remounting the editor. The isolated Electron import
   regression failed on the original build and passed after the fix.
+- Reproduced and fixed: Resume after imported audio mixed file-relative and
+  wall-clock timestamps, displaying epoch-sized elapsed times. Clicking the
+  imported row after the recorded row also selected the wrong audio part.
+  Mixed sessions now display cumulative saved-audio time and resolve rows to
+  their own part for seeking/highlighting. Stored source data remains intact;
+  recorded-only timeline behavior and untimed TXT semantics are preserved.
 - Mac library relocation and native Whisper remain Mac-only. Windows storage,
   capture drain, Sherpa final transcription and privacy behavior are preserved.
 

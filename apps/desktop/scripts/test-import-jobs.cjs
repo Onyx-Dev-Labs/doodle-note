@@ -121,7 +121,7 @@ let runtime
       // Windows Electron can retain its tray/launcher after the test closes
       // the window. Terminate only this harness's isolated child process tree.
       if(process.platform==='win32'){
-        require('node:child_process').execFileSync('taskkill',['/pid',String(runtime.process().pid),'/T','/F'],{stdio:'ignore'})
+        require('node:child_process').execFileSync('taskkill',['/pid',String(runtime.process().pid),'/T','/F'],{stdio:'ignore',windowsHide:true})
       } else await runtime.close()
     }
   }
