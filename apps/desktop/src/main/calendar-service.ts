@@ -1,23 +1,18 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  Menu,
-  nativeImage,
-  Notification,
-  safeStorage,
-  shell,
-  Tray
-} from 'electron'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { CalendarAuthLoopback } from './calendar-auth-loopback'
+import { calendarPages, CalendarRequestError, mapCalendarTasks } from './calendar-http'
+import { BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   PublicClientApplication,
-  type AccountInfo,
   type AuthenticationResult,
   type ICachePlugin
 } from '@azure/msal-node'
 import {
+  calendarJoinUrl,
+  CALENDAR_ACCOUNT_CONNECT_CHANNEL,
+  CALENDAR_ACCOUNT_REMOVE_CHANNEL,
+  CALENDAR_AUTH_CANCEL_CHANNEL,
   CALENDAR_CONNECT_CHANNEL,
   CALENDAR_CONNECT_GOOGLE_CHANNEL,
   CALENDAR_DISCONNECT_GOOGLE_CHANNEL,
@@ -25,11 +20,14 @@ import {
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_DISMISS_PROMPT_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
   CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
   DEFAULT_CALENDAR_PREFS,
   type CalendarAccount,
+  type CalendarProvider,
+  type CalendarConnection,
   type CalendarConfigUpdate,
   type CalendarEvent,
   type CalendarInfo,
@@ -43,13 +41,12 @@ import {
   filterByParticipants,
   graphColorToHex,
   mergeCalendarEvents,
-  nextTrayEvent,
-  resolveVisibleCalendars,
-  trayTitle,
-  upcomingTrayEvents
+  resolveVisibleCalendars
 } from './calendar-events'
 import { eventsToPromptNow, pruneNotified } from './calendar-watcher'
 import { GoogleCalendarClient } from './google-calendar'
+import { CalendarAccountStore } from './calendar-account-store'
+import { accountKey, microsoftIdentity, scopeCalendar, scopeEvent } from './calendar-identity'
 import type { PromptPanel } from './prompt-panel'
 import {
   coordinatePrompt,
@@ -71,8 +68,6 @@ const FOCUS_REFRESH_MIN_GAP_MS = 60_000
 const CONNECT_TIMEOUT_MS = 5 * 60_000
 /** How far ahead the "Coming up" card looks (two 7-day pages). */
 const LOOKAHEAD_DAYS = 14
-/** Tray click menu lists this many upcoming meetings. */
-const TRAY_MENU_EVENTS = 3
 
 /**
  * Branded landing pages served by the local OAuth redirect during sign-in.
@@ -134,28 +129,35 @@ interface StoredCalendarCache {
   account?: CalendarAccount
 }
 
+interface CalendarSource {
+  id: string
+  provider: CalendarProvider
+  google?: GoogleCalendarClient
+  calendars(signal: AbortSignal): Promise<CalendarInfo[]>
+  events(calendar: CalendarInfo, signal: AbortSignal): Promise<CalendarEvent[]>
+}
+
 export type CalendarBroadcast = (channel: string, payload: unknown) => void
 
 /**
- * Owns the Microsoft 365 calendar integration in the main process:
+ * Owns calendar integration in the main process:
  *
  * - MSAL public-client auth (auth-code + PKCE against a loopback redirect via
  *   acquireTokenInteractive; the system browser is opened with
- *   shell.openExternal). The MSAL token cache persists to
- *   userData/calendar-token-cache, encrypted with safeStorage — plaintext
- *   tokens never touch disk. Refresh is silent; interactive only on Connect.
+ *   shell.openExternal). Microsoft and Google credentials, snapshots,
+ *   selections and prompt history persist per account in the safeStorage
+ *   encrypted calendar-accounts-v2 vault. Interactive auth runs only on Connect.
  * - Graph polling every 5 minutes while signed in (plus on connect and window
  *   focus): the calendar list (/me/calendars) and then each visible
  *   calendar's /calendarView for the next 14 days, fetched in parallel and
  *   merged (calendar-events.ts holds the pure logic). Results are cached in
- *   memory and in userData/calendar-cache.json so the Home card fills
- *   instantly on boot. Display prefs (menu bar, no-participant events,
- *   visible calendars) live additively in userData/calendar-settings.json.
+ *   memory and restored only after account ownership is established.
+ *   Global display preferences remain in calendar-settings.json.
  * - A 30s meeting-start watcher (pure decision logic in calendar-watcher.ts)
  *   that fires an OS notification + a renderer broadcast; notified event ids
- *   persist in userData/calendar-notified.json.
- * - A text-only macOS menu-bar Tray showing the next meeting and countdown,
- *   created/destroyed here as sign-in state, prefs and events change.
+ *   persist in the owning account's encrypted state.
+ * - Calendar snapshots for the shared dog menu-bar item. RecordingTray owns
+ *   the single native item and its today-only display.
  *
  * Every IPC entry point resolves to a CalendarState — errors are strings on
  * that state, never rejected promises.
@@ -165,48 +167,67 @@ export class CalendarService {
   private readonly tokenCachePath: string
   private readonly eventCachePath: string
   private readonly notifiedPath: string
+  private readonly accounts: CalendarAccountStore
+  private readonly legacyCache: StoredCalendarCache
+  private readonly legacyVisibleIds: string[] | null
+  private authGeneration = 0
+  private sources = new Map<string, CalendarSource>()
+  private syncState = new Map<
+    string,
+    { syncing: boolean; error?: string; lastSyncIso?: string; retryAt?: number }
+  >()
+  private inflight = new Map<string, AbortController>()
+  private pendingAuth?: { provider: CalendarProvider; accountId?: string }
+  private pendingGoogle?: GoogleCalendarClient
+  private pendingMicrosoft?: CalendarAuthLoopback
+  private cancelMicrosoftWait?: () => void
+  private selectionGeneration = 0
 
   private config: StoredCalendarConfig | null
   private prefs: CalendarPrefs
-  private pca: PublicClientApplication | null = null
-  private account: AccountInfo | null = null
-  private accountView: CalendarAccount | null = null
   /** All fetched events (merged, sorted, unfiltered) — what the cache stores. */
   private rawEvents: CalendarEvent[] = []
   /** The account's calendars from GET /me/calendars. */
   private calendars: CalendarInfo[] = []
   private googleCalendars: CalendarInfo[] = []
-  private google: GoogleCalendarClient
   private lastSyncIso: string | undefined
   private lastError: string | undefined
+  private restoreErrors: Partial<Record<'microsoft' | 'google', string>> = {}
   private notified: Record<string, string>
   private promptState: PromptCoordinatorState
+  private activePrompt?: CalendarStartMeetingEvent
 
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private watchTimer: ReturnType<typeof setInterval> | null = null
-  private tray: Tray | null = null
-  private connectBusy = false
-  private refreshBusy = false
+  private refreshWork?: Promise<void>
+  private refreshQueue = new Set<string>()
+  get refreshBusy(): boolean {
+    return !!this.refreshWork
+  }
   private disposed = false
 
   /** Boot-time account restore; IPC handlers await this before answering. */
   private readonly ready: Promise<void>
 
   constructor(
-    userDataDir: string,
+    private readonly userDataDir: string,
     private readonly broadcast: CalendarBroadcast,
     /** Bring the app forward (or recreate the window) on notification click. */
     private readonly focusWindow: () => void,
     /** Floating always-on-top card for when the main window can't be seen. */
-    private readonly promptPanel?: PromptPanel
+    private readonly promptPanel?: PromptPanel,
+    private readonly requestRecordingStart?: (prompt: CalendarStartMeetingEvent) => void,
+    private readonly updateMenuBar?: (state: CalendarState) => void
   ) {
     this.settingsPath = join(userDataDir, 'calendar-settings.json')
     this.tokenCachePath = join(userDataDir, 'calendar-token-cache')
     this.eventCachePath = join(userDataDir, 'calendar-cache.json')
     this.notifiedPath = join(userDataDir, 'calendar-notified.json')
+    this.accounts = new CalendarAccountStore(userDataDir, safeStorage)
     const settings = this.loadSettings()
     this.config = settings.config
     this.prefs = settings.prefs
+    this.legacyVisibleIds = settings.prefs.visibleCalendarIds
     this.notified = this.loadNotified()
     this.promptState = initialPromptCoordinatorState(
       Object.fromEntries(
@@ -216,13 +237,12 @@ export class CalendarService {
       )
     )
     const cache = this.loadEventCache()
-    this.rawEvents = cache.events
-    this.calendars = cache.calendars ?? []
-    this.googleCalendars = cache.googleCalendars ?? []
-    this.lastSyncIso = cache.lastSyncIso
-    this.accountView = cache.account ?? null
-    this.google = new GoogleCalendarClient(userDataDir)
+    this.legacyCache = cache
     this.ready = this.bootstrap()
+      .catch((err) => {
+        this.lastError = friendlyError(err)
+      })
+      .then(() => this.updateMenuBarState())
   }
 
   /** The canonical event list every consumer sees (broadcast, watcher, tray):
@@ -244,40 +264,88 @@ export class CalendarService {
       // until the next sync stamps real calendar ids.
       events = events.filter((e) => e.calendarId === '' || visibleIds.has(e.calendarId))
     }
-    return events
+    return events.map((event) => {
+      const account = this.accounts.get(event.accountId ?? '')?.view
+      const calendar = all.find((c) => c.id === event.calendarId)
+      const status = this.syncState.get(event.accountId ?? '')
+      return {
+        ...event,
+        joinUrl: calendarJoinUrl(event.joinUrl),
+        legacyEventId: this.accounts.legacyAlias(event.id),
+        sourceLabel: account
+          ? `${account.provider === 'microsoft' ? 'Microsoft 365' : 'Google'} · ${account.email} · ${calendar?.name ?? 'Calendar'}`
+          : undefined,
+        stale: !!status?.error || !status?.lastSyncIso
+      }
+    })
+  }
+
+  /** Every recording entry point resolves aliases against current main-process ownership. */
+  resolveStart(event: CalendarStartMeetingEvent): CalendarStartMeetingEvent | null {
+    if (!event.eventId)
+      return { ...event, legacyEventId: undefined, joinUrl: undefined, joinRequested: false }
+    const current = this.visibleEvents().find((e) => e.id === event.eventId)
+    return current
+      ? {
+          ...event,
+          subject: current.subject,
+          startIso: current.startIso,
+          sourceLabel: current.sourceLabel,
+          joinUrl: calendarJoinUrl(current.joinUrl),
+          joinRequested: event.joinRequested === true,
+          adHoc: false,
+          legacyEventId: current.legacyEventId
+        }
+      : null
   }
 
   registerIpc(): void {
-    ipcMain.handle(CALENDAR_GET_STATE_CHANNEL, async () => {
-      await this.ready
-      return this.state()
+    const handle = (
+      channel: string,
+      action: (value: unknown) => CalendarState | Promise<CalendarState>
+    ): void => {
+      ipcMain.handle(channel, async (_event, value: unknown) => {
+        await this.ready
+        try {
+          return await action(value)
+        } catch (err) {
+          this.lastError = friendlyError(err)
+          this.broadcastState()
+          return this.state()
+        }
+      })
+    }
+    ipcMain.handle(CALENDAR_DISMISS_PROMPT_CHANNEL, () => this.dismissPrompt())
+    handle(CALENDAR_ACCOUNT_CONNECT_CHANNEL, (value) => {
+      const request = value as { provider?: unknown; accountId?: unknown } | null
+      if (
+        !request ||
+        !['microsoft', 'google'].includes(String(request.provider)) ||
+        (request.accountId !== undefined && typeof request.accountId !== 'string')
+      )
+        throw new Error('Invalid calendar account request.')
+      return this.connectAccount(
+        request.provider as CalendarProvider,
+        request.accountId as string | undefined
+      )
     })
-    ipcMain.handle(CALENDAR_SET_CONFIG_CHANNEL, async (_event, update: unknown) => {
-      await this.ready
-      return this.setConfig((update ?? {}) as Partial<CalendarConfigUpdate>)
+    handle(CALENDAR_ACCOUNT_REMOVE_CHANNEL, (value) => {
+      if (typeof value !== 'string') throw new Error('Invalid calendar account.')
+      return this.removeAccount(value)
     })
-    ipcMain.handle(CALENDAR_SET_PREFS_CHANNEL, async (_event, update: unknown) => {
-      await this.ready
-      return this.setPrefs((update ?? {}) as CalendarPrefsUpdate)
-    })
-    ipcMain.handle(CALENDAR_CONNECT_CHANNEL, async () => {
-      await this.ready
-      return this.connect()
-    })
-    ipcMain.handle(CALENDAR_DISCONNECT_CHANNEL, async () => {
-      await this.ready
-      return this.disconnect()
-    })
-    ipcMain.handle(CALENDAR_CONNECT_GOOGLE_CHANNEL, async () => {
-      await this.ready
-      return this.connectGoogle()
-    })
-    ipcMain.handle(CALENDAR_DISCONNECT_GOOGLE_CHANNEL, async () => {
-      await this.ready
-      return this.disconnectGoogle()
-    })
-    ipcMain.handle(CALENDAR_REFRESH_CHANNEL, async () => {
-      await this.ready
+    handle(CALENDAR_AUTH_CANCEL_CHANNEL, () => this.cancelAuth())
+    handle(CALENDAR_GET_STATE_CHANNEL, () => this.state())
+    handle(CALENDAR_SET_CONFIG_CHANNEL, (value) =>
+      this.setConfig((value ?? {}) as Partial<CalendarConfigUpdate>)
+    )
+    handle(CALENDAR_SET_PREFS_CHANNEL, (value) =>
+      this.setPrefs((value ?? {}) as CalendarPrefsUpdate)
+    )
+    handle(CALENDAR_CONNECT_CHANNEL, () => this.connect())
+    handle(CALENDAR_DISCONNECT_CHANNEL, () => this.disconnect())
+    handle(CALENDAR_CONNECT_GOOGLE_CHANNEL, () => this.connectGoogle())
+    handle(CALENDAR_DISCONNECT_GOOGLE_CHANNEL, () => this.disconnectGoogle())
+    handle(CALENDAR_REFRESH_CHANNEL, async () => {
       await this.refreshEvents()
       return this.state()
     })
@@ -292,7 +360,7 @@ export class CalendarService {
     // turning one detection into a panel followed by a second in-app banner.
     this.promptPanel?.close()
     void this.ready.then(() => {
-      if (!this.account) return
+      if (!this.sources.size) return
       const last = this.lastSyncIso ? Date.parse(this.lastSyncIso) : 0
       if (Date.now() - last < FOCUS_REFRESH_MIN_GAP_MS) return
       void this.refreshEvents()
@@ -301,8 +369,10 @@ export class CalendarService {
 
   dispose(): void {
     this.disposed = true
+    this.cancelAuth()
+    for (const controller of this.inflight.values()) controller.abort()
+    for (const source of this.sources.values()) source.google?.cancelPending()
     this.stopTimers()
-    this.destroyTray()
     this.promptPanel?.close()
   }
 
@@ -311,6 +381,12 @@ export class CalendarService {
   setRecordingActive(recording: boolean): void {
     this.promptState = setPromptRecording(this.promptState, recording)
     if (!recording) return
+    this.dismissPrompt()
+  }
+
+  /** Dismiss every presentation of the current prompt without starting capture. */
+  dismissPrompt(): void {
+    this.activePrompt = undefined
     this.promptPanel?.close()
     this.broadcast(CALENDAR_START_MEETING_CHANNEL, {
       action: 'dismiss',
@@ -323,27 +399,41 @@ export class CalendarService {
   /* ---- state ---- */
 
   private state(): CalendarState {
-    const msSignedIn = this.account !== null
-    const googleSignedIn = this.google.signedIn
-    const signedIn = msSignedIn || googleSignedIn
+    const connections: CalendarConnection[] = this.accounts.views().map((view) => {
+      const status = this.syncState.get(view.id)
+      return {
+        ...view,
+        syncing: status?.syncing,
+        error: status?.error,
+        lastSyncIso: status?.lastSyncIso,
+        stale: !!status?.error || !status?.lastSyncIso
+      }
+    })
+    const microsoft = connections.filter((c) => c.provider === 'microsoft')
+    const google = connections.filter((c) => c.provider === 'google')
     return {
+      connections,
+      connecting: this.pendingAuth ? { ...this.pendingAuth } : undefined,
+      // Keep new Google consent gated until the shipped registration is verified.
+      googleAvailable: false,
       configured: this.effectiveConfig() !== null,
       builtIn: BUILT_IN_MS_CLIENT_ID.length > 0,
       ...(this.config ? { clientId: this.config.clientId, tenantId: this.config.tenantId } : {}),
-      signedIn,
-      msSignedIn,
-      googleSignedIn,
-      ...(msSignedIn && this.accountView ? { account: this.accountView } : {}),
-      ...(googleSignedIn && this.google.account ? { googleAccount: this.google.account } : {}),
-      events: signedIn ? this.visibleEvents() : [],
-      calendars: signedIn ? this.allCalendars() : [],
+      signedIn: connections.length > 0,
+      msSignedIn: microsoft.length > 0,
+      googleSignedIn: google.length > 0,
+      account: microsoft[0],
+      googleAccount: google[0],
+      events: this.visibleEvents(),
+      calendars: this.allCalendars(),
       prefs: { ...this.prefs },
-      ...(this.lastSyncIso ? { lastSyncIso: this.lastSyncIso } : {}),
-      ...(this.lastError ? { error: this.lastError } : {})
+      lastSyncIso: this.lastSyncIso,
+      error: this.lastError
     }
   }
 
   private broadcastState(): void {
+    this.updateMenuBarState()
     this.broadcast(CALENDAR_EVENTS_CHANNEL, this.state())
   }
 
@@ -361,41 +451,160 @@ export class CalendarService {
 
   /* ---- boot ---- */
 
-  /** Rebuild the MSAL client and adopt a cached account, if any. */
   private async bootstrap(): Promise<void> {
-    const config = this.effectiveConfig()
-    if (!config) return
-    try {
-      this.pca = this.buildClient(config)
-      const accounts = await this.pca.getTokenCache().getAllAccounts()
-      this.account = accounts[0] ?? null
-      if (this.account) {
-        if (!this.accountView) {
-          this.accountView = { email: this.account.username }
-        }
-        this.startTimers()
-        // Cached events already serve the UI; fetch fresh ones in the
-        // background without holding up the first getState().
-        void this.refreshEvents()
-      }
-    } catch (err) {
-      this.pca = null
-      this.account = null
-      this.lastError = friendlyError(err)
+    if (this.accounts.error) {
+      this.lastError = this.accounts.error
+      return
     }
-    if (this.google.signedIn) {
+    const config = this.effectiveConfig()
+    if (config && !this.accounts.migrated('microsoft')) {
+      try {
+        const client = this.buildClient(config)
+        const pending = this.accounts.entries('microsoft')
+        const legacy = pending.length === 1 ? pending[0]!.credential : this.readTokenCache()
+        if (legacy) client.getTokenCache().deserialize(legacy)
+        const cached = await client.getTokenCache().getAllAccounts()
+        if (this.disposed) return
+        if (cached.length > 1)
+          throw new Error(
+            'Several legacy Microsoft sessions were found. Reconnect your intended account; existing notes are preserved.'
+          )
+        if (cached.length === 1) {
+          const account = cached[0]!
+          const id = this.accounts.put(
+            microsoftIdentity(account, config.clientId),
+            { email: account.username, name: account.name },
+            client.getTokenCache().serialize()
+          )
+          this.accounts.migrateSnapshot(
+            id,
+            this.legacyCache.calendars ?? [],
+            this.legacyCache.account?.email.toLowerCase() === account.username.toLowerCase()
+              ? this.legacyCache.events.filter((e) => !e.calendarId.startsWith('g:'))
+              : [],
+            this.legacyVisibleIds,
+            this.notified,
+            this.legacyCache.lastSyncIso
+          )
+        }
+      } catch (err) {
+        this.restoreErrors.microsoft = friendlyError(err)
+      }
+    }
+    if (!this.accounts.entries('google').length && !this.accounts.migrated('google')) {
+      const legacy = new GoogleCalendarClient(this.userDataDir, undefined, this.accounts)
+      this.pendingGoogle = legacy
+      try {
+        await legacy.initialize()
+      } catch (err) {
+        this.restoreErrors.google = friendlyError(err)
+      }
+      if (this.disposed) {
+        legacy.cancelPending()
+        return
+      }
+      this.pendingGoogle = undefined
+    }
+    for (const entry of this.accounts.entries()) {
+      this.installSource(entry.view.id)
+      this.syncState.set(entry.view.id, { syncing: false, lastSyncIso: entry.lastSyncIso })
+      Object.assign(this.notified, entry.notified)
+    }
+    this.restoreSnapshots()
+    this.promptState = initialPromptCoordinatorState(
+      Object.fromEntries(
+        Object.entries(this.notified).map(([id, iso]) => [`calendar:${id}`, Date.parse(iso)])
+      )
+    )
+    if (!this.disposed && this.sources.size) {
       this.startTimers()
       void this.refreshEvents()
+    } else this.lastError = Object.values(this.restoreErrors).join(' ') || undefined
+  }
+
+  private installSource(id: string, google?: GoogleCalendarClient): void {
+    const entry = this.accounts.get(id)!
+    this.inflight.get(id)?.abort()
+    if (entry.identity.provider === 'google') {
+      const client =
+        google ?? new GoogleCalendarClient(this.userDataDir, undefined, this.accounts, id)
+      this.sources.set(id, {
+        id,
+        provider: 'google',
+        google: client,
+        calendars: (signal) => client.fetchCalendars(signal),
+        events: (calendar, signal) => client.fetchEvents(calendar, signal)
+      })
+    } else {
+      const config = this.effectiveConfig()
+      const client = config ? this.buildClient(config, id) : undefined
+      const token = async (): Promise<string> => {
+        if (!client || !config)
+          throw new Error('Configure the Microsoft registration to reconnect this account.')
+        const accounts = await client.getTokenCache().getAllAccounts()
+        const account = accounts.find(
+          (a) => accountKey(microsoftIdentity(a, config.clientId)) === id
+        )
+        if (!account)
+          throw new Error('Microsoft account could not be restored. Reconnect this account.')
+        try {
+          return (await client.acquireTokenSilent({ account, scopes: SCOPES })).accessToken
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith('Calendar storage')) throw err
+          throw new Error('Microsoft Calendar needs you to reconnect this account.')
+        }
+      }
+      this.sources.set(id, {
+        id,
+        provider: 'microsoft',
+        calendars: async (signal) => this.fetchCalendars(await token(), id, signal),
+        events: async (calendar, signal) =>
+          this.fetchCalendarView(await token(), calendar, id, signal)
+      })
     }
   }
 
-  private buildClient(config: StoredCalendarConfig): PublicClientApplication {
+  private restoreSnapshots(): void {
+    const entries = this.accounts.entries()
+    this.rawEvents = mergeCalendarEvents(entries.map((e) => e.events))
+    this.calendars = entries
+      .filter((e) => e.identity.provider === 'microsoft')
+      .flatMap((e) => e.calendars)
+    this.googleCalendars = entries
+      .filter((e) => e.identity.provider === 'google')
+      .flatMap((e) => e.calendars)
+    const syncs = entries.map((e) => e.lastSyncIso).filter((s): s is string => !!s)
+    this.lastSyncIso = syncs.length === entries.length && syncs.length ? syncs.sort()[0] : undefined
+    this.restoreVisibleSelection()
+  }
+
+  private restoreVisibleSelection(): void {
+    const entries = this.accounts
+      .entries()
+      .filter((e) => this.activeAccountIds().includes(e.view.id))
+    if (entries.every((e) => e.visibleCalendarIds === null)) this.prefs.visibleCalendarIds = null
+    else
+      this.prefs.visibleCalendarIds = entries.flatMap(
+        (e) =>
+          e.visibleCalendarIds ??
+          resolveVisibleCalendars(
+            this.allCalendars().filter((c) => c.accountId === e.view.id),
+            null
+          ).map((c) => c.id)
+      )
+  }
+
+  private activeAccountIds(): string[] {
+    return this.accounts.views().map((view) => view.id)
+  }
+
+  private buildClient(config: StoredCalendarConfig, id?: string): PublicClientApplication {
     return new PublicClientApplication({
       auth: {
         clientId: config.clientId,
         authority: `https://login.microsoftonline.com/${config.tenantId}`
       },
-      cache: { cachePlugin: this.cachePlugin() }
+      ...(id ? { cache: { cachePlugin: this.cachePlugin(id) } } : {})
     })
   }
 
@@ -417,16 +626,14 @@ export class CalendarService {
     this.lastError = undefined
     const changed = this.config?.clientId !== clientId || this.config?.tenantId !== tenantId
     if (changed) {
-      // Tokens are minted per app registration — a new one starts signed out.
-      this.forgetSession()
+      if (this.accounts.entries('microsoft').length) {
+        this.lastError =
+          'Remove the connected Microsoft accounts before changing the app registration. Other accounts and notes are preserved.'
+        return this.state()
+      }
+      this.cancelAuth()
       this.config = { clientId, tenantId }
       this.saveSettings()
-      try {
-        this.pca = this.buildClient(this.config)
-      } catch (err) {
-        this.pca = null
-        this.lastError = friendlyError(err)
-      }
     }
     this.broadcastState()
     return this.state()
@@ -460,205 +667,256 @@ export class CalendarService {
         ids.some((id, i) => this.prefs.visibleCalendarIds?.[i] !== id)
       next.visibleCalendarIds = ids
     }
+    if (
+      visibilityChanged &&
+      this.allCalendars().length &&
+      !resolveVisibleCalendars(this.allCalendars(), next.visibleCalendarIds).length
+    ) {
+      this.lastError = 'Keep at least one calendar visible across your accounts.'
+      return this.state()
+    }
+    try {
+      if (visibilityChanged)
+        this.accounts.setSelection(next.visibleCalendarIds, this.activeAccountIds())
+    } catch (err) {
+      this.lastError = friendlyError(err)
+      this.broadcastState()
+      return this.state()
+    }
     this.prefs = next
     this.saveSettings()
-    this.updateTray()
     this.broadcastState()
-    if (visibilityChanged && this.account) void this.refreshEvents()
+    if (visibilityChanged) {
+      this.selectionGeneration++
+      for (const controller of this.inflight.values()) controller.abort()
+      void this.refreshEvents()
+    }
     return this.state()
   }
 
   /* ---- auth ---- */
 
-  private async connect(): Promise<CalendarState> {
-    const config = this.effectiveConfig()
-    if (!config) {
-      this.lastError = 'Add your Client ID and Tenant ID first, then hit Save.'
+  private async connect(accountId?: string): Promise<CalendarState> {
+    return this.connectAccount('microsoft', accountId)
+  }
+  private async connectGoogle(accountId?: string): Promise<CalendarState> {
+    return this.connectAccount('google', accountId)
+  }
+
+  private async connectAccount(
+    provider: CalendarProvider,
+    accountId?: string
+  ): Promise<CalendarState> {
+    if (this.pendingAuth) return this.state()
+    if (accountId && this.accounts.get(accountId)?.identity.provider !== provider) {
+      this.lastError = 'That calendar account is no longer available.'
       return this.state()
     }
-    if (!this.pca) {
-      this.pca = this.buildClient(config)
-    }
-    if (this.connectBusy) {
-      this.lastError = 'A sign-in is already in progress — finish it in your browser.'
-      return this.state()
-    }
-    this.connectBusy = true
+    const generation = ++this.authGeneration
+    const attempt = { provider, accountId }
+    this.pendingAuth = attempt
     this.lastError = undefined
+    this.broadcastState()
     try {
-      // MSAL's interactive helper does the whole dance: PKCE (S256), a
-      // loopback http server on 127.0.0.1:<random port> (redirect URI
-      // http://localhost:<port> — Entra treats loopback ports as equivalent),
-      // then the code exchange. We only supply the browser opener.
-      const flow = this.pca.acquireTokenInteractive({
-        scopes: SCOPES,
-        openBrowser: async (url) => {
-          await shell.openExternal(url)
-        },
-        successTemplate: SUCCESS_TEMPLATE,
-        errorTemplate: ERROR_TEMPLATE
-      })
-      const result = await withTimeout(flow, CONNECT_TIMEOUT_MS)
-      if (result === 'timeout') {
-        // The loopback server lingers until the flow completes or the app
-        // quits; if the user finishes late, adopt the session then.
-        void flow.then((late) => this.adoptSession(late)).catch(() => {})
-        this.lastError = 'Sign-in timed out — hit Connect to try again.'
-        return this.state()
+      this.accounts.assertWritable()
+      let id: string
+      if (provider === 'google') {
+        const client = new GoogleCalendarClient(
+          this.userDataDir,
+          undefined,
+          this.accounts,
+          accountId ?? null
+        )
+        this.pendingGoogle = client
+        await client.connect()
+        if (generation !== this.authGeneration || this.disposed) return this.state()
+        id = client.accountId!
+        this.installSource(id, client)
+      } else {
+        const config = this.effectiveConfig()
+        if (!config) throw new Error('Add your Microsoft Client ID and Tenant ID first.')
+        const client = this.buildClient(config)
+        const loopback = new CalendarAuthLoopback()
+        this.pendingMicrosoft = loopback
+        const cancelled = new Promise<'cancelled'>((resolve) => {
+          this.cancelMicrosoftWait = () => resolve('cancelled')
+        })
+        const flow = client.acquireTokenInteractive({
+          loopbackClient: loopback,
+          state: loopback.state,
+          scopes: SCOPES,
+          prompt: 'select_account',
+          openBrowser: async (url) => {
+            if (generation !== this.authGeneration || this.disposed)
+              throw new Error('Sign-in cancelled.')
+            await shell.openExternal(url)
+          },
+          successTemplate: SUCCESS_TEMPLATE,
+          errorTemplate: ERROR_TEMPLATE
+        })
+        const result = await withTimeout(Promise.race([flow, cancelled]), CONNECT_TIMEOUT_MS)
+        loopback.closeServer()
+        if (this.pendingMicrosoft === loopback) {
+          this.pendingMicrosoft = undefined
+          this.cancelMicrosoftWait = undefined
+        }
+        if (result === 'cancelled') return this.state()
+        if (generation !== this.authGeneration || this.disposed) return this.state()
+        if (result === 'timeout') {
+          void flow.catch(() => {})
+          throw new Error('Microsoft sign-in timed out. Try Add account again.')
+        }
+        id = await this.adoptSession(result, client, config, generation, accountId)
+        if (generation !== this.authGeneration || this.disposed) return this.state()
+        this.installSource(id)
       }
-      await this.adoptSession(result)
-      return this.state()
-    } catch (err) {
-      this.lastError = friendlyError(err)
-      return this.state()
-    } finally {
-      this.connectBusy = false
-    }
-  }
-
-  /** Land a completed interactive sign-in: account, /me identity, first sync. */
-  private async adoptSession(result: AuthenticationResult): Promise<void> {
-    if (this.disposed) return
-    this.account = result.account ?? (await this.allAccounts())[0] ?? null
-    if (!this.account) {
-      this.lastError = 'Signed in, but Microsoft returned no account — try Connect again.'
-      return
-    }
-    this.lastError = undefined
-    this.accountView = { email: this.account.username }
-    await this.fetchIdentity(result.accessToken)
-    this.startTimers()
-    await this.refreshEvents()
-  }
-
-  private async allAccounts(): Promise<AccountInfo[]> {
-    try {
-      return this.pca ? await this.pca.getTokenCache().getAllAccounts() : []
-    } catch {
-      return []
-    }
-  }
-
-  private async connectGoogle(): Promise<CalendarState> {
-    if (this.connectBusy) return this.state()
-    this.connectBusy = true
-    try {
-      await this.google.connect()
-      this.lastError = undefined
+      delete this.restoreErrors[provider]
+      this.syncState.set(id, { syncing: false, lastSyncIso: this.accounts.get(id)?.lastSyncIso })
+      this.restoreSnapshots()
       this.startTimers()
-      await this.refreshEvents()
+      // Authentication has committed. Sync has its own progress and cancellation lifecycle.
+      if (this.pendingAuth === attempt) {
+        this.pendingAuth = undefined
+        this.pendingGoogle = undefined
+      }
+      this.broadcastState()
+      await this.refreshEvents([id])
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err)
+      if (generation === this.authGeneration) this.lastError = friendlyError(err)
     } finally {
-      this.connectBusy = false
+      if (this.pendingAuth === attempt) {
+        this.pendingMicrosoft?.closeServer()
+        this.pendingMicrosoft = undefined
+        this.cancelMicrosoftWait = undefined
+        this.authGeneration++
+        this.pendingAuth = undefined
+        this.pendingGoogle = undefined
+      }
       this.broadcastState()
     }
     return this.state()
   }
 
-  private async disconnectGoogle(): Promise<CalendarState> {
-    this.google.disconnect()
-    this.googleCalendars = []
-    this.rawEvents = this.rawEvents.filter((e) => !e.calendarId.startsWith('g:'))
-    if (this.account === null) {
-      // Nothing left connected — behave like a full sign-out.
-      this.rawEvents = []
-      this.lastSyncIso = undefined
-      this.stopTimers()
-      this.destroyTray()
+  private async adoptSession(
+    result: AuthenticationResult,
+    client: PublicClientApplication,
+    config: StoredCalendarConfig,
+    generation: number,
+    target?: string
+  ): Promise<string> {
+    const account = result.account
+    if (!account) throw new Error('Microsoft returned no account. Try again.')
+    const identity = microsoftIdentity(account, config.clientId)
+    const id = accountKey(identity)
+    if (target && target !== id)
+      throw new Error('Choose the targeted Microsoft account to reconnect it.')
+    if (
+      !['common', 'organizations', 'consumers'].includes(config.tenantId.toLowerCase()) &&
+      /^[0-9a-f-]{36}$/i.test(config.tenantId) &&
+      account.tenantId.toLowerCase() !== config.tenantId.toLowerCase()
+    )
+      throw new Error(
+        'This custom Microsoft registration only permits its configured tenant. Existing accounts are unchanged.'
+      )
+    for (const cached of await client.getTokenCache().getAllAccounts()) {
+      if (accountKey(microsoftIdentity(cached, config.clientId)) !== id)
+        await client.getTokenCache().removeAccount(cached)
     }
-    this.saveEventCache()
-    this.broadcastState()
+    if (generation !== this.authGeneration || this.disposed) throw new Error('Sign-in cancelled.')
+    this.accounts.put(
+      identity,
+      { email: account.username, name: account.name },
+      client.getTokenCache().serialize(),
+      true
+    )
+    return id
+  }
+
+  private cancelAuth(): CalendarState {
+    this.authGeneration++
+    this.cancelMicrosoftWait?.()
+    this.cancelMicrosoftWait = undefined
+    this.pendingMicrosoft?.closeServer()
+    this.pendingMicrosoft = undefined
+    this.pendingGoogle?.cancelPending()
+    this.pendingGoogle = undefined
+    this.pendingAuth = undefined
+    if (!this.disposed) this.broadcastState()
     return this.state()
   }
 
   private async disconnect(): Promise<CalendarState> {
-    this.stopTimers()
+    const id = this.accounts.views().find((c) => c.provider === 'microsoft')?.id
+    return id ? this.removeAccount(id) : this.state()
+  }
+  private async disconnectGoogle(): Promise<CalendarState> {
+    const id = this.accounts.views().find((c) => c.provider === 'google')?.id
+    return id ? this.removeAccount(id) : this.state()
+  }
+  private async removeAccount(id: string): Promise<CalendarState> {
+    const entry = this.accounts.get(id)
+    if (!entry) return this.state()
+    this.cancelAuth()
+    this.accounts.remove(id)
+    this.inflight.get(id)?.abort()
+    this.sources.get(id)?.google?.cancelPending()
+    this.sources.delete(id)
+    this.syncState.delete(id)
+    this.restoreSnapshots()
+    this.clearRemovedPrompts()
+    delete this.restoreErrors[entry.identity.provider]
+    this.lastError = undefined
+    // Deleting one connection never signs out a different account at the provider.
+    const legacy =
+      entry.identity.provider === 'microsoft'
+        ? this.tokenCachePath
+        : join(this.userDataDir, 'google-token-cache')
     try {
-      if (this.pca && this.account) {
-        await this.pca.signOut({ account: this.account })
-      }
+      rmSync(legacy, { force: true })
     } catch {
-      // Cache cleanup below still runs.
+      /* The persisted tombstone prevents resurrection. */
     }
-    this.forgetSession()
+    if (!this.sources.size) this.stopTimers()
     this.broadcastState()
     return this.state()
   }
 
-  /** Drop every trace of the signed-in session (tokens, events, identity).
-   *  Display prefs survive — they are settings, not session data. */
-  private forgetSession(): void {
-    this.account = null
-    this.accountView = null
-    this.rawEvents = []
-    this.calendars = []
-    this.lastSyncIso = undefined
-    this.lastError = undefined
-    this.stopTimers()
-    this.destroyTray()
-    for (const path of [this.tokenCachePath, this.eventCachePath]) {
-      try {
-        rmSync(path, { force: true })
-      } catch {
-        // Best effort — a stale cache file is harmless next to a cleared account.
-      }
-    }
-  }
-
-  /** Silent token first; a null return means the user must reconnect. */
-  private async getAccessToken(): Promise<string | null> {
-    if (!this.pca || !this.account) return null
-    try {
-      const result = await this.pca.acquireTokenSilent({ account: this.account, scopes: SCOPES })
-      return result.accessToken
-    } catch {
-      this.lastError =
-        'Your Microsoft 365 session expired — open Settings and hit Connect to sign in again.'
-      return null
-    }
-  }
-
-  /** "Connected as <email>" comes from Graph /me, not the token claims. */
-  private async fetchIdentity(accessToken: string): Promise<void> {
-    try {
-      const res = await fetch(
-        'https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName',
-        { headers: { Authorization: `Bearer ${accessToken}` } }
+  private clearRemovedPrompts(): void {
+    const retained = new Set(this.rawEvents.map((e) => e.id))
+    this.notified = Object.fromEntries(
+      Object.entries(this.notified).filter(([id]) => retained.has(id))
+    )
+    this.promptState = {
+      ...this.promptState,
+      deliveredAt: Object.fromEntries(
+        Object.entries(this.promptState.deliveredAt).filter(
+          ([key]) => !key.startsWith('calendar:') || retained.has(key.slice('calendar:'.length))
+        )
       )
-      if (!res.ok) return
-      const me = (await res.json()) as {
-        displayName?: unknown
-        mail?: unknown
-        userPrincipalName?: unknown
-      }
-      const email =
-        typeof me.mail === 'string' && me.mail
-          ? me.mail
-          : typeof me.userPrincipalName === 'string'
-            ? me.userPrincipalName
-            : ''
-      if (email) {
-        this.accountView = {
-          email,
-          ...(typeof me.displayName === 'string' && me.displayName ? { name: me.displayName } : {})
-        }
-      }
-    } catch {
-      // Keep the token-claim username; /me is a nicety.
     }
+    if (this.activePrompt?.eventId && !retained.has(this.activePrompt.eventId)) this.dismissPrompt()
   }
 
   /* ---- token cache (safeStorage-encrypted, like notes-service API keys) ---- */
 
-  private cachePlugin(): ICachePlugin {
+  private cachePlugin(id: string): ICachePlugin {
+    const epoch = this.accounts.epoch(id)
     return {
       beforeCacheAccess: async (context) => {
-        const data = this.readTokenCache()
-        if (data !== null) context.tokenCache.deserialize(data)
+        if (!this.accounts.current(id, epoch))
+          throw new Error('Microsoft account changed. Retry calendar sync.')
+        const data = this.accounts.get(id)?.credential
+        if (data) context.tokenCache.deserialize(data)
       },
       afterCacheAccess: async (context) => {
-        if (context.cacheHasChanged) this.writeTokenCache(context.tokenCache.serialize())
+        if (
+          context.cacheHasChanged &&
+          !this.accounts.update(id, epoch, (e) => {
+            e.credential = context.tokenCache.serialize()
+          })
+        ) {
+          throw new Error('Microsoft account changed. Retry calendar sync.')
+        }
       }
     }
   }
@@ -672,125 +930,162 @@ export class CalendarService {
     }
   }
 
-  private writeTokenCache(serialized: string): void {
-    try {
-      if (!safeStorage.isEncryptionAvailable()) {
-        // Never fall back to plaintext tokens on disk.
-        console.error('[calendar] safeStorage unavailable — token cache not persisted')
-        return
-      }
-      mkdirSync(dirname(this.tokenCachePath), { recursive: true })
-      writeFileSync(this.tokenCachePath, safeStorage.encryptString(serialized))
-    } catch (err) {
-      console.error('[calendar] failed to persist token cache:', err)
-    }
-  }
-
   /* ---- Graph polling ---- */
 
-  private async refreshEvents(): Promise<void> {
-    if (this.refreshBusy || (!this.account && !this.google.signedIn)) return
-    this.refreshBusy = true
-    try {
-      let token: string | null = null
-      if (this.account) {
-        token = await this.getAccessToken()
-        if (token !== null) {
-          this.calendars = await this.fetchCalendars(token)
-        } else if (!this.google.signedIn) {
-          return // lastError already explains
-        }
-      }
-      if (this.google.signedIn) {
-        try {
-          this.googleCalendars = await this.google.fetchCalendars()
-        } catch (err) {
-          // Google blip must not kill the Microsoft sync (and vice versa).
-          if (this.googleCalendars.length === 0) throw err
-          console.error('[calendar] google calendar list refresh failed:', err)
-        }
-      }
-      const visible = resolveVisibleCalendars(
-        this.allCalendars(),
-        this.prefs.visibleCalendarIds
-      ).filter((calendar) => (calendar.id.startsWith('g:') ? true : token !== null))
-      // Per-calendar fetches run in parallel; one failing shared calendar
-      // must not kill the sync, so failures are collected, not thrown.
-      const results = await Promise.allSettled(
-        visible.map((calendar) =>
-          calendar.id.startsWith('g:')
-            ? this.google.fetchEvents(calendar)
-            : this.fetchCalendarView(token as string, calendar)
-        )
-      )
-      const lists: CalendarEvent[][] = []
-      let firstFailure: unknown
-      results.forEach((result, i) => {
-        if (result.status === 'fulfilled') {
-          lists.push(result.value)
-        } else {
-          firstFailure ??= result.reason
-          console.error(`[calendar] sync failed for “${visible[i]?.name}”:`, result.reason)
-        }
-      })
-      // …but when every fetch failed there is nothing fresh at all — surface
-      // the first reason and keep the previous events.
-      if (lists.length === 0 && visible.length > 0) {
-        throw firstFailure instanceof Error ? firstFailure : new Error(String(firstFailure))
-      }
-      this.rawEvents = mergeCalendarEvents(lists)
-      this.lastSyncIso = new Date().toISOString()
-      this.lastError = undefined
-      this.saveEventCache()
-      // Catch an already-imminent meeting without waiting for the next tick.
-      this.checkMeetingStarts()
-    } catch (err) {
-      this.lastError = friendlyError(err)
-    } finally {
-      this.refreshBusy = false
-      this.updateTray()
-      this.broadcastState()
-    }
+  private refreshEvents(only?: string[]): Promise<void> {
+    for (const id of only ?? this.sources.keys()) this.refreshQueue.add(id)
+    if (!this.refreshWork)
+      this.refreshWork = Promise.resolve()
+        .then(async () => {
+          while (this.refreshQueue.size && !this.disposed) {
+            const ids = [...this.refreshQueue]
+            this.refreshQueue.clear()
+            await this.syncAccounts(ids)
+          }
+        })
+        .finally(() => {
+          this.refreshWork = undefined
+        })
+    return this.refreshWork
   }
 
-  /** GET /me/calendars — the account's calendar list. Falls back to the
-   *  cached list when Graph hiccups so a blip never blanks the sync. */
-  private async fetchCalendars(accessToken: string): Promise<CalendarInfo[]> {
+  private async syncAccounts(only: string[]): Promise<void> {
+    const sources = [...this.sources.values()].filter((source) => !only || only.includes(source.id))
+    await mapCalendarTasks(sources, 3, async (source) => {
+      const id = source.id
+      if (this.inflight.has(id) || !this.accounts.get(id) || this.disposed) return
+      const previous = this.syncState.get(id)
+      if (previous?.retryAt && previous.retryAt > Date.now()) return
+      const controller = new AbortController()
+      this.inflight.set(id, controller)
+      const epoch = this.accounts.epoch(id)
+      const selection = this.selectionGeneration
+      const current = (): boolean =>
+        !this.disposed &&
+        !controller.signal.aborted &&
+        this.accounts.current(id, epoch) &&
+        this.sources.get(id) === source &&
+        selection === this.selectionGeneration
+      this.syncState.set(id, { ...previous, syncing: true })
+      this.broadcastState()
+      try {
+        const calendars = await source.calendars(controller.signal)
+        if (!current()) return
+        if (source.provider === 'google' && !this.accounts.migrated('google')) {
+          this.accounts.migrateSnapshot(
+            id,
+            calendars.map((c) => ({ ...c, id: `g:${c.providerCalendarId}` })),
+            [],
+            this.legacyVisibleIds,
+            {}
+          )
+        }
+        const entry = this.accounts.get(id)!
+        const selected = resolveVisibleCalendars(calendars, entry.visibleCalendarIds)
+        let retryAt: number | undefined
+        const results = await mapCalendarTasks(selected, 2, async (calendar) => {
+          try {
+            if (retryAt && retryAt > Date.now())
+              throw new CalendarRequestError(
+                'Calendar sync is waiting for the provider retry window.',
+                retryAt
+              )
+            return { events: await source.events(calendar, controller.signal), error: undefined }
+          } catch (err) {
+            if (err instanceof CalendarRequestError && err.retryAt)
+              retryAt = Math.max(retryAt ?? 0, err.retryAt)
+            return {
+              events: entry.events.filter((e) => e.calendarId === calendar.id),
+              error: friendlyError(err)
+            }
+          }
+        })
+        if (!current()) return
+        const errors = results.flatMap((r) => (r.error ? [r.error] : []))
+        const lastSyncIso = errors.length ? entry.lastSyncIso : new Date().toISOString()
+        this.accounts.update(id, epoch, (saved) => {
+          saved.calendars = calendars
+          saved.events = mergeCalendarEvents(results.map((r) => r.events))
+          saved.lastSyncIso = lastSyncIso
+        })
+        this.syncState.set(id, {
+          syncing: false,
+          lastSyncIso,
+          error: errors.length ? [...new Set(errors)].join(' ') : undefined,
+          retryAt
+        })
+        this.restoreSnapshots()
+      } catch (err) {
+        if (current())
+          this.syncState.set(id, {
+            syncing: false,
+            lastSyncIso: previous?.lastSyncIso,
+            error: friendlyError(err),
+            retryAt: err instanceof CalendarRequestError ? err.retryAt : undefined
+          })
+      } finally {
+        if (this.inflight.get(id) === controller) this.inflight.delete(id)
+        const state = this.syncState.get(id)
+        if (state && this.sources.get(id) === source) state.syncing = false
+        this.broadcastState()
+        if (
+          !this.disposed &&
+          selection !== this.selectionGeneration &&
+          this.sources.get(id) === source
+        )
+          void this.refreshEvents([id])
+      }
+    })
+    if (this.disposed) return
+    const errors = [
+      ...Object.values(this.restoreErrors),
+      ...[...this.syncState.values()].flatMap((s) => (s.error ? [s.error] : []))
+    ]
+    this.lastError = errors.length ? [...new Set(errors)].join(' ') : undefined
+    this.checkMeetingStarts()
+    this.broadcastState()
+  }
+
+  /** GET /me/calendars. The refresh coordinator preserves cached data on failure. */
+  private async fetchCalendars(
+    accessToken: string,
+    id: string,
+    signal?: AbortSignal
+  ): Promise<CalendarInfo[]> {
+    const identity = this.accounts.get(id)?.identity
+    if (!identity)
+      throw new Error('Microsoft account identity is unavailable. Reconnect Microsoft Calendar.')
     const params = new URLSearchParams({
       $select: 'id,name,color,hexColor,isDefaultCalendar,canEdit',
       $top: '50'
     })
-    try {
-      const res = await fetch(`https://graph.microsoft.com/v1.0/me/calendars?${params}`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      })
-      if (!res.ok) {
-        throw new Error(await graphErrorMessage(res))
-      }
-      const body = (await res.json()) as { value?: unknown }
-      const items = Array.isArray(body.value) ? body.value : []
-      const calendars: CalendarInfo[] = []
-      for (const item of items) {
-        const calendar = normalizeGraphCalendar(item)
-        if (calendar) calendars.push(calendar)
-      }
-      // Every mailbox has a default calendar; an empty list is a Graph blip.
-      if (calendars.length === 0) throw new Error('Microsoft returned no calendars')
-      return calendars
-    } catch (err) {
-      if (this.calendars.length > 0) {
-        console.error('[calendar] calendar list refresh failed, using cached list:', err)
-        return this.calendars
-      }
-      throw err
+    const items = await calendarPages(
+      `https://graph.microsoft.com/v1.0/me/calendars?${params}`,
+      accessToken,
+      'microsoft',
+      {},
+      signal
+    )
+    const calendars: CalendarInfo[] = []
+    for (const item of items) {
+      const calendar = normalizeGraphCalendar(item)
+      if (calendar) calendars.push(scopeCalendar(identity, calendar))
     }
+    // Every mailbox has a default calendar; an empty list is a Graph blip.
+    if (calendars.length === 0) throw new Error('Microsoft returned no calendars')
+    return calendars
   }
 
   /** GET /me/calendars/{id}/calendarView for the next LOOKAHEAD_DAYS. */
   private async fetchCalendarView(
     accessToken: string,
-    calendar: CalendarInfo
+    calendar: CalendarInfo,
+    id: string,
+    signal?: AbortSignal
   ): Promise<CalendarEvent[]> {
+    const identity = this.accounts.get(id)?.identity
+    if (!identity || calendar.accountId !== id)
+      throw new Error('Microsoft calendar belongs to another account.')
     const now = new Date()
     const end = new Date(now.getTime() + LOOKAHEAD_DAYS * 86_400_000)
     const timeZone = systemTimeZone()
@@ -798,28 +1093,21 @@ export class CalendarService {
       startDateTime: now.toISOString(),
       endDateTime: end.toISOString(),
       $select:
-        'subject,start,end,isAllDay,isOnlineMeeting,onlineMeeting,location,organizer,attendees',
+        'subject,start,end,isAllDay,isCancelled,isOnlineMeeting,onlineMeeting,location,organizer,attendees',
       $orderby: 'start/dateTime',
       $top: '50'
     })
-    const res = await fetch(
-      `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(calendar.id)}/calendarView?${params}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Prefer: `outlook.timezone="${timeZone}"`
-        }
-      }
+    const items = await calendarPages(
+      `https://graph.microsoft.com/v1.0/me/calendars/${encodeURIComponent(calendar.providerCalendarId!)}/calendarView?${params}`,
+      accessToken,
+      'microsoft',
+      { Prefer: `outlook.timezone="${timeZone}"` },
+      signal
     )
-    if (!res.ok) {
-      throw new Error(await graphErrorMessage(res))
-    }
-    const body = (await res.json()) as { value?: unknown }
-    const items = Array.isArray(body.value) ? body.value : []
     const events: CalendarEvent[] = []
     for (const item of items) {
       const event = normalizeGraphEvent(item, calendar)
-      if (event) events.push(event)
+      if (event) events.push(scopeEvent(identity, calendar, event))
     }
     return events
   }
@@ -856,7 +1144,7 @@ export class CalendarService {
   /**
    * Deliver one deduplicated meeting prompt. The renderer keeps a persistent
    * action banner, while one external surface gets the user's attention: a
-   * native notification when supported, or the floating panel as fallback.
+   * bottom panel on macOS, native notification with panel fallback elsewhere.
    * Also the entry point for ad-hoc mic-detected prompts (MicWatcher).
    */
   deliverPrompt(requested: CalendarStartMeetingEvent): void {
@@ -864,7 +1152,13 @@ export class CalendarService {
     const decision = coordinatePrompt(this.promptState, requested, this.visibleEvents(), nowMs)
     this.promptState = decision.state
     if (!decision.prompt) return
-    const payload = decision.prompt
+    const source = this.visibleEvents().find((e) => e.id === decision.prompt?.eventId)
+    const payload = {
+      ...decision.prompt,
+      sourceLabel: source?.sourceLabel,
+      joinUrl: calendarJoinUrl(source?.joinUrl)
+    }
+    this.activePrompt = payload
 
     // A mic signal correlated to a calendar event owns that event's one prompt,
     // so the 30-second calendar watcher must not deliver it again later.
@@ -900,14 +1194,23 @@ export class CalendarService {
     if (this.promptPanel) {
       this.promptPanel.show(prompt, (action) => {
         if (action === 'start') this.actOnPromptStart(prompt)
+        else this.dismissPrompt()
       })
     }
   }
 
   /** One click anywhere = meeting created + recording (renderer handles it). */
   private actOnPromptStart(prompt: CalendarStartMeetingEvent): void {
-    const payload = { ...prompt, action: 'start' as const }
+    const payload = {
+      ...prompt,
+      action: 'start' as const,
+      joinRequested: !!calendarJoinUrl(prompt.joinUrl)
+    }
     this.promptPanel?.close()
+    if (this.requestRecordingStart) {
+      this.requestRecordingStart(payload)
+      return
+    }
     const hadWindow = BrowserWindow.getAllWindows().length > 0
     this.focusWindow()
     if (hadWindow) {
@@ -949,70 +1252,22 @@ export class CalendarService {
     }
   }
 
-  /* ---- menu bar (Tray) ---- */
+  /* ---- shared menu bar ---- */
 
-  /**
-   * Reconcile the macOS menu-bar item with current state: a text-only Tray
-   * (empty image + title) showing the next meeting and its countdown. It
-   * exists only while signed in, the pref is on, and a timed event is in the
-   * fetched window — otherwise it is destroyed (an empty tray still occupies
-   * menu-bar space). Refreshed on every poll, pref change and 30s watch tick.
-   */
-  private updateTray(): void {
-    if (process.platform !== 'darwin' || this.disposed) {
-      this.destroyTray()
-      return
-    }
-    const nowMs = Date.now()
-    const shown = this.account !== null && this.prefs.showMenuBar ? this.visibleEvents() : []
-    const next = nextTrayEvent(shown, nowMs)
-    if (next === null) {
-      this.destroyTray()
-      return
-    }
-    try {
-      if (this.tray === null) {
-        this.tray = new Tray(nativeImage.createEmpty())
-        this.tray.setToolTip('DoodleNote — upcoming meetings')
-      }
-      this.tray.setTitle(trayTitle(next, nowMs), { fontType: 'monospacedDigit' })
-      const items: Electron.MenuItemConstructorOptions[] = upcomingTrayEvents(
-        shown,
-        nowMs,
-        TRAY_MENU_EVENTS
-      ).map((event) => ({
-        label: `${trayMenuTime(event.startIso)} — ${event.subject.trim() || 'Untitled meeting'}`,
-        enabled: false
-      }))
-      items.push(
-        { type: 'separator' },
-        { label: 'Open DoodleNote', click: () => this.focusWindow() },
-        {
-          label: 'Hide from menu bar',
-          click: () => {
-            this.setPrefs({ showMenuBar: false })
-          }
-        },
-        { type: 'separator' },
-        { label: 'Quit DoodleNote', click: () => app.quit() }
-      )
-      this.tray.setContextMenu(Menu.buildFromTemplate(items))
-    } catch (err) {
-      // Tray support can be flaky (headless CI, odd window managers) — the
-      // in-app card is the real surface; never let the menu bar break sync.
-      console.error('[calendar] tray update failed:', err)
-      this.destroyTray()
-    }
+  /** Keep the legacy preference so existing Settings and saved choices agree
+   * with the Compact / Full Island radio items. The dog is always available. */
+  setMenuBarMode(fullIsland: boolean): void {
+    this.setPrefs({ showMenuBar: fullIsland })
   }
 
-  private destroyTray(): void {
-    if (this.tray === null) return
+  private updateMenuBarState(): void {
+    if (this.disposed) return
     try {
-      this.tray.destroy()
-    } catch {
-      // Already gone.
+      this.updateMenuBar?.(this.state())
+    } catch (err) {
+      // A native menu failure must never interrupt calendar auth or syncing.
+      console.error('[calendar] menu bar update failed:', err)
     }
-    this.tray = null
   }
 
   /* ---- timers ---- */
@@ -1026,7 +1281,6 @@ export class CalendarService {
     if (this.watchTimer === null) {
       this.watchTimer = setInterval(() => {
         this.checkMeetingStarts()
-        this.updateTray() // keep the "in 12m" countdown honest
       }, WATCH_INTERVAL_MS)
       this.watchTimer.unref?.()
     }
@@ -1085,7 +1339,8 @@ export class CalendarService {
         ...(this.config ?? {}),
         showMenuBar: this.prefs.showMenuBar,
         showNoParticipants: this.prefs.showNoParticipants,
-        visibleCalendarIds: this.prefs.visibleCalendarIds
+        // Account selections live in the encrypted vault; keep legacy rollback input intact.
+        visibleCalendarIds: this.loadSettings().prefs.visibleCalendarIds
       }
       writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2))
     } catch (err) {
@@ -1110,6 +1365,9 @@ export class CalendarService {
       return {
         events,
         ...(calendars.length > 0 ? { calendars } : {}),
+        ...(Array.isArray(raw.googleCalendars)
+          ? { googleCalendars: raw.googleCalendars.filter(isStoredCalendarInfo) }
+          : {}),
         ...(typeof raw.lastSyncIso === 'string' ? { lastSyncIso: raw.lastSyncIso } : {}),
         ...(raw.account && typeof raw.account.email === 'string'
           ? {
@@ -1122,21 +1380,6 @@ export class CalendarService {
       }
     } catch {
       return { events: [] } // no cache yet
-    }
-  }
-
-  private saveEventCache(): void {
-    try {
-      const cache: StoredCalendarCache = {
-        events: this.rawEvents,
-        ...(this.calendars.length > 0 ? { calendars: this.calendars } : {}),
-        ...(this.googleCalendars.length > 0 ? { googleCalendars: this.googleCalendars } : {}),
-        ...(this.lastSyncIso ? { lastSyncIso: this.lastSyncIso } : {}),
-        ...(this.accountView ? { account: this.accountView } : {})
-      }
-      writeFileSync(this.eventCachePath, JSON.stringify(cache, null, 2))
-    } catch (err) {
-      console.error('[calendar] failed to save event cache:', err)
     }
   }
 
@@ -1156,9 +1399,18 @@ export class CalendarService {
 
   private saveNotified(): void {
     try {
-      writeFileSync(this.notifiedPath, JSON.stringify(this.notified, null, 2))
+      for (const entry of this.accounts
+        .entries()
+        .filter((e) => this.activeAccountIds().includes(e.view.id))) {
+        const ids = new Set(entry.events.map((e) => e.id))
+        this.accounts.update(entry.view.id, this.accounts.epoch(entry.view.id), (saved) => {
+          saved.notified = Object.fromEntries(
+            Object.entries(this.notified).filter(([id]) => ids.has(id))
+          )
+        })
+      }
     } catch (err) {
-      console.error('[calendar] failed to save notified ids:', err)
+      this.lastError = friendlyError(err)
     }
   }
 }
@@ -1202,15 +1454,6 @@ function graphDateTimeToIso(value: unknown): string | null {
   return new Date(ms).toISOString()
 }
 
-/** "9:00 AM" for the Tray click menu rows. */
-function trayMenuTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  } catch {
-    return ''
-  }
-}
-
 function normalizeGraphCalendar(item: unknown): CalendarInfo | null {
   if (typeof item !== 'object' || item === null) return null
   const raw = item as Record<string, unknown>
@@ -1227,16 +1470,13 @@ function normalizeGraphCalendar(item: unknown): CalendarInfo | null {
 function normalizeGraphEvent(item: unknown, calendar: CalendarInfo): CalendarEvent | null {
   if (typeof item !== 'object' || item === null) return null
   const raw = item as Record<string, unknown>
-  if (typeof raw.id !== 'string' || raw.id.length === 0) return null
+  if (typeof raw.id !== 'string' || raw.id.length === 0 || raw.isCancelled === true) return null
   const startIso = graphDateTimeToIso(raw.start)
   const endIso = graphDateTimeToIso(raw.end)
   if (startIso === null || endIso === null) return null
 
   const online = raw.onlineMeeting as { joinUrl?: unknown } | null | undefined
-  const joinUrl =
-    online && typeof online.joinUrl === 'string' && /^https:\/\//i.test(online.joinUrl)
-      ? online.joinUrl
-      : undefined
+  const joinUrl = calendarJoinUrl(online?.joinUrl)
   const location = raw.location as { displayName?: unknown } | null | undefined
   const organizer = raw.organizer as
     { emailAddress?: { name?: unknown; address?: unknown } } | null | undefined
@@ -1313,29 +1553,10 @@ function isStoredCalendarInfo(value: unknown): value is CalendarInfo {
   )
 }
 
-async function graphErrorMessage(res: Response): Promise<string> {
-  let detail = ''
-  try {
-    const body = (await res.json()) as { error?: { code?: unknown; message?: unknown } }
-    if (typeof body.error?.message === 'string') detail = body.error.message
-  } catch {
-    // Non-JSON error body — the status code is enough.
-  }
-  if (res.status === 401) {
-    return 'Microsoft 365 rejected the session — open Settings and hit Connect to sign in again.'
-  }
-  if (res.status === 403) {
-    return 'Microsoft 365 denied calendar access — your admin may need to grant the Calendars.Read permission.'
-  }
-  if (res.status === 429) {
-    return 'Microsoft is rate-limiting calendar syncs — DoodleNote will retry shortly.'
-  }
-  return `Calendar sync failed (HTTP ${res.status})${detail ? `: ${clip(detail)}` : ''}`
-}
-
 /** Turn auth/network failures into one calm sentence for the Settings card. */
 function friendlyError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
+  if (/^Google Calendar/i.test(message)) return clip(message)
   if (/AADSTS700016|unauthorized_client/i.test(message)) {
     return 'Microsoft didn’t recognize that Client ID — double-check the app registration.'
   }

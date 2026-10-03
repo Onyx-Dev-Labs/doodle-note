@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { macMicPromptDelay, updateMacMicSession, type MacMicSession } from './mac-mic-session'
 import { WIN_MICMON_ARGS } from './win-micmon'
 import {
   initialEndState,
@@ -9,6 +11,7 @@ import {
   markPrompted,
   MEETING_END_DEBOUNCE_MS,
   meetingPromptLabel,
+  meetingAppLabel,
   MIC_DEBOUNCE_MS,
   onCaptureMicEvent,
   onMicEvent,
@@ -45,6 +48,8 @@ export class MicWatcher {
   private config: MicWatcherConfig
   private readonly configPath: string
   private state: MicPromptState = initialMicState()
+  private macSession: MacMicSession | null = null
+  private readonly detectionPrefix = randomUUID()
   private child: ChildProcessWithoutNullStreams | null = null
   private debounceTimer: NodeJS.Timeout | null = null
   private restartTimer: NodeJS.Timeout | null = null
@@ -72,7 +77,7 @@ export class MicWatcher {
   constructor(
     private readonly enginePath: string,
     userDataDir: string,
-    private readonly onMeetingDetected: (appLabel: string | null) => void,
+    private readonly onMeetingDetected: (appLabel: string | null, detectionId?: string) => void,
     /** The meeting app left the mic mid-capture — stop the recording. */
     private readonly onMeetingEnded: () => void
   ) {
@@ -126,6 +131,8 @@ export class MicWatcher {
     this.config.enabled = enabled
     this.writeConfig()
     this.state = initialMicState()
+    this.macSession = null
+    this.clearDebounce()
     this.reconcileChild()
   }
 
@@ -149,7 +156,10 @@ export class MicWatcher {
    *  That same window is when the meeting-end watch is armed. */
   setSuppressed(suppressed: boolean): void {
     this.state = setSuppressed(this.state, suppressed)
-    if (suppressed) this.clearDebounce()
+    if (suppressed) {
+      this.clearDebounce()
+      if (this.macSession) this.macSession = { ...this.macSession, prompted: true }
+    }
     this.capturing = suppressed
     this.resetEndWatch()
     // micmon only emits on CHANGES — if the meeting app already held the mic
@@ -229,7 +239,11 @@ export class MicWatcher {
                 `inputLabel=${inputLabel} outputOnlyIgnored=${inputLabel === null && output.length > 0} ` +
                 `suppressed=${this.state.suppressed}`
             )
-            this.handleMicEvent(inputLabel !== null)
+            if (process.platform === 'darwin') {
+              this.handleMacMicEvent(inputLabel, output)
+            } else {
+              this.handleMicEvent(inputLabel !== null)
+            }
             this.handleEndWatch(inputLabel !== null)
           }
         } catch {
@@ -242,6 +256,11 @@ export class MicWatcher {
     child.on('exit', () => {
       this.child = null
       this.clearDebounce()
+      // Monitor downtime is not evidence that a call ended. Re-debounce fresh
+      // input after restart, preserving consumption of the existing call.
+      if (this.macSession) {
+        this.macSession = { ...this.macSession, busySinceMs: null, absentSinceMs: null }
+      }
       if (!this.stopping && this.childWanted) {
         this.restartTimer = setTimeout(() => this.spawnChild(), RESTART_DELAY_MS)
         this.restartTimer.unref?.()
@@ -274,6 +293,40 @@ export class MicWatcher {
   }
 
   /* ---- decision plumbing ---- */
+
+  private handleMacMicEvent(inputLabel: string | null, output: string[]): void {
+    this.macSession = updateMacMicSession(
+      this.macSession,
+      inputLabel,
+      output.map((bundle) => meetingAppLabel([bundle])).filter((label) => label !== null),
+      Date.now(),
+      this.capturing
+    )
+    this.clearDebounce()
+    if (!this.config.enabled || this.capturing) return
+    const delay = macMicPromptDelay(this.macSession, Date.now())
+    if (delay === null) return
+    // Schedule the original input deadline, not another four seconds after
+    // every unrelated output/device event. micmon emits only on changes.
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null
+      const session = this.macSession
+      if (
+        !this.config.enabled ||
+        this.capturing ||
+        !session ||
+        macMicPromptDelay(session, Date.now()) !== 0
+      )
+        return
+      this.macSession = { ...session, prompted: true }
+      this.diag(`PROMPT fired (${session.label}; distinct macOS audio session)`)
+      this.onMeetingDetected(
+        session.label,
+        `${this.detectionPrefix}:${session.label}:${session.startedAtMs}`
+      )
+    }, delay)
+    this.debounceTimer.unref?.()
+  }
 
   private handleMicEvent(running: boolean): void {
     this.state = onMicEvent(this.state, running, Date.now())

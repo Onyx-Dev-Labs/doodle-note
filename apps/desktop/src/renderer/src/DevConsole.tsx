@@ -135,6 +135,9 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
         return { ...base, livePartials: { ...base.livePartials, [ev.channel]: ev.text } }
       }
       return { ...base, partial: ev.text }
+    case 'session-snapshot':
+    case 'capture-finalized':
+      return base
     case 'timings':
       // Segment-building raw material; surfaced in the raw log only for now.
       return base
@@ -154,11 +157,26 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
         statusKind: 'done',
         statusText: 'done'
       }
+    case 'refined':
+      return {
+        ...base,
+        liveFinals: Object.fromEntries(ev.transcripts.map((item) => [item.channel, item.text])),
+        statusKind: 'busy',
+        statusText: 'high-accuracy transcript ready'
+      }
     case 'segments': {
       const kept = ev.segments.filter((s) => !s.echo)
       const echoDropped = ev.segments.length - kept.length
       const merged = [...base.segments, ...kept].sort((a, b) => segmentTime(a) - segmentTime(b))
       return { ...base, segments: merged, echoCount: base.echoCount + echoDropped }
+    }
+    case 'segments-replaced': {
+      const kept = ev.segments.filter((s) => !s.echo)
+      return {
+        ...base,
+        segments: kept.sort((a, b) => segmentTime(a) - segmentTime(b)),
+        echoCount: ev.segments.length - kept.length
+      }
     }
     case 'session-saved':
       return {

@@ -3,6 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 
+import { deviceLinkCallback } from "@/lib/device-link-callback";
+
 import { buttonPrimary, inputClass } from "../ui";
 
 function DialogCard({ children }: { children: React.ReactNode }) {
@@ -24,6 +26,7 @@ function DialogCard({ children }: { children: React.ReactNode }) {
 export function LinkDeviceForm({
   port,
   callbackScheme,
+  callbackState,
   personalOrganizationId,
   deviceName,
   email,
@@ -32,6 +35,7 @@ export function LinkDeviceForm({
   port: number | null;
   /** Custom URL scheme callback for mobile apps (e.g. "doodlenote"). */
   callbackScheme?: string | null;
+  callbackState?: string | null;
   personalOrganizationId: string | null;
   deviceName: string;
   email: string;
@@ -50,6 +54,7 @@ export function LinkDeviceForm({
     if (!hasCallback) return;
     setError(null);
     setPending(true);
+    try {
     const response = await fetch("/api/device/link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -57,6 +62,7 @@ export function LinkDeviceForm({
         organizationId,
         deviceName,
         platform: callbackScheme ? "ios" : "desktop",
+        ...(callbackScheme ? { state: callbackState, purpose: "native-library" } : {}),
       }),
     });
     const body = await response.json();
@@ -85,14 +91,21 @@ export function LinkDeviceForm({
       return;
     }
     setDone(true);
-    const params = new URLSearchParams({
-      token: body.token,
-      email: body.email,
-      workspace: body.workspaceName,
-    });
-    window.location.href = callbackScheme
-      ? `${callbackScheme}://link?${params}`
-      : `http://127.0.0.1:${port}/callback?${params}`;
+    try {
+      window.location.href = deviceLinkCallback({
+        port, scheme: callbackScheme, state: callbackState,
+        token: body.token, email: body.email, workspaceName: body.workspaceName,
+      });
+    } catch {
+      setDone(false);
+      setError("Could not return to the device. Start linking again from the app.");
+    }
+    } catch {
+      setDone(false);
+      setError("Could not connect. Check your connection and try again.");
+    } finally {
+      setPending(false);
+    }
   }
 
   if (!hasCallback) {
@@ -116,8 +129,9 @@ export function LinkDeviceForm({
         Connect &ldquo;{deviceName}&rdquo;?
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-bark">
-        This {callbackScheme ? "device" : "computer"} will sync meetings,
-        transcripts, and notes to the workspace below, signed in as{" "}
+        {callbackScheme
+          ? "Connect to reopen this account’s saved device library. Eligible cloud sync starts only after you choose a library in the app. Signed in as "
+          : "This computer will sync meetings, transcripts, and notes to the workspace below, signed in as "}
         <strong>{email}</strong>.
       </p>
 
@@ -153,7 +167,7 @@ export function LinkDeviceForm({
 
       {done ? (
         <p className="mt-4 rounded-lg bg-sage-fill px-3 py-2 text-sm text-sage-deep">
-          Connected — taking you to your meetings…
+          {callbackScheme ? "Connected. Return to the app to choose your library." : "Connected — taking you to your meetings…"}
         </p>
       ) : (
         <button

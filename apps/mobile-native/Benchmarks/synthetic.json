@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "synthetic",
+  "language": "en",
+  "duration_seconds": 4,
+  "reference_text": "We approved the plan",
+  "hypothesis_text": "We approved a plan",
+  "reference_segments": [{"start": 0, "end": 2, "speaker": "a"}, {"start": 1, "end": 4, "speaker": "b"}],
+  "hypothesis_segments": [{"start": 0, "end": 2, "speaker": "slot2"}, {"start": 2, "end": 4, "speaker": "slot1"}],
+  "transcript_latency_seconds": [1, 2, 3],
+  "speaker_latency_seconds": [2, 3, 4],
+  "identity_decisions": [{"expected": "a", "assigned": "a"}, {"expected": null, "assigned": null}],
+  "retrieval_probes": [{"relevant_ids": ["old-note"], "retrieved_ids": ["old-note"], "forbidden_ids": ["trash-note", "other-library"]}]
+}

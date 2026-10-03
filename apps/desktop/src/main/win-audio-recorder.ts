@@ -158,6 +158,11 @@ export async function mergeWinSession(dir: string): Promise<WinMergedAudio | nul
     chunksByChannel.set(match[1]!, list)
   }
   if (chunksByChannel.size === 0) return null
+  // Batch decoding assigns mono to the microphone. Keep system audio on the
+  // right even when no microphone frames were captured.
+  if (chunksByChannel.has('system') && !chunksByChannel.has('mic')) {
+    chunksByChannel.set('mic', [])
+  }
 
   let epochs: Record<string, number> = {}
   try {
@@ -220,6 +225,10 @@ export async function mergeWinSession(dir: string): Promise<WinMergedAudio | nul
     }
   } finally {
     closeSync(fd)
+    // The final read can end exactly at the requested frame count, without
+    // another read returning EOF. Close every input before deleting chunks:
+    // Electron on Windows rejects deletion while those handles are open.
+    for (const reader of readers) reader.close()
   }
 
   rmSync(checkpointsDir, { recursive: true, force: true })
@@ -278,6 +287,13 @@ class ChannelChunkReader {
       }
     }
     this.totalFrames = frames
+  }
+
+  close(): void {
+    if (this.fd !== null) {
+      closeSync(this.fd)
+      this.fd = null
+    }
   }
 
   /** Fill the first `frames` entries of `target` (already zeroed). */

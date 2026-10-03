@@ -38,8 +38,24 @@ enum Commands {
             return
         }
 
+        Events.emit(["event": "status", "stage": "transcribing"])
         var decoderState = try TdtDecoderState()
         let result = try await manager.transcribe(url, decoderState: &decoderState)
+
+        // Mixed external stereo is a single sound scene, not mic/system speakers.
+        // Emit the same segment protocol as split capture while decoding it once.
+        if options.values["channels"] == "mixed" {
+            if let timings = result.tokenTimings {
+                for offset in stride(from: 0, to: timings.count, by: 1_000) {
+                    let end = min(offset + 1_000, timings.count)
+                    Events.emit(["event": "timings", "channel": "mic", "tokens": Timings.payload(Array(timings[offset..<end]))])
+                }
+            }
+            Events.emit(["event": "final", "channel": "mic", "text": result.text])
+            let file = try AVAudioFile(forReading: url)
+            Events.emit(["event": "done", "audioSeconds": Double(file.length) / file.processingFormat.sampleRate])
+            return
+        }
 
         // The URL transcribe path reports duration 0 in FluidAudio 0.15.4 — measure it ourselves.
         let audioFile = try AVAudioFile(forReading: url)
@@ -142,7 +158,9 @@ enum Commands {
     /// AVAudioFile reads the existing audio imports directly. An MP4 video is
     /// first normalized to a temporary audio-only M4A so video tracks never
     /// enter the ASR path and the same channel splitter can process both.
-    private static func prepareAudioFile(_ sourceURL: URL) async throws -> PreparedAudioFile {
+    static func prepareAudioFile(
+        _ sourceURL: URL, temporaryParent: URL = FileManager.default.temporaryDirectory
+    ) async throws -> PreparedAudioFile {
         do {
             let file = try AVAudioFile(forReading: sourceURL)
             guard file.length > 0 else {
@@ -168,7 +186,7 @@ enum Commands {
                     "MP4 audio is not supported: \(sourceURL.lastPathComponent)")
             }
 
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            let directory = temporaryParent.appendingPathComponent(
                 "doodlenote-import-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true)
@@ -266,7 +284,7 @@ enum Commands {
     }
 }
 
-private struct PreparedAudioFile {
+struct PreparedAudioFile {
     let url: URL
     let temporaryDirectory: URL?
 

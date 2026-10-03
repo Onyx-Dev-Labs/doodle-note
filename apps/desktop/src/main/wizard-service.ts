@@ -11,11 +11,8 @@ import {
 } from '../shared/wizard-api'
 
 /**
- * The wizard's window into engine preflight. The launch-time preflight run
- * (index.ts) is fire-and-forget with its output discarded; the wizard needs
- * the same work with the progress VISIBLE, so it spawns its own run with a
- * piped stdout and forwards the NDJSON events. Model loads are cached, so a
- * second preflight after the silent one costs seconds, not a re-download.
+ * Visible onboarding owns full permission preflight and forwards its progress.
+ * App launch warms models only; it must not probe capture or prompt for consent.
  */
 export class WizardService {
   constructor(

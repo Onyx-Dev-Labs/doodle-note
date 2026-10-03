@@ -9,6 +9,7 @@
 export type MeetingChannel = "mic" | "system";
 
 export interface TranscriptSegment {
+  source?: "audio";
   id: string;
   channel: MeetingChannel;
   /**
@@ -30,6 +31,23 @@ export interface TranscriptSegment {
   /** True when the segment was judged to be far-side audio bleeding into the mic. */
   echo?: boolean;
 }
+
+/** Imported text has no audio channel, timing or ASR confidence. */
+export interface TextTranscriptSegment {
+  id: string;
+  source: "text";
+  channel: "text";
+  speaker: string;
+  speakerId: string;
+  text: string;
+  startMs?: never;
+  endMs?: never;
+  confidence?: never;
+  absoluteStartMs?: never;
+  echo?: never;
+}
+
+export type MeetingTranscriptSegment = TranscriptSegment | TextTranscriptSegment;
 
 /** How a participant's name was established (weakest to strongest). */
 export type ParticipantSource =
@@ -59,6 +77,12 @@ export interface MeetingChatEntry {
 
 /** Full meeting document as stored on disk. */
 export interface MeetingRecord {
+  /** Last successful batch pass; live capture remains independent. */
+  batchTranscription?: {
+    backend: "parakeet" | "whisper";
+    parakeetModel: "v2" | "v3";
+    language: string;
+  };
   id: string;
   /**
    * What this document is: a meeting (default when absent) or a standalone
@@ -77,12 +101,14 @@ export interface MeetingRecord {
   rawNotesMarkdown: string;
   /** AI-merged notes, present after a successful Enhance run. */
   enhancedMarkdown?: string;
+  /** Non-echo segments included in the last generated version; local freshness cue. */
+  enhancedTranscriptSegmentCount?: number;
   /** Which notes engine produced enhancedMarkdown (e.g. "local:…"). */
   engine?: string;
   /** Note template used for Generate notes; absent = "general". */
   templateId?: string;
   /** Interleaved You/Them transcript segments (echo-flagged ones excluded). */
-  segments: TranscriptSegment[];
+  segments: MeetingTranscriptSegment[];
   /** Known speakers, keyed by the ids segments carry; absent = nobody named. */
   participants?: MeetingParticipant[];
   /** How many echo segments were suppressed across the session(s). */

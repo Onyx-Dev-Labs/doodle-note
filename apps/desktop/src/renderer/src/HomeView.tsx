@@ -1,3 +1,5 @@
+import TextImportDialog from './TextImportDialog'
+import type { TextImportPreview } from '../../shared/text-import-api'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CalendarEvent, CalendarState } from '../../shared/calendar-api'
 import type { FolderRecord } from '../../shared/folders-api'
@@ -16,6 +18,7 @@ import {
   FolderIcon,
   ImportIcon,
   PencilIcon,
+  PlusIcon,
   TrashIcon,
   UsersIcon
 } from './icons'
@@ -304,6 +307,12 @@ function ComingUpCard({
                           <span className="cu-subject">
                             {event.subject.trim() || 'Untitled meeting'}
                           </span>
+                          {event.sourceLabel && (
+                            <span className="cu-time">
+                              {event.sourceLabel}
+                              {event.stale ? ' · May be out of date' : ''}
+                            </span>
+                          )}
                           <span className="cu-time">
                             {eventTimeLabel(event)}
                             {event.isOnlineMeeting && event.joinUrl !== undefined && (
@@ -380,6 +389,9 @@ export default function HomeView({
   /** Transient share feedback: message shown as a toast under the topbar. */
   const [shareNotice, setShareNotice] = useState<string | null>(null)
   /** 'idle' | 'running' | an error message. */
+  const [textPreview, setTextPreview] = useState<TextImportPreview | null>(null)
+  const [textPicking, setTextPicking] = useState(false)
+  const [textImportError, setTextImportError] = useState<string | null>(null)
   const [importState, setImportState] = useState<'idle' | 'running' | string>('idle')
 
   const exportMeeting = async (id: string, format: 'md' | 'pdf'): Promise<void> => {
@@ -399,6 +411,22 @@ export default function HomeView({
     }
   }
 
+  const runTextImport = async (): Promise<void> => {
+    if (textPicking) return
+    setNewMenuOpen(false)
+    setTextPicking(true)
+    setTextImportError(null)
+    try {
+      const result = await window.textImporter.preview()
+      if (result.preview) setTextPreview(result.preview)
+      else if (result.error) setTextImportError(result.error)
+    } catch {
+      setTextImportError('Could not open the transcript. Please try again.')
+    } finally {
+      setTextPicking(false)
+    }
+  }
+
   const runImport = async (): Promise<void> => {
     if (importState === 'running') return
     setNewMenuOpen(false)
@@ -407,9 +435,14 @@ export default function HomeView({
       const result = await window.importer.importAudio()
       setImportState('idle')
       if (result.meetingId) onOpenMeeting(result.meetingId)
-      else if (result.error) setImportState(result.error)
+      else if (result.error) {
+        setImportState(result.error)
+        setShareNotice(result.error)
+      }
     } catch (err) {
-      setImportState(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setImportState(message)
+      setShareNotice(message)
     }
   }
 
@@ -727,6 +760,7 @@ export default function HomeView({
           <button
             type="button"
             className="pill-btn new-menu-trigger"
+            aria-label="+ New"
             aria-haspopup="menu"
             aria-expanded={newMenuOpen}
             onClick={() => {
@@ -735,10 +769,8 @@ export default function HomeView({
               setNewMenuOpen((open) => !open)
             }}
           >
-            + New{' '}
-            <span className="new-menu-chevron" aria-hidden="true">
-              ⌄
-            </span>
+            <PlusIcon size={12} />
+            <span>New</span>
           </button>
           {newMenuOpen && (
             <div className="new-menu-popover" role="menu" aria-label="Create or import">
@@ -789,11 +821,40 @@ export default function HomeView({
                   <small>Transcribe an existing recording</small>
                 </span>
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={textPicking}
+                onClick={() => void runTextImport()}
+              >
+                <span className="new-menu-icon">
+                  <DocIcon size={16} />
+                </span>
+                <span>
+                  <strong>Import transcript (.txt)</strong>
+                  <small>Use text without an audio recording</small>
+                </span>
+              </button>
             </div>
           )}
         </div>
       </div>
 
+      {textPreview && (
+        <TextImportDialog
+          preview={textPreview}
+          onClose={() => setTextPreview(null)}
+          onImported={onOpenMeeting}
+        />
+      )}
+      {textImportError && (
+        <div className="toast" role="alert">
+          {textImportError}
+          <button type="button" onClick={() => setTextImportError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {shareNotice !== null && (
         <div className="share-notice" role="status">
           {shareNotice}

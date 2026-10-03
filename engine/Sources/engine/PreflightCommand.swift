@@ -3,15 +3,18 @@ import FluidAudio
 import Foundation
 import ScreenCaptureKit
 
-/// Run once at app launch so meetings start instantly:
-/// - triggers the microphone and screen/system-audio permission prompts
-///   (attributed to the host app) before the user ever hits record
-/// - loads the streaming ASR model once, downloading it if missing and
-///   priming the CoreML compilation cache for subsequent sessions
-/// Exits without capturing anything — the mic is never opened.
+/// Full preflight is explicit onboarding; background launch uses models-only
+/// warmup so it never probes audio hardware or requests recording permissions.
 enum PreflightCommand {
-    static func run() async {
-        let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
+    static func run(modelsOnly: Bool = false) async {
+        if !modelsOnly {
+            await checkPermissions()
+        }
+        await warmModels()
+    }
+
+    private static func checkPermissions() async {
+        let micGranted = await MicrophoneAuthorization.authorize()
         Events.emit(["event": "status", "stage": "preflight_mic", "granted": micGranted])
 
         // System audio: the tap needs only the audio-capture permission —
@@ -30,7 +33,9 @@ enum PreflightCommand {
                 Events.log("preflight: screen/system-audio not granted yet: \(error)")
             }
         }
+    }
 
+    private static func warmModels() async {
         do {
             let gate = PercentGate()
             let manager = StreamingUnifiedAsrManager()

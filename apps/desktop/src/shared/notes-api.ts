@@ -1,3 +1,4 @@
+import type { BatchTranscriptionSettings } from './batch-transcription'
 /**
  * Shared notes/AI IPC contract, used by main + preload + renderer.
  *
@@ -7,8 +8,14 @@
  * web tsconfig never touch node-only code.
  */
 
-import type { TranscriptSegment } from './engine-events'
+import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
 import type { MeetingParticipant } from '@repo/meetings-store/types'
+
+export const NOTES_CLOUD_MODELS_CHANNEL = 'notes:cloud-models'
+export interface CloudModelsResult {
+  models: Array<{ id: string; label: string }>
+  error?: string
+}
 
 export const NOTES_MODELS_CHANNEL = 'notes:models'
 export const NOTES_TEMPLATES_CHANNEL = 'notes:templates'
@@ -31,7 +38,9 @@ export const NOTES_ASK_TOKEN_CHANNEL = 'notes:ask-token'
 /** main → renderer: streamed tokens during a cross-meeting ask run. */
 export const NOTES_ASK_GLOBAL_TOKEN_CHANNEL = 'notes:ask-global-token'
 
-export type CloudProvider = 'anthropic' | 'openai' | 'groq' | 'openrouter' | 'ollama'
+// Retired IDs remain readable so an update preserves existing encrypted settings.
+export type CloudProvider =
+  'anthropic' | 'openai' | 'grok' | 'gemini' | 'groq' | 'openrouter' | 'ollama'
 
 export const CLOUD_PROVIDERS: ReadonlyArray<{
   id: CloudProvider
@@ -40,18 +49,17 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 }> = [
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'openai', label: 'OpenAI' },
-  { id: 'groq', label: 'Groq' },
-  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'grok', label: 'Grok (xAI)' },
+  { id: 'gemini', label: 'Google Gemini (paid API)' },
   { id: 'ollama', label: 'Ollama (local)', keyOptional: true }
 ]
 export type EngineChoice = 'local' | 'cloud'
 
 /**
- * Transcription language. 'english' runs the fastest English-only models;
- * 'multilingual' auto-detects the spoken language; a FLEURS code such as
- * 'de-DE' pins live captions to that language. Imports and re-transcription
- * always auto-detect among 25 European languages when not 'english'.
- * Live captions on Windows stay English.
+ * Live caption language. 'english' runs the fastest English-only streaming
+ * model; 'multilingual' auto-detects the spoken language; a FLEURS code such
+ * as 'de-DE' pins live captions to that language. Imports and re-transcription
+ * follow `batchTranscription` instead. Live captions on Windows stay English.
  */
 export const TRANSCRIPTION_LANGUAGES = [
   ['english', 'English (fastest)'],
@@ -79,7 +87,7 @@ export interface NotesModelInfo {
   minRamGB: number
   /** This machine has enough RAM to run it. */
   available: boolean
-  /** The GGUF is present in the app's models dir. */
+  /** A compatible GGUF has been verified in a known local cache. */
   downloaded: boolean
   /** Currently selected as the local notes model. */
   active: boolean
@@ -97,7 +105,10 @@ export interface ActivateModelResult {
 
 /** Settings as exposed to the renderer — the API key never crosses IPC. */
 export interface NotesSettingsView {
+  batchTranscription?: BatchTranscriptionSettings
   engineChoice: EngineChoice
+  /** Missing stored values default on; applies to manual and detected stops. */
+  autoGenerateNotesAfterStop?: boolean
   activeLocalModelId?: string
   transcriptionLanguage: TranscriptionLanguage
   /** The user's own name, used to label their transcript lines. */
@@ -105,6 +116,7 @@ export interface NotesSettingsView {
   cloud?: {
     provider: CloudProvider
     model?: string
+    dataPolicyConfirmed?: boolean
     hasKey: boolean
   }
   /** Set when part of an update could not be applied (e.g. no encryption). */
@@ -113,8 +125,10 @@ export interface NotesSettingsView {
 
 /** Partial update; omitted fields are left untouched. */
 export interface NotesSettingsUpdate {
+  batchTranscription?: BatchTranscriptionSettings
   engineChoice?: EngineChoice
   transcriptionLanguage?: TranscriptionLanguage
+  autoGenerateNotesAfterStop?: boolean
   /** The user's own name; empty string clears it back to "You". */
   profileName?: string
   /**
@@ -124,11 +138,14 @@ export interface NotesSettingsUpdate {
   cloud?: {
     provider: CloudProvider
     model?: string
+    dataPolicyConfirmed?: boolean
     apiKey?: string
   } | null
 }
 
 export interface EnhanceRequest {
+  /** Recheck the stop preference and selected provider in main before AI work. */
+  automaticAfterStop?: boolean
   title: string
   rawNotesMarkdown: string
   segments: TranscriptSegment[]
@@ -207,6 +224,7 @@ export interface GlobalChatEntry {
 
 export interface DownloadProgressEvent {
   modelId: string
+  stage?: 'checking' | 'downloading' | 'verifying' | 'loading'
   /** 0..1 */
   progress: number
 }
@@ -235,6 +253,7 @@ export interface NotesApi {
   templates(): Promise<NotesTemplateInfo[]>
   models(): Promise<NotesModelsResponse>
   activateModel(modelId: string): Promise<ActivateModelResult>
+  cloudModels(provider: CloudProvider): Promise<CloudModelsResult>
   getSettings(): Promise<NotesSettingsView>
   setSettings(update: NotesSettingsUpdate): Promise<NotesSettingsView>
   enhance(input: EnhanceRequest): Promise<EnhanceResult>

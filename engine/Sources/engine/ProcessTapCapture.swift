@@ -28,7 +28,7 @@ final class ProcessTapCapture: SystemCaptureBackend {
 
     func start() async throws {
         Events.emit([
-            "event": "status", "stage": "requesting_permission", "permission": "system_audio",
+            "event": "status", "stage": "starting_capture", "channel": "system",
         ])
 
         // 1. Global mono tap of everything (we play no audio ourselves).
@@ -103,9 +103,6 @@ final class ProcessTapCapture: SystemCaptureBackend {
             throw EngineError.internalError("tap device start failed (\(status))")
         }
         CaptureRegistry.shared.register(self) { [weak self] in self?.stopSync() }
-        Events.emit([
-            "event": "status", "stage": "permission_granted", "permission": "system_audio",
-        ])
     }
 
     func stop() async {

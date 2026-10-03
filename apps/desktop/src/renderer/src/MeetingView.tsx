@@ -1,16 +1,18 @@
+import { TranscriptSplit } from './TranscriptSplit'
+import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
+import { registerLibrarySave } from './lib/library-flush'
+import { generatedModelLabel } from './lib/generated-model-label'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
-import type {
-  EngineChannel,
-  EngineEvent,
-  EngineInputDevice,
-  TranscriptSegment
-} from '../../shared/engine-events'
+import type { EngineChannel, EngineEvent, EngineInputDevice } from '../../shared/engine-events'
+import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
+import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
+import { applyCaptureStatus } from './lib/capture-status'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
   SYSTEM_BACKEND_STORAGE_KEY,
@@ -18,7 +20,7 @@ import {
 } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
-import { meetingPrimaryAction, transcriptCheckpointDelayMs } from '../../shared/meeting-recovery'
+import { meetingPrimaryAction } from '../../shared/meeting-recovery'
 import {
   defaultSpeakerId,
   defaultSpeakerLabel,
@@ -46,6 +48,7 @@ import DoodlingIndicator from './DoodlingIndicator'
 import FormatToolbar from './FormatToolbar'
 import {
   CalendarIcon,
+  ChevronIcon,
   FolderIcon,
   HomeIcon,
   MailIcon,
@@ -81,7 +84,7 @@ const initialSessionState: SessionState = {
 const ACTIVE_PHASES: readonly Phase[] = ['starting', 'recording', 'finishing']
 
 function segmentTime(segment: TranscriptSegment): number {
-  return segment.absoluteStartMs ?? segment.startMs
+  return segment.absoluteStartMs ?? segment.startMs ?? 0
 }
 
 function formatClock(totalSec: number): string {
@@ -92,38 +95,26 @@ function formatClock(totalSec: number): string {
 function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
   const active = ACTIVE_PHASES.includes(state.phase)
   switch (ev.event) {
+    case 'session-snapshot': {
+      const snapshot = ev.snapshot
+      return {
+        ...state,
+        phase: snapshot.phase,
+        segments: snapshot.segments.filter((s) => !s.echo),
+        partials: snapshot.partials,
+        echoCount: snapshot.segments.filter((s) => s.echo).length,
+        error: snapshot.error ?? state.error,
+        statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
+      }
+    }
     case 'started':
       if (ev.command !== 'live') {
         // A file run from the dev console superseded any live session.
         return active ? { ...state, phase: 'idle', statusText: '' } : state
       }
       return { ...initialSessionState, phase: 'starting', statusText: 'Starting…' }
-    case 'status': {
-      if (!active) return state
-      if (ev.stage === 'requesting_permission') {
-        const which = (ev.permission ?? 'capture').replace(/_/g, ' ')
-        return { ...state, statusText: `Waiting for macOS permission — ${which}` }
-      }
-      if (ev.stage === 'transcribing') {
-        return { ...state, transcribing: true, statusText: '' }
-      }
-      if (ev.stage === 'loading_models') {
-        return { ...state, statusText: 'Loading speech model…' }
-      }
-      // The engine confirms a stop instantly with `finishing` — reflect it
-      // instantly, or the still-ticking timer makes stop look ignored and
-      // users hammer the button.
-      if (ev.stage === 'finishing' || ev.stage === 'saving_audio') {
-        return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
-      }
-      return { ...state, statusText: (ev.stage ?? 'working').replace(/_/g, ' ') }
-    }
-    case 'download':
-      if (!active) return state
-      return {
-        ...state,
-        statusText: `Downloading speech model — ${Math.round((ev.progress ?? 0) * 100)}%`
-      }
+    case 'status':
+      return applyCaptureStatus(state, ev)
     case 'ready':
       if (!active) return state
       return { ...state, phase: 'recording', statusText: '' }
@@ -143,6 +134,16 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       const merged = [...state.segments, ...kept].sort((a, b) => segmentTime(a) - segmentTime(b))
       return { ...state, segments: merged, echoCount: state.echoCount + echoDropped }
     }
+    case 'segments-replaced': {
+      if (!active) return state
+      const kept = ev.segments.filter((s) => !s.echo)
+      return {
+        ...state,
+        segments: kept.sort((a, b) => segmentTime(a) - segmentTime(b)),
+        echoCount: ev.segments.length - kept.length,
+        partials: {}
+      }
+    }
     case 'final':
       if (!active || !ev.channel) return state
       return {
@@ -153,10 +154,29 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       }
     case 'done':
       if (!active) return state
-      return { ...state, phase: 'ended', statusText: '', partials: {} }
-    case 'session-saved':
+      return { ...state, phase: 'finishing', statusText: 'Saving transcript…', partials: {} }
+    case 'download':
+      // A non-English live model downloads on its first session, before `ready`.
+      if (state.phase === 'starting') {
+        return {
+          ...state,
+          statusText: `Downloading speech model — ${Math.round(ev.progress * 100)}%`
+        }
+      }
+      if (state.phase !== 'finishing') return state
+      return {
+        ...state,
+        statusText: `Preparing accurate transcript… ${Math.round(ev.progress * 100)}%`
+      }
+    case 'capture-finalized':
       if (!active && state.phase !== 'ended') return state
-      return { ...state, phase: 'ended', statusText: '', partials: {} }
+      return {
+        ...state,
+        phase: 'ended',
+        statusText: '',
+        partials: {},
+        error: ev.error ?? state.error
+      }
     case 'error':
       return { ...state, error: ev.message }
     case 'spawn-error':
@@ -164,7 +184,12 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
     case 'exit': {
       if (!active) return state
       if (ev.code !== null && ev.code !== 0 && state.phase === 'starting') {
-        return { ...state, phase: 'idle', statusText: '', error: `Engine exited (code ${ev.code})` }
+        return {
+          ...state,
+          phase: 'idle',
+          statusText: '',
+          error: state.error ?? `Engine exited (code ${ev.code})`
+        }
       }
       return {
         ...state,
@@ -224,6 +249,7 @@ export default function MeetingView({
   meetingId,
   visible,
   autoRecord,
+  autoRecordRequestId,
   isNewDraft,
   onAutoRecordStarted,
   onDraftSettled,
@@ -235,6 +261,7 @@ export default function MeetingView({
   visible: boolean
   /** True when this meeting was just created via "+ New meeting" — recording starts automatically. */
   autoRecord: boolean
+  autoRecordRequestId: string | null
   /** True until a manually-created document is first saved or discarded. */
   isNewDraft: boolean
   onAutoRecordStarted: () => void
@@ -254,6 +281,8 @@ export default function MeetingView({
   const [renameText, setRenameText] = useState('')
   const [savedEcho, setSavedEcho] = useState(0)
   const [enhancedMarkdown, setEnhancedMarkdown] = useState<string | null>(null)
+  const [generatedEngine, setGeneratedEngine] = useState<string | undefined>()
+  const [generatedSegmentCount, setGeneratedSegmentCount] = useState(0)
   const [docView, setDocView] = useState<'notes' | 'enhanced'>('notes')
   const [enhanceStatus, setEnhanceStatus] = useState<EnhanceStatus>('idle')
   const [enhanceError, setEnhanceError] = useState<string | null>(null)
@@ -299,6 +328,8 @@ export default function MeetingView({
   const [templateId, setTemplateId] = useState('general')
   const [tplMenuOpen, setTplMenuOpen] = useState(false)
 
+  const generationRef = useRef(new MeetingGeneration())
+  const mountedRef = useRef(true)
   const roughMarkdownRef = useRef('')
   const titleValueRef = useRef('')
   /** Lets generated notes improve a deterministic transcript fallback later in the same session. */
@@ -306,14 +337,12 @@ export default function MeetingView({
   const docViewRef = useRef<'notes' | 'enhanced'>('notes')
   const applyingRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const stateRef = useRef(state)
   const startedAtRef = useRef<string | null>(null)
   const recordStartRef = useRef<number | null>(null)
   /** Seconds recorded in EARLIER sessions of this meeting — Resume must not
    *  restart the clock at 0 when the recording itself is cumulative. */
   const elapsedBaseRef = useRef(0)
-  const autoOpenedRef = useRef(false)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -385,6 +414,7 @@ export default function MeetingView({
     },
     onUpdate: ({ editor: ed }) => {
       if (applyingRef.current || docViewRef.current !== 'notes') return
+      generationRef.current.edit()
       roughMarkdownRef.current = docToMarkdown(ed.getJSON())
       scheduleNotesSave()
     }
@@ -421,29 +451,54 @@ export default function MeetingView({
     [editor]
   )
 
+  const autoRecordRequestRef = useRef(autoRecordRequestId)
+  useEffect(() => {
+    autoRecordRequestRef.current = autoRecordRequestId
+  }, [autoRecordRequestId])
+
   /* ---- load the meeting document once ---- */
 
   useEffect(() => {
     let cancelled = false
-    void window.meetings.get(meetingId).then((record) => {
-      if (cancelled || !record) return
-      setMeeting(record)
-      setTitle(record.title)
-      titleValueRef.current = record.title
-      titleWasAutoGeneratedRef.current = isGenericDraftTitle(record.title)
-      roughMarkdownRef.current = record.rawNotesMarkdown
-      setSavedSegments(record.segments.filter((s) => !s.echo))
-      setParticipants(record.participants ?? [])
-      setSavedEcho(record.echoSuppressed)
-      startedAtRef.current = record.startedAt ?? null
-      setTemplateId(record.templateId ?? 'general')
-      setFolderId(record.folderId ?? null)
-      if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
-      if (Array.isArray(record.chat) && record.chat.length > 0) {
-        chatThreadRef.current = record.chat
-        setChatThread(record.chat)
-      }
-    })
+    void window.meetings
+      .get(meetingId)
+      .then((record) => {
+        if (cancelled) return
+        if (!record) throw new Error('Meeting could not be loaded. Try Record now again.')
+        setMeeting(record)
+        setGeneratedEngine(record.engine)
+        setTitle(record.title)
+        titleValueRef.current = record.title
+        titleWasAutoGeneratedRef.current = isGenericDraftTitle(record.title)
+        roughMarkdownRef.current = record.rawNotesMarkdown
+        setSavedSegments(record.segments.filter((s) => !s.echo))
+        if (record.segments.some((segment) => segment.source === 'text')) setTranscriptOpen(true)
+        // Older notes establish a baseline before Resume adds new content.
+        setGeneratedSegmentCount(
+          record.enhancedTranscriptSegmentCount ?? record.segments.filter((s) => !s.echo).length
+        )
+        setParticipants(record.participants ?? [])
+        setSavedEcho(record.echoSuppressed)
+        startedAtRef.current = record.startedAt ?? null
+        setTemplateId(record.templateId ?? 'general')
+        setFolderId(record.folderId ?? null)
+        if (record.enhancedMarkdown) setEnhancedMarkdown(record.enhancedMarkdown)
+        if (Array.isArray(record.chat) && record.chat.length > 0) {
+          chatThreadRef.current = record.chat
+          setChatThread(record.chat)
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        if (autoRecordRequestRef.current) void window.recording.cancel(autoRecordRequestRef.current)
+        dispatch({
+          event: 'spawn-error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Meeting could not be loaded. Try Record now again.'
+        })
+      })
     return () => {
       cancelled = true
     }
@@ -463,17 +518,97 @@ export default function MeetingView({
     }
   }, [editor, meeting, setEditorMarkdown])
 
+  const startPendingRef = useRef(false)
+
   /* ---- engine events ---- */
+
+  const eventRevisionRef = useRef(0)
+  const recoveredCaptureRef = useRef<string | undefined>(undefined)
+  const transcriptRefreshRevision = useRef(0)
+  const refreshTranscript = useCallback(async (): Promise<void> => {
+    const revision = ++transcriptRefreshRevision.current
+    // Invalidate a pending live snapshot read before loading the authoritative replacement.
+    eventRevisionRef.current++
+    const record = await window.meetings.get(meetingId)
+    if (
+      !record ||
+      !mountedRef.current ||
+      revision !== transcriptRefreshRevision.current ||
+      ACTIVE_PHASES.includes(stateRef.current.phase)
+    )
+      return
+    generationRef.current.invalidate()
+    eventRevisionRef.current++
+    const reset: EngineEvent = {
+      event: 'session-snapshot',
+      snapshot: { meetingId, phase: 'ended', segments: [], partials: {}, error: '' }
+    }
+    stateRef.current = sessionReducer(stateRef.current, reset)
+    dispatch(reset)
+    setSavedSegments(record.segments.filter((segment) => !segment.echo))
+    setSavedEcho(record.echoSuppressed)
+  }, [meetingId])
+
+  // Retry can finish in the app-level progress panel while this editor stays mounted.
+  // Completion belongs to the meeting, not to the button that originally started the job.
+  useEffect(
+    () =>
+      window.importer?.onProgress?.((progress: { stage: string; meetingId: string }) => {
+        if (progress.stage === 'completed' && progress.meetingId === meetingId) {
+          void refreshTranscript().catch((error) =>
+            dispatch({ event: 'error', message: String(error) })
+          )
+        }
+      }),
+    [meetingId, refreshTranscript]
+  )
+  useEffect(() => {
+    let cancelled = false
+    const recover = async (): Promise<void> => {
+      if (!window.engine.snapshot) return
+      const revision = eventRevisionRef.current
+      const snapshot = await window.engine.snapshot(meetingId).catch(() => null)
+      if (cancelled || !snapshot) return
+      // A response must never replace events delivered after its request.
+      if (revision !== eventRevisionRef.current) {
+        void recover()
+        return
+      }
+      if (snapshot.captureId !== recoveredCaptureRef.current) {
+        recoveredCaptureRef.current = snapshot.captureId
+        generationRef.current.startCapture(snapshot.captureId)
+        // Restoring an already finished capture must not generate notes a second time.
+        if (snapshot.phase === 'recording' || snapshot.phase === 'finishing')
+          generationRef.current.markReady()
+      }
+      if (snapshot.phase === 'ended')
+        generationRef.current.finalize(snapshot.error, snapshot.captureId)
+      const event: EngineEvent = { event: 'session-snapshot', snapshot }
+      stateRef.current = sessionReducer(stateRef.current, event)
+      dispatch(event)
+    }
+    void recover()
+    window.addEventListener('focus', recover)
+    document.addEventListener('visibilitychange', recover)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', recover)
+      document.removeEventListener('visibilitychange', recover)
+    }
+  }, [meetingId, transcriptOpen])
 
   useEffect(
     () =>
       window.engine.onEvent((ev) => {
+        eventRevisionRef.current++
         if (ev.event === 'started' && ev.command === 'live') {
           // Fold the previous session's segments into the saved pool before
           // the reducer resets, so nothing is lost across re-records.
+          recoveredCaptureRef.current = ev.captureId
+          generationRef.current.startCapture(ev.captureId)
           const prev = stateRef.current
           if (prev.segments.length > 0) {
-            setSavedSegments((s) => [...s, ...prev.segments])
+            setSavedSegments((s) => reconcileTranscriptSegments(s, prev.segments))
           }
           if (prev.echoCount > 0) setSavedEcho((n) => n + prev.echoCount)
           recordStartRef.current = null
@@ -485,12 +620,22 @@ export default function MeetingView({
             elapsedBaseRef.current = Math.max(elapsedBaseRef.current, shown)
             return shown
           })
-          if (!autoOpenedRef.current) {
-            autoOpenedRef.current = true
-            setTranscriptOpen(true)
-            setChatOpen(false)
-          }
+          setTranscriptOpen(true)
+          setChatOpen(false)
         }
+        if (ev.event === 'ready') generationRef.current.markReady()
+        if (ev.event === 'exit' || ev.event === 'spawn-error') startPendingRef.current = false
+        if (
+          ev.event === 'capture-finalized' &&
+          !generationRef.current.finalize(ev.error, ev.captureId)
+        )
+          return
+        // Finalization ends a persistent-engine capture without requiring a process exit.
+        if (ev.event === 'capture-finalized') startPendingRef.current = false
+        if (ev.event === 'started' && ev.command !== 'live') generationRef.current.invalidate()
+        if (ev.event === 'spawn-error') generationRef.current.invalidate()
+        // Keep event ownership current even when React batches several IPC events.
+        stateRef.current = sessionReducer(stateRef.current, ev)
         dispatch(ev)
       }),
     []
@@ -661,15 +806,11 @@ export default function MeetingView({
     capturingRef.current = capturing
   }, [capturing])
 
-  /** Meeting ended → after the capture settles, generate notes on their own. */
-  const pendingAutoGenRef = useRef(false)
-
   useEffect(() => {
     return window.detect.onMeetingEnded(() => {
       if (!capturingRef.current) return
       window.engine.stop()
       setAutoStopped(true)
-      pendingAutoGenRef.current = true
     })
   }, [])
 
@@ -705,69 +846,26 @@ export default function MeetingView({
   const allSegments = useMemo(
     () =>
       labelSegments(
-        [...savedSegments, ...state.segments].sort((a, b) => segmentTime(a) - segmentTime(b)),
+        mergeTranscriptSegments(savedSegments, state.segments).sort(
+          (a, b) => segmentTime(a) - segmentTime(b)
+        ),
         roster
       ),
     [savedSegments, state.segments, roster]
   )
-  const transcriptCheckpointRef = useRef({
-    segments: allSegments,
-    echoSuppressed: savedEcho + state.echoCount
-  })
-  useEffect(() => {
-    transcriptCheckpointRef.current = {
-      segments: allSegments,
-      echoSuppressed: savedEcho + state.echoCount
-    }
-  }, [allSegments, savedEcho, state.echoCount])
-
   /** Assign a name once and apply it to every line that speaker owns. */
   const applyRename = useCallback(
     (speakerId: string, name: string): void => {
       const next = renameSpeaker({ segments: [], participants: roster }, speakerId, name)
       setRenamingId(null)
       setRenameText('')
+      generationRef.current.edit()
       setParticipants(next.participants)
       // The store relabels the stored segments from the roster on write.
       persist({ participants: next.participants })
     },
     [roster, persist]
   )
-
-  useEffect(() => {
-    const delay = transcriptCheckpointDelayMs(phase, allSegments.length)
-    if (delay === null) {
-      if (sessionSaveTimerRef.current !== null) {
-        clearTimeout(sessionSaveTimerRef.current)
-        sessionSaveTimerRef.current = null
-      }
-      return
-    }
-    const saveTranscript = (): void => {
-      sessionSaveTimerRef.current = null
-      const checkpoint = transcriptCheckpointRef.current
-      persist({
-        segments: checkpoint.segments,
-        echoSuppressed: checkpoint.echoSuppressed,
-        ...(phase === 'ended' ? { endedAt: new Date().toISOString() } : {})
-      })
-    }
-    if (delay === 0) {
-      if (sessionSaveTimerRef.current !== null) {
-        clearTimeout(sessionSaveTimerRef.current)
-        sessionSaveTimerRef.current = null
-      }
-      saveTranscript()
-      return
-    }
-    // Throttle rather than debounce. Continuous speech can add segments every
-    // second; resetting this timer on every segment would postpone the first
-    // crash-safe checkpoint indefinitely.
-    if (sessionSaveTimerRef.current !== null) return
-    sessionSaveTimerRef.current = setTimeout(() => {
-      saveTranscript()
-    }, delay)
-  }, [phase, allSegments.length, persist])
 
   // A session that ends with zero transcript is otherwise indistinguishable
   // from success ("I hit stop and nothing happened") — say so explicitly.
@@ -785,6 +883,21 @@ export default function MeetingView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (phase === 'ended') setTranscriptOpen(false)
   }, [phase])
+
+  useEffect(
+    () =>
+      registerLibrarySave(async () => {
+        if (!contentLoadedRef.current || discardingRef.current) return
+        if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+        await window.meetings.upsert({
+          id: meetingId,
+          title: titleValueRef.current,
+          rawNotesMarkdown: roughMarkdownRef.current
+        })
+      }),
+    [meetingId]
+  )
 
   // Flush pending note edits when leaving the view entirely.
   useEffect(() => {
@@ -827,6 +940,7 @@ export default function MeetingView({
 
   // Refreshed when the picker gains focus so plugging in a mic just works.
   // macOS asks the native engine; Windows asks Chromium, which owns capture.
+  const [inputDevicesLoaded, setInputDevicesLoaded] = useState(false)
   const refreshInputDevices = useCallback(async (): Promise<void> => {
     try {
       const platform = await window.detect.getState()
@@ -837,6 +951,8 @@ export default function MeetingView({
       )
     } catch {
       setInputDevices([])
+    } finally {
+      setInputDevicesLoaded(true)
     }
   }, [])
 
@@ -855,8 +971,25 @@ export default function MeetingView({
     }
   }
 
+  const showNotesDoc = (): void => {
+    if (docView === 'notes') return
+    setDocView('notes')
+    docViewRef.current = 'notes'
+    setEditorMarkdown(roughMarkdownRef.current, true)
+  }
+
   const startRecording = (): void => {
-    if (capturing) return
+    if (allSegments.some((segment) => segment.source === 'text')) return
+    if (capturing || startPendingRef.current || ACTIVE_PHASES.includes(stateRef.current.phase))
+      return
+    startPendingRef.current = true
+    generationRef.current.startCapture()
+    showNotesDoc()
+    if (enhancedMarkdown !== null) {
+      // Save the baseline for older notes too, so the cue survives reopening
+      // after Resume even if the user has not regenerated yet.
+      persist({ enhancedTranscriptSegmentCount: generatedSegmentCount })
+    }
     if (startedAtRef.current === null) {
       startedAtRef.current = new Date().toISOString()
       persist({ startedAt: startedAtRef.current })
@@ -879,7 +1012,10 @@ export default function MeetingView({
     })
   }
 
-  const stopRecording = (): void => window.engine.stop()
+  const stopRecording = (): void => {
+    if (stateRef.current.phase === 'finishing') return
+    window.engine.stop()
+  }
 
   /* ---- playback: transcript ↔ audio sync ---- */
 
@@ -892,6 +1028,7 @@ export default function MeetingView({
   // loses it. Fallback: a segment's channel-relative startMs is within the
   // capture-start gap (≈1s) of its file position in the current part.
   const seekToSegment = (segment: TranscriptSegment): void => {
+    if (segment.source === 'text') return
     if (audioParts.length === 0) return
     let partIndex = Math.min(activePart, audioParts.length - 1)
     let offsetSec = Math.max(0, segment.startMs / 1000)
@@ -936,11 +1073,7 @@ export default function MeetingView({
         dispatch({ event: 'error', message: result.error })
         return
       }
-      const record = await window.meetings.get(meetingId)
-      if (record) {
-        setSavedSegments(record.segments.filter((s) => !s.echo))
-        setSavedEcho(record.echoSuppressed)
-      }
+      await refreshTranscript()
     } catch (err) {
       dispatch({ event: 'error', message: err instanceof Error ? err.message : String(err) })
     } finally {
@@ -958,7 +1091,9 @@ export default function MeetingView({
     for (const s of allSegments) {
       // Same fallback as seekToSegment for sync-stripped segments.
       const t =
-        typeof s.absoluteStartMs === 'number' ? s.absoluteStartMs : part.startEpochMs + s.startMs
+        typeof s.absoluteStartMs === 'number'
+          ? s.absoluteStartMs
+          : part.startEpochMs + (s.startMs ?? 0)
       if (t > epochMs) break
       current = s.id
     }
@@ -970,19 +1105,28 @@ export default function MeetingView({
   // no separate "now find the record button" step.
   const autoStartedRef = useRef(false)
   useEffect(() => {
-    if (!autoRecord || !visible || autoStartedRef.current) return
-    if (phase !== 'idle') return
+    if (!autoRecord) {
+      autoStartedRef.current = false
+      return
+    }
+    if (!autoRecord || !visible || !meeting || !inputDevicesLoaded || autoStartedRef.current) return
+    if (phase !== 'idle' && phase !== 'ended') return
     autoStartedRef.current = true
     onAutoRecordStarted()
     startRecording()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once when eligible
-  }, [autoRecord, visible, phase])
+  }, [autoRecord, visible, phase, meeting, inputDevicesLoaded])
 
   const totalEcho = savedEcho + state.echoCount
   const anyDownloaded = modelsInfo?.models.some((m) => m.downloaded) ?? false
   const cloudReady = settings?.engineChoice === 'cloud' && settings.cloud?.hasKey === true
   const modelReady = cloudReady || anyDownloaded
   const canEnhance = allSegments.length > 0 && modelReady && enhanceStatus !== 'running'
+  const hasNewTranscript =
+    !capturing &&
+    enhanceStatus !== 'running' &&
+    enhancedMarkdown !== null &&
+    allSegments.length > generatedSegmentCount
   const primaryAction = meetingPrimaryAction({
     capturing,
     segmentCount: allSegments.length,
@@ -993,67 +1137,141 @@ export default function MeetingView({
     retranscribing
   })
 
-  const runEnhance = async (selectedTemplateId = templateId): Promise<void> => {
-    if (!editor || enhanceStatus === 'running') return
-    refreshNotesMeta()
+  const runEnhance = async (
+    selectedTemplateId = templateId,
+    automatic?: { error?: string }
+  ): Promise<void> => {
+    if (!editor || ACTIVE_PHASES.includes(stateRef.current.phase)) return
+    const generation = generationRef.current
+    const run = generation.begin()
+    if (!run) return
     setEnhanceError(null)
     setEnhanceStatus('running')
-    // Make sure the freshest rough notes go into the merge.
-    if (docViewRef.current === 'notes') {
-      roughMarkdownRef.current = docToMarkdown(editor.getJSON())
-    }
-    const shouldGenerateTitle =
-      isGenericDraftTitle(titleValueRef.current) || titleWasAutoGeneratedRef.current
-    const result = await window.notes.enhance({
-      title: shouldGenerateTitle ? '' : titleValueRef.current.trim(),
-      rawNotesMarkdown: roughMarkdownRef.current,
-      segments: allSegments,
-      participants: roster,
-      templateId: selectedTemplateId
-    })
-    if (result.error !== undefined || result.markdown === undefined) {
-      setEnhanceStatus('error')
-      setEnhanceError(result.error ?? 'Enhance failed with no output')
-      return
-    }
-    // Cloud-aware footer: when the meeting lives in the cloud too, the
-    // notes link to its web page (full transcript + chat). Skipped while
-    // sync is off — local-first notes carry no dead links.
-    let markdown = result.markdown
+    setEnhanceProgressText('Preparing notes…')
+    const current = (): boolean => mountedRef.current && generation.isCurrent(run)
     try {
-      const sync = await window.sync.getStatus()
-      if (sync.connected && sync.enabled) {
-        markdown += `\n\n---\n\n[View transcript & chat](${sync.baseUrl}/app/meeting/${meetingId})`
+      // Read once at completion. A skipped run never waits for a later settings change.
+      const [latestSettings, latestModels] = await Promise.all([
+        window.notes.getSettings(),
+        window.notes.models()
+      ])
+      if (!current())
+        throw new Error(
+          'Notes generation canceled because the meeting changed. Generate notes again when ready.'
+        )
+      setSettings(latestSettings)
+      setModelsInfo(latestModels)
+      if (automatic && !autoGenerateNotesAfterStop(latestSettings.autoGenerateNotesAfterStop))
+        return
+      if (automatic?.error) throw new Error(`Automatic notes skipped: ${automatic.error}`)
+      if (allSegments.length === 0) {
+        throw new Error(
+          'No transcript to generate notes from. Retry transcription from the saved recording or record again.'
+        )
       }
-    } catch {
-      // status unavailable — plain notes are fine
+      const selectedReady =
+        latestSettings.engineChoice === 'cloud'
+          ? latestSettings.cloud?.hasKey === true
+          : latestModels.models.some(
+              (model) =>
+                model.downloaded &&
+                (!latestSettings.activeLocalModelId ||
+                  model.id === latestSettings.activeLocalModelId)
+            )
+      const ready = automatic
+        ? selectedReady
+        : selectedReady || latestModels.models.some((model) => model.downloaded)
+      if (!ready)
+        throw new Error(
+          'Set up your selected notes model or provider in Settings, then choose Generate notes.'
+        )
+      // Save only rough notes here. Main owns the transcript independently of AI success.
+      // No audio goes to this pipeline.
+      if (docViewRef.current === 'notes') roughMarkdownRef.current = docToMarkdown(editor.getJSON())
+      const rawNotesMarkdown = roughMarkdownRef.current
+      const shouldGenerateTitle =
+        isGenericDraftTitle(titleValueRef.current) || titleWasAutoGeneratedRef.current
+      const request = {
+        title: shouldGenerateTitle ? '' : titleValueRef.current.trim(),
+        rawNotesMarkdown,
+        segments: allSegments,
+        participants: roster,
+        templateId: selectedTemplateId,
+        ...(automatic ? { automaticAfterStop: true } : {})
+      }
+      await window.meetings.upsert({
+        id: meetingId,
+        rawNotesMarkdown
+      })
+      if (!current())
+        throw new Error(
+          'Notes generation canceled because the meeting changed. Your notes are preserved; generate again when ready.'
+        )
+      setEnhanceProgressText(null)
+      const result = await window.notes.enhance(request)
+      if (result.error !== undefined || result.markdown === undefined) {
+        throw new Error(result.error ?? 'Generate notes failed with no output. Try again.')
+      }
+      let markdown = result.markdown
+      try {
+        const sync = await window.sync.getStatus()
+        if (sync.connected && sync.enabled) {
+          markdown += `\n\n---\n\n[View transcript & chat](${sync.baseUrl}/app/meeting/${meetingId})`
+        }
+      } catch {
+        // Status unavailable — plain notes are fine.
+      }
+      if (!current())
+        throw new Error(
+          'Generated notes were not applied because the meeting changed. Your existing notes are preserved; generate again when ready.'
+        )
+      const generatedTitle = deriveDraftTitle({
+        kind: meeting?.kind === 'note' ? 'note' : 'meeting',
+        title: shouldGenerateTitle ? '' : titleValueRef.current,
+        rawNotesMarkdown,
+        enhancedMarkdown: markdown,
+        segments: allSegments
+      })
+      // Persist before presenting success. Never write rough notes from an old request here.
+      await window.meetings.upsert({
+        id: meetingId,
+        enhancedMarkdown: markdown,
+        enhancedTranscriptSegmentCount: allSegments.length,
+        ...(result.engine ? { engine: result.engine } : {})
+      })
+      if (!current())
+        throw new Error(
+          'The generated version was saved, but your newer edits remain open. Generate again when ready.'
+        )
+      setEnhancedMarkdown(markdown)
+      setGeneratedEngine(result.engine)
+      setGeneratedSegmentCount(allSegments.length)
+      if (generatedTitle !== null && generatedTitle !== titleValueRef.current.trim()) {
+        setTitle(generatedTitle)
+        titleValueRef.current = generatedTitle
+        titleWasAutoGeneratedRef.current = shouldGenerateTitle
+        persist({ title: generatedTitle })
+      }
+      setDocView('enhanced')
+      docViewRef.current = 'enhanced'
+      setEditorMarkdown(markdown, false)
+    } catch (err) {
+      if (mountedRef.current) {
+        setEnhanceStatus('error')
+        setEnhanceError(err instanceof Error ? err.message : String(err))
+      }
+    } finally {
+      generation.finish(run)
+      if (mountedRef.current) {
+        setEnhanceStatus((status) => (status === 'running' ? 'idle' : status))
+        setEnhanceProgressText(null)
+      }
     }
-    setEnhanceStatus('idle')
-    setEnhancedMarkdown(markdown)
-    const generatedTitle = deriveDraftTitle({
-      kind: meeting?.kind === 'note' ? 'note' : 'meeting',
-      title: shouldGenerateTitle ? '' : titleValueRef.current,
-      rawNotesMarkdown: roughMarkdownRef.current,
-      enhancedMarkdown: markdown,
-      segments: allSegments
-    })
-    if (generatedTitle !== null && generatedTitle !== titleValueRef.current.trim()) {
-      setTitle(generatedTitle)
-      titleValueRef.current = generatedTitle
-      titleWasAutoGeneratedRef.current = shouldGenerateTitle
-    }
-    persist({
-      enhancedMarkdown: markdown,
-      ...(generatedTitle !== null ? { title: generatedTitle } : {}),
-      ...(result.engine ? { engine: result.engine } : {})
-    })
-    setDocView('enhanced')
-    docViewRef.current = 'enhanced'
-    setEditorMarkdown(markdown, false)
   }
 
   /** Pick a template: remember it on the meeting and (re)generate with it. */
   const chooseTemplate = (id: string): void => {
+    generationRef.current.edit()
     setTemplateId(id)
     setTplMenuOpen(false)
     persist({ templateId: id })
@@ -1078,25 +1296,23 @@ export default function MeetingView({
     </div>
   )
 
-  // Notes appear on their own after the meeting ends. Waits
-  // for the stop to settle (capturing false, segments folded) and the model
-  // to be ready; skips silently when there is nothing to write from.
+  // Only the main-process completion event arms this one-shot attempt. It is
+  // consumed even when settings/model/transcript/finalization prevents generation.
   useEffect(() => {
-    if (!pendingAutoGenRef.current || capturing) return
-    if (enhanceStatus === 'running') return
-    if (allSegments.length === 0 || !modelReady) return
-    pendingAutoGenRef.current = false
-    // Auto-generation is the intended side effect of a completed capture.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void runEnhance()
+    if (capturing || !editor) return
+    const automatic = generationRef.current.takeAutomatic()
+    if (!automatic) return
+    void runEnhance(templateId, automatic)
   })
 
-  const showNotesDoc = (): void => {
-    if (docView === 'notes') return
-    setDocView('notes')
-    docViewRef.current = 'notes'
-    setEditorMarkdown(roughMarkdownRef.current, true)
-  }
+  useEffect(() => {
+    mountedRef.current = true
+    const generation = generationRef.current
+    return () => {
+      mountedRef.current = false
+      generation.invalidate()
+    }
+  }, [])
 
   const showEnhancedDoc = (): void => {
     if (docView === 'enhanced' || enhancedMarkdown === null) return
@@ -1278,10 +1494,6 @@ export default function MeetingView({
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    if (sessionSaveTimerRef.current !== null) {
-      clearTimeout(sessionSaveTimerRef.current)
-      sessionSaveTimerRef.current = null
-    }
     if (capturing) window.engine.stop()
     try {
       await onDiscardDraft()
@@ -1333,8 +1545,9 @@ export default function MeetingView({
           className="back-pill no-drag"
           onClick={() => void goBack()}
           title="Back to home"
+          aria-label="Back to home"
         >
-          ‹ <HomeIcon size={13} />
+          <ChevronIcon direction="left" size={12} /> <HomeIcon size={13} />
         </button>
       </div>
 
@@ -1369,291 +1582,282 @@ export default function MeetingView({
         </div>
       )}
 
-      <div className="editor-scroll">
-        <div className="editor-col">
-          <input
-            className="doc-title"
-            type="text"
-            spellCheck={false}
-            placeholder={meeting?.kind === 'note' ? 'New note' : 'New meeting'}
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value)
-              titleValueRef.current = e.target.value
-              titleWasAutoGeneratedRef.current = false
-              scheduleNotesSave()
-            }}
-          />
+      <TranscriptSplit open={transcriptOpen}>
+        <div className="editor-scroll">
+          <div className="editor-col">
+            <input
+              className="doc-title"
+              type="text"
+              spellCheck={false}
+              placeholder={meeting?.kind === 'note' ? 'New note' : 'New meeting'}
+              value={title}
+              onChange={(e) => {
+                generationRef.current.edit()
+                setTitle(e.target.value)
+                titleValueRef.current = e.target.value
+                titleWasAutoGeneratedRef.current = false
+                scheduleNotesSave()
+              }}
+            />
 
-          <div className="chips-row">
-            <span className="chip">
-              <CalendarIcon size={12} /> {dateChip}
-            </span>
-            <span className="chip">
-              {meeting?.kind === 'note' ? (
-                <>
-                  <PencilIcon size={12} /> Note
-                </>
-              ) : (
-                <>
-                  <UsersIcon size={12} /> Me
-                </>
-              )}
-            </span>
-            <span className="chip-folder-anchor">
-              <button
-                type="button"
-                className="chip chip-folder"
-                title={folderName !== null ? 'Move to another folder' : 'Add to folder'}
-                onClick={() => setFolderPickerOpen((open) => !open)}
-              >
-                <FolderIcon size={12} /> {folderName ?? 'Add to folder'}
-              </button>
-              {folderPickerOpen && (
-                <FolderPicker
-                  currentFolderId={folderId}
-                  onAssign={assignFolder}
-                  onClose={() => setFolderPickerOpen(false)}
-                />
-              )}
-            </span>
-            {enhancedMarkdown !== null && (
-              <span className="chip chip-toggle">
-                <button
-                  type="button"
-                  className={docView === 'notes' ? 'on' : ''}
-                  onClick={showNotesDoc}
-                >
-                  My notes
-                </button>
-                <button
-                  type="button"
-                  className={docView === 'enhanced' ? 'on' : ''}
-                  onClick={showEnhancedDoc}
-                >
-                  Enhanced ✓
-                </button>
+            <div className="chips-row">
+              <span className="chip">
+                <CalendarIcon size={12} /> {dateChip}
               </span>
-            )}
-            {enhancedMarkdown !== null && !capturing && (
-              <button
-                type="button"
-                className="chip chip-regen"
-                disabled={!canEnhance}
-                title={
-                  !modelReady ? 'Activate a notes model in Settings first' : 'Regenerate notes'
-                }
-                aria-label="Regenerate notes"
-                onClick={() => void runEnhance()}
-              >
-                {enhanceStatus === 'running' ? (
-                  <span className="spinner" aria-hidden="true" />
+              <span className="chip">
+                {meeting?.kind === 'note' ? (
+                  <>
+                    <PencilIcon size={12} /> Note
+                  </>
                 ) : (
-                  '↻'
+                  <>
+                    <UsersIcon size={12} /> Me
+                  </>
                 )}
-              </button>
-            )}
-            {enhancedMarkdown !== null && !capturing && (
-              <span className="chip-template-anchor tpl-anchor">
+              </span>
+              <span className="chip-folder-anchor">
                 <button
                   type="button"
-                  className="chip"
-                  disabled={!canEnhance}
-                  title="Regenerate with a different template"
-                  aria-expanded={tplMenuOpen}
-                  onClick={() => setTplMenuOpen((o) => !o)}
+                  className="chip chip-folder"
+                  title={folderName !== null ? 'Move to another folder' : 'Add to folder'}
+                  onClick={() => setFolderPickerOpen((open) => !open)}
                 >
-                  {templates.find((t) => t.id === templateId)?.label ?? 'Template'} ▾
+                  <FolderIcon size={12} /> {folderName ?? 'Add to folder'}
                 </button>
-                {tplMenuOpen && templateMenu}
+                {folderPickerOpen && (
+                  <FolderPicker
+                    currentFolderId={folderId}
+                    onAssign={assignFolder}
+                    onClose={() => setFolderPickerOpen(false)}
+                  />
+                )}
               </span>
-            )}
-            {enhancedMarkdown !== null && enhanceStatus === 'running' && (
-              <span className="chip-regen-status">
-                <DoodlingIndicator statusText={enhanceProgressText} />
-              </span>
-            )}
-          </div>
-
-          {docView === 'notes' && (
-            <FormatToolbar editor={editor} onPickImage={() => imageInputRef.current?.click()} />
-          )}
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const files = imageFilesFrom(e.target.files)
-              if (files.length > 0) insertImagesRef.current(files)
-              e.target.value = ''
-            }}
-          />
-          <EditorContent editor={editor} className="doc-editor" />
-        </div>
-      </div>
-
-      {transcriptOpen && (
-        <div className="transcript-panel">
-          <div className="tp-head">
-            <span className="tp-meta">{totalEcho > 0 ? `${totalEcho} echo suppressed` : ''}</span>
-            <div className="tp-actions">
-              {audioParts.length > 0 && !capturing && (
-                <button
-                  type="button"
-                  onClick={() => void runRetranscribe()}
-                  disabled={retranscribing}
-                  title="Rebuild the transcript from the saved recording with the current model"
-                >
-                  {retranscribing ? 'Re-transcribing…' : 'Re-transcribe'}
-                </button>
-              )}
-              <button type="button" onClick={copyTranscript} title="Copy transcript">
-                {copied ? '✓ Copied' : 'Copy'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setTranscriptOpen(false)}
-                title="Minimize"
-                aria-label="Minimize transcript"
-              >
-                —
-              </button>
-            </div>
-          </div>
-          {audioParts.length > 0 && !capturing && (
-            <div className="tp-audio">
-              <audio
-                ref={audioRef}
-                controls
-                preload="auto"
-                src={playerSrc ?? undefined}
-                onLoadedMetadata={() => {
-                  const sec = pendingSeekSecRef.current
-                  const el = audioRef.current
-                  if (sec !== null && el) {
-                    pendingSeekSecRef.current = null
-                    el.currentTime = sec
-                    void el.play()
-                  }
-                }}
-                onTimeUpdate={onPlayheadMoved}
-                onEnded={() => {
-                  // Multi-part meetings (record → stop → record) play through.
-                  if (activePart < audioParts.length - 1) {
-                    pendingSeekSecRef.current = 0
-                    setActivePart(activePart + 1)
-                  } else {
-                    setPlayingSegId(null)
-                  }
-                }}
-              />
-              {audioParts.length > 1 && (
-                <span className="tp-audio-part">
-                  Part {Math.min(activePart, audioParts.length - 1) + 1}/{audioParts.length}
+              {enhancedMarkdown !== null && (
+                <span className="chip chip-toggle">
+                  <button
+                    type="button"
+                    className={docView === 'notes' ? 'on' : ''}
+                    onClick={showNotesDoc}
+                  >
+                    My notes
+                  </button>
+                  <button
+                    type="button"
+                    className={docView === 'enhanced' ? 'on' : ''}
+                    onClick={showEnhancedDoc}
+                  >
+                    Enhanced ✓
+                  </button>
                 </span>
               )}
             </div>
-          )}
-          <div className="tp-body" ref={feedRef}>
-            {transcriptEmpty ? (
-              <div className="tp-empty">
-                <p className="tp-empty-title">Transcript on…</p>
-                <p className="tp-empty-sub">
-                  {capturing
-                    ? state.transcribing
-                      ? 'Start talking'
-                      : 'Warming up transcription — keep talking, your audio is being captured'
-                    : 'Hit record and start talking'}
-                </p>
-              </div>
-            ) : (
-              <>
-                {allSegments.map((s) => (
-                  <div
-                    key={s.id}
-                    className={[
-                      'tp-row',
-                      `tp-${s.channel}`,
-                      audioParts.length > 0 && !capturing ? 'tp-clickable' : '',
-                      playingSegId === s.id ? 'tp-playing' : ''
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    onClick={
-                      audioParts.length > 0 && !capturing ? () => seekToSegment(s) : undefined
-                    }
-                    title={
-                      audioParts.length > 0 && !capturing
-                        ? 'Play the recording from here'
-                        : undefined
-                    }
-                  >
-                    {renamingId === speakerIdOf(s) ? (
-                      <input
-                        className="tp-speaker-input"
-                        autoFocus
-                        value={renameText}
-                        placeholder="Name this speaker"
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => setRenameText(e.target.value)}
-                        onBlur={() => applyRename(speakerIdOf(s), renameText)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') applyRename(speakerIdOf(s), renameText)
-                          else if (e.key === 'Escape') {
-                            setRenamingId(null)
-                            setRenameText('')
-                          }
-                        }}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="tp-speaker tp-speaker-btn"
-                        title="Name this speaker — applies to the whole transcript"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setRenamingId(speakerIdOf(s))
-                          setRenameText(
-                            s.speaker === defaultSpeakerLabel(s.channel) ? '' : s.speaker
-                          )
-                        }}
-                      >
-                        {s.speaker}
-                      </button>
-                    )}
-                    <span className="tp-text">{s.text}</span>
-                    <span className="tp-time">
-                      {formatClock((segmentTime(s) - firstSegmentTime) / 1000)}
-                    </span>
-                  </div>
-                ))}
-                {capturing &&
-                  (['mic', 'system'] as const).map((channel) =>
-                    state.partials[channel] ? (
-                      <div key={channel} className={`tp-row tp-${channel} tp-partial`}>
-                        <span className="tp-speaker">
-                          {speakerLabel(
-                            {
-                              channel,
-                              speaker: defaultSpeakerLabel(channel),
-                              speakerId: defaultSpeakerId(channel)
-                            },
-                            roster
-                          )}
-                        </span>
-                        <span className="tp-text">{state.partials[channel]}</span>
-                        <span className="tp-time">·</span>
-                      </div>
-                    ) : null
-                  )}
-              </>
+
+            {enhancedMarkdown !== null && (
+              <p className="models-sub">Generated with {generatedModelLabel(generatedEngine)}</p>
             )}
+
+            {docView === 'notes' && (
+              <FormatToolbar editor={editor} onPickImage={() => imageInputRef.current?.click()} />
+            )}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const files = imageFilesFrom(e.target.files)
+                if (files.length > 0) insertImagesRef.current(files)
+                e.target.value = ''
+              }}
+            />
+            <EditorContent editor={editor} className="doc-editor" />
           </div>
-          <div className="tp-foot">Always get consent when recording others.</div>
         </div>
-      )}
+
+        {transcriptOpen && (
+          <div className="transcript-panel">
+            <div className="tp-head">
+              <span className="tp-meta">{totalEcho > 0 ? `${totalEcho} echo suppressed` : ''}</span>
+              <div className="tp-actions">
+                {audioParts.length > 0 && !capturing && (
+                  <button
+                    type="button"
+                    onClick={() => void runRetranscribe()}
+                    disabled={retranscribing}
+                    title="Rebuild the transcript from the saved recording with the current model"
+                  >
+                    {retranscribing ? 'Re-transcribing…' : 'Re-transcribe'}
+                  </button>
+                )}
+                <button type="button" onClick={copyTranscript} title="Copy transcript">
+                  {copied ? '✓ Copied' : 'Copy'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranscriptOpen(false)}
+                  title="Minimize"
+                  aria-label="Minimize transcript"
+                >
+                  —
+                </button>
+              </div>
+            </div>
+            {audioParts.length > 0 && !capturing && (
+              <div className="tp-audio">
+                <audio
+                  ref={audioRef}
+                  controls
+                  preload="auto"
+                  src={playerSrc ?? undefined}
+                  onLoadedMetadata={() => {
+                    const sec = pendingSeekSecRef.current
+                    const el = audioRef.current
+                    if (sec !== null && el) {
+                      pendingSeekSecRef.current = null
+                      el.currentTime = sec
+                      void el.play()
+                    }
+                  }}
+                  onTimeUpdate={onPlayheadMoved}
+                  onEnded={() => {
+                    // Multi-part meetings (record → stop → record) play through.
+                    if (activePart < audioParts.length - 1) {
+                      pendingSeekSecRef.current = 0
+                      setActivePart(activePart + 1)
+                    } else {
+                      setPlayingSegId(null)
+                    }
+                  }}
+                />
+                {audioParts.length > 1 && (
+                  <label className="tp-audio-part">
+                    Recording part
+                    <select
+                      aria-label="Recording part"
+                      value={Math.min(activePart, audioParts.length - 1)}
+                      onChange={(event) => {
+                        audioRef.current?.pause()
+                        pendingSeekSecRef.current = 0
+                        setPlayingSegId(null)
+                        setActivePart(Number(event.target.value))
+                      }}
+                    >
+                      {audioParts.map((part, index) => (
+                        <option key={part.url} value={index}>
+                          Part {index + 1} of {audioParts.length}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            )}
+            <div className="tp-body" ref={feedRef}>
+              {transcriptEmpty ? (
+                <div className="tp-empty">
+                  <p className="tp-empty-title">Transcript on…</p>
+                  <p className="tp-empty-sub">
+                    {phase === 'starting'
+                      ? state.statusText || 'Starting…'
+                      : phase === 'finishing'
+                        ? 'Finishing up…'
+                        : phase === 'recording'
+                          ? state.transcribing
+                            ? 'Start talking'
+                            : 'Warming up transcription — keep talking, your audio is being captured'
+                          : 'Hit record and start talking'}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {allSegments.map((s) => (
+                    <div
+                      key={s.id}
+                      className={[
+                        'tp-row',
+                        s.source === 'text' ? 'tp-imported' : `tp-${s.channel}`,
+                        audioParts.length > 0 && !capturing ? 'tp-clickable' : '',
+                        playingSegId === s.id ? 'tp-playing' : ''
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      onClick={
+                        audioParts.length > 0 && !capturing ? () => seekToSegment(s) : undefined
+                      }
+                      title={
+                        audioParts.length > 0 && !capturing
+                          ? 'Play the recording from here'
+                          : undefined
+                      }
+                    >
+                      {renamingId === speakerIdOf(s) ? (
+                        <input
+                          className="tp-speaker-input"
+                          autoFocus
+                          value={renameText}
+                          placeholder="Name this speaker"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setRenameText(e.target.value)}
+                          onBlur={() => applyRename(speakerIdOf(s), renameText)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') applyRename(speakerIdOf(s), renameText)
+                            else if (e.key === 'Escape') {
+                              setRenamingId(null)
+                              setRenameText('')
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="tp-speaker tp-speaker-btn"
+                          title="Name this speaker — applies to the whole transcript"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setRenamingId(speakerIdOf(s))
+                            setRenameText(
+                              s.speaker === defaultSpeakerLabel(s.channel) ? '' : s.speaker
+                            )
+                          }}
+                        >
+                          {s.speaker}
+                        </button>
+                      )}
+                      <span className="tp-text">{s.text}</span>
+                      {s.source !== 'text' && (
+                        <span className="tp-time">
+                          {formatClock((segmentTime(s) - firstSegmentTime) / 1000)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {capturing &&
+                    (['mic', 'system'] as const).map((channel) =>
+                      state.partials[channel] ? (
+                        <div key={channel} className={`tp-row tp-${channel} tp-partial`}>
+                          <span className="tp-speaker">
+                            {speakerLabel(
+                              {
+                                channel,
+                                speaker: defaultSpeakerLabel(channel),
+                                speakerId: defaultSpeakerId(channel)
+                              },
+                              roster
+                            )}
+                          </span>
+                          <span className="tp-text">{state.partials[channel]}</span>
+                          <span className="tp-time">·</span>
+                        </div>
+                      ) : null
+                    )}
+                </>
+              )}
+            </div>
+            <div className="tp-foot">Always get consent when recording others.</div>
+          </div>
+        )}
+      </TranscriptSplit>
 
       {chatOpen && (
         <div className="transcript-panel chat-panel">
@@ -1743,78 +1947,104 @@ export default function MeetingView({
         </div>
       )}
 
-      {enhanceStatus === 'error' && enhanceError && (
-        <div className="enhance-error-bar">
-          <span>{enhanceError}</span>
-          {!modelReady && (
+      <div className="meeting-generation-actions">
+        {enhanceStatus === 'error' && enhanceError && (
+          <div className="enhance-error-bar" role="alert">
+            <span>{enhanceError}</span>
+            {!capturing && allSegments.length > 0 && modelReady && (
+              <button
+                type="button"
+                disabled={!canEnhance || retranscribing}
+                onClick={() => void runEnhance()}
+              >
+                Retry generation
+              </button>
+            )}
             <button type="button" onClick={onOpenSettings}>
               Open Settings →
             </button>
-          )}
-          <button type="button" onClick={() => setEnhanceStatus('idle')}>
-            Dismiss
-          </button>
-        </div>
-      )}
+            <button type="button" onClick={() => setEnhanceStatus('idle')}>
+              Dismiss
+            </button>
+          </div>
+        )}
 
-      {primaryAction !== 'hidden' && (
-        <div className="generate-cta-wrap tpl-anchor">
-          <button
-            type="button"
-            className="generate-cta"
-            disabled={primaryAction === 'generating' || primaryAction === 'transcribing'}
-            title={
-              primaryAction === 'configure-model'
-                ? 'Choose a local model or connect an AI provider'
-                : primaryAction === 'transcribe' || primaryAction === 'transcribing'
-                  ? 'Build a transcript from the saved recording'
-                  : 'Generate notes'
-            }
-            onClick={() => {
-              if (primaryAction === 'configure-model') onOpenSettings()
-              else if (primaryAction === 'transcribe') void runRetranscribe()
-              else if (primaryAction === 'generate') void runEnhance()
-            }}
-          >
-            {enhanceStatus === 'running' ? (
-              <DoodlingIndicator statusText={enhanceProgressText} />
-            ) : primaryAction === 'transcribing' ? (
+        {hasNewTranscript && (
+          <p className="generate-cta-notice" id="new-transcript-notice" role="status">
+            New transcript detected
+          </p>
+        )}
+        {primaryAction !== 'hidden' && (
+          <div className="generate-cta-wrap tpl-anchor">
+            <button
+              type="button"
+              className="generate-cta"
+              aria-describedby={hasNewTranscript ? 'new-transcript-notice' : undefined}
+              disabled={primaryAction === 'generating' || primaryAction === 'transcribing'}
+              title={
+                primaryAction === 'configure-model'
+                  ? 'Choose a local model or connect an AI provider'
+                  : primaryAction === 'transcribe' || primaryAction === 'transcribing'
+                    ? 'Build a transcript from the saved recording'
+                    : primaryAction === 'regenerate'
+                      ? 'Regenerate from the full transcript and your latest notes'
+                      : 'Generate notes'
+              }
+              onClick={() => {
+                if (primaryAction === 'configure-model') onOpenSettings()
+                else if (primaryAction === 'transcribe') void runRetranscribe()
+                else if (primaryAction === 'generate' || primaryAction === 'regenerate')
+                  void runEnhance()
+              }}
+            >
+              {enhanceStatus === 'running' ? (
+                <DoodlingIndicator statusText={enhanceProgressText} />
+              ) : primaryAction === 'transcribing' ? (
+                <>
+                  <span className="spinner" aria-hidden="true" /> Transcribing recording…
+                </>
+              ) : primaryAction === 'transcribe' ? (
+                <>
+                  <SparkleIcon size={14} /> Transcribe recording
+                </>
+              ) : primaryAction === 'configure-model' ? (
+                <>
+                  <SparkleIcon size={14} /> Set up notes model
+                </>
+              ) : (
+                <>
+                  <SparkleIcon size={14} />{' '}
+                  {primaryAction === 'regenerate' ? 'Regenerate notes' : 'Generate notes'}
+                </>
+              )}
+            </button>
+            {(primaryAction === 'generate' ||
+              primaryAction === 'regenerate' ||
+              primaryAction === 'generating') && (
               <>
-                <span className="spinner" aria-hidden="true" /> Transcribing recording…
-              </>
-            ) : primaryAction === 'transcribe' ? (
-              <>
-                <SparkleIcon size={14} /> Transcribe recording
-              </>
-            ) : primaryAction === 'configure-model' ? (
-              <>
-                <SparkleIcon size={14} /> Set up notes model
-              </>
-            ) : (
-              <>
-                <SparkleIcon size={14} /> Generate notes
+                <button
+                  type="button"
+                  className="generate-cta generate-cta-arrow"
+                  disabled={!canEnhance}
+                  title="Choose a note template"
+                  aria-label="Choose a note template"
+                  aria-expanded={tplMenuOpen}
+                  onClick={() => setTplMenuOpen((o) => !o)}
+                >
+                  <ChevronIcon direction="down" size={14} />
+                </button>
+                {tplMenuOpen && templateMenu}
               </>
             )}
-          </button>
-          {(primaryAction === 'generate' || primaryAction === 'generating') && (
-            <>
-              <button
-                type="button"
-                className="generate-cta generate-cta-arrow"
-                disabled={!canEnhance}
-                title="Choose a note template"
-                aria-label="Choose a note template"
-                aria-expanded={tplMenuOpen}
-                onClick={() => setTplMenuOpen((o) => !o)}
-              >
-                ▾
-              </button>
-              {tplMenuOpen && templateMenu}
-            </>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
+      {allSegments.some((segment) => segment.source === 'text') && (
+        <p className="text-import-local" role="note">
+          Imported text transcript. No recording or timestamps. Stored locally; use Export to share.
+        </p>
+      )}
       <div className="bottom-bar">
         <div className="rec-pill">
           {capturing ? (
@@ -1830,8 +2060,10 @@ export default function MeetingView({
                 className="chev-btn"
                 onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-expanded={transcriptOpen}
               >
-                {transcriptOpen ? '⌄' : '⌃'}
+                <ChevronIcon direction={transcriptOpen ? 'down' : 'up'} />
               </button>
               <button
                 type="button"
@@ -1848,20 +2080,33 @@ export default function MeetingView({
             <>
               <button
                 type="button"
+                disabled={allSegments.some((s) => s.source === 'text')}
                 className={allSegments.length > 0 ? 'record-btn resume' : 'record-btn'}
                 onClick={startRecording}
-                title={allSegments.length > 0 ? 'Resume recording' : 'Start recording'}
+                title={
+                  allSegments.some((s) => s.source === 'text')
+                    ? 'Imported transcript. Create a new meeting to record audio.'
+                    : allSegments.length > 0
+                      ? 'Resume recording'
+                      : 'Start recording'
+                }
               >
                 <BarsIcon animated={false} />
-                {allSegments.length > 0 && <span className="rec-resume">Resume</span>}
+                {allSegments.length > 0 && (
+                  <span className="rec-resume">
+                    {allSegments.some((s) => s.source === 'text') ? 'Imported text' : 'Resume'}
+                  </span>
+                )}
               </button>
               <button
                 type="button"
                 className="chev-btn"
                 onClick={toggleTranscript}
                 title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+                aria-expanded={transcriptOpen}
               >
-                {transcriptOpen ? '⌄' : '⌃'}
+                <ChevronIcon direction={transcriptOpen ? 'down' : 'up'} />
               </button>
             </>
           )}

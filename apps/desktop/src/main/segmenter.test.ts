@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { EngineTokenTiming } from '../shared/engine-events'
+import type { EngineTokenTiming, TranscriptSegment } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
 
 /** Build subword tokens the way Parakeet emits them: leading space = new word. */
@@ -121,4 +121,22 @@ test('stamps absolute wall-clock time from the channel epoch', () => {
   a.addTimings('mic', sentence('hello there', 2.0))
   const [seg] = a.flush('mic')
   assert.equal(seg!.absoluteStartMs, 1_750_000_000_000 + 2000)
+})
+
+test('separate live sessions and batch parts never reuse segment identities', () => {
+  const part = (count: number): TranscriptSegment[] => {
+    const assembler = new SegmentAssembler()
+    return Array.from({ length: count }, (_, i) => [
+      ...assembler.addTimings('mic', sentence(`Synthetic part line ${i}`, i * 3)),
+      ...assembler.flush('mic')
+    ]).flat()
+  }
+  for (const [first, second] of [
+    [5, 8],
+    [3, 4]
+  ]) {
+    const segments = [...part(first!), ...part(second!)]
+    assert.equal(segments.length, first! + second!)
+    assert.equal(new Set(segments.map((segment) => segment.id)).size, segments.length)
+  }
 })

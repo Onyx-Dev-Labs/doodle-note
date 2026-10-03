@@ -1,0 +1,27 @@
+{
+  "repository": "FluidInference/diar-streaming-sortformer-coreml",
+  "revision": "ae9a27ab45dc0aa3abede7d2d6bad2b7a69aa6d1",
+  "package": "Sortformer_v2.1.mlpackage",
+  "files": [
+    {
+      "path": "Manifest.json",
+      "size": 617,
+      "sha256": "216380ef6d639d64dbd84236de641cf98b5350ccf1e6103156502a240b07fd91"
+    },
+    {
+      "path": "Data/com.apple.CoreML/model.mlmodel",
+      "size": 762389,
+      "sha256": "4bcf2064983710d51ad167aeeacec76c9cba93043924986218a1da9dde316750"
+    },
+    {
+      "path": "Data/com.apple.CoreML/weights/0-weight.bin",
+      "size": 8948544,
+      "sha256": "88a98803e35186b1dfb41d7f748f7cee5093bb6efeb117f56953c17549792fa4"
+    },
+    {
+      "path": "Data/com.apple.CoreML/weights/1-weight.bin",
+      "size": 230428224,
+      "sha256": "4c85926af77684bce762b355a2b162df557d832444fbeb79ee195113a4bbf1db"
+    }
+  ]
+}

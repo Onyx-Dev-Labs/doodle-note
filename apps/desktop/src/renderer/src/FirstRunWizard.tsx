@@ -51,7 +51,9 @@ export default function FirstRunWizard({
   useEffect(() => {
     if (step !== 'engine' || preflightStartedRef.current) return
     preflightStartedRef.current = true
+    let active = true
     const unsubscribe = window.wizard.onPreflightEvent((ev: WizardPreflightEvent) => {
+      if (!active) return
       setEngine((prev) => {
         switch (ev.stage) {
           case 'mic':
@@ -72,6 +74,7 @@ export default function FirstRunWizard({
             return {
               ...prev,
               status: 'error',
+              progress: null,
               detail: ev.message ?? 'Setup hit a snag — you can finish later from Settings'
             }
           default:
@@ -79,26 +82,47 @@ export default function FirstRunWizard({
         }
       })
     })
-    window.wizard.runPreflight().then((result) => {
-      setEngine((prev) =>
-        prev.status === 'running'
-          ? {
-              ...prev,
-              status: result.ok ? 'ready' : 'error',
-              detail: result.ok
-                ? 'Transcription is ready'
-                : (result.error ?? 'Setup hit a snag — you can finish later from Settings')
-            }
-          : prev
-      )
-    })
-    return unsubscribe
+    void window.wizard
+      .runPreflight()
+      .then((result) => {
+        if (!active) return
+        setEngine((prev) =>
+          prev.status === 'running'
+            ? {
+                ...prev,
+                status: result.ok ? 'ready' : 'error',
+                progress: null,
+                detail: result.ok
+                  ? 'Transcription is ready'
+                  : (result.error ?? 'Setup hit a snag — you can finish later from Settings')
+              }
+            : prev
+        )
+      })
+      .catch(() => {
+        if (!active) return
+        setEngine((prev) =>
+          prev.status === 'running'
+            ? {
+                ...prev,
+                status: 'error',
+                progress: null,
+                detail: 'Setup hit a snag — you can finish later from Settings'
+              }
+            : prev
+        )
+      })
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [step])
 
   /* ---- notes model step ---- */
   const [models, setModels] = useState<NotesModelInfo[] | null>(null)
   const [notesState, setNotesState] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle')
   const [notesProgress, setNotesProgress] = useState(0)
+  const [notesStage, setNotesStage] = useState('checking')
   const [notesError, setNotesError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -106,23 +130,32 @@ export default function FirstRunWizard({
     void window.notes
       .models()
       .then((response) => setModels(response.models))
-      .catch(() => setModels([]))
+      .catch(() => {
+        setModels([])
+        setNotesError('Could not check local models. Retry from Settings → Notes model.')
+      })
   }, [step, models])
 
   useEffect(
     () =>
-      window.notes.onDownloadProgress(({ progress }) => {
+      window.notes.onDownloadProgress(({ progress, stage }) => {
         setNotesProgress(progress)
+        setNotesStage(stage ?? 'downloading')
       }),
     []
   )
 
   const recommended = models?.find((m) => m.available) ?? null
-  const alreadyActive = models?.some((m) => m.downloaded) ?? false
+  const readyModel =
+    notesState === 'done'
+      ? recommended
+      : (models?.find((m) => m.active && m.available && m.downloaded) ?? null)
 
   const downloadNotesModel = async (): Promise<void> => {
     if (!recommended) return
     setNotesState('downloading')
+    setNotesStage('checking')
+    setNotesProgress(0)
     setNotesError(null)
     try {
       const result = await window.notes.activateModel(recommended.id)
@@ -218,14 +251,30 @@ export default function FirstRunWizard({
                   </span>
                 </div>
               )}
-              <div className="wizard-row">
+              <div className="wizard-row" role="status" aria-live="polite" aria-atomic="true">
                 <span>{engine.detail}</span>
-                <span className={engine.status === 'error' ? 'wz-bad' : 'wz-ok'}>
-                  {engine.status === 'ready' ? '✓' : engine.status === 'error' ? '✕' : '…'}
-                </span>
+                {engine.status === 'running' ? (
+                  <span className="wizard-loading" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                ) : (
+                  <span
+                    className={engine.status === 'error' ? 'wz-bad' : 'wz-ok'}
+                    aria-hidden="true"
+                  >
+                    {engine.status === 'ready' ? '✓' : '✕'}
+                  </span>
+                )}
               </div>
               {engine.progress !== null && (
-                <progress className="wizard-progress" value={engine.progress} max={1} />
+                <progress
+                  aria-label="Transcription model download"
+                  className="wizard-progress"
+                  value={engine.progress}
+                  max={1}
+                />
               )}
             </div>
             {!isWindows && (engine.mic === false || engine.screen === false) && (
@@ -253,23 +302,37 @@ export default function FirstRunWizard({
               After a meeting, DoodleNote merges your rough notes with the transcript into polished
               notes — by default with a model that runs entirely on this computer.
             </p>
-            {alreadyActive || notesState === 'done' ? (
-              <div className="wizard-rows">
+            {readyModel ? (
+              <div className="wizard-rows" role="status">
                 <div className="wizard-row">
-                  <span>On-device notes model</span>
-                  <span className="wz-ok">✓ ready</span>
+                  <span>
+                    {readyModel.label} — {readyModel.description}
+                  </span>
+                  <span className="wz-ok" style={{ whiteSpace: 'nowrap' }}>
+                    ✓ ready
+                  </span>
                 </div>
+                <p className="wizard-hint">
+                  {notesState === 'done'
+                    ? 'Selected for your notes. Ready to use on this computer.'
+                    : 'Selected for your notes. Already on this computer — no download needed.'}
+                </p>
               </div>
             ) : recommended ? (
-              <div className="wizard-rows">
+              <div className="wizard-rows" aria-live="polite">
                 <div className="wizard-row">
                   <span>
                     {recommended.label} — {recommended.description}
                   </span>
                   <span>{recommended.sizeGB.toFixed(1)} GB</span>
                 </div>
-                {notesState === 'downloading' && (
-                  <progress className="wizard-progress" value={notesProgress} max={1} />
+                {notesState === 'downloading' && notesStage === 'downloading' && (
+                  <progress
+                    aria-label="Model download"
+                    className="wizard-progress"
+                    value={notesProgress}
+                    max={1}
+                  />
                 )}
                 {notesError && <p className="wizard-hint wz-bad">{notesError}</p>}
                 <button
@@ -279,21 +342,26 @@ export default function FirstRunWizard({
                   onClick={() => void downloadNotesModel()}
                 >
                   {notesState === 'downloading'
-                    ? `Downloading… ${Math.round(notesProgress * 100)}%`
+                    ? notesStage === 'downloading'
+                      ? `Downloading… ${Math.round(notesProgress * 100)}%`
+                      : notesStage === 'loading'
+                        ? 'Loading local model…'
+                        : notesStage === 'verifying'
+                          ? 'Verifying download…'
+                          : 'Checking local models…'
                     : 'Download the model'}
                 </button>
               </div>
             ) : (
-              <p className="wizard-hint">
-                {models === null
-                  ? 'Checking this computer…'
-                  : 'This computer is short on RAM for the on-device model — use your own API key instead.'}
+              <p className="wizard-hint" role="status">
+                {notesError ??
+                  (models === null
+                    ? 'Checking this computer…'
+                    : 'This computer is short on RAM for the on-device model — use your own API key instead.')}
               </p>
             )}
             <button type="button" className="wizard-link" onClick={() => setStep('done')}>
-              {alreadyActive || notesState === 'done'
-                ? 'Continue'
-                : 'Skip — I’ll use my own API key (Settings → Notes model)'}
+              {readyModel ? 'Continue' : 'Skip — I’ll use my own API key (Settings → Notes model)'}
             </button>
           </div>
         )}

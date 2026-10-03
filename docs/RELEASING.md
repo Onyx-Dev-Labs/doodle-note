@@ -64,6 +64,7 @@ On a Mac with a supported Xcode and Swift environment, also run:
 
 ```sh
 pnpm engine:build
+pnpm whisper:build
 ```
 
 The normal push and pull-request checks are defined in
@@ -80,6 +81,10 @@ packaging command is defined by the desktop package:
 pnpm engine:build
 pnpm --filter desktop package
 ```
+
+The Mac package command builds the pinned Whisper CLI before bundling. It requires
+CMake and an Apple Silicon compiler. This build embeds Metal shaders and the
+license notice; it does not download a speech model. See [WHISPER.md](WHISPER.md).
 
 `apps/desktop/electron-builder.yml` configures the Developer ID identity,
 hardened runtime, ZIP and DMG targets, and notarization. Local packaging can
@@ -200,3 +205,23 @@ commands mutate production storage and require explicit authorization.
   separately.
 - [ ] Do not mark the release complete until publication, updater visibility,
   installation, and manual verification have each been observed.
+
+### Google Calendar credential gate
+
+Before an official desktop release, securely supply
+`DOODLENOTE_GOOGLE_CLIENT_SECRET` for DoodleNote's existing **Desktop** OAuth
+registration. The Mac workflow uses the identically named repository secret.
+Local `pnpm --filter desktop package` and `release:win` check for it before
+building. Generic `build` and CI `package:win` remain credential-free and do not
+qualify as Google-enabled production packages. Do not reuse a previously built
+bundle after changing the credential. Verify the packaged app's fresh Google
+connect, calendar list, selected events, expiry refresh and quit/relaunch before
+publication. Keep Microsoft connected for an isolation test: a Google failure
+must preserve Google cached events, allow Microsoft to refresh, display the
+Google error, and leave the last fully successful sync timestamp unchanged.
+
+Credential values are injected into the main process, never committed. Installed
+binaries can be inspected; this is not confidential-server secret storage.
+Rotation and public OAuth verification remain maintainer operations, not end-user
+setup. A source fix does not repair previously installed versions until a tested,
+approved update is distributed.

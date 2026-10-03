@@ -79,6 +79,19 @@ engine info
 
 ## First-run permissions (live)
 
+The desktop app runs `engine preflight --models-only` at launch to warm the
+transcription cache without requesting permissions or probing audio devices.
+Full `engine preflight` belongs to the visible onboarding flow: it checks or
+requests microphone access, tests system audio, then prepares transcription.
+
+Each recording start still validates current capture capability. Microphone
+consent is requested only when the OS reports `notDetermined`; an existing
+grant skips the request, and denied/restricted access fails with recovery
+instructions. System capture still creates and validates the chosen tap or
+ScreenCaptureKit stream, including the existing tap-to-SCK fallback. Those
+operations report `starting_capture`, not a presumed permission prompt or
+permission grant. Only `ready` marks capture as started.
+
 macOS will prompt once, attributed to the app that launched the engine (your
 terminal during development, the desktop app in production):
 
@@ -95,7 +108,7 @@ try/parse each line and skip failures.
 
 | event | fields | meaning |
 |---|---|---|
-| `status` | `stage`, optional `channel`, `model`, `permission` | lifecycle: `loading_models`, `requesting_permission`, `capturing`, `finishing` |
+| `status` | `stage`, optional `channel`, `model`, `permission` | lifecycle: `loading_models`, `requesting_permission` (actual first-use mic consent), `starting_capture`, `finishing` |
 | `download` | `progress` 0..1 | model download progress (whole-percent steps) |
 | `ready` | `model` or `channels`, `mode` | models loaded, work begins |
 | `channel_start` | `channel`, `epochMs` | live: wall-clock anchor for the channel's token timeline (first audio buffer) |

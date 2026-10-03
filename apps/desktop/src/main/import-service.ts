@@ -1,3 +1,8 @@
+import {
+  normalizeBatchSettings,
+  type BatchTranscriptionSettings
+} from '../shared/batch-transcription'
+import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
@@ -6,9 +11,11 @@ import type { MeetingFileStore } from '@repo/meetings-store'
 import type { TranscriptSegment } from '../shared/engine-events'
 import {
   IMPORT_AUDIO_CHANNEL,
+  IMPORT_STATUS_CHANNEL,
+  IMPORT_CANCEL_CHANNEL,
+  IMPORT_RETRY_CHANNEL,
   IMPORT_PROGRESS_CHANNEL,
   IMPORT_RETRANSCRIBE_CHANNEL,
-  type ImportProgress,
   type ImportResult,
   type RetranscribeResult
 } from '../shared/import-api'
@@ -16,10 +23,12 @@ import { AudioService } from './audio-service'
 import { IMPORTABLE_EXTENSIONS } from './import-media'
 import {
   transcribeFileToSegments,
-  type BatchAsrModel,
+  type BatchOptions,
   type BatchProgress,
   type BatchTranscription
 } from './import-logic'
+
+import { ImportJobs, checkImportCanceled, type ImportJobContext } from './import-jobs'
 
 /** Sanity ceiling — a 2GB "audio file" is a mistake, not a meeting. */
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024
@@ -33,7 +42,23 @@ const MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024
  */
 export class ImportService {
   /** One batch job at a time keeps memory and thermal behavior sane. */
-  private busy = false
+  private picking = false
+  private readonly jobs = new ImportJobs((state) => this.broadcast(IMPORT_PROGRESS_CHANNEL, state))
+  private retrySource: { jobId: string; filePath?: string; meetingId?: string } | null = null
+
+  private captureActive: (meetingId: string) => boolean = () => false
+
+  setCaptureGuard(guard: (meetingId: string) => boolean): void {
+    this.captureActive = guard
+  }
+
+  isWorkingOn(meetingId: string): boolean {
+    return this.jobs.busy && this.jobs.snapshot()?.meetingId === meetingId
+  }
+
+  get isBusy(): boolean {
+    return this.picking || this.jobs.busy
+  }
 
   constructor(
     private readonly enginePath: string,
@@ -42,48 +67,71 @@ export class ImportService {
     private readonly broadcast: (channel: string, payload: unknown) => void,
     private readonly platformTranscriber?: (
       filePath: string,
-      onProgress?: (progress: BatchProgress) => void
+      onProgress?: (progress: BatchProgress) => void,
+      options?: BatchOptions
     ) => Promise<BatchTranscription>,
-    /** Engine model to batch-transcribe with; absent = engine default (v2). */
-    private readonly asrModel?: () => BatchAsrModel
+    private readonly batchSettings?: () => BatchTranscriptionSettings
   ) {}
 
   registerIpc(): void {
-    ipcMain.handle(IMPORT_AUDIO_CHANNEL, () => this.importAudio())
-    ipcMain.handle(IMPORT_RETRANSCRIBE_CHANNEL, (_event, meetingId: unknown) =>
+    // These two operations cannot wait behind the library barrier: cancel
+    // releases the import that a transfer may currently be waiting on.
+    ipcMain.handle(IMPORT_STATUS_CHANNEL, () => this.jobs.snapshot())
+    ipcMain.handle(IMPORT_CANCEL_CHANNEL, (_event, jobId: unknown) =>
+      this.jobs.cancel(String(jobId ?? ''))
+    )
+    libraryIpc.handle(IMPORT_RETRY_CHANNEL, (_event, jobId: unknown) =>
+      this.retry(String(jobId ?? ''))
+    )
+    libraryIpc.handle(IMPORT_AUDIO_CHANNEL, () => this.importAudio())
+    libraryIpc.handle(IMPORT_RETRANSCRIBE_CHANNEL, (_event, meetingId: unknown) =>
       this.retranscribe(String(meetingId ?? ''))
     )
   }
 
-  private progress(payload: ImportProgress): void {
-    this.broadcast(IMPORT_PROGRESS_CHANNEL, payload)
+  private toBatchProgress(
+    context: ImportJobContext,
+    part?: number,
+    parts?: number
+  ): (p: BatchProgress) => void {
+    return (p) => context.progress(p.stage, p.progress, part, parts)
   }
 
-  private toBatchProgress(
-    kind: ImportProgress['kind'],
-    meetingId: string
-  ): (p: BatchProgress) => void {
-    return (p) =>
-      this.progress({
-        kind,
-        meetingId,
-        stage: p.stage === 'downloading_model' ? 'downloading_model' : p.stage,
-        ...(typeof p.progress === 'number' ? { progress: p.progress } : {})
-      })
+  private async retry(jobId: string): Promise<ImportResult> {
+    const source = this.retrySource
+    const status = this.jobs.snapshot()
+    if (this.isBusy) return { error: 'Another import is still running.' }
+    if (
+      !source ||
+      source.jobId !== jobId ||
+      status?.jobId !== jobId ||
+      !['failed', 'canceled'].includes(status.stage)
+    ) {
+      return { error: 'That import is no longer available to retry. Choose the file again.' }
+    }
+    return source.filePath ? this.importFile(source.filePath) : this.retranscribe(source.meetingId!)
   }
 
   async importAudio(): Promise<ImportResult> {
-    if (this.busy) return { error: 'Another import is still running — one at a time.' }
+    if (this.isBusy) return { error: 'Another import is still running. Please wait or cancel it.' }
+    this.picking = true
+    try {
+      const picked = await dialog.showOpenDialog(BrowserWindow.getAllWindows()[0]!, {
+        title: 'Import audio',
+        filters: [{ name: 'Audio', extensions: [...IMPORTABLE_EXTENSIONS] }],
+        properties: ['openFile']
+      })
+      if (picked.canceled || picked.filePaths.length === 0) return { canceled: true }
+      return await this.importFile(picked.filePaths[0]!)
+    } finally {
+      this.picking = false
+    }
+  }
+
+  private async importFile(filePath: string): Promise<ImportResult> {
     if (!this.platformTranscriber && !existsSync(this.enginePath)) {
       return { error: 'The transcription engine is not available on this platform yet.' }
     }
-    const picked = await dialog.showOpenDialog(BrowserWindow.getAllWindows()[0]!, {
-      title: 'Import audio',
-      filters: [{ name: 'Audio', extensions: [...IMPORTABLE_EXTENSIONS] }],
-      properties: ['openFile']
-    })
-    if (picked.canceled || picked.filePaths.length === 0) return { canceled: true }
-    const filePath = picked.filePaths[0]!
     const ext = extname(filePath).slice(1).toLowerCase()
     if (!(IMPORTABLE_EXTENSIONS as readonly string[]).includes(ext)) {
       return { error: `Only ${IMPORTABLE_EXTENSIONS.join(', ')} files can be imported right now.` }
@@ -96,101 +144,150 @@ export class ImportService {
       return { error: 'Could not read that file.' }
     }
 
-    this.busy = true
+    const settings = normalizeBatchSettings(this.batchSettings?.())
     const meetingId = randomUUID()
     let storedAudio = false
     try {
-      this.progress({ kind: 'import', meetingId, stage: 'starting' })
-      const result = await this.transcribe(filePath, this.toBatchProgress('import', meetingId))
-      const kept = result.segments.filter((s) => !s.echo)
-      if (kept.length === 0) {
-        return { error: 'No speech was found in that file.' }
-      }
-      this.progress({ kind: 'import', meetingId, stage: 'finishing' })
-      // Audio part first so playback is ready the moment the meeting opens.
-      storedAudio = this.audio.addImportedPart(
-        meetingId,
-        filePath,
-        Math.round(result.audioSeconds * 1000)
+      return await this.jobs.run(
+        { kind: 'import', meetingId, label: basename(filePath) },
+        async (context) => {
+          this.retrySource = { jobId: this.jobs.snapshot()!.jobId, filePath }
+          const result = await this.transcribe(filePath, this.toBatchProgress(context), {
+            signal: context.signal,
+            settings
+          })
+          checkImportCanceled(context.signal)
+          const kept = result.segments.filter((s) => !s.echo)
+          if (kept.length === 0) {
+            throw new Error('No speech was found in that file.')
+          }
+          return context.commit(() => {
+            // Audio part first so playback is ready the moment the meeting opens.
+            storedAudio = this.audio.addImportedPart(
+              meetingId,
+              filePath,
+              Math.round(result.audioSeconds * 1000)
+            )
+            if (!storedAudio) throw new Error('Could not save that recording for local playback.')
+            const now = new Date()
+            this.meetings.upsert({
+              id: meetingId,
+              title: basename(filePath, extname(filePath)),
+              createdAt: now.toISOString(),
+              startedAt: now.toISOString(),
+              endedAt: now.toISOString(),
+              rawNotesMarkdown: '',
+              segments: kept,
+              echoSuppressed: result.segments.length - kept.length,
+              batchTranscription: settings
+            })
+            return { meetingId }
+          })
+        }
       )
-      if (!storedAudio) throw new Error('Could not save that recording for local playback.')
-      const now = new Date()
-      this.meetings.upsert({
-        id: meetingId,
-        title: basename(filePath, extname(filePath)),
-        createdAt: now.toISOString(),
-        startedAt: now.toISOString(),
-        endedAt: now.toISOString(),
-        rawNotesMarkdown: '',
-        segments: kept,
-        echoSuppressed: result.segments.length - kept.length
-      })
-      return { meetingId }
     } catch (err) {
       if (storedAudio) this.audio.deleteFor(meetingId)
-      return { error: err instanceof Error ? err.message : String(err) }
-    } finally {
-      this.busy = false
+      return err instanceof Error && err.name === 'AbortError'
+        ? { canceled: true }
+        : { error: err instanceof Error ? err.message : String(err) }
     }
   }
 
   async retranscribe(meetingId: string): Promise<RetranscribeResult> {
-    if (this.busy) return { error: 'Another import is still running — one at a time.' }
+    if (this.isBusy) return { error: 'Another import is still running. Please wait or cancel it.' }
     if (!this.platformTranscriber && !existsSync(this.enginePath)) {
       return { error: 'The transcription engine is not available on this platform yet.' }
     }
+    if (this.captureActive(meetingId)) {
+      return {
+        error: 'Stop recording and wait for it to finish before re-transcribing this meeting.'
+      }
+    }
     const record = this.meetings.get(meetingId)
-    if (!record) return { error: 'Meeting not found.' }
+    if (!record || record.trashedAt) return { error: 'Meeting not found.' }
+    const settings = normalizeBatchSettings(this.batchSettings?.())
     const parts = this.audio.listPaths(meetingId)
     if (parts.length === 0) {
       return { error: 'This meeting has no saved recording to re-transcribe.' }
     }
 
-    this.busy = true
     try {
-      const all: TranscriptSegment[] = []
-      let echoSuppressed = 0
-      for (const part of parts) {
-        this.progress({ kind: 'retranscribe', meetingId, stage: 'starting' })
-        const result = await this.transcribe(
-          part.path,
-          this.toBatchProgress('retranscribe', meetingId)
-        )
-        for (const segment of result.segments) {
-          if (segment.echo) {
-            echoSuppressed += 1
-            continue
+      return await this.jobs.run(
+        { kind: 'retranscribe', meetingId, label: record.title || 'Recording' },
+        async (context) => {
+          this.retrySource = { jobId: this.jobs.snapshot()!.jobId, meetingId }
+          const all: TranscriptSegment[] = []
+          let echoSuppressed = 0
+          for (const [index, part] of parts.entries()) {
+            checkImportCanceled(context.signal)
+            context.progress('starting', undefined, index + 1, parts.length)
+            let result: BatchTranscription
+            try {
+              result = await this.transcribe(
+                part.path,
+                this.toBatchProgress(context, index + 1, parts.length),
+                { channels: part.channels, signal: context.signal, settings }
+              )
+            } catch (error) {
+              checkImportCanceled(context.signal)
+              throw new Error(
+                `Could not transcribe part ${index + 1} of ${parts.length}. Your current transcript is unchanged. ${error instanceof Error ? error.message : String(error)}`
+              )
+            }
+            checkImportCanceled(context.signal)
+            for (const segment of result.segments) {
+              if (segment.echo) {
+                echoSuppressed += 1
+                continue
+              }
+              all.push({
+                ...segment,
+                // Anchor to the part's wall-clock start so playback seek and
+                // multi-part ordering keep working after the rebuild.
+                ...(part.startEpochMs > 0
+                  ? { absoluteStartMs: part.startEpochMs + segment.startMs }
+                  : {})
+              })
+            }
           }
-          all.push({
-            ...segment,
-            // Anchor to the part's wall-clock start so playback seek and
-            // multi-part ordering keep working after the rebuild.
-            ...(part.startEpochMs > 0
-              ? { absoluteStartMs: part.startEpochMs + segment.startMs }
-              : {})
+          if (all.length === 0) {
+            throw new Error(
+              'Re-transcription produced no speech. Your current transcript is unchanged.'
+            )
+          }
+          all.sort((a, b) => (a.absoluteStartMs ?? a.startMs) - (b.absoluteStartMs ?? b.startMs))
+          return context.commit(() => {
+            const current = this.meetings.get(meetingId)
+            if (!current || current.trashedAt) {
+              throw new Error(
+                'This meeting was deleted or moved to Trash. No transcript was saved.'
+              )
+            }
+            this.meetings.upsert({
+              id: meetingId,
+              segments: all,
+              echoSuppressed,
+              batchTranscription: settings
+            })
+
+            return { meetingId, segmentCount: all.length }
           })
         }
-      }
-      if (all.length === 0) {
-        return { error: 'Re-transcription produced no speech — keeping the current transcript.' }
-      }
-      all.sort((a, b) => (a.absoluteStartMs ?? a.startMs) - (b.absoluteStartMs ?? b.startMs))
-      this.progress({ kind: 'retranscribe', meetingId, stage: 'finishing' })
-      this.meetings.upsert({ id: meetingId, segments: all, echoSuppressed })
-      return { meetingId, segmentCount: all.length }
+      )
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) }
-    } finally {
-      this.busy = false
+      return err instanceof Error && err.name === 'AbortError'
+        ? { canceled: true }
+        : { error: err instanceof Error ? err.message : String(err) }
     }
   }
 
   private transcribe(
     filePath: string,
-    onProgress: (progress: BatchProgress) => void
+    onProgress: (progress: BatchProgress) => void,
+    options: BatchOptions
   ): Promise<BatchTranscription> {
     return this.platformTranscriber
-      ? this.platformTranscriber(filePath, onProgress)
-      : transcribeFileToSegments(this.enginePath, filePath, onProgress, this.asrModel?.())
+      ? this.platformTranscriber(filePath, onProgress, options)
+      : transcribeFileToSegments(this.enginePath, filePath, onProgress, options)
   }
 }

@@ -10,8 +10,8 @@
 export const ENGINE_CAPTURE_CONTROL_CHANNEL = 'engine:capture-control'
 /** renderer → main (Windows): one 16k mono Float32 frame for a channel. */
 export const ENGINE_AUDIO_CHANNEL = 'engine:audio'
-/** renderer → main (Windows): capture could not start (permissions etc.). */
-export const ENGINE_CAPTURE_ERROR_CHANNEL = 'engine:capture-error'
+/** renderer → main (Windows): capture readiness, drain, and error acknowledgements. */
+export const ENGINE_CAPTURE_STATUS_CHANNEL = 'engine:capture-status'
 /** main → renderer (Windows): decode an imported file with Chromium's media stack. */
 export const ENGINE_BATCH_CONTROL_CHANNEL = 'engine:batch-control'
 /** renderer → main (Windows): decoded PCM lifecycle for an imported file. */
@@ -21,12 +21,18 @@ export const ENGINE_BATCH_READ_CHANNEL = 'engine:batch-read'
 
 export interface EngineCaptureControl {
   action: 'start' | 'stop' | 'switch-input'
+  /** Identifies one live capture so delayed callbacks cannot cross session boundaries. */
+  sessionId: number
   channels?: string[]
   inputDevice?: string
 }
 
+export type EngineCaptureStatus =
+  | { type: 'ready' | 'drained' | 'switch-complete'; sessionId: number }
+  | { type: 'error' | 'switch-error'; sessionId: number; message: string }
+
 export interface EngineBatchControl {
-  action: 'decode'
+  action: 'decode' | 'cancel'
   jobId: string
 }
 
@@ -44,6 +50,7 @@ export type EngineBatchMessage =
 export const ENGINE_EVENT_CHANNEL = 'engine:event'
 export const ENGINE_START_CHANNEL = 'engine:start'
 export const ENGINE_STOP_CHANNEL = 'engine:stop'
+export const ENGINE_SNAPSHOT_CHANNEL = 'engine:snapshot'
 /** renderer → main (invoke): list audio input devices (macOS engine). */
 export const ENGINE_LIST_DEVICES_CHANNEL = 'engine:list-devices'
 /** renderer → main: switch the mic channel's input device (mid-session too). */
@@ -155,6 +162,12 @@ export interface EngineFinalEvent {
   tokens?: EngineTokenTiming[]
 }
 
+/** Windows: high-accuracy local text for each channel after live capture stops. */
+export interface EngineRefinedEvent {
+  event: 'refined'
+  transcripts: Array<{ channel: EngineChannel; text: string; audioSeconds?: number }>
+}
+
 export interface EngineErrorEvent {
   event: 'error'
   message: string
@@ -190,6 +203,7 @@ export type EngineSidecarEvent =
   | EnginePartialEvent
   | EngineTimingsEvent
   | EngineFinalEvent
+  | EngineRefinedEvent
   | EngineErrorEvent
   | EngineDoneEvent
   | EngineChannelStartEvent
@@ -198,6 +212,8 @@ export type EngineSidecarEvent =
 /* ---- Lifecycle events synthesized by the main process ---- */
 
 export interface EngineStartedEvent {
+  /** Main-process identity used by transcript completion, absent in raw host events. */
+  captureId?: string
   event: 'started'
   command: EngineCommand
   filePath?: string
@@ -242,12 +258,31 @@ export interface EngineSessionSavedEvent {
   segmentCount: number
 }
 
+/** Atomic replacement of the provisional live segments after local refinement. */
+export interface EngineSegmentsReplacedEvent {
+  event: 'segments-replaced'
+  segments: TranscriptSegment[]
+}
+
+export interface EngineSessionSnapshot {
+  meetingId: string
+  captureId?: string
+  phase: 'starting' | 'recording' | 'finishing' | 'ended'
+  segments: TranscriptSegment[]
+  partials: Partial<Record<EngineChannel, string>>
+  error?: string
+}
+
 export type EngineLifecycleEvent =
+  | { event: 'session-snapshot'; snapshot: EngineSessionSnapshot }
   | EngineStartedEvent
   | EngineSpawnErrorEvent
   | EngineExitEvent
   | EngineSegmentsEvent
+  | EngineSegmentsReplacedEvent
   | EngineSessionSavedEvent
+  /** Emitted by main only after final segments and session persistence settle. */
+  | { event: 'capture-finalized'; captureId?: string; error?: string }
 
 /** Everything the renderer can receive on ENGINE_EVENT_CHANNEL. */
 export type EngineEvent = EngineSidecarEvent | EngineLifecycleEvent
@@ -255,6 +290,7 @@ export type EngineEvent = EngineSidecarEvent | EngineLifecycleEvent
 /** API surface exposed on `window.engine` by the preload script. */
 export interface EngineApi {
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void
+  snapshot(meetingId: string): Promise<EngineSessionSnapshot | null>
   stop(): void
   onEvent(cb: (event: EngineEvent) => void): () => void
   /** Audio input devices for the mic picker; [] where unsupported (Windows). */
@@ -265,8 +301,8 @@ export interface EngineApi {
   tapSelfTest(): Promise<{ ok: boolean; reason?: string }>
   /** Windows capture bridge (no-ops on macOS). */
   onCaptureControl(cb: (control: EngineCaptureControl) => void): () => void
-  sendAudio(channel: string, samples: Float32Array): void
-  reportCaptureError(message: string): void
+  sendAudio(sessionId: number, channel: string, samples: Float32Array): void
+  reportCaptureStatus(status: EngineCaptureStatus): void
   /** Windows imported-audio decoder bridge (no events are sent on macOS). */
   onBatchControl(cb: (control: EngineBatchControl) => void): () => void
   readBatchAudio(jobId: string): Promise<ArrayBuffer>

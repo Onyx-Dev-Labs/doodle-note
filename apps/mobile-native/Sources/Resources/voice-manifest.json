@@ -1,0 +1,32 @@
+{
+  "repository": "FluidInference/speaker-diarization-coreml",
+  "revision": "1ed7a662fdc7109e36d822db793ee6eebdaf8594",
+  "package": "wespeaker.mlmodelc",
+  "files": [
+    {
+      "path": "analytics/coremldata.bin",
+      "size": 243,
+      "sha256": "6f79ae5563cd4807a2e10630ce8aac7bdc469e37d7c723acce06f54df75c1f21"
+    },
+    {
+      "path": "coremldata.bin",
+      "size": 359,
+      "sha256": "5dcd845627ea84f3f764e48b8ed3c2a14b593bab94045377bf7662add50e2972"
+    },
+    {
+      "path": "metadata.json",
+      "size": 2590,
+      "sha256": "84bd3a308bb1c3327ed5325c3c7c922711ebbc24e5b4a43e17de29733053a53d"
+    },
+    {
+      "path": "model.mil",
+      "size": 698092,
+      "sha256": "2e0751aee7be6b437ae2afc93853121353da1f4f3378211f4023002ec3ab2e44"
+    },
+    {
+      "path": "weights/weight.bin",
+      "size": 28706752,
+      "sha256": "680837ec172d67c3197bba93800e1623eebfd35c3b17011802f5f98b8026a0aa"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import { and, eq, getDb, member, organization, syncDevices } from "@repo/db";
 
 import { auth } from "@/lib/auth";
 import { entitlementFor } from "@/lib/billing";
+import { linkCredentialScope } from "@/lib/device-link-callback";
 import { hashToken, mintToken } from "@/lib/sync-auth";
 
 /**
@@ -14,26 +15,20 @@ import { hashToken, mintToken } from "@/lib/sync-auth";
  * plaintext sync token exactly once.
  */
 export async function POST(request: Request) {
+  if (request.headers.get("origin") !== new URL(request.url).origin) {
+    return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+  }
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  }
-
-  // Cloud sync is the paid feature — linking a device requires entitlement
-  // (grandfathered, trialing, active, or past_due). The approval page turns this 402
-  // into a "start your free trial" checkout hand-off.
-  const entitlement = await entitlementFor(session.user.id);
-  if (!entitlement.entitled) {
-    return NextResponse.json(
-      { error: "Subscription required", needsSubscription: true },
-      { status: 402 },
-    );
   }
 
   let body: {
     organizationId?: unknown;
     deviceName?: unknown;
     platform?: unknown;
+    state?: unknown;
+    purpose?: unknown;
   };
   try {
     body = await request.json();
@@ -49,6 +44,13 @@ export async function POST(request: Request) {
     ? (requestedPlatform as "desktop" | "ios")
     : "unknown";
 
+  const entitlement = await entitlementFor(session.user.id);
+  const scope = linkCredentialScope({ platform, purpose: body.purpose, state: body.state,
+    entitled: entitlement.entitled });
+  if (scope === "invalid") return NextResponse.json({ error: "Invalid device attempt" }, { status: 400 });
+  if (scope === "subscription") {
+    return NextResponse.json({ error: "Subscription required", needsSubscription: true }, { status: 402 });
+  }
   const db = getDb();
   const membership = await db
     .select({ orgName: organization.name })
@@ -68,7 +70,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const token = mintToken();
+  const token = mintToken(scope === "identity");
   await db.insert(syncDevices).values({
     id: randomUUID(),
     tokenHash: hashToken(token),
@@ -82,5 +84,5 @@ export async function POST(request: Request) {
     token,
     email: session.user.email,
     workspaceName: membership[0].orgName,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

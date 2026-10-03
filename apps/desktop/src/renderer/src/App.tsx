@@ -1,3 +1,7 @@
+import { ImportProgressPanel } from './ImportProgressPanel'
+import type { RecordingState, RecordingJoinState } from '../../shared/recording-api'
+import { prepareRecordingMeeting } from './lib/recording-start'
+import { CloudNotesView } from './CloudNotesView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CalendarEvent,
@@ -15,7 +19,7 @@ import mascotUrl from './assets/mascot-square.png'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
 import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
-import { decodeWinBatchAudio } from './lib/win-batch-decode'
+import { decodeWinBatchAudio, cancelWinBatchAudio } from './lib/win-batch-decode'
 import {
   CalendarIcon,
   FolderIcon,
@@ -27,7 +31,7 @@ import {
   TrashIcon
 } from './icons'
 
-type ViewId = 'home' | 'editor' | 'settings' | 'dev'
+type ViewId = 'home' | 'editor' | 'settings' | 'dev' | 'cloud'
 
 /** The "meeting is starting" banner disappears 10 min past the start. */
 const BANNER_TTL_PAST_START_MS = 10 * 60_000
@@ -42,8 +46,13 @@ const BANNER_TTL_PAST_START_MS = 10 * 60_000
  * read the same fetch, re-run whenever homeRefresh bumps.
  */
 function App(): React.JSX.Element {
+  const recordingState = useRef<RecordingState>({ phase: 'idle', eligible: false, meetingId: null })
+  const handlingStart = useRef<string | null>(null)
+  const [joinState, setJoinState] = useState<RecordingJoinState | undefined>()
+  const [recordingError, setRecordingError] = useState<string | null>(null)
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [autoRecordRequestId, setAutoRecordRequestId] = useState<string | null>(null)
   const [autoRecordId, setAutoRecordId] = useState<string | null>(null)
   /** Only manually-created documents get the empty save/discard decision. */
   const [newDraftId, setNewDraftId] = useState<string | null>(null)
@@ -117,11 +126,15 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.engine.onCaptureControl((control) => {
       if (control.action === 'start') {
-        void startWinCapture(control.channels ?? ['mic', 'system'], control.inputDevice)
+        void startWinCapture(
+          control.sessionId,
+          control.channels ?? ['mic', 'system'],
+          control.inputDevice
+        )
       } else if (control.action === 'switch-input') {
-        void switchWinInputDevice(control.inputDevice)
+        void switchWinInputDevice(control.sessionId, control.inputDevice)
       } else {
-        stopWinCapture()
+        stopWinCapture(control.sessionId)
       }
     })
   }, [])
@@ -129,10 +142,16 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.engine.onBatchControl((control) => {
       if (control.action === 'decode') void decodeWinBatchAudio(control.jobId)
+      else cancelWinBatchAudio(control.jobId)
     })
   }, [])
 
   const openMeeting = useCallback((id: string, isNewManualDraft = false) => {
+    const active = recordingState.current
+    if (active.phase !== 'idle' && active.meetingId !== id) {
+      setView('editor')
+      return
+    }
     setMeetingId(id)
     setNewDraftId(isNewManualDraft ? id : null)
     setView('editor')
@@ -144,6 +163,14 @@ function App(): React.JSX.Element {
       calendarEventId?: string
       kind?: 'note'
     }): Promise<void> => {
+      if (prefill?.kind !== 'note') {
+        await window.recording.requestStart()
+        return
+      }
+      if (recordingState.current.phase !== 'idle') {
+        setView('editor')
+        return
+      }
       const id =
         typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
@@ -161,7 +188,6 @@ function App(): React.JSX.Element {
       // Fresh meetings start recording immediately; opening an existing
       // meeting from the list never does. Quick notes never auto-record —
       // typing is their default, the rec pill is there when wanted.
-      if (prefill?.kind !== 'note') setAutoRecordId(id)
       openMeeting(id, prefill?.calendarEventId === undefined)
     },
     [openMeeting]
@@ -174,24 +200,16 @@ function App(): React.JSX.Element {
    * instead of minting a duplicate.
    */
   const startCalendarMeeting = useCallback(
-    async (ev: { eventId: string; subject: string }): Promise<void> => {
-      setBanner((b) => (b !== null && b.eventId === ev.eventId ? null : b))
-      try {
-        const list = await window.meetings.list()
-        const existing = list.find((m) => m.calendarEventId === ev.eventId && !m.trashedAt)
-        if (existing) {
-          openMeeting(existing.id)
-          return
-        }
-        await newMeeting({
-          title: ev.subject.trim(),
-          calendarEventId: ev.eventId
-        })
-      } catch {
-        // Creation failed — the user can still start one manually.
-      }
+    async (ev: { eventId: string; subject: string; joinUrl?: string }): Promise<void> => {
+      await window.recording.requestStart({
+        action: 'start',
+        joinRequested: !!ev.joinUrl,
+        eventId: ev.eventId,
+        subject: ev.subject,
+        startIso: new Date().toISOString()
+      })
     },
-    [newMeeting, openMeeting]
+    []
   )
 
   const startFromCalendarEvent = useCallback(
@@ -200,6 +218,50 @@ function App(): React.JSX.Element {
     },
     [startCalendarMeeting]
   )
+
+  useEffect(() => {
+    const offState = window.recording.onState((state) => {
+      recordingState.current = state
+      setJoinState(state.join)
+    })
+    const offStart = window.recording.onStart((request) => {
+      if (handlingStart.current === request.id) return
+      handlingStart.current = request.id
+      setBanner(null)
+      setRecordingError(null)
+      void prepareRecordingMeeting(request, window.meetings, window.recording, () =>
+        crypto.randomUUID()
+      )
+        .then((id) => {
+          if (!id) return
+          // attach() has already reserved this document in main. Mirror it
+          // synchronously so the normal navigation guard accepts it.
+          recordingState.current = { ...recordingState.current, phase: 'starting', meetingId: id }
+          setAutoRecordRequestId(request.id)
+          setAutoRecordId(id)
+          openMeeting(id, !request.event.eventId)
+        })
+        .catch(() =>
+          setRecordingError(
+            'Could not prepare this recording. Check available disk space and try Record now again.'
+          )
+        )
+        .finally(() => {
+          handlingStart.current = null
+        })
+    })
+    return () => {
+      offStart()
+      offState()
+    }
+  }, [openMeeting])
+
+  useEffect(() => {
+    void window.recording.ready(!wizardOpen && !tourOpen).then((state) => {
+      recordingState.current = state
+      setJoinState(state.join)
+    })
+  }, [wizardOpen, tourOpen])
 
   /* ---- calendar state + meeting-start prompts (window.calendar) ---- */
 
@@ -576,6 +638,7 @@ function App(): React.JSX.Element {
         </aside>
 
         <main className="content">
+          {view === 'cloud' && <CloudNotesView />}
           <div className={view === 'home' ? 'content-slot' : 'content-slot hidden'}>
             <HomeView
               meetings={meetings}
@@ -612,6 +675,7 @@ function App(): React.JSX.Element {
             meetingId={meetingId}
             visible={view === 'editor'}
             autoRecord={meetingId === autoRecordId}
+            autoRecordRequestId={autoRecordRequestId}
             isNewDraft={meetingId === newDraftId}
             onAutoRecordStarted={() => setAutoRecordId(null)}
             onDraftSettled={() =>
@@ -627,6 +691,40 @@ function App(): React.JSX.Element {
         </div>
       )}
 
+      {joinState && joinState.status !== 'opened' && (
+        <div
+          className="meeting-banner no-drag"
+          role={joinState.status === 'failed' ? 'alert' : 'status'}
+          style={{ top: 'auto', bottom: 80, borderRadius: 16, flexWrap: 'wrap' }}
+        >
+          <span>
+            {joinState.status === 'opening'
+              ? 'Opening meeting…'
+              : `Could not open “${joinState.subject}”. Try Join again or open it from your calendar.`}
+          </span>
+          {joinState.status === 'failed' && (
+            <button
+              type="button"
+              onClick={() => void window.recording.retryJoin(joinState.requestId)}
+            >
+              Join again
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void window.recording.dismissJoin(joinState.requestId)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {recordingError && (
+        <div className="meeting-banner no-drag" role="alert">
+          <span>{recordingError}</span>
+          <button onClick={() => setRecordingError(null)}>Dismiss</button>
+        </div>
+      )}
+      <ImportProgressPanel onOpen={openMeeting} />
       {wizardOpen && <FirstRunWizard onFinish={closeWizard} />}
 
       {!wizardOpen && tourOpen && (
@@ -636,7 +734,9 @@ function App(): React.JSX.Element {
             setSettingsJump({ section: 'model', n: Date.now() })
             setView('settings')
           }}
-          onNewMeeting={() => void newMeeting()}
+          onNewMeeting={() => {
+            void window.recording.ready(true).then(() => newMeeting())
+          }}
           onClose={() => setTourOpen(false)}
         />
       )}
@@ -654,6 +754,9 @@ function App(): React.JSX.Element {
             ) : (
               <>
                 <strong>{banner.subject}</strong> is starting
+                {banner.sourceLabel && (
+                  <small style={{ display: 'block' }}>{banner.sourceLabel}</small>
+                )}
               </>
             )}
           </span>
@@ -662,9 +765,15 @@ function App(): React.JSX.Element {
             className="mb-start"
             onClick={() => void startCalendarMeeting(banner)}
           >
-            Start taking notes
+            {banner.joinUrl && banner.eventId && !banner.adHoc
+              ? 'Record & Join'
+              : 'Start taking notes'}
           </button>
-          <button type="button" className="mb-dismiss" onClick={() => setBanner(null)}>
+          <button
+            type="button"
+            className="mb-dismiss"
+            onClick={() => void window.calendar.dismissPrompt()}
+          >
             Dismiss
           </button>
         </div>

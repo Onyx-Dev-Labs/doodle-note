@@ -31,7 +31,7 @@ The web app starts with a local PGlite database and no cloud credentials:
 pnpm --filter web dev
 ```
 
-See the component READMEs for [desktop](apps/desktop/README.md), [iOS](apps/ios/README.md), [web](apps/web/README.md), the [transcription engine](engine/README.md), and the [local MCP server](packages/doodle-note-mcp/README.md).
+See the component READMEs for [desktop](apps/desktop/README.md), [native iPhone/iPad](apps/mobile-native/README.md), [web](apps/web/README.md), the [transcription engine](engine/README.md), and the [local MCP server](packages/doodle-note-mcp/README.md).
 
 ## Making a change
 

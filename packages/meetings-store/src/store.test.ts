@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -65,6 +65,42 @@ test("rejects unsafe ids for reads and writes", () => {
   try {
     assert.throws(() => store.upsert({ id: "../evil", title: "x" }));
     assert.equal(store.get("../evil"), null);
+  } finally {
+    cleanup();
+  }
+});
+
+test("generated transcript baseline survives added capture and reopening", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    store.upsert({
+      id: "resumed",
+      enhancedMarkdown: "Saved notes",
+      enhancedTranscriptSegmentCount: 1,
+    });
+    store.upsert({
+      id: "resumed",
+      segments: [segment("Before"), segment("After", 1000, 2000)],
+    });
+    const reopened = new MeetingFileStore(dir).get("resumed");
+    assert.equal(reopened?.enhancedTranscriptSegmentCount, 1);
+    assert.equal(reopened?.segments.length, 2);
+    store.upsert({
+      id: "resumed",
+      enhancedMarkdown: "Updated notes",
+      enhancedTranscriptSegmentCount: 2,
+    });
+    assert.equal(
+      new MeetingFileStore(dir).get("resumed")?.enhancedTranscriptSegmentCount,
+      2,
+    );
+    for (const invalid of [-1, 1.5, NaN, Infinity]) {
+      store.upsert({ id: "invalid", enhancedTranscriptSegmentCount: invalid });
+      assert.equal(
+        store.get("invalid")?.enhancedTranscriptSegmentCount,
+        undefined,
+      );
+    }
   } finally {
     cleanup();
   }
@@ -147,6 +183,65 @@ test("onDidWrite fires with deletedId on trash and delete", () => {
     store.upsert({ id: "m1", trashedAt: new Date().toISOString() });
     store.delete("m1");
     assert.deepEqual(events, [{}, { deletedId: "m1" }, { deletedId: "m1" }]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unavailable library guard rejects reads and writes instead of treating it as empty", () => {
+  const { dir, cleanup } = tempStore();
+  let available = true;
+  const store = new MeetingFileStore(dir, () => {
+    if (!available) throw new Error("disconnected");
+  });
+  try {
+    store.upsert({ id: "retained", title: "Retain me" });
+    available = false;
+    assert.throws(() => store.list(), /disconnected/);
+    assert.throws(() => store.get("retained"), /disconnected/);
+    assert.throws(() => store.upsert({ id: "new-note" }), /disconnected/);
+    assert.throws(() => store.delete("retained"), /disconnected/);
+    available = true;
+    assert.equal(store.get("retained")?.title, "Retain me");
+    assert.equal(store.get("new-note"), null);
+  } finally {
+    cleanup();
+  }
+});
+
+
+test("failed atomic replacement leaves no partial meeting or temporary file", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    mkdirSync(join(dir, "blocked.json"));
+    assert.throws(() => store.upsert({ id: "blocked", title: "Cannot commit" }));
+    assert.equal(store.get("blocked"), null);
+    assert.deepEqual(readdirSync(dir), ["blocked.json"]);
+  } finally { cleanup(); }
+});
+
+test("batch provenance and a neutral imported speaker survive reopening", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    const batchTranscription = {
+      backend: "whisper" as const,
+      parakeetModel: "v2" as const,
+      language: "da",
+    };
+    store.upsert({
+      id: "batch-test",
+      batchTranscription,
+      segments: [
+        {
+          ...segment("Et møde"),
+          speaker: "Speaker",
+          speakerId: "imported-speaker",
+        },
+      ],
+    });
+    const reopened = new MeetingFileStore(dir).get("batch-test");
+    assert.deepEqual(reopened?.batchTranscription, batchTranscription);
+    assert.equal(reopened?.segments[0]?.speaker, "Speaker");
   } finally {
     cleanup();
   }

@@ -6,7 +6,7 @@ export const metadata = { title: "Privacy policy | DoodleNote" };
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy policy" updated="August 31, 2026">
+    <LegalPage title="Privacy policy" updated="September 12, 2026">
       <p>
         DoodleNote is operated by Onyx Dev Labs. This policy explains how the
         DoodleNote apps, website, and optional hosted Sync service handle
@@ -74,6 +74,79 @@ export default function PrivacyPage() {
           you choose an external AI provider, the content you submit is sent to
           that provider under its terms. Local AI and Ollama do not require
           DoodleNote to receive that content.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Google user data and Limited Use">
+        <p>
+          DoodleNote&apos;s use and transfer of information received from Google
+          APIs, including raw and derived Google Workspace API data, will adhere
+          to the{' '}
+          <a className="text-sage-deep underline" href="https://developers.google.com/terms/api-services-user-data-policy">
+            Google API Services User Data Policy
+          </a>, including the Limited Use requirements. We do not use Google user
+          data to train generalized AI or machine-learning models, sell it, or use
+          it for advertising. Google user data must not be sent to a service or
+          account configuration that uses it for generalized model training.
+        </p>
+        <p>
+          When you connect Google Calendar, DoodleNote reads your calendar list
+          and selected calendars&apos; events to display upcoming meetings and
+          meeting links. This includes calendar names, event titles, times,
+          locations, organizer details, and whether participants are present.
+          The desktop integration requests calendar.readonly and does not create,
+          edit, or delete Google calendars or events. OAuth tokens are stored
+          locally using operating-system encryption. Disconnecting Google Calendar
+          removes its local credentials; you can also revoke access in your Google account.
+        </p>
+        <p>
+          Starting a note from a calendar event can copy its title and event
+          identifier into the meeting record. That title, and text derived from
+          it, may be included in note generation and meeting questions. Enabling
+          Cloud Sync can upload that meeting record. Granting an agent or
+          Composio access can expose the synced title and meeting content to
+          that client. Disconnecting Calendar does not delete meeting notes
+          already created from events; use the meeting deletion controls to remove them.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="AI processing and your provider choices">
+        <p>
+          On-device AI runs downloaded model weights locally, including Qwen,
+          Llama, and Gemma models. In this offline inference mode, Google user
+          data and meeting content are processed on your device and are not
+          sent back to the model publisher for training or secondary purposes.
+          Downloading a model is separate from sending it meeting content.
+          Ollama connects to localhost; this local-processing description applies
+          when you run local weights, not a cloud-backed model or proxy you configure.
+        </p>
+        <p>
+          Optional external AI uses your own API account. Supported direct
+          providers are Anthropic, OpenAI, xAI (Grok), and Google Gemini with an
+          active Cloud Billing project. A consumer chatbot subscription is not
+          the same as an API account. Meeting titles, transcripts, notes, speaker
+          labels, questions, and relevant conversation history can be sent to
+          the provider you select. Meeting audio is not sent for note generation.
+          Do not enable provider options that share these inputs or outputs for
+          model training. Unpaid Gemini API configurations are not permitted for
+          this processing. Provider abuse-monitoring retention may still apply;
+          a no-training policy does not itself mean zero retention.
+        </p>
+        <p>
+          These direct-provider changes require an updated desktop app. Older
+          versions offered Groq and OpenRouter. Update before using external AI
+          with Google-derived content. The updated app preserves retired-provider
+          settings but blocks their use until you choose a supported provider;
+          it never transfers an old key to a replacement provider. It asks you
+          to confirm the selected API account&apos;s data-use requirements. It
+          cannot independently verify your Gemini billing status or changes you
+          later make in a provider&apos;s dashboard.
+        </p>
+        <p>
+          Remote MCP and Composio are optional access paths for clients you
+          authorize, not built-in model hosting. Only connect them to clients
+          and API accounts whose data-use settings comply with the same Limited
+          Use restrictions. Revoke the dedicated agent token to end that access.
         </p>
       </LegalSection>
 

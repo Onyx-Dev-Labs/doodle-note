@@ -1,5 +1,7 @@
-import { ipcMain } from 'electron'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -82,8 +84,12 @@ export class AgentAccessService {
   private readonly configPath: string
   private readonly clients: McpClientDef[]
 
+  private get meetingsDir(): string {
+    return resolveLibraryPath(this.meetingsDirSource)
+  }
+
   constructor(
-    private readonly meetingsDir: string,
+    private readonly meetingsDirSource: LibraryPath,
     private readonly server: McpServerSpec,
     home = homedir()
   ) {
@@ -91,15 +97,41 @@ export class AgentAccessService {
     this.clients = clientDefs(home)
   }
 
+  /** Preserve consent while following a successfully relocated library. */
+  refreshLibraryPath(previousMeetingsDir: string): void {
+    const raw = this.tryRead(this.configPath)
+    if (raw === null) return
+    let config: Record<string, unknown>
+    try {
+      config = JSON.parse(raw)
+    } catch {
+      return // Do not replace malformed configuration.
+    }
+    if (
+      config &&
+      typeof config.enabled === 'boolean' &&
+      config.meetingsDir === previousMeetingsDir &&
+      config.meetingsDir !== this.meetingsDir
+    ) {
+      const temporary = `${this.configPath}.${randomUUID()}.tmp`
+      writeFileSync(
+        temporary,
+        JSON.stringify({ ...config, meetingsDir: this.meetingsDir }, null, 2) + '\n',
+        { flag: 'wx', mode: 0o600 }
+      )
+      renameSync(temporary, this.configPath)
+    }
+  }
+
   registerIpc(): void {
-    ipcMain.handle(AGENT_ACCESS_GET_CHANNEL, () => this.status())
-    ipcMain.handle(AGENT_ACCESS_SET_CHANNEL, (_event, enabled: unknown) =>
+    libraryIpc.handle(AGENT_ACCESS_GET_CHANNEL, () => this.status())
+    libraryIpc.handle(AGENT_ACCESS_SET_CHANNEL, (_event, enabled: unknown) =>
       this.setEnabled(Boolean(enabled))
     )
-    ipcMain.handle(AGENT_ACCESS_CONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
+    libraryIpc.handle(AGENT_ACCESS_CONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
       this.setClientConnected(String(id) as McpClientId, true)
     )
-    ipcMain.handle(AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
+    libraryIpc.handle(AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL, (_event, id: unknown) =>
       this.setClientConnected(String(id) as McpClientId, false)
     )
   }

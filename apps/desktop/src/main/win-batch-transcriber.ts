@@ -12,8 +12,11 @@ import {
   type TranscriptSegment
 } from '../shared/engine-events'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
-import type { BatchProgress, BatchTranscription } from './import-logic'
+import type { BatchOptions, BatchProgress, BatchTranscription } from './import-logic'
 import { SegmentAssembler } from './segmenter'
+import { reconcileRefinedTranscript } from './transcript-refinement'
+
+import { checkImportCanceled, ImportCanceledError } from './import-jobs'
 
 const TIMEOUT_MS = 30 * 60_000
 /** Chromium decodes the complete file in memory; this still covers hours of compressed audio. */
@@ -26,9 +29,12 @@ interface ActiveJob {
   child: UtilityProcess
   assembler: SegmentAssembler
   segments: TranscriptSegment[]
+  finals: Map<EngineChannel, { text: string; audioSeconds: number }>
   audioSeconds: number
   started: boolean
   settled: boolean
+  exited: boolean
+  removeAbort?: () => void
   timeout: NodeJS.Timeout
   nextSequence: number
   pendingAck: {
@@ -49,10 +55,12 @@ interface ActiveJob {
  */
 export class WinBatchTranscriber {
   private active: ActiveJob | null = null
+  private preparing = false
 
   constructor(
     private readonly ensureEngineReady: (
-      onEvent?: (event: WizardPreflightEvent) => void
+      onEvent?: (event: WizardPreflightEvent) => void,
+      signal?: AbortSignal
     ) => Promise<WizardPreflightResult>
   ) {}
 
@@ -76,11 +84,16 @@ export class WinBatchTranscriber {
 
   transcribe(
     filePath: string,
-    onProgress?: (progress: BatchProgress) => void
+    onProgress?: (progress: BatchProgress) => void,
+    options: BatchOptions = {}
   ): Promise<BatchTranscription> {
-    if (this.active) return Promise.reject(new Error('Another Windows transcription is running.'))
-    return new Promise((resolve, reject) => {
-      void this.start(filePath, onProgress, resolve, reject)
+    if (this.active || this.preparing)
+      return Promise.reject(new Error('Another Windows transcription is running.'))
+    this.preparing = true
+    return new Promise<BatchTranscription>((resolve, reject) => {
+      void this.start(filePath, onProgress, resolve, reject, options).catch(reject)
+    }).finally(() => {
+      this.preparing = false
     })
   }
 
@@ -88,8 +101,10 @@ export class WinBatchTranscriber {
     filePath: string,
     onProgress: ((progress: BatchProgress) => void) | undefined,
     resolve: (result: BatchTranscription) => void,
-    reject: (error: Error) => void
+    reject: (error: Error) => void,
+    options: BatchOptions
   ): Promise<void> {
+    checkImportCanceled(options.signal)
     onProgress?.({ stage: 'starting' })
     try {
       if ((await stat(filePath)).size > MAX_DECODE_BYTES) {
@@ -100,11 +115,13 @@ export class WinBatchTranscriber {
       reject(new Error(`Could not read that audio file: ${String(error)}`))
       return
     }
+    checkImportCanceled(options.signal)
     const readiness = await this.ensureEngineReady((event) => {
       if (event.stage === 'download') {
         onProgress?.({ stage: 'downloading_model', progress: event.progress })
       }
-    })
+    }, options.signal)
+    checkImportCanceled(options.signal)
     if (!readiness.ok) {
       reject(new Error(readiness.error ?? 'The Windows transcription engine is not ready.'))
       return
@@ -127,9 +144,11 @@ export class WinBatchTranscriber {
       child,
       assembler: new SegmentAssembler(),
       segments: [],
+      finals: new Map(),
       audioSeconds: 0,
       started: false,
       settled: false,
+      exited: false,
       timeout: setTimeout(() => {}, TIMEOUT_MS),
       nextSequence: 0,
       pendingAck: null,
@@ -144,6 +163,9 @@ export class WinBatchTranscriber {
     )
     job.timeout.unref()
     this.active = job
+    const abort = (): void => this.finish(job, new ImportCanceledError())
+    options.signal?.addEventListener('abort', abort, { once: true })
+    job.removeAbort = () => options.signal?.removeEventListener('abort', abort)
 
     child.on('message', (message: unknown) => {
       if (this.active !== job) return
@@ -157,14 +179,27 @@ export class WinBatchTranscriber {
       if (data.t === 'event' && data.event) this.handleEngineEvent(job, data.event)
     })
     child.on('exit', () => {
+      job.exited = true
       if (this.active === job && !job.settled) {
         this.finish(job, new Error('The Windows import engine stopped unexpectedly.'))
       }
     })
-    child.postMessage({ t: 'init', modelsDir: join(app.getPath('userData'), 'asr-models') })
+    if (options.signal?.aborted) {
+      abort()
+      return
+    }
+    child.postMessage({
+      t: 'init',
+      modelsDir: join(app.getPath('userData'), 'asr-models'),
+      quality: 'final'
+    })
   }
 
   private handleEngineEvent(job: ActiveJob, event: Record<string, unknown>): void {
+    if (event.event === 'download' && typeof event.progress === 'number') {
+      job.onProgress?.({ stage: 'downloading_model', progress: event.progress })
+      return
+    }
     if (event.event === 'status' && event.stage === 'serve_ready') {
       const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
       if (!window || window.isDestroyed()) {
@@ -194,6 +229,15 @@ export class WinBatchTranscriber {
     }
     if (event.event === 'final' && typeof event.channel === 'string') {
       job.segments.push(...job.assembler.flush(event.channel as EngineChannel))
+      const channel = event.channel as EngineChannel
+      const text = typeof event.text === 'string' ? event.text.trim() : ''
+      if (text) {
+        job.finals.set(channel, {
+          text,
+          audioSeconds:
+            typeof event.audioSeconds === 'number' ? event.audioSeconds : job.audioSeconds
+        })
+      }
       return
     }
     if (event.event === 'error') {
@@ -248,15 +292,32 @@ export class WinBatchTranscriber {
     clearTimeout(job.timeout)
     job.pendingAck?.reject(error ?? new Error('The Windows import engine stopped.'))
     job.pendingAck = null
-    job.child.kill()
-    if (this.active === job) this.active = null
-    if (error) {
-      job.reject(error)
-      return
+    job.removeAbort?.()
+    const window = BrowserWindow.getAllWindows().find(
+      (window) => window.webContents.id === job.rendererId
+    )
+    window?.webContents.send(ENGINE_BATCH_CONTROL_CHANNEL, { action: 'cancel', jobId: job.id })
+    const complete = (): void => {
+      if (this.active === job) this.active = null
+      if (error) {
+        job.reject(error)
+        return
+      }
+      job.segments.push(...job.assembler.flush())
+      if (job.finals.size > 0) {
+        job.segments = reconcileRefinedTranscript(
+          job.segments,
+          [...job.finals].map(([channel, result]) => ({ channel, ...result }))
+        )
+      }
+      job.segments.sort((a, b) => a.startMs - b.startMs)
+      job.resolve({ segments: job.segments, audioSeconds: job.audioSeconds })
     }
-    job.segments.push(...job.assembler.flush())
-    job.segments.sort((a, b) => a.startMs - b.startMs)
-    job.resolve({ segments: job.segments, audioSeconds: job.audioSeconds })
+    if (job.exited) complete()
+    else {
+      job.child.once('exit', complete)
+      job.child.kill()
+    }
   }
 
   dispose(): void {

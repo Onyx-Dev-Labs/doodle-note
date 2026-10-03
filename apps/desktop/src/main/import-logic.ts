@@ -1,19 +1,37 @@
+import type { BatchTranscriptionSettings } from '../shared/batch-transcription'
 import { spawn } from 'node:child_process'
 import type { TranscriptSegment } from '../shared/engine-events'
 import type { EngineChannel, EngineTokenTiming } from '../shared/engine-events'
+import { checkImportCanceled, ImportCanceledError } from './import-jobs'
 import { SegmentAssembler } from './segmenter'
 
-/**
- * Batch-transcribe an audio file into transcript segments — the pipeline
- * behind import and re-transcription. Electron-free so it can be integration-
- * tested under node against the real engine binary.
- *
- * Runs `engine transcribe --channels split`: stereo meeting recordings decode
- * per channel (L = mic "You", R = system "Them"), mono imports land on the
- * mic channel. The engine emits the live protocol's timings/final events, so
- * the exact same SegmentAssembler (pause-cutting, echo suppression) shapes
- * the result.
+/** Batch imports use mixed audio unless a saved DoodleNote part proves split origin. */
+export interface BatchOptions {
+  channels?: 'mixed' | 'split'
+  signal?: AbortSignal
+  settings?: BatchTranscriptionSettings
+}
+
+/** Buffer batch tokens so acoustic echo comparison is independent of event order.
+ * Keep all system words: unlike live capture, batch channel events can span hours.
  */
+export function assembleBatchTokens(
+  tokens: Record<EngineChannel, EngineTokenTiming[]>,
+  channels: 'mixed' | 'split'
+): TranscriptSegment[] {
+  const assembler = new SegmentAssembler({ systemMemorySec: Infinity })
+  const segments: TranscriptSegment[] = []
+  for (const channel of ['system', 'mic'] as const) {
+    segments.push(...assembler.addTimings(channel, tokens[channel]), ...assembler.flush(channel))
+  }
+  return segments
+    .sort((a, b) => a.startMs - b.startMs)
+    .map((segment) =>
+      channels === 'mixed'
+        ? { ...segment, speaker: 'Speaker', speakerId: 'imported-speaker' }
+        : segment
+    )
+}
 
 export interface BatchTranscription {
   /** All assembled segments, echo-flagged ones included, sorted by startMs. */
@@ -30,53 +48,75 @@ export interface BatchProgress {
  *  on first use can take a while on slow connections. */
 const TIMEOUT_MS = 30 * 60_000
 
-/** v2 is the engine's default English model; v3 recognizes 25 European languages. */
-export type BatchAsrModel = 'v2' | 'v3'
-
-export function batchTranscribeArgs(filePath: string, model?: BatchAsrModel): string[] {
-  const args = ['transcribe', '--file', filePath, '--channels', 'split']
-  if (model === 'v3') args.push('--model', 'v3')
-  return args
-}
-
 export function transcribeFileToSegments(
   enginePath: string,
   filePath: string,
   onProgress?: (progress: BatchProgress) => void,
-  model?: BatchAsrModel
+  options: BatchOptions = {}
 ): Promise<BatchTranscription> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(enginePath, batchTranscribeArgs(filePath, model), {
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
+      checkImportCanceled(options.signal)
+    } catch (error) {
+      reject(error)
+      return
+    }
+    try {
+      child = spawn(
+        enginePath,
+        [
+          'transcribe',
+          '--file',
+          filePath,
+          '--channels',
+          options.channels ?? 'mixed',
+          '--model',
+          options.settings?.parakeetModel ?? 'v2'
+        ],
+        {
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      )
     } catch (err) {
       reject(new Error(`could not start the transcription engine: ${String(err)}`))
       return
     }
 
-    const assembler = new SegmentAssembler()
-    const segments: TranscriptSegment[] = []
+    const tokens: Record<EngineChannel, EngineTokenTiming[]> = { mic: [], system: [] }
     let audioSeconds = 0
     let engineError: string | null = null
     let settled = false
+    let stopError: Error | undefined
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    const stop = (error: Error): void => {
+      if (settled || stopError) return
+      stopError = error
+      child.kill('SIGTERM')
+      killTimer = setTimeout(() => child.kill('SIGKILL'), 1500)
+    }
+    const abort = (): void => stop(new ImportCanceledError())
 
     const finish = (err?: Error): void => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
+      clearTimeout(killTimer)
+      options.signal?.removeEventListener('abort', abort)
       if (err) reject(err)
       else {
-        segments.push(...assembler.flush())
-        segments.sort((a, b) => a.startMs - b.startMs)
-        resolve({ segments, audioSeconds })
+        resolve({
+          segments: assembleBatchTokens(tokens, options.channels ?? 'mixed'),
+          audioSeconds
+        })
       }
     }
     const timeout = setTimeout(() => {
-      child.kill('SIGKILL')
-      finish(new Error('transcription timed out'))
+      stop(new Error('Transcription timed out.'))
     }, TIMEOUT_MS)
+
+    options.signal?.addEventListener('abort', abort, { once: true })
+    if (options.signal?.aborted) abort()
 
     let buffer = ''
     child.stdout?.setEncoding('utf8')
@@ -111,12 +151,11 @@ export function transcribeFileToSegments(
             onProgress?.({ stage: 'downloading_model', progress: ev.progress })
             break
           case 'timings':
-            if (ev.channel && Array.isArray(ev.tokens)) {
-              segments.push(...assembler.addTimings(ev.channel, ev.tokens))
+            if ((ev.channel === 'mic' || ev.channel === 'system') && Array.isArray(ev.tokens)) {
+              tokens[ev.channel].push(...ev.tokens)
             }
             break
           case 'final':
-            if (ev.channel) segments.push(...assembler.flush(ev.channel))
             break
           case 'error':
             engineError = String(ev.message ?? 'transcription failed')
@@ -134,7 +173,8 @@ export function transcribeFileToSegments(
     })
     child.on('error', (err) => finish(new Error(`engine failed to start: ${err.message}`)))
     child.on('close', (code) => {
-      if (engineError) finish(new Error(engineError))
+      if (stopError) finish(stopError)
+      else if (engineError) finish(new Error(engineError))
       else if (code !== 0) finish(new Error(`engine exited with code ${code}`))
       else finish()
     })

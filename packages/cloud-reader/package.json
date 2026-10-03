@@ -1,0 +1,9 @@
+{
+  "name": "@repo/cloud-reader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {".": "./src/Reader.tsx", "./types": "./src/types.ts"},
+  "peerDependencies": {"react": "^19"},
+  "devDependencies": {"@types/react": "^19"}
+}

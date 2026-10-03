@@ -1,3 +1,6 @@
+import type { TextImporterApi } from '../shared/text-import-api'
+import type { StorageApi } from '../shared/storage-api'
+import type { RecordingApi } from '../shared/recording-api'
 import type { AudioApi } from '../shared/audio-api'
 import type { ImporterApi } from '../shared/import-api'
 import type { WizardApi } from '../shared/wizard-api'
@@ -16,6 +19,8 @@ import type { UpdateApi } from '../shared/update-api'
 
 declare global {
   interface Window {
+    storage: StorageApi
+    recording: RecordingApi
     engine: EngineApi
     notes: NotesApi
     meetings: MeetingsApi
@@ -29,6 +34,7 @@ declare global {
     integrations: IntegrationsApi
     audio: AudioApi
     importer: ImporterApi
+    textImporter: TextImporterApi
     wizard: WizardApi
     exporter: ExporterApi
   }

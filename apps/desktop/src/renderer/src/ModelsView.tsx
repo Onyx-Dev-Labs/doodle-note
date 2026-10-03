@@ -1,3 +1,11 @@
+import {
+  normalizeBatchSettings,
+  WHISPER_LANGUAGES,
+  type BatchTranscriptionSettings
+} from '../../shared/batch-transcription'
+import { StorageSettings } from './StorageSettings'
+import CloudModelPicker from './CloudModelPicker'
+import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
@@ -6,7 +14,7 @@ import {
 } from '../../shared/audio-api'
 import type { CalendarPrefsUpdate, CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
-import type { SyncStatus } from '../../shared/sync-api'
+import { useSyncConnection } from './lib/use-sync-connection'
 import type { AgentAccessStatus, McpClientId, McpServerSpec } from '../../shared/integrations-api'
 import type { UpdateState } from '../../shared/update-api'
 import { CalendarIcon, CloudIcon, GearIcon, SparkleIcon, UsersIcon } from './icons'
@@ -15,12 +23,14 @@ import {
   CLOUD_PROVIDERS,
   type CloudProvider,
   type EngineChoice,
+  type DownloadProgressEvent,
   type NotesModelInfo,
   type NotesModelsResponse,
   type NotesSettingsView,
   type TranscriptionLanguage,
   TRANSCRIPTION_LANGUAGES
 } from '../../shared/notes-api'
+import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
 import mascotUrl from './assets/mascot-square.png'
 
 function lastSyncLabel(iso: string): string {
@@ -36,8 +46,10 @@ function lastSyncLabel(iso: string): string {
 const MODEL_PLACEHOLDERS: Record<CloudProvider, string> = {
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-5',
-  groq: 'llama-3.3-70b-versatile',
-  openrouter: 'anthropic/claude-sonnet-4.5',
+  groq: 'retired provider',
+  grok: 'grok-4.6',
+  openrouter: 'retired provider',
+  gemini: 'gemini-3.8-flash',
   ollama: 'llama3.1'
 }
 
@@ -190,7 +202,9 @@ export default function ModelsView({
   }
   const [data, setData] = useState<NotesModelsResponse | null>(null)
   const [settings, setSettings] = useState<NotesSettingsView | null>(null)
-  const [downloading, setDownloading] = useState<{ id: string; progress: number } | null>(null)
+  const [downloading, setDownloading] = useState<(DownloadProgressEvent & { id: string }) | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
 
   /** The user's own name; labels their lines instead of "You". */
@@ -202,11 +216,18 @@ export default function ModelsView({
   const [cloudModel, setCloudModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [keySaved, setKeySaved] = useState(false)
+  const [catalogRevision, setCatalogRevision] = useState(0)
+  const [dataPolicyConfirmed, setDataPolicyConfirmed] = useState(false)
   const cloudFormSeeded = useRef(false)
 
   /* ---- cloud sync ---- */
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
-  const [linkPending, setLinkPending] = useState(false)
+  const {
+    status: syncStatus,
+    error: syncError,
+    adoptStatus: adoptSyncStatus,
+    connect: connectSync,
+    cancel: cancelSync
+  } = useSyncConnection(active)
 
   /* ---- integrations: agent access ---- */
   const [agentAccess, setAgentAccess] = useState<AgentAccessStatus | null>(null)
@@ -340,9 +361,13 @@ export default function ModelsView({
       case 'downloading':
         return `Downloading v${u.latestVersion ?? ''}… ${u.percent ?? 0}%`
       case 'downloaded':
-        return `v${u.latestVersion} is ready to install`
+        return u.error ?? `v${u.latestVersion} is ready to install`
+      case 'installing':
+        return 'Restarting to install the update…'
       case 'up-to-date':
         return 'You are on the latest version'
+      case 'cancelled':
+        return 'Download cancelled. You can try again.'
       case 'error':
         return u.error ?? 'Update check failed'
       default:
@@ -384,33 +409,12 @@ export default function ModelsView({
 
   useEffect(() => {
     if (active) {
-      void window.sync
-        .getStatus()
-        .then(setSyncStatus)
-        .catch(() => setSyncStatus(null))
-    }
-  }, [active])
-
-  useEffect(() => window.sync.onStatus(setSyncStatus), [])
-
-  useEffect(() => {
-    if (active) {
       void window.detect
         .getState()
         .then(setDetect)
         .catch(() => setDetect(null))
     }
   }, [active])
-
-  const connectSync = async (): Promise<void> => {
-    if (linkPending) return
-    setLinkPending(true)
-    try {
-      setSyncStatus(await window.sync.connect())
-    } finally {
-      setLinkPending(false)
-    }
-  }
 
   const saveCalendarConfig = async (): Promise<void> => {
     const state = await window.calendar.setConfig({
@@ -421,25 +425,16 @@ export default function ModelsView({
     if (state.configured && !state.error) setEditingCalConfig(false)
   }
 
-  const connectCalendar = async (): Promise<void> => {
+  const connectCalendar = async (
+    provider: 'microsoft' | 'google' = 'microsoft',
+    accountId?: string
+  ): Promise<void> => {
     if (connecting) return
     setConnecting(true)
     try {
-      setCalState(await window.calendar.connect())
+      setCalState(await window.calendar.connectAccount(provider, accountId))
     } finally {
       setConnecting(false)
-    }
-  }
-
-  const [googleConnecting, setGoogleConnecting] = useState(false)
-
-  const connectGoogle = async (): Promise<void> => {
-    if (googleConnecting) return
-    setGoogleConnecting(true)
-    try {
-      setCalState(await window.calendar.connectGoogle())
-    } finally {
-      setGoogleConnecting(false)
     }
   }
 
@@ -451,10 +446,6 @@ export default function ModelsView({
     } finally {
       setSyncing(false)
     }
-  }
-
-  const disconnectCalendar = async (): Promise<void> => {
-    setCalState(await window.calendar.disconnect())
   }
 
   /** Partial display-prefs update; main persists and echoes the new state. */
@@ -472,11 +463,11 @@ export default function ModelsView({
    */
   const visibleCalendarIds = (state: CalendarState): Set<string> => {
     if (state.prefs.visibleCalendarIds !== null) return new Set(state.prefs.visibleCalendarIds)
-    const defaults = state.calendars.filter((c) => c.isDefault).map((c) => c.id)
-    if (defaults.length === 0 && state.calendars.length > 0) {
-      const first = state.calendars[0]
-      if (first) return new Set([first.id])
-    }
+    const defaults = (state.connections ?? []).flatMap((account) => {
+      const calendars = state.calendars.filter((c) => c.accountId === account.id)
+      const primary = calendars.filter((c) => c.isDefault)
+      return (primary.length ? primary : calendars.slice(0, 1)).map((c) => c.id)
+    })
     return new Set(defaults)
   }
 
@@ -510,6 +501,7 @@ export default function ModelsView({
           cloudFormSeeded.current = true
           setProvider(view.cloud.provider)
           setCloudModel(view.cloud.model ?? '')
+          setDataPolicyConfirmed(view.cloud.dataPolicyConfirmed === true)
         }
       })
       .catch(() => setSettings(null))
@@ -522,18 +514,23 @@ export default function ModelsView({
   useEffect(
     () =>
       window.notes.onDownloadProgress((ev) => {
-        setDownloading((d) => (d && d.id === ev.modelId ? { ...d, progress: ev.progress } : d))
+        setDownloading((d) => (d && d.id === ev.modelId ? { ...d, ...ev } : d))
       }),
     []
   )
 
   const activate = async (modelId: string): Promise<void> => {
     setError(null)
-    setDownloading({ id: modelId, progress: 0 })
-    const result = await window.notes.activateModel(modelId)
-    setDownloading(null)
-    if (!result.ok) setError(result.error ?? 'activation failed')
-    refresh()
+    setDownloading({ id: modelId, modelId, progress: 0, stage: 'checking' })
+    try {
+      const result = await window.notes.activateModel(modelId)
+      if (!result.ok) setError(result.error ?? 'Activation failed. Please retry.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Activation failed. Please retry.')
+    } finally {
+      setDownloading(null)
+      refresh()
+    }
   }
 
   const saveProfileName = async (): Promise<void> => {
@@ -542,6 +539,23 @@ export default function ModelsView({
     setProfileName(view.profileName ?? '')
     setProfileSaved(true)
     setTimeout(() => setProfileSaved(false), 2000)
+  }
+
+  const [savingAutoNotes, setSavingAutoNotes] = useState(false)
+  const toggleAutoNotes = async (): Promise<void> => {
+    setSavingAutoNotes(true)
+    setError(null)
+    try {
+      const view = await window.notes.setSettings({
+        autoGenerateNotesAfterStop: settings?.autoGenerateNotesAfterStop === false
+      })
+      setSettings(view)
+      if (view.error) setError(view.error)
+    } catch {
+      setError('Could not save automatic notes preference. Please try again.')
+    } finally {
+      setSavingAutoNotes(false)
+    }
   }
 
   const chooseEngine = async (choice: EngineChoice): Promise<void> => {
@@ -555,11 +569,20 @@ export default function ModelsView({
     setSettings(view)
   }
 
+  const chooseBatch = async (update: Partial<BatchTranscriptionSettings>): Promise<void> => {
+    const view = await window.notes.setSettings({
+      batchTranscription: { ...normalizeBatchSettings(settings?.batchTranscription), ...update }
+    })
+    setSettings(view)
+    if (view.error) setError(view.error)
+  }
+
   const saveCloudKey = async (): Promise<void> => {
     setError(null)
     const view = await window.notes.setSettings({
       cloud: {
         provider,
+        dataPolicyConfirmed,
         ...(cloudModel.trim() ? { model: cloudModel.trim() } : {}),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
       }
@@ -570,6 +593,7 @@ export default function ModelsView({
       setError(view.error)
     } else if (view.cloud?.hasKey) {
       setKeySaved(true)
+      setCatalogRevision((n) => n + 1)
       setTimeout(() => setKeySaved(false), 2000)
     }
   }
@@ -578,18 +602,30 @@ export default function ModelsView({
     if (downloading?.id === m.id) {
       const pct = Math.round(downloading.progress * 100)
       return (
-        <div className="model-progress">
-          <div className="progress-track">
-            <div className="progress-bar" style={{ width: `${pct}%` }} />
-          </div>
+        <div className="model-progress" role="status" aria-live="polite">
+          {downloading.stage === 'downloading' && (
+            <div className="progress-track">
+              <div className="progress-bar" style={{ width: `${pct}%` }} />
+            </div>
+          )}
           <span className="progress-label">
-            {downloading.progress > 0 ? `downloading… ${pct}%` : 'preparing…'}
+            {downloading.stage === 'downloading'
+              ? `Downloading… ${pct}%`
+              : downloading.stage === 'loading'
+                ? 'Loading local model…'
+                : downloading.stage === 'verifying'
+                  ? 'Verifying download…'
+                  : 'Checking local models…'}
           </span>
         </div>
       )
     }
     if (m.active) {
-      return <span className="badge badge-active">Active</span>
+      return engineChoice === 'local' ? (
+        <span className="badge badge-active">Active</span>
+      ) : (
+        <span className="model-note">Selected for on-device use</span>
+      )
     }
     if (!m.available) {
       return <span className="model-note">needs {m.minRamGB} GB RAM</span>
@@ -645,7 +681,19 @@ export default function ModelsView({
         <div className="settings-content">
           {section === 'model' && (
             <section className="keys-section">
-              <h3>On-device model</h3>
+              <h3>Active notes model</h3>
+              <p className="models-sub" role="status">
+                {engineChoice === 'cloud'
+                  ? settings?.cloud?.hasKey &&
+                    (settings.cloud.provider === 'ollama' || settings.cloud.dataPolicyConfirmed)
+                    ? `Active: ${CLOUD_PROVIDERS.find((p) => p.id === settings.cloud?.provider)?.label ?? settings.cloud.provider} · ${settings.cloud.model || MODEL_PLACEHOLDERS[settings.cloud.provider]}`
+                    : 'Cloud selected. Complete the provider setup below before generating notes.'
+                  : `Active: ${data?.models.find((m) => m.active)?.label ?? 'On-device model'} · On-device`}
+              </p>
+              {engineChoice === 'cloud' && (
+                <p className="models-sub">On-device models are not selected for note generation.</p>
+              )}
+              <h3>On-device models</h3>
               <p className="models-sub">
                 DoodleNote polishes your meeting notes with a model that runs entirely on this
                 computer
@@ -653,14 +701,22 @@ export default function ModelsView({
                 machine.
               </p>
 
-              {error && <div className="models-error">{error}</div>}
+              {error && (
+                <div className="models-error" role="alert">
+                  {error}
+                </div>
+              )}
 
               <div className="model-cards">
-                {data === null && <span className="placeholder">loading models…</span>}
+                {data === null && (
+                  <span className="placeholder" role="status">
+                    Checking local models…
+                  </span>
+                )}
                 {data?.models.map((m) => (
                   <div
                     key={m.id}
-                    className={`model-card${m.available ? '' : ' unavailable'}${m.active ? ' is-active' : ''}`}
+                    className={`model-card${m.available ? '' : ' unavailable'}${m.active && engineChoice === 'local' ? ' is-active' : ''}`}
                   >
                     <div className="model-head">
                       <span className="model-label">{m.label}</span>
@@ -681,9 +737,9 @@ export default function ModelsView({
             <section className="keys-section calendar-section">
               <h3>Calendar</h3>
               <p className="models-sub">
-                Sign in with any Microsoft account — work, school, or personal — to see the
-                week&rsquo;s meetings on Home and get a nudge to take notes the moment one starts.
-                DoodleNote only reads your calendar.
+                Connect your work and personal accounts to see their upcoming meetings together.
+                Each account keeps its own calendars and sign-in. DoodleNote only reads your
+                calendar.
               </p>
 
               {calState?.error && <div className="models-error">{calState.error}</div>}
@@ -721,124 +777,175 @@ export default function ModelsView({
                     (client) ID and Directory (tenant) ID from there.
                   </p>
                 </>
-              ) : !calState.signedIn ? (
-                <div className="calendar-actions">
-                  <button
-                    type="button"
-                    className="ms-signin"
-                    disabled={connecting}
-                    onClick={() => void connectCalendar()}
-                  >
-                    <MicrosoftLogo />
-                    <span>
-                      {connecting ? 'Waiting for your browser…' : 'Sign in with Microsoft'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="ms-signin"
-                    disabled={googleConnecting}
-                    onClick={() => void connectGoogle()}
-                  >
-                    <GoogleLogo />
-                    <span>
-                      {googleConnecting ? 'Waiting for your browser…' : 'Sign in with Google'}
-                    </span>
-                  </button>
-                  {!calState.builtIn && (
+              ) : null}
+              {calState && (
+                <div className="calendar-connected">
+                  <div className="calendar-actions">
                     <button
                       type="button"
-                      className="calendar-ghost"
-                      onClick={() => setEditingCalConfig(true)}
+                      className="provider-btn"
+                      disabled={!calState.configured || connecting || !!calState.connecting}
+                      onClick={() => void connectCalendar('microsoft')}
                     >
-                      Edit IDs
+                      <MicrosoftLogo /> Add Microsoft account
                     </button>
-                  )}
-                  {connecting && (
-                    <span className="calendar-note">
-                      finish signing in in your browser, then come back
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <div className="calendar-connected">
-                  <span className="calendar-status">
-                    {calState.msSignedIn && (
-                      <>
-                        Microsoft: <strong>{calState.account?.email ?? 'connected'}</strong>
-                      </>
-                    )}
-                    {calState.msSignedIn && calState.googleSignedIn && ' · '}
-                    {calState.googleSignedIn && (
-                      <>
-                        Google: <strong>{calState.googleAccount?.email ?? 'connected'}</strong>
-                      </>
-                    )}
-                    {calState.lastSyncIso && (
-                      <span className="calendar-note">
-                        {' '}
-                        · {lastSyncLabel(calState.lastSyncIso)}
-                      </span>
-                    )}
-                  </span>
-                  <div className="calendar-actions">
-                    <button type="button" disabled={syncing} onClick={() => void syncCalendar()}>
-                      {syncing ? 'Syncing…' : 'Sync now'}
-                    </button>
-                    {calState.msSignedIn && calState.error && (
-                      <button
-                        type="button"
-                        disabled={connecting}
-                        onClick={() => void connectCalendar()}
-                      >
-                        {connecting ? 'Waiting for your browser…' : 'Sign in again'}
-                      </button>
-                    )}
-                    {!calState.msSignedIn && (
+                    {calState.googleAvailable ? (
                       <button
                         type="button"
                         className="provider-btn"
-                        disabled={connecting}
-                        onClick={() => void connectCalendar()}
+                        disabled={connecting || !!calState.connecting}
+                        onClick={() => void connectCalendar('google')}
                       >
-                        <MicrosoftLogo />
-                        {connecting ? 'Waiting for your browser…' : 'Connect Microsoft'}
+                        <GoogleLogo /> Add Google account
                       </button>
+                    ) : (
+                      <GoogleCalendarPending buttonClassName="provider-btn">
+                        <GoogleLogo /> Add Google account
+                      </GoogleCalendarPending>
                     )}
-                    {calState.msSignedIn && (
+                    {calState.signedIn && (
                       <button
                         type="button"
-                        className="provider-btn"
-                        onClick={() => void disconnectCalendar()}
+                        disabled={syncing || calState.connections?.some((c) => c.syncing)}
+                        onClick={() => void syncCalendar()}
                       >
-                        <MicrosoftLogo />
-                        Disconnect Microsoft
+                        {syncing || calState.connections?.some((c) => c.syncing)
+                          ? 'Syncing…'
+                          : 'Sync now'}
                       </button>
                     )}
-                    {!calState.googleSignedIn && (
+                    {!calState.builtIn && !editingCalConfig && (
                       <button
                         type="button"
-                        className="provider-btn"
-                        disabled={googleConnecting}
-                        onClick={() => void connectGoogle()}
+                        className="calendar-ghost"
+                        onClick={() => setEditingCalConfig(true)}
                       >
-                        <GoogleLogo />
-                        {googleConnecting ? 'Waiting for your browser…' : 'Connect Google'}
-                      </button>
-                    )}
-                    {calState.googleSignedIn && (
-                      <button
-                        type="button"
-                        className="provider-btn"
-                        onClick={() => {
-                          void window.calendar.disconnectGoogle().then(setCalState)
-                        }}
-                      >
-                        <GoogleLogo />
-                        Disconnect Google
+                        Edit Microsoft IDs
                       </button>
                     )}
                   </div>
+                  {calState.connecting && (
+                    <div className="calendar-actions" role="status">
+                      <span>Finish signing in in your browser.</span>
+                      <button
+                        type="button"
+                        onClick={() => void window.calendar.cancelAuth().then(adoptCalState)}
+                      >
+                        Cancel sign-in
+                      </button>
+                    </div>
+                  )}
+                  {calState.tenantId &&
+                    !['common', 'organizations', 'consumers'].includes(
+                      calState.tenantId.toLowerCase()
+                    ) && (
+                      <p className="calendar-note">
+                        This custom Microsoft registration is restricted to its configured
+                        organization. Accounts from other organizations may require a different
+                        registration.
+                      </p>
+                    )}
+                  {!calState.signedIn && (
+                    <p className="calendar-note">
+                      Add an account to choose calendars and see upcoming meetings.
+                    </p>
+                  )}
+                  {(calState.connections ?? []).map((account) => (
+                    <section
+                      className="cal-subcard"
+                      key={account.id}
+                      aria-label={`${account.provider === 'microsoft' ? 'Microsoft' : 'Google'} ${account.email}`}
+                    >
+                      <div className="cal-subcard-head" style={{ flexWrap: 'wrap', gap: 8 }}>
+                        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                          {account.provider === 'microsoft' ? 'Microsoft 365' : 'Google'} ·{' '}
+                          {account.email}
+                          {account.name && (
+                            <span className="cal-row-sub" style={{ display: 'block' }}>
+                              {account.name}
+                            </span>
+                          )}
+                        </span>
+                        <div className="calendar-actions">
+                          <button
+                            type="button"
+                            disabled={
+                              connecting ||
+                              !!calState.connecting ||
+                              (account.provider === 'google' && !calState.googleAvailable)
+                            }
+                            aria-label={`Reconnect ${account.email}`}
+                            onClick={() => void connectCalendar(account.provider, account.id)}
+                          >
+                            Reconnect
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${account.email}`}
+                            onClick={() =>
+                              void window.calendar.removeAccount(account.id).then(adoptCalState)
+                            }
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      <p className="calendar-note" role="status">
+                        {account.syncing
+                          ? 'Syncing…'
+                          : account.stale
+                            ? 'Calendar data may be out of date.'
+                            : 'Connected.'}
+                        {account.lastSyncIso && ` ${lastSyncLabel(account.lastSyncIso)}`}
+                      </p>
+                      {account.error && (
+                        <p className="models-error" role="alert">
+                          {account.error}
+                        </p>
+                      )}
+                      {calState.calendars
+                        .filter((c) => c.accountId === account.id)
+                        .map((cal) => {
+                          const visible = visibleCalendarIds(calState)
+                          const isOn = visible.has(cal.id)
+                          const lastOne =
+                            isOn && calState.calendars.filter((c) => visible.has(c.id)).length === 1
+                          return (
+                            <div key={cal.id} className="cal-row">
+                              <span
+                                className="cal-dot"
+                                style={{ background: cal.colorHex }}
+                                aria-hidden="true"
+                              />
+                              <span className="cal-row-main">
+                                <span className="cal-row-label">{cal.name}</span>
+                              </span>
+                              <Toggle
+                                checked={isOn}
+                                disabled={lastOne}
+                                label={`Show ${cal.name} from ${account.email} in Coming up`}
+                                title={lastOne ? 'At least one calendar stays visible' : undefined}
+                                onChange={() => toggleCalendar(calState, cal.id)}
+                              />
+                            </div>
+                          )
+                        })}
+                      {!calState.calendars.some((c) => c.accountId === account.id) && (
+                        <p className="calendar-note">
+                          No calendars synced yet. Use Sync now to retry.
+                        </p>
+                      )}
+                    </section>
+                  ))}
+                  {calState.signedIn && (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => setCalPrefs({ visibleCalendarIds: null })}
+                    >
+                      Use each account’s default calendar
+                    </button>
+                  )}
 
                   <div className="cal-subcard">
                     <div className="cal-subcard-head">Display</div>
@@ -848,14 +955,15 @@ export default function ModelsView({
                           <MenuBarIcon />
                         </span>
                         <span className="cal-row-main">
-                          <span className="cal-row-label">Show upcoming meetings in menu bar</span>
+                          <span className="cal-row-label">Full Island in menu bar</span>
                           <span className="cal-row-sub">
-                            Display your next meeting and time until it starts in the macOS menu bar
+                            Show today’s next meeting beside the dog. Turn off for the compact dog
+                            icon.
                           </span>
                         </span>
                         <Toggle
                           checked={calState.prefs.showMenuBar}
-                          label="Show upcoming meetings in menu bar"
+                          label="Full Island in menu bar"
                           onChange={() => setCalPrefs({ showMenuBar: !calState.prefs.showMenuBar })}
                         />
                       </div>
@@ -879,52 +987,6 @@ export default function ModelsView({
                         }
                       />
                     </div>
-                  </div>
-
-                  <div className="cal-subcard">
-                    <div className="cal-subcard-head">
-                      Visible calendars
-                      <button
-                        type="button"
-                        className="link-btn cal-reset"
-                        title="Back to your default calendar only"
-                        onClick={() => setCalPrefs({ visibleCalendarIds: null })}
-                      >
-                        Reset
-                      </button>
-                    </div>
-                    {calState.calendars.length === 0 ? (
-                      <div className="cal-row">
-                        <span className="calendar-note">
-                          No calendars synced yet — hit Sync now above
-                        </span>
-                      </div>
-                    ) : (
-                      calState.calendars.map((cal) => {
-                        const visible = visibleCalendarIds(calState)
-                        const isOn = visible.has(cal.id)
-                        const lastOne = isOn && visible.size === 1
-                        return (
-                          <div key={cal.id} className="cal-row">
-                            <span
-                              className="cal-dot"
-                              style={{ background: cal.colorHex }}
-                              aria-hidden="true"
-                            />
-                            <span className="cal-row-main">
-                              <span className="cal-row-label">{cal.name}</span>
-                            </span>
-                            <Toggle
-                              checked={isOn}
-                              disabled={lastOne}
-                              label={`Show ${cal.name} in Coming up`}
-                              title={lastOne ? 'At least one calendar stays visible' : undefined}
-                              onChange={() => toggleCalendar(calState, cal.id)}
-                            />
-                          </div>
-                        )
-                      })
-                    )}
                   </div>
                 </div>
               )}
@@ -957,16 +1019,77 @@ export default function ModelsView({
                 </div>
               </section>
 
+              {detect?.platform === 'darwin' && (
+                <section className="keys-section">
+                  <h3>Recording transcription</h3>
+                  <p className="models-sub">
+                    Choose the local engine for imported audio and Re-transcribe. Live captions keep
+                    using Parakeet.
+                  </p>
+                  <label className="models-sub">
+                    Batch engine
+                    <select
+                      aria-label="Batch transcription engine"
+                      value={settings?.batchTranscription?.backend ?? 'parakeet'}
+                      onChange={(event) =>
+                        void chooseBatch({ backend: event.target.value as 'parakeet' | 'whisper' })
+                      }
+                    >
+                      <option value="parakeet">Parakeet (default)</option>
+                      <option value="whisper">Whisper large-v3-turbo</option>
+                    </select>
+                  </label>
+                  {(settings?.batchTranscription?.backend ?? 'parakeet') === 'parakeet' ? (
+                    <label className="models-sub">
+                      Parakeet language
+                      <select
+                        aria-label="Parakeet batch language"
+                        value={settings?.batchTranscription?.parakeetModel ?? 'v2'}
+                        onChange={(event) =>
+                          void chooseBatch({ parakeetModel: event.target.value as 'v2' | 'v3' })
+                        }
+                      >
+                        <option value="v2">English</option>
+                        <option value="v3">Multilingual</option>
+                      </select>
+                    </label>
+                  ) : (
+                    <>
+                      <p className="models-sub">
+                        Your first Whisper import downloads a verified 1.62 GB model from Hugging
+                        Face. You can cancel or retry from import progress. Once downloaded, it
+                        works offline. Audio stays on this Mac. Models stay in application support
+                        when you move the library.
+                      </p>
+                      <label className="models-sub">
+                        Recording language
+                        <select
+                          aria-label="Whisper recording language"
+                          value={settings?.batchTranscription?.language ?? 'auto'}
+                          onChange={(event) => void chooseBatch({ language: event.target.value })}
+                        >
+                          {WHISPER_LANGUAGES.map(([code, label]) => (
+                            <option key={code} value={code}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  )}
+                </section>
+              )}
+
               <section className="keys-section">
-                <h3>Transcription language</h3>
+                <h3>Live caption language</h3>
                 <p className="models-sub">
-                  Pick the language you speak, or Auto-detect. Applies to live captions, imported
-                  recordings, and &ldquo;Re-transcribe&rdquo;; the first non-English session
-                  downloads its model. Live captions on Windows stay English.
+                  Pick the language you speak, or Auto-detect. The first non-English session
+                  downloads its model. Imports and &ldquo;Re-transcribe&rdquo; use the batch engine
+                  settings. Live captions on Windows stay English.
                 </p>
                 <div className="key-form">
                   <select
-                    aria-label="Transcription language"
+                    aria-label="Live caption language"
                     value={settings?.transcriptionLanguage ?? 'english'}
                     onChange={(e) =>
                       void chooseTranscriptionLanguage(e.target.value as TranscriptionLanguage)
@@ -1028,6 +1151,14 @@ export default function ModelsView({
                       >
                         Restart to update
                       </button>
+                    ) : update?.status === 'downloading' ? (
+                      <button
+                        type="button"
+                        className="pill-btn"
+                        onClick={() => void window.updates.cancel()}
+                      >
+                        Cancel download
+                      </button>
                     ) : (
                       <button
                         type="button"
@@ -1036,11 +1167,15 @@ export default function ModelsView({
                           checkPending ||
                           update?.supported === false ||
                           update?.status === 'checking' ||
-                          update?.status === 'downloading'
+                          update?.status === 'installing'
                         }
                         onClick={() => void checkForUpdates()}
                       >
-                        Check for updates
+                        {update?.status === 'installing'
+                          ? 'Restarting…'
+                          : update?.status === 'error' || update?.status === 'cancelled'
+                            ? 'Retry update'
+                            : 'Check for updates'}
                       </button>
                     )}
                   </div>
@@ -1138,6 +1273,7 @@ export default function ModelsView({
                 )}
               </section>
 
+              {detect?.platform === 'darwin' && <StorageSettings />}
               <section className="keys-section">
                 <h3>Meeting recordings</h3>
                 <p className="models-sub">
@@ -1226,6 +1362,11 @@ export default function ModelsView({
                 share them on the web.
               </p>
 
+              {syncError && (
+                <div className="models-error" role="alert">
+                  {syncError}
+                </div>
+              )}
               {syncStatus?.lastError && <div className="models-error">{syncStatus.lastError}</div>}
 
               {syncStatus === null ? (
@@ -1235,19 +1376,24 @@ export default function ModelsView({
                   <button
                     type="button"
                     className="ms-signin"
-                    disabled={linkPending || syncStatus.linking}
+                    disabled={syncStatus.linking}
                     onClick={() => void connectSync()}
                   >
                     <span>
-                      {linkPending || syncStatus.linking
+                      {syncStatus.linking
                         ? 'Waiting for your browser…'
                         : 'Connect DoodleNote Cloud'}
                     </span>
                   </button>
-                  {(linkPending || syncStatus.linking) && (
-                    <span className="calendar-note">
-                      approve the connection in your browser, then come back
-                    </span>
+                  {syncStatus.linking && (
+                    <>
+                      <button type="button" className="pill-btn" onClick={() => void cancelSync()}>
+                        Cancel
+                      </button>
+                      <span className="calendar-note" role="status">
+                        Approve in your browser, or cancel to try again if you closed it.
+                      </span>
+                    </>
                   )}
                 </div>
               ) : (
@@ -1286,18 +1432,23 @@ export default function ModelsView({
                         checked={syncStatus.enabled}
                         label="Sync meetings to the cloud"
                         onChange={() => {
-                          void window.sync.setEnabled(!syncStatus.enabled).then(setSyncStatus)
+                          void window.sync.setEnabled(!syncStatus.enabled).then(adoptSyncStatus)
                         }}
                       />
                     </div>
                   </div>
 
                   <div className="calendar-actions">
+                    {syncStatus.linking && (
+                      <button type="button" onClick={() => void cancelSync()}>
+                        Cancel
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={syncStatus.syncing || !syncStatus.enabled}
                       onClick={() => {
-                        void window.sync.syncNow().then(setSyncStatus)
+                        void window.sync.syncNow().then(adoptSyncStatus)
                       }}
                     >
                       {syncStatus.syncing ? 'Syncing…' : 'Sync now'}
@@ -1305,7 +1456,7 @@ export default function ModelsView({
                     <button
                       type="button"
                       onClick={() => {
-                        void window.sync.disconnect().then(setSyncStatus)
+                        void window.sync.disconnect().then(adoptSyncStatus)
                       }}
                     >
                       Disconnect
@@ -1318,12 +1469,18 @@ export default function ModelsView({
 
           {section === 'integrations' && (
             <>
+              {active && syncStatus?.connected && (
+                <PaidRemoteMcpSetup
+                  key={`${syncStatus.baseUrl}:${syncStatus.connectionRevision}`}
+                  baseUrl={syncStatus.baseUrl}
+                />
+              )}
               <section className="keys-section calendar-section">
-                <h3>Agent access</h3>
+                <h3>Local MCP</h3>
                 <p className="models-sub">
                   Let AI tools on this computer (Claude, Codex, and other MCP clients) read your
                   meetings, notes, and transcripts. Read-only, off by default, and local — nothing
-                  is uploaded. Turning this off revokes access immediately.
+                  is uploaded. Turning this off revokes local access immediately.
                 </p>
                 {agentError && <div className="models-error">{agentError}</div>}
                 {agentAccess === null ? (
@@ -1392,7 +1549,7 @@ export default function ModelsView({
                       ))}
                       <div className="cal-row">
                         <span className="cal-row-main">
-                          <span className="cal-row-label">Other MCP clients</span>
+                          <span className="cal-row-label">Other local MCP clients</span>
                           <span className="cal-row-sub">
                             Copy a ready-made config snippet — no build steps, the server ships
                             inside DoodleNote
@@ -1415,6 +1572,24 @@ export default function ModelsView({
 
           {section === 'model' && (
             <section className="keys-section">
+              <h3>Meeting notes</h3>
+              <div className="cal-row">
+                <span className="cal-row-main">
+                  <span className="cal-row-label">Generate notes automatically after Stop</span>
+                  <span className="cal-row-sub">
+                    After you stop recording or a detected meeting ends, generate notes once the
+                    transcript is saved. Uses your selected model and template. On-device processing
+                    stays local; your configured external provider receives text and may charge
+                    usage fees. Audio is not sent for note generation.
+                  </span>
+                </span>
+                <Toggle
+                  checked={settings?.autoGenerateNotesAfterStop !== false}
+                  disabled={!settings || savingAutoNotes}
+                  onChange={() => void toggleAutoNotes()}
+                  label="Generate notes automatically after Stop"
+                />
+              </div>
               <h3>AI keys (optional)</h3>
               <p className="models-sub">
                 On-device is the default and needs no account. Add your own API key only if you want
@@ -1446,44 +1621,105 @@ export default function ModelsView({
                 </label>
               </div>
 
+              <p className="models-sub">
+                External AI receives meeting titles (including Google Calendar titles), notes,
+                transcripts, and chat context. Use an API account with model training and data
+                sharing disabled. Consumer chat subscriptions are not API plans. On-device models
+                process content locally without sending it to the model publisher.
+              </p>
+              {(provider === 'groq' || provider === 'openrouter') && (
+                <p className="models-sub">
+                  Groq and OpenRouter have been replaced by direct Grok and Gemini integrations.
+                  Choose a provider and enter its own API key. Existing keys are never reused with
+                  another provider. Your notes are unchanged.
+                </p>
+              )}
+              {provider !== 'ollama' && provider !== 'groq' && provider !== 'openrouter' && (
+                <label className="models-sub">
+                  <input
+                    type="checkbox"
+                    checked={dataPolicyConfirmed}
+                    onChange={(e) => setDataPolicyConfirmed(e.target.checked)}
+                  />
+                  I authorize sending meeting content to this API provider and confirm its account
+                  settings do not allow model training or data sharing for training.
+                  {provider === 'gemini' &&
+                    ' My Gemini API key belongs to a project with active Cloud Billing; unpaid Gemini API use is not permitted.'}
+                </label>
+              )}
+
               <div className="key-form">
                 <select
                   value={provider}
-                  onChange={(e) => setProvider(e.target.value as CloudProvider)}
+                  onChange={(e) => {
+                    setProvider(e.target.value as CloudProvider)
+                    setApiKey('')
+                    setCloudModel('')
+                    setKeySaved(false)
+                    setDataPolicyConfirmed(false)
+                  }}
                 >
+                  {(provider === 'groq' || provider === 'openrouter') && (
+                    <option value={provider} disabled>
+                      {provider === 'groq' ? 'Groq' : 'OpenRouter'} (retired; choose a provider)
+                    </option>
+                  )}
                   {CLOUD_PROVIDERS.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}
                     </option>
                   ))}
                 </select>
-                <input
-                  type="text"
-                  spellCheck={false}
-                  placeholder={`model (optional, e.g. ${MODEL_PLACEHOLDERS[provider]})`}
-                  value={cloudModel}
-                  onChange={(e) => setCloudModel(e.target.value)}
-                />
+
                 <input
                   type="password"
                   placeholder={
                     provider === 'ollama'
                       ? 'no key needed — uses localhost:11434'
-                      : settings?.cloud?.hasKey
+                      : settings?.cloud?.provider === provider && settings.cloud.hasKey
                         ? '••••••••  (key saved)'
                         : 'API key'
                   }
                   disabled={provider === 'ollama'}
                   value={provider === 'ollama' ? '' : apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  onChange={(e) => {
+                    setApiKey(e.target.value)
+                    setDataPolicyConfirmed(false)
+                  }}
                 />
-                <button type="button" onClick={() => void saveCloudKey()}>
+                <button
+                  type="button"
+                  disabled={
+                    provider === 'groq' ||
+                    provider === 'openrouter' ||
+                    (provider !== 'ollama' && !dataPolicyConfirmed)
+                  }
+                  onClick={() => void saveCloudKey()}
+                >
                   Save
                 </button>
-                {(keySaved || settings?.cloud?.hasKey) && (
+                {(keySaved ||
+                  (settings?.cloud?.provider === provider && settings.cloud.hasKey)) && (
                   <span className="key-saved">key saved ✓</span>
                 )}
               </div>
+              {provider !== 'groq' && provider !== 'openrouter' && (
+                <CloudModelPicker
+                  key={provider}
+                  provider={provider}
+                  saved={
+                    settings?.cloud?.provider === provider &&
+                    settings.cloud.hasKey &&
+                    !apiKey.trim()
+                  }
+                  revision={catalogRevision}
+                  value={cloudModel}
+                  defaultModel={MODEL_PLACEHOLDERS[provider]}
+                  onChange={setCloudModel}
+                  onSave={() => void saveCloudKey()}
+                  canSave={provider === 'ollama' || dataPolicyConfirmed}
+                />
+              )}
             </section>
           )}
         </div>

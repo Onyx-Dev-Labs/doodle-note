@@ -1,3 +1,32 @@
+import {
+  TEXT_IMPORT_PREVIEW,
+  TEXT_IMPORT_COMMIT,
+  TEXT_IMPORT_CANCEL,
+  type TextImporterApi
+} from '../shared/text-import-api'
+import {
+  STORAGE_STATUS_CHANNEL,
+  STORAGE_RETRY_CHANNEL,
+  STORAGE_PROGRESS_CHANNEL,
+  type StorageProgress,
+  STORAGE_CHOOSE_CHANNEL,
+  STORAGE_CANCEL_CHANNEL,
+  STORAGE_OPEN_CHANNEL,
+  type StorageApi
+} from '../shared/storage-api'
+import {
+  RECORDING_JOIN_RETRY_CHANNEL,
+  RECORDING_JOIN_DISMISS_CHANNEL,
+  RECORDING_REQUEST_CHANNEL,
+  RECORDING_READY_CHANNEL,
+  RECORDING_DELIVER_CHANNEL,
+  RECORDING_ATTACH_CHANNEL,
+  RECORDING_CANCEL_CHANNEL,
+  RECORDING_STATE_CHANNEL,
+  type RecordingApi,
+  type RecordingStartRequest,
+  type RecordingState
+} from '../shared/recording-api'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   ENGINE_AUDIO_CHANNEL,
@@ -5,14 +34,16 @@ import {
   ENGINE_BATCH_DATA_CHANNEL,
   ENGINE_BATCH_READ_CHANNEL,
   ENGINE_CAPTURE_CONTROL_CHANNEL,
-  ENGINE_CAPTURE_ERROR_CHANNEL,
+  ENGINE_CAPTURE_STATUS_CHANNEL,
   ENGINE_EVENT_CHANNEL,
   ENGINE_LIST_DEVICES_CHANNEL,
   ENGINE_SET_INPUT_CHANNEL,
   ENGINE_TAP_SELFTEST_CHANNEL,
   ENGINE_START_CHANNEL,
   ENGINE_STOP_CHANNEL,
+  ENGINE_SNAPSHOT_CHANNEL,
   type EngineCaptureControl,
+  type EngineCaptureStatus,
   type EngineBatchControl,
   type EngineBatchMessage,
   type EngineApi,
@@ -35,6 +66,9 @@ import {
 } from '../shared/audio-api'
 import {
   IMPORT_AUDIO_CHANNEL,
+  IMPORT_STATUS_CHANNEL,
+  IMPORT_CANCEL_CHANNEL,
+  IMPORT_RETRY_CHANNEL,
   IMPORT_PROGRESS_CHANNEL,
   IMPORT_RETRANSCRIBE_CHANNEL,
   type ImporterApi,
@@ -56,6 +90,9 @@ import {
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
   NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
+  NOTES_CLOUD_MODELS_CHANNEL,
+  type CloudModelsResult,
+  type CloudProvider,
   NOTES_SET_SETTINGS_CHANNEL,
   NOTES_TEMPLATES_CHANNEL,
   type ActivateModelResult,
@@ -109,6 +146,7 @@ import {
 } from '../shared/integrations-api'
 import {
   UPDATE_CHECK_CHANNEL,
+  UPDATE_CANCEL_CHANNEL,
   UPDATE_GET_STATE_CHANNEL,
   UPDATE_INSTALL_CHANNEL,
   UPDATE_STATE_EVENT_CHANNEL,
@@ -147,8 +185,10 @@ import {
 } from '../shared/media-api'
 import {
   SYNC_CONNECT_CHANNEL,
+  SYNC_CANCEL_CONNECT_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
+  SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SHARE_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
@@ -158,6 +198,9 @@ import {
   type SyncStatus
 } from '../shared/sync-api'
 import {
+  CALENDAR_ACCOUNT_CONNECT_CHANNEL,
+  CALENDAR_ACCOUNT_REMOVE_CHANNEL,
+  CALENDAR_AUTH_CANCEL_CHANNEL,
   CALENDAR_CONNECT_CHANNEL,
   CALENDAR_CONNECT_GOOGLE_CHANNEL,
   CALENDAR_DISCONNECT_CHANNEL,
@@ -165,6 +208,7 @@ import {
   CALENDAR_EVENTS_CHANNEL,
   CALENDAR_GET_STATE_CHANNEL,
   CALENDAR_REFRESH_CHANNEL,
+  CALENDAR_DISMISS_PROMPT_CHANNEL,
   CALENDAR_SET_CONFIG_CHANNEL,
   CALENDAR_SET_PREFS_CHANNEL,
   CALENDAR_START_MEETING_CHANNEL,
@@ -176,6 +220,7 @@ import {
 } from '../shared/calendar-api'
 
 const engineApi: EngineApi = {
+  snapshot: (meetingId) => ipcRenderer.invoke(ENGINE_SNAPSHOT_CHANNEL, meetingId),
   start(command: EngineCommand, filePath?: string, opts?: EngineStartOptions): void {
     const request: EngineStartRequest = { command, filePath, opts }
     ipcRenderer.send(ENGINE_START_CHANNEL, request)
@@ -220,12 +265,12 @@ const engineApi: EngineApi = {
     }
   },
 
-  sendAudio(channel: string, samples: Float32Array): void {
-    ipcRenderer.send(ENGINE_AUDIO_CHANNEL, { channel, samples })
+  sendAudio(sessionId: number, channel: string, samples: Float32Array): void {
+    ipcRenderer.send(ENGINE_AUDIO_CHANNEL, { sessionId, channel, samples })
   },
 
-  reportCaptureError(message: string): void {
-    ipcRenderer.send(ENGINE_CAPTURE_ERROR_CHANNEL, message)
+  reportCaptureStatus(status: EngineCaptureStatus): void {
+    ipcRenderer.send(ENGINE_CAPTURE_STATUS_CHANNEL, status)
   },
 
   onBatchControl(cb: (control: EngineBatchControl) => void): () => void {
@@ -269,6 +314,10 @@ const notesApi: NotesApi = {
 
   activateModel(modelId: string): Promise<ActivateModelResult> {
     return ipcRenderer.invoke(NOTES_ACTIVATE_MODEL_CHANNEL, modelId) as Promise<ActivateModelResult>
+  },
+
+  cloudModels(provider: CloudProvider): Promise<CloudModelsResult> {
+    return ipcRenderer.invoke(NOTES_CLOUD_MODELS_CHANNEL, provider) as Promise<CloudModelsResult>
   },
 
   getSettings(): Promise<NotesSettingsView> {
@@ -367,7 +416,35 @@ const foldersApi: FoldersApi = {
   }
 }
 
+const recordingApi: RecordingApi = {
+  retryJoin: (requestId) => ipcRenderer.invoke(RECORDING_JOIN_RETRY_CHANNEL, requestId),
+  dismissJoin: (requestId) => ipcRenderer.invoke(RECORDING_JOIN_DISMISS_CHANNEL, requestId),
+  requestStart: (event) => ipcRenderer.invoke(RECORDING_REQUEST_CHANNEL, event),
+  ready: (eligible) => ipcRenderer.invoke(RECORDING_READY_CHANNEL, eligible),
+  attach: (requestId, meetingId) =>
+    ipcRenderer.invoke(RECORDING_ATTACH_CHANNEL, requestId, meetingId),
+  cancel: (requestId) => ipcRenderer.invoke(RECORDING_CANCEL_CHANNEL, requestId),
+  onStart(cb) {
+    const listener = (_event: IpcRendererEvent, request: RecordingStartRequest): void => cb(request)
+    ipcRenderer.on(RECORDING_DELIVER_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(RECORDING_DELIVER_CHANNEL, listener)
+    }
+  },
+  onState(cb) {
+    const listener = (_event: IpcRendererEvent, state: RecordingState): void => cb(state)
+    ipcRenderer.on(RECORDING_STATE_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(RECORDING_STATE_CHANNEL, listener)
+    }
+  }
+}
+
 const calendarApi: CalendarApi = {
+  connectAccount: (provider, accountId) =>
+    ipcRenderer.invoke(CALENDAR_ACCOUNT_CONNECT_CHANNEL, { provider, accountId }),
+  removeAccount: (accountId) => ipcRenderer.invoke(CALENDAR_ACCOUNT_REMOVE_CHANNEL, accountId),
+  cancelAuth: () => ipcRenderer.invoke(CALENDAR_AUTH_CANCEL_CHANNEL),
   getState(): Promise<CalendarState> {
     return ipcRenderer.invoke(CALENDAR_GET_STATE_CHANNEL) as Promise<CalendarState>
   },
@@ -400,6 +477,10 @@ const calendarApi: CalendarApi = {
     return ipcRenderer.invoke(CALENDAR_REFRESH_CHANNEL) as Promise<CalendarState>
   },
 
+  dismissPrompt(): Promise<void> {
+    return ipcRenderer.invoke(CALENDAR_DISMISS_PROMPT_CHANNEL) as Promise<void>
+  },
+
   onEvents(cb: (state: CalendarState) => void): () => void {
     return subscribe(CALENDAR_EVENTS_CHANNEL, cb)
   },
@@ -410,6 +491,12 @@ const calendarApi: CalendarApi = {
 }
 
 const syncApi: SyncApi = {
+  getRemoteMcpEligibility(): Promise<boolean> {
+    return ipcRenderer.invoke(SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL) as Promise<boolean>
+  },
+  reader(request: unknown): Promise<unknown> {
+    return ipcRenderer.invoke('sync:reader', request)
+  },
   share(meetingId: string): Promise<ShareResult> {
     return ipcRenderer.invoke(SYNC_SHARE_CHANNEL, meetingId) as Promise<ShareResult>
   },
@@ -420,6 +507,10 @@ const syncApi: SyncApi = {
 
   connect(): Promise<SyncStatus> {
     return ipcRenderer.invoke(SYNC_CONNECT_CHANNEL) as Promise<SyncStatus>
+  },
+
+  cancelConnect(): Promise<SyncStatus> {
+    return ipcRenderer.invoke(SYNC_CANCEL_CONNECT_CHANNEL) as Promise<SyncStatus>
   },
 
   disconnect(): Promise<SyncStatus> {
@@ -458,6 +549,10 @@ const updateApi: UpdateApi = {
 
   check(): Promise<UpdateState> {
     return ipcRenderer.invoke(UPDATE_CHECK_CHANNEL) as Promise<UpdateState>
+  },
+
+  cancel(): Promise<void> {
+    return ipcRenderer.invoke(UPDATE_CANCEL_CHANNEL) as Promise<void>
   },
 
   install(): Promise<void> {
@@ -504,7 +599,22 @@ const integrationsApi: IntegrationsApi = {
   }
 }
 
+const textImporterApi: TextImporterApi = {
+  preview: () => ipcRenderer.invoke(TEXT_IMPORT_PREVIEW),
+  commit: (token) => ipcRenderer.invoke(TEXT_IMPORT_COMMIT, token),
+  cancel: (token) => ipcRenderer.invoke(TEXT_IMPORT_CANCEL, token)
+}
+
 const importerApi: ImporterApi = {
+  getStatus(): Promise<ImportProgress | null> {
+    return ipcRenderer.invoke(IMPORT_STATUS_CHANNEL) as Promise<ImportProgress | null>
+  },
+  cancel(jobId: string): Promise<ImportProgress | null> {
+    return ipcRenderer.invoke(IMPORT_CANCEL_CHANNEL, jobId) as Promise<ImportProgress | null>
+  },
+  retry(jobId: string): Promise<ImportResult> {
+    return ipcRenderer.invoke(IMPORT_RETRY_CHANNEL, jobId) as Promise<ImportResult>
+  },
   importAudio(): Promise<ImportResult> {
     return ipcRenderer.invoke(IMPORT_AUDIO_CHANNEL) as Promise<ImportResult>
   },
@@ -562,11 +672,27 @@ const audioApi: AudioApi = {
 
 if (process.contextIsolated) {
   try {
+    contextBridge.exposeInMainWorld('storage', {
+      status: () => ipcRenderer.invoke(STORAGE_STATUS_CHANNEL),
+      retry: () => ipcRenderer.invoke(STORAGE_RETRY_CHANNEL),
+      onProgress: (callback) => {
+        const listener = (_event: Electron.IpcRendererEvent, progress: StorageProgress): void =>
+          callback(progress)
+        ipcRenderer.on(STORAGE_PROGRESS_CHANNEL, listener)
+        return () => {
+          ipcRenderer.removeListener(STORAGE_PROGRESS_CHANNEL, listener)
+        }
+      },
+      choose: () => ipcRenderer.invoke(STORAGE_CHOOSE_CHANNEL),
+      cancel: () => ipcRenderer.invoke(STORAGE_CANCEL_CHANNEL),
+      open: () => ipcRenderer.invoke(STORAGE_OPEN_CHANNEL)
+    } satisfies StorageApi)
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
+    contextBridge.exposeInMainWorld('recording', recordingApi)
     contextBridge.exposeInMainWorld('sync', syncApi)
     contextBridge.exposeInMainWorld('media', mediaApi)
     contextBridge.exposeInMainWorld('detect', detectApi)
@@ -575,6 +701,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('integrations', integrationsApi)
     contextBridge.exposeInMainWorld('audio', audioApi)
     contextBridge.exposeInMainWorld('importer', importerApi)
+    contextBridge.exposeInMainWorld('textImporter', textImporterApi)
     contextBridge.exposeInMainWorld('wizard', wizardApi)
     contextBridge.exposeInMainWorld('exporter', exporterApi)
   } catch (error) {
@@ -592,6 +719,8 @@ if (process.contextIsolated) {
   // @ts-ignore (defined in index.d.ts)
   window.calendar = calendarApi
   // @ts-ignore (defined in index.d.ts)
+  window.recording = recordingApi
+  // @ts-ignore (defined in index.d.ts)
   window.sync = syncApi
   // @ts-ignore (defined in index.d.ts)
   window.media = mediaApi
@@ -607,6 +736,7 @@ if (process.contextIsolated) {
   window.audio = audioApi
   // @ts-ignore (defined in index.d.ts)
   window.importer = importerApi
+  Object.assign(window, { textImporter: textImporterApi })
   // @ts-ignore (defined in index.d.ts)
   window.wizard = wizardApi
   // @ts-ignore (defined in index.d.ts)

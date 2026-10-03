@@ -1,9 +1,18 @@
-import { ipcMain, safeStorage } from 'electron'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  normalizeBatchSettings,
+  type BatchTranscriptionSettings
+} from '../shared/batch-transcription'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
+import { fetchCloudModels } from './cloud-models'
+import { app, safeStorage } from 'electron'
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CloudNotesEngine,
+  DEFAULT_MODELS_DIR,
   LOCAL_MODELS,
+  LocalModelStore,
   LocalNotesEngine,
   totalRamGB,
   type AskInput,
@@ -27,6 +36,8 @@ import {
   NOTES_GLOBAL_CHAT_CLEAR_CHANNEL,
   NOTES_GLOBAL_CHAT_GET_CHANNEL,
   NOTES_MODELS_CHANNEL,
+  NOTES_CLOUD_MODELS_CHANNEL,
+  type CloudModelsResult,
   NOTES_SET_SETTINGS_CHANNEL,
   type ActivateModelResult,
   type AskRequest,
@@ -43,9 +54,11 @@ import {
   type TranscriptionLanguage,
   isTranscriptionLanguage
 } from '../shared/notes-api'
+import { autoGenerateNotesAfterStop } from '../shared/auto-notes'
 import type { MeetingRecord } from '../shared/meetings-api'
 import { isStoredCloudProvider } from '../shared/meeting-recovery'
 import type { MeetingsService } from './meetings-service'
+import { modelSearchDirectories } from './model-paths'
 
 /**
  * @repo/ai's index does not re-export the global-ask types (the engines
@@ -65,6 +78,7 @@ const MAX_GLOBAL_HISTORY_SENT = 6
 
 /** What actually lands in userData/settings.json. */
 interface StoredCloudSettings {
+  dataPolicyConfirmed?: boolean
   provider: CloudProvider
   model?: string
   /** base64 of safeStorage.encryptString(key). The plaintext never hits
@@ -73,6 +87,8 @@ interface StoredCloudSettings {
 }
 
 interface StoredSettings {
+  batchTranscription?: BatchTranscriptionSettings
+  autoGenerateNotesAfterStop?: boolean
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
   /** Absent means 'english', the pre-existing behavior. */
@@ -93,11 +109,14 @@ export type NotesBroadcast = (channel: string, payload: unknown) => void
  */
 export class NotesService {
   private readonly settingsPath: string
-  private readonly globalChatPath: string
-  private readonly modelsDir: string
+  private get globalChatPath(): string {
+    return join(resolveLibraryPath(this.libraryRoot), 'global-chat.json')
+  }
+  private readonly modelStore: LocalModelStore
   private settings: StoredSettings
   private localEngine: LocalNotesEngine | null = null
   private localEngineModelId: string | null = null
+  private localEnginePath: string | null = null
   private enhanceBusy = false
   private askBusy = false
   private activateBusy = false
@@ -106,38 +125,53 @@ export class NotesService {
     userDataDir: string,
     private readonly broadcast: NotesBroadcast,
     /** Read-only view of the meetings store, for cross-meeting context. */
-    private readonly meetings: MeetingsService
+    private readonly meetings: MeetingsService,
+    private readonly libraryRoot: LibraryPath = userDataDir,
+    private readonly assertAvailable: () => void = () => {}
   ) {
     this.settingsPath = join(userDataDir, 'settings.json')
-    this.globalChatPath = join(userDataDir, 'global-chat.json')
-    this.modelsDir = join(userDataDir, 'models')
+    this.modelStore = new LocalModelStore(
+      modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR)
+    )
     this.settings = this.loadSettings()
   }
 
   registerIpc(): void {
-    ipcMain.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
-    ipcMain.handle(NOTES_ACTIVATE_MODEL_CHANNEL, (_event, modelId: unknown) =>
+    libraryIpc.handle(
+      NOTES_CLOUD_MODELS_CHANNEL,
+      async (_event, provider: unknown): Promise<CloudModelsResult> => {
+        const cloud = this.settings.cloud
+        if (!cloud || provider !== cloud.provider)
+          return { models: [], error: 'Save this provider’s API key first.' }
+        if (cloud.provider === 'groq' || cloud.provider === 'openrouter')
+          return { models: [], error: 'Select a supported provider.' }
+        const key = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
+        return fetchCloudModels(cloud.provider, key ?? '')
+      }
+    )
+    libraryIpc.handle(NOTES_MODELS_CHANNEL, () => this.modelsResponse())
+    libraryIpc.handle(NOTES_ACTIVATE_MODEL_CHANNEL, (_event, modelId: unknown) =>
       this.activateModel(String(modelId))
     )
-    ipcMain.handle(NOTES_GET_SETTINGS_CHANNEL, () => this.settingsView())
-    ipcMain.handle(NOTES_SET_SETTINGS_CHANNEL, (_event, update: unknown) =>
+    libraryIpc.handle(NOTES_GET_SETTINGS_CHANNEL, () => this.settingsView())
+    libraryIpc.handle(NOTES_SET_SETTINGS_CHANNEL, (_event, update: unknown) =>
       this.applySettings((update ?? {}) as NotesSettingsUpdate)
     )
-    ipcMain.handle(NOTES_TEMPLATES_CHANNEL, async () => {
+    libraryIpc.handle(NOTES_TEMPLATES_CHANNEL, async () => {
       const { NOTE_TEMPLATES } = await import('@repo/ai')
       return NOTE_TEMPLATES.map((t) => ({ id: t.id, label: t.label, description: t.description }))
     })
-    ipcMain.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
+    libraryIpc.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
       this.enhance((request ?? {}) as EnhanceRequest)
     )
-    ipcMain.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
+    libraryIpc.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
       this.ask((request ?? {}) as AskRequest)
     )
-    ipcMain.handle(NOTES_ASK_GLOBAL_CHANNEL, (_event, request: unknown) =>
+    libraryIpc.handle(NOTES_ASK_GLOBAL_CHANNEL, (_event, request: unknown) =>
       this.askGlobal((request ?? {}) as GlobalAskRequest)
     )
-    ipcMain.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () => this.loadGlobalChat())
-    ipcMain.handle(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL, () => {
+    libraryIpc.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () => this.loadGlobalChat())
+    libraryIpc.handle(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL, () => {
       this.saveGlobalChat([])
     })
   }
@@ -155,16 +189,15 @@ export class NotesService {
 
   /* ---- models ---- */
 
-  private modelsResponse(): NotesModelsResponse {
+  private async modelsResponse(): Promise<NotesModelsResponse> {
     const ramGB = totalRamGB()
-    const files = this.listModelFiles()
+    const paths = new Map<string, string | null>()
+    for (const spec of LOCAL_MODELS) paths.set(spec.id, await this.modelStore.find(spec))
     // Out-of-the-box behavior: if nothing was explicitly activated but a
     // usable model is already on disk, adopt the best downloaded one so
     // Enhance works without requiring a trip to Settings first.
     if (this.settings.activeLocalModelId === undefined) {
-      const downloaded = LOCAL_MODELS.filter(
-        (m) => m.minRamGB <= ramGB && this.isDownloaded(m, files)
-      )
+      const downloaded = LOCAL_MODELS.filter((m) => m.minRamGB <= ramGB && paths.get(m.id))
       const adopt = downloaded[downloaded.length - 1]
       if (adopt) {
         this.settings.activeLocalModelId = adopt.id
@@ -180,39 +213,10 @@ export class NotesService {
         sizeGB: spec.sizeGB,
         minRamGB: spec.minRamGB,
         available: spec.minRamGB <= ramGB,
-        downloaded: this.isDownloaded(spec, files),
-        active: this.settings.activeLocalModelId === spec.id
+        downloaded: Boolean(paths.get(spec.id)),
+        active: this.settings.activeLocalModelId === spec.id && Boolean(paths.get(spec.id))
       }))
     }
-  }
-
-  private listModelFiles(): string[] {
-    try {
-      return readdirSync(this.modelsDir)
-    } catch {
-      return [] // dir doesn't exist yet — nothing downloaded
-    }
-  }
-
-  /**
-   * node-llama-cpp caches `hf:owner/repo:quant` URIs as
-   * `hf_<owner>_<repo minus -GGUF>.<quant>.gguf` (verified against a real
-   * download). Exact-name match first, then a fuzzy base+quant fallback; a
-   * sibling `.ipull` marker means the download is still in progress.
-   */
-  private isDownloaded(spec: LocalModelSpec, files: string[]): boolean {
-    const parsed = /^hf:([^/]+)\/([^:]+):(.+)$/.exec(spec.uri)
-    if (!parsed) return false
-    const owner = parsed[1]!.toLowerCase()
-    const repoBase = parsed[2]!.replace(/-GGUF$/i, '').toLowerCase()
-    const quant = parsed[3]!.toLowerCase()
-    const expected = `hf_${owner}_${repoBase}.${quant}.gguf`
-    const lower = files.map((f) => f.toLowerCase())
-    const inProgress = new Set(lower.filter((f) => f.endsWith('.ipull')))
-    return lower.some((f) => {
-      if (!f.endsWith('.gguf') || inProgress.has(`${f}.ipull`)) return false
-      return f === expected || (f.includes(repoBase) && f.includes(quant))
-    })
   }
 
   private async activateModel(modelId: string): Promise<ActivateModelResult> {
@@ -221,13 +225,34 @@ export class NotesService {
     if (spec.minRamGB > totalRamGB()) {
       return { ok: false, error: `${spec.label} needs at least ${spec.minRamGB} GB RAM.` }
     }
-    if (this.activateBusy) {
-      return { ok: false, error: 'Another model is already downloading.' }
+    if (this.activateBusy || this.enhanceBusy || this.askBusy) {
+      return { ok: false, error: 'Another model operation is running. Try again when it finishes.' }
     }
     this.activateBusy = true
     try {
-      const engine = this.obtainLocalEngine(spec)
-      await engine.prepare() // downloads (with progress events) + loads
+      const phase = (stage: 'checking' | 'loading' | 'verifying'): void => {
+        this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, { modelId: spec.id, progress: 0, stage })
+      }
+      phase('checking')
+      const modelPath = await this.modelStore.ensure(spec, async (directory) => {
+        const { resolveModelFile } = await import('node-llama-cpp')
+        const file = await resolveModelFile(spec.artifact.uri, {
+          directory,
+          cli: false,
+          onProgress: ({ totalSize, downloadedSize }) => {
+            this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, {
+              modelId: spec.id,
+              stage: 'downloading',
+              progress: totalSize > 0 ? downloadedSize / totalSize : 0
+            })
+          }
+        })
+        phase('verifying')
+        return file
+      })
+      phase('loading')
+      const engine = this.obtainLocalEngine(spec, modelPath)
+      await engine.prepare()
       this.settings.activeLocalModelId = spec.id
       this.saveSettings()
       return { ok: true }
@@ -239,19 +264,21 @@ export class NotesService {
   }
 
   /** The single long-lived local engine; swapped only on model change. */
-  private obtainLocalEngine(spec: LocalModelSpec): LocalNotesEngine {
-    if (this.localEngine && this.localEngineModelId === spec.id) {
+  private obtainLocalEngine(spec: LocalModelSpec, modelPath: string): LocalNotesEngine {
+    if (
+      this.localEngine &&
+      this.localEngineModelId === spec.id &&
+      this.localEnginePath === modelPath
+    ) {
       return this.localEngine
     }
     const previous = this.localEngine
     this.localEngine = new LocalNotesEngine({
       modelUri: spec.uri,
-      modelsDir: this.modelsDir,
-      onDownloadProgress: (fraction) => {
-        this.broadcast(NOTES_DOWNLOAD_PROGRESS_CHANNEL, { modelId: spec.id, progress: fraction })
-      }
+      modelPath
     })
     this.localEngineModelId = spec.id
+    this.localEnginePath = modelPath
     void previous?.dispose().catch(() => {})
     return this.localEngine
   }
@@ -267,6 +294,12 @@ export class NotesService {
     }
     this.enhanceBusy = true
     try {
+      if (
+        request.automaticAfterStop &&
+        !autoGenerateNotesAfterStop(this.settings.autoGenerateNotesAfterStop)
+      ) {
+        return { error: 'Automatic notes are now disabled. Choose Generate notes to run manually.' }
+      }
       const segments = labelSegments(
         Array.isArray(request.segments) ? request.segments : [],
         request.participants
@@ -278,10 +311,14 @@ export class NotesService {
           typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
         segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
         speakers: speakerInfos(kept, request.participants),
-        ...(kept.length > 0 ? { durationMs: Math.max(...kept.map((s) => s.endMs)) } : {}),
+        ...(kept.some((s) => s.endMs !== undefined)
+          ? {
+              durationMs: Math.max(...kept.flatMap((s) => (s.endMs === undefined ? [] : [s.endMs])))
+            }
+          : {}),
         ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
       }
-      const engine = this.pickEngine()
+      const engine = await this.pickEngine(request.automaticAfterStop === true)
       const result = await engine.generateNotes(
         input,
         (token) => {
@@ -336,7 +373,7 @@ export class NotesService {
         history: history.map((h) => ({ question: h.question, answer: h.answer })),
         question
       }
-      const engine = this.pickEngine()
+      const engine = await this.pickEngine()
       const result = await engine.askQuestion(input, (token) => {
         this.broadcast(NOTES_ASK_TOKEN_CHANNEL, { token })
       })
@@ -380,7 +417,7 @@ export class NotesService {
           .map((e) => ({ question: e.question, answer: e.answer })),
         question
       }
-      const engine = this.pickEngine()
+      const engine = await this.pickEngine()
       const result = await engine.askAcrossMeetings(input, (token) => {
         this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token })
       })
@@ -428,6 +465,7 @@ export class NotesService {
   /* ---- global chat persistence (userData/global-chat.json) ---- */
 
   private loadGlobalChat(): GlobalChatEntry[] {
+    this.assertAvailable()
     try {
       const raw = JSON.parse(readFileSync(this.globalChatPath, 'utf8'))
       return Array.isArray(raw) ? raw.filter(isGlobalChatEntry) : []
@@ -437,6 +475,7 @@ export class NotesService {
   }
 
   private saveGlobalChat(entries: GlobalChatEntry[]): void {
+    this.assertAvailable()
     try {
       writeFileSync(this.globalChatPath, JSON.stringify(entries, null, 2))
     } catch (err) {
@@ -446,38 +485,46 @@ export class NotesService {
 
   /** Local by default; cloud only when explicitly chosen AND usable —
    *  a readable key, or Ollama which needs none. */
-  private pickEngine(): NotesEngine {
+  private async pickEngine(requireSelectedProvider = false): Promise<NotesEngine> {
+    if (this.activateBusy) throw new Error('A model is being prepared. Try again when it finishes.')
     const { engineChoice, cloud } = this.settings
     if (engineChoice === 'cloud' && cloud) {
+      if (cloud.provider === 'groq' || cloud.provider === 'openrouter') {
+        throw new Error(
+          'Groq and OpenRouter are retired. Select Grok (xAI), paid Gemini, or another provider in Settings and enter its own API key. Your notes and stored settings are preserved.'
+        )
+      }
       const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
       if (apiKey || cloud.provider === 'ollama') {
         return new CloudNotesEngine({
           provider: cloud.provider,
+          dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
           apiKey: apiKey ?? '',
           ...(cloud.model ? { model: cloud.model } : {})
         })
       }
+      if (requireSelectedProvider)
+        throw new Error(
+          'The selected provider key is unavailable. Open Settings and reconnect it, then generate notes manually.'
+        )
       // Key unreadable (keychain changed, etc.) — fall through to local.
     }
 
-    const files = this.listModelFiles()
-    const spec =
-      LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId) ??
-      LOCAL_MODELS.find((m) => this.isDownloaded(m, files)) // settings lost but files present
-    if (!spec || !this.isDownloaded(spec, files)) {
-      throw new Error(
-        'No local notes model is downloaded yet. Open the Models view and activate one.'
-      )
+    if (requireSelectedProvider && engineChoice === 'cloud' && !cloud) {
+      throw new Error('Set up the selected provider in Settings, then generate notes manually.')
     }
-    return this.obtainLocalEngine(spec)
+    const selected = LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId)
+    for (const spec of selected ? [selected] : LOCAL_MODELS) {
+      if (spec.minRamGB > totalRamGB()) continue
+      const modelPath = await this.modelStore.find(spec)
+      if (modelPath) return this.obtainLocalEngine(spec, modelPath)
+    }
+    throw new Error(
+      'The local notes model is missing, unreadable or invalid. Open Settings → Notes model to activate or download it.'
+    )
   }
 
   /* ---- settings ---- */
-
-  /** Engine model for batch transcription (import + re-transcribe). */
-  batchAsrModel(): 'v2' | 'v3' {
-    return (this.settings.transcriptionLanguage ?? 'english') === 'english' ? 'v2' : 'v3'
-  }
 
   /** Language hint for live captions; undefined keeps the English streaming model. */
   liveAsrLanguage(): string | undefined {
@@ -486,17 +533,26 @@ export class NotesService {
     return language === 'multilingual' ? 'auto' : language
   }
 
+  batchTranscriptionSettings(): BatchTranscriptionSettings {
+    return normalizeBatchSettings(this.settings.batchTranscription)
+  }
+
   private settingsView(): NotesSettingsView {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
       transcriptionLanguage: this.settings.transcriptionLanguage ?? 'english',
+      batchTranscription: this.batchTranscriptionSettings(),
+      autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(
+        this.settings.autoGenerateNotesAfterStop
+      ),
       ...(activeLocalModelId ? { activeLocalModelId } : {}),
       ...(profileName ? { profileName } : {}),
       ...(cloud
         ? {
             cloud: {
               provider: cloud.provider,
+              dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
               ...(cloud.model ? { model: cloud.model } : {}),
               // "Usable", strictly speaking: Ollama is keyless by design.
               hasKey: Boolean(cloud.apiKeyEncrypted) || cloud.provider === 'ollama'
@@ -508,6 +564,9 @@ export class NotesService {
 
   private applySettings(update: NotesSettingsUpdate): NotesSettingsView {
     let error: string | undefined
+    const previousSettings = { ...this.settings }
+    if (update.batchTranscription)
+      this.settings.batchTranscription = normalizeBatchSettings(update.batchTranscription)
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
@@ -523,7 +582,11 @@ export class NotesService {
       else delete this.settings.profileName
     }
 
-    const validProviders: CloudProvider[] = ['anthropic', 'openai', 'groq', 'openrouter', 'ollama']
+    if (typeof update.autoGenerateNotesAfterStop === 'boolean') {
+      this.settings.autoGenerateNotesAfterStop = update.autoGenerateNotesAfterStop
+    }
+
+    const validProviders: CloudProvider[] = ['anthropic', 'openai', 'grok', 'gemini', 'ollama']
     if (update.cloud === null) {
       delete this.settings.cloud
     } else if (update.cloud && validProviders.includes(update.cloud.provider as CloudProvider)) {
@@ -533,7 +596,7 @@ export class NotesService {
           ? update.cloud.model.trim()
           : undefined
       const previous = this.settings.cloud
-      // Keys are provider-specific: switching provider drops the old key.
+      // Keys are provider-specific: never reuse one for a different provider.
       let apiKeyEncrypted =
         previous && previous.provider === provider ? previous.apiKeyEncrypted : undefined
 
@@ -546,18 +609,22 @@ export class NotesService {
         }
       }
 
-      if (apiKeyEncrypted || provider === 'ollama') {
+      if (!error && (apiKeyEncrypted || provider === 'ollama')) {
         this.settings.cloud = {
           provider,
+          dataPolicyConfirmed: update.cloud.dataPolicyConfirmed === true,
           ...(model ? { model } : {}),
           ...(apiKeyEncrypted ? { apiKeyEncrypted } : {})
         }
-      } else {
-        delete this.settings.cloud
+      } else if (!error) {
+        error = 'Enter an API key for the selected provider. Your previous settings are preserved.'
       }
     }
 
-    this.saveSettings()
+    if (!this.saveSettings()) {
+      this.settings = previousSettings
+      error = 'Could not save notes settings. Please try again.'
+    }
     const view = this.settingsView()
     return error ? { ...view, error } : view
   }
@@ -575,6 +642,15 @@ export class NotesService {
     try {
       const raw = JSON.parse(readFileSync(this.settingsPath, 'utf8')) as Partial<StoredSettings>
       const settings: StoredSettings = {
+        batchTranscription: normalizeBatchSettings(
+          raw.batchTranscription ?? {
+            parakeetModel:
+              (raw as { transcriptionLanguage?: string }).transcriptionLanguage === 'multilingual'
+                ? 'v3'
+                : 'v2'
+          }
+        ),
+        autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(raw.autoGenerateNotesAfterStop),
         engineChoice: raw.engineChoice === 'cloud' ? 'cloud' : 'local'
       }
       if (
@@ -599,6 +675,7 @@ export class NotesService {
       ) {
         settings.cloud = {
           provider: cloud.provider,
+          dataPolicyConfirmed: cloud.dataPolicyConfirmed === true,
           ...(typeof cloud.model === 'string' && cloud.model ? { model: cloud.model } : {}),
           ...(typeof cloud.apiKeyEncrypted === 'string'
             ? { apiKeyEncrypted: cloud.apiKeyEncrypted }
@@ -611,12 +688,21 @@ export class NotesService {
     }
   }
 
-  private saveSettings(): void {
+  private saveSettings(): boolean {
+    const temporaryPath = `${this.settingsPath}.${process.pid}.tmp`
     try {
-      writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2))
+      writeFileSync(temporaryPath, JSON.stringify(this.settings, null, 2))
+      renameSync(temporaryPath, this.settingsPath)
+      return true
     } catch (err) {
       // Never log settings content here — it would include the encrypted key.
       console.error('[notes] failed to save settings:', err)
+      try {
+        rmSync(temporaryPath, { force: true })
+      } catch {
+        /* Preserve the original failure. */
+      }
+      return false
     }
   }
 }

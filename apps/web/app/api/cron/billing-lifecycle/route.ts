@@ -1,3 +1,4 @@
+import { cleanupPrivateInk } from "@/lib/private-ink-cleanup";
 import { timingSafeEqual } from "node:crypto";
 
 import { NextResponse } from "next/server";
@@ -36,7 +37,24 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const started = Date.now();
   const deletions = await processDueDataDeletions();
   const notifications = await processPendingBillingNotifications();
-  return NextResponse.json({ ok: true, deletions, notifications });
+  let privateAssets;
+  try {
+    privateAssets = await cleanupPrivateInk(
+      undefined,
+      undefined,
+      undefined,
+      Math.min(20000, Math.max(0, 55000 - (Date.now() - started))),
+    );
+  } catch {
+    privateAssets = { error: "cleanup_pending" };
+  }
+  return NextResponse.json({
+    ok: true,
+    deletions,
+    notifications,
+    privateAssets,
+  });
 }

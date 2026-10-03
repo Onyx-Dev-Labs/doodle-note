@@ -49,3 +49,8 @@ export function contentHash(record: MeetingRecord, mediaUrls: Record<string, str
   }
   return createHash('sha256').update(JSON.stringify(projection)).digest('hex')
 }
+
+/** Legacy cloud storage requires audio timing; keep untimed imports local. */
+export function supportsCloudSync(record: MeetingRecord): boolean {
+  return !record.segments.some((segment) => segment.source === 'text')
+}

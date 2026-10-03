@@ -22,8 +22,8 @@ overrides:
   postcss@<=8.5.22: 8.5.23
   sharp@<0.35.0: 0.35.0
   tar@>=7.0.0 <=7.5.20: 7.5.21
-  undici@>=6.0.0 <6.28.0: 6.28.0
-  undici@>=7.0.0 <7.29.0: 7.29.0
+  undici@>=6.0.0 <6.28.1: 6.28.1
+  undici@>=7.0.0 <7.29.1: 7.29.1
 
 # Cross-building the Windows app from macOS: pnpm must also install the
 # win32-x64 platform binaries (sherpa-onnx, node-llama-cpp) so

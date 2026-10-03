@@ -5,6 +5,7 @@ import { put } from '@vercel/blob'
 import { createReadStream, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildWindowsBetaManifests } from './windows-beta-manifest.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const desktopDir = path.join(here, '..')
@@ -59,13 +60,14 @@ for (const { source, destination } of artifacts) {
   console.log(blob.url)
 }
 
-process.stdout.write('uploading beta manifest… ')
-const betaManifestBody = manifest.split(installerName).join(betaInstallerName)
-const betaManifest = await put('updates/latest-beta.yml', Buffer.from(betaManifestBody), {
-  access: 'public',
-  addRandomSuffix: false,
-  allowOverwrite: true,
-  cacheControlMaxAge: 60
-})
-console.log(betaManifest.url)
+for (const { pathname, body } of buildWindowsBetaManifests(manifest, installerName)) {
+  process.stdout.write(`uploading beta manifest ${pathname}… `)
+  const betaManifest = await put(pathname, Buffer.from(body), {
+    access: 'public',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 60
+  })
+  console.log(betaManifest.url)
+}
 console.log('production latest.yml remains unchanged')

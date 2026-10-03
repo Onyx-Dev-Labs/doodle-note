@@ -8,8 +8,11 @@ import {
   meetings,
   notes,
   transcriptSegments,
+  writeLegacy,
+  syncNotes,
 } from "@repo/db";
 
+import { syncV2Enabled, readBoundedJSON } from "@/lib/sync-v2";
 import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
 
 const UUID_RE =
@@ -70,7 +73,8 @@ export async function POST(request: Request) {
 
   let body: { meetings?: unknown; folders?: unknown };
   try {
-    body = await request.json();
+    body = await readBoundedJSON(request) as typeof body;
+    if (!body || typeof body !== "object") throw new Error("invalid_body");
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -78,9 +82,9 @@ export async function POST(request: Request) {
     ? (body.meetings as PushMeeting[])
     : [];
   const folderItems = Array.isArray(body.folders)
-    ? (body.folders as PushFolder[]).slice(0, 100)
+    ? (body.folders as PushFolder[])
     : [];
-  if (items.length + folderItems.length === 0 || items.length > 20) {
+  if (items.length + folderItems.length === 0 || items.length > 20 || folderItems.length > 100) {
     return NextResponse.json(
       { error: "Expected 1-20 meetings per push" },
       { status: 400 },
@@ -90,19 +94,21 @@ export async function POST(request: Request) {
   const db = getDb();
   const results: Array<{ id: string; ok: boolean; error?: string }> = [];
 
+  const folderResults: Array<{id:string;ok:boolean;error?:string}>=[];
   // Folders first — meetings in this batch may point at them.
   for (const item of folderItems) {
-    const id = String(item.id ?? "");
+    const id = String(item?.id ?? "");
     if (!UUID_RE.test(id) || typeof item.name !== "string" || !item.name.trim()) {
-      continue; // malformed folder — meetings degrade to unfiled
+      folderResults.push({id,ok:false,error:"invalid_folder"});continue;
     }
+    try {
     const existing = await db
       .select({ organizationId: folders.organizationId })
       .from(folders)
       .where(eq(folders.id, id))
       .limit(1);
     if (existing[0] && existing[0].organizationId !== device.organizationId) {
-      continue; // id owned by another workspace
+      folderResults.push({id,ok:false,error:"write_rejected"});continue;
     }
     const row = {
       organizationId: device.organizationId,
@@ -116,7 +122,10 @@ export async function POST(request: Request) {
       .onConflictDoUpdate({
         target: folders.id,
         set: { name: row.name, updatedAt: row.updatedAt },
+        setWhere: eq(folders.organizationId, device.organizationId),
       });
+    folderResults.push({id,ok:true});
+    } catch {folderResults.push({id,ok:false,error:"write_rejected"});}
   }
 
   // Folder assignments must reference folders this workspace owns.
@@ -130,7 +139,7 @@ export async function POST(request: Request) {
   );
 
   for (const item of items) {
-    const id = String(item.id ?? "");
+    const id = String(item?.id ?? "");
     if (!UUID_RE.test(id)) {
       results.push({ id, ok: false, error: "meeting id must be a UUID" });
       continue;
@@ -140,6 +149,38 @@ export async function POST(request: Request) {
       results.push({ id, ok: false, error: "createdAt must be ISO date" });
       continue;
     }
+
+    if (!Array.isArray(item.segments) || item.segments.length > 20_000 || item.segments.some(s =>
+      !s || (s.channel !== 'mic' && s.channel !== 'system') || typeof s.text !== 'string' || s.text.length > 10_000 ||
+      !Number.isSafeInteger(s.startMs) || !Number.isSafeInteger(s.endMs) || s.startMs < 0 || s.endMs < s.startMs || s.endMs > 2147483647 ||
+      (s.absoluteStartMs !== undefined && !Number.isSafeInteger(s.absoluteStartMs)) ||
+      (s.confidence !== undefined && (!Number.isFinite(s.confidence) || s.confidence < 0 || s.confidence > 1)))) {
+      results.push({id,ok:false,error:'invalid_or_oversized_segments'}); continue;
+    }
+
+      const segments = (Array.isArray(item.segments) ? item.segments : [])
+        .filter(
+          (s) =>
+            (s.channel === "mic" || s.channel === "system") &&
+            typeof s.text === "string" &&
+            Number.isFinite(s.startMs) &&
+            Number.isFinite(s.endMs),
+        )
+        .map((s) => ({
+          meetingId: id,
+          channel: s.channel,
+          speaker:
+            String(s.speaker ?? "").slice(0, 40) || (s.channel === "mic" ? "You" : "Them"),
+          text: s.text.slice(0, 10_000),
+          startMs: Math.round(s.startMs),
+          endMs: Math.round(s.endMs),
+          absoluteStartMs:
+            typeof s.absoluteStartMs === "number" &&
+            Number.isFinite(s.absoluteStartMs)
+              ? Math.round(s.absoluteStartMs)
+              : null,
+          confidence: Number.isFinite(s.confidence) ? s.confidence : null,
+        }));
 
     try {
       // Ownership guard: an id that exists under another workspace is not ours.
@@ -171,39 +212,20 @@ export async function POST(request: Request) {
         createdAt,
         updatedAt: new Date(),
       };
-      await db
+      if (syncV2Enabled()) {
+        await writeLegacy(db, device.organizationId, {id,...row,
+          rawContent:markdownEnvelope(item.rawNotesMarkdown), enhancedContent:markdownEnvelope(item.enhancedMarkdown),
+          segments:segments.map(s=>({channel:s.channel,speaker:s.speaker,text:s.text,startMs:s.startMs,endMs:s.endMs,absoluteStartMs:s.absoluteStartMs,confidence:s.confidence}))});
+        results.push({id,ok:true});continue;
+      }
+      const written = await db
         .insert(meetings)
         .values({ id, ...row })
-        .onConflictDoUpdate({ target: meetings.id, set: row });
+        .onConflictDoUpdate({ target: meetings.id, set: row, setWhere:eq(meetings.organizationId,device.organizationId) }).returning();
+      if (!written.length) {results.push({id,ok:false,error:"write_rejected"});continue;}
 
-      // Segments: full replace keeps the cloud copy exactly mirroring local.
-      await db
-        .delete(transcriptSegments)
-        .where(eq(transcriptSegments.meetingId, id));
-      const segments = (Array.isArray(item.segments) ? item.segments : [])
-        .filter(
-          (s) =>
-            (s.channel === "mic" || s.channel === "system") &&
-            typeof s.text === "string" &&
-            Number.isFinite(s.startMs) &&
-            Number.isFinite(s.endMs),
-        )
-        .slice(0, 5000)
-        .map((s) => ({
-          meetingId: id,
-          channel: s.channel,
-          speaker:
-            String(s.speaker ?? "").slice(0, 40) || (s.channel === "mic" ? "You" : "Them"),
-          text: s.text.slice(0, 10_000),
-          startMs: Math.round(s.startMs),
-          endMs: Math.round(s.endMs),
-          absoluteStartMs:
-            typeof s.absoluteStartMs === "number" &&
-            Number.isFinite(s.absoluteStartMs)
-              ? Math.round(s.absoluteStartMs)
-              : null,
-          confidence: Number.isFinite(s.confidence) ? s.confidence : null,
-        }));
+      // All validation precedes the atomic replacement when v2 rollout is enabled.
+      await db.delete(transcriptSegments).where(eq(transcriptSegments.meetingId, id));
       if (segments.length > 0) {
         await db.insert(transcriptSegments).values(segments);
       }
@@ -219,16 +241,16 @@ export async function POST(request: Request) {
         });
 
       results.push({ id, ok: true });
-    } catch (error) {
+    } catch {
       results.push({
         id,
         ok: false,
-        error: error instanceof Error ? error.message : "write failed",
+        error: "write_rejected",
       });
     }
   }
 
-  return NextResponse.json({ results });
+  return NextResponse.json({ results,folderResults });
 }
 
 /** Meeting deletions propagate too: ids the desktop trashed or removed. */
@@ -238,28 +260,36 @@ export async function DELETE(request: Request) {
   const device = authed.device;
   let body: { ids?: unknown; folderIds?: unknown };
   try {
-    body = await request.json();
+    body = await readBoundedJSON(request) as typeof body;
+    if (!body || typeof body !== "object") throw new Error("invalid_body");
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const ids = (Array.isArray(body.ids) ? body.ids : [])
     .map(String)
     .filter((id) => UUID_RE.test(id))
-    .slice(0, 100);
+;
   const folderIds = (Array.isArray(body.folderIds) ? body.folderIds : [])
     .map(String)
     .filter((id) => UUID_RE.test(id))
-    .slice(0, 100);
+;
 
+  if ((Array.isArray(body.ids) && body.ids.length > 100) || (Array.isArray(body.folderIds) && body.folderIds.length > 100)) return NextResponse.json({error:'delete_batch_limit'},{status:400});
   const db = getDb();
+  const failures: string[]=[];
   for (const id of ids) {
-    await db
+    try {
+      if(syncV2Enabled()) { const protectedRows=await db.select().from(syncNotes).where(and(eq(syncNotes.id,id),eq(syncNotes.organizationId,device.organizationId)));
+        if(protectedRows.some(r=>r.state!=="purged")){failures.push(id);continue;} }
+      await db
       .delete(meetings)
       .where(
         and(eq(meetings.id, id), eq(meetings.organizationId, device.organizationId)),
       );
+    } catch { failures.push(id); }
   }
   if (folderIds.length > 0) {
+    try {
     // FK is ON DELETE SET NULL — meetings inside fall back to unfiled.
     await db
       .delete(folders)
@@ -269,6 +299,7 @@ export async function DELETE(request: Request) {
           eq(folders.organizationId, device.organizationId),
         ),
       );
+    } catch {failures.push(...folderIds);}
   }
-  return NextResponse.json({ ok: true, deleted: ids.length + folderIds.length });
+  return NextResponse.json({ ok: failures.length===0, deleted: ids.length-failures.length + folderIds.length, failures }, {status:failures.length?409:200});
 }

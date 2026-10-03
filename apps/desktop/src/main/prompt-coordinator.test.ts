@@ -114,28 +114,76 @@ describe('prompt coordination', () => {
 
 describe('prompt delivery planning', () => {
   it('pairs one native notification with the persistent in-app action', () => {
-    assert.deepEqual(planPromptDelivery(true, true, true, true), {
+    assert.deepEqual(planPromptDelivery(true, true, true, true, 'win32'), {
       banner: true,
       external: 'notification'
     })
-    assert.deepEqual(planPromptDelivery(true, false, true, true), {
+    assert.deepEqual(planPromptDelivery(true, false, true, true, 'win32'), {
       banner: true,
       external: 'notification'
     })
   })
 
   it('uses the floating panel only when native notifications are unavailable', () => {
-    assert.deepEqual(planPromptDelivery(true, false, false, true), {
+    assert.deepEqual(planPromptDelivery(true, false, false, true, 'win32'), {
       banner: true,
       external: 'panel'
     })
-    assert.deepEqual(planPromptDelivery(true, true, false, true), {
+    assert.deepEqual(planPromptDelivery(true, true, false, true, 'win32'), {
       banner: true,
       external: null
     })
-    assert.deepEqual(planPromptDelivery(false, false, false, true), {
+    assert.deepEqual(planPromptDelivery(false, false, false, true, 'win32'), {
       banner: false,
       external: 'panel'
     })
+  })
+})
+
+describe('macOS prompt delivery', () => {
+  it('uses exactly one panel with or without native notification support in the background', () => {
+    for (const hasWindow of [true, false]) {
+      for (const notifications of [true, false]) {
+        assert.deepEqual(planPromptDelivery(hasWindow, false, notifications, true, 'darwin'), {
+          banner: hasWindow,
+          external: 'panel'
+        })
+      }
+    }
+  })
+  it('keeps the in-app banner without an external toast when foregrounded', () => {
+    assert.deepEqual(planPromptDelivery(true, true, true, true, 'darwin'), {
+      banner: true,
+      external: null
+    })
+  })
+  it('never substitutes a competing native toast for an unavailable macOS panel', () => {
+    assert.equal(planPromptDelivery(false, false, true, false, 'darwin').external, null)
+  })
+})
+
+describe('distinct microphone session identities', () => {
+  it('allows the next call inside five minutes but suppresses the same detection', () => {
+    const prompt = { ...micPrompt('Meeting'), detectionId: 'call-1' }
+    const first = coordinatePrompt(initialPromptCoordinatorState(), prompt, [], NOW)
+    assert.ok(first.prompt)
+    assert.equal(coordinatePrompt(first.state, prompt, [], NOW + 10000).prompt, null)
+    assert.ok(
+      coordinatePrompt(first.state, { ...prompt, detectionId: 'call-2' }, [], NOW + 15000).prompt
+    )
+  })
+  it('still correlates different microphone identities to one calendar event', () => {
+    const event = eventAt(0)
+    const first = coordinatePrompt(
+      initialPromptCoordinatorState(),
+      { ...micPrompt(), detectionId: 'call-1' },
+      [event],
+      NOW
+    )
+    assert.equal(
+      coordinatePrompt(first.state, { ...micPrompt(), detectionId: 'call-2' }, [event], NOW + 15000)
+        .prompt,
+      null
+    )
   })
 })

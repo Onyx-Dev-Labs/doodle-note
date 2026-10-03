@@ -1,0 +1,303 @@
+import assert from 'node:assert/strict'
+import { test, type TestContext } from 'node:test'
+import { createRequire } from 'node:module'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { CalendarAccountStore } from './calendar-account-store'
+
+const require = createRequire(import.meta.url)
+const loader = require('node:module') as { _load: (id: string, ...args: unknown[]) => unknown }
+const originalLoad = loader._load
+let browser: (url: string) => Promise<void> = async () => {}
+loader._load = (id, ...args) =>
+  id === 'electron'
+    ? {
+        shell: { openExternal: (url: string) => browser(url) },
+        safeStorage: {
+          isEncryptionAvailable: () => true,
+          encryptString: (value: string) => Buffer.from(`encrypted:${value}`),
+          decryptString: (value: Buffer) => value.toString().replace(/^encrypted:/, '')
+        }
+      }
+    : originalLoad(id, ...args)
+const { GoogleCalendarClient } = require('./google-calendar') as typeof import('./google-calendar')
+loader._load = originalLoad
+const secret = 'synthetic-desktop-credential'
+const calendar = {
+  id: 'g:primary',
+  name: 'Test calendar',
+  colorHex: '#123456',
+  isDefault: true,
+  canEdit: false
+}
+const response = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), { status })
+
+function setup(
+  t: TestContext,
+  persisted = false,
+  credential = secret
+): { client: InstanceType<typeof GoogleCalendarClient>; cache: string; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'google-calendar-test-'))
+  const cache = join(dir, 'google-token-cache')
+  if (persisted)
+    writeFileSync(
+      cache,
+      'encrypted:' + JSON.stringify({ refreshToken: 'fixture-refresh', email: 'qa@example.test' })
+    )
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  return { client: new GoogleCalendarClient(dir, credential), cache, dir }
+}
+
+test('initial exchange includes desktop credential, PKCE and matching redirect; restart refresh uses same credential', async (t) => {
+  const { client, dir } = setup(t)
+  const networkFetch = globalThis.fetch
+  const grants: string[] = []
+  let auth: URL
+  browser = async (url) => {
+    auth = new URL(url)
+    const callback = new URL(auth.searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', auth.searchParams.get('state')!)
+    await networkFetch(callback)
+  }
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input)
+    if (url === 'https://openidconnect.googleapis.com/v1/userinfo')
+      return response({ sub: 'fixture-subject', email: 'qa@example.test' })
+    if (url === 'https://oauth2.googleapis.com/token') {
+      const params = new URLSearchParams(init?.body as URLSearchParams)
+      assert.equal(params.get('client_secret'), secret)
+      grants.push(params.get('grant_type')!)
+      if (params.get('grant_type') === 'authorization_code') {
+        assert.equal(params.get('redirect_uri'), auth.searchParams.get('redirect_uri'))
+        assert.equal(
+          createHash('sha256').update(params.get('code_verifier')!).digest('base64url'),
+          auth.searchParams.get('code_challenge')
+        )
+        assert.equal(
+          auth.searchParams.get('scope'),
+          'openid email https://www.googleapis.com/auth/calendar.readonly'
+        )
+      } else assert.equal(params.get('refresh_token'), 'fixture-refresh')
+      return response({
+        access_token: 'fixture-access',
+        expires_in: 3600,
+        refresh_token: 'fixture-refresh'
+      })
+    }
+    assert.equal(new URL(url).origin, 'https://www.googleapis.com')
+    assert.ok(new URL(url).pathname.startsWith('/calendar/v3/'))
+    return response({ items: [{ id: 'primary', summary: 'Test calendar', primary: true }] })
+  })
+  await client.connect()
+  assert.match(readFileSync(join(dir, 'calendar-accounts-v2'), 'utf8'), /^encrypted:/)
+  await client.fetchCalendars()
+  await new GoogleCalendarClient(dir, secret).fetchCalendars()
+  assert.deepEqual(grants, ['authorization_code', 'refresh_token'])
+})
+
+test('missing credential fails before browser/network and preserves persisted credentials', async (t) => {
+  const { client, cache } = setup(t, true, '')
+  browser = async () => assert.fail('must not open browser with missing configuration')
+  t.mock.method(globalThis, 'fetch', async () => assert.fail('must not send unconfigured request'))
+  await assert.rejects(client.connect(), /Google Calendar.*configured.*Update DoodleNote/)
+  await assert.rejects(client.fetchCalendars(), /Google Calendar.*configured/)
+  assert.match(readFileSync(cache, 'utf8'), /fixture-refresh/)
+})
+
+test('Google missing-client-secret response gives application recovery without leaking provider payload; retry succeeds', async (t) => {
+  const { client, cache } = setup(t, true)
+  let failed = true
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (String(input) === 'https://openidconnect.googleapis.com/v1/userinfo')
+      return response({ sub: 'fixture-subject', email: 'qa@example.test' })
+    if (String(input) === 'https://oauth2.googleapis.com/token') {
+      if (failed)
+        return response(
+          {
+            error: 'invalid_request',
+            error_description: 'client_secret is missing. private-provider-detail'
+          },
+          400
+        )
+      return response({ access_token: 'fixture-access', expires_in: 3600 })
+    }
+    return response({ items: [{ id: 'primary' }] })
+  })
+  await assert.rejects(client.fetchCalendars(), (error) => {
+    assert.match(String(error), /Google Calendar.*Update DoodleNote/)
+    assert.doesNotMatch(String(error), /private-provider-detail|synthetic-desktop/)
+    return true
+  })
+  assert.match(readFileSync(cache, 'utf8'), /fixture-refresh/)
+  failed = false
+  assert.equal((await client.fetchCalendars()).length, 1)
+})
+
+test('expired access token refreshes, invalid grant requests reconnect, disconnect removes only Google tokens', async (t) => {
+  const { client, cache, dir } = setup(t, true)
+  writeFileSync(join(dir, 'notes-fixture'), 'preserve')
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 })
+  let refreshes = 0
+  let revoked = false
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (String(input) === 'https://openidconnect.googleapis.com/v1/userinfo')
+      return response({ sub: 'fixture-subject', email: 'qa@example.test' })
+    if (String(input) === 'https://oauth2.googleapis.com/token') {
+      refreshes++
+      return revoked
+        ? response({ error: 'invalid_grant' }, 400)
+        : response({ access_token: 'fixture-access', expires_in: 3600 })
+    }
+    return response({ items: [] })
+  })
+  await client.fetchEvents(calendar)
+  await client.fetchEvents(calendar)
+  assert.equal(refreshes, 1)
+  t.mock.timers.tick(3_600_000)
+  await client.fetchEvents(calendar)
+  assert.equal(refreshes, 2)
+  revoked = true
+  t.mock.timers.tick(3_600_000)
+  await assert.rejects(client.fetchEvents(calendar), /Google Calendar.*reconnect/i)
+  client.disconnect()
+  assert.equal(client.signedIn, false)
+  assert.throws(() => readFileSync(cache))
+  assert.equal(readFileSync(join(dir, 'notes-fixture'), 'utf8'), 'preserve')
+})
+
+test('wrong-account reconnect leaves the original credential and selections intact', async (t) => {
+  const { client, dir } = setup(t, true)
+  const networkFetch = globalThis.fetch
+  let subject = 'original-subject'
+  browser = async (url) => {
+    const auth = new URL(url)
+    const callback = new URL(auth.searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', auth.searchParams.get('state')!)
+    await networkFetch(callback)
+  }
+  t.mock.method(globalThis, 'fetch', async (input) =>
+    String(input).endsWith('/userinfo')
+      ? response({ sub: subject, email: 'same@example.test' })
+      : response({
+          access_token: 'fixture-access',
+          refresh_token: 'fixture-refresh',
+          expires_in: 3600
+        })
+  )
+  await client.initialize()
+  const before = readFileSync(join(dir, 'calendar-accounts-v2'))
+  subject = 'different-subject'
+  await assert.rejects(client.connect(), /Choose the connected Google account/)
+  assert.equal(client.identity?.subject, 'original-subject')
+  assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
+})
+
+test('disconnect during identity resolution discards the late result across restart', async (t) => {
+  const { client, dir } = setup(t, true)
+  let finish: (response: Response) => void = () => {}
+  let entered: () => void = () => {}
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    if (String(input).endsWith('/userinfo')) {
+      entered()
+      return new Promise<Response>((resolve) => {
+        finish = resolve
+      })
+    }
+    return response({ access_token: 'fixture-access', expires_in: 3600 })
+  })
+  const pending = client.initialize()
+  await started
+  client.disconnect()
+  finish(response({ sub: 'late-subject', email: 'same@example.test' }))
+  await pending
+  assert.equal(client.signedIn, false)
+  assert.equal(new GoogleCalendarClient(dir, secret).signedIn, false)
+})
+
+test('storage failure during verified Google migration reports recovery and preserves the legacy source', async (t) => {
+  const { dir, cache } = setup(t, true)
+  const before = readFileSync(cache)
+  const store = new CalendarAccountStore(dir, {
+    isEncryptionAvailable: () => true,
+    encryptString: () => {
+      throw new Error('private-provider-payload')
+    },
+    decryptString: (b) => b.toString().replace(/^encrypted:/, '')
+  })
+  const client = new GoogleCalendarClient(dir, secret, store)
+  t.mock.method(globalThis, 'fetch', async (input) =>
+    String(input).endsWith('/userinfo')
+      ? response({ sub: 'verified-subject', email: 'same@example.test' })
+      : response({ access_token: 'fixture-access', expires_in: 3600 })
+  )
+  await assert.rejects(client.initialize(), /Calendar storage.*keychain and disk/)
+  assert.equal(client.accountId, undefined)
+  assert.deepEqual(readFileSync(cache), before)
+  assert.equal(existsSync(store.path), false)
+})
+
+test('two Google subjects add independently, deduplicate, restore and remove only their own credentials', async (t) => {
+  const { client, dir } = setup(t)
+  const codec = {
+    isEncryptionAvailable: () => true,
+    encryptString: (s: string) => Buffer.from(`encrypted:${s}`),
+    decryptString: (b: Buffer) => b.toString().replace(/^encrypted:/, '')
+  }
+  let subject = 'first'
+  const networkFetch = globalThis.fetch
+  browser = async (url) => {
+    const auth = new URL(url)
+    assert.equal(auth.searchParams.get('prompt'), 'select_account consent')
+    const callback = new URL(auth.searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', auth.searchParams.get('state')!)
+    await networkFetch(callback)
+  }
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = String(input)
+    if (url.includes('/userinfo'))
+      return response({ sub: subject, email: `${subject}@example.test` })
+    if (url.includes('/token'))
+      return response({
+        access_token: `access-${subject}`,
+        refresh_token: `refresh-${subject}`,
+        expires_in: 3600
+      })
+    return response({ items: [{ id: 'primary', summary: 'Calendar', primary: true }] })
+  })
+  await client.connect()
+  // Re-open the shared store after the first independent client committed.
+  const shared = new CalendarAccountStore(dir, codec)
+  const firstId = client.accountId!
+  shared.update(firstId, shared.epoch(firstId), (e) => {
+    e.visibleCalendarIds = []
+  })
+  subject = 'second'
+  const second = new GoogleCalendarClient(dir, secret, shared, null)
+  await second.connect()
+  const secondId = second.accountId!
+  assert.notEqual(firstId, secondId)
+  assert.equal(shared.views().length, 2)
+  await new GoogleCalendarClient(dir, secret, shared, null).connect()
+  assert.equal(shared.views().length, 2)
+  assert.deepEqual(shared.get(firstId)?.visibleCalendarIds, [])
+  const restarted = new CalendarAccountStore(dir, codec)
+  assert.equal(
+    new GoogleCalendarClient(dir, secret, restarted, firstId).account?.email,
+    'first@example.test'
+  )
+  const restoredSecond = new GoogleCalendarClient(dir, secret, restarted, secondId)
+  assert.equal(restoredSecond.account?.email, 'second@example.test')
+  restoredSecond.disconnect()
+  const after = new CalendarAccountStore(dir, codec)
+  assert.equal(after.views().length, 1)
+  assert.equal(after.get(firstId)?.view.email, 'first@example.test')
+})

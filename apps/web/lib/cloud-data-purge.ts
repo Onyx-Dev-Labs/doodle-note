@@ -1,3 +1,5 @@
+import { cleanupPrivateInk } from "./private-ink-cleanup";
+import type { PrivateInkStore } from "./private-ink-store";
 import { del, list } from "@vercel/blob";
 import {
   agentTokens,
@@ -23,6 +25,7 @@ export interface CloudDataPurgeResult {
 interface PurgePersonalCloudDataInput {
   userId: string;
   db?: Db;
+  privateInkProvider?: PrivateInkStore;
   deleteAttachmentPrefix?: (prefix: string) => Promise<void>;
 }
 
@@ -50,6 +53,7 @@ export async function purgePersonalCloudData({
   userId,
   db = getDb(),
   deleteAttachmentPrefix = deleteCloudAttachments,
+  privateInkProvider,
 }: PurgePersonalCloudDataInput): Promise<CloudDataPurgeResult> {
   const personalWorkspaces = await db
     .select({ id: organization.id })
@@ -73,11 +77,23 @@ export async function purgePersonalCloudData({
 
   let meetingCount = 0;
   for (const workspace of personalWorkspaces) {
-    const deletedMeetings = await db
-      .delete(meetings)
-      .where(eq(meetings.organizationId, workspace.id))
-      .returning();
-    meetingCount += deletedMeetings.length;
+    // Catalog lookup is safe before migration and during a flag-off rollback.
+    // Once installed, the function also erases native-only/history content and
+    // retains minimal resurrection barriers before old projections are deleted.
+    const capability = await db.execute(sql`select to_regprocedure('sync_purge_workspace(text)') is not null as available`);
+    const capabilityRows = Array.isArray(capability) ? capability : capability.rows;
+    if(capabilityRows[0]?.available) {
+      const result=await db.execute(sql`select sync_purge_workspace(${workspace.id}) as count`);
+      const rows=Array.isArray(result)?result:result.rows;
+      meetingCount+=Number(rows[0]?.count??0);
+    } else {
+      const deletedMeetings = await db.delete(meetings).where(eq(meetings.organizationId, workspace.id)).returning();
+      meetingCount += deletedMeetings.length;
+    }
+    const privateCleanup = await cleanupPrivateInk(db, workspace.id, privateInkProvider);
+    if (privateCleanup.failed || privateCleanup.pending) {
+      throw new Error("Private asset cleanup pending");
+    }
     await db.delete(folders).where(eq(folders.organizationId, workspace.id));
     await db
       .delete(meetingTags)

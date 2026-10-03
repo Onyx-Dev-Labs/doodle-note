@@ -9,6 +9,107 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.32",
+    date: "October 1, 2026",
+    highlights: [
+      "Mac: choose a library folder in Settings and transfer recordings, notes, transcripts, and attachments without restarting",
+      "Keep complete transcripts when hiding the window, resuming recordings, or reopening older multipart recordings",
+      "Import stereo recordings once and follow transcription progress with Cancel and Retry",
+      "Import TXT transcripts with speaker labels and keep notes beside a resizable transcript pane",
+      "Choose local Whisper for imported recordings and re-transcription; downloaded models work without another download",
+      "New Google Calendar connections remain unavailable pending verification",
+    ],
+  },
+  {
+    version: "0.4.31",
+    date: "September 14, 2026",
+    highlights: [
+      "Connect multiple Microsoft 365 accounts and see their selected calendars together on Mac",
+      "Identify each event's account and manage calendar selections, reconnects, and errors independently",
+      "Use Record & Join from meeting prompts to start recording and open the correct meeting link",
+      "Retry opening a meeting link without starting another recording",
+      "Remove the obsolete Mobile cloud notes sidebar button",
+      "New Google Calendar connections remain unavailable pending verification",
+    ],
+  },
+  {
+    version: "0.4.27",
+    date: "September 12, 2026",
+    highlights: [
+      "Choose models from your AI provider's catalog using your saved API key",
+      "See the active notes provider in Settings and which model generated each note",
+      "Use direct paid Gemini and xAI Grok integrations in place of OpenRouter and Groq",
+      "Review clear AI data-use requirements before sending meeting content to a cloud provider",
+      "Existing OpenRouter and Groq users must select a supported provider and enter its own key; notes and Cloud Sync data are preserved",
+      "New Google Calendar connections remain unavailable pending Google verification",
+    ],
+  },
+  {
+    version: "0.4.26",
+    date: "September 11, 2026",
+    highlights: [
+      "Generate notes automatically after Stop, resume recordings, and regenerate notes from the latest transcript",
+      "Use one dog and calendar tray with Compact and Full Island views for today's meetings",
+      "Reuse installed local notes models and get clearer recording startup and setup feedback",
+      "Cancel and retry abandoned Cloud connections",
+      "Temporarily disable new Google Calendar connections while awaiting Google verification approval",
+    ],
+  },
+  {
+    version: "0.4.24",
+    date: "September 8, 2026",
+    highlights: [
+      "Set up Composio and other remote MCP clients from Integrations with a separate server URL and authentication guide",
+      "Manage agent tokens within the selected cloud workspace",
+      "Keep local MCP client setup available alongside remote connections",
+    ],
+  },
+  {
+    version: "0.4.23",
+    date: "September 7, 2026",
+    highlights: [
+      "Keep one Windows app instance in control of your library and updates",
+      "Show update restart progress and allow another attempt when the installer handoff reports an error",
+      "Add local update diagnostics to help investigate installation failures",
+    ],
+  },
+  {
+    version: "0.4.22",
+    date: "September 5, 2026",
+    highlights: [
+      "Fix Windows recording finalization so the local transcript refinement pass can finish",
+      "Protect recordings started immediately after launch and preserve system-audio speaker labels",
+      "Cancel stalled update downloads and retry from Settings without exposing internal errors",
+    ],
+  },
+  {
+    version: "0.4.21",
+    date: "September 4, 2026",
+    highlights: [
+      "Improve Windows transcript accuracy with a private, on-device final pass after recording",
+      "Keep live captions, speaker labels, timestamps, and saved audio while the final wording is refined",
+      "Use the same higher-accuracy Windows transcription path for imported recordings",
+    ],
+  },
+  {
+    version: "0.4.20",
+    date: "September 4, 2026",
+    highlights: [
+      "Restore Check for updates for Windows beta installations",
+      "Replace internal updater diagnostics with a short, readable error message",
+    ],
+  },
+  {
+    version: "0.4.19",
+    date: "September 4, 2026",
+    highlights: [
+      "Preserve the final spoken words when stopping a Windows recording",
+      "Prevent delayed microphone starts and switches from crossing recording sessions",
+      "Show recording readiness and microphone switch failures accurately on Windows",
+      "Route Windows beta update checks through the Windows beta release feed",
+    ],
+  },
+  {
     version: "0.4.18",
     date: "September 1, 2026",
     highlights: [

@@ -1,0 +1,16 @@
+# Copy to Calendar.local.yml only after native registrations are approved.
+# No client secret belongs in an installed native app.
+include: [project.yml]
+targets:
+  DoodleNoteNative:
+    info:
+      properties:
+        DoodleGoogleClientID: ""
+        DoodleGoogleRedirectURI: ""
+        DoodleMicrosoftClientID: ""
+        DoodleMicrosoftRedirectURI: ""
+        CFBundleURLTypes:
+          - CFBundleURLName: Google calendar authorization
+            CFBundleURLSchemes: []
+          - CFBundleURLName: Microsoft calendar authorization
+            CFBundleURLSchemes: []

@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { resolveLibraryPath, type LibraryPath } from './library-path'
+import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import {
@@ -22,21 +23,27 @@ export class FoldersService {
   /** Post-write hook (cloud sync). `deletedId` set on folder deletion. */
   onDidWrite: ((change: { deletedId?: string }) => void) | null = null
 
+  private get file(): string {
+    return resolveLibraryPath(this.fileSource)
+  }
+
   constructor(
-    private readonly file: string,
-    private readonly meetings: MeetingsService
+    private readonly fileSource: LibraryPath,
+    private readonly meetings: MeetingsService,
+    private readonly assertAvailable: () => void = () => {}
   ) {}
 
   registerIpc(): void {
-    ipcMain.handle(FOLDERS_LIST_CHANNEL, () => this.list())
-    ipcMain.handle(FOLDERS_CREATE_CHANNEL, (_event, name: unknown) => this.create(String(name)))
-    ipcMain.handle(FOLDERS_RENAME_CHANNEL, (_event, id: unknown, name: unknown) =>
+    libraryIpc.handle(FOLDERS_LIST_CHANNEL, () => this.list())
+    libraryIpc.handle(FOLDERS_CREATE_CHANNEL, (_event, name: unknown) => this.create(String(name)))
+    libraryIpc.handle(FOLDERS_RENAME_CHANNEL, (_event, id: unknown, name: unknown) =>
       this.rename(String(id), String(name))
     )
-    ipcMain.handle(FOLDERS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
+    libraryIpc.handle(FOLDERS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
   }
 
   list(): FolderRecord[] {
+    this.assertAvailable()
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8'))
       return Array.isArray(raw) ? raw.filter(isFolderRecord) : []
@@ -96,6 +103,7 @@ export class FoldersService {
   }
 
   private save(folders: FolderRecord[]): void {
+    this.assertAvailable()
     writeFileSync(this.file, JSON.stringify(folders, null, 2))
   }
 }

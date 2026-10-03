@@ -1,5 +1,6 @@
+import { libraryIpc } from './library-ipc'
 import { writeFileSync } from 'node:fs'
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import type { MeetingFileStore } from '@repo/meetings-store'
 import { EXPORT_MEETING_CHANNEL, type ExportFormat, type ExportResult } from '../shared/export-api'
 import { buildExportHtml, buildExportMarkdown } from './export-logic'
@@ -13,7 +14,7 @@ export class ExportService {
   constructor(private readonly meetings: MeetingFileStore) {}
 
   registerIpc(): void {
-    ipcMain.handle(EXPORT_MEETING_CHANNEL, (_event, meetingId: unknown, format: unknown) =>
+    libraryIpc.handle(EXPORT_MEETING_CHANNEL, (_event, meetingId: unknown, format: unknown) =>
       this.exportMeeting(String(meetingId ?? ''), format === 'pdf' ? 'pdf' : 'md')
     )
   }

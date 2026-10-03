@@ -7,7 +7,7 @@
 
   <p>
     <a href="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/ci.yml/badge.svg"></a>
-    <a href="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/ios.yml"><img alt="iOS" src="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/ios.yml/badge.svg"></a>
+    <a href="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/mobile-native.yml"><img alt="iOS" src="https://github.com/Onyx-Dev-Labs/doodle-note/actions/workflows/mobile-native.yml/badge.svg"></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-506941.svg"></a>
     <a href="https://www.doodlenote.ai"><img alt="Website" src="https://img.shields.io/badge/doodlenote.ai-506941"></a>
   </p>
@@ -84,7 +84,7 @@ meeting limits. Hosted Sync is optional and costs $10 per user per month.
 | --------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
 | macOS desktop   | Supported      | Apple Silicon, macOS 14 or later; official releases distributed through [doodlenote.ai](https://www.doodlenote.ai) are signed and notarized. |
 | Windows desktop | Beta           | Windows 10/11, 64-bit; packaging and native-module smoke checks run in CI. The current checked-in configuration is unsigned, so SmartScreen warns. |
-| iPhone          | In development | Native SwiftUI app targeting iOS 26; full recording verification requires a physical device.                          |
+| iPhone          | In development | Fresh iPhone/iPad app in apps/mobile-native; iOS 26 prototype, with physical-device and release gates open.                          |
 | Web workspace   | In development | Next.js app for account linking, sync, sharing, workspaces, and hosted agent access.                                  |
 
 Public release history is available in [GitHub Releases](https://github.com/Onyx-Dev-Labs/doodle-note/releases) and the [DoodleNote changelog](https://www.doodlenote.ai/changelog). Maintainer release procedures are documented in [docs/RELEASING.md](docs/RELEASING.md).
@@ -95,7 +95,8 @@ Public release history is available in [GitHub Releases](https://github.com/Onyx
 .github/                 CI, CodeQL, iOS, and release workflows and community configuration
 apps/
   desktop/                Electron + React desktop application
-  ios/                    Native SwiftUI iPhone application
+  mobile-native/          Fresh SwiftUI iPhone/iPad implementation
+  ios/                    Historical iOS implementation; not used for fresh mobile work
   web/                    Next.js cloud workspace and public site
 docs/                    Brand, open-source, release, and screenshot documentation
 engine/                   Swift audio capture and on-device ASR sidecar
@@ -137,7 +138,7 @@ For a durable production deployment of the Sync server, follow
 explicit authentication secret and must either configure Stripe or declare
 themselves self-hosted.
 
-For native iPhone setup, see [apps/ios/README.md](apps/ios/README.md). For the engine protocol and commands, see [engine/README.md](engine/README.md).
+For fresh iPhone/iPad setup, see [apps/mobile-native/README.md](apps/mobile-native/README.md). For the engine protocol and commands, see [engine/README.md](engine/README.md).
 
 ## Verification
 

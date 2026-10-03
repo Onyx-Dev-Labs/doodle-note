@@ -41,3 +41,228 @@ Packaging requires the platform's native dependencies. Maintainer release comman
 - The local MCP server is disabled until the user explicitly enables Agent access in Settings; it remains read-only.
 - Cloud sync, external AI providers, calendars, connectors, and update publication are separate opt-in or maintainer-configured paths.
 - Never commit generated release artifacts, local meeting stores, OAuth tokens, provider keys, or signing material.
+
+## Record from the macOS menu bar
+
+The 22-point filled dog gains red eyes, nose and mouth during confirmed recording,
+clearing when capture stops (including while the meeting finishes saving). The recording body stays
+solid white regardless of app theme; the idle icon uses native template rendering.
+
+After setup and the welcome tour, the dog icon offers **Record now** even with
+no calendar account or upcoming meeting. It opens the normal meeting editor and
+starts capture with the existing microphone, audio persistence and system-audio
+settings. The menu disables new starts during preparation, recording and finalization.
+Closing the main window during capture hides it to preserve the active document;
+closing an idle window destroys it, and the next tray action recreates it.
+
+The optional calendar countdown retains its own menu and preference. Contributor
+PR #119's capture-only timer is independent and is not included here. The dog menu
+adds no duplicate Stop action or timer. Windows has no new tray or close-to-tray
+behavior. The start coordinator also serializes calendar/banner and normal new
+meeting actions, and the optional CalendarService callback is the integration
+point for ONY-269's desktop prompt.
+
+Native wiring QA can run after `pnpm --filter desktop build` using a separately
+installed Playwright runtime:
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright \
+  node apps/desktop/scripts/test-recording-tray.cjs
+```
+
+This harness loads the real main/preload/renderer with a synthetic engine in an
+isolated temporary profile. It never captures audio or downloads models. It checks
+setup eligibility, one-click capture routing, remembered input, repeated starts,
+visible/minimized/closed windows, failure recovery and both native icon resolutions.
+It reports the screenshot directory. Native menu activation is scheduled outside
+inspector evaluation to avoid a macOS Electron 44 inspector crash during window
+creation. This does not prove real microphone/system-audio capture, transcription,
+OS permission recovery, native menu keyboard access or light/dark menu-bar contrast.
+
+Human QA: run `pnpm engine:build` then `pnpm --filter desktop dev` with a dedicated
+`DOODLE_USER_DATA` profile. Complete setup, select a non-default available mic, and
+use safe test speech. With no calendar, activate the dog menu and Record now with
+the window visible, minimized, then closed while the app runs. Expect one new
+recording per idle activation; rapid clicks and clicks while finishing must not
+create another. Stop and reopen each meeting: confirm the saved audio/transcript.
+Check permission denial/unavailable engine recovery, both menu-bar appearances,
+scaled/Retina displays, keyboard menu operation, calendar countdown coexistence,
+and quitting during capture. Packaging, release and installed-version evidence
+remain separate approval gates under `docs/RELEASING.md`.
+
+### Google Calendar in official desktop builds
+
+Downloaded official apps use DoodleNote's **Desktop** OAuth client. New Google
+connections remain disabled until the shipped registration's approval and exact
+scopes are verified. Once enabled, users select Add Google account and consent
+to read-only Calendar access; they do not need Node, a fork, Google Cloud setup,
+or a personal application secret.
+
+Maintainers supply `DOODLENOTE_GOOGLE_CLIENT_SECRET` in the build environment from
+secure credential storage. It must belong to the Desktop client declared in
+`src/shared/google-app.ts`, never the separate Web client. `electron-vite` embeds
+it only in the main-process bundle. Do not paste its value in source, `.env`
+examples, logs, issues, or chat. Build injection keeps the value out of Git, but
+**cannot make an installed-app credential confidential**: it is extractable from
+the distributed binary. PKCE, state, browser consent, loopback redirects, and
+OS-encrypted user refresh tokens remain necessary.
+
+The Mac release workflow reads the GitHub Actions repository secret named
+`DOODLENOTE_GOOGLE_CLIENT_SECRET`. Local Mac packaging and Windows publishing
+require the same environment variable. Generic development builds and unsigned
+Windows CI packages can build without it, but Google connection then gives a
+configuration error before opening a browser. They are not Google-enabled
+release artifacts. Changing the environment after building does not update an
+existing bundle: rebuild before packaging.
+
+Keep the client ID during secret rotation so existing refresh tokens remain
+associated with the same registration. Securely save a replacement, update the
+build input, build and test fresh connect plus expiry/restart refresh, and then
+release through the normal approved process. Do not disable the outgoing
+credential until dependent builds are retired. Users whose refresh tokens were
+revoked must reconnect Google; notes and calendar preferences must be preserved.
+
+Google Console must have Calendar API enabled, External production audience,
+verified branding/domain ownership, and verified declarations matching the
+actual `openid email https://www.googleapis.com/auth/calendar.readonly` request.
+OAuth verification requires a real working-flow demo; a successful unit test or
+branding check is not Google approval.
+
+
+### Multiple calendar accounts
+
+Settings > Calendar groups calendars under each connected identity. Add selects
+that account's default calendar; reconnecting the same identity preserves its
+choices. A reconnect cannot replace it with a different identity. Remove deletes
+only that account's local calendar credentials and cache, leaving saved notes,
+recordings, other accounts and cloud login intact.
+
+Calendar sync processes up to three accounts at once and two calendars per
+account. It follows all pages in the 14-day window, with explicit errors at 100
+pages or 10,000 results per list. Short transient retries are bounded to three
+attempts; longer provider Retry-After windows defer that account while others
+continue. Failed calendars retain their last data with a stale/error label.
+Same invitations received by different accounts remain separate, attributed
+entries with separate event-linked notes.
+
+Synthetic regression checks (no live credentials or capture):
+
+```sh
+pnpm --filter desktop test
+pnpm --filter desktop typecheck
+pnpm --filter desktop lint
+pnpm --filter desktop build
+DOODLE_PLAYWRIGHT_MODULE=/path/to/playwright node apps/desktop/scripts/test-calendar-accounts.cjs
+DOODLE_PLAYWRIGHT_MODULE=/path/to/playwright node apps/desktop/scripts/test-prompt-start.cjs
+```
+
+Before release, use an authorized test profile with two Microsoft organizations
+and two Google identities. Check restart, silent renewal, duplicate add, wrong
+reconnect, removal during sync, per-account visibility, offline recovery and
+recording/notes from each source. Google approval/configuration, actual provider
+handoff, VoiceOver and recorded audio remain separate from fixture evidence.
+
+### Record & Join from a meeting prompt
+
+Calendar prompts with a valid HTTPS meeting link offer **Record & Join**. Main
+resolves the link from the selected event and opens it only after accepting the
+recording reservation. Repeated delivery cannot launch the link again. Recording
+indicators still wait for the engine's ready event. Home's separate Join and
+Take notes actions and unlinked recording prompts retain their existing behavior.
+
+A link-launch failure does not cancel capture. **Join again** retries only the
+accepted link and cannot reserve another recording. The failure state survives a
+renderer reload; the destination remains in main and is never accepted from retry
+IPC. Invalid schemes and URLs containing credentials are not actionable.
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/path/to/playwright node apps/desktop/scripts/test-record-and-join.cjs
+```
+
+This smoke uses an intercepted opener and synthetic engine in a temporary
+profile. It covers panel/banner keyboard actions, closed-main-window startup,
+repeated activation, event-note reuse, independent failures and join-only retry.
+It is not proof of actual meeting-app handoff or recorded audio. Forced renderer
+reload returns to Home, so the fixture stops its retained capture through engine
+IPC after proving the join retry survives without another capture start; full
+editor/session restoration is not added by this feature.
+
+## Choose a Mac library location
+
+In **Settings → General → Library storage**, choose a folder. DoodleNote creates
+**DoodleNote Library** there, finishes pending saves, copies and verifies your
+files, and immediately uses the new location. The app stays open. A progress
+dialog pauses editing during the transfer. Finish active recording or importing
+before changing the location; background library operations drain before copying,
+and later operations queue until the transfer succeeds or fails. If existing
+work does not finish within 30 seconds, the transfer does not start.
+
+Recordings, meeting JSON (notes/transcripts), pasted attachments, folders, Home
+chat and session recovery move together. AI models, sign-ins, cloud/calendar
+configuration, app preferences and caches remain in application support. **Open
+in Finder** opens the active library. Audio lives in
+`audio/<meetingId>/<sessionEpochMs>/`; meeting documents in `meetings/<meetingId>.json`.
+Copy files out if needed. Manually moving managed files can break references.
+
+The original files remain as a recovery copy. This copy uses additional disk
+space and is not updated after the switch. Existing libraries are never
+merged or overwritten. A failed transfer leaves the original active and offers
+**Retry transfer** or **Cancel change** in Settings. The app does not need to
+restart to retry. An interrupted transfer can also recover on the next launch.
+Hidden `.doodlenote-transfer-*` folders may remain after failures; these are
+transaction staging, not active libraries. Retry only removes its own verified
+staging folder. Force-quitting or disconnecting a drive can interrupt a transfer.
+Normal quit/window-close is blocked while the transfer holds the library lock.
+
+Keep external drives connected. A missing/replaced active root stops capture and
+blocks library operations with Retry/Quit, without silently creating an empty
+replacement. Recording interrupted by a disconnect may be incomplete. Restore a
+corrupt `library-location.json`; do not delete it as a troubleshooting shortcut.
+
+The initial location is Electron's actual user-data profile, usually
+`~/Library/Application Support/DoodleNote` for the installed Mac app. Development
+uses `desktop` or `DOODLE_USER_DATA`. Existing agent consent follows the new path
+without being enabled automatically; restart older MCP clients after updating
+the app to load the new server. Development profiles do not redirect another
+profile's agent configuration. Windows/mobile storage UI is unchanged.
+
+Do not downgrade to a build without library-location support after transferring:
+it would open the stale original snapshot. Any rollback must preserve the latest
+active library. Packaging, signing, updater behavior and physical-drive/recording
+acceptance remain separate release gates.
+
+After `pnpm --filter desktop build`, run the synthetic Mac UI check from the root:
+
+```sh
+DOODLE_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/test \
+  node apps/desktop/scripts/test-library-storage.cjs
+```
+
+The test isolates a temporary profile, intercepts the native picker/Finder and
+stubs capture. It checks same-process transfer, recording-busy rejection,
+progress, background drain, queued writes, failure/cancel/retry, new-write paths,
+retained content, agent consent and restart persistence. It prints screenshot
+and fixture locations. This does not prove native picker/Finder, real capture,
+physical-drive reliability or signed installed-app acceptance.
+
+Human QA with disposable data: choose a folder and confirm the path updates
+without restarting; play a retained recording, inspect notes/transcripts and
+attachments, then record/import new content. Check its files use the new folder.
+Reject an occupied/unwritable destination and retry after restoring access.
+Disconnect/reconnect a test external drive and verify the same library resumes.
+
+## Importing a text transcript
+
+Choose **New → Import transcript (.txt)** on Mac or Windows. Preview the content,
+then confirm to create a new local meeting document. Cancel creates nothing.
+Supported files are UTF-8 plain text (optional BOM), up to 2 MB and 10,000 speaker
+sections. CRLF/CR line endings are normalized. Standalone `[Speaker N]` headers
+identify repeat speakers; other labels remain literal text. Unlabeled text uses
+“Speaker” rather than guessing “You” or “Them”.
+
+Text imports contain no audio, timestamps or transcription confidence. Search,
+notes generation, Ask, speaker renaming and Markdown/PDF export remain available.
+Create a new meeting to record audio. These transcripts are explicitly local-only:
+the existing cloud schema requires audio timing, so sync and share links exclude
+them without affecting ordinary recorded meetings. Export to share their content.
+They move with the rest of the library when its folder changes.

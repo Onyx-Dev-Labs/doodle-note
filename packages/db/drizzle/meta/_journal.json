@@ -92,6 +92,34 @@
       "when": 1788184190594,
       "tag": "0012_perfect_pretty_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788733073040,
+      "tag": "0013_same_abomination",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788741254610,
+      "tag": "0014_mean_wild_child",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788744785745,
+      "tag": "0015_mobile_readers",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788798450498,
+      "tag": "0016_explicit_legacy_adoption",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,8 @@ struct EngineMain {
         let options = CLIOptions(args.dropFirst())
         do {
             switch command {
+            case "prepare-batch-audio":
+                try await BatchAudioCommand.run(options)
             case "transcribe":
                 try await Commands.transcribe(options)
             case "stream":
@@ -21,7 +23,7 @@ struct EngineMain {
             case "live":
                 try await LiveCommand.run(options)
             case "preflight":
-                await PreflightCommand.run()
+                await PreflightCommand.run(modelsOnly: options.flags.contains("models-only"))
             case "micmon":
                 MicMonitorCommand.run()
             case "serve":
@@ -97,17 +99,5 @@ struct CLIOptions {
             throw EngineError.usage("file not found: \(url.path)")
         }
         return url
-    }
-}
-
-enum EngineError: Error {
-    case usage(String)
-    case internalError(String)
-
-    var message: String {
-        switch self {
-        case .usage(let m): return m
-        case .internalError(let m): return m
-        }
     }
 }

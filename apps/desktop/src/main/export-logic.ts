@@ -25,10 +25,12 @@ export function buildExportMarkdown(record: MeetingRecord): string {
     parts.push(notes, '')
   }
   if (segments.length > 0) {
-    const base = segments[0]!.startMs
+    const base = segments[0]!.startMs ?? 0
     parts.push('## Transcript', '')
     for (const s of segments) {
-      parts.push(`**[${formatClock(s.startMs - base)}] ${s.speaker}:** ${s.text}`)
+      parts.push(
+        `**${s.startMs === undefined ? '' : `[${formatClock(s.startMs - base)}] `}${s.speaker}:** ${s.text}`
+      )
       parts.push('')
     }
   }
