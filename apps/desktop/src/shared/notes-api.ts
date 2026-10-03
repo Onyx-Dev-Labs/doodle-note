@@ -57,13 +57,13 @@ export type EngineChoice = 'local' | 'cloud'
 
 /**
  * Live caption language. 'english' runs the fastest English-only streaming
- * model; 'multilingual' auto-detects the spoken language; a FLEURS code such
+ * model; 'auto' detects the spoken language; a FLEURS code such
  * as 'de-DE' pins live captions to that language. Imports and re-transcription
  * follow `batchTranscription` instead. Live captions on Windows stay English.
  */
-export const TRANSCRIPTION_LANGUAGES = [
+export const LIVE_CAPTION_LANGUAGES = [
   ['english', 'English (fastest)'],
-  ['multilingual', 'Auto-detect'],
+  ['auto', 'Auto-detect'],
   ['de-DE', 'Deutsch'],
   ['fr-FR', 'Français'],
   ['es-ES', 'Español'],
@@ -72,9 +72,9 @@ export const TRANSCRIPTION_LANGUAGES = [
   ['nl-NL', 'Nederlands'],
   ['pl-PL', 'Polski']
 ] as const
-export type TranscriptionLanguage = (typeof TRANSCRIPTION_LANGUAGES)[number][0]
-export function isTranscriptionLanguage(value: unknown): value is TranscriptionLanguage {
-  return TRANSCRIPTION_LANGUAGES.some(([code]) => code === value)
+export type LiveCaptionLanguage = (typeof LIVE_CAPTION_LANGUAGES)[number][0]
+export function isLiveCaptionLanguage(value: unknown): value is LiveCaptionLanguage {
+  return LIVE_CAPTION_LANGUAGES.some(([code]) => code === value)
 }
 
 /** One catalog model + its state on this machine. */
@@ -110,7 +110,7 @@ export interface NotesSettingsView {
   /** Missing stored values default on; applies to manual and detected stops. */
   autoGenerateNotesAfterStop?: boolean
   activeLocalModelId?: string
-  transcriptionLanguage: TranscriptionLanguage
+  liveCaptionLanguage: LiveCaptionLanguage
   /** The user's own name, used to label their transcript lines. */
   profileName?: string
   cloud?: {
@@ -127,7 +127,7 @@ export interface NotesSettingsView {
 export interface NotesSettingsUpdate {
   batchTranscription?: BatchTranscriptionSettings
   engineChoice?: EngineChoice
-  transcriptionLanguage?: TranscriptionLanguage
+  liveCaptionLanguage?: LiveCaptionLanguage
   autoGenerateNotesAfterStop?: boolean
   /** The user's own name; empty string clears it back to "You". */
   profileName?: string

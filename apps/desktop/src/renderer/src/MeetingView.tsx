@@ -156,13 +156,6 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       if (!active) return state
       return { ...state, phase: 'finishing', statusText: 'Saving transcript…', partials: {} }
     case 'download':
-      // A non-English live model downloads on its first session, before `ready`.
-      if (state.phase === 'starting') {
-        return {
-          ...state,
-          statusText: `Downloading speech model — ${Math.round(ev.progress * 100)}%`
-        }
-      }
       if (state.phase !== 'finishing') return state
       return {
         ...state,
@@ -1763,9 +1756,10 @@ export default function MeetingView({
                       : phase === 'finishing'
                         ? 'Finishing up…'
                         : phase === 'recording'
-                          ? state.transcribing
-                            ? 'Start talking'
-                            : 'Warming up transcription — keep talking, your audio is being captured'
+                          ? state.statusText ||
+                            (state.transcribing
+                              ? 'Start talking'
+                              : 'Warming up transcription — keep talking, your audio is being captured')
                           : 'Hit record and start talking'}
                   </p>
                 </div>

@@ -112,6 +112,8 @@ export interface EngineStatusEvent {
   channel?: EngineChannel
   /** Present when stage === "requesting_permission". */
   permission?: string
+  /** 0..1, present when stage === "downloading_live_model". */
+  progress?: number
 }
 
 export interface EngineDownloadEvent {

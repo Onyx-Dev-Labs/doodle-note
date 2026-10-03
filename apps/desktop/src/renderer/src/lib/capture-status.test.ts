@@ -95,3 +95,14 @@ test('idle and completed sessions ignore delayed status events', () => {
     }
   }
 })
+
+test('live-caption model download progress shows mid-recording without changing phase', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  const next = applyCaptureStatus(recording, {
+    event: 'status',
+    stage: 'downloading_live_model',
+    progress: 0.42
+  })
+  assert.equal(next.phase, 'recording')
+  assert.match(next.statusText, /English captions for now .*42%/)
+})

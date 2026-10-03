@@ -51,8 +51,8 @@ import {
   type NotesModelsResponse,
   type NotesSettingsUpdate,
   type NotesSettingsView,
-  type TranscriptionLanguage,
-  isTranscriptionLanguage
+  type LiveCaptionLanguage,
+  isLiveCaptionLanguage
 } from '../shared/notes-api'
 import { autoGenerateNotesAfterStop } from '../shared/auto-notes'
 import type { MeetingRecord } from '../shared/meetings-api'
@@ -92,7 +92,7 @@ interface StoredSettings {
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
   /** Absent means 'english', the pre-existing behavior. */
-  transcriptionLanguage?: TranscriptionLanguage
+  liveCaptionLanguage?: LiveCaptionLanguage
   /** The user's own name, shown instead of "You" on their transcript lines. */
   profileName?: string
   cloud?: StoredCloudSettings
@@ -528,9 +528,8 @@ export class NotesService {
 
   /** Language hint for live captions; undefined keeps the English streaming model. */
   liveAsrLanguage(): string | undefined {
-    const language = this.settings.transcriptionLanguage
-    if (!language || language === 'english') return undefined
-    return language === 'multilingual' ? 'auto' : language
+    const language = this.settings.liveCaptionLanguage ?? 'english'
+    return language === 'english' ? undefined : language
   }
 
   batchTranscriptionSettings(): BatchTranscriptionSettings {
@@ -541,7 +540,7 @@ export class NotesService {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
-      transcriptionLanguage: this.settings.transcriptionLanguage ?? 'english',
+      liveCaptionLanguage: this.settings.liveCaptionLanguage ?? 'english',
       batchTranscription: this.batchTranscriptionSettings(),
       autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(
         this.settings.autoGenerateNotesAfterStop
@@ -572,8 +571,8 @@ export class NotesService {
       this.settings.engineChoice = update.engineChoice
     }
 
-    if (isTranscriptionLanguage(update.transcriptionLanguage)) {
-      this.settings.transcriptionLanguage = update.transcriptionLanguage
+    if (isLiveCaptionLanguage(update.liveCaptionLanguage)) {
+      this.settings.liveCaptionLanguage = update.liveCaptionLanguage
     }
 
     if (typeof update.profileName === 'string') {
@@ -663,8 +662,8 @@ export class NotesService {
         const name = sanitizeSpeakerName(raw.profileName)
         if (name) settings.profileName = name
       }
-      if (isTranscriptionLanguage(raw.transcriptionLanguage)) {
-        settings.transcriptionLanguage = raw.transcriptionLanguage
+      if (isLiveCaptionLanguage(raw.liveCaptionLanguage)) {
+        settings.liveCaptionLanguage = raw.liveCaptionLanguage
       }
       const cloud = raw.cloud
       if (

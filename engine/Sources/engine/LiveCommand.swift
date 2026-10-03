@@ -388,18 +388,51 @@ actor MultilingualLiveAsr: LiveAsr {
         self.language = language
     }
 
-    func loadModels() async throws {
-        let gate = PercentGate()
-        // One full multilingual ship for every language (scores identically to the
-        // per-language pruned ships) so pinning a language never triggers a new download.
-        // ponytail: 1120 ms tier — smallest chunk that keeps punctuation over long sessions.
-        let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
-            languageCode: "auto", chunkMs: 1120
-        ) { progress in
-            if let pct = gate.advance(progress.fractionCompleted) {
-                Events.emit(["event": "download", "progress": Double(pct) / 100.0])
+    // One full multilingual ship for every language (scores identically to the
+    // per-language pruned ships) so pinning a language never triggers a new download.
+    // ponytail: 1120 ms tier — smallest chunk that keeps punctuation over long sessions.
+    private static let chunkMs = 1120
+
+    /// Whether the model is on disk (FluidAudio's default cache root). A meeting
+    /// never waits on a ~650 MB download: uncached sessions caption in English.
+    static var isCached: Bool {
+        let metadata = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FluidAudio/Models", isDirectory: true)
+            .appendingPathComponent(Repo.nemotronMultilingual.folderName, isDirectory: true)
+            .appendingPathComponent("multilingual/\(chunkMs)ms", isDirectory: true)
+            .appendingPathComponent(ModelNames.NemotronMultilingualStreaming.metadata)
+        return FileManager.default.fileExists(atPath: metadata.path)
+    }
+
+    /// Fetches the model while the session captions in English, at most once per
+    /// process (both channels ask). An interrupted download resumes next session
+    /// (FluidAudio keeps `.partial` files and continues by byte range).
+    static let downloadInBackground: Void = {
+        Task.detached {
+            let gate = PercentGate()
+            do {
+                _ = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                    languageCode: "auto", chunkMs: chunkMs
+                ) { progress in
+                    if let pct = gate.advance(progress.fractionCompleted) {
+                        Events.emit([
+                            "event": "status", "stage": "downloading_live_model",
+                            "progress": Double(pct) / 100.0,
+                        ])
+                    }
+                }
+                Events.emit(["event": "status", "stage": "live_model_ready"])
+            } catch {
+                Events.log("multilingual model download failed: \(error)")
+                Events.emit(["event": "status", "stage": "live_model_download_failed"])
             }
         }
+    }()
+
+    func loadModels() async throws {
+        // Cached by now (see isCached); the call only repairs a stale tokenizer.
+        let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+            languageCode: "auto", chunkMs: Self.chunkMs)
         try await inner.loadModels(from: dir)
         await inner.setLanguage(language == "auto" ? nil : language)
     }
@@ -420,9 +453,17 @@ actor MultilingualLiveAsr: LiveAsr {
         } else {
             all = await inner.getTokenTimings()
         }
-        let tail = Array(all.dropFirst(emittedTimings))
+        let tail = all.dropFirst(emittedTimings)
         emittedTimings += tail.count
-        return tail
+        // Nemotron keeps SentencePiece's "▁" word marker; the desktop splits words
+        // on a leading space, as Unified emits them.
+        return tail.map {
+            TokenTiming(
+                token: $0.token.replacingOccurrences(
+                    of: ASRConstants.sentencePieceWordBoundary, with: " "),
+                tokenId: $0.tokenId, startTime: $0.startTime, endTime: $0.endTime,
+                confidence: $0.confidence)
+        }
     }
 
     func finish() async throws -> String {
@@ -443,7 +484,7 @@ actor MultilingualLiveAsr: LiveAsr {
 /// ASR hiccups — buffers queue in the AsyncStream.
 final class ChannelPipeline {
     let channel: String
-    private let manager: any LiveAsr
+    private var manager: any LiveAsr
     private let recorder: ChannelRecorder?
     private let bufferStream: AsyncStream<AVAudioPCMBuffer>
     private let bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation
@@ -492,8 +533,20 @@ final class ChannelPipeline {
     /// Called AFTER capture starts — audio queues until begin() drains it.
     func prepare() async throws {
         if !preloaded {
+            if manager is MultilingualLiveAsr, !MultilingualLiveAsr.isCached {
+                _ = MultilingualLiveAsr.downloadInBackground
+                manager = StreamingUnifiedAsrManager()
+            }
             Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": manager.modelName])
-            try await manager.loadModels()
+            do {
+                try await manager.loadModels()
+            } catch let error where manager is MultilingualLiveAsr {
+                // A broken multilingual model must not end the meeting — English still works.
+                Events.log("multilingual load failed (\(error)) — captioning in English")
+                Events.emit(["event": "status", "stage": "live_model_load_failed", "channel": channel])
+                manager = StreamingUnifiedAsrManager()
+                try await manager.loadModels()
+            }
         }
         let ch = channel
         await manager.setPartialTranscriptCallback { text in
