@@ -1756,9 +1756,10 @@ export default function MeetingView({
                       : phase === 'finishing'
                         ? 'Finishing up…'
                         : phase === 'recording'
-                          ? state.transcribing
-                            ? 'Start talking'
-                            : 'Warming up transcription — keep talking, your audio is being captured'
+                          ? state.statusText ||
+                            (state.transcribing
+                              ? 'Start talking'
+                              : 'Warming up transcription — keep talking, your audio is being captured')
                           : 'Hit record and start talking'}
                   </p>
                 </div>

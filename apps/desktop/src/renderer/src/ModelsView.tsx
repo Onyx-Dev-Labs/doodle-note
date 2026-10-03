@@ -26,7 +26,9 @@ import {
   type DownloadProgressEvent,
   type NotesModelInfo,
   type NotesModelsResponse,
-  type NotesSettingsView
+  type NotesSettingsView,
+  type LiveCaptionLanguage,
+  LIVE_CAPTION_LANGUAGES
 } from '../../shared/notes-api'
 import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
 import mascotUrl from './assets/mascot-square.png'
@@ -1016,10 +1018,10 @@ export default function ModelsView({
                 <section className="keys-section">
                   <h3>Recording transcription</h3>
                   <p className="models-sub">
-                    Choose the local engine for imported audio and Re-transcribe. Live captions keep
-                    using Parakeet.
+                    Choose the local engine for imported audio and Re-transcribe. Live captions
+                    follow the live caption language below.
                   </p>
-                  <label className="models-sub">
+                  <label className="models-sub key-form">
                     Batch engine
                     <select
                       aria-label="Batch transcription engine"
@@ -1033,7 +1035,7 @@ export default function ModelsView({
                     </select>
                   </label>
                   {(settings?.batchTranscription?.backend ?? 'parakeet') === 'parakeet' ? (
-                    <label className="models-sub">
+                    <label className="models-sub key-form">
                       Parakeet language
                       <select
                         aria-label="Parakeet batch language"
@@ -1054,7 +1056,7 @@ export default function ModelsView({
                         works offline. Audio stays on this Mac. Models stay in application support
                         when you move the library.
                       </p>
-                      <label className="models-sub">
+                      <label className="models-sub key-form">
                         Recording language
                         <select
                           aria-label="Whisper recording language"
@@ -1072,6 +1074,35 @@ export default function ModelsView({
                   )}
                 </section>
               )}
+
+              <section className="keys-section">
+                <h3>Live caption language</h3>
+                <p className="models-sub">
+                  Pick the language you speak, or Auto-detect. Your first recording in another
+                  language captions in English while its model downloads in the background. Imports
+                  and &ldquo;Re-transcribe&rdquo; use the batch engine settings. Live captions on
+                  Windows stay English.
+                </p>
+                <div className="key-form">
+                  <select
+                    aria-label="Live caption language"
+                    value={settings?.liveCaptionLanguage ?? 'english'}
+                    onChange={(e) =>
+                      void window.notes
+                        .setSettings({
+                          liveCaptionLanguage: e.target.value as LiveCaptionLanguage
+                        })
+                        .then(setSettings)
+                    }
+                  >
+                    {LIVE_CAPTION_LANGUAGES.map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </section>
 
               <section className="keys-section">
                 <h3>Appearance</h3>

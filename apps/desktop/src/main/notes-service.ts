@@ -50,7 +50,9 @@ import {
   type GlobalChatEntry,
   type NotesModelsResponse,
   type NotesSettingsUpdate,
-  type NotesSettingsView
+  type NotesSettingsView,
+  type LiveCaptionLanguage,
+  isLiveCaptionLanguage
 } from '../shared/notes-api'
 import { autoGenerateNotesAfterStop } from '../shared/auto-notes'
 import type { MeetingRecord } from '../shared/meetings-api'
@@ -89,6 +91,8 @@ interface StoredSettings {
   autoGenerateNotesAfterStop?: boolean
   engineChoice: 'local' | 'cloud'
   activeLocalModelId?: string
+  /** Absent means 'english', the pre-existing behavior. */
+  liveCaptionLanguage?: LiveCaptionLanguage
   /** The user's own name, shown instead of "You" on their transcript lines. */
   profileName?: string
   cloud?: StoredCloudSettings
@@ -522,6 +526,12 @@ export class NotesService {
 
   /* ---- settings ---- */
 
+  /** Language hint for live captions; undefined keeps the English streaming model. */
+  liveAsrLanguage(): string | undefined {
+    const language = this.settings.liveCaptionLanguage ?? 'english'
+    return language === 'english' ? undefined : language
+  }
+
   batchTranscriptionSettings(): BatchTranscriptionSettings {
     return normalizeBatchSettings(this.settings.batchTranscription)
   }
@@ -530,6 +540,7 @@ export class NotesService {
     const { engineChoice, activeLocalModelId, profileName, cloud } = this.settings
     return {
       engineChoice,
+      liveCaptionLanguage: this.settings.liveCaptionLanguage ?? 'english',
       batchTranscription: this.batchTranscriptionSettings(),
       autoGenerateNotesAfterStop: autoGenerateNotesAfterStop(
         this.settings.autoGenerateNotesAfterStop
@@ -558,6 +569,10 @@ export class NotesService {
 
     if (update.engineChoice === 'local' || update.engineChoice === 'cloud') {
       this.settings.engineChoice = update.engineChoice
+    }
+
+    if (isLiveCaptionLanguage(update.liveCaptionLanguage)) {
+      this.settings.liveCaptionLanguage = update.liveCaptionLanguage
     }
 
     if (typeof update.profileName === 'string') {
@@ -646,6 +661,9 @@ export class NotesService {
       if (typeof raw.profileName === 'string') {
         const name = sanitizeSpeakerName(raw.profileName)
         if (name) settings.profileName = name
+      }
+      if (isLiveCaptionLanguage(raw.liveCaptionLanguage)) {
+        settings.liveCaptionLanguage = raw.liveCaptionLanguage
       }
       const cloud = raw.cloud
       if (

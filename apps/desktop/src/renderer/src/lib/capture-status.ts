@@ -47,6 +47,19 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
       return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
     case 'refining_transcript':
       return { ...state, phase: 'finishing', statusText: 'Improving transcript locally…' }
+    // The live-caption language model downloads in the background on its first
+    // session; captions run in English meanwhile.
+    case 'downloading_live_model':
+      return {
+        ...state,
+        statusText: `English captions for now — downloading the language model (${Math.round((ev.progress ?? 0) * 100)}%)`
+      }
+    case 'live_model_ready':
+      return { ...state, statusText: 'Language model ready — your next recording uses it' }
+    case 'live_model_download_failed':
+      return { ...state, statusText: 'Language model download failed — captions stay English' }
+    case 'live_model_load_failed':
+      return { ...state, statusText: 'Language model failed to load — captions stay English' }
     default:
       return state
   }

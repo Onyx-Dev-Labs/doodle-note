@@ -55,6 +55,28 @@ export const CLOUD_PROVIDERS: ReadonlyArray<{
 ]
 export type EngineChoice = 'local' | 'cloud'
 
+/**
+ * Live caption language. 'english' runs the fastest English-only streaming
+ * model; 'auto' detects the spoken language; a FLEURS code such
+ * as 'de-DE' pins live captions to that language. Imports and re-transcription
+ * follow `batchTranscription` instead. Live captions on Windows stay English.
+ */
+export const LIVE_CAPTION_LANGUAGES = [
+  ['english', 'English (fastest)'],
+  ['auto', 'Auto-detect'],
+  ['de-DE', 'Deutsch'],
+  ['fr-FR', 'Français'],
+  ['es-ES', 'Español'],
+  ['it-IT', 'Italiano'],
+  ['pt-BR', 'Português'],
+  ['nl-NL', 'Nederlands'],
+  ['pl-PL', 'Polski']
+] as const
+export type LiveCaptionLanguage = (typeof LIVE_CAPTION_LANGUAGES)[number][0]
+export function isLiveCaptionLanguage(value: unknown): value is LiveCaptionLanguage {
+  return LIVE_CAPTION_LANGUAGES.some(([code]) => code === value)
+}
+
 /** One catalog model + its state on this machine. */
 export interface NotesModelInfo {
   id: string
@@ -88,6 +110,7 @@ export interface NotesSettingsView {
   /** Missing stored values default on; applies to manual and detected stops. */
   autoGenerateNotesAfterStop?: boolean
   activeLocalModelId?: string
+  liveCaptionLanguage: LiveCaptionLanguage
   /** The user's own name, used to label their transcript lines. */
   profileName?: string
   cloud?: {
@@ -104,6 +127,7 @@ export interface NotesSettingsView {
 export interface NotesSettingsUpdate {
   batchTranscription?: BatchTranscriptionSettings
   engineChoice?: EngineChoice
+  liveCaptionLanguage?: LiveCaptionLanguage
   autoGenerateNotesAfterStop?: boolean
   /** The user's own name; empty string clears it back to "You". */
   profileName?: string
