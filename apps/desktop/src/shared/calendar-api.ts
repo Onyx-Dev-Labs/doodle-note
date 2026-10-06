@@ -113,6 +113,7 @@ export interface CalendarConnection extends CalendarAccount {
 export interface CalendarState {
   connections?: CalendarConnection[]
   connecting?: { provider: CalendarProvider; accountId?: string }
+  /** Whether new Google accounts may be added; existing accounts may still reconnect. */
   googleAvailable?: boolean
   /** A registration is available (built-in, or saved Client/Tenant IDs). */
   configured: boolean
