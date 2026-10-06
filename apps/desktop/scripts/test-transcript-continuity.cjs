@@ -197,9 +197,43 @@ async function main() {
     await page.getByText('Imported synthetic phrase.',{exact:true}).click();
     assert.equal(await page.getByRole('combobox',{name:'Recording part'}).inputValue(),'0','imported row seeks the imported part after Resume');
     assert.deepEqual(await page.locator('.tp-row .tp-time').allTextContents(),['0:00','0:15'],'import/Resume timestamps use the saved audio timeline');
+    // Completion outcomes must survive finalization, clear on Resume and reject
+    // stale capture completions. Engine final alone never proves refinement.
+    await page.getByTitle('Resume recording',{exact:true}).click();
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-first'});
+    await send({event:'ready',channels:['mic']});
+    await send({event:'refined',transcripts:[{channel:'mic',text:'Synthetic refined text.'}]});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0);
+    await send({event:'capture-finalized',captureId:'outcome-first',refinement:'refined'});
+    await page.getByText('Transcript refined locally.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot={meetingId:'qa',captureId:'outcome-first',phase:'ended',segments:[],partials:{},refinement:'refined'};window.dispatchEvent(new Event('focus'))});
+    await settle();
+    await page.getByText('Transcript refined locally.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot=null});
+    await page.getByTitle('Resume recording',{exact:true}).click();
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-second'});
+    await send({event:'ready',channels:['mic']});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0);
+    await send({event:'capture-finalized',captureId:'outcome-first',refinement:'refined'});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0);
+    await send({event:'capture-finalized',captureId:'outcome-second',refinement:'fallback',error:'Synthetic refinement failed.'});
+    await page.getByText('Refinement could not finish. Any available live transcript was kept.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot={meetingId:'qa',captureId:'outcome-second',phase:'ended',segments:[],partials:{},refinement:'fallback',error:'Synthetic refinement failed.'};window.dispatchEvent(new Event('focus'))});
+    await settle();
+    await page.getByText('Refinement could not finish. Any available live transcript was kept.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot=null});
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-third'});
+    await send({event:'ready',channels:['mic']});
+    await send({event:'final',channel:'mic',text:'STREAMING ONLY'});
+    await send({event:'capture-finalized',captureId:'outcome-third'});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0,'Streaming final alone is not refinement');
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-fourth'});
+    await send({event:'ready',channels:['mic']});
+    await send({event:'capture-finalized',captureId:'outcome-fourth',refinement:'refined',error:'Synthetic persistence error.'});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0,'Failed persistence must not show success');
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
-    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy, part highlighting, imported/recorded timestamps and part selection')
+    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy, part highlighting, imported/recorded timestamps and part selection; explicit finalized refinement success/fallback, snapshot restoration, Resume reset, stale capture rejection, no success from streaming final or persistence failure')
   } finally { await browser.close(); server.close() }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

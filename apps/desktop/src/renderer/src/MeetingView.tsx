@@ -17,7 +17,12 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
-import type { EngineChannel, EngineEvent, EngineInputDevice } from '../../shared/engine-events'
+import type {
+  EngineChannel,
+  EngineEvent,
+  EngineInputDevice,
+  RefinementOutcome
+} from '../../shared/engine-events'
 import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
 import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
@@ -79,6 +84,7 @@ interface SessionState {
   error: string | null
   /** True once the ASR models finished warming and transcription is live. */
   transcribing: boolean
+  refinement?: RefinementOutcome
 }
 
 const initialSessionState: SessionState = {
@@ -114,6 +120,7 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         partials: snapshot.partials,
         echoCount: snapshot.segments.filter((s) => s.echo).length,
         error: snapshot.error ?? state.error,
+        refinement: snapshot.refinement,
         statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
       }
     }
@@ -178,7 +185,8 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         phase: 'ended',
         statusText: '',
         partials: {},
-        error: ev.error ?? state.error
+        error: ev.error ?? state.error,
+        refinement: ev.refinement
       }
     case 'error':
       return { ...state, error: ev.message }
@@ -2115,6 +2123,16 @@ export default function MeetingView({
       {allSegments.some((segment) => segment.source === 'text') && (
         <p className="text-import-local" role="note">
           Imported text transcript. No recording or timestamps. Stored locally; use Export to share.
+        </p>
+      )}
+      {phase === 'ended' && state.refinement === 'refined' && !state.error && (
+        <p className="text-import-local" role="status">
+          Transcript refined locally.
+        </p>
+      )}
+      {phase === 'ended' && state.refinement === 'fallback' && (
+        <p className="text-import-local" role="status">
+          Refinement could not finish. Any available live transcript was kept.
         </p>
       )}
       {capturing && autoStopState && (

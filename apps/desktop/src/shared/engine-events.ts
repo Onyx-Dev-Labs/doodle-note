@@ -172,6 +172,8 @@ export interface EngineErrorEvent {
   event: 'error'
   message: string
   channel?: EngineChannel
+  /** Windows local refinement failed; provisional live text was retained. */
+  refinementFailed?: boolean
 }
 
 /** Live session fully finished (all channels final). */
@@ -264,6 +266,8 @@ export interface EngineSegmentsReplacedEvent {
   segments: TranscriptSegment[]
 }
 
+export type RefinementOutcome = 'pending' | 'refined' | 'fallback'
+
 export interface EngineSessionSnapshot {
   meetingId: string
   captureId?: string
@@ -271,6 +275,7 @@ export interface EngineSessionSnapshot {
   segments: TranscriptSegment[]
   partials: Partial<Record<EngineChannel, string>>
   error?: string
+  refinement?: RefinementOutcome
 }
 
 export type EngineLifecycleEvent =
@@ -282,7 +287,12 @@ export type EngineLifecycleEvent =
   | EngineSegmentsReplacedEvent
   | EngineSessionSavedEvent
   /** Emitted by main only after final segments and session persistence settle. */
-  | { event: 'capture-finalized'; captureId?: string; error?: string }
+  | {
+      event: 'capture-finalized'
+      captureId?: string
+      error?: string
+      refinement?: RefinementOutcome
+    }
 
 /** Everything the renderer can receive on ENGINE_EVENT_CHANNEL. */
 export type EngineEvent = EngineSidecarEvent | EngineLifecycleEvent

@@ -221,6 +221,7 @@ export class WinEngineHost {
         if (!this.disposed && this.sessionActive && this.activeSessionId === sessionId)
           this.emit({
             event: 'error',
+            refinementFailed: true,
             message: this.ephemeralAudioDir
               ? 'High-accuracy refinement could not finish; the live transcript was kept. Enable saved audio before your next recording to retry later.'
               : 'High-accuracy refinement could not finish; the live transcript was kept. Try Re-transcribe using the saved recording.'
@@ -229,6 +230,7 @@ export class WinEngineHost {
     } else if (!this.disposed && this.sessionActive && this.activeSessionId === sessionId) {
       this.emit({
         event: 'error',
+        refinementFailed: true,
         message: audioPath
           ? 'High-accuracy refinement is unavailable; the live transcript was kept. Try Re-transcribe using the saved recording.'
           : 'The recording could not be prepared for high-accuracy refinement; the live transcript was kept. Restart DoodleNote to recover any saved audio.'

@@ -215,7 +215,10 @@ test('audio finalization failure retains the transcript and emits an actionable 
   await state.completeSession()
   assert.ok(
     events.some(
-      (event) => event.event === 'error' && /live transcript was kept/i.test(event.message)
+      (event) =>
+        event.event === 'error' &&
+        event.refinementFailed === true &&
+        /live transcript was kept/i.test(event.message)
     )
   )
   assert.ok(!JSON.stringify(events).includes('private path'))

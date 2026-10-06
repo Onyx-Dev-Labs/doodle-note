@@ -121,3 +121,18 @@ native smoke. Only then assess Done/Live. Keep the preceding qualified artifacts
 and a private profile backup. Rollback requires explicit approval and normally a
 higher-version corrected build; never overwrite newer user data or silently
 switch channels. A stale lower-version feed is not a reliable installed rollback.
+
+## Explicit refinement outcome follow-up
+
+Native Windows QA reproduced a completed refinement with no visible success
+message. The recording session now reports its authoritative refinement outcome
+only after finalization and persistence. The view shows “Transcript refined
+locally.” for explicit successful refinement, or an explicit fallback retaining
+any available live transcript. Resume clears the old outcome and stale capture
+completions cannot replace a new recording's state. Streaming final text alone
+and persistence errors cannot produce a success notice. Same-session snapshot
+recovery restores the outcome; this does not add a historical outcome migration.
+
+Focused session/host and actual renderer regressions cover success, failure,
+empty output, stale completion, Resume, snapshot recovery and persistence errors.
+Native package tests must observe both outcomes on the final candidate.

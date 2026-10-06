@@ -6,6 +6,73 @@ import { test } from 'node:test'
 import type { EngineEvent } from '../shared/engine-events'
 import { TranscriptSession } from './transcript-session'
 
+test('completion and snapshot carry only an explicit successful refinement, resetting on Resume', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'doodle-refinement-status-'))
+  const events: EngineEvent[] = []
+  try {
+    const session = new TranscriptSession((event) => events.push(event), dir)
+    session.bindMeeting('synthetic')
+    session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'first' })
+    session.handle({ event: 'ready' })
+    session.handle({
+      event: 'refined',
+      transcripts: [{ channel: 'mic', text: 'Synthetic refined text.' }]
+    })
+    assert.equal(
+      events.some((event) => event.event === 'capture-finalized'),
+      false
+    )
+    session.handle({ event: 'done' })
+    assert.equal((events.at(-1) as { refinement?: string }).refinement, 'refined')
+    assert.equal((session.snapshot('synthetic') as { refinement?: string }).refinement, 'refined')
+    session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'second' })
+    session.handle({ event: 'final', channel: 'mic', text: 'STREAMING ONLY' })
+    session.handle({ event: 'refined', transcripts: [{ channel: 'mic', text: '  ' }] })
+    session.handle({ event: 'done' })
+    assert.equal((events.at(-1) as { refinement?: string }).refinement, undefined)
+    assert.equal((session.snapshot('synthetic') as { refinement?: string }).refinement, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('failed or interrupted refinement explicitly keeps live text without reporting success', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'doodle-refinement-fallback-'))
+  try {
+    for (const interrupted of [false, true]) {
+      const events: EngineEvent[] = []
+      const session = new TranscriptSession((event) => events.push(event), dir)
+      session.bindMeeting('synthetic')
+      session.handle({
+        event: 'started',
+        command: 'live',
+        binaryPath: 'test',
+        captureId: 'fallback'
+      })
+      session.handle({
+        event: 'timings',
+        channel: 'mic',
+        tokens: [{ token: 'Live synthetic text.', startSec: 0, endSec: 1, confidence: 1 }]
+      })
+      if (interrupted) {
+        session.handle({ event: 'status', stage: 'refining_transcript' })
+        session.handle({ event: 'exit', code: 1, signal: null })
+      } else {
+        session.handle({
+          event: 'error',
+          message: 'Refinement unavailable.',
+          refinementFailed: true
+        })
+        session.handle({ event: 'done' })
+      }
+      assert.equal((events.at(-1) as { refinement?: string }).refinement, 'fallback')
+      assert.equal(session.snapshot('synthetic')?.segments[0]?.text, 'Live synthetic text.')
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('persists refined wording while preserving the live seek anchor', () => {
   const dir = mkdtempSync(join(tmpdir(), 'doodlenote-session-test-'))
   const events: EngineEvent[] = []
