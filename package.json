@@ -42,6 +42,6 @@
     "whisper:build": "bash apps/desktop/scripts/build-whisper.sh"
   },
   "devDependencies": {
-    "turbo": "^2.5.0"
+    "turbo": "^2.11.7"
   }
 }
