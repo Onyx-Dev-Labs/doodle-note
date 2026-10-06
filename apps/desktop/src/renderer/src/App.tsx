@@ -52,6 +52,10 @@ function App(): React.JSX.Element {
   const [recordingError, setRecordingError] = useState<string | null>(null)
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [transcriptRequest, setTranscriptRequest] = useState<{
+    meetingId: string
+    n: number
+  } | null>(null)
   const [autoRecordRequestId, setAutoRecordRequestId] = useState<string | null>(null)
   const [autoRecordId, setAutoRecordId] = useState<string | null>(null)
   /** Only manually-created documents get the empty save/discard decision. */
@@ -146,16 +150,22 @@ function App(): React.JSX.Element {
     })
   }, [])
 
-  const openMeeting = useCallback((id: string, isNewManualDraft = false) => {
-    const active = recordingState.current
-    if (active.phase !== 'idle' && active.meetingId !== id) {
+  const openMeeting = useCallback(
+    (id: string, isNewManualDraft = false, showTranscript = false) => {
+      const active = recordingState.current
+      if (active.phase !== 'idle' && active.meetingId !== id) {
+        setView('editor')
+        return
+      }
+      setMeetingId(id)
+      setTranscriptRequest((current) =>
+        showTranscript ? { meetingId: id, n: (current?.n ?? 0) + 1 } : null
+      )
+      setNewDraftId(isNewManualDraft ? id : null)
       setView('editor')
-      return
-    }
-    setMeetingId(id)
-    setNewDraftId(isNewManualDraft ? id : null)
-    setView('editor')
-  }, [])
+    },
+    []
+  )
 
   const newMeeting = useCallback(
     async (prefill?: {
@@ -674,6 +684,9 @@ function App(): React.JSX.Element {
             key={meetingId}
             meetingId={meetingId}
             visible={view === 'editor'}
+            openTranscriptRequestId={
+              transcriptRequest?.meetingId === meetingId ? transcriptRequest.n : undefined
+            }
             autoRecord={meetingId === autoRecordId}
             autoRecordRequestId={autoRecordRequestId}
             isNewDraft={meetingId === newDraftId}
@@ -724,7 +737,7 @@ function App(): React.JSX.Element {
           <button onClick={() => setRecordingError(null)}>Dismiss</button>
         </div>
       )}
-      <ImportProgressPanel onOpen={openMeeting} />
+      <ImportProgressPanel onOpen={(id) => openMeeting(id, false, true)} />
       {wizardOpen && <FirstRunWizard onFinish={closeWizard} />}
 
       {!wizardOpen && tourOpen && (

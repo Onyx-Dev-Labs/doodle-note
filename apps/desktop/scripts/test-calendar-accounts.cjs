@@ -53,7 +53,8 @@ async function main() {
       window.audio = { usage: async () => ({ bytes: 0, count: 0 }) }
       window.sync = { getStatus: async () => null, onStatus: off }
       window.integrations = { getAgentAccess: async () => null }
-      window.detect = { getState: async () => ({ platform: 'darwin' }) }
+      const params = new URLSearchParams(location.search)
+      window.detect = { getState: async () => ({ platform: params.get('platform') }) }
       window.updates = { getState: async () => null, onState: off }
       const connections = ['microsoft', 'microsoft', 'google', 'google'].map((provider, i) => ({
         id: `account-${i}`,
@@ -70,7 +71,7 @@ async function main() {
           signedIn: true,
           msSignedIn: true,
           googleSignedIn: true,
-          googleAvailable: true,
+          googleAvailable: params.get('google') === 'enabled',
           connections,
           calendars: connections.map((c) => ({
             id: `cal-${c.id}`,
@@ -118,17 +119,35 @@ async function main() {
         }
       }
     })
-    for (const [width, height, theme] of [
-      [1000, 760, 'light'],
-      [800, 560, 'dark']
+    for (const [platform, google, width, height, theme] of [
+      ['win32', 'enabled', 1000, 760, 'light'],
+      ['win32', 'enabled', 800, 560, 'dark'],
+      ['win32', 'pending', 800, 560, 'dark'],
+      ['darwin', 'enabled', 1000, 760, 'light'],
+      ['darwin', 'pending', 800, 560, 'dark']
     ]) {
       await page.setViewportSize({ width, height })
-      await page.goto(`http://127.0.0.1:${server.address().port}`)
+      await page.goto(
+        `http://127.0.0.1:${server.address().port}?platform=${platform}&google=${google}`
+      )
       await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme)
       await page
         .getByRole('region', { name: 'Microsoft owner-0@example.test', exact: true })
         .waitFor()
       assert.equal(await page.getByRole('button', { name: /^Reconnect owner-/ }).count(), 4)
+      const googleAdd = page.getByRole('button', { name: 'Add Google account', exact: true })
+      assert.equal(await googleAdd.isDisabled(), google === 'pending')
+      for (const account of [2, 3]) {
+        assert.equal(
+          await page
+            .getByRole('button', { name: `Reconnect owner-${account}@example.test`, exact: true })
+            .isDisabled(),
+          google === 'pending'
+        )
+      }
+      if (google === 'pending') {
+        await page.getByText('Awaiting Google verification approval.', { exact: true }).waitFor()
+      }
       const reconnect = page.getByRole('button', {
         name: 'Reconnect owner-1@example.test',
         exact: true
@@ -153,11 +172,14 @@ async function main() {
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
         true
       )
-      await page.screenshot({ path: join(output, `${width}-${theme}.png`), fullPage: true })
+      await page.screenshot({
+        path: join(output, `${platform}-${google}-${width}-${theme}.png`),
+        fullPage: true
+      })
     }
     assert.deepEqual(errors, [])
     console.log(
-      `PASS: four account cards, targeted keyboard reconnect, cancel, single remove, selection, account errors, compact layout. Evidence: ${output}`
+      `PASS: Windows/macOS four account cards, Google approval gate, targeted keyboard reconnect, cancel, single remove, selection, account errors, compact layout. Synthetic provider state only; no OAuth or account-retention acceptance. Evidence: ${output}`
     )
   } finally {
     await browser.close()

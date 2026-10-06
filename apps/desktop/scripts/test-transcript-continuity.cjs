@@ -168,9 +168,72 @@ async function main() {
       await page.getByTitle('Copy transcript',{exact:true}).click();
       assert.equal((await page.evaluate(()=>window.qa.clipboard)).split('\n').length,7);
     }
+    // Imported audio uses file-relative timing; Resume uses wall-clock timing.
+    // Joining those domains must not render epoch-sized elapsed timestamps.
+    await page.evaluate(()=>{
+      window.qa.snapshot=null;
+      window.qa.meeting.segments=[
+        {id:'imported',channel:'mic',speaker:'Speaker',speakerId:'imported-speaker',text:'Imported synthetic phrase.',startMs:0,endMs:10000,confidence:1},
+        {id:'resumed',channel:'system',speaker:'Them',text:'Resumed synthetic phrase.',startMs:3000,endMs:6000,absoluteStartMs:1790979993000,confidence:1}
+      ];
+      window.qa.parts=[{url:'imported-part',startEpochMs:1790979921059,durationMs:12000},{url:'resumed-part',startEpochMs:1790979990000,durationMs:40000}];
+      window.qa.send({event:'audio'});
+      window.qa.refreshImported();
+    });
+    await page.getByText('Imported synthetic phrase.',{exact:true}).waitFor();
+    await settle();
+    // No real audio decoder in this renderer harness; assert the actual part
+    // selection that feeds the player (native QA checks playable fixtures).
+    await page.evaluate(()=>{HTMLMediaElement.prototype.play=()=>Promise.resolve()});
+    await page.getByText('Resumed synthetic phrase.',{exact:true}).click();
+    assert.equal(await page.getByRole('combobox',{name:'Recording part'}).inputValue(),'1');
+    await page.evaluate(()=>{
+      const audio=document.querySelector('.tp-audio audio');
+      Object.defineProperty(audio,'paused',{configurable:true,get:()=>false});
+      audio.currentTime=0.5;audio.dispatchEvent(new Event('timeupdate',{bubbles:true}));
+    });
+    await settle();
+    assert.equal(await page.locator('.tp-playing').count(),0,'recorded part must not highlight an imported row');
+    await page.getByText('Imported synthetic phrase.',{exact:true}).click();
+    assert.equal(await page.getByRole('combobox',{name:'Recording part'}).inputValue(),'0','imported row seeks the imported part after Resume');
+    assert.deepEqual(await page.locator('.tp-row .tp-time').allTextContents(),['0:00','0:15'],'import/Resume timestamps use the saved audio timeline');
+    // Completion outcomes must survive finalization, clear on Resume and reject
+    // stale capture completions. Engine final alone never proves refinement.
+    await page.getByTitle('Resume recording',{exact:true}).click();
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-first'});
+    await send({event:'ready',channels:['mic']});
+    await send({event:'refined',transcripts:[{channel:'mic',text:'Synthetic refined text.'}]});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0);
+    await send({event:'capture-finalized',captureId:'outcome-first',refinement:'refined'});
+    await page.getByText('Transcript refined locally.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot={meetingId:'qa',captureId:'outcome-first',phase:'ended',segments:[],partials:{},refinement:'refined'};window.dispatchEvent(new Event('focus'))});
+    await settle();
+    await page.getByText('Transcript refined locally.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot=null});
+    await page.getByTitle('Resume recording',{exact:true}).click();
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-second'});
+    await send({event:'ready',channels:['mic']});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0);
+    await send({event:'capture-finalized',captureId:'outcome-first',refinement:'refined'});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0);
+    await send({event:'capture-finalized',captureId:'outcome-second',refinement:'fallback',error:'Synthetic refinement failed.'});
+    await page.getByText('Refinement could not finish. Any available live transcript was kept.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot={meetingId:'qa',captureId:'outcome-second',phase:'ended',segments:[],partials:{},refinement:'fallback',error:'Synthetic refinement failed.'};window.dispatchEvent(new Event('focus'))});
+    await settle();
+    await page.getByText('Refinement could not finish. Any available live transcript was kept.',{exact:true}).waitFor();
+    await page.evaluate(()=>{window.qa.snapshot=null});
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-third'});
+    await send({event:'ready',channels:['mic']});
+    await send({event:'final',channel:'mic',text:'STREAMING ONLY'});
+    await send({event:'capture-finalized',captureId:'outcome-third'});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0,'Streaming final alone is not refinement');
+    await send({event:'started',command:'live',binaryPath:'synthetic',captureId:'outcome-fourth'});
+    await send({event:'ready',channels:['mic']});
+    await send({event:'capture-finalized',captureId:'outcome-fourth',refinement:'refined',error:'Synthetic persistence error.'});
+    assert.equal(await page.getByText('Transcript refined locally.',{exact:true}).count(),0,'Failed persistence must not show success');
     await page.screenshot({path:join(output,'transcript-recovered.png')})
     assert.deepEqual(errors,[])
-    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy and part highlighting')
+    console.log('PASS: hidden partial/final events, missed-event snapshot recovery, no duplicate segments, main-owned persistence, matching background completion, library flush, Resume, legacy 13/8 and 7/4 rows, Copy, part highlighting, imported/recorded timestamps and part selection; explicit finalized refinement success/fallback, snapshot restoration, Resume reset, stale capture rejection, no success from streaming final or persistence failure')
   } finally { await browser.close(); server.close() }
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

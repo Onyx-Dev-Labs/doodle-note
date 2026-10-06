@@ -11,10 +11,12 @@ import {
   desktopCapturer,
   ipcMain,
   nativeTheme,
+  powerMonitor,
   protocol,
   session as electronSession
 } from 'electron'
 import { RecordingStartCoordinator } from './recording-start-coordinator'
+import { RecordingStopCoordinator } from './recording-stop-coordinator'
 import { RecordingTray } from './recording-tray'
 import {
   RECORDING_JOIN_RETRY_CHANNEL,
@@ -58,7 +60,7 @@ import { SyncService } from './sync-service'
 import { MAIN_WINDOW_SIZE } from './window-sizing'
 import {
   DETECT_GET_STATE_CHANNEL,
-  DETECT_MEETING_ENDED_CHANNEL,
+  DETECT_AUTO_STOP_STATE_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
   type DetectPrefsUpdate,
   type DetectState
@@ -402,6 +404,34 @@ app.whenReady().then(async () => {
   // the mic open (Zoom/Teams/Meet) and prompts even without a calendar event.
   // Audio output alone is intentionally ignored: it cannot distinguish an
   // incoming call from ordinary playback, notifications, or phone tones.
+  const autoStopState = (): import('../shared/detect-api').AutoStopState => ({
+    status: micWatcher.autoStopStatus,
+    stop: captureStop.snapshot()
+  })
+  const publishAutoStopState = (): void =>
+    broadcast(DETECT_AUTO_STOP_STATE_CHANNEL, autoStopState())
+  const captureStop = new RecordingStopCoordinator(
+    () => {
+      recording.stop()
+      engine.stop()
+    },
+    () => {
+      publishAutoStopState()
+      // Only capture correlation and finite state; never meeting titles or transcript.
+      try {
+        const target = join(app.getPath('userData'), 'capture-stop.log')
+        if ((statSync(target, { throwIfNoEntry: false })?.size ?? 0) > 512 * 1024)
+          writeFileSync(target, '')
+        const state = captureStop.snapshot()
+        appendFileSync(
+          target,
+          `${new Date().toISOString()} capture=${state?.captureId} reason=${state?.reason ?? 'none'} phase=${state?.phase}\n`
+        )
+      } catch {
+        /* Diagnostics must not block Stop. */
+      }
+    }
+  )
   const micWatcher = new MicWatcher(
     resolveEngineBinary(),
     app.getPath('userData'),
@@ -416,11 +446,13 @@ app.whenReady().then(async () => {
         ...(detectionId ? { detectionId } : {})
       })
     },
-    () => {
-      // Meeting app hung up mid-recording — the editor stops its capture.
-      broadcast(DETECT_MEETING_ENDED_CHANNEL, {})
-    }
+    (captureId) => {
+      if (captureId) captureStop.request('meeting-ended', captureId)
+    },
+    publishAutoStopState
   )
+  powerMonitor.on('suspend', () => micWatcher.suspend())
+  powerMonitor.on('resume', () => micWatcher.resume())
 
   // Saved meeting audio: session dirs for the engine's checkpoint recording,
   // playback serving, crash recovery, deletion. Local-only — never synced.
@@ -446,7 +478,10 @@ app.whenReady().then(async () => {
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
   const session = new TranscriptSession(
-    broadcastEngineEvent,
+    (event) => {
+      broadcastEngineEvent(event)
+      if (event.event === 'capture-finalized') captureStop.handle(event)
+    },
     () => join(libraryRoot(), 'sessions'),
     assertLibrary,
     (segments, ended) => {
@@ -506,12 +541,16 @@ app.whenReady().then(async () => {
 
   engine.onEvent((rawEvent) => {
     // Bind terminal transcript persistence to the exact capture the renderer saw start.
-    const event = rawEvent.event === 'started' ? { ...rawEvent, captureId: randomUUID() } : rawEvent
+    const event =
+      rawEvent.event === 'started'
+        ? { ...rawEvent, captureId: captureStop.snapshot()?.captureId ?? randomUUID() }
+        : rawEvent
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)
     logEngineEvent(event)
     recording.handle(event)
+    captureStop.handle(event)
     if (!recording.busy) micWatcher.setSuppressed(false)
   })
 
@@ -546,7 +585,9 @@ app.whenReady().then(async () => {
     // Our own capture holds the mic — the ad-hoc meeting detector must not
     // mistake it for a Zoom call. Suppress BEFORE the engine opens the mic.
     if (request.command === 'live') calendarService?.setRecordingActive(true)
-    micWatcher.setSuppressed(true)
+    const captureId = randomUUID()
+    captureStop.begin(captureId, request.opts?.meetingId)
+    micWatcher.setSuppressed(request.command === 'live', captureId)
     const opts = { ...request.opts }
     // Audio persistence: give the session a directory keyed by meeting; the
     // capture host checkpoints into it and merges on stop (Swift engine on
@@ -564,9 +605,9 @@ app.whenReady().then(async () => {
     engine.start(request.command, request.filePath, opts)
   })
 
-  ipcMain.on(ENGINE_STOP_CHANNEL, () => {
-    recording.stop()
-    engine.stop()
+  ipcMain.on(ENGINE_STOP_CHANNEL, (event) => {
+    if (event.sender !== mainWindow?.webContents) return
+    captureStop.request('manual')
   })
 
   // Mic input picker: device list + (mid-session) switching. macOS engine
@@ -718,6 +759,7 @@ app.whenReady().then(async () => {
     loginItem: app.getLoginItemSettings().openAtLogin,
     micDetect: micWatcher.enabled,
     autoStop: micWatcher.autoStop,
+    autoStopState: autoStopState(),
     micMonitorAlive: micWatcher.monitorAlive,
     micDetectSupported: process.platform === 'darwin' || process.platform === 'win32',
     platform: process.platform,

@@ -4,7 +4,12 @@ import { cloudReaderClient } from './cloud-reader-client'
 test('desktop cloud reader confines token to fixed origin and never flattens selected versions', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = []
   const client = cloudReaderClient(
-    () => ({ token: 'synthetic-token', enabled: true, baseUrl: 'https://fixture.example' }),
+    () => ({
+      token: 'synthetic-token',
+      enabled: true,
+      baseUrl: 'https://fixture.example',
+      revision: 0
+    }),
     async (input, init) => {
       calls.push({ url: String(input), init })
       return Response.json({ status: 'ok' })
@@ -31,7 +36,7 @@ test('desktop cloud reader confines token to fixed origin and never flattens sel
   await assert.rejects(client({ kind: 'http', url: 'https://attacker.example' }), /Invalid/)
 })
 test('desktop reader blocks disabled sync and stale account responses with safe errors', async () => {
-  const auth = { token: 'one', enabled: false, baseUrl: 'https://fixture.example' }
+  const auth = { token: 'one', enabled: false, baseUrl: 'https://fixture.example', revision: 0 }
   let fetched = false
   const client = cloudReaderClient(
     () => auth,
@@ -55,4 +60,22 @@ test('desktop reader blocks disabled sync and stale account responses with safe 
     failed({ kind: 'list' }),
     (e) => e instanceof Error && !e.message.includes('secret')
   )
+})
+
+test('desktop reader rejects responses from a retired connection even when the token is reused', async () => {
+  const auth = {
+    token: 'same-account-token',
+    enabled: true,
+    baseUrl: 'https://fixture.example',
+    revision: 1
+  }
+  const client = cloudReaderClient(
+    () => auth,
+    async () => {
+      // Disconnect and reconnect the same account before the old response arrives.
+      auth.revision += 2
+      return Response.json({ notes: [{ title: 'Obsolete workspace content' }], next: null })
+    }
+  )
+  await assert.rejects(client({ kind: 'list' }), /Cloud notes unavailable/)
 })

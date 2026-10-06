@@ -2,10 +2,11 @@
 // the production electron-updater feed. Production Windows releases must keep
 // using `pnpm release:win`, including its Authenticode verification gate.
 import { put } from '@vercel/blob'
-import { createReadStream, readFileSync, statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildWindowsBetaManifests } from './windows-beta-manifest.mjs'
+import { windowsReleaseBody } from './windows-release-upload.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const desktopDir = path.join(here, '..')
@@ -52,7 +53,7 @@ for (const { source, destination } of artifacts) {
   const file = path.join(releaseDir, source)
   const size = statSync(file).size
   process.stdout.write(`uploading beta ${destination} (${(size / 1024 / 1024).toFixed(1)} MB)… `)
-  const blob = await put(`updates/${destination}`, createReadStream(file), {
+  const blob = await put(`updates/${destination}`, await windowsReleaseBody(file), {
     access: 'public',
     addRandomSuffix: false,
     allowOverwrite: true

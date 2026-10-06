@@ -5,6 +5,7 @@ import { copyFileSync, createReadStream, mkdirSync, readdirSync, readFileSync, s
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { windowsReleaseBody } from './windows-release-upload.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const releaseDir = path.join(here, '..', 'release')
@@ -69,7 +70,8 @@ for (const name of artifacts) {
   // which froze the feed and made "Check for updates" report stale versions.
   // Versioned artifacts are immutable, so the long default is fine there.
   const isManifest = name.endsWith('.yml')
-  const blob = await put(`updates/${name}`, createReadStream(file), {
+  const body = isWinArtifact(name) ? await windowsReleaseBody(file) : createReadStream(file)
+  const blob = await put(`updates/${name}`, body, {
     access: 'public',
     addRandomSuffix: false,
     allowOverwrite: true,

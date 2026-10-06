@@ -136,7 +136,9 @@ export class RecordingStartCoordinator {
       this.publish()
     } else if (
       event.event === 'status' &&
-      ['finishing', 'saving_audio', 'refining_transcript'].includes(event.stage ?? '')
+      ['finishing', 'capture_stopped', 'saving_audio', 'refining_transcript'].includes(
+        event.stage ?? ''
+      )
     ) {
       this.state.phase = 'finishing'
       this.publish()

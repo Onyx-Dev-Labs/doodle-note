@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { macMicPromptDelay, updateMacMicSession, type MacMicSession } from './mac-mic-session'
 import { WIN_MICMON_ARGS } from './win-micmon'
+import type { AutoStopStatus } from '../shared/detect-api'
 import {
   initialEndState,
   initialMicState,
@@ -54,6 +55,10 @@ export class MicWatcher {
   private debounceTimer: NodeJS.Timeout | null = null
   private restartTimer: NodeJS.Timeout | null = null
   private stopping = false
+  private suspended = false
+  private sampleValid = false
+  private captureId: string | undefined
+  private lastStatus: AutoStopStatus | undefined
 
   /** Friendly name of the meeting app behind the current busy stretch. */
   private currentAppLabel: string | null = null
@@ -79,7 +84,8 @@ export class MicWatcher {
     userDataDir: string,
     private readonly onMeetingDetected: (appLabel: string | null, detectionId?: string) => void,
     /** The meeting app left the mic mid-capture — stop the recording. */
-    private readonly onMeetingEnded: () => void
+    private readonly onMeetingEnded: (captureId?: string) => void,
+    private readonly onStatusChanged: (status: AutoStopStatus) => void = () => {}
   ) {
     this.configPath = join(userDataDir, 'mic-watch.json')
     this.logPath = join(userDataDir, 'mic-watch.log')
@@ -94,6 +100,9 @@ export class MicWatcher {
   /** Detection diary — read this to diagnose missed/false prompts. */
   private diag(message: string): void {
     try {
+      if ((statSync(this.logPath, { throwIfNoEntry: false })?.size ?? 0) > 2 * 1024 * 1024) {
+        writeFileSync(this.logPath, '')
+      }
       appendFileSync(this.logPath, `${new Date().toISOString()} ${message}\n`)
     } catch {
       // never let logging break detection
@@ -110,6 +119,32 @@ export class MicWatcher {
 
   get monitorAlive(): boolean {
     return this.child !== null
+  }
+
+  get autoStopStatus(): AutoStopStatus {
+    if (!this.config.autoStop) return 'disabled'
+    if (!this.sampleValid) return 'unavailable'
+    if (this.endState.ended) return 'stopping'
+    return this.capturing && this.endState.meetingSeen ? 'armed' : 'waiting'
+  }
+
+  private publishStatus(): void {
+    const status = this.autoStopStatus
+    if (status === this.lastStatus) return
+    this.lastStatus = status
+    this.diag(`auto-stop status=${status} capture=${this.captureId ?? 'none'}`)
+    this.onStatusChanged(status)
+  }
+
+  /** Change-only monitors need a fresh sample after suspension, not a heartbeat timeout. */
+  suspend(): void {
+    this.suspended = true
+    this.killChild()
+  }
+
+  resume(): void {
+    this.suspended = false
+    this.reconcileChild()
   }
 
   /** Either feature needs the micmon child. */
@@ -142,6 +177,10 @@ export class MicWatcher {
     this.writeConfig()
     this.resetEndWatch()
     this.reconcileChild()
+    if (autoStop && this.capturing && this.sampleValid && this.currentInputLabel !== null) {
+      this.handleEndWatch(true)
+    }
+    this.publishStatus()
   }
 
   private reconcileChild(): void {
@@ -154,23 +193,25 @@ export class MicWatcher {
 
   /** True while DoodleNote's own capture holds the mic — don't self-prompt.
    *  That same window is when the meeting-end watch is armed. */
-  setSuppressed(suppressed: boolean): void {
+  setSuppressed(suppressed: boolean, captureId?: string): void {
     this.state = setSuppressed(this.state, suppressed)
     if (suppressed) {
       this.clearDebounce()
       if (this.macSession) this.macSession = { ...this.macSession, prompted: true }
     }
     this.capturing = suppressed
+    this.captureId = suppressed ? captureId : undefined
     this.resetEndWatch()
     // micmon only emits on CHANGES — if the meeting app already held the mic
     // when recording started (the normal case), seed the watch from the
     // last-known INPUT state or the end edge would never arm. Ring-only
     // evidence must not seed it (see currentInputLabel); a call that is
     // still ringing arms the watch later, when the app takes the mic.
-    if (suppressed && this.currentInputLabel !== null) {
+    if (suppressed && this.sampleValid && this.currentInputLabel !== null) {
       this.diag(`end-watch seeded: ${this.currentInputLabel} already on the mic`)
       this.endState = onCaptureMicEvent(this.endState, true, Date.now())
     }
+    this.publishStatus()
   }
 
   private resetEndWatch(): void {
@@ -184,7 +225,7 @@ export class MicWatcher {
   /* ---- child process ---- */
 
   private spawnChild(): void {
-    if (this.child || this.stopping) return
+    if (this.child || this.stopping || this.suspended) return
     let child: ChildProcessWithoutNullStreams
     try {
       if (process.platform === 'win32') {
@@ -200,6 +241,8 @@ export class MicWatcher {
       }
     } catch (error) {
       console.error('[micwatch] spawn failed:', error)
+      this.invalidateSample()
+      this.scheduleRestart()
       return
     }
     this.child = child
@@ -207,6 +250,7 @@ export class MicWatcher {
     let buffer = ''
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => {
+      if (this.child !== child) return
       buffer += chunk
       let newline = buffer.indexOf('\n')
       while (newline >= 0) {
@@ -220,8 +264,21 @@ export class MicWatcher {
             running?: boolean
             bundles?: string[]
             outputBundles?: string[]
+            valid?: boolean
+          }
+          if (event.event === 'micmon' && event.valid === false) {
+            this.invalidateSample()
+            continue
           }
           if (event.event === 'micmon' && typeof event.running === 'boolean') {
+            if (
+              !Array.isArray(event.bundles) ||
+              !event.bundles.every((v) => typeof v === 'string')
+            ) {
+              this.invalidateSample()
+              continue
+            }
+            this.sampleValid = true
             // Only microphone capture by an actual meeting app counts as
             // "busy". Output remains useful diagnostic context, but an open
             // output session is not proof of a call and must never prompt.
@@ -235,7 +292,7 @@ export class MicWatcher {
             this.currentAppLabel = inputLabel
             this.currentInputLabel = inputLabel
             this.diag(
-              `event running=${event.running} in=[${bundles.join(',')}] out=[${output.join(',')}] ` +
+              `event valid=true running=${event.running} inputCount=${bundles.length} outputCount=${output.length} ` +
                 `inputLabel=${inputLabel} outputOnlyIgnored=${inputLabel === null && output.length > 0} ` +
                 `suppressed=${this.state.suppressed}`
             )
@@ -245,6 +302,7 @@ export class MicWatcher {
               this.handleMicEvent(inputLabel !== null)
             }
             this.handleEndWatch(inputLabel !== null)
+            this.publishStatus()
           }
         } catch {
           // CoreML/CoreAudio noise on stdout — NDJSON hosts skip unparseable lines.
@@ -254,24 +312,26 @@ export class MicWatcher {
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', () => {})
     child.on('exit', () => {
+      if (this.child !== child) return
       this.child = null
-      this.clearDebounce()
+      this.invalidateSample()
       // Monitor downtime is not evidence that a call ended. Re-debounce fresh
       // input after restart, preserving consumption of the existing call.
       if (this.macSession) {
         this.macSession = { ...this.macSession, busySinceMs: null, absentSinceMs: null }
       }
-      if (!this.stopping && this.childWanted) {
-        this.restartTimer = setTimeout(() => this.spawnChild(), RESTART_DELAY_MS)
-        this.restartTimer.unref?.()
-      }
+      this.scheduleRestart()
     })
     child.on('error', (error) => {
+      if (this.child !== child) return
       console.error('[micwatch] child error:', error.message)
+      this.killChild()
+      this.scheduleRestart()
     })
   }
 
   private killChild(): void {
+    this.invalidateSample()
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
@@ -290,6 +350,27 @@ export class MicWatcher {
       }, 2_000).unref()
       this.child = null
     }
+  }
+
+  private invalidateSample(): void {
+    this.sampleValid = false
+    this.currentInputLabel = null
+    this.currentAppLabel = null
+    this.clearDebounce()
+    this.state = { ...this.state, busySinceMs: null, idleSinceMs: null }
+    if (this.macSession)
+      this.macSession = { ...this.macSession, busySinceMs: null, absentSinceMs: null }
+    this.resetEndWatch()
+    this.publishStatus()
+  }
+
+  private scheduleRestart(): void {
+    if (this.restartTimer || this.stopping || this.suspended || !this.childWanted) return
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      this.spawnChild()
+    }, RESTART_DELAY_MS)
+    this.restartTimer.unref?.()
   }
 
   /* ---- decision plumbing ---- */
@@ -362,21 +443,34 @@ export class MicWatcher {
 
   /** Meeting-end watch: armed while our capture runs and autoStop is on. */
   private handleEndWatch(meetingPresent: boolean): void {
-    if (!this.capturing || !this.config.autoStop) return
+    if (!this.capturing || !this.config.autoStop || !this.sampleValid) return
     this.endState = onCaptureMicEvent(this.endState, meetingPresent, Date.now())
     if (this.endTimer) {
       clearTimeout(this.endTimer)
       this.endTimer = null
     }
     if (this.endState.absentSinceMs !== null && !this.endState.ended) {
-      this.endTimer = setTimeout(() => {
-        this.endTimer = null
-        if (this.capturing && shouldAutoStop(this.endState, Date.now())) {
-          this.endState = markEnded(this.endState)
-          this.diag('AUTO-STOP fired: meeting app off the mic past debounce')
-          this.onMeetingEnded()
-        }
-      }, MEETING_END_DEBOUNCE_MS)
+      const deadline = this.endState.absentSinceMs + MEETING_END_DEBOUNCE_MS
+      const captureId = this.captureId
+      this.diag(`absence deadline=${deadline} capture=${captureId ?? 'none'}`)
+      this.endTimer = setTimeout(
+        () => {
+          this.endTimer = null
+          if (
+            this.capturing &&
+            this.config.autoStop &&
+            this.sampleValid &&
+            this.captureId === captureId &&
+            shouldAutoStop(this.endState, Date.now())
+          ) {
+            this.endState = markEnded(this.endState)
+            this.diag('AUTO-STOP fired: meeting app off the mic past debounce')
+            this.publishStatus()
+            this.onMeetingEnded(captureId)
+          }
+        },
+        Math.max(0, deadline - Date.now())
+      )
       this.endTimer.unref?.()
     }
   }

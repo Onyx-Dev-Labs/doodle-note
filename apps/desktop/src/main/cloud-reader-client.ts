@@ -5,7 +5,7 @@ export type CloudReaderRequest =
   | { kind: 'action'; value: ReaderAction }
   | { kind: 'preview'; libraryId: string; noteId: string; revisionId: string; versionId: string }
 export function cloudReaderClient(
-  credentials: () => { token: string | null; enabled: boolean; baseUrl: string },
+  credentials: () => { token: string | null; enabled: boolean; baseUrl: string; revision: number },
   fetcher: typeof fetch = fetch
 ) {
   return async (value: unknown): Promise<unknown> => {
@@ -50,7 +50,8 @@ export function cloudReaderClient(
       const result =
         r.kind === 'preview' ? new Uint8Array(await response.arrayBuffer()) : await response.json()
       const current = credentials()
-      if (current.token !== auth.token || !current.enabled) throw new Error('workspace_changed')
+      if (current.token !== auth.token || !current.enabled || current.revision !== auth.revision)
+        throw new Error('workspace_changed')
       return result
     } catch {
       throw new Error(

@@ -5,6 +5,7 @@ import type {
   EngineChannel,
   EngineEvent,
   EngineSessionSnapshot,
+  RefinementOutcome,
   TranscriptSegment
 } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
@@ -30,6 +31,7 @@ export class TranscriptSession {
   private meetingId: string | undefined
   private phase: EngineSessionSnapshot['phase'] = 'starting'
   private partials: Partial<Record<EngineChannel, string>> = {}
+  private refinement: RefinementOutcome | undefined
 
   bindMeeting(meetingId?: string): void {
     this.meetingId = meetingId
@@ -43,7 +45,8 @@ export class TranscriptSession {
       phase: this.phase,
       segments: [...this.segments],
       partials: { ...this.partials },
-      error: this.error
+      error: this.error,
+      ...(this.refinement ? { refinement: this.refinement } : {})
     }
   }
 
@@ -68,6 +71,7 @@ export class TranscriptSession {
         this.startedAtIso = new Date().toISOString()
         this.saved = false
         this.error = undefined
+        this.refinement = undefined
         this.captureId = ev.captureId
         this.phase = 'starting'
         this.partials = {}
@@ -79,7 +83,13 @@ export class TranscriptSession {
         if (ev.channel) this.partials[ev.channel] = ev.text
         return
       case 'status':
-        if (['finishing', 'saving_audio', 'refining_transcript'].includes(ev.stage ?? ''))
+        if (ev.stage === 'refining_transcript' && this.refinement !== 'refined')
+          this.refinement = 'pending'
+        if (
+          ['finishing', 'capture_stopped', 'saving_audio', 'refining_transcript'].includes(
+            ev.stage ?? ''
+          )
+        )
           this.phase = 'finishing'
         return
       case 'channel_start':
@@ -98,7 +108,11 @@ export class TranscriptSession {
         }
         return
       case 'refined':
-        if (this.assembler) {
+        if (
+          this.assembler &&
+          ev.transcripts.some((transcript) => transcript.text.trim().length > 0)
+        ) {
+          this.refinement = 'refined'
           this.publish(this.assembler.flush())
           this.segments = reconcileRefinedTranscript(this.segments, ev.transcripts)
           for (const transcript of ev.transcripts) this.finals[transcript.channel] = transcript.text
@@ -108,6 +122,7 @@ export class TranscriptSession {
         return
       case 'error':
         this.error = ev.message
+        if (ev.refinementFailed) this.refinement = 'fallback'
         return
       case 'done':
         this.finish()
@@ -146,11 +161,13 @@ export class TranscriptSession {
     this.phase = 'ended'
     this.partials = {}
     this.persistCheckpoint(true)
+    if (this.refinement === 'pending') this.refinement = 'fallback'
     this.error ??= exitError
     const error = this.error
     if (this.segments.length === 0) {
       this.broadcast({
         event: 'capture-finalized',
+        ...(this.refinement ? { refinement: this.refinement } : {}),
         ...(this.captureId ? { captureId: this.captureId } : {}),
         ...(error ? { error } : {})
       })
@@ -170,6 +187,7 @@ export class TranscriptSession {
             startedAt: this.startedAtIso,
             savedAt: new Date().toISOString(),
             finals: this.finals,
+            ...(this.refinement ? { refinement: this.refinement } : {}),
             segments: this.segments
           },
           null,
@@ -179,6 +197,7 @@ export class TranscriptSession {
       this.broadcast({ event: 'session-saved', path, segmentCount: this.segments.length })
       this.broadcast({
         event: 'capture-finalized',
+        ...(this.refinement ? { refinement: this.refinement } : {}),
         ...(this.captureId ? { captureId: this.captureId } : {}),
         ...(error ? { error } : {})
       })
@@ -188,6 +207,7 @@ export class TranscriptSession {
       this.broadcast({ event: 'error', message })
       this.broadcast({
         event: 'capture-finalized',
+        ...(this.refinement ? { refinement: this.refinement } : {}),
         ...(this.captureId ? { captureId: this.captureId } : {}),
         error: message
       })

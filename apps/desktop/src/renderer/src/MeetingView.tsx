@@ -1,18 +1,33 @@
 import { TranscriptSplit } from './TranscriptSplit'
 import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
+import { transcriptAudioPosition, transcriptDisplayTime } from './lib/transcript-audio'
 import { registerLibrarySave } from './lib/library-flush'
 import { generatedModelLabel } from './lib/generated-model-label'
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState
+} from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Placeholder } from '@tiptap/extensions'
-import type { EngineChannel, EngineEvent, EngineInputDevice } from '../../shared/engine-events'
+import type {
+  EngineChannel,
+  EngineEvent,
+  EngineInputDevice,
+  RefinementOutcome
+} from '../../shared/engine-events'
 import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
 import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
 import { applyCaptureStatus } from './lib/capture-status'
+import type { AutoStopState } from '../../shared/detect-api'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
   SYSTEM_BACKEND_STORAGE_KEY,
@@ -69,6 +84,7 @@ interface SessionState {
   error: string | null
   /** True once the ASR models finished warming and transcription is live. */
   transcribing: boolean
+  refinement?: RefinementOutcome
 }
 
 const initialSessionState: SessionState = {
@@ -104,6 +120,7 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         partials: snapshot.partials,
         echoCount: snapshot.segments.filter((s) => s.echo).length,
         error: snapshot.error ?? state.error,
+        refinement: snapshot.refinement,
         statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
       }
     }
@@ -168,7 +185,8 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         phase: 'ended',
         statusText: '',
         partials: {},
-        error: ev.error ?? state.error
+        error: ev.error ?? state.error,
+        refinement: ev.refinement
       }
     case 'error':
       return { ...state, error: ev.message }
@@ -241,6 +259,7 @@ function imageFilesFrom(list: FileList | null | undefined): File[] {
 export default function MeetingView({
   meetingId,
   visible,
+  openTranscriptRequestId,
   autoRecord,
   autoRecordRequestId,
   isNewDraft,
@@ -252,6 +271,8 @@ export default function MeetingView({
 }: {
   meetingId: string
   visible: boolean
+  /** Each completion action reveals the panel without remounting the editor. */
+  openTranscriptRequestId?: number
   /** True when this meeting was just created via "+ New meeting" — recording starts automatically. */
   autoRecord: boolean
   autoRecordRequestId: string | null
@@ -283,6 +304,13 @@ export default function MeetingView({
   const [enhanceProgressText, setEnhanceProgressText] = useState<string | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  useEffect(() => {
+    if (openTranscriptRequestId === undefined) return
+    // An explicit navigation action opens the requested panel.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTranscriptOpen(true)
+    setChatOpen(false)
+  }, [openTranscriptRequestId])
   const [chatThread, setChatThread] = useState<MeetingChatEntry[]>([])
   const [askText, setAskText] = useState('')
   /** The question currently being answered; null when no ask is in flight. */
@@ -338,6 +366,9 @@ export default function MeetingView({
   const elapsedBaseRef = useRef(0)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
+  const transcriptFollowingRef = useRef(true)
+  const transcriptSizeRef = useRef({ width: 0, height: 0 })
+  const transcriptScrollTopRef = useRef(0)
   const audioRef = useRef<HTMLAudioElement>(null)
   /** Seek (seconds) to apply once a newly selected part's metadata loads. */
   const pendingSeekSecRef = useRef<number | null>(null)
@@ -793,19 +824,33 @@ export default function MeetingView({
   /* ---- auto-stop when the meeting app hangs up ---- */
 
   const [autoStopped, setAutoStopped] = useState(false)
-  const capturingRef = useRef(false)
+  const [autoStopState, setAutoStopState] = useState<AutoStopState | null>(null)
 
   useEffect(() => {
-    capturingRef.current = capturing
-  }, [capturing])
-
-  useEffect(() => {
-    return window.detect.onMeetingEnded(() => {
-      if (!capturingRef.current) return
-      window.engine.stop()
-      setAutoStopped(true)
-    })
-  }, [])
+    let live = true
+    let received = false
+    const receive = (next: AutoStopState): void => {
+      received = true
+      if (!live) return
+      setAutoStopState(next)
+      setAutoStopped(
+        next.stop?.meetingId === meetingId &&
+          next.stop.reason === 'meeting-ended' &&
+          next.stop.phase === 'completed'
+      )
+    }
+    const unsubscribe = window.detect.onAutoStopState?.(receive)
+    void window.detect
+      .getState()
+      .then((next) => {
+        if (live && !received && next.autoStopState) receive(next.autoStopState)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+      unsubscribe?.()
+    }
+  }, [meetingId])
 
   useEffect(() => {
     if (!autoStopped) return
@@ -904,10 +949,38 @@ export default function MeetingView({
 
   /* ---- transcript autoscroll ---- */
 
-  useEffect(() => {
+  // Reopening or changing meetings starts at the latest text. Starting another
+  // recording also releases a saved transcript's manual reading position.
+  useLayoutEffect(() => {
+    transcriptFollowingRef.current = true
+  }, [meetingId, transcriptOpen])
+
+  useLayoutEffect(() => {
+    if (phase === 'starting') transcriptFollowingRef.current = true
+  }, [phase])
+
+  useLayoutEffect(() => {
     const el = feedRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [allSegments, state.partials, transcriptOpen])
+    if (!el) return
+    if (transcriptFollowingRef.current) el.scrollTop = el.scrollHeight
+    // A shorter partial can clamp scrollTop during layout. Its queued scroll
+    // event must not be mistaken for the reader returning to the live end.
+    transcriptScrollTopRef.current = el.scrollTop
+  }, [allSegments, state.partials, transcriptOpen, phase])
+
+  useLayoutEffect(() => {
+    const el = feedRef.current
+    if (!el) return
+    // Pane/window resizing should keep followers at the live end, but must not
+    // take scroll ownership back from someone reading earlier lines.
+    const observer = new ResizeObserver(() => {
+      transcriptSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
+      if (transcriptFollowingRef.current) el.scrollTop = el.scrollHeight
+      transcriptScrollTopRef.current = el.scrollTop
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [transcriptOpen])
 
   /* ---- playback follow-along: keep the highlighted row in view ---- */
 
@@ -1021,21 +1094,9 @@ export default function MeetingView({
   // loses it. Fallback: a segment's channel-relative startMs is within the
   // capture-start gap (≈1s) of its file position in the current part.
   const seekToSegment = (segment: TranscriptSegment): void => {
-    if (segment.source === 'text') return
-    if (audioParts.length === 0) return
-    let partIndex = Math.min(activePart, audioParts.length - 1)
-    let offsetSec = Math.max(0, segment.startMs / 1000)
-    const abs = segment.absoluteStartMs
-    if (typeof abs === 'number') {
-      partIndex = 0
-      for (let i = audioParts.length - 1; i >= 0; i--) {
-        if (audioParts[i]!.startEpochMs <= abs) {
-          partIndex = i
-          break
-        }
-      }
-      offsetSec = Math.max(0, (abs - audioParts[partIndex]!.startEpochMs) / 1000)
-    }
+    const position = transcriptAudioPosition(segment, audioParts, activePart)
+    if (!position) return
+    const { partIndex, offsetSec } = position
     const el = audioRef.current
     if (partIndex !== activePart || !el) {
       pendingSeekSecRef.current = offsetSec
@@ -1079,15 +1140,11 @@ export default function MeetingView({
     const part = audioParts[activePart]
     const el = audioRef.current
     if (!part || !el || el.paused) return
-    const epochMs = part.startEpochMs + el.currentTime * 1000
     let current: string | null = null
     for (const s of allSegments) {
-      // Same fallback as seekToSegment for sync-stripped segments.
-      const t =
-        typeof s.absoluteStartMs === 'number'
-          ? s.absoluteStartMs
-          : part.startEpochMs + (s.startMs ?? 0)
-      if (t > epochMs) break
+      const position = transcriptAudioPosition(s, audioParts, activePart)
+      if (!position || position.partIndex !== activePart) continue
+      if (position.offsetSec > el.currentTime) break
       current = s.id
     }
     setPlayingSegId(current)
@@ -1528,7 +1585,13 @@ export default function MeetingView({
     folderId !== null ? (folders.find((f) => f.id === folderId)?.name ?? null) : null
 
   const transcriptEmpty = allSegments.length === 0 && Object.values(state.partials).every((p) => !p)
-  const firstSegmentTime = allSegments.length > 0 ? segmentTime(allSegments[0]!) : 0
+  const hasImportedAudio =
+    audioParts.some((part) => part.startEpochMs === 0) ||
+    allSegments.some((segment) => segment.speakerId === 'imported-speaker')
+  const firstTimedSegment = allSegments.find((segment) => segment.source !== 'text')
+  const firstSegmentTime = firstTimedSegment
+    ? transcriptDisplayTime(firstTimedSegment, audioParts, hasImportedAudio)
+    : 0
 
   return (
     <div className="editor-page">
@@ -1746,7 +1809,27 @@ export default function MeetingView({
                 )}
               </div>
             )}
-            <div className="tp-body" ref={feedRef}>
+            <div
+              className="tp-body transcript-feed"
+              ref={feedRef}
+              tabIndex={0}
+              role="region"
+              aria-label="Transcript"
+              onScroll={(event) => {
+                const el = event.currentTarget
+                const size = transcriptSizeRef.current
+                // Chromium can dispatch an anchoring scroll before the resize
+                // observer. That layout adjustment is not a user's scroll.
+                if (el.clientWidth !== size.width || el.clientHeight !== size.height) return
+                if (el.scrollTop === transcriptScrollTopRef.current) return
+                transcriptScrollTopRef.current = el.scrollTop
+                // Fractional layout/zoom can leave a subpixel gap at the end.
+                // Unlike content-height changes, native scroll events cover
+                // wheel, touchpad, scrollbar and keyboard intent alike.
+                transcriptFollowingRef.current =
+                  el.scrollHeight - el.clientHeight - el.scrollTop <= 2
+              }}
+            >
               {transcriptEmpty ? (
                 <div className="tp-empty">
                   <p className="tp-empty-title">Transcript on…</p>
@@ -1820,7 +1903,11 @@ export default function MeetingView({
                       <span className="tp-text">{s.text}</span>
                       {s.source !== 'text' && (
                         <span className="tp-time">
-                          {formatClock((segmentTime(s) - firstSegmentTime) / 1000)}
+                          {formatClock(
+                            (transcriptDisplayTime(s, audioParts, hasImportedAudio) -
+                              firstSegmentTime) /
+                              1000
+                          )}
                         </span>
                       )}
                     </div>
@@ -2036,6 +2123,34 @@ export default function MeetingView({
       {allSegments.some((segment) => segment.source === 'text') && (
         <p className="text-import-local" role="note">
           Imported text transcript. No recording or timestamps. Stored locally; use Export to share.
+        </p>
+      )}
+      {phase === 'ended' && state.refinement === 'refined' && !state.error && (
+        <p className="text-import-local" role="status">
+          Transcript refined locally.
+        </p>
+      )}
+      {phase === 'ended' && state.refinement === 'fallback' && (
+        <p className="text-import-local" role="status">
+          Refinement could not finish. Any available live transcript was kept.
+        </p>
+      )}
+      {capturing && autoStopState && (
+        <p className="text-import-local" role="status">
+          {autoStopState.stop?.meetingId === meetingId &&
+          autoStopState.stop.reason === 'meeting-ended'
+            ? autoStopState.stop.phase === 'failed'
+              ? 'Automatic stop needs attention. Check the recording and use Stop if it is still running.'
+              : autoStopState.stop.phase === 'stopped'
+                ? 'Recording stopped automatically. Finishing transcript and audio…'
+                : 'Meeting ended. Stopping recording…'
+            : autoStopState.status === 'armed'
+              ? 'Automatic stop is armed for detected meeting input.'
+              : autoStopState.status === 'unavailable'
+                ? 'Meeting detection is unavailable. Stop this recording manually.'
+                : autoStopState.status === 'disabled'
+                  ? 'Automatic stop is off. Stop this recording manually.'
+                  : 'Waiting for detectable meeting input. Stop manually if no meeting is detected.'}
         </p>
       )}
       <div className="bottom-bar">

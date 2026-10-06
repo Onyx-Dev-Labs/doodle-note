@@ -1930,6 +1930,16 @@ button.fp-row:hover {
   user-select: text;
 }
 
+.tp-body:focus-visible {
+  outline: 2px solid var(--accent-deep);
+  outline-offset: -2px;
+}
+
+.transcript-feed {
+  /* Live partials change height; following is owned by the transcript view. */
+  overflow-anchor: none;
+}
+
 .tp-row.tp-clickable {
   cursor: pointer;
   border-radius: 8px;
