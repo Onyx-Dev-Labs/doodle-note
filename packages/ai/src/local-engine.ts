@@ -1,10 +1,27 @@
+import {
+  GENERATION_LIMITS,
+  requireCompleteOutput,
+  withGenerationDeadline
+} from './generation-control'
 import os from 'node:os'
 import path from 'node:path'
 import type { Llama, LlamaModel } from 'node-llama-cpp'
 import { buildAskSystemPrompt, buildAskUserMessage } from './ask-prompt'
-import { buildGlobalAskUserMessage, GLOBAL_ASK_SYSTEM_PROMPT, type GlobalAskInput } from './global-ask-prompt'
+import {
+  buildGlobalAskUserMessage,
+  GLOBAL_ASK_SYSTEM_PROMPT,
+  type GlobalAskInput
+} from './global-ask-prompt'
 import { generateMeetingNotes } from './map-reduce'
-import type { AskAnswer, AskInput, MergeInput, MergedNotes, NotesEngine, NotesProgress } from './types'
+import type {
+  AskAnswer,
+  AskInput,
+  GenerationControl,
+  MergeInput,
+  MergedNotes,
+  NotesEngine,
+  NotesProgress
+} from './types'
 
 /**
  * node-llama-cpp is ESM-only *with top-level await*, so it cannot be
@@ -58,16 +75,20 @@ export class LocalNotesEngine implements NotesEngine {
   }
 
   /** Download (if needed) and load the model. Safe to call more than once. */
-  async prepare(): Promise<void> {
+  async prepare(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
     if (this.model) return
     const { getLlama, resolveModelFile } = await loadNodeLlamaCpp()
-    this.modelPath = this.options.modelPath ?? await resolveModelFile(this.options.modelUri, {
-      directory: this.options.modelsDir ?? DEFAULT_MODELS_DIR,
-      cli: false,
-      onProgress: ({ totalSize, downloadedSize }) => {
-        if (totalSize > 0) this.options.onDownloadProgress?.(downloadedSize / totalSize)
-      }
-    })
+    this.modelPath =
+      this.options.modelPath ??
+      (await resolveModelFile(this.options.modelUri, {
+        directory: this.options.modelsDir ?? DEFAULT_MODELS_DIR,
+        cli: false,
+        onProgress: ({ totalSize, downloadedSize }) => {
+          if (totalSize > 0) this.options.onDownloadProgress?.(downloadedSize / totalSize)
+        }
+      }))
+    signal?.throwIfAborted()
     // Staged load: the default compute layer first (Metal on mac, Vulkan on
     // Windows when present), then CPU-only. Shared laptop iGPUs under Vulkan
     // fail intermittently — whether the weights or the KV cache fit depends
@@ -79,17 +100,25 @@ export class LocalNotesEngine implements NotesEngine {
     if (!this.forceCpu) {
       try {
         this.llama = await getLlama({ build: 'never' })
-        this.model = await this.llama.loadModel({ modelPath: this.modelPath })
+        this.model = await this.llama.loadModel({
+          modelPath: this.modelPath,
+          loadSignal: signal
+        })
         return
       } catch (gpuErr) {
+        signal?.throwIfAborted()
         console.error('[local-engine] default compute layer failed, retrying CPU-only:', gpuErr)
         this.forceCpu = true
       }
     }
     try {
       this.llama = await getLlama({ gpu: false, build: 'never' })
-      this.model = await this.llama.loadModel({ modelPath: this.modelPath })
+      this.model = await this.llama.loadModel({
+        modelPath: this.modelPath,
+        loadSignal: signal
+      })
     } catch (cpuErr) {
+      signal?.throwIfAborted()
       this.llama = null
       this.model = null
       const detail = cpuErr instanceof Error ? cpuErr.message : String(cpuErr)
@@ -103,9 +132,10 @@ export class LocalNotesEngine implements NotesEngine {
   async generateNotes(
     input: MergeInput,
     onToken?: (text: string) => void,
-    onProgress?: (progress: NotesProgress) => void
+    onProgress?: (progress: NotesProgress) => void,
+    control?: GenerationControl
   ): Promise<MergedNotes> {
-    return generateMeetingNotes(this, input, onToken, onProgress)
+    return generateMeetingNotes(this, input, onToken, onProgress, control)
   }
 
   async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
@@ -126,47 +156,60 @@ export class LocalNotesEngine implements NotesEngine {
   async runRaw(
     systemPrompt: string,
     userMessage: string,
-    onToken?: (text: string) => void
+    onToken?: (text: string) => void,
+    control?: GenerationControl
   ): Promise<MergedNotes> {
-    await this.prepare()
-    const { LlamaChatSession } = await loadNodeLlamaCpp()
-    const started = Date.now()
+    await withGenerationDeadline(control?.signal, 'preparing', (signal) => this.prepare(signal))
+    return withGenerationDeadline(control?.signal, control?.phase ?? 'writing', async (signal) => {
+      signal.throwIfAborted()
+      const { LlamaChatSession } = await loadNodeLlamaCpp()
+      const started = Date.now()
 
-    let context: Awaited<ReturnType<LlamaModel['createContext']>>
-    try {
-      context = await this.model!.createContext({
-        contextSize: this.options.contextSize ?? 16384
-      })
-    } catch (err) {
-      if (this.forceCpu) throw err
-      // Weights fit on the GPU but the KV cache didn't — reload on CPU.
-      console.error('[local-engine] context creation failed on GPU, reloading CPU-only:', err)
-      this.forceCpu = true
-      await this.model?.dispose()
-      this.model = null
-      this.llama = null
-      await this.prepare()
-      context = await this.model!.createContext({
-        contextSize: this.options.contextSize ?? 16384
-      })
-    }
-    try {
-      const session = new LlamaChatSession({
-        contextSequence: context.getSequence(),
-        systemPrompt
-      })
-      const markdown = await session.prompt(userMessage, {
-        temperature: 0.3,
-        onTextChunk: onToken
-      })
-      return {
-        markdown: markdown.trim(),
-        engine: this.id,
-        elapsedMs: Date.now() - started
+      let context: Awaited<ReturnType<LlamaModel['createContext']>>
+      try {
+        context = await this.model!.createContext({
+          contextSize: this.options.contextSize ?? 16384
+        })
+      } catch (err) {
+        signal.throwIfAborted()
+        if (this.forceCpu) throw err
+        // Weights fit on the GPU but the KV cache didn't — reload on CPU.
+        console.error('[local-engine] context creation failed on GPU, reloading CPU-only:', err)
+        this.forceCpu = true
+        await this.model?.dispose()
+        this.model = null
+        this.llama = null
+        await this.prepare(signal)
+        context = await this.model!.createContext({
+          contextSize: this.options.contextSize ?? 16384
+        })
       }
-    } finally {
-      await context.dispose()
-    }
+      try {
+        signal.throwIfAborted()
+        const session = new LlamaChatSession({
+          contextSequence: context.getSequence(),
+          systemPrompt
+        })
+        const result = await session.promptWithMeta(userMessage, {
+          signal,
+          maxTokens: GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens,
+          temperature: 0.3,
+          onTextChunk: (text) => {
+            control?.onActivity?.()
+            onToken?.(text)
+          }
+        })
+        signal.throwIfAborted()
+        requireCompleteOutput(result.stopReason, control?.phase ?? 'writing')
+        return {
+          markdown: result.responseText.trim(),
+          engine: this.id,
+          elapsedMs: Date.now() - started
+        }
+      } finally {
+        await context.dispose()
+      }
+    })
   }
 
   async dispose(): Promise<void> {

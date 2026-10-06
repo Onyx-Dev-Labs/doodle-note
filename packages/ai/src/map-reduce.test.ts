@@ -20,13 +20,25 @@ class FakeEngine implements NotesEngine {
   calls: Array<{ system: string; prompt: string }> = []
   failOn = new Set<number>()
 
-  async runRaw(system: string, prompt: string, onToken?: (t: string) => void): Promise<MergedNotes> {
+  async runRaw(
+    system: string,
+    prompt: string,
+    onToken?: (t: string) => void
+  ): Promise<MergedNotes> {
     this.calls.push({ system, prompt })
     if (this.failOn.has(this.calls.length)) throw new Error(`call ${this.calls.length} failed`)
     onToken?.('notes')
-    return { markdown: `output-${this.calls.length}`, engine: this.id, elapsedMs: 1 }
+    return {
+      markdown: `output-${this.calls.length}`,
+      engine: this.id,
+      elapsedMs: 1
+    }
   }
-  generateNotes(input: MergeInput, onToken?: (t: string) => void, onProgress?: (p: NotesProgress) => void) {
+  generateNotes(
+    input: MergeInput,
+    onToken?: (t: string) => void,
+    onProgress?: (p: NotesProgress) => void
+  ) {
     return generateMeetingNotes(this, input, onToken, onProgress)
   }
   askQuestion(): Promise<MergedNotes> {
@@ -152,4 +164,55 @@ describe('generateMeetingNotes', () => {
     // And the message respects the wider budget instead of 48K truncation.
     assert.doesNotMatch(engine.calls[0]!.prompt, /middle of a long transcript omitted/)
   })
+})
+
+it('cancellation in the first chunk stops every subsequent chunk and reduction', async () => {
+  const engine = new FakeEngine()
+  const controller = new AbortController()
+  let calls = 0
+  engine.runRaw = async () => {
+    calls++
+    controller.abort(new Error('User canceled'))
+    throw controller.signal.reason
+  }
+  await assert.rejects(
+    generateMeetingNotes(engine, baseInput(makeSegments(300)), undefined, undefined, {
+      signal: controller.signal
+    }),
+    /User canceled/
+  )
+  assert.equal(calls, 1)
+})
+
+it('cancellation while writing rejects late output; retries can complete', async () => {
+  const engine = new FakeEngine()
+  const controller = new AbortController()
+  const original = engine.runRaw.bind(engine)
+  engine.runRaw = async (system, prompt, token) => {
+    const result = await original(system, prompt, token)
+    if (system !== CHUNK_SYSTEM_PROMPT) controller.abort(new Error('Canceled during writing'))
+    return result
+  }
+  await assert.rejects(
+    generateMeetingNotes(engine, baseInput(makeSegments(300)), undefined, undefined, {
+      signal: controller.signal
+    }),
+    /Canceled during writing/
+  )
+  engine.runRaw = original
+  assert.ok((await engine.generateNotes(baseInput(makeSegments(10)))).markdown)
+})
+
+it('deadline/output-limit errors cannot degrade into a successful summary with gaps', async () => {
+  const { GenerationError } = await import('./generation-control')
+  for (const code of ['timeout', 'output-limit'] as const) {
+    const engine = new FakeEngine()
+    let calls = 0
+    engine.runRaw = async () => {
+      calls++
+      throw new GenerationError(code, code)
+    }
+    await assert.rejects(engine.generateNotes(baseInput(makeSegments(300))), new RegExp(code))
+    assert.equal(calls, 1)
+  }
 })

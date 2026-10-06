@@ -22,6 +22,7 @@ export const NOTES_TEMPLATES_CHANNEL = 'notes:templates'
 export const NOTES_ACTIVATE_MODEL_CHANNEL = 'notes:activate-model'
 export const NOTES_GET_SETTINGS_CHANNEL = 'notes:get-settings'
 export const NOTES_SET_SETTINGS_CHANNEL = 'notes:set-settings'
+export const NOTES_CANCEL_ENHANCE_CHANNEL = 'notes:cancel-enhance'
 export const NOTES_ENHANCE_CHANNEL = 'notes:enhance'
 export const NOTES_ASK_CHANNEL = 'notes:ask'
 export const NOTES_ASK_GLOBAL_CHANNEL = 'notes:ask-global'
@@ -119,7 +120,12 @@ export interface NotesSettingsUpdate {
   } | null
 }
 
-export interface EnhanceRequest {
+export interface EnhanceIdentity {
+  meetingId: string
+  runId: string
+}
+
+export interface EnhanceRequest extends EnhanceIdentity {
   /** Recheck the stop preference and selected provider in main before AI work. */
   automaticAfterStop?: boolean
   title: string
@@ -140,6 +146,7 @@ export interface NotesTemplateInfo {
 
 /** Errors come back as a value, never as a rejected promise. */
 export interface EnhanceResult {
+  code?: 'canceled' | 'timeout' | 'output-limit' | 'model-error'
   markdown?: string
   engine?: string
   elapsedMs?: number
@@ -205,13 +212,16 @@ export interface DownloadProgressEvent {
   progress: number
 }
 
-export interface EnhanceTokenEvent {
+export interface EnhanceTokenEvent extends EnhanceIdentity {
   token: string
 }
 
 /** Long meetings condense in parts before the final write (map-reduce). */
-export interface EnhanceProgressEvent {
-  phase: 'condensing' | 'writing'
+export interface EnhanceProgressEvent extends EnhanceIdentity {
+  elapsedMs: number
+  responseChunks: number
+  lastActivityMs?: number
+  phase: 'preparing' | 'canceling' | 'condensing' | 'writing'
   current?: number
   total?: number
 }
@@ -232,6 +242,7 @@ export interface NotesApi {
   cloudModels(provider: CloudProvider): Promise<CloudModelsResult>
   getSettings(): Promise<NotesSettingsView>
   setSettings(update: NotesSettingsUpdate): Promise<NotesSettingsView>
+  cancelEnhance(identity: EnhanceIdentity): Promise<boolean>
   enhance(input: EnhanceRequest): Promise<EnhanceResult>
   ask(req: AskRequest): Promise<AskResult>
   askGlobal(req: GlobalAskRequest): Promise<GlobalAskResult>

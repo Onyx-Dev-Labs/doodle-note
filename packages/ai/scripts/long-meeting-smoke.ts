@@ -7,6 +7,9 @@
  * Run: pnpm --filter @repo/ai long-meeting-smoke
  * Point at existing models: DOODLE_MODELS_DIR=... (defaults to the app's dir)
  */
+import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { GenerationError } from '../src/generation-control'
 import os from 'node:os'
 import path from 'node:path'
 import { LOCAL_MODELS } from '../src/catalog'
@@ -70,17 +73,51 @@ console.log(`transcript: ${segments.length} segments, ${transcriptChars} chars �
 const modelsDir =
   process.env.DOODLE_MODELS_DIR ??
   path.join(os.homedir(), 'Library', 'Application Support', 'desktop', 'models')
-const engine = new LocalNotesEngine({ modelUri: LOCAL_MODELS[0]!.uri, modelsDir })
+const modelPath =
+  process.env.DOODLE_MODEL_PATH ??
+  path.join(modelsDir, 'hf_unsloth_Qwen3-4B-Instruct-2507.Q4_K_M.gguf')
+if (!existsSync(modelPath))
+  throw new Error(
+    'Set DOODLE_MODEL_PATH to an existing cached Qwen model. This smoke never downloads.'
+  )
+const engine = new LocalNotesEngine({
+  modelUri: LOCAL_MODELS[0]!.uri,
+  modelPath
+})
+// This is an isolated test process, never the installed app. Bound even native teardown.
+const watchdog = setTimeout(() => {
+  console.error('FAIL: isolated smoke exceeded 12 minutes')
+  process.exit(124)
+}, 12 * 60_000)
+const controller = new AbortController()
+const cancelStarted = Date.now()
+await assert.rejects(
+  engine.runRaw(
+    'Answer with a long list.',
+    'List the numbers from one to one thousand.',
+    () => {
+      controller.abort(new GenerationError('canceled', 'Synthetic cancel'))
+    },
+    { signal: controller.signal }
+  ),
+  /Synthetic cancel/
+)
+console.log(
+  `PASS: real native cancellation and context cleanup (${Date.now() - cancelStarted}ms including load/prefill); retrying long meeting`
+)
 
 const started = Date.now()
 const result = await engine.generateNotes(input, undefined, (progress) => {
+  if (progress.activity) return
   console.log(
     progress.phase === 'condensing'
       ? `condensing part ${progress.current}/${progress.total}…`
       : 'writing final notes…'
   )
 })
-console.log(`\n===== NOTES (${result.engine}, ${Math.round((Date.now() - started) / 1000)}s) =====\n`)
+console.log(
+  `\n===== NOTES (${result.engine}, ${Math.round((Date.now() - started) / 1000)}s) =====\n`
+)
 console.log(result.markdown)
 
 const notes = result.markdown.toLowerCase()
@@ -97,6 +134,7 @@ for (const [label, ok] of checks) {
   if (!ok) failed += 1
 }
 await engine.dispose()
+clearTimeout(watchdog)
 if (failed > 0) {
   console.error(`\n${failed} planted fact(s) missing from the notes`)
   process.exit(1)

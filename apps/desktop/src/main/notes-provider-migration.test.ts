@@ -1,3 +1,4 @@
+import { NotesGenerationJobs } from './notes-generation-job'
 import * as batchTranscription from '../shared/batch-transcription'
 import { LibraryActivity } from './library-activity'
 import * as libraryPath from './library-path'
@@ -37,6 +38,8 @@ test('retired settings survive reload, block requests, and never migrate keys to
         }
       }
     },
+    './notes-generation-job': { NotesGenerationJobs },
+    './library-activity': { libraryActivity: activity },
     './library-path': libraryPath,
     './library-ipc': {
       libraryIpc: {

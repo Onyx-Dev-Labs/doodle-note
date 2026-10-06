@@ -1,3 +1,5 @@
+import { NotesGenerationJobs } from './notes-generation-job'
+import { libraryActivity } from './library-activity'
 import {
   normalizeBatchSettings,
   type BatchTranscriptionSettings
@@ -5,10 +7,12 @@ import {
 import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
 import { fetchCloudModels } from './cloud-models'
-import { app, safeStorage } from 'electron'
+import { app, ipcMain, safeStorage } from 'electron'
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  GenerationError,
+  withGenerationDeadline,
   CloudNotesEngine,
   DEFAULT_MODELS_DIR,
   LOCAL_MODELS,
@@ -28,6 +32,7 @@ import {
   NOTES_ASK_GLOBAL_TOKEN_CHANNEL,
   NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
+  NOTES_CANCEL_ENHANCE_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_TEMPLATES_CHANNEL,
   NOTES_ENHANCE_PROGRESS_CHANNEL,
@@ -43,6 +48,8 @@ import {
   type AskRequest,
   type AskResult,
   type CloudProvider,
+  type EnhanceIdentity,
+  type EnhanceProgressEvent,
   type EnhanceRequest,
   type EnhanceResult,
   type GlobalAskRequest,
@@ -113,7 +120,10 @@ export class NotesService {
   private localEngine: LocalNotesEngine | null = null
   private localEngineModelId: string | null = null
   private localEnginePath: string | null = null
-  private enhanceBusy = false
+  private readonly generationJobs = new NotesGenerationJobs()
+  private get enhanceBusy(): boolean {
+    return this.generationJobs.busy
+  }
   private askBusy = false
   private activateBusy = false
 
@@ -157,8 +167,27 @@ export class NotesService {
       const { NOTE_TEMPLATES } = await import('@repo/ai')
       return NOTE_TEMPLATES.map((t) => ({ id: t.id, label: t.label, description: t.description }))
     })
-    libraryIpc.handle(NOTES_ENHANCE_CHANNEL, (_event, request: unknown) =>
-      this.enhance((request ?? {}) as EnhanceRequest)
+    // Reserve ownership before waiting on library relocation. Cancellation must
+    // bypass that barrier or it could deadlock behind the operation it stops.
+    ipcMain.handle(NOTES_ENHANCE_CHANNEL, async (event, request: unknown) => {
+      const input = (request ?? {}) as EnhanceRequest
+      const cancel = (): void => {
+        this.generationJobs.cancel(input, event.sender.id)
+      }
+      // A reload/crash has no React unmount callback. Stop its orphaned inference.
+      event.sender.on('destroyed', cancel)
+      event.sender.on('render-process-gone', cancel)
+      event.sender.on('did-start-loading', cancel)
+      try {
+        return await this.enhance(input, event.sender.id)
+      } finally {
+        event.sender.removeListener('destroyed', cancel)
+        event.sender.removeListener('render-process-gone', cancel)
+        event.sender.removeListener('did-start-loading', cancel)
+      }
+    })
+    ipcMain.handle(NOTES_CANCEL_ENHANCE_CHANNEL, (event, identity: EnhanceIdentity) =>
+      identity ? this.generationJobs.cancel(identity, event.sender.id) : false
     )
     libraryIpc.handle(NOTES_ASK_CHANNEL, (_event, request: unknown) =>
       this.ask((request ?? {}) as AskRequest)
@@ -173,6 +202,7 @@ export class NotesService {
   }
 
   async dispose(): Promise<void> {
+    await this.generationJobs.stop()
     const engine = this.localEngine
     this.localEngine = null
     this.localEngineModelId = null
@@ -281,54 +311,110 @@ export class NotesService {
 
   /* ---- enhance ---- */
 
-  private async enhance(request: EnhanceRequest): Promise<EnhanceResult> {
+  private async enhance(request: EnhanceRequest, owner: number): Promise<EnhanceResult> {
     if (this.enhanceBusy) {
       return { error: 'Notes are already being generated — wait for the current run to finish.' }
     }
     if (this.askBusy) {
       return { error: 'A question is being answered right now — try again in a moment.' }
     }
-    this.enhanceBusy = true
+    if (!request.runId || !request.meetingId)
+      return { error: 'Notes generation requires a meeting and run ID.' }
+    const identity = { runId: request.runId, meetingId: request.meetingId }
     try {
-      if (
-        request.automaticAfterStop &&
-        !autoGenerateNotesAfterStop(this.settings.autoGenerateNotesAfterStop)
-      ) {
-        return { error: 'Automatic notes are now disabled. Choose Generate notes to run manually.' }
-      }
-      const segments = labelSegments(
-        Array.isArray(request.segments) ? request.segments : [],
-        request.participants
-      )
-      const kept = segments.filter((s) => !s.echo)
-      const input: MergeInput = {
-        title: typeof request.title === 'string' ? request.title.trim() : '',
-        rawNotesMarkdown:
-          typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
-        segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
-        speakers: speakerInfos(kept, request.participants),
-        ...(kept.some((s) => s.endMs !== undefined)
-          ? {
-              durationMs: Math.max(...kept.flatMap((s) => (s.endMs === undefined ? [] : [s.endMs])))
+      return await this.generationJobs.run(identity, owner, async (signal) => {
+        const started = Date.now()
+        let phase: EnhanceProgressEvent['phase'] = 'preparing'
+        let current: number | undefined
+        let total: number | undefined
+        let responseChunks = 0
+        let lastActivity: number | undefined
+        const progress = (): void =>
+          this.broadcast(NOTES_ENHANCE_PROGRESS_CHANNEL, {
+            ...identity,
+            phase: signal.aborted ? 'canceling' : phase,
+            current,
+            total,
+            elapsedMs: Date.now() - started,
+            responseChunks,
+            lastActivityMs: lastActivity === undefined ? undefined : Date.now() - lastActivity
+          })
+        progress()
+        const heartbeat = setInterval(progress, 1000)
+        try {
+          return await libraryActivity.run(async () => {
+            signal.throwIfAborted()
+            if (
+              request.automaticAfterStop &&
+              !autoGenerateNotesAfterStop(this.settings.autoGenerateNotesAfterStop)
+            ) {
+              return {
+                error: 'Automatic notes are now disabled. Choose Generate notes to run manually.'
+              }
             }
-          : {}),
-        ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
-      }
-      const engine = await this.pickEngine(request.automaticAfterStop === true)
-      const result = await engine.generateNotes(
-        input,
-        (token) => {
-          this.broadcast(NOTES_ENHANCE_TOKEN_CHANNEL, { token })
-        },
-        (progress) => {
-          this.broadcast(NOTES_ENHANCE_PROGRESS_CHANNEL, progress)
+            const segments = labelSegments(
+              Array.isArray(request.segments) ? request.segments : [],
+              request.participants
+            )
+            const kept = segments.filter((s) => !s.echo)
+            const input: MergeInput = {
+              title: typeof request.title === 'string' ? request.title.trim() : '',
+              rawNotesMarkdown:
+                typeof request.rawNotesMarkdown === 'string' ? request.rawNotesMarkdown : '',
+              segments: kept.map((s) => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })),
+              speakers: speakerInfos(kept, request.participants),
+              ...(kept.some((s) => s.endMs !== undefined)
+                ? {
+                    durationMs: Math.max(
+                      ...kept.flatMap((s) => (s.endMs === undefined ? [] : [s.endMs]))
+                    )
+                  }
+                : {}),
+              ...(typeof request.templateId === 'string' ? { templateId: request.templateId } : {})
+            }
+            const engine = await withGenerationDeadline(
+              signal,
+              'preparing',
+              async (preparingSignal) => {
+                const engine = await this.pickEngine(request.automaticAfterStop === true)
+                preparingSignal.throwIfAborted()
+                if (engine instanceof LocalNotesEngine) await engine.prepare(preparingSignal)
+                return engine
+              }
+            )
+            const result = await engine.generateNotes(
+              input,
+              (token) => {
+                if (!signal.aborted)
+                  this.broadcast(NOTES_ENHANCE_TOKEN_CHANNEL, { ...identity, token })
+              },
+              (update) => {
+                phase = update.phase
+                current = update.current
+                total = update.total
+                if (update.activity) {
+                  responseChunks++
+                  lastActivity = Date.now()
+                } else {
+                  responseChunks = 0
+                  lastActivity = undefined
+                  progress()
+                }
+              },
+              { signal }
+            )
+            signal.throwIfAborted()
+            return { markdown: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
+          })
+        } finally {
+          clearInterval(heartbeat)
         }
-      )
-      return { markdown: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
+      })
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) }
-    } finally {
-      this.enhanceBusy = false
+      return {
+        code: err instanceof GenerationError ? err.code : 'model-error',
+        error: err instanceof Error ? err.message : String(err)
+      }
     }
   }
 
