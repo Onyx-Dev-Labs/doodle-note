@@ -1,6 +1,6 @@
 # DEV-374 Windows delivery candidate
 
-This is an unpublished Windows x64 test candidate, proposed as **0.4.33 beta**.
+This is an unpublished Windows x64 test candidate, proposed as **0.4.34 beta**.
 It is not an approved release. An unsigned artifact must be described as an
 unsigned test candidate. Do not publish or change updater feeds from this PR.
 
@@ -28,6 +28,31 @@ unsigned test candidate. Do not publish or change updater feeds from this PR.
   recorded-only timeline behavior and untimed TXT semantics are preserved.
 - Mac library relocation and native Whisper remain Mac-only. Windows storage,
   capture drain, Sherpa final transcription and privacy behavior are preserved.
+
+### Expanded October 6 scope
+
+The earlier 0.4.33 candidate and its October 2 evidence remain historical. The
+expanded candidate must be verified again after these changes:
+
+- DEV-334: preserve transcript reading position while live partial/final text
+  arrives; resume following at the end and provide keyboard access.
+- DEV-336 / DEV-251: reuse PR #115 commit
+  `11ec9a54173974f65af4d7bf3f4e1b82d0682ae8` (local cherry-pick `1a90f2a`),
+  qualify detection recovery and capture-specific automatic Stop independent of
+  the editor view. The source PR remains unmerged.
+- DEV-286: reject mobile-reader responses from retired connections, including
+  same-account reconnects. Preserve existing versions/ink contracts and the
+  deliberate mobile-navigation rollout gate. Synthetic reader tests do not
+  replace authenticated iPad/Windows interoperability evidence.
+- DEV-333: qualify integrated multiple-calendar-account behavior on Windows,
+  including per-account errors and the Google approval gate. Keep actual OAuth,
+  account retention and provider verification separate from synthetic UI tests.
+- Qualify Windows publisher retry behavior against a local simulated server and
+  remediate compatible dependency vulnerabilities before final packaging.
+
+No calendar/provider permissions, mobile rollout settings or public channel
+configuration are changed by this candidate. Issue-specific physical and
+authenticated-account acceptance remains visible in the final QA report.
 
 ## Evidence requirements
 
@@ -70,9 +95,10 @@ the updater lifecycle. Use a disposable OS/account boundary for those tests.
 Read-only channel check on October 2, 2026: `/download/win` resolves to
 `DoodleNote-0.4.23-beta-setup.exe`; `beta.yml` and `latest-beta.yml` report 0.4.23;
 production `latest.yml` reports 0.3.4. Windows update policy selects `beta` and
-disables downgrades. Recheck these values immediately before approved rollout.
+disables downgrades. The three manifest versions were checked again on October
+6 and remain unchanged. Recheck all routes immediately before approved rollout.
 
-Propose 0.4.33 on the existing beta channel, after review, DEV-256 quality gates,
+Propose 0.4.34 on the existing beta channel, after review, DEV-256 quality gates,
 isolated installation/upgrade verification and explicit release approval. Keep
 production `latest.yml` and all Mac artifacts/feeds unchanged. Production requires
 valid Authenticode through the existing signature gate. Google-enabled official
@@ -82,9 +108,11 @@ credential-free CI packaging is not evidence of those checks.
 Prepare beta manifests locally with `buildWindowsBetaManifests`; verify both
 reference the versioned beta installer and its measured size/SHA-512. Do not run
 `publish:win-beta` or `release:win` without separate publication authorization.
-The publisher uses stream uploads; a previous Mac retry failure is not proven
-repaired by packaging or by a local multipart helper. Qualify retry semantics
-without paid resources or production mutations before approved upload.
+Windows publishers now use disk-backed Blob bodies so SDK retries can read the
+complete artifact again. Local tests exercise the actual beta publisher against
+a simulated 503 response, verify complete retry bytes and artifact-before-feed
+ordering, and ensure exhausted artifact retries publish no manifests. The shared
+Mac upload path is unchanged. These tests do not establish actual public delivery.
 
 After approval: publish immutable qualified artifacts, then intended beta
 manifests; read back and hash downloads; update an existing 0.4.23 beta client via

@@ -19,15 +19,22 @@
     "overrides": {
       "@xmldom/xmldom@>=0.7.0 <0.8.15": "0.8.15",
       "qs@>=2.2.5 <6.16.0": "6.16.0",
-      "brace-expansion@1": "1.1.18",
-      "brace-expansion@2": "2.1.4",
-      "brace-expansion@5": "5.0.9",
+      "brace-expansion@1": "1.1.21",
+      "brace-expansion@2": "2.1.7",
+      "brace-expansion@5": "5.0.12",
       "esbuild@0.18": "0.25.12",
       "postcss@8.4.31": "8.5.26",
-      "sharp@0.34": "0.35.4",
+      "sharp@>=0.34 <0.35.5": "0.35.5",
       "js-yaml@4": "4.3.2",
       "baseline-browser-mapping@2": "2.11.0",
-      "browserslist@4": "4.28.7"
+      "browserslist@4": "4.28.7",
+      "node-llama-cpp>simple-git": "4.0.2",
+      "prosemirror-view@1": "1.42.3",
+      "hono@4": "4.13.7",
+      "proxy-addr@2": "2.0.8",
+      "ip-address@10": "10.7.1",
+      "fast-uri@3": "3.1.8",
+      "source-map-js@1": "1.2.2"
     }
   },
   "scripts": {
