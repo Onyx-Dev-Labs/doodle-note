@@ -200,7 +200,7 @@ function finishingHost(finish: () => Promise<unknown>): {
     activeSessionId: 1,
     captureState: 'finishing',
     child: new Worker(),
-    recorder: { dir: '/synthetic', finish }
+    recorder: { dir: '/synthetic', finish, abort: () => {} }
   })
   return { host, state, events }
 }
@@ -240,6 +240,24 @@ test('repeated Stop during refinement cannot restart finalization or finish the 
   await finishing
   assert.equal(events.filter((event) => event.event === 'done').length, 1)
   assert.ok(events.some((event) => event.event === 'error'))
+})
+
+test('Windows capture confirmation waits for the matching drain acknowledgement', () => {
+  const { host, state, events } = finishingHost(async () => null)
+  Object.assign(state, { captureState: 'draining', workerStarted: true })
+  host.captureStatus({ type: 'drained', sessionId: 0 })
+  assert.ok(!events.some((event) => event.event === 'status' && event.stage === 'capture_stopped'))
+  host.captureStatus({ type: 'drained', sessionId: 1 })
+  assert.equal(
+    events.filter((event) => event.event === 'status' && event.stage === 'capture_stopped').length,
+    1
+  )
+  host.captureStatus({ type: 'drained', sessionId: 1 })
+  assert.equal(
+    events.filter((event) => event.event === 'status' && event.stage === 'capture_stopped').length,
+    1
+  )
+  host.dispose()
 })
 
 test('failure on one split channel rejects the entire replacement', async () => {

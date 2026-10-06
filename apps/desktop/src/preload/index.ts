@@ -171,10 +171,12 @@ import {
 } from '../shared/wizard-api'
 import {
   DETECT_GET_STATE_CHANNEL,
+  DETECT_AUTO_STOP_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
   type DetectApi,
   type DetectPrefsUpdate,
+  type AutoStopState,
   type DetectState
 } from '../shared/detect-api'
 import {
@@ -575,6 +577,9 @@ const detectApi: DetectApi = {
 
   onMeetingEnded(cb: () => void): () => void {
     return subscribe(DETECT_MEETING_ENDED_CHANNEL, cb)
+  },
+  onAutoStopState(cb: (state: AutoStopState) => void): () => void {
+    return subscribe(DETECT_AUTO_STOP_STATE_CHANNEL, cb)
   }
 }
 

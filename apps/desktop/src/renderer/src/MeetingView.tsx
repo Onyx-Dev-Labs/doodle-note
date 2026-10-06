@@ -3,7 +3,15 @@ import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/tran
 import { transcriptAudioPosition, transcriptDisplayTime } from './lib/transcript-audio'
 import { registerLibrarySave } from './lib/library-flush'
 import { generatedModelLabel } from './lib/generated-model-label'
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState
+} from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
@@ -14,6 +22,7 @@ import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetin
 import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
 import { applyCaptureStatus } from './lib/capture-status'
+import type { AutoStopState } from '../../shared/detect-api'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
   SYSTEM_BACKEND_STORAGE_KEY,
@@ -349,6 +358,9 @@ export default function MeetingView({
   const elapsedBaseRef = useRef(0)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
+  const transcriptFollowingRef = useRef(true)
+  const transcriptSizeRef = useRef({ width: 0, height: 0 })
+  const transcriptScrollTopRef = useRef(0)
   const audioRef = useRef<HTMLAudioElement>(null)
   /** Seek (seconds) to apply once a newly selected part's metadata loads. */
   const pendingSeekSecRef = useRef<number | null>(null)
@@ -804,19 +816,33 @@ export default function MeetingView({
   /* ---- auto-stop when the meeting app hangs up ---- */
 
   const [autoStopped, setAutoStopped] = useState(false)
-  const capturingRef = useRef(false)
+  const [autoStopState, setAutoStopState] = useState<AutoStopState | null>(null)
 
   useEffect(() => {
-    capturingRef.current = capturing
-  }, [capturing])
-
-  useEffect(() => {
-    return window.detect.onMeetingEnded(() => {
-      if (!capturingRef.current) return
-      window.engine.stop()
-      setAutoStopped(true)
-    })
-  }, [])
+    let live = true
+    let received = false
+    const receive = (next: AutoStopState): void => {
+      received = true
+      if (!live) return
+      setAutoStopState(next)
+      setAutoStopped(
+        next.stop?.meetingId === meetingId &&
+          next.stop.reason === 'meeting-ended' &&
+          next.stop.phase === 'completed'
+      )
+    }
+    const unsubscribe = window.detect.onAutoStopState?.(receive)
+    void window.detect
+      .getState()
+      .then((next) => {
+        if (live && !received && next.autoStopState) receive(next.autoStopState)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+      unsubscribe?.()
+    }
+  }, [meetingId])
 
   useEffect(() => {
     if (!autoStopped) return
@@ -915,10 +941,38 @@ export default function MeetingView({
 
   /* ---- transcript autoscroll ---- */
 
-  useEffect(() => {
+  // Reopening or changing meetings starts at the latest text. Starting another
+  // recording also releases a saved transcript's manual reading position.
+  useLayoutEffect(() => {
+    transcriptFollowingRef.current = true
+  }, [meetingId, transcriptOpen])
+
+  useLayoutEffect(() => {
+    if (phase === 'starting') transcriptFollowingRef.current = true
+  }, [phase])
+
+  useLayoutEffect(() => {
     const el = feedRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [allSegments, state.partials, transcriptOpen])
+    if (!el) return
+    if (transcriptFollowingRef.current) el.scrollTop = el.scrollHeight
+    // A shorter partial can clamp scrollTop during layout. Its queued scroll
+    // event must not be mistaken for the reader returning to the live end.
+    transcriptScrollTopRef.current = el.scrollTop
+  }, [allSegments, state.partials, transcriptOpen, phase])
+
+  useLayoutEffect(() => {
+    const el = feedRef.current
+    if (!el) return
+    // Pane/window resizing should keep followers at the live end, but must not
+    // take scroll ownership back from someone reading earlier lines.
+    const observer = new ResizeObserver(() => {
+      transcriptSizeRef.current = { width: el.clientWidth, height: el.clientHeight }
+      if (transcriptFollowingRef.current) el.scrollTop = el.scrollHeight
+      transcriptScrollTopRef.current = el.scrollTop
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [transcriptOpen])
 
   /* ---- playback follow-along: keep the highlighted row in view ---- */
 
@@ -1747,7 +1801,27 @@ export default function MeetingView({
                 )}
               </div>
             )}
-            <div className="tp-body" ref={feedRef}>
+            <div
+              className="tp-body transcript-feed"
+              ref={feedRef}
+              tabIndex={0}
+              role="region"
+              aria-label="Transcript"
+              onScroll={(event) => {
+                const el = event.currentTarget
+                const size = transcriptSizeRef.current
+                // Chromium can dispatch an anchoring scroll before the resize
+                // observer. That layout adjustment is not a user's scroll.
+                if (el.clientWidth !== size.width || el.clientHeight !== size.height) return
+                if (el.scrollTop === transcriptScrollTopRef.current) return
+                transcriptScrollTopRef.current = el.scrollTop
+                // Fractional layout/zoom can leave a subpixel gap at the end.
+                // Unlike content-height changes, native scroll events cover
+                // wheel, touchpad, scrollbar and keyboard intent alike.
+                transcriptFollowingRef.current =
+                  el.scrollHeight - el.clientHeight - el.scrollTop <= 2
+              }}
+            >
               {transcriptEmpty ? (
                 <div className="tp-empty">
                   <p className="tp-empty-title">Transcript on…</p>
@@ -2041,6 +2115,24 @@ export default function MeetingView({
       {allSegments.some((segment) => segment.source === 'text') && (
         <p className="text-import-local" role="note">
           Imported text transcript. No recording or timestamps. Stored locally; use Export to share.
+        </p>
+      )}
+      {capturing && autoStopState && (
+        <p className="text-import-local" role="status">
+          {autoStopState.stop?.meetingId === meetingId &&
+          autoStopState.stop.reason === 'meeting-ended'
+            ? autoStopState.stop.phase === 'failed'
+              ? 'Automatic stop needs attention. Check the recording and use Stop if it is still running.'
+              : autoStopState.stop.phase === 'stopped'
+                ? 'Recording stopped automatically. Finishing transcript and audio…'
+                : 'Meeting ended. Stopping recording…'
+            : autoStopState.status === 'armed'
+              ? 'Automatic stop is armed for detected meeting input.'
+              : autoStopState.status === 'unavailable'
+                ? 'Meeting detection is unavailable. Stop this recording manually.'
+                : autoStopState.status === 'disabled'
+                  ? 'Automatic stop is off. Stop this recording manually.'
+                  : 'Waiting for detectable meeting input. Stop manually if no meeting is detected.'}
         </p>
       )}
       <div className="bottom-bar">

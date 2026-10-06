@@ -357,6 +357,7 @@ export class WinEngineHost {
       return
     }
     if (status.type === 'drained' && this.captureState === 'draining') {
+      this.emit({ event: 'status', stage: 'capture_stopped' })
       this.finishAfterCaptureDrain()
       return
     }

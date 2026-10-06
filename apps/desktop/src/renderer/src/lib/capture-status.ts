@@ -43,6 +43,7 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
         statusText: state.phase === 'starting' ? 'Starting…' : state.statusText
       }
     case 'finishing':
+    case 'capture_stopped':
     case 'saving_audio':
       return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
     case 'refining_transcript':

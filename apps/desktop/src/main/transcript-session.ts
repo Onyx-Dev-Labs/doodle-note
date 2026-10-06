@@ -79,7 +79,11 @@ export class TranscriptSession {
         if (ev.channel) this.partials[ev.channel] = ev.text
         return
       case 'status':
-        if (['finishing', 'saving_audio', 'refining_transcript'].includes(ev.stage ?? ''))
+        if (
+          ['finishing', 'capture_stopped', 'saving_audio', 'refining_transcript'].includes(
+            ev.stage ?? ''
+          )
+        )
           this.phase = 'finishing'
         return
       case 'channel_start':

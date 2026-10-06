@@ -25,28 +25,35 @@ while ($true) {
   if ($env:DOODLE_PARENT_PID) {
     if (-not (Get-Process -Id ([int]$env:DOODLE_PARENT_PID) -ErrorAction SilentlyContinue)) { exit }
   }
+  try {
   $inUse = New-Object System.Collections.Generic.List[string]
-  foreach ($key in (Get-ChildItem $root -ErrorAction SilentlyContinue)) {
+  foreach ($key in (Get-ChildItem $root -ErrorAction Stop)) {
     if ($key.PSChildName -eq 'NonPackaged') {
-      foreach ($sub in (Get-ChildItem $key.PSPath -ErrorAction SilentlyContinue)) {
-        $v = Get-ItemProperty $sub.PSPath -ErrorAction SilentlyContinue
+      foreach ($sub in (Get-ChildItem $key.PSPath -ErrorAction Stop)) {
+        $v = Get-ItemProperty $sub.PSPath -ErrorAction Stop
         if ($v.LastUsedTimeStart -gt 0 -and $v.LastUsedTimeStop -eq 0) {
           $inUse.Add($sub.PSChildName.ToLower())
         }
       }
     } else {
-      $v = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue
+      $v = Get-ItemProperty $key.PSPath -ErrorAction Stop
       if ($v.LastUsedTimeStart -gt 0 -and $v.LastUsedTimeStop -eq 0) {
         $inUse.Add($key.PSChildName.ToLower())
       }
     }
   }
   $list = @($inUse | Sort-Object -Unique)
-  $sig = $list -join '|'
+  $sig = 'valid:' + ($list -join '|')
   if ($sig -ne $prev) {
     $prev = $sig
-    $payload = @{ event = 'micmon'; running = ($list.Count -gt 0); bundles = $list; outputBundles = @() }
+    $payload = @{ event = 'micmon'; valid = $true; running = ($list.Count -gt 0); bundles = $list; outputBundles = @() }
     Write-Output (ConvertTo-Json $payload -Compress)
+  }
+  } catch {
+    if ($prev -ne 'unavailable') {
+      $prev = 'unavailable'
+      Write-Output (ConvertTo-Json @{ event = 'micmon'; valid = $false } -Compress)
+    }
   }
   Start-Sleep -Milliseconds 1500
 }
