@@ -62,11 +62,19 @@ export interface AskInput {
 export type AskAnswer = MergedNotes
 
 /** Progress of a long-meeting notes run (map-reduce condensation). */
+export interface GenerationControl {
+  signal?: AbortSignal
+  phase?: 'condensing' | 'writing'
+  /** Activity counts only; intermediate text never leaves the engine. */
+  onActivity?: () => void
+}
+
 export interface NotesProgress {
   phase: 'condensing' | 'writing'
   /** 1-based part counter, present while condensing. */
   current?: number
   total?: number
+  activity?: boolean
 }
 
 /**
@@ -84,11 +92,17 @@ export interface NotesEngine {
    */
   readonly singlePassThresholdChars?: number
   /** One raw generation — the primitive the notes orchestration composes. */
-  runRaw(system: string, prompt: string, onToken?: (text: string) => void): Promise<MergedNotes>
+  runRaw(
+    system: string,
+    prompt: string,
+    onToken?: (text: string) => void,
+    control?: GenerationControl
+  ): Promise<MergedNotes>
   generateNotes(
     input: MergeInput,
     onToken?: (text: string) => void,
-    onProgress?: (progress: NotesProgress) => void
+    onProgress?: (progress: NotesProgress) => void,
+    control?: GenerationControl
   ): Promise<MergedNotes>
   /** Answer a question grounded ONLY in this meeting's content. */
   askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer>

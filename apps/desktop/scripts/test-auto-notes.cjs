@@ -38,12 +38,24 @@ const launch = async () => {
     BrowserWindow.getAllWindows()[0].setTitle('DoodleNote — ONY-271 synthetic QA')
   )
 }
-const send = async (ev) =>
-  app.evaluate(
+let activeFixtureId
+const send = async (ev) => {
+  // The capture service is stubbed in this test. Persist its synthetic transcript
+  // here: renderer IPC intentionally cannot write transcript-owned fields.
+  if (activeFixtureId && (ev.event === 'segments' || ev.event === 'segments-replaced')) {
+    const file = path.join(profile, 'meetings', activeFixtureId + '.json')
+    const record = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const segments = new Map(record.segments.map((s) => [s.id, s]))
+    for (const segment of ev.segments) segments.set(segment.id, segment)
+    record.segments = [...segments.values()]
+    fs.writeFileSync(file, JSON.stringify(record))
+  }
+  await app.evaluate(
     ({ BrowserWindow }, ev) =>
       BrowserWindow.getAllWindows()[0].webContents.send('engine:event', ev),
     ev
   )
+}
 const count = async () => app.evaluate(() => globalThis.qa.calls.length)
 const waitCount = async (n) => expect.poll(count).toBe(n)
 ;(async () => {
@@ -72,6 +84,8 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   )
   const disabled = await page.evaluate(() =>
     window.notes.enhance({
+      meetingId: 'synthetic-preflight',
+      runId: crypto.randomUUID(),
       automaticAfterStop: true,
       rawNotesMarkdown: 'Synthetic',
       title: 'QA',
@@ -120,6 +134,8 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   )
   const missingKey = await page.evaluate(() =>
     window.notes.enhance({
+      meetingId: 'synthetic-preflight',
+      runId: crypto.randomUUID(),
       automaticAfterStop: true,
       rawNotesMarkdown: 'Synthetic',
       title: 'QA',
@@ -136,7 +152,8 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
       ready: true,
       stops: 0,
       capture: 0,
-      captureReady: true
+      captureReady: true,
+      cancellations: []
     }
     ipcMain.removeAllListeners('engine:start')
     ipcMain.removeAllListeners('engine:stop')
@@ -172,6 +189,11 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
         }
       ]
     }))
+    ipcMain.removeHandler('notes:cancel-enhance')
+    ipcMain.handle('notes:cancel-enhance', (_e, identity) => {
+      qa.cancellations.push(identity)
+      return true // Completion stays pending until the test releases native cleanup.
+    })
     ipcMain.removeHandler('notes:enhance')
     ipcMain.handle('notes:enhance', (_e, request) => {
       qa.calls.push(request)
@@ -196,6 +218,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   })
   const openMeeting = async (raw = 'Original rough notes') => {
     const id = 'ony-271-qa-' + ++serial
+    activeFixtureId = id
     await page.evaluate(
       ({ id, raw }) =>
         window.meetings.upsert({
@@ -299,6 +322,64 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
         ' Stop: finalized transcript, freshest rough notes, one request, persisted result'
     )
   }
+  // Cancellation keeps the renderer busy through cleanup and rejects late success.
+  const canceledId = await openMeeting()
+  await start()
+  await send({ event: 'segments', segments: [segment('Synthetic cancel transcript')] })
+  await stop(false)
+  const cancelBefore = await count()
+  await finalize()
+  await waitCount(cancelBefore + 1)
+  const runIdentity = await app.evaluate(() => qa.calls.at(-1))
+  await app.evaluate(({ BrowserWindow }, identity) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('notes:enhance-progress', {
+      ...identity,
+      phase: 'condensing',
+      current: 2,
+      total: 3,
+      elapsedMs: 15000,
+      responseChunks: 25,
+      lastActivityMs: 1000
+    })
+  }, runIdentity)
+  await expect(page.getByText('Condensing part 2 of 3 · 15s · last response 1s ago')).toBeVisible()
+  await app.evaluate(({ BrowserWindow }, identity) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('notes:enhance-progress', {
+      ...identity,
+      runId: 'stale-run',
+      phase: 'writing',
+      elapsedMs: 99000,
+      responseChunks: 99
+    })
+  }, runIdentity)
+  await expect(page.getByText('Condensing part 2 of 3 · 15s · last response 1s ago')).toBeVisible()
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(800, 560))
+  await expect(
+    page.getByRole('button', { name: 'Cancel generation', exact: true })
+  ).toBeInViewport()
+  await page.screenshot({
+    path: artifacts + '/notes-progress-cancel-compact.png',
+    animations: 'disabled'
+  })
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1180, 760))
+  await page.getByRole('button', { name: 'Cancel generation', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect
+    .poll(() => app.evaluate(() => qa.cancellations.at(-1)?.runId))
+    .toBe(runIdentity.runId)
+  await expect(page.getByRole('button', { name: 'Canceling…', exact: true })).toBeDisabled()
+  await resolve() // A producer racing cancellation still cannot replace notes.
+  await expect(page.getByRole('button', { name: 'Generate notes', exact: true })).toBeEnabled()
+  assert.equal((await saved(canceledId)).enhancedMarkdown, undefined)
+  assert.equal((await saved(canceledId)).rawNotesMarkdown, 'Original rough notes')
+  await page.getByRole('button', { name: 'Generate notes', exact: true }).click()
+  await waitCount(cancelBefore + 2)
+  await resolve()
+  await expect(page.locator('.tiptap')).toContainText('Synthetic generated notes')
+  assert.match((await saved(canceledId)).enhancedMarkdown, /Synthetic generated notes/)
+  results.push(
+    'Scoped progress; cancel waits for cleanup; late result discarded; manual retry persists'
+  )
   // Off means no automatic work on either route. Manual generation still works.
   for (const detected of [false, true]) {
     await page.evaluate(() => window.notes.setSettings({ autoGenerateNotesAfterStop: false }))
@@ -332,7 +413,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   await waitCount(before + 1)
   await page.locator('.tiptap').fill('Newer authored edit')
   await resolve()
-  await expect(page.getByRole('alert')).toContainText('not applied')
+  await expect(page.getByRole('button', { name: 'Cancel generation', exact: true })).toHaveCount(0)
   await expect(page.locator('.tiptap')).toContainText('Newer authored edit')
   assert.equal((await saved(edited)).enhancedMarkdown, undefined)
   results.push('Edits during generation reject stale output')
@@ -352,7 +433,7 @@ const waitCount = async (n) => expect.poll(count).toBe(n)
   })
   await expect(page.getByRole('button', { name: 'Stop recording', exact: true })).toBeEnabled()
   await resolve()
-  await expect(page.getByRole('alert')).toContainText('not applied')
+  await expect(page.getByRole('button', { name: 'Cancel generation', exact: true })).toHaveCount(0)
   assert.equal((await saved(resumed)).enhancedMarkdown, undefined)
   await send({ event: 'segments', segments: [{ ...segment('After Resume'), id: 'second-part' }] })
   await stop(false)

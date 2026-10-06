@@ -1,3 +1,4 @@
+import { requireCompleteOutput } from './generation-control'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
@@ -9,6 +10,7 @@ import {
 } from './global-ask-prompt'
 import { generateMeetingNotes } from './map-reduce'
 import type {
+  GenerationControl,
   AskAnswer,
   AskInput,
   MergeInput,
@@ -80,44 +82,34 @@ export class CloudNotesEngine implements NotesEngine {
       throw new Error(
         'This AI provider is retired. Select a supported provider and enter its own API key in Settings.'
       )
-    this.label =
-      options.provider === 'ollama' ? preset.label : `${preset.label} (your key)`
+    this.label = options.provider === 'ollama' ? preset.label : `${preset.label} (your key)`
   }
 
   async generateNotes(
     input: MergeInput,
     onToken?: (text: string) => void,
-    onProgress?: (progress: NotesProgress) => void
+    onProgress?: (progress: NotesProgress) => void,
+    control?: GenerationControl
   ): Promise<MergedNotes> {
-    return generateMeetingNotes(this, input, onToken, onProgress)
+    return generateMeetingNotes(this, input, onToken, onProgress, control)
   }
 
-  async askQuestion(
-    input: AskInput,
-    onToken?: (text: string) => void
-  ): Promise<AskAnswer> {
-    return this.runRaw(
-      buildAskSystemPrompt(input.speakers),
-      buildAskUserMessage(input),
-      onToken
-    )
+  async askQuestion(input: AskInput, onToken?: (text: string) => void): Promise<AskAnswer> {
+    return this.runRaw(buildAskSystemPrompt(input.speakers), buildAskUserMessage(input), onToken)
   }
 
   async askAcrossMeetings(
     input: GlobalAskInput,
     onToken?: (text: string) => void
   ): Promise<AskAnswer> {
-    return this.runRaw(
-      GLOBAL_ASK_SYSTEM_PROMPT,
-      buildGlobalAskUserMessage(input),
-      onToken
-    )
+    return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
   }
 
   async runRaw(
     system: string,
     prompt: string,
-    onToken?: (text: string) => void
+    onToken?: (text: string) => void,
+    control?: GenerationControl
   ): Promise<MergedNotes> {
     if (!Object.hasOwn(CLOUD_PROVIDER_PRESETS, this.options.provider)) {
       throw new Error(
@@ -145,7 +137,9 @@ export class CloudNotesEngine implements NotesEngine {
         : this.options.provider === 'openai'
           ? openai!(modelId)
           : openai!.chat(modelId)
-    const { text } = await generateText({
+    control?.signal?.throwIfAborted()
+    const { text, finishReason } = await generateText({
+      abortSignal: control?.signal,
       model,
       system,
       prompt,
@@ -154,6 +148,8 @@ export class CloudNotesEngine implements NotesEngine {
         ? { providerOptions: { openai: { store: false } } }
         : {})
     })
+    control?.signal?.throwIfAborted()
+    requireCompleteOutput(finishReason, control?.phase ?? 'writing')
     onToken?.(text)
     return {
       markdown: text.trim(),

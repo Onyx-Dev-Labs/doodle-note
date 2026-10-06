@@ -83,6 +83,7 @@ import {
   NOTES_ASK_GLOBAL_TOKEN_CHANNEL,
   NOTES_ASK_TOKEN_CHANNEL,
   NOTES_DOWNLOAD_PROGRESS_CHANNEL,
+  NOTES_CANCEL_ENHANCE_CHANNEL,
   NOTES_ENHANCE_CHANNEL,
   NOTES_ENHANCE_PROGRESS_CHANNEL,
   NOTES_ENHANCE_TOKEN_CHANNEL,
@@ -326,6 +327,10 @@ const notesApi: NotesApi = {
 
   setSettings(update: NotesSettingsUpdate): Promise<NotesSettingsView> {
     return ipcRenderer.invoke(NOTES_SET_SETTINGS_CHANNEL, update) as Promise<NotesSettingsView>
+  },
+
+  cancelEnhance(identity) {
+    return ipcRenderer.invoke(NOTES_CANCEL_ENHANCE_CHANNEL, identity) as Promise<boolean>
   },
 
   enhance(input: EnhanceRequest): Promise<EnhanceResult> {

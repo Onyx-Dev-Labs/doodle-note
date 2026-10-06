@@ -17,6 +17,7 @@ export {
 } from './prompt'
 export { chunkSegments, DEFAULT_SINGLE_PASS_CHARS, generateMeetingNotes } from './map-reduce'
 export type {
+  GenerationControl,
   AskAnswer,
   AskExchange,
   AskInput,
@@ -28,3 +29,5 @@ export type {
   SpeakerInfo
 } from './types'
 export { NOTE_TEMPLATES, templateById, type NoteTemplate } from './templates'
+
+export { GenerationError, GENERATION_LIMITS, withGenerationDeadline } from './generation-control'

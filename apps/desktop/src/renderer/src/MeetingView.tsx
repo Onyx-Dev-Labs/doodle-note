@@ -323,6 +323,25 @@ export default function MeetingView({
 
   const generationRef = useRef(new MeetingGeneration())
   const mountedRef = useRef(true)
+  const enhanceRunRef = useRef<{
+    runId: string
+    meetingId: string
+    canceled: boolean
+    submitted: boolean
+    committing: boolean
+  } | null>(null)
+  const [enhanceCanceling, setEnhanceCanceling] = useState(false)
+  const [enhanceSaving, setEnhanceSaving] = useState(false)
+  const cancelEnhance = useCallback((): void => {
+    const job = enhanceRunRef.current
+    if (!job || job.canceled || job.committing) return
+    job.canceled = true
+    if (mountedRef.current) {
+      setEnhanceCanceling(true)
+      setEnhanceProgressText('Canceling notes; waiting for model cleanup…')
+    }
+    if (job.submitted) void window.notes.cancelEnhance(job).catch(() => {})
+  }, [])
   const roughMarkdownRef = useRef('')
   const titleValueRef = useRef('')
   /** Lets generated notes improve a deterministic transcript fallback later in the same session. */
@@ -407,6 +426,7 @@ export default function MeetingView({
     },
     onUpdate: ({ editor: ed }) => {
       if (applyingRef.current || docViewRef.current !== 'notes') return
+      cancelEnhance()
       generationRef.current.edit()
       roughMarkdownRef.current = docToMarkdown(ed.getJSON())
       scheduleNotesSave()
@@ -530,6 +550,7 @@ export default function MeetingView({
       ACTIVE_PHASES.includes(stateRef.current.phase)
     )
       return
+    cancelEnhance()
     generationRef.current.invalidate()
     eventRevisionRef.current++
     const reset: EngineEvent = {
@@ -540,7 +561,7 @@ export default function MeetingView({
     dispatch(reset)
     setSavedSegments(record.segments.filter((segment) => !segment.echo))
     setSavedEcho(record.echoSuppressed)
-  }, [meetingId])
+  }, [meetingId, cancelEnhance])
 
   // Retry can finish in the app-level progress panel while this editor stays mounted.
   // Completion belongs to the meeting, not to the button that originally started the job.
@@ -598,6 +619,7 @@ export default function MeetingView({
           // Fold the previous session's segments into the saved pool before
           // the reducer resets, so nothing is lost across re-records.
           recoveredCaptureRef.current = ev.captureId
+          cancelEnhance()
           generationRef.current.startCapture(ev.captureId)
           const prev = stateRef.current
           if (prev.segments.length > 0) {
@@ -631,7 +653,7 @@ export default function MeetingView({
         stateRef.current = sessionReducer(stateRef.current, ev)
         dispatch(ev)
       }),
-    []
+    [cancelEnhance]
   )
 
   useEffect(
@@ -645,11 +667,29 @@ export default function MeetingView({
   useEffect(
     () =>
       window.notes.onEnhanceProgress((progress) => {
-        setEnhanceProgressText(
-          progress.phase === 'condensing' && progress.total
-            ? `Long meeting — condensing part ${progress.current} of ${progress.total}…`
-            : null // writing phase: back to the regular doodling phrases
+        const job = enhanceRunRef.current
+        if (
+          !job ||
+          job.canceled ||
+          job.committing ||
+          progress.runId !== job.runId ||
+          progress.meetingId !== job.meetingId
         )
+          return
+        const phase =
+          progress.phase === 'condensing'
+            ? `Condensing part ${progress.current} of ${progress.total}`
+            : progress.phase === 'writing'
+              ? 'Writing notes'
+              : progress.phase === 'canceling'
+                ? 'Stopping model'
+                : 'Preparing model'
+        const elapsed = Math.floor(progress.elapsedMs / 1000)
+        const activity =
+          progress.lastActivityMs !== undefined
+            ? `last response ${Math.floor(progress.lastActivityMs / 1000)}s ago`
+            : 'waiting for model response'
+        setEnhanceProgressText(`${phase} · ${elapsed}s · ${activity}`)
       }),
     []
   )
@@ -976,6 +1016,7 @@ export default function MeetingView({
     if (capturing || startPendingRef.current || ACTIVE_PHASES.includes(stateRef.current.phase))
       return
     startPendingRef.current = true
+    cancelEnhance()
     generationRef.current.startCapture()
     showNotesDoc()
     if (enhancedMarkdown !== null) {
@@ -1138,10 +1179,20 @@ export default function MeetingView({
     const generation = generationRef.current
     const run = generation.begin()
     if (!run) return
+    const job = {
+      runId: crypto.randomUUID(),
+      meetingId,
+      canceled: false,
+      submitted: false,
+      committing: false
+    }
+    enhanceRunRef.current = job
+    setEnhanceCanceling(false)
+    setEnhanceSaving(false)
     setEnhanceError(null)
     setEnhanceStatus('running')
     setEnhanceProgressText('Preparing notes…')
-    const current = (): boolean => mountedRef.current && generation.isCurrent(run)
+    const current = (): boolean => mountedRef.current && !job.canceled && generation.isCurrent(run)
     try {
       // Read once at completion. A skipped run never waits for a later settings change.
       const [latestSettings, latestModels] = await Promise.all([
@@ -1185,6 +1236,8 @@ export default function MeetingView({
       const shouldGenerateTitle =
         isGenericDraftTitle(titleValueRef.current) || titleWasAutoGeneratedRef.current
       const request = {
+        runId: job.runId,
+        meetingId,
         title: shouldGenerateTitle ? '' : titleValueRef.current.trim(),
         rawNotesMarkdown,
         segments: allSegments,
@@ -1200,8 +1253,10 @@ export default function MeetingView({
         throw new Error(
           'Notes generation canceled because the meeting changed. Your notes are preserved; generate again when ready.'
         )
-      setEnhanceProgressText(null)
+      setEnhanceProgressText('Preparing model…')
+      job.submitted = true
       const result = await window.notes.enhance(request)
+      if (job.canceled || result.code === 'canceled') return
       if (result.error !== undefined || result.markdown === undefined) {
         throw new Error(result.error ?? 'Generate notes failed with no output. Try again.')
       }
@@ -1225,6 +1280,10 @@ export default function MeetingView({
         enhancedMarkdown: markdown,
         segments: allSegments
       })
+      // Commit point: cancel is no longer offered once an accepted result is saving.
+      job.committing = true
+      setEnhanceSaving(true)
+      setEnhanceProgressText('Saving notes…')
       // Persist before presenting success. Never write rough notes from an old request here.
       await window.meetings.upsert({
         id: meetingId,
@@ -1249,15 +1308,18 @@ export default function MeetingView({
       docViewRef.current = 'enhanced'
       setEditorMarkdown(markdown, false)
     } catch (err) {
-      if (mountedRef.current) {
+      if (mountedRef.current && !job.canceled) {
         setEnhanceStatus('error')
         setEnhanceError(err instanceof Error ? err.message : String(err))
       }
     } finally {
       generation.finish(run)
+      if (enhanceRunRef.current === job) enhanceRunRef.current = null
       if (mountedRef.current) {
         setEnhanceStatus((status) => (status === 'running' ? 'idle' : status))
         setEnhanceProgressText(null)
+        setEnhanceCanceling(false)
+        setEnhanceSaving(false)
       }
     }
   }
@@ -1303,9 +1365,10 @@ export default function MeetingView({
     const generation = generationRef.current
     return () => {
       mountedRef.current = false
+      cancelEnhance()
       generation.invalidate()
     }
-  }, [])
+  }, [cancelEnhance])
 
   const showEnhancedDoc = (): void => {
     if (docView === 'enhanced' || enhancedMarkdown === null) return
@@ -1969,6 +2032,16 @@ export default function MeetingView({
         )}
         {primaryAction !== 'hidden' && (
           <div className="generate-cta-wrap tpl-anchor">
+            {enhanceStatus === 'running' && (
+              <button
+                type="button"
+                className="generate-cancel"
+                disabled={enhanceCanceling || enhanceSaving}
+                onClick={cancelEnhance}
+              >
+                {enhanceSaving ? 'Saving…' : enhanceCanceling ? 'Canceling…' : 'Cancel generation'}
+              </button>
+            )}
             <button
               type="button"
               className="generate-cta"

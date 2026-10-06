@@ -3175,10 +3175,31 @@ button.fp-row:hover {
   position: relative;
   display: flex;
   gap: 2px;
+  max-width: 100%;
   z-index: 5;
 }
 
+.generate-cancel {
+  flex-shrink: 0;
+  margin-right: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+.generate-cancel:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.generate-cancel:focus-visible {
+  outline: 2px solid var(--accent-deep);
+  outline-offset: 2px;
+}
+
 .generate-cta {
+  min-width: 0;
   background: #5f7247;
   border: none;
   color: #fdfcf8;
@@ -3288,6 +3309,11 @@ button.fp-row:hover {
 .generate-cta:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Progress is readable status text even though the generate action is disabled. */
+.generate-cta:disabled:has(.doodling) {
+  opacity: 1;
 }
 
 .rec-resume {
