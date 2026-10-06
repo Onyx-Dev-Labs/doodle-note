@@ -41,6 +41,28 @@ neither is a repository fixture. This is not installed-release acceptance.
 
 ## Release and recovery
 
+Candidate artifact source: `d06bd327ccd67ac6b4b279c5ecfac02a0ee5357a`.
+Required CI, CodeQL, Windows packaging/native smoke and the web preview pass at
+that source. The Swift engine and pinned Whisper CLI built locally. The Mac app
+and DMG are signed with Developer ID SEAN INMAN (VTZW6K32K4); their Apple
+notarizations were accepted (`70611c12-1829-4bbd-8543-7b3845138463` and
+`46802b60-c616-48d2-8cbb-1721055cd0ad`). Staples, signatures and Gatekeeper pass.
+The extracted ZIP payload matches all 970 built-app entries. A packaged Metal
+model smoke passed actual cancellation, cleanup before retry and successful
+generation, with downloads disabled and no user profile access.
+
+Final distributables after DMG stapling:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| DoodleNote-0.4.33-arm64-mac.zip | 186326644 | 9ef996e47ca62485e657aee77be76e40fae958e7af4aaf4e5f868633d6e98826 |
+| DoodleNote-0.4.33-arm64.dmg | 188249984 | 7a870f18793d7be4e9a9b9a925cbaec2d74fe6db4d921513bc94297a82b007ba |
+
+The final PR additionally stages these artifacts' manifest and this evidence;
+those metadata changes do not change the packaged application. Upload and verify
+the qualified artifacts before merging the manifest, which activates the website
+download and Mac updater. Nothing has been uploaded or installed by preparation.
+
 Build the Swift engine and package the Mac app separately from publishing.
 Use the existing Developer ID and OAuth configuration; validate signatures,
 notarization, staples, Gatekeeper and archive payloads before distribution.
