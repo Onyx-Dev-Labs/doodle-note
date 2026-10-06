@@ -24,10 +24,13 @@
       "brace-expansion@5": "5.0.9",
       "esbuild@0.18": "0.25.12",
       "postcss@8.4.31": "8.5.26",
-      "sharp@0.34": "0.35.4",
+      "sharp@>=0.34 <0.35.5": "0.35.5",
       "js-yaml@4": "4.3.2",
       "baseline-browser-mapping@2": "2.11.0",
-      "browserslist@4": "4.28.7"
+      "browserslist@4": "4.28.7",
+      "node-llama-cpp>simple-git": "4.0.2",
+      "prosemirror-view@1": "1.42.3",
+      "source-map-js@1": "1.2.2"
     }
   },
   "scripts": {

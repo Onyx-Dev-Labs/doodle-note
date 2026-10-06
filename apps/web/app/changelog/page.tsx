@@ -9,6 +9,17 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.33",
+    date: "October 6, 2026",
+    highlights: [
+      "Mac: prevent local note generation from running indefinitely on long meetings",
+      "See the current generation step, elapsed time, and recent response activity",
+      "Cancel generation and retry after model cleanup while keeping your existing notes and transcript",
+      "Reject incomplete results instead of saving them as finished notes",
+      "Update affected dependencies to address reported security vulnerabilities",
+    ],
+  },
+  {
     version: "0.4.32",
     date: "October 1, 2026",
     highlights: [
