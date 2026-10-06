@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import type { EngineChannel, EngineEvent } from '../shared/engine-events'
-import type { BatchTranscription } from './import-logic'
+import type { BatchProgress, BatchTranscription } from './import-logic'
 
 const require = createRequire(import.meta.url)
 const loader = require('node:module') as { _load: (id: string, ...args: unknown[]) => unknown }
@@ -183,6 +183,7 @@ type HostState = {
   captureState: string
   recorder: unknown
   child: Worker
+  ephemeralAudioDir: string | null
   completeSession: () => Promise<void>
 }
 
@@ -203,6 +204,96 @@ function finishingHost(finish: () => Promise<unknown>): {
     recorder: { dir: '/synthetic', finish, abort: () => {} }
   })
   return { host, state, events }
+}
+
+for (const stage of ['audio', 'refinement'] as const) {
+  for (const outcome of ['resolve', 'reject'] as const) {
+    test(`stale ${stage} ${outcome} after worker restart cannot affect the next capture`, async () => {
+      const host = new WinEngineHost(() => {})
+      const state = host as unknown as HostState
+      const events: EngineEvent[] = []
+      host.onEvent((event) => events.push(event))
+      let settleAudio!: (value: { durationMs: number; startEpochMs: number }) => void
+      let failAudio!: (error: Error) => void
+      let settleRefinement!: (value: BatchTranscription) => void
+      let failRefinement!: (error: Error) => void
+      let progress: ((value: BatchProgress) => void) | undefined
+      let refinementCalls = 0
+      host.setFinalRefiner((_, onProgress) => {
+        refinementCalls++
+        progress = onProgress
+        return new Promise((resolve, reject) => {
+          settleRefinement = resolve
+          failRefinement = reject
+        })
+      })
+      try {
+        host.startServe()
+        worker.event({ event: 'status', stage: 'serve_ready' })
+        host.start('live')
+        const dir = state.ephemeralAudioDir!
+        state.recorder = {
+          dir,
+          finish: () =>
+            stage === 'audio'
+              ? new Promise((resolve, reject) => {
+                  settleAudio = resolve
+                  failAudio = reject
+                })
+              : Promise.resolve({ durationMs: 1000, startEpochMs: 0 })
+        }
+        const finishing = state.completeSession()
+        await new Promise((resolve) => setImmediate(resolve))
+        worker.emit('exit')
+        host.startServe()
+        worker.event({ event: 'status', stage: 'serve_ready' })
+        host.start('live')
+        const nextId = state.activeSessionId
+        const nextDir = state.ephemeralAudioDir!
+        const checkpoint = join(nextDir, 'synthetic-current-capture.txt')
+        writeFileSync(checkpoint, 'Synthetic current capture checkpoint')
+        events.length = 0
+        const callsBefore = refinementCalls
+        if (stage === 'audio') {
+          if (outcome === 'resolve') settleAudio({ durationMs: 1000, startEpochMs: 0 })
+          else failAudio(new Error('Synthetic stale recorder failure'))
+          await new Promise((resolve) => setImmediate(resolve))
+          // Unblock a buggy late refiner so failure is an assertion, not a hung test.
+          if (refinementCalls > callsBefore) failRefinement(new Error('Stale refiner started'))
+        } else {
+          progress?.({ stage: 'downloading_model', progress: 0.5 })
+          progress?.({ stage: 'transcribing' })
+          if (outcome === 'resolve')
+            settleRefinement({
+              segments: [
+                {
+                  id: 'retired-capture-text',
+                  channel: 'mic',
+                  speaker: 'You',
+                  text: 'Synthetic retired capture text.',
+                  startMs: 0,
+                  endMs: 1000,
+                  confidence: 1
+                }
+              ],
+              audioSeconds: 1
+            })
+          else failRefinement(new Error('Synthetic stale refinement failure'))
+        }
+        await finishing
+        assert.deepEqual([...events], [], 'A retired capture must not publish into the new capture')
+        assert.equal(refinementCalls, callsBefore, 'Late audio must not start refinement')
+        assert.equal(host.running, true)
+        assert.equal(state.activeSessionId, nextId)
+        assert.equal(state.captureState, 'starting')
+        assert.equal(state.ephemeralAudioDir, nextDir)
+        assert.equal(existsSync(checkpoint), true, 'The current capture owns its audio cleanup')
+      } finally {
+        host.dispose()
+        worker = undefined as unknown as Worker
+      }
+    })
+  }
 }
 
 test('audio finalization failure retains the transcript and emits an actionable fallback before done', async () => {

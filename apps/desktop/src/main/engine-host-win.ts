@@ -172,12 +172,16 @@ export class WinEngineHost {
     if (this.drainTimer) clearTimeout(this.drainTimer)
     this.drainTimer = null
     const sessionId = this.activeSessionId
+    const isCurrentSession = (): boolean =>
+      !this.disposed && this.sessionActive && this.activeSessionId === sessionId
     if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
     const recorder = this.recorder
     this.recorder = null
     let audioPath: string | null = null
     try {
       const saved = await recorder?.finish()
+      // Worker recovery may have started another capture while audio merged.
+      if (!isCurrentSession()) return
       if (saved && recorder) {
         audioPath = joinPath(recorder.dir, 'audio.wav')
         if (!this.ephemeralAudioDir) {
@@ -190,6 +194,7 @@ export class WinEngineHost {
         }
       }
     } catch {
+      if (!isCurrentSession()) return
       console.error('[win-audio] merge failed')
     }
 
@@ -198,12 +203,14 @@ export class WinEngineHost {
         const refinementPath = audioPath
         this.emit({ event: 'status', stage: 'refining_transcript' })
         const result = await this.finalRefiner(refinementPath, (progress) => {
+          if (!isCurrentSession()) return
           if (progress.stage === 'downloading_model') {
             this.emit({ event: 'download', progress: progress.progress ?? 0 })
           } else if (progress.stage === 'transcribing') {
             this.emit({ event: 'status', stage: 'refining_transcript' })
           }
         })
+        if (!isCurrentSession()) return
         const transcripts = (['mic', 'system'] as const).flatMap((channel) => {
           const text = result.segments
             .filter((segment) => segment.channel === channel && !segment.echo)
@@ -213,10 +220,10 @@ export class WinEngineHost {
             .join(' ')
           return text ? [{ channel, text, audioSeconds: result.audioSeconds }] : []
         })
-        if (this.disposed || !this.sessionActive || this.activeSessionId !== sessionId) return
         if (transcripts.length === 0) throw new Error('No refined transcript')
         this.emit({ event: 'refined', transcripts })
       } catch {
+        if (!isCurrentSession()) return
         console.error('[win-asr] final refinement failed')
         if (!this.disposed && this.sessionActive && this.activeSessionId === sessionId)
           this.emit({
@@ -237,8 +244,10 @@ export class WinEngineHost {
       })
     }
 
+    // The temporary directory belongs to the current capture, not a retired
+    // completion that happened to settle after its worker crashed/restarted.
+    if (!isCurrentSession()) return
     this.removeEphemeralAudio()
-    if (this.disposed || !this.sessionActive || this.activeSessionId !== sessionId) return
     this.sessionActive = false
     this.captureState = 'idle'
     this.activeSessionId = null
