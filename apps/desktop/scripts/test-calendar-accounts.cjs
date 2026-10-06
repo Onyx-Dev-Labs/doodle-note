@@ -61,7 +61,7 @@ async function main() {
         email: `owner-${i}@example.test`,
         name: `QA account ${i}`,
         lastSyncIso: new Date().toISOString(),
-        ...(i === 1 ? { error: 'This account needs to reconnect.', stale: true } : {})
+        ...(i === 1 || i === 2 ? { error: 'This account needs to reconnect.', stale: true } : {})
       }))
       window.qa = {
         state: {
@@ -70,7 +70,7 @@ async function main() {
           signedIn: true,
           msSignedIn: true,
           googleSignedIn: true,
-          googleAvailable: true,
+          googleAvailable: false,
           connections,
           calendars: connections.map((c) => ({
             id: `cal-${c.id}`,
@@ -129,6 +129,31 @@ async function main() {
         .getByRole('region', { name: 'Microsoft owner-0@example.test', exact: true })
         .waitFor()
       assert.equal(await page.getByRole('button', { name: /^Reconnect owner-/ }).count(), 4)
+      const addGoogle = page.getByRole('button', { name: 'Add Google account', exact: true })
+      assert.equal(await addGoogle.isDisabled(), true)
+      const googleReconnect = page.getByRole('button', {
+        name: 'Reconnect owner-2@example.test',
+        exact: true
+      })
+      assert.equal(
+        await googleReconnect.isEnabled(),
+        true,
+        'Existing Google accounts must reconnect while new Google connections are gated'
+      )
+      await page.screenshot({
+        path: join(output, `${width}-${theme}-google-reconnect.png`),
+        fullPage: true
+      })
+      await googleReconnect.focus()
+      await page.keyboard.press('Enter')
+      await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).waitFor()
+      for (const button of await page.getByRole('button', { name: /^Reconnect owner-/ }).all()) {
+        assert.equal(await button.isDisabled(), true, 'Prevent overlapping sign-in attempts')
+      }
+      assert.equal(await addGoogle.isDisabled(), true)
+      await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()
+      assert.equal(await googleReconnect.isEnabled(), true)
+      assert.equal(await addGoogle.isDisabled(), true)
       const reconnect = page.getByRole('button', {
         name: 'Reconnect owner-1@example.test',
         exact: true
@@ -139,6 +164,8 @@ async function main() {
       await page.getByRole('button', { name: 'Remove owner-2@example.test', exact: true }).click()
       assert.equal(await page.getByRole('button', { name: /^Reconnect owner-/ }).count(), 3)
       assert.deepEqual(await page.evaluate(() => window.qa.calls), [
+        ['connect', 'google', 'account-2'],
+        ['cancel'],
         ['connect', 'microsoft', 'account-1'],
         ['cancel'],
         ['remove', 'account-2']
@@ -157,7 +184,7 @@ async function main() {
     }
     assert.deepEqual(errors, [])
     console.log(
-      `PASS: four account cards, targeted keyboard reconnect, cancel, single remove, selection, account errors, compact layout. Evidence: ${output}`
+      `PASS: Google reconnect with new connections gated, concurrent sign-in guard, targeted keyboard reconnect, cancel, single remove, selection, account errors, compact layout. Evidence: ${output}`
     )
   } finally {
     await browser.close()

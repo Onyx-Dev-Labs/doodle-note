@@ -862,11 +862,7 @@ export default function ModelsView({
                         <div className="calendar-actions">
                           <button
                             type="button"
-                            disabled={
-                              connecting ||
-                              !!calState.connecting ||
-                              (account.provider === 'google' && !calState.googleAvailable)
-                            }
+                            disabled={connecting || !!calState.connecting}
                             aria-label={`Reconnect ${account.email}`}
                             onClick={() => void connectCalendar(account.provider, account.id)}
                           >
