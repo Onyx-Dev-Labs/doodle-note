@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { ShareWithPeople } from "./share-with-people";
+
 interface TranscriptSegment {
   speaker: string;
   startMs: number;
@@ -213,6 +215,8 @@ export function MeetingActions({
           {error ?? message}
         </p>
       )}
+
+      {shareOpen && <ShareWithPeople meetingId={meetingId} />}
 
       {shareOpen && (
         <section className="mt-4 rounded-xl border border-sand bg-card p-4" aria-label="Share settings">

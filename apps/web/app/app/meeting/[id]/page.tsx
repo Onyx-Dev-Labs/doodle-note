@@ -16,9 +16,11 @@ import {
 } from "@repo/db";
 
 import { getAppWorkspace } from "@/lib/app-workspace";
+import { getSharedMeetingAccess } from "@/lib/meeting-access";
 import { markdownOf } from "@/lib/meeting-content";
 import { MeetingBody } from "../../../meeting-body";
 import { MeetingActions } from "./meeting-actions";
+import { SharedMeetingView } from "./shared-meeting-view";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -34,7 +36,13 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const db = getDb();
   const meetingRows = await db.select().from(meetings).where(eq(meetings.id, id)).limit(1);
   const meeting = meetingRows[0];
-  if (!meeting || !memberOrgIds.includes(meeting.organizationId)) notFound();
+  if (!meeting) notFound();
+  if (!memberOrgIds.includes(meeting.organizationId)) {
+    // Not a workspace member: only a per-person share grants (read-only) access.
+    const share = await getSharedMeetingAccess(workspace, id);
+    if (!share) notFound();
+    return <SharedMeetingView share={share} />;
+  }
 
   const [noteRows, segments, tagRows, folderRows] = await Promise.all([
     db.select().from(notes).where(eq(notes.meetingId, id)).limit(1),
