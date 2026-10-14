@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { ShareWithTeamLink } from "./share-with-team-link";
 
 interface TranscriptSegment {
   speaker: string;
@@ -253,7 +252,6 @@ export function MeetingActions({
             {shareUrl && <button type="button" onClick={() => void copyShareLink()} className="rounded-lg border border-sand px-3 py-2 text-sm font-medium text-ink hover:bg-sage-fill">Copy link</button>}
             {currentShareToken && <button type="button" disabled={pending} onClick={() => void updateShare(false)} className="rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">Revoke</button>}
           </div>
-          <ShareWithTeamLink />
         </section>
       )}
 
