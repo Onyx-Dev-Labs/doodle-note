@@ -12,7 +12,7 @@ import { sendMeetingShareEmails } from "@/lib/meeting-share-email";
 export const dynamic = "force-dynamic";
 
 /**
- * Share with people: GET lists recipients, POST { emails, includeTranscript }
+ * Share with people: GET lists recipients, POST { emails }
  * adds them, DELETE ?recipientId= revokes one. Only workspace members who
  * pass getMeetingAccess may manage; recipients and strangers get 404.
  */

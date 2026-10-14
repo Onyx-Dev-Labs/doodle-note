@@ -7,20 +7,27 @@
  * Anything else — another workspace's meeting, or one the desktop has not
  * pushed yet — gets the same 404 so the desktop can tell the user to sync.
  *
- * Share with people delegates to the DEV-485 handler, so validation, caps,
- * no-enumeration responses and notifications are identical to the web app.
+ * Both routes reuse the web Share panel's logic: people via the DEV-485
+ * recipients handler (same validation, caps, no-enumeration responses and
+ * notifications) and settings via lib/meeting-share-state.ts (same share
+ * state, including `workspace`).
  *
  * Framework-free (no `server-only`/Next imports) so tests can exercise it;
  * the route files only wire `getDb()` and `after()`.
  */
-import { randomBytes } from "node:crypto";
-
 import { and, eq, meetings, user, type Db } from "@repo/db";
 
 import {
   handleMeetingRecipientsRequest,
   type RecipientsAddedEvent,
 } from "./meeting-recipients-http";
+import {
+  parseShareSettingsUpdate,
+  readMeetingShareState,
+  shareOrigin,
+  shareSettingsResponse,
+  type MeetingShareState,
+} from "./meeting-share-state";
 import { authenticateEntitledSyncRequest, type SyncDeviceAuth } from "./sync-auth";
 
 const UUID_RE =
@@ -28,57 +35,31 @@ const UUID_RE =
 
 export const MEETING_NOT_SYNCED = "Meeting not synced yet — sync it first";
 
-/** Public-link lifetimes the web Share panel offers; 0 = never expires. */
-const EXPIRY_DAYS = [0, 1, 7, 30];
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 const noStore = { "Cache-Control": "private, no-store" };
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: noStore });
 }
 
-/** Canonical public origin for share URLs. */
-function shareOrigin(request: Request): string {
-  return process.env.BETTER_AUTH_URL ?? new URL(request.url).origin;
-}
-
 /** The meeting when it is synced into the device's workspace, else null. */
 async function findDeviceMeeting(db: Db, device: SyncDeviceAuth, meetingId: string) {
   const rows = await db
-    .select({
-      id: meetings.id,
-      title: meetings.title,
-      shareToken: meetings.shareToken,
-      shareIncludeTranscript: meetings.shareIncludeTranscript,
-      shareExpiresAt: meetings.shareExpiresAt,
-    })
+    .select({ id: meetings.id, title: meetings.title })
     .from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.organizationId, device.organizationId)))
     .limit(1);
   return rows[0] ?? null;
 }
 
-type DeviceMeeting = NonNullable<Awaited<ReturnType<typeof findDeviceMeeting>>>;
-
-/** Current public-link settings; a revoked link reports url: null. */
-function linkState(
-  origin: string,
-  meeting: Pick<DeviceMeeting, "shareToken" | "shareIncludeTranscript" | "shareExpiresAt">,
-) {
-  if (!meeting.shareToken) {
-    return { url: null, includeTranscript: false, expiresAt: null };
-  }
-  return {
-    url: `${origin}/share/${meeting.shareToken}`,
-    includeTranscript: meeting.shareIncludeTranscript,
-    expiresAt: meeting.shareExpiresAt?.toISOString() ?? null,
-  };
+/** Desktop builds before DEV-486 read only the top-level `url` (null = no link). */
+function withLegacyUrl(state: MeetingShareState) {
+  return { url: state.link?.url ?? null };
 }
 
 /**
  * GET/POST/DELETE /api/sync/share/recipients?meetingId=<uuid>.
- * Same bodies and responses as /api/meetings/[id]/recipients.
+ * Same bodies and responses as /api/meetings/[id]/recipients: GET
+ * { recipients, limits }, POST { emails }, DELETE &recipientId=.
  */
 export async function handleSyncRecipientsRequest(
   request: Request,
@@ -116,14 +97,16 @@ export async function handleSyncRecipientsRequest(
 }
 
 /**
- * /api/sync/share — the meeting's public link.
+ * /api/sync/share — the meeting's share state and settings, the bearer twin
+ * of /api/meetings/[id]/share.
  *
- * GET ?meetingId= returns the current settings.
- * POST { meetingId, enable, includeTranscript?, expiresInDays? } creates,
- * updates or (enable:false) revokes it. Desktop builds before DEV-486 send
- * only { meetingId, enable }: a new link then gets the old notes-only,
- * never-expiring defaults and an existing link keeps its settings. Every
- * response includes { url, includeTranscript, expiresAt }.
+ * GET ?meetingId= returns `{ ok, url, includeTranscript, link, recipients,
+ * workspace, limits }`. POST { meetingId, includeTranscript?, link?:
+ * "on"|"off", expiresInDays?: 0|1|7|30 } applies the change and returns the
+ * same shape. Desktop builds before DEV-486 send { meetingId, enable }:
+ * enable:true turns the link on (a new link never expires) WITHOUT touching
+ * the meeting-level transcript setting, enable:false revokes, and `url` stays
+ * at the top level for them.
  */
 export async function handleSyncShareRequest(
   request: Request,
@@ -139,79 +122,30 @@ export async function handleSyncShareRequest(
     const meetingId = new URL(request.url).searchParams.get("meetingId") ?? "";
     if (!UUID_RE.test(meetingId)) return json({ error: "meetingId must be a UUID" }, 400);
     const meeting = await findDeviceMeeting(db, device, meetingId);
-    if (!meeting) return json({ error: MEETING_NOT_SYNCED }, 404);
-    return json({ ok: true, ...linkState(origin, meeting) });
+    const state = meeting ? await readMeetingShareState(db, { meetingId: meeting.id, origin }) : null;
+    if (!state) return json({ error: MEETING_NOT_SYNCED }, 404);
+    return json({ ok: true, ...withLegacyUrl(state), ...state });
   }
 
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  let body: {
-    meetingId?: unknown;
-    enable?: unknown;
-    includeTranscript?: unknown;
-    expiresInDays?: unknown;
-  };
+  let body: unknown;
   try {
-    body = (await request.json()) as typeof body;
-    if (!body || typeof body !== "object") throw new Error("invalid_body");
+    body = await request.json();
   } catch {
-    return json({ error: "Invalid JSON" }, 400);
+    return json({ error: "Invalid JSON", code: "invalid_body" }, 400);
   }
-  const meetingId = String(body.meetingId ?? "");
+  const meetingId = String((body as { meetingId?: unknown } | null)?.meetingId ?? "");
   if (!UUID_RE.test(meetingId)) return json({ error: "meetingId must be a UUID" }, 400);
-  const enable = body.enable !== false;
-
-  // Options are optional so older desktop builds keep working unchanged.
-  let includeTranscript: boolean | undefined;
-  let expiresInDays: number | undefined;
-  if (enable) {
-    if (body.includeTranscript !== undefined) {
-      if (typeof body.includeTranscript !== "boolean") {
-        return json({ error: "includeTranscript must be true or false" }, 400);
-      }
-      includeTranscript = body.includeTranscript;
-    }
-    if (body.expiresInDays !== undefined) {
-      // Same rule as the web Share panel (/api/meetings/[id]/share).
-      expiresInDays = Number(body.expiresInDays ?? 0);
-      if (!EXPIRY_DAYS.includes(expiresInDays)) {
-        return json({ error: "expiresInDays must be 0, 1, 7, or 30" }, 400);
-      }
-    }
-  }
+  const parsed = parseShareSettingsUpdate(body);
+  if (!parsed.ok) return json({ error: parsed.error, code: parsed.code }, parsed.status);
 
   const meeting = await findDeviceMeeting(db, device, meetingId);
   if (!meeting) return json({ error: MEETING_NOT_SYNCED }, 404);
-
-  if (!enable) {
-    await db
-      .update(meetings)
-      .set({ shareToken: null, shareExpiresAt: null })
-      .where(eq(meetings.id, meeting.id));
-    return json({ ok: true, ...linkState(origin, { ...meeting, shareToken: null }) });
-  }
-
-  const isNew = !meeting.shareToken;
-  const next = {
-    shareToken: meeting.shareToken ?? randomBytes(16).toString("hex"),
-    // A new link starts notes-only and never-expiring unless asked otherwise;
-    // an existing link keeps whatever was not explicitly changed.
-    shareIncludeTranscript: includeTranscript ?? (isNew ? false : meeting.shareIncludeTranscript),
-    shareExpiresAt:
-      expiresInDays !== undefined
-        ? expiresInDays === 0
-          ? null
-          : new Date(Date.now() + expiresInDays * DAY_MS)
-        : isNew
-          ? null
-          : meeting.shareExpiresAt,
-  };
-  const changed =
-    isNew ||
-    next.shareIncludeTranscript !== meeting.shareIncludeTranscript ||
-    next.shareExpiresAt?.getTime() !== meeting.shareExpiresAt?.getTime();
-  if (changed) {
-    await db.update(meetings).set(next).where(eq(meetings.id, meeting.id));
-  }
-  return json({ ok: true, ...linkState(origin, next) });
+  return shareSettingsResponse(db, {
+    meetingId: meeting.id,
+    origin,
+    update: parsed.update,
+    extra: withLegacyUrl,
+  });
 }

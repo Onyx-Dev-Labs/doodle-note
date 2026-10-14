@@ -14,24 +14,24 @@ import {
   SYNC_SHARE_CHANNEL,
   SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
   SYNC_SHARE_REMOVE_RECIPIENT_CHANNEL,
-  SYNC_SHARE_REVOKE_LINK_CHANNEL,
-  SYNC_SHARE_SET_LINK_CHANNEL,
   SYNC_SHARE_STATE_CHANNEL,
+  SYNC_SHARE_UPDATE_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
   SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
-  PUBLIC_LINK_EXPIRY_DAYS,
-  type PublicLink,
-  type PublicLinkOptions,
-  type PublicLinkResult,
+  SHARE_LINK_EXPIRY_DAYS,
   type ShareFailure,
+  type ShareLink,
   type ShareRecipient,
   type ShareRecipientsResult,
   type ShareResult,
+  type ShareSettingsUpdate,
+  type ShareState,
   type ShareStateResult,
+  type ShareWorkspace,
   type SyncStatus
 } from '../shared/sync-api'
 import type { FolderRecord } from '../shared/folders-api'
@@ -135,13 +135,9 @@ export class SyncService {
     )
     ipcMain.handle(
       SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
-      (_event, meetingId: unknown, emails: unknown, includeTranscript: unknown) =>
+      (_event, meetingId: unknown, emails: unknown) =>
         libraryActivity.run(() =>
-          this.addShareRecipients(
-            String(meetingId),
-            typeof emails === 'string' ? emails : '',
-            includeTranscript !== false
-          )
+          this.addShareRecipients(String(meetingId), typeof emails === 'string' ? emails : '')
         )
     )
     ipcMain.handle(
@@ -149,20 +145,10 @@ export class SyncService {
       (_event, meetingId: unknown, recipientId: unknown) =>
         libraryActivity.run(() => this.removeShareRecipient(String(meetingId), String(recipientId)))
     )
-    ipcMain.handle(SYNC_SHARE_SET_LINK_CHANNEL, (_event, meetingId: unknown, options: unknown) => {
-      const raw = (options && typeof options === 'object' ? options : {}) as {
-        includeTranscript?: unknown
-        expiresInDays?: unknown
-      }
-      return libraryActivity.run(() =>
-        this.setPublicLink(String(meetingId), {
-          includeTranscript: raw.includeTranscript === true,
-          expiresInDays: Number(raw.expiresInDays) as PublicLinkOptions['expiresInDays']
-        })
+    ipcMain.handle(SYNC_SHARE_UPDATE_CHANNEL, (_event, meetingId: unknown, update: unknown) =>
+      libraryActivity.run(() =>
+        this.updateShareSettings(String(meetingId), sanitizeShareUpdate(update))
       )
-    })
-    ipcMain.handle(SYNC_SHARE_REVOKE_LINK_CHANNEL, (_event, meetingId: unknown) =>
-      libraryActivity.run(() => this.revokePublicLink(String(meetingId)))
     )
 
     setInterval(() => {
@@ -394,38 +380,27 @@ export class SyncService {
     }
   }
 
-  /** Recipients and public link for the Share dialog. Reads only; never pushes. */
+  /** The Share dialog state (people, link, transcript, workspace). Reads only; never pushes. */
   async shareState(meetingId: string): Promise<ShareStateResult> {
     const target = this.shareTarget(meetingId)
     if ('error' in target) return target
-    const id = encodeURIComponent(target.record.id)
     try {
-      const [recipients, link] = await Promise.all([
-        this.shareFetch(target.token, `/api/sync/share/recipients?meetingId=${id}`, 'GET'),
-        this.shareFetch(target.token, `/api/sync/share?meetingId=${id}`, 'GET')
-      ])
-      for (const response of [recipients, link]) {
-        if (!response.ok && response.status !== 404) {
-          return shareFailure(response.status, response.body, 'Could not load sharing')
-        }
-      }
+      const response = await this.shareFetch(
+        target.token,
+        `/api/sync/share?meetingId=${encodeURIComponent(target.record.id)}`,
+        'GET'
+      )
       // The cloud has no copy in this workspace yet, so nothing is shared.
-      if (!recipients.ok || !link.ok) return { recipients: [], link: null, synced: false }
-      return {
-        recipients: parseRecipients(recipients.body),
-        link: parseLink(link.body),
-        synced: true
-      }
+      if (response.status === 404) return NOT_SYNCED_STATE
+      if (!response.ok)
+        return shareFailure(response.status, response.body, 'Could not load sharing')
+      return parseShareState(response.body)
     } catch {
       return { error: NETWORK_SHARE_ERROR, code: 'network' }
     }
   }
 
-  async addShareRecipients(
-    meetingId: string,
-    emails: string,
-    includeTranscript: boolean
-  ): Promise<ShareRecipientsResult> {
+  async addShareRecipients(meetingId: string, emails: string): Promise<ShareRecipientsResult> {
     const target = this.shareTarget(meetingId)
     if ('error' in target) return target
     const input = emails.trim()
@@ -440,7 +415,7 @@ export class SyncService {
         target.token,
         `/api/sync/share/recipients?meetingId=${encodeURIComponent(target.record.id)}`,
         'POST',
-        { emails: input, includeTranscript }
+        { emails: input }
       )
       if (!response.ok) return shareFailure(response.status, response.body, 'Could not share')
       return { recipients: parseRecipients(response.body) }
@@ -471,41 +446,37 @@ export class SyncService {
     }
   }
 
-  /** Create or update the public link; the meeting is pushed first. */
-  async setPublicLink(meetingId: string, options: PublicLinkOptions): Promise<PublicLinkResult> {
+  /**
+   * Include transcript, general access and link expiry. Anything that can
+   * publish content pushes the meeting first; only turning the link off
+   * goes straight to the server.
+   */
+  async updateShareSettings(
+    meetingId: string,
+    update: ShareSettingsUpdate
+  ): Promise<ShareStateResult> {
     const target = this.shareTarget(meetingId)
     if ('error' in target) return target
-    if (!(PUBLIC_LINK_EXPIRY_DAYS as readonly number[]).includes(options.expiresInDays)) {
-      return { error: 'Choose when the link expires.', code: 'request' }
-    }
+    const body = validShareUpdate(update)
+    if (!body) return { error: 'Nothing to change.', code: 'request' }
+    if ('error' in body) return body
+    const revokeOnly =
+      body.link === 'off' &&
+      body.includeTranscript === undefined &&
+      body.expiresInDays === undefined
     try {
-      const pushed = await this.pushForShare(target.record, target.token)
-      if (pushed) return pushed
+      if (!revokeOnly) {
+        const pushed = await this.pushForShare(target.record, target.token)
+        if (pushed) return pushed
+      }
       const response = await this.shareFetch(target.token, '/api/sync/share', 'POST', {
         meetingId: target.record.id,
-        enable: true,
-        includeTranscript: options.includeTranscript === true,
-        expiresInDays: options.expiresInDays
+        ...body
       })
-      const link = response.ok ? parseLink(response.body) : null
-      if (!link) return shareFailure(response.status, response.body, 'Could not create the link')
-      return { link }
-    } catch {
-      return { error: NETWORK_SHARE_ERROR, code: 'network' }
-    }
-  }
-
-  async revokePublicLink(meetingId: string): Promise<PublicLinkResult> {
-    const target = this.shareTarget(meetingId)
-    if ('error' in target) return target
-    try {
-      const response = await this.shareFetch(target.token, '/api/sync/share', 'POST', {
-        meetingId: target.record.id,
-        enable: false
-      })
-      if (!response.ok)
-        return shareFailure(response.status, response.body, 'Could not revoke the link')
-      return { link: null }
+      if (!response.ok) {
+        return shareFailure(response.status, response.body, 'Could not save sharing')
+      }
+      return parseShareState(response.body)
     } catch {
       return { error: NETWORK_SHARE_ERROR, code: 'network' }
     }
@@ -974,7 +945,8 @@ interface ShareResponseBody {
   recipients?: unknown
   url?: unknown
   includeTranscript?: unknown
-  expiresAt?: unknown
+  link?: unknown
+  workspace?: unknown
 }
 
 /** Maps a failed share-route response to user guidance; never includes the token. */
@@ -1016,6 +988,47 @@ function pushRejectedMessage(reason: unknown): string {
     : 'The cloud did not accept this meeting, so it was not shared.'
 }
 
+const NOT_SYNCED_STATE: ShareState = {
+  includeTranscript: false,
+  link: null,
+  recipients: [],
+  workspace: null,
+  synced: false
+}
+
+/** Coerces an IPC payload into a settings update; unknown or mistyped fields are dropped. */
+export function sanitizeShareUpdate(raw: unknown): ShareSettingsUpdate {
+  const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const update: ShareSettingsUpdate = {}
+  if (typeof input.includeTranscript === 'boolean')
+    update.includeTranscript = input.includeTranscript
+  if (input.link === 'on' || input.link === 'off') update.link = input.link
+  if (typeof input.expiresInDays === 'number') {
+    update.expiresInDays = input.expiresInDays as ShareSettingsUpdate['expiresInDays']
+  }
+  return update
+}
+
+/** The request body for an update, null when empty, or a local validation error. */
+function validShareUpdate(update: ShareSettingsUpdate): ShareSettingsUpdate | ShareFailure | null {
+  const body: ShareSettingsUpdate = {}
+  if (update.includeTranscript !== undefined)
+    body.includeTranscript = update.includeTranscript === true
+  if (update.link !== undefined) {
+    if (update.link !== 'on' && update.link !== 'off') {
+      return { error: 'Choose who can open the link.', code: 'request' }
+    }
+    body.link = update.link
+  }
+  if (update.expiresInDays !== undefined) {
+    if (!(SHARE_LINK_EXPIRY_DAYS as readonly number[]).includes(update.expiresInDays)) {
+      return { error: 'Choose when the link expires.', code: 'request' }
+    }
+    body.expiresInDays = update.expiresInDays
+  }
+  return Object.keys(body).length === 0 ? null : body
+}
+
 function parseRecipients(body: ShareResponseBody): ShareRecipient[] {
   if (!Array.isArray(body.recipients)) return []
   return body.recipients.flatMap((raw: unknown) => {
@@ -1025,7 +1038,6 @@ function parseRecipients(body: ShareResponseBody): ShareRecipient[] {
           {
             id: r.id,
             email: r.email,
-            includeTranscript: r.includeTranscript === true,
             createdAt: typeof r.createdAt === 'string' ? r.createdAt : ''
           }
         ]
@@ -1033,12 +1045,29 @@ function parseRecipients(body: ShareResponseBody): ShareRecipient[] {
   })
 }
 
-function parseLink(body: ShareResponseBody): PublicLink | null {
-  if (typeof body.url !== 'string' || body.url.length === 0) return null
+function parseLink(raw: unknown): ShareLink | null {
+  const link = (raw ?? {}) as Record<string, unknown>
+  if (typeof link.url !== 'string' || link.url.length === 0) return null
+  return { url: link.url, expiresAt: typeof link.expiresAt === 'string' ? link.expiresAt : null }
+}
+
+function parseWorkspace(raw: unknown): ShareWorkspace | null {
+  const workspace = (raw ?? {}) as Record<string, unknown>
+  if (typeof workspace.name !== 'string') return null
   return {
-    url: body.url,
+    name: workspace.name,
+    personal: workspace.personal === true,
+    memberCount: typeof workspace.memberCount === 'number' ? workspace.memberCount : 0
+  }
+}
+
+function parseShareState(body: ShareResponseBody): ShareState {
+  return {
     includeTranscript: body.includeTranscript === true,
-    expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null
+    link: parseLink(body.link),
+    recipients: parseRecipients(body),
+    workspace: parseWorkspace(body.workspace),
+    synced: true
   }
 }
 

@@ -164,6 +164,8 @@ export const meetingTagLinks = pgTable(
  * attached recipient_user_id. Sharing never changes meetings.organization_id
  * and never writes to meetings/notes/transcript_segments; deleting the
  * meeting (including desktop sync DELETE) cascades these rows away.
+ * Whether recipients see the transcript is one meeting-level setting,
+ * meetings.share_include_transcript, shared with the public link.
  */
 export const meetingShares = pgTable(
   "meeting_shares",
@@ -181,7 +183,6 @@ export const meetingShares = pgTable(
     sharedByUserId: text("shared_by_user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    includeTranscript: boolean("include_transcript").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

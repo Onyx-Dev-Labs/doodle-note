@@ -9,8 +9,10 @@
  *
  * Access rules:
  * - A share row grants the matching user read-only access to exactly one
- *   meeting: notes, transcript when `includeTranscript`, Copy notes, and
- *   Export .md. No folders, tags, other meetings, or mutations.
+ *   meeting: notes, Copy notes, Export .md, and the transcript when the
+ *   meeting-level `meetings.share_include_transcript` is on (the same one
+ *   setting governs the public link; see meeting-share-state.ts). No
+ *   folders, tags, other meetings, or mutations.
  * - A user matches a row by `recipient_user_id`, or — while the row is still
  *   unattached — by normalized email. When email verification is enabled
  *   (`resolveAuthEmailEnabled()`, always true in production) only a VERIFIED
@@ -53,7 +55,6 @@ const UUID_RE =
 export interface MeetingRecipient {
   id: string;
   email: string;
-  includeTranscript: boolean;
   createdAt: string;
 }
 
@@ -168,13 +169,11 @@ export function validateRecipientEmails(
 function toRecipient(row: {
   id: string;
   recipientEmail: string;
-  includeTranscript: boolean;
   createdAt: Date;
 }): MeetingRecipient {
   return {
     id: row.id,
     email: row.recipientEmail,
-    includeTranscript: row.includeTranscript,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -182,7 +181,6 @@ function toRecipient(row: {
 const recipientColumns = {
   id: meetingShares.id,
   recipientEmail: meetingShares.recipientEmail,
-  includeTranscript: meetingShares.includeTranscript,
   createdAt: meetingShares.createdAt,
 };
 
@@ -222,7 +220,6 @@ export async function addMeetingRecipients(
     sharedByUserId: string;
     sharedByEmail: string;
     emails: unknown;
-    includeTranscript?: boolean;
   },
 ): Promise<AddRecipientsResult> {
   const validated = validateRecipientEmails(input.emails, input.sharedByEmail);
@@ -261,7 +258,6 @@ export async function addMeetingRecipients(
           meetingId: input.meetingId,
           recipientEmail,
           sharedByUserId: input.sharedByUserId,
-          includeTranscript: input.includeTranscript !== false,
         })),
       )
       .returning();
@@ -388,6 +384,7 @@ export async function listMeetingsSharedWithUser(
 
 export interface SharedMeetingGrant {
   meeting: typeof meetings.$inferSelect;
+  /** The meeting-level `share_include_transcript` setting. */
   includeTranscript: boolean;
   sharedAt: Date;
   sharedByEmail: string;
@@ -411,7 +408,6 @@ export async function findSharedMeetingGrant(
   const rows = await db
     .select({
       meeting: meetings,
-      includeTranscript: meetingShares.includeTranscript,
       sharedAt: meetingShares.createdAt,
       sharedByEmail: user.email,
       sharedByName: user.name,
@@ -425,15 +421,13 @@ export async function findSharedMeetingGrant(
         shareMatchesIdentity(input.identity, input.requireVerifiedEmail),
       ),
     )
-    .orderBy(asc(meetingShares.createdAt));
+    .orderBy(asc(meetingShares.createdAt))
+    .limit(1);
   const first = rows[0];
   if (!first) return null;
   await attachPendingShares(db, input.identity, input.requireVerifiedEmail).catch(() => {});
-  return {
-    ...first,
-    // Two rows can match after an email change; the most generous one wins.
-    includeTranscript: rows.some((row) => row.includeTranscript),
-  };
+  // One transcript setting for everyone the meeting is shared with.
+  return { ...first, includeTranscript: first.meeting.shareIncludeTranscript };
 }
 
 export interface SharedTranscriptSegment {
@@ -466,7 +460,7 @@ export type SharedMeetingRead =
 /**
  * Full read of a shared meeting for a recipient, gated on the recipient's own
  * paid entitlement. Content (notes/transcript) is loaded only when entitled,
- * and the transcript only when the share includes it. Map statuses to
+ * and the transcript only while the meeting's share_include_transcript is on. Map statuses to
  * 404 / 402 / 503 / 200 in HTTP callers.
  */
 export async function readSharedMeeting(

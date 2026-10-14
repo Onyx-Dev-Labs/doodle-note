@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
-  PublicLink,
-  PublicLinkExpiryDays,
   ShareFailure,
-  ShareRecipient
+  ShareLinkExpiryDays,
+  ShareRecipient,
+  ShareSettingsUpdate,
+  ShareState
 } from '../../shared/sync-api'
 import { Toggle } from './ModelsView'
 
@@ -16,28 +17,34 @@ const BLOCKING: ReadonlyArray<ShareFailure['code']> = [
   'local_only'
 ]
 
-const EXPIRY_OPTIONS: ReadonlyArray<{ days: PublicLinkExpiryDays; label: string }> = [
-  { days: 1, label: 'After 24 hours' },
-  { days: 7, label: 'After 7 days' },
-  { days: 30, label: 'After 30 days' },
-  { days: 0, label: 'Never' }
+const EXPIRY_OPTIONS: ReadonlyArray<{ days: ShareLinkExpiryDays; label: string }> = [
+  { days: 0, label: 'Never' },
+  { days: 1, label: '24 hours' },
+  { days: 7, label: '7 days' },
+  { days: 30, label: '30 days' }
 ]
 
 type Notice = { text: string; error: boolean } | null
 
-function expiryLabel(link: PublicLink): string {
-  if (!link.expiresAt) return 'Does not expire'
-  const at = new Date(link.expiresAt)
-  return at.getTime() <= Date.now()
-    ? `Expired ${at.toLocaleString()} — update it to share again`
-    : `Expires ${at.toLocaleString()}`
+function formatExpiry(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
 }
 
 /**
- * Share… dialog for one meeting: give specific people read-only access in
- * their own DoodleNote account, and manage the public link. Every action
- * goes through main (window.sync), which pushes the meeting first when
- * needed and maps cloud errors to guidance.
+ * Share… dialog for one meeting, the same single panel as the web app:
+ * Add people, Who has access (the workspace first, then each person), General
+ * access (only people added, or anyone with the link with an optional
+ * expiry), and one Include transcript setting for everyone. Every change
+ * saves immediately through main (window.sync), which pushes the meeting
+ * first when needed and maps cloud errors to guidance. The native modal
+ * <dialog> traps focus and closes on Escape.
  */
 export default function ShareDialog({
   meetingId,
@@ -51,21 +58,15 @@ export default function ShareDialog({
   onOpenSettings(): void
 }): React.JSX.Element {
   const dialog = useRef<HTMLDialogElement>(null)
-  const [loading, setLoading] = useState(true)
+  const [state, setState] = useState<ShareState | null>(null)
   const [blocked, setBlocked] = useState<ShareFailure | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-
-  const [recipients, setRecipients] = useState<ShareRecipient[]>([])
   const [emails, setEmails] = useState('')
-  const [peopleTranscript, setPeopleTranscript] = useState(true)
-  const [peopleBusy, setPeopleBusy] = useState(false)
-  const [peopleNotice, setPeopleNotice] = useState<Notice>(null)
-
-  const [link, setLink] = useState<PublicLink | null>(null)
-  const [linkTranscript, setLinkTranscript] = useState(false)
-  const [expiry, setExpiry] = useState<PublicLinkExpiryDays>(7)
-  const [linkBusy, setLinkBusy] = useState(false)
-  const [linkNotice, setLinkNotice] = useState<Notice>(null)
+  const [addError, setAddError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice>(null)
+  /** Expiry chosen in this session; null shows the saved date as-is. */
+  const [expiryChoice, setExpiryChoice] = useState<ShareLinkExpiryDays | null>(null)
 
   useEffect(() => {
     dialog.current?.showModal()
@@ -82,119 +83,105 @@ export default function ShareDialog({
           else setLoadError(result.error)
           return
         }
-        setRecipients(result.recipients)
-        setLink(result.link)
-        if (result.link) {
-          setLinkTranscript(result.link.includeTranscript)
-          setExpiry(result.link.expiresAt ? 7 : 0)
-        }
+        setState(result)
       })
       .catch(() => {
         if (!cancelled) setLoadError('Could not load sharing. Try again.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
       })
     return () => {
       cancelled = true
     }
   }, [meetingId])
 
-  /** Blocking failures replace the dialog body with guidance; others stay inline. */
-  const fail = (result: ShareFailure, show: (notice: Notice) => void): void => {
+  /** Blocking failures replace the dialog body with guidance; others show inline. */
+  const fail = (result: ShareFailure, show: (text: string) => void): void => {
     if (BLOCKING.includes(result.code)) setBlocked(result)
-    else show({ text: result.error, error: true })
+    else show(result.error)
   }
+  const showError = (text: string): void => setNotice({ text, error: true })
 
-  const share = async (): Promise<void> => {
-    if (peopleBusy || emails.trim().length === 0) return
-    setPeopleBusy(true)
-    setPeopleNotice(null)
+  const addPeople = async (): Promise<void> => {
+    if (busy || emails.trim().length === 0) return
+    setBusy('add')
+    setNotice(null)
+    setAddError(null)
     try {
-      const result = await window.sync.addShareRecipients(meetingId, emails, peopleTranscript)
-      if ('error' in result) return fail(result, setPeopleNotice)
-      const before = new Set(recipients.map((r) => r.id))
+      const result = await window.sync.addShareRecipients(meetingId, emails)
+      if ('error' in result) return fail(result, setAddError)
+      const before = new Set(state?.recipients.map((r) => r.id))
       const added = result.recipients.filter((r) => !before.has(r.id)).length
-      setRecipients(result.recipients)
+      // Adding pushes the meeting, so a cloud copy (and its workspace) now exists.
+      const fresh = await window.sync.shareState(meetingId)
+      setState((current) =>
+        fresh && !('error' in fresh)
+          ? fresh
+          : current
+            ? { ...current, recipients: result.recipients }
+            : current
+      )
       setEmails('')
-      setPeopleNotice({
+      setNotice({
         text: `Shared with ${added} ${added === 1 ? 'person' : 'people'}. They'll get an email.`,
         error: false
       })
     } catch {
-      setPeopleNotice({ text: 'Could not share the meeting. Try again.', error: true })
+      setAddError('Could not share the meeting. Try again.')
     } finally {
-      setPeopleBusy(false)
+      setBusy(null)
     }
   }
 
-  const remove = async (recipient: ShareRecipient): Promise<void> => {
-    if (peopleBusy) return
-    setPeopleBusy(true)
-    setPeopleNotice(null)
+  const removePerson = async (recipient: ShareRecipient): Promise<void> => {
+    if (busy) return
+    setBusy(`remove:${recipient.id}`)
+    setNotice(null)
     try {
       const result = await window.sync.removeShareRecipient(meetingId, recipient.id)
-      if ('error' in result) return fail(result, setPeopleNotice)
-      setRecipients(result.recipients)
-      setPeopleNotice({ text: `Removed ${recipient.email}.`, error: false })
+      if ('error' in result) return fail(result, showError)
+      setState((current) => (current ? { ...current, recipients: result.recipients } : current))
+      setNotice({ text: `Removed ${recipient.email}.`, error: false })
     } catch {
-      setPeopleNotice({ text: 'Could not remove access. Try again.', error: true })
+      showError('Could not remove access. Try again.')
     } finally {
-      setPeopleBusy(false)
+      setBusy(null)
     }
   }
 
-  const copy = async (url: string, done: string): Promise<void> => {
+  /** Saves one settings change and shows `done(next)` on success. */
+  const save = async (
+    key: string,
+    update: ShareSettingsUpdate,
+    done: (next: ShareState) => string
+  ): Promise<void> => {
+    if (busy) return
+    setBusy(key)
+    setNotice(null)
+    try {
+      const result = await window.sync.updateShareSettings(meetingId, update)
+      if ('error' in result) return fail(result, showError)
+      setState(result)
+      setNotice({ text: done(result), error: false })
+    } catch {
+      showError('Could not save sharing. Try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const copyLink = async (url: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(url)
-      setLinkNotice({ text: done, error: false })
+      setNotice({ text: 'Link copied.', error: false })
     } catch {
-      setLinkNotice({ text: 'Copy blocked — select the link above to copy it.', error: true })
-    }
-  }
-
-  const saveLink = async (): Promise<void> => {
-    if (linkBusy) return
-    setLinkBusy(true)
-    setLinkNotice(null)
-    try {
-      const existed = link !== null
-      const result = await window.sync.setPublicLink(meetingId, {
-        includeTranscript: linkTranscript,
-        expiresInDays: expiry
-      })
-      if ('error' in result) return fail(result, setLinkNotice)
-      setLink(result.link)
-      if (result.link) {
-        await copy(
-          result.link.url,
-          existed ? 'Link updated and copied.' : 'Link created and copied.'
-        )
-      }
-    } catch {
-      setLinkNotice({ text: 'Could not save the link. Try again.', error: true })
-    } finally {
-      setLinkBusy(false)
-    }
-  }
-
-  const revoke = async (): Promise<void> => {
-    if (linkBusy) return
-    setLinkBusy(true)
-    setLinkNotice(null)
-    try {
-      const result = await window.sync.revokePublicLink(meetingId)
-      if ('error' in result) return fail(result, setLinkNotice)
-      setLink(null)
-      setLinkNotice({ text: 'Link revoked. It no longer opens.', error: false })
-    } catch {
-      setLinkNotice({ text: 'Could not revoke the link. Try again.', error: true })
-    } finally {
-      setLinkBusy(false)
+      showError('Copy blocked — select the link to copy it.')
     }
   }
 
   const needsSettings = blocked?.code === 'not_linked' || blocked?.code === 'unauthorized'
+  const link = state?.link ?? null
+  const disabled = busy !== null
+  const expiryValue = link?.expiresAt ? (expiryChoice ?? 'current') : '0'
+  const workspace = state?.workspace ?? null
 
   return (
     <dialog
@@ -234,188 +221,213 @@ export default function ShareDialog({
             </button>
           </div>
         </div>
-      ) : loading ? (
+      ) : loadError ? (
+        <p className="share-msg error" role="alert">
+          {loadError}
+        </p>
+      ) : !state ? (
         <p className="share-muted" role="status">
           Loading…
         </p>
       ) : (
         <>
-          {loadError && (
-            <p className="share-msg error" role="alert">
-              {loadError}
-            </p>
-          )}
-
-          <section className="share-section" aria-labelledby="share-people-title">
-            <h3 id="share-people-title">Share with people</h3>
-            <p className="share-muted">
-              People you add can read this meeting in their own DoodleNote account. They can copy
-              and export it, but can’t edit or reshare it.
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                void share()
-              }}
-            >
-              <label className="share-label" htmlFor="share-emails">
-                Email addresses
-              </label>
-              <textarea
+          <form
+            className="share-add"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void addPeople()
+            }}
+          >
+            <label className="share-label" htmlFor="share-emails">
+              Add people
+            </label>
+            <div className="share-add-row">
+              <input
                 id="share-emails"
                 className="share-input"
-                rows={2}
+                type="text"
+                inputMode="email"
+                autoComplete="off"
                 spellCheck={false}
-                placeholder="name@example.com, teammate@example.com"
+                placeholder="name@example.com, …"
                 value={emails}
-                aria-invalid={peopleNotice?.error === true}
-                aria-describedby={peopleNotice ? 'share-people-notice' : undefined}
-                onChange={(event) => setEmails(event.target.value)}
-                onKeyDown={(event) => {
-                  // Enter shares; Shift+Enter keeps a newline for pasted lists.
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault()
-                    void share()
-                  }
+                aria-invalid={addError ? true : undefined}
+                aria-describedby={addError ? 'share-add-error' : 'share-add-help'}
+                onChange={(event) => {
+                  setEmails(event.target.value)
+                  if (addError) setAddError(null)
                 }}
               />
-              <div className="share-row">
-                <span>
-                  <strong>Include transcript</strong>
-                  <span className="share-muted">Turn off to share only the notes.</span>
-                </span>
-                <Toggle
-                  checked={peopleTranscript}
-                  onChange={() => setPeopleTranscript((v) => !v)}
-                  label="Include transcript for people you add"
-                />
-              </div>
-              <div className="share-actions">
-                <button
-                  type="submit"
-                  className="share-primary"
-                  disabled={peopleBusy || emails.trim().length === 0}
-                >
-                  {peopleBusy ? 'Saving…' : 'Share'}
-                </button>
-              </div>
-            </form>
-            {peopleNotice && (
-              <p
-                id="share-people-notice"
-                className={peopleNotice.error ? 'share-msg error' : 'share-msg'}
-                role={peopleNotice.error ? 'alert' : 'status'}
+              <button
+                type="submit"
+                className="share-primary"
+                disabled={disabled || emails.trim().length === 0}
               >
-                {peopleNotice.text}
+                {busy === 'add' ? 'Sharing…' : 'Share'}
+              </button>
+            </div>
+            {addError ? (
+              <p id="share-add-error" className="share-msg error" role="alert">
+                {addError}
               </p>
-            )}
-            <p className="share-label">People with access</p>
-            {recipients.length === 0 ? (
-              <p className="share-muted">Only people in this workspace can see this meeting.</p>
             ) : (
-              <ul className="share-recipients">
-                {recipients.map((recipient) => (
-                  <li key={recipient.id}>
-                    <span className="share-recipient-main">
-                      <span className="share-recipient-email">{recipient.email}</span>
+              <span id="share-add-help" className="share-muted">
+                Separate addresses with commas or spaces. People added can view, copy and export,
+                but not edit.
+              </span>
+            )}
+          </form>
+
+          <section className="share-section" aria-labelledby="share-access-title">
+            <h3 id="share-access-title">Who has access</h3>
+            <ul className="share-recipients">
+              <li>
+                <span className="share-recipient-main">
+                  {workspace && !workspace.personal ? (
+                    <>
+                      <span className="share-recipient-email">Everyone in {workspace.name}</span>
                       <span className="share-muted">
-                        Can view ·{' '}
-                        {recipient.includeTranscript ? 'Notes and transcript' : 'Notes only'}
+                        {workspace.memberCount} {workspace.memberCount === 1 ? 'member' : 'members'}{' '}
+                        · Workspace
                       </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="share-recipient-email">You · Owner</span>
+                      <span className="share-muted">
+                        {workspace ? 'Your Personal workspace' : 'Not in the cloud yet'}
+                      </span>
+                    </>
+                  )}
+                </span>
+              </li>
+              {state.recipients.map((recipient) => (
+                <li key={recipient.id}>
+                  <span className="share-recipient-main">
+                    <span className="share-recipient-email" title={recipient.email}>
+                      {recipient.email}
                     </span>
-                    <button
-                      type="button"
-                      className="share-danger"
-                      disabled={peopleBusy}
-                      aria-label={`Remove ${recipient.email}`}
-                      onClick={() => void remove(recipient)}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                    <span className="share-muted">Can view</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="share-danger"
+                    disabled={disabled}
+                    aria-label={`Remove ${recipient.email}`}
+                    onClick={() => void removePerson(recipient)}
+                  >
+                    {busy === `remove:${recipient.id}` ? 'Removing…' : 'Remove'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="share-section" aria-labelledby="share-general-title">
+            <h3 id="share-general-title">
+              <label htmlFor="share-general">General access</label>
+            </h3>
+            <select
+              id="share-general"
+              className="share-input share-select"
+              value={link ? 'link' : 'people'}
+              disabled={disabled}
+              onChange={(event) => {
+                const on = event.target.value === 'link'
+                setExpiryChoice(null)
+                void save('access', { link: on ? 'on' : 'off' }, () =>
+                  on ? 'Link is on. Anyone with it can view.' : 'Link turned off.'
+                )
+              }}
+            >
+              <option value="people">Only people added</option>
+              <option value="link">Anyone with the link</option>
+            </select>
+            <span className="share-muted">
+              {link
+                ? 'Anyone on the internet with the link can view. No sign-in needed.'
+                : workspace && !workspace.personal
+                  ? `Only ${workspace.name} and people you add can open it.`
+                  : 'Only you and people you add can open it.'}
+            </span>
+            {link && (
+              <div className="share-link-box">
+                <div className="share-add-row">
+                  <input
+                    className="share-input"
+                    readOnly
+                    value={link.url}
+                    aria-label="Share link"
+                    onFocus={(event) => event.target.select()}
+                  />
+                  <button type="button" onClick={() => void copyLink(link.url)}>
+                    Copy link
+                  </button>
+                </div>
+                <div className="share-expiry">
+                  <label htmlFor="share-expiry">Link expires</label>
+                  <select
+                    id="share-expiry"
+                    className="share-input"
+                    value={expiryValue}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      if (event.target.value === 'current') return
+                      const days = Number(event.target.value) as ShareLinkExpiryDays
+                      void save('expiry', { expiresInDays: days }, (next) => {
+                        setExpiryChoice(days)
+                        return next.link?.expiresAt
+                          ? `Link expires ${formatExpiry(next.link.expiresAt)}.`
+                          : 'Link never expires.'
+                      })
+                    }}
+                  >
+                    {expiryValue === 'current' && <option value="current">On a set date</option>}
+                    {EXPIRY_OPTIONS.map((option) => (
+                      <option key={option.days} value={option.days}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="share-muted">
+                    {link.expiresAt ? `Expires ${formatExpiry(link.expiresAt)}` : 'Never expires'}
+                  </span>
+                </div>
+              </div>
             )}
           </section>
 
-          <section className="share-section" aria-labelledby="share-link-title">
-            <h3 id="share-link-title">Public link</h3>
-            <p className="share-muted">
-              Anyone with the link can read the selected content until you revoke it or it expires.
-            </p>
-            <div className="share-row">
-              <span>
-                <strong>Include transcript</strong>
-                <span className="share-muted">
-                  Off by default so sharing notes does not expose the full conversation.
-                </span>
+          <div className="share-section share-row">
+            <span>
+              <strong id="share-transcript-label">Include transcript</strong>
+              <span className="share-muted">
+                For everyone above{link ? ' and anyone with the link' : ''}. Off: people see the
+                notes only.
               </span>
-              <Toggle
-                checked={linkTranscript}
-                onChange={() => setLinkTranscript((v) => !v)}
-                label="Include transcript in the public link"
-              />
-            </div>
-            <div className="share-row">
-              <label htmlFor="share-expiry">
-                <strong>Link expires</strong>
-              </label>
-              <select
-                id="share-expiry"
-                className="share-input"
-                value={expiry}
-                onChange={(event) => setExpiry(Number(event.target.value) as PublicLinkExpiryDays)}
-              >
-                {EXPIRY_OPTIONS.map((option) => (
-                  <option key={option.days} value={option.days}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {link && (
-              <div className="share-link-box">
-                <span className="share-link-url">{link.url}</span>
-                <span className="share-muted">
-                  {expiryLabel(link)} ·{' '}
-                  {link.includeTranscript ? 'Notes and transcript' : 'Notes only'}
-                </span>
-              </div>
-            )}
-            <div className="share-actions">
-              <button
-                type="button"
-                className="share-primary"
-                disabled={linkBusy}
-                onClick={() => void saveLink()}
-              >
-                {linkBusy ? 'Saving…' : link ? 'Update link' : 'Create link'}
-              </button>
-              {link && (
-                <button type="button" onClick={() => void copy(link.url, 'Link copied.')}>
-                  Copy link
-                </button>
-              )}
-              {link && (
-                <button
-                  type="button"
-                  className="share-danger"
-                  disabled={linkBusy}
-                  onClick={() => void revoke()}
-                >
-                  Revoke
-                </button>
-              )}
-            </div>
-            {linkNotice && (
-              <p
-                className={linkNotice.error ? 'share-msg error' : 'share-msg'}
-                role={linkNotice.error ? 'alert' : 'status'}
-              >
-                {linkNotice.text}
-              </p>
-            )}
-          </section>
+            </span>
+            <Toggle
+              checked={state.includeTranscript}
+              disabled={disabled}
+              onChange={() => {
+                const includeTranscript = !state.includeTranscript
+                void save('transcript', { includeTranscript }, () =>
+                  includeTranscript
+                    ? 'Transcript included for everyone.'
+                    : 'Notes only for everyone.'
+                )
+              }}
+              label="Include transcript for everyone"
+            />
+          </div>
+
+          {notice && (
+            <p
+              className={notice.error ? 'share-msg error' : 'share-msg'}
+              role={notice.error ? 'alert' : 'status'}
+            >
+              {notice.text}
+            </p>
+          )}
         </>
       )}
     </dialog>

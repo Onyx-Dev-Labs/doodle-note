@@ -7,7 +7,6 @@ CREATE TABLE "meeting_shares" (
 	"recipient_email" text NOT NULL,
 	"recipient_user_id" text,
 	"shared_by_user_id" text NOT NULL,
-	"include_transcript" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "meeting_shares_recipient_email_normalized" CHECK ("meeting_shares"."recipient_email" = lower(btrim("meeting_shares"."recipient_email")))
 );

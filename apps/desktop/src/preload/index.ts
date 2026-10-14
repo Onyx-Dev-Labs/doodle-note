@@ -194,14 +194,12 @@ import {
   SYNC_SHARE_CHANNEL,
   SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
   SYNC_SHARE_REMOVE_RECIPIENT_CHANNEL,
-  SYNC_SHARE_REVOKE_LINK_CHANNEL,
-  SYNC_SHARE_SET_LINK_CHANNEL,
   SYNC_SHARE_STATE_CHANNEL,
+  SYNC_SHARE_UPDATE_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
-  type PublicLinkOptions,
-  type PublicLinkResult,
   type ShareRecipientsResult,
+  type ShareSettingsUpdate,
   type ShareResult,
   type ShareStateResult,
   type SyncApi,
@@ -517,16 +515,11 @@ const syncApi: SyncApi = {
   shareState(meetingId: string): Promise<ShareStateResult> {
     return ipcRenderer.invoke(SYNC_SHARE_STATE_CHANNEL, meetingId) as Promise<ShareStateResult>
   },
-  addShareRecipients(
-    meetingId: string,
-    emails: string,
-    includeTranscript: boolean
-  ): Promise<ShareRecipientsResult> {
+  addShareRecipients(meetingId: string, emails: string): Promise<ShareRecipientsResult> {
     return ipcRenderer.invoke(
       SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
       meetingId,
-      emails,
-      includeTranscript
+      emails
     ) as Promise<ShareRecipientsResult>
   },
   removeShareRecipient(meetingId: string, recipientId: string): Promise<ShareRecipientsResult> {
@@ -536,18 +529,12 @@ const syncApi: SyncApi = {
       recipientId
     ) as Promise<ShareRecipientsResult>
   },
-  setPublicLink(meetingId: string, options: PublicLinkOptions): Promise<PublicLinkResult> {
+  updateShareSettings(meetingId: string, update: ShareSettingsUpdate): Promise<ShareStateResult> {
     return ipcRenderer.invoke(
-      SYNC_SHARE_SET_LINK_CHANNEL,
+      SYNC_SHARE_UPDATE_CHANNEL,
       meetingId,
-      options
-    ) as Promise<PublicLinkResult>
-  },
-  revokePublicLink(meetingId: string): Promise<PublicLinkResult> {
-    return ipcRenderer.invoke(
-      SYNC_SHARE_REVOKE_LINK_CHANNEL,
-      meetingId
-    ) as Promise<PublicLinkResult>
+      update
+    ) as Promise<ShareStateResult>
   },
 
   getStatus(): Promise<SyncStatus> {

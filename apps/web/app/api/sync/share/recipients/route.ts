@@ -10,8 +10,9 @@ export const dynamic = "force-dynamic";
  * Share with people from the desktop app (DEV-486), bearer-authenticated by
  * the desktop sync token; the sharer is the token's user. Query
  * ?meetingId=<uuid> on every method. GET lists recipients, POST
- * { emails, includeTranscript } adds them, DELETE &recipientId= revokes one —
- * the same bodies and responses as /api/meetings/[id]/recipients.
+ * { emails } adds them, DELETE &recipientId= revokes one — the same bodies
+ * and responses as /api/meetings/[id]/recipients. Transcript visibility is
+ * the meeting-level setting on /api/sync/share.
  */
 function handle(request: Request): Promise<Response> {
   return handleSyncRecipientsRequest(request, {

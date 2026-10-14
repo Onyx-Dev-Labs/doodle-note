@@ -57,22 +57,20 @@ export async function handleMeetingRecipientsRequest(
   }
 
   if (request.method === "POST") {
-    let body: { emails?: unknown; includeTranscript?: unknown };
+    // Transcript visibility is the meeting-level setting (POST .../share
+    // { includeTranscript }); a per-person value is ignored if sent.
+    let body: { emails?: unknown };
     try {
       body = (await request.json()) as typeof body;
       if (!body || typeof body !== "object") throw new Error("invalid_body");
     } catch {
       return json({ error: "Invalid JSON" }, 400);
     }
-    if (body.includeTranscript !== undefined && typeof body.includeTranscript !== "boolean") {
-      return json({ error: "includeTranscript must be true or false", code: "invalid_body" }, 400);
-    }
     const result = await addMeetingRecipients(db, {
       meetingId: access.meetingId,
       sharedByUserId: access.userId,
       sharedByEmail: access.userEmail,
       emails: body.emails,
-      includeTranscript: body.includeTranscript !== false,
     });
     if (!result.ok) {
       return json(

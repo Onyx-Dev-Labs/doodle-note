@@ -597,13 +597,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "include_transcript": {
-          "name": "include_transcript",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",

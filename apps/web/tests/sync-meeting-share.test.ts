@@ -5,7 +5,7 @@ import test from "node:test";
 import { sql, type Db } from "@repo/db";
 import { createInMemoryDb } from "@repo/db/testing";
 
-import { listMeetingsSharedWithUser } from "../lib/meeting-recipients";
+import { listMeetingsSharedWithUser, readSharedMeeting } from "../lib/meeting-recipients";
 import type { RecipientsAddedEvent } from "../lib/meeting-recipients-http";
 import { handleSyncRecipientsRequest, handleSyncShareRequest } from "../lib/sync-meeting-share";
 
@@ -53,6 +53,9 @@ async function withFixture(run: (f: Fixture) => Promise<void>): Promise<void> {
     globalDb.__repoDbClient = previousDb;
     if (previousOrigin === undefined) delete process.env.BETTER_AUTH_URL;
     else process.env.BETTER_AUTH_URL = previousOrigin;
+    // sync-auth stamps lastSeenAt without awaiting; PGlite runs queries in
+    // order, so one more query lets that write finish before closing.
+    await db.execute(sql`select 1`).catch(() => {});
     await close();
   }
 }
@@ -111,13 +114,14 @@ test("desktop share-with-people adds, lists and removes recipients through the D
     assert.deepEqual((await empty.json()).recipients, []);
 
     const added = await handleSyncRecipientsRequest(
-      call("POST", path, { body: { emails: "Rae@Example.test, pending@example.test", includeTranscript: false } }),
+      call("POST", path, { body: { emails: "Rae@Example.test, pending@example.test" } }),
       deps,
     );
     assert.equal(added.status, 201);
     const addedBody = await added.json();
     assert.deepEqual(addedBody.recipients.map((r: { email: string }) => r.email).sort(), ["pending@example.test", "rae@example.test"]);
-    assert.ok(addedBody.recipients.every((r: { includeTranscript: boolean }) => r.includeTranscript === false));
+    // Recipients carry no per-person settings.
+    assert.ok(addedBody.recipients.every((r: Record<string, unknown>) => Object.keys(r).sort().join() === "createdAt,email,id"));
     // No account information reaches the owner (no-enumeration rule).
     assert.doesNotMatch(JSON.stringify(addedBody), /hasAccount|recipientUserId|Rae Recipient/);
     // The sharer is the device's user, and the same notification hook fires.
@@ -200,9 +204,12 @@ test("desktop sharing is gated on the sync token and the owner's entitlement", a
       const blocked = await handleSyncRecipientsRequest(call("POST", recipients, { body: { emails: ["rae@example.test"] } }), deps);
       assert.equal(blocked.status, 402);
       assert.equal((await blocked.json()).needsSubscription, true);
-      const link = await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable: true, includeTranscript: true, expiresInDays: 7 } }), { db });
+      const link = await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, link: "on", includeTranscript: true, expiresInDays: 7 } }), { db });
       assert.equal(link.status, 402);
-      assert.equal((await shareRow(db, meetingId)).share_token, null);
+      assert.equal((await handleSyncShareRequest(call("GET", `/api/sync/share?meetingId=${meetingId}`), { db })).status, 402);
+      const row = await shareRow(db, meetingId);
+      assert.equal(row.share_token, null);
+      assert.equal(row.share_include_transcript, false);
       assert.equal(await shareCount(db), 0);
 
       await db.execute(sql`insert into subscriptions(user_id,status) values('owner','active')`);
@@ -211,95 +218,128 @@ test("desktop sharing is gated on the sync token and the owner's entitlement", a
   });
 });
 
-test("old desktop request shape still mints a notes-only, never-expiring link", async () => {
+test("old desktop request shape still mints a never-expiring link and never flips Include transcript", async () => {
   await withFixture(async ({ db, meetingId }) => {
-    const first = await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable: true } }), { db });
-    assert.equal(first.status, 200);
-    const body = await first.json();
-    assert.equal(body.ok, true);
-    assert.match(body.url, new RegExp(`^${ORIGIN}/share/[0-9a-f]{32}$`));
-    assert.equal(body.includeTranscript, false);
-    assert.equal(body.expiresAt, null);
-    const row = await shareRow(db, meetingId);
-    assert.equal(row.share_include_transcript, false);
-    assert.equal(row.share_expires_at, null);
+    const old = (enable: boolean) => handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable } }), { db });
+    for (const includeTranscript of [true, false]) {
+      await db.execute(sql`update meetings set share_include_transcript=${includeTranscript}, share_token=null, share_expires_at=null where id=${meetingId}::uuid`);
+      const first = await old(true);
+      assert.equal(first.status, 200);
+      const body = await first.json();
+      assert.equal(body.ok, true);
+      assert.match(body.url, new RegExp(`^${ORIGIN}/share/[0-9a-f]{32}$`));
+      assert.equal(body.link.url, body.url);
+      assert.equal(body.link.expiresAt, null);
+      assert.equal(body.includeTranscript, includeTranscript);
+      const row = await shareRow(db, meetingId);
+      assert.equal(row.share_include_transcript, includeTranscript);
+      assert.equal(row.share_expires_at, null);
 
-    // Repeat calls return the same link.
-    const second = await (await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable: true } }), { db })).json();
-    assert.equal(second.url, body.url);
+      // Repeat calls return the same link and still leave the setting alone.
+      assert.equal((await (await old(true)).json()).url, body.url);
+      assert.equal((await shareRow(db, meetingId)).share_include_transcript, includeTranscript);
+    }
 
-    // A link configured elsewhere (web Share panel) keeps its settings under the old shape.
-    await db.execute(sql`update meetings set share_include_transcript=true, share_expires_at=now() + interval '7 days' where id=${meetingId}::uuid`);
-    const kept = await (await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable: true } }), { db })).json();
-    assert.equal(kept.url, body.url);
-    assert.equal(kept.includeTranscript, true);
-    assert.ok(kept.expiresAt);
+    // A link given an expiry elsewhere (web Share panel) keeps it under the old shape.
+    const url = (await (await old(true)).json()).url;
+    await db.execute(sql`update meetings set share_expires_at=now() + interval '7 days' where id=${meetingId}::uuid`);
+    const kept = await (await old(true)).json();
+    assert.equal(kept.url, url);
+    assert.ok(kept.link.expiresAt);
 
-    // Revoke is unchanged: the link stops resolving, and a later old-shape
-    // request gets a brand-new notes-only link even if the column was left on.
-    const revoked = await (await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable: false } }), { db })).json();
+    // Revoke is unchanged: url null, token and expiry cleared; the next
+    // old-shape request mints a brand-new link with no expiry.
+    const revoked = await (await old(false)).json();
     assert.equal(revoked.url, null);
-    assert.equal((await shareRow(db, meetingId)).share_token, null);
-    const fresh = await (await handleSyncShareRequest(call("POST", "/api/sync/share", { body: { meetingId, enable: true } }), { db })).json();
-    assert.notEqual(fresh.url, body.url);
-    assert.equal(fresh.includeTranscript, false);
-    assert.equal(fresh.expiresAt, null);
+    assert.equal(revoked.link, null);
+    const row = await shareRow(db, meetingId);
+    assert.equal(row.share_token, null);
+    assert.equal(row.share_expires_at, null);
+    assert.equal(row.share_include_transcript, false);
+    const fresh = await (await old(true)).json();
+    assert.notEqual(fresh.url, url);
+    assert.equal(fresh.link.expiresAt, null);
   });
 });
 
-test("public link honors includeTranscript and expiresInDays and validates them", async () => {
+test("desktop share state and settings use the web Share panel contract", async () => {
   await withFixture(async ({ db, meetingId, otherWorkspaceMeetingId }) => {
-    const post = (body: unknown) => handleSyncShareRequest(call("POST", "/api/sync/share", { body }), { db });
+    const post = (body: unknown, token?: string) => handleSyncShareRequest(call("POST", "/api/sync/share", { body, token }), { db });
+    const get = (id: string, token?: string) => handleSyncShareRequest(call("GET", `/api/sync/share?meetingId=${id}`, { token }), { db });
 
-    const created = await post({ meetingId, enable: true, includeTranscript: true, expiresInDays: 7 });
-    assert.equal(created.status, 200);
-    const body = await created.json();
-    assert.equal(body.includeTranscript, true);
-    const expires = Date.parse(body.expiresAt);
-    assert.ok(Math.abs(expires - (Date.now() + 7 * 86_400_000)) < 60_000);
-    const row = await shareRow(db, meetingId);
-    assert.equal(row.share_include_transcript, true);
-    assert.equal(new Date(row.share_expires_at!).getTime(), expires);
-
-    // Update keeps the URL; 0 = never expires.
-    const updated = await (await post({ meetingId, enable: true, includeTranscript: false, expiresInDays: 0 })).json();
-    assert.equal(updated.url, body.url);
-    assert.equal(updated.includeTranscript, false);
-    assert.equal(updated.expiresAt, null);
-    assert.equal((await shareRow(db, meetingId)).share_expires_at, null);
-
-    // GET reports the current settings without changing them.
-    const read = await handleSyncShareRequest(call("GET", `/api/sync/share?meetingId=${meetingId}`), { db });
-    assert.deepEqual(await read.json(), { ok: true, url: body.url, includeTranscript: false, expiresAt: null });
-
-    for (const invalid of [
-      { expiresInDays: 3 },
-      { expiresInDays: -1 },
-      { expiresInDays: "forever" },
-      { includeTranscript: "yes" },
-    ]) {
-      const response = await post({ meetingId, enable: true, ...invalid });
-      assert.equal(response.status, 400, JSON.stringify(invalid));
-    }
-    assert.equal((await shareRow(db, meetingId)).share_include_transcript, false);
-
-    // Workspace and sync checks are the same as before.
-    for (const id of [otherWorkspaceMeetingId, randomUUID()]) {
-      const response = await post({ meetingId: id, enable: true, includeTranscript: true, expiresInDays: 1 });
-      assert.equal(response.status, 404);
-      assert.equal((await response.json()).error, "Meeting not synced yet — sync it first");
-      assert.equal((await handleSyncShareRequest(call("GET", `/api/sync/share?meetingId=${id}`), { db })).status, 404);
-    }
-    assert.equal((await shareRow(db, otherWorkspaceMeetingId)).share_token, null);
-    assert.equal((await post({ meetingId: "nope", enable: true })).status, 400);
-
-    // Revoke clears the expiry too and GET reports no link.
-    await post({ meetingId, enable: true, expiresInDays: 30 });
-    await post({ meetingId, enable: false });
-    assert.deepEqual(await (await handleSyncShareRequest(call("GET", `/api/sync/share?meetingId=${meetingId}`), { db })).json(), {
-      ok: true, url: null, includeTranscript: false, expiresAt: null,
+    const initial = await get(meetingId);
+    assert.equal(initial.status, 200);
+    assert.equal(initial.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await initial.json(), {
+      ok: true,
+      url: null,
+      includeTranscript: false,
+      link: null,
+      recipients: [],
+      workspace: { name: "Owner team", personal: false, memberCount: 1 },
+      limits: { perRequest: 20, perMeeting: 50 },
     });
-    assert.equal((await shareRow(db, meetingId)).share_expires_at, null);
+
+    // General access on: a never-expiring link by default.
+    const on = await (await post({ meetingId, link: "on" })).json();
+    assert.match(on.link.url, new RegExp(`^${ORIGIN}/share/[0-9a-f]{32}$`));
+    assert.equal(on.link.expiresAt, null);
+    const week = await (await post({ meetingId, expiresInDays: 7 })).json();
+    assert.equal(week.link.url, on.link.url);
+    assert.ok(Math.abs(Date.parse(week.link.expiresAt) - (Date.now() + 7 * 86_400_000)) < 60_000);
+    assert.equal((await (await post({ meetingId, expiresInDays: 0 })).json()).link.expiresAt, null);
+
+    // One transcript setting: toggling it changes what a recipient sees immediately.
+    const recipients = `/api/sync/share/recipients?meetingId=${meetingId}`;
+    assert.equal((await handleSyncRecipientsRequest(call("POST", recipients, { body: { emails: ["rae@example.test"] } }), { db })).status, 201);
+    const rae = { id: "recipient", email: "rae@example.test", emailVerified: true };
+    const recipientSeesTranscript = async () => {
+      const read = await readSharedMeeting(db, { meetingId, identity: rae, requireVerifiedEmail: true, entitlement: async () => ({ entitled: true }) });
+      assert.equal(read.status, "ok");
+      return read.status === "ok" ? read.includeTranscript : null;
+    };
+    assert.equal(await recipientSeesTranscript(), false);
+    const withTranscript = await (await post({ meetingId, includeTranscript: true })).json();
+    assert.equal(withTranscript.includeTranscript, true);
+    assert.equal(withTranscript.link.url, on.link.url);
+    assert.deepEqual(withTranscript.recipients.map((r: { email: string }) => r.email), ["rae@example.test"]);
+    assert.equal(await recipientSeesTranscript(), true);
+    assert.equal((await shareRow(db, meetingId)).share_include_transcript, true);
+
+    // General access off revokes; the transcript setting stays for people added.
+    const off = await (await post({ meetingId, link: "off" })).json();
+    assert.equal(off.link, null);
+    assert.equal(off.url, null);
+    assert.equal(off.includeTranscript, true);
+    assert.equal(await recipientSeesTranscript(), true);
+
+    const before = await shareRow(db, meetingId);
+    for (const [body, status] of [
+      [{ meetingId, expiresInDays: 3 }, 400],
+      [{ meetingId, expiresInDays: "forever" }, 400],
+      [{ meetingId, includeTranscript: "yes" }, 400],
+      [{ meetingId, link: "maybe" }, 400],
+      [{ meetingId }, 400],
+      [{ meetingId, link: "off", expiresInDays: 7 }, 400],
+      [{ meetingId, expiresInDays: 7 }, 409], // the link is off
+      [{ meetingId: "nope", link: "on" }, 400],
+    ] as const) {
+      assert.equal((await post(body)).status, status, JSON.stringify(body));
+    }
+    assert.deepEqual(await shareRow(db, meetingId), before);
+
+    // Another workspace's meeting, an unsynced id, or another user's device: 404, no writes.
+    for (const [id, token] of [[otherWorkspaceMeetingId, undefined], [randomUUID(), undefined], [meetingId, OTHER_TOKEN]] as const) {
+      for (const body of [{ meetingId: id, link: "on" }, { meetingId: id, includeTranscript: false }, { meetingId: id, enable: false }]) {
+        const response = await post(body, token);
+        assert.equal(response.status, 404);
+        assert.equal((await response.json()).error, "Meeting not synced yet — sync it first");
+      }
+      assert.equal((await get(id, token)).status, 404);
+    }
+    assert.deepEqual(await shareRow(db, meetingId), before);
+    assert.equal((await shareRow(db, otherWorkspaceMeetingId)).share_token, null);
+    assert.equal((await handleSyncShareRequest(call("PUT", "/api/sync/share", { body: {} }), { db })).status, 405);
   });
 });
 
