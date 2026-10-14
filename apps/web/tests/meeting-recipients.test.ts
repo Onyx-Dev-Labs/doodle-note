@@ -90,11 +90,12 @@ test("owner can share, list, and remove people; notification hook gets only new 
     assert.equal(empty.headers.get("cache-control"), "private, no-store");
     assert.deepEqual((await empty.json()).recipients, []);
 
-    const created = await handle(request("POST", { emails: " Rae@Example.test , newperson@example.test", includeTranscript: false }));
+    const created = await handle(request("POST", { emails: " Rae@Example.test , newperson@example.test" }));
     assert.equal(created.status, 201);
     const body = await created.json();
     assert.deepEqual(body.added.map((r: { email: string }) => r.email).sort(), ["newperson@example.test", "rae@example.test"]);
-    assert.ok(body.added.every((r: { includeTranscript: boolean }) => r.includeTranscript === false));
+    // No per-person settings: transcript visibility is meeting-level.
+    assert.ok(body.added.every((r: Record<string, unknown>) => Object.keys(r).sort().join() === "createdAt,email,id"));
     assert.equal(body.recipients.length, 2);
     assert.deepEqual(events, [{
       meetingId: f.meetingId,
@@ -103,9 +104,10 @@ test("owner can share, list, and remove people; notification hook gets only new 
       emails: body.added.map((r: { email: string }) => r.email),
     }]);
 
-    // Include transcript defaults to on.
-    const third = await (await handle(request("POST", { emails: ["third@example.test"] }))).json();
-    assert.equal(third.added[0].includeTranscript, true);
+    // A per-person transcript flag from an older client is ignored, not stored.
+    const third = await handle(request("POST", { emails: ["third@example.test"], includeTranscript: false }));
+    assert.equal(third.status, 201);
+    assert.equal("includeTranscript" in (await third.json()).added[0], false);
 
     const listed = await (await handle(request("GET"))).json();
     assert.equal(listed.recipients.length, 3);
@@ -140,10 +142,11 @@ test("callers without management access get 404 on every method and nothing chan
   }
 });
 
-test("a recipient reads exactly the shared meeting, transcript only when included", async () => {
+test("a recipient reads exactly the shared meeting, transcript only while the meeting setting is on", async () => {
   const f = await fixture();
   try {
-    await addMeetingRecipients(f.db, { meetingId: f.meetingId, sharedByUserId: "owner", sharedByEmail: "owner@example.test", emails: ["rae@example.test"], includeTranscript: true });
+    await f.db.execute(sql`update meetings set share_include_transcript=true where id=${f.meetingId}::uuid`);
+    await addMeetingRecipients(f.db, { meetingId: f.meetingId, sharedByUserId: "owner", sharedByEmail: "owner@example.test", emails: ["rae@example.test"] });
     const read = await readSharedMeeting(f.db, { meetingId: f.meetingId, identity: f.recipient, requireVerifiedEmail: true, entitlement: entitled });
     assert.equal(read.status, "ok");
     if (read.status !== "ok") return;
@@ -159,8 +162,8 @@ test("a recipient reads exactly the shared meeting, transcript only when include
     assert.equal(library[0]!.sharedByEmail, "owner@example.test");
     assert.deepEqual(Object.keys(library[0]!).sort(), ["createdAt", "endedAt", "kind", "meetingId", "sharedAt", "sharedByEmail", "sharedByName", "startedAt", "title"]);
 
-    // Notes-only share: transcript is not even loaded.
-    await f.db.execute(sql`update meeting_shares set include_transcript=false`);
+    // Notes only (the default for a meeting): transcript is not even loaded.
+    await f.db.execute(sql`update meetings set share_include_transcript=false where id=${f.meetingId}::uuid`);
     const notesOnly = await readSharedMeeting(f.db, { meetingId: f.meetingId, identity: f.recipient, requireVerifiedEmail: true, entitlement: entitled });
     assert.equal(notesOnly.status, "ok");
     if (notesOnly.status === "ok") {
@@ -254,7 +257,7 @@ test("the owner-facing response is identical for existing accounts and unknown a
     const existing = await shape("rae@example.test");
     const unknown = await shape("nobody-here@example.test");
     assert.deepEqual(existing, unknown);
-    assert.deepEqual(Object.keys(existing.body.added[0]).sort(), ["createdAt", "email", "id", "includeTranscript"]);
+    assert.deepEqual(Object.keys(existing.body.added[0]).sort(), ["createdAt", "email", "id"]);
 
     // Account existence only drives the recipient's email template, server-side.
     assert.deepEqual(await planShareNotifications(f.db, ["rae@example.test", "nobody-here@example.test"]), [
@@ -287,7 +290,6 @@ test("invalid, duplicate, self, oversized, over-limit, and already-shared reques
       assert.equal(result.body.code, code);
       assert.equal(typeof result.body.error, "string");
     }
-    assert.equal((await post({ emails: ["x@example.test"], includeTranscript: "yes" })).status, 400);
     const badJson = await handleMeetingRecipientsRequest(
       new Request("http://localhost/x", { method: "POST", body: "{" }),
       { db: f.db, access: f.owner },

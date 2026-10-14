@@ -1,19 +1,78 @@
-# Share a meeting with people (DEV-485)
+# Sharing a meeting (DEV-485)
 
-A workspace member can give specific people read-only access to one meeting by
-email from the meeting's **Share** panel (**Share with people**, above the public
-link). Recipients find it under **Shared with me** (`/app/shared`) and open it at
-`/app/meeting/<id>` in their own signed-in app. The public link (`/share/<token>`)
-is a separate, unchanged option.
+Each meeting has ONE **Share** panel (web: `app/app/meeting/[id]/share-panel.tsx`;
+the desktop **Share…** dialog mirrors it), Google-Docs style. Every change saves
+immediately:
 
-## Access rules
+1. **Share "<title>"** header.
+2. **Add people**: one or more email addresses (commas, spaces or new lines) and
+   **Share**. Invalid, duplicate, self, already-added and over-cap addresses are
+   rejected inline and nothing is saved.
+3. **Who has access**: first the workspace's built-in access (no Remove) — "You ·
+   Owner / Your Personal workspace" or "Everyone in <Team> · N members" — then each
+   person added ("Can view", **Remove**).
+4. **General access**: **Only people added** (default) or **Anyone with the link**.
+   Choosing the link creates it right away and shows it with **Copy link** and a
+   small **Link expires** select (Never — the default — 24 hours, 7 days, 30 days;
+   the actual expiry date is shown). Switching back revokes it ("Link turned off").
+5. **Include transcript**: one setting for everyone — people added and the link.
+   Off (the default) means people see the notes only.
 
-- Rows live in `meeting_shares` (migration `0017_meeting_shares.sql`), keyed by
-  meeting and normalized lowercase email. Sharing never changes
-  `meetings.organization_id` and never writes to `meetings`, `notes` or
-  `transcript_segments`. Deleting a meeting (including desktop sync DELETE) or
-  the sharer's account deletes the rows; deleting the recipient's account only
-  clears `recipient_user_id`.
+Meetings never move between workspaces; sharing only adds read access.
+
+## API
+
+`GET /api/meetings/<id>/share` and every `POST` return the share state:
+
+```json
+{
+  "ok": true,
+  "includeTranscript": false,
+  "link": { "url": "https://…/share/<token>", "expiresAt": null },
+  "recipients": [{ "id": "…", "email": "rae@example.com", "createdAt": "…" }],
+  "workspace": { "name": "Acme", "personal": false, "memberCount": 4 },
+  "limits": { "perRequest": 20, "perMeeting": 50 }
+}
+```
+
+`link` is `null` for "Only people added" (an expired link also reads as off).
+`POST /api/meetings/<id>/share` takes any of
+`{ "includeTranscript": boolean, "link": "on" | "off", "expiresInDays": 0 | 1 | 7 | 30 }`
+and applies them in one UPDATE:
+
+- `link: "on"` keeps a still-active link (same URL) or mints a new token with no
+  expiry; an expired URL is never revived. `link: "off"` clears token and expiry.
+- `expiresInDays` (0 = never) needs the link on (or `link: "on"` in the same
+  request), otherwise 409 `link_off`. It is rejected with `link: "off"`.
+- Older clients' `enable: true|false` is read as `link: "on"|"off"` and never
+  changes `includeTranscript`.
+- Validation errors are 400 with `{ error, code }` (`invalid_body`,
+  `invalid_include_transcript`, `invalid_link`, `invalid_expiry`,
+  `nothing_to_update`) and change nothing. A meeting the v2 sync engine owns
+  (the `sync_guard_legacy` trigger raises) returns 409 `sync_upgrade_required`.
+
+People are added and removed with `/api/meetings/<id>/recipients`: `GET` →
+`{ recipients, limits }`, `POST { emails }` → 201 `{ ok, added, recipients, limits }`
+(errors `{ error, code, emails? }`), `DELETE ?recipientId=` → `{ ok, recipients, limits }`.
+Both routes use `getMeetingAccess` (workspace membership): recipients and
+strangers get 404 on every method.
+
+Logic lives in framework-free modules so the desktop bearer routes reuse it:
+`lib/meeting-share-state.ts` (state, settings, HTTP handler) and
+`lib/meeting-recipients.ts` (people).
+
+## Storage and access rules
+
+- Transcript visibility is `meetings.share_include_transcript` (default false), the
+  single source of truth for the public reader (`/share/<token>`) and for people
+  added. The link is `meetings.share_token` / `share_expires_at`. Writes touch only
+  those columns, as the public-link route always has; they pass the
+  `sync_guard_legacy` trigger and never change `organization_id`.
+- People live in `meeting_shares` (migration `0017_meeting_shares.sql`), keyed by
+  meeting and normalized lowercase email, with no per-person settings. Sharing
+  never writes to `notes` or `transcript_segments`. Deleting a meeting (including
+  desktop sync DELETE) or the sharer's account deletes the rows; deleting the
+  recipient's account only clears `recipient_user_id`.
 - A signed-in user matches a share by `recipient_user_id`, or, while it is
   unattached, by account email. **When email verification is enabled
   (`resolveAuthEmailEnabled()`, required in production) only a verified email
@@ -21,11 +80,13 @@ is a separate, unchanged option.
   account email matches so localhost testing works. The first match attaches the
   row to that user id; from then on it follows the account and another account
   with the same address cannot claim it.
-- Recipients can read notes, read the transcript only when that share includes
-  it (owner's toggle, default on), use **Copy notes** and **Export .md**. They see
-  no folders, tags, workspace, star, move, sharing or public-link controls. All
-  mutating meeting routes (`share`, `move`, `tags`, `star`, `recipients`) still use
-  `getMeetingAccess` (workspace membership), so recipients and strangers get 404.
+- People added find the meeting under **Shared with me** (`/app/shared`) and open
+  it at `/app/meeting/<id>`. They read the notes, the transcript only while
+  Include transcript is on, and can **Copy notes** and **Export .md**. They see no
+  folders, tags, workspace, star, move or sharing controls. All mutating meeting
+  routes (`share`, `move`, `tags`, `star`, `recipients`) use `getMeetingAccess`,
+  so they get 404.
+- Owners find meetings with a public link at `/app?shared=1`.
 - Opening a shared meeting requires the recipient's own entitlement
   (`entitlementFor`). Without it the meeting is still listed, but the page shows
   an upgrade message and no notes or transcript are loaded.
@@ -35,10 +96,6 @@ is a separate, unchanged option.
   link returns to the meeting. Email uses `RESEND_API_KEY` +
   `INVITATION_FROM_EMAIL`, runs after the response, and is logged instead of sent
   when unconfigured.
-
-The service functions in `lib/meeting-recipients.ts` take the database explicitly
-and are transport-neutral, so a bearer-token route can reuse them after its own
-authorization.
 
 ## Local QA
 
