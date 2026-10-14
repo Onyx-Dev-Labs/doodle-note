@@ -263,7 +263,7 @@ export default function ShareDialog({
                 className="share-primary"
                 disabled={disabled || emails.trim().length === 0}
               >
-                {busy === 'add' ? 'Sharing…' : 'Share'}
+                {busy === 'add' ? 'Adding…' : 'Add'}
               </button>
             </div>
             {addError ? (
@@ -389,9 +389,9 @@ export default function ShareDialog({
                       </option>
                     ))}
                   </select>
-                  <span className="share-muted">
-                    {link.expiresAt ? `Expires ${formatExpiry(link.expiresAt)}` : 'Never expires'}
-                  </span>
+                  {link.expiresAt && (
+                    <span className="share-muted">{formatExpiry(link.expiresAt)}</span>
+                  )}
                 </div>
               </div>
             )}
