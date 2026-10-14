@@ -12,13 +12,26 @@ import {
   SYNC_CONNECT_CHANNEL,
   SYNC_CANCEL_CONNECT_CHANNEL,
   SYNC_SHARE_CHANNEL,
+  SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
+  SYNC_SHARE_REMOVE_RECIPIENT_CHANNEL,
+  SYNC_SHARE_REVOKE_LINK_CHANNEL,
+  SYNC_SHARE_SET_LINK_CHANNEL,
+  SYNC_SHARE_STATE_CHANNEL,
   SYNC_DISCONNECT_CHANNEL,
   SYNC_GET_STATUS_CHANNEL,
   SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
+  PUBLIC_LINK_EXPIRY_DAYS,
+  type PublicLink,
+  type PublicLinkOptions,
+  type PublicLinkResult,
+  type ShareFailure,
+  type ShareRecipient,
+  type ShareRecipientsResult,
   type ShareResult,
+  type ShareStateResult,
   type SyncStatus
 } from '../shared/sync-api'
 import type { FolderRecord } from '../shared/folders-api'
@@ -48,6 +61,14 @@ const PUSH_INTERVAL_MS = 5 * 60_000
 /** Pull pages are capped server-side; this bounds a runaway loop. */
 const MAX_PULL_PAGES = 40
 const STARTUP_SYNC_DELAY_MS = 5_000
+
+const SUBSCRIPTION_ERROR =
+  'Cloud sync needs an active subscription — manage billing at https://www.doodlenote.ai/pricing'
+const LOCAL_ONLY_SHARE_ERROR =
+  'Imported text transcripts stay on this computer. Export this note to share it.'
+const NETWORK_SHARE_ERROR = 'Could not reach DoodleNote cloud. Check your connection and try again.'
+/** Generous bound on the raw address list; the server caps recipients per request. */
+const MAX_RECIPIENT_INPUT_CHARS = 10_000
 
 /**
  * Two-way desktop ↔ cloud sync. Local storage stays the source of truth
@@ -108,6 +129,40 @@ export class SyncService {
     ipcMain.handle(SYNC_NOW_CHANNEL, () => this.syncNow())
     ipcMain.handle(SYNC_SHARE_CHANNEL, (_event, meetingId: unknown) =>
       libraryActivity.run(() => this.share(String(meetingId)))
+    )
+    ipcMain.handle(SYNC_SHARE_STATE_CHANNEL, (_event, meetingId: unknown) =>
+      libraryActivity.run(() => this.shareState(String(meetingId)))
+    )
+    ipcMain.handle(
+      SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
+      (_event, meetingId: unknown, emails: unknown, includeTranscript: unknown) =>
+        libraryActivity.run(() =>
+          this.addShareRecipients(
+            String(meetingId),
+            typeof emails === 'string' ? emails : '',
+            includeTranscript !== false
+          )
+        )
+    )
+    ipcMain.handle(
+      SYNC_SHARE_REMOVE_RECIPIENT_CHANNEL,
+      (_event, meetingId: unknown, recipientId: unknown) =>
+        libraryActivity.run(() => this.removeShareRecipient(String(meetingId), String(recipientId)))
+    )
+    ipcMain.handle(SYNC_SHARE_SET_LINK_CHANNEL, (_event, meetingId: unknown, options: unknown) => {
+      const raw = (options && typeof options === 'object' ? options : {}) as {
+        includeTranscript?: unknown
+        expiresInDays?: unknown
+      }
+      return libraryActivity.run(() =>
+        this.setPublicLink(String(meetingId), {
+          includeTranscript: raw.includeTranscript === true,
+          expiresInDays: Number(raw.expiresInDays) as PublicLinkOptions['expiresInDays']
+        })
+      )
+    })
+    ipcMain.handle(SYNC_SHARE_REVOKE_LINK_CHANNEL, (_event, meetingId: unknown) =>
+      libraryActivity.run(() => this.revokePublicLink(String(meetingId)))
     )
 
     setInterval(() => {
@@ -257,48 +312,202 @@ export class SyncService {
     return this.status()
   }
 
+  /* ---- sharing ---- */
+
   /**
-   * Push the meeting fresh (the shared page must show current content),
-   * then mint or fetch its public share link.
+   * Local checks shared by every share action. A failure here means no
+   * network request at all (not linked, local-only import, missing meeting).
+   */
+  private shareTarget(meetingId: string): { record: MeetingRecord; token: string } | ShareFailure {
+    const record = this.meetings.readAll().find((r) => r.id === meetingId && !r.trashedAt)
+    if (!record) return { error: 'Meeting not found', code: 'not_found' }
+    if (!supportsCloudSync(record)) return { error: LOCAL_ONLY_SHARE_ERROR, code: 'local_only' }
+    const token = this.token()
+    if (!token) return { error: 'Connect cloud sync in Settings first', code: 'not_linked' }
+    return { record, token }
+  }
+
+  /** One bearer request to a share route. Throws only on network failure. */
+  private async shareFetch(
+    token: string,
+    path: string,
+    method: 'GET' | 'POST' | 'DELETE',
+    body?: unknown
+  ): Promise<{ ok: boolean; status: number; body: ShareResponseBody }> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    })
+    const parsed = (await response.json().catch(() => ({}))) as unknown
+    return {
+      ok: response.ok,
+      status: response.status,
+      body: parsed && typeof parsed === 'object' ? (parsed as ShareResponseBody) : {}
+    }
+  }
+
+  /**
+   * Push the meeting fresh (shared pages must show current content). A
+   * rejected push — e.g. the id already lives in another cloud workspace —
+   * is an error, so the caller never hands out a link to stale content.
+   */
+  private async pushForShare(record: MeetingRecord, token: string): Promise<ShareFailure | null> {
+    await this.uploadReferencedMedia(record, token)
+    const response = await this.shareFetch(token, '/api/sync/push', 'POST', {
+      meetings: [toPushMeeting(record, this.config.mediaUrls)]
+    })
+    if (!response.ok)
+      return shareFailure(response.status, response.body, 'Could not sync the meeting')
+    const result = Array.isArray(response.body.results) ? response.body.results[0] : undefined
+    if (!result || result.ok !== true) {
+      return { code: 'push_rejected', error: pushRejectedMessage(result?.error) }
+    }
+    this.config.pushed[record.id] = contentHash(record, this.config.mediaUrls)
+    this.writeConfig()
+    return null
+  }
+
+  /**
+   * Legacy one-shot share (pre-DEV-486 renderer): push, then mint/fetch the
+   * public link with the original request shape.
    */
   async share(meetingId: string): Promise<ShareResult> {
-    const record = this.meetings.readAll().find((r) => r.id === meetingId && !r.trashedAt)
-    if (!record) return { error: 'Meeting not found' }
-    if (!supportsCloudSync(record))
-      return {
-        error: 'Imported text transcripts stay on this computer. Export this note to share it.'
-      }
-    const token = this.token()
-    if (!token) return { error: 'Connect cloud sync in Settings first' }
-
+    const target = this.shareTarget(meetingId)
+    if ('error' in target) return { error: target.error }
     try {
-      await this.uploadReferencedMedia(record, token)
-      const pushResponse = await fetch(`${this.baseUrl}/api/sync/push`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetings: [toPushMeeting(record, this.config.mediaUrls)] })
+      const pushed = await this.pushForShare(target.record, target.token)
+      if (pushed) return { error: pushed.error }
+      const response = await this.shareFetch(target.token, '/api/sync/share', 'POST', {
+        meetingId: target.record.id,
+        enable: true
       })
-      if (!pushResponse.ok) {
-        return { error: `Could not sync the meeting (HTTP ${pushResponse.status})` }
+      if (!response.ok || typeof response.body.url !== 'string') {
+        return { error: shareFailure(response.status, response.body, 'Share failed').error }
       }
-      this.config.pushed[record.id] = contentHash(record, this.config.mediaUrls)
-      this.writeConfig()
+      return { url: response.body.url }
+    } catch {
+      return { error: NETWORK_SHARE_ERROR }
+    }
+  }
 
-      const shareResponse = await fetch(`${this.baseUrl}/api/sync/share`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetingId, enable: true })
+  /** Recipients and public link for the Share dialog. Reads only; never pushes. */
+  async shareState(meetingId: string): Promise<ShareStateResult> {
+    const target = this.shareTarget(meetingId)
+    if ('error' in target) return target
+    const id = encodeURIComponent(target.record.id)
+    try {
+      const [recipients, link] = await Promise.all([
+        this.shareFetch(target.token, `/api/sync/share/recipients?meetingId=${id}`, 'GET'),
+        this.shareFetch(target.token, `/api/sync/share?meetingId=${id}`, 'GET')
+      ])
+      for (const response of [recipients, link]) {
+        if (!response.ok && response.status !== 404) {
+          return shareFailure(response.status, response.body, 'Could not load sharing')
+        }
+      }
+      // The cloud has no copy in this workspace yet, so nothing is shared.
+      if (!recipients.ok || !link.ok) return { recipients: [], link: null, synced: false }
+      return {
+        recipients: parseRecipients(recipients.body),
+        link: parseLink(link.body),
+        synced: true
+      }
+    } catch {
+      return { error: NETWORK_SHARE_ERROR, code: 'network' }
+    }
+  }
+
+  async addShareRecipients(
+    meetingId: string,
+    emails: string,
+    includeTranscript: boolean
+  ): Promise<ShareRecipientsResult> {
+    const target = this.shareTarget(meetingId)
+    if ('error' in target) return target
+    const input = emails.trim()
+    if (input.length === 0) return { error: 'Enter at least one email address.', code: 'request' }
+    if (input.length > MAX_RECIPIENT_INPUT_CHARS) {
+      return { error: 'That list is too long. Share with fewer people at a time.', code: 'request' }
+    }
+    try {
+      const pushed = await this.pushForShare(target.record, target.token)
+      if (pushed) return pushed
+      const response = await this.shareFetch(
+        target.token,
+        `/api/sync/share/recipients?meetingId=${encodeURIComponent(target.record.id)}`,
+        'POST',
+        { emails: input, includeTranscript }
+      )
+      if (!response.ok) return shareFailure(response.status, response.body, 'Could not share')
+      return { recipients: parseRecipients(response.body) }
+    } catch {
+      return { error: NETWORK_SHARE_ERROR, code: 'network' }
+    }
+  }
+
+  async removeShareRecipient(
+    meetingId: string,
+    recipientId: string
+  ): Promise<ShareRecipientsResult> {
+    const target = this.shareTarget(meetingId)
+    if ('error' in target) return target
+    try {
+      const query = `meetingId=${encodeURIComponent(target.record.id)}&recipientId=${encodeURIComponent(recipientId)}`
+      const response = await this.shareFetch(
+        target.token,
+        `/api/sync/share/recipients?${query}`,
+        'DELETE'
+      )
+      if (!response.ok) {
+        return shareFailure(response.status, response.body, 'Could not remove access')
+      }
+      return { recipients: parseRecipients(response.body) }
+    } catch {
+      return { error: NETWORK_SHARE_ERROR, code: 'network' }
+    }
+  }
+
+  /** Create or update the public link; the meeting is pushed first. */
+  async setPublicLink(meetingId: string, options: PublicLinkOptions): Promise<PublicLinkResult> {
+    const target = this.shareTarget(meetingId)
+    if ('error' in target) return target
+    if (!(PUBLIC_LINK_EXPIRY_DAYS as readonly number[]).includes(options.expiresInDays)) {
+      return { error: 'Choose when the link expires.', code: 'request' }
+    }
+    try {
+      const pushed = await this.pushForShare(target.record, target.token)
+      if (pushed) return pushed
+      const response = await this.shareFetch(target.token, '/api/sync/share', 'POST', {
+        meetingId: target.record.id,
+        enable: true,
+        includeTranscript: options.includeTranscript === true,
+        expiresInDays: options.expiresInDays
       })
-      const body = (await shareResponse.json().catch(() => ({}))) as {
-        url?: string
-        error?: string
-      }
-      if (!shareResponse.ok || typeof body.url !== 'string') {
-        return { error: body.error ?? `Share failed (HTTP ${shareResponse.status})` }
-      }
-      return { url: body.url }
-    } catch (error) {
-      return { error: error instanceof Error ? error.message : 'Share failed' }
+      const link = response.ok ? parseLink(response.body) : null
+      if (!link) return shareFailure(response.status, response.body, 'Could not create the link')
+      return { link }
+    } catch {
+      return { error: NETWORK_SHARE_ERROR, code: 'network' }
+    }
+  }
+
+  async revokePublicLink(meetingId: string): Promise<PublicLinkResult> {
+    const target = this.shareTarget(meetingId)
+    if ('error' in target) return target
+    try {
+      const response = await this.shareFetch(target.token, '/api/sync/share', 'POST', {
+        meetingId: target.record.id,
+        enable: false
+      })
+      if (!response.ok)
+        return shareFailure(response.status, response.body, 'Could not revoke the link')
+      return { link: null }
+    } catch {
+      return { error: NETWORK_SHARE_ERROR, code: 'network' }
     }
   }
 
@@ -754,6 +963,83 @@ interface RemoteMeeting {
     absoluteStartMs?: unknown
     confidence?: unknown
   }>
+}
+
+interface ShareResponseBody {
+  error?: unknown
+  code?: unknown
+  emails?: unknown
+  needsSubscription?: unknown
+  results?: unknown
+  recipients?: unknown
+  url?: unknown
+  includeTranscript?: unknown
+  expiresAt?: unknown
+}
+
+/** Maps a failed share-route response to user guidance; never includes the token. */
+export function shareFailure(
+  status: number,
+  body: ShareResponseBody,
+  fallback: string
+): ShareFailure {
+  const message = typeof body.error === 'string' && body.error.length > 0 ? body.error : undefined
+  if (status === 401) {
+    return {
+      code: 'unauthorized',
+      error: 'This computer is no longer linked to cloud sync. Reconnect it in Settings.'
+    }
+  }
+  if (status === 402) return { code: 'needs_subscription', error: message ?? SUBSCRIPTION_ERROR }
+  if (status === 503) {
+    return { code: 'unavailable', error: message ?? 'Cloud sync is unavailable right now.' }
+  }
+  if (status === 404) {
+    return { code: 'not_found', error: message ?? 'Meeting not synced yet — sync it first' }
+  }
+  const emails = Array.isArray(body.emails)
+    ? body.emails.filter((e): e is string => typeof e === 'string')
+    : []
+  return {
+    code: 'request',
+    error: message ?? `${fallback} (HTTP ${status})`,
+    ...(emails.length > 0 ? { emails } : {})
+  }
+}
+
+function pushRejectedMessage(reason: unknown): string {
+  if (typeof reason === 'string' && /another workspace/i.test(reason)) {
+    return 'This meeting belongs to a different cloud workspace, so it can’t be shared from this one.'
+  }
+  return typeof reason === 'string' && reason.length > 0
+    ? `The cloud did not accept this meeting (${reason}), so it was not shared.`
+    : 'The cloud did not accept this meeting, so it was not shared.'
+}
+
+function parseRecipients(body: ShareResponseBody): ShareRecipient[] {
+  if (!Array.isArray(body.recipients)) return []
+  return body.recipients.flatMap((raw: unknown) => {
+    const r = (raw ?? {}) as Record<string, unknown>
+    return typeof r.id === 'string' && typeof r.email === 'string'
+      ? [
+          {
+            id: r.id,
+            email: r.email,
+            includeTranscript: r.includeTranscript === true,
+            createdAt: typeof r.createdAt === 'string' ? r.createdAt : ''
+          }
+        ]
+      : []
+  })
+}
+
+function parseLink(body: ShareResponseBody): PublicLink | null {
+  if (typeof body.url !== 'string' || body.url.length === 0) return null
+  return {
+    url: body.url,
+    includeTranscript: body.includeTranscript === true,
+    expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null
+  }
 }
 
 function toPushMeeting(record: MeetingRecord, mediaUrls: Record<string, string>): object {

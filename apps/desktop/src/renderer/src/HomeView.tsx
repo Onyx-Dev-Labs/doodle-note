@@ -12,6 +12,7 @@ import type {
 import { isGenericDraftTitle } from '../../shared/draft-lifecycle'
 import { meetingHistoryWindow } from '../../shared/meeting-history'
 import FolderPicker from './FolderPicker'
+import ShareDialog from './ShareDialog'
 import {
   CheckSquareIcon,
   DocIcon,
@@ -44,6 +45,12 @@ function dayLabel(iso: string): string {
   if (diffDays <= 0) return 'Today'
   if (diffDays === 1) return 'Yesterday'
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+/** Row label: generic draft titles read as "New note" / "New meeting". */
+function rowTitle(m: Pick<MeetingSummary, 'title' | 'kind'>): string {
+  if (!isGenericDraftTitle(m.title)) return m.title.trim()
+  return m.kind === 'note' ? 'New note' : 'New meeting'
 }
 
 function timeLabel(iso: string): string {
@@ -452,21 +459,8 @@ export default function HomeView({
     return () => clearTimeout(timer)
   }, [shareNotice])
 
-  const copyShareLink = async (id: string): Promise<void> => {
-    setMenuFor(null)
-    setShareNotice('Creating share link…')
-    const result = await window.sync.share(id)
-    if ('url' in result) {
-      try {
-        await navigator.clipboard.writeText(result.url)
-        setShareNotice('Share link copied to clipboard ✓')
-      } catch {
-        setShareNotice(result.url) // clipboard blocked — at least show it
-      }
-    } else {
-      setShareNotice(result.error)
-    }
-  }
+  /** Meeting whose Share… dialog is open. */
+  const [shareFor, setShareFor] = useState<{ id: string; title: string } | null>(null)
 
   /* ---- cross-meeting "ask anything" (thread persisted by main) ---- */
   const [chatOpen, setChatOpen] = useState(false)
@@ -855,6 +849,14 @@ export default function HomeView({
           </button>
         </div>
       )}
+      {shareFor && (
+        <ShareDialog
+          meetingId={shareFor.id}
+          title={shareFor.title}
+          onClose={() => setShareFor(null)}
+          onOpenSettings={onOpenSettings}
+        />
+      )}
       {shareNotice !== null && (
         <div className="share-notice" role="status">
           {shareNotice}
@@ -951,13 +953,7 @@ export default function HomeView({
                         {m.kind === 'note' ? <PencilIcon size={14} /> : <DocIcon size={14} />}
                       </span>
                       <span className="row-main">
-                        <span className="row-title">
-                          {isGenericDraftTitle(m.title)
-                            ? m.kind === 'note'
-                              ? 'New note'
-                              : 'New meeting'
-                            : m.title.trim()}
-                        </span>
+                        <span className="row-title">{rowTitle(m)}</span>
                         <span className="row-sub">
                           {m.kind === 'note' ? 'Note' : 'Me'}
                           {m.durationMin !== undefined ? ` · ${m.durationMin} min` : ''}
@@ -1009,10 +1005,13 @@ export default function HomeView({
                         <div className="row-menu" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
-                            title="Copy a public link to this meeting's notes"
-                            onClick={() => void copyShareLink(m.id)}
+                            title="Share with people or manage this meeting's public link"
+                            onClick={() => {
+                              setMenuFor(null)
+                              setShareFor({ id: m.id, title: rowTitle(m) })
+                            }}
                           >
-                            Copy share link
+                            Share…
                           </button>
                           <button
                             type="button"
