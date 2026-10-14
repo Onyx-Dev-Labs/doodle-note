@@ -40,6 +40,28 @@ The service functions in `lib/meeting-recipients.ts` take the database explicitl
 and are transport-neutral, so a bearer-token route can reuse them after its own
 authorization.
 
+## Desktop (DEV-486)
+
+The desktop **Share…** dialog uses bearer routes authenticated by the device's
+sync token (`authenticateEntitledSyncRequest`: 401 bad token, 402 no
+subscription). The sharer is the device's user, and the meeting must already be
+synced into the device's workspace; otherwise every method returns 404
+"Meeting not synced yet — sync it first". Logic lives in
+`lib/sync-meeting-share.ts`.
+
+- `/api/sync/share/recipients?meetingId=<uuid>`: GET / POST / DELETE
+  (`&recipientId=`), delegating to `handleMeetingRecipientsRequest`, so bodies,
+  validation, caps, responses and notification emails match the web route.
+- `/api/sync/share`: GET `?meetingId=` reads the public link; POST
+  `{ meetingId, enable, includeTranscript?, expiresInDays? }` creates, updates or
+  revokes it, and every response returns `{ url, includeTranscript, expiresAt }`.
+  `expiresInDays` is validated like the web Share panel (0, 1, 7, 30). Older
+  desktop builds send only `{ meetingId, enable }`: a new link then stays
+  notes-only and never expires, and an existing link keeps its settings.
+
+The desktop pushes the meeting before adding recipients or creating/updating
+the link, and reports an error instead of a link when the push is rejected.
+
 ## Local QA
 
 With no `DATABASE_URL`, no Stripe keys and no Resend keys, local development has

@@ -1,69 +1,18 @@
-import { randomBytes } from "node:crypto";
+import { getDb } from "@repo/db";
 
-import { NextResponse } from "next/server";
-import { and, eq, getDb, meetings } from "@repo/db";
+import { handleSyncShareRequest } from "@/lib/sync-meeting-share";
 
-import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Canonical public origin for share URLs. */
-function shareOrigin(request: Request): string {
-  return process.env.BETTER_AUTH_URL ?? new URL(request.url).origin;
-}
+export const dynamic = "force-dynamic";
 
 /**
- * Enable/disable the public share link for a meeting. Bearer-authenticated
- * (desktop sync token); the meeting must belong to the token's workspace.
+ * The public share link for a meeting, bearer-authenticated (desktop sync
+ * token); the meeting must already be synced into the token's workspace.
+ * GET ?meetingId= reads the settings; POST { meetingId, enable,
+ * includeTranscript?, expiresInDays? } creates, updates or revokes it.
+ * See lib/sync-meeting-share.ts for compatibility with older desktop builds.
  */
-export async function POST(request: Request) {
-  const authed = await authenticateEntitledSyncRequest(request);
-  if (authed.response) return authed.response;
-  const device = authed.device;
-
-  let body: { meetingId?: unknown; enable?: unknown };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  const meetingId = String(body.meetingId ?? "");
-  if (!UUID_RE.test(meetingId)) {
-    return NextResponse.json({ error: "meetingId must be a UUID" }, { status: 400 });
-  }
-  const enable = body.enable !== false;
-
-  const db = getDb();
-  const rows = await db
-    .select({ id: meetings.id, shareToken: meetings.shareToken })
-    .from(meetings)
-    .where(
-      and(eq(meetings.id, meetingId), eq(meetings.organizationId, device.organizationId)),
-    )
-    .limit(1);
-  const meeting = rows[0];
-  if (!meeting) {
-    return NextResponse.json(
-      { error: "Meeting not synced yet — sync it first" },
-      { status: 404 },
-    );
-  }
-
-  if (!enable) {
-    await db
-      .update(meetings)
-      .set({ shareToken: null })
-      .where(eq(meetings.id, meetingId));
-    return NextResponse.json({ ok: true, url: null });
-  }
-
-  const token = meeting.shareToken ?? randomBytes(16).toString("hex");
-  if (!meeting.shareToken) {
-    await db
-      .update(meetings)
-      .set({ shareToken: token })
-      .where(eq(meetings.id, meetingId));
-  }
-  return NextResponse.json({ ok: true, url: `${shareOrigin(request)}/share/${token}` });
+function handle(request: Request): Promise<Response> {
+  return handleSyncShareRequest(request, { db: getDb() });
 }
+
+export { handle as GET, handle as POST };
