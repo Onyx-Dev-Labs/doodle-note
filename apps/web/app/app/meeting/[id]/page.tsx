@@ -18,6 +18,7 @@ import {
 import { getAppWorkspace } from "@/lib/app-workspace";
 import { getSharedMeetingAccess } from "@/lib/meeting-access";
 import { markdownOf } from "@/lib/meeting-content";
+import { isLinkActive } from "@/lib/meeting-share-state";
 import { MeetingBody } from "../../../meeting-body";
 import { MeetingActions } from "./meeting-actions";
 import { SharedMeetingView } from "./shared-meeting-view";
@@ -72,7 +73,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${meeting.organizationId === workspace.personal.id ? "bg-sage-fill text-sage-deep" : "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200"}`}>
               {meeting.organizationId === workspace.personal.id ? "Private" : meetingOrganization?.name ?? "Shared workspace"}
             </span>
-            {meeting.shareToken && <span className="rounded-full bg-card px-2.5 py-1 text-xs text-stone">Public link active</span>}
+            {isLinkActive(meeting) && <span className="rounded-full bg-card px-2.5 py-1 text-xs text-stone">Public link active</span>}
           </div>
           <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{meeting.title || "Untitled meeting"}</h1>
           {when && <p className="mt-1.5 text-sm text-stone">{when.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</p>}
@@ -87,9 +88,6 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             title={meeting.title || "Untitled meeting"}
             markdown={markdown}
             segments={segments.map(({ speaker, startMs, text }) => ({ speaker, startMs, text }))}
-            shareToken={meeting.shareToken}
-            shareExpiresAt={meeting.shareExpiresAt?.toISOString() ?? null}
-            shareIncludeTranscript={meeting.shareIncludeTranscript}
             organizationId={meeting.organizationId}
             folderId={meeting.folderId}
             organizations={workspace.organizations.map((organization) => ({ id: organization.id, name: organization.name, personal: organization.id === workspace.personal.id }))}
