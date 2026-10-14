@@ -260,7 +260,7 @@ export function SharePanel({
                 disabled={disabled || !emails.trim()}
                 className="shrink-0 rounded-lg bg-ink px-3 py-2 text-sm font-medium text-cream hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage-deep disabled:opacity-50"
               >
-                {busy === "add" ? "Sharing…" : "Share"}
+                {busy === "add" ? "Adding…" : "Add"}
               </button>
             </div>
             {addError ? (
@@ -358,7 +358,7 @@ export function SharePanel({
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
-                <span>{link.expiresAt ? `Expires ${formatExpiry(link.expiresAt)}` : "Never expires"}</span>
+                {link.expiresAt && <span>{formatExpiry(link.expiresAt)}</span>}
               </div>
             </div>
           )}
