@@ -59,7 +59,7 @@ export function WorkspacePanel({
   return (
     <section>
       <h2 className="font-display text-xl font-semibold text-ink">Workspace</h2>
-      <p className="mt-1 text-sm leading-relaxed text-stone">Personal is private. Team workspaces are shared with their members; meetings only enter one when you deliberately move or sync them there.</p>
+      <p className="mt-1 text-sm leading-relaxed text-stone">Personal is private. Team workspaces are shared with their members; meetings only enter one when a linked device syncs them there.</p>
       {error && <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-300">{error}</p>}
       <ul className="mt-5 overflow-hidden rounded-xl border border-sand bg-card">
         {organizations.map((organization) => {

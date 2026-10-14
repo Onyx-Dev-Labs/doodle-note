@@ -137,8 +137,8 @@ export function LinkDeviceForm({
 
       {organizationId === personalOrganizationId && (
         <p className="mt-3 rounded-lg bg-sage-fill px-3 py-2 text-xs leading-relaxed text-sage-deep">
-          Personal is private to you. You can deliberately move individual
-          meetings into a shared workspace later.
+          Personal is private to you. Meetings stay in the workspace they sync
+          to; share individual meetings with people when you want to collaborate.
         </p>
       )}
 
