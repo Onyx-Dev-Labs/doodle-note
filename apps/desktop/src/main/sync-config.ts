@@ -18,15 +18,31 @@ export interface SyncConfig {
   mediaUrls: Record<string, string>
   /** Local meetings deleted/trashed whose cloud copy still needs removing. */
   pendingDeletes: string[]
+  /**
+   * meetingId → content hash the cloud refused because the id belongs to
+   * another workspace. Parked until the content changes or Sync now.
+   */
+  blockedPushes: Record<string, string>
 }
 
-export const EMPTY_SYNC_CONFIG: SyncConfig = {
-  enabled: false,
-  pushed: {},
-  mediaUrls: {},
-  pendingDeletes: [],
-  syncedFolders: {},
-  pendingFolderDeletes: []
+/** Fresh nested maps each call, so resets never share mutable state. */
+export function emptySyncConfig(): SyncConfig {
+  return {
+    enabled: false,
+    pushed: {},
+    mediaUrls: {},
+    pendingDeletes: [],
+    syncedFolders: {},
+    pendingFolderDeletes: [],
+    blockedPushes: {}
+  }
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+  )
 }
 
 /** Parse sync.json fields off disk — pure, unit-testable. */
@@ -51,6 +67,7 @@ export function parseSyncConfigFromRaw(raw: Partial<SyncConfig>): SyncConfig {
     pendingFolderDeletes: Array.isArray(raw.pendingFolderDeletes)
       ? raw.pendingFolderDeletes.map(String)
       : [],
+    blockedPushes: stringRecord(raw.blockedPushes),
     ...(typeof raw.pullCursor === 'string' ? { pullCursor: raw.pullCursor } : {})
   }
 }

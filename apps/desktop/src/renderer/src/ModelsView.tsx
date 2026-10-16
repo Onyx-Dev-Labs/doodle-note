@@ -1389,9 +1389,16 @@ export default function ModelsView({
                               ? 'Syncing now…'
                               : syncStatus.pendingCount > 0
                                 ? `${syncStatus.pendingCount} meeting${syncStatus.pendingCount === 1 ? '' : 's'} waiting to sync`
-                                : 'Everything is synced'
+                                : syncStatus.blockedMessage
+                                  ? 'Everything else is synced'
+                                  : 'Everything is synced'
                             : 'Paused — nothing is uploaded while this is off'}
                         </span>
+                        {syncStatus.enabled && syncStatus.blockedMessage && (
+                          <span className="cal-row-sub" role="status">
+                            {syncStatus.blockedMessage}
+                          </span>
+                        )}
                       </span>
                       <Toggle
                         checked={syncStatus.enabled}
