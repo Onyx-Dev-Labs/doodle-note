@@ -68,7 +68,6 @@ export function MeetingActions({
   const [expiresInDays, setExpiresInDays] = useState("7");
   const [currentShareToken, setCurrentShareToken] = useState(shareToken);
   const [currentShareExpiry, setCurrentShareExpiry] = useState(shareExpiresAt);
-  const [targetOrganizationId, setTargetOrganizationId] = useState(organizationId);
   const [targetFolderId, setTargetFolderId] = useState(folderId ?? "");
   const [tagText, setTagText] = useState(tags.join(", "));
 
@@ -81,8 +80,9 @@ export function MeetingActions({
   const currentOrganization = organizations.find(
     (organization) => organization.id === organizationId,
   );
+  // Meetings stay in their workspace; only its own spaces are move targets.
   const availableFolders = folders.filter(
-    (folder) => folder.organizationId === targetOrganizationId,
+    (folder) => folder.organizationId === organizationId,
   );
 
   function startAction() {
@@ -160,17 +160,18 @@ export function MeetingActions({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          organizationId: targetOrganizationId,
+          organizationId,
           folderId: targetFolderId || null,
         }),
       });
-      const body = (await response.json()) as { error?: string; workspaceName?: string };
+      const body = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Could not move the meeting");
-      setMessage(`Moved to ${body.workspaceName}.`);
-      router.push("/app");
+      const space = availableFolders.find((folder) => folder.id === targetFolderId);
+      setMessage(space ? `Moved to ${space.name}.` : "Moved to Unfiled.");
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not move the meeting");
+    } finally {
       setPending(false);
     }
   }
@@ -260,27 +261,21 @@ export function MeetingActions({
         <p className="mt-2 text-sm font-medium text-ink">
           {currentOrganization?.personal ? "Personal · Private to you" : `${currentOrganization?.name ?? "Workspace"} · Visible to workspace members`}
         </p>
-        <label className="mt-4 block text-xs font-medium text-bark">
-          Workspace
-          <select value={targetOrganizationId} onChange={(event) => { setTargetOrganizationId(event.target.value); setTargetFolderId(""); }} className="mt-1 w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sage-deep">
-            {organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}{organization.personal ? " (private)" : " (shared)"}</option>)}
-          </select>
-        </label>
-        <label className="mt-3 block text-xs font-medium text-bark">
-          Space
-          <select value={targetFolderId} onChange={(event) => setTargetFolderId(event.target.value)} className="mt-1 w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sage-deep">
-            <option value="">Unfiled</option>
-            {availableFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-          </select>
-        </label>
-        {targetOrganizationId !== organizationId && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-            Moving this meeting changes who can see it. Existing public links and workspace-specific tags will be removed.
-          </p>
+        <p className="mt-1 text-xs leading-relaxed text-stone">Meetings stay in the workspace they were created in. Use Share to give other people access.</p>
+        {(availableFolders.length > 0 || folderId) && (
+          <>
+            <label className="mt-4 block text-xs font-medium text-bark">
+              Space
+              <select value={targetFolderId} onChange={(event) => setTargetFolderId(event.target.value)} className="mt-1 w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sage-deep">
+                <option value="">Unfiled</option>
+                {availableFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+              </select>
+            </label>
+            <button type="button" disabled={pending || targetFolderId === (folderId ?? "")} onClick={() => void moveMeeting()} className="mt-3 rounded-lg border border-sand bg-card px-3 py-2 text-sm font-medium text-ink hover:bg-sage-fill disabled:opacity-50">
+              Move to space
+            </button>
+          </>
         )}
-        <button type="button" disabled={pending || (targetOrganizationId === organizationId && targetFolderId === (folderId ?? ""))} onClick={() => void moveMeeting()} className="mt-3 rounded-lg border border-sand bg-card px-3 py-2 text-sm font-medium text-ink hover:bg-sage-fill disabled:opacity-50">
-          Move meeting
-        </button>
       </section>
 
       <section className="mt-4 rounded-xl border border-sand bg-card p-4">

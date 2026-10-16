@@ -32,7 +32,13 @@ import {
   supportsCloudSync
 } from './sync-content-hash'
 import { DeviceLinkAttempt } from './device-link-attempt'
-import { EMPTY_SYNC_CONFIG, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
+import { emptySyncConfig, parseSyncConfigFromRaw, type SyncConfig } from './sync-config'
+import {
+  isOtherWorkspaceRejection,
+  otherWorkspaceMessage,
+  partitionPushCandidates,
+  rejectedPushMessage
+} from './sync-push-rejections'
 import {
   decideFolderPull,
   decidePullAction,
@@ -66,6 +72,8 @@ export class SyncService {
   private statusRevision = 0
   private connectionRevision = 0
   private lastError: string | undefined
+  /** Meetings refused for retryable reasons during the last push cycle. */
+  private retryableRejections = 0
   private debounceTimer: NodeJS.Timeout | null = null
   private linkAttempt: DeviceLinkAttempt | null = null
 
@@ -149,6 +157,10 @@ export class SyncService {
 
   /** MeetingsService calls this after every write; deletes pass deletedId. */
   onMeetingsChanged(deletedId?: string): void {
+    if (deletedId && this.config.blockedPushes[deletedId] !== undefined) {
+      delete this.config.blockedPushes[deletedId]
+      this.writeConfig()
+    }
     if (deletedId && this.config.pushed[deletedId]) {
       this.config.pendingDeletes = [...new Set([...this.config.pendingDeletes, deletedId])]
       delete this.config.pushed[deletedId]
@@ -166,6 +178,9 @@ export class SyncService {
   /* ---- status ---- */
 
   status(): SyncStatus {
+    const { pending, blocked } = this.pushCandidates()
+    const blockedMessage = otherWorkspaceMessage(blocked.length)
+    const lastError = this.lastError ?? rejectedPushMessage(this.retryableRejections)
     return {
       statusRevision: this.statusRevision,
       connectionRevision: this.connectionRevision,
@@ -175,8 +190,9 @@ export class SyncService {
       enabled: this.config.enabled,
       syncing: this.syncing,
       ...(this.config.lastSyncAt ? { lastSyncAt: this.config.lastSyncAt } : {}),
-      pendingCount: this.pendingMeetings().length + this.config.pendingDeletes.length,
-      ...(this.lastError ? { lastError: this.lastError } : {}),
+      pendingCount: pending.length + this.config.pendingDeletes.length,
+      ...(blockedMessage ? { blockedCount: blocked.length, blockedMessage } : {}),
+      ...(lastError ? { lastError } : {}),
       linking: this.linkAttempt !== null,
       baseUrl: this.baseUrl
     }
@@ -212,6 +228,8 @@ export class SyncService {
         this.connectionRevision++
         this.config.email = token.email
         this.config.workspaceName = token.workspace
+        // A (re)link may target another workspace; let refused meetings retry.
+        this.config.blockedPushes = {}
         this.config.enabled = true
         this.writeConfig()
         // First sync right away — the whole point of connecting.
@@ -242,9 +260,10 @@ export class SyncService {
   disconnect(): SyncStatus {
     this.cancelConnect()
     this.connectionRevision++
-    this.config = { ...EMPTY_SYNC_CONFIG }
+    this.config = emptySyncConfig()
     this.writeConfig()
     this.lastError = undefined
+    this.retryableRejections = 0
     this.emitStatus()
     return this.status()
   }
@@ -303,19 +322,29 @@ export class SyncService {
   }
 
   async syncNow(): Promise<SyncStatus> {
+    // An explicit Sync now retries meetings parked as owned elsewhere, once.
+    if (Object.keys(this.config.blockedPushes).length > 0) {
+      this.config.blockedPushes = {}
+      this.writeConfig()
+    }
     await this.syncCycle()
     return this.status()
   }
 
   /* ---- pushing ---- */
 
-  private pendingMeetings(): MeetingRecord[] {
-    return this.meetings
+  /** Changed meetings, minus those parked as belonging to another workspace. */
+  private pushCandidates(): { pending: MeetingRecord[]; blocked: MeetingRecord[] } {
+    const hashOf = (record: MeetingRecord): string => contentHash(record, this.config.mediaUrls)
+    const changed = this.meetings
       .readAll()
       .filter((record) => !record.trashedAt && supportsCloudSync(record))
-      .filter(
-        (record) => this.config.pushed[record.id] !== contentHash(record, this.config.mediaUrls)
-      )
+      .filter((record) => this.config.pushed[record.id] !== hashOf(record))
+    return partitionPushCandidates(changed, this.config.blockedPushes, hashOf)
+  }
+
+  private pendingMeetings(): MeetingRecord[] {
+    return this.pushCandidates().pending
   }
 
   private async pushAll(): Promise<void> {
@@ -367,6 +396,7 @@ export class SyncService {
         }
       }
 
+      let rejected = 0
       for (const record of this.pendingMeetings()) {
         await this.uploadReferencedMedia(record, token)
         const response = await fetch(`${this.baseUrl}/api/sync/push`, {
@@ -397,14 +427,24 @@ export class SyncService {
         if (!result?.ok) {
           // Per-meeting rejection (bad id etc.) — record and move on.
           console.error('[sync] meeting rejected:', record.id, result?.error)
+          if (isOtherWorkspaceRejection(result?.error)) {
+            // Identical content can never succeed; park it so the status UI
+            // reports it and later cycles stop re-uploading it.
+            this.config.blockedPushes[record.id] = contentHash(record, this.config.mediaUrls)
+            this.writeConfig()
+          } else {
+            rejected++
+          }
           continue
         }
         this.config.pushed[record.id] = contentHash(record, this.config.mediaUrls)
+        delete this.config.blockedPushes[record.id]
         this.writeConfig()
       }
 
       this.config.lastSyncAt = new Date().toISOString()
       this.writeConfig()
+      this.retryableRejections = rejected
       this.lastError = undefined
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : 'Sync failed'
@@ -720,7 +760,7 @@ export class SyncService {
       const raw = JSON.parse(readFileSync(this.configPath, 'utf8')) as Partial<SyncConfig>
       return parseSyncConfigFromRaw(raw)
     } catch {
-      return { ...EMPTY_SYNC_CONFIG }
+      return emptySyncConfig()
     }
   }
 
