@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -59,7 +60,7 @@ export function WorkspacePanel({
   return (
     <section>
       <h2 className="font-display text-xl font-semibold text-ink">Workspace</h2>
-      <p className="mt-1 text-sm leading-relaxed text-stone">Personal is private. Team workspaces are shared with their members; meetings only enter one when a linked device syncs them there.</p>
+      <p className="mt-1 text-sm leading-relaxed text-stone">Personal is private. Team workspaces are shared with their members; meetings enter one when a device linked to that workspace records or imports them. Every workspace you belong to appears in your meetings library.</p>
       {error && <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-300">{error}</p>}
       <ul className="mt-5 overflow-hidden rounded-xl border border-sand bg-card">
         {organizations.map((organization) => {
@@ -71,7 +72,10 @@ export function WorkspacePanel({
                 <p className="mt-0.5 text-xs text-stone">{organization.personal ? "Private to you" : "Shared with workspace members"}</p>
               </div>
               {active ? (
-                <span className="rounded-full bg-sage-fill px-2.5 py-1 text-xs font-medium text-sage-deep">Active</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {!organization.personal && <Link href="/app/settings/invitations" className="rounded-lg border border-sand px-3 py-2 text-sm font-medium text-ink hover:bg-sage-fill">Invite people</Link>}
+                  <span className="rounded-full bg-sage-fill px-2.5 py-1 text-xs font-medium text-sage-deep">Active</span>
+                </span>
               ) : (
                 <button type="button" onClick={() => void setActive(organization.id)} className="shrink-0 rounded-lg border border-sand px-3 py-2 text-sm font-medium text-ink hover:bg-sage-fill">Switch</button>
               )}
@@ -80,7 +84,7 @@ export function WorkspacePanel({
         })}
       </ul>
 
-      <form onSubmit={createWorkspace} className="mt-8 rounded-xl border border-sand bg-card p-4">
+      <form id="create-team" onSubmit={createWorkspace} className="mt-8 scroll-mt-24 rounded-xl border border-sand bg-card p-4">
         <h3 className="font-display text-base font-semibold text-ink">Create a team workspace</h3>
         <label className="mt-3 block text-xs font-medium text-bark" htmlFor="workspace-name">Workspace name</label>
         <div className="mt-1 flex flex-col gap-2 sm:flex-row">

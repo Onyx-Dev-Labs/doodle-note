@@ -5,12 +5,9 @@ import {
   and,
   desc,
   eq,
-  folders,
   getDb,
   ilike,
   meetings,
-  meetingTagLinks,
-  meetingTags,
   notes,
   or,
   sql,
@@ -18,8 +15,17 @@ import {
 } from "@repo/db";
 
 import { getAppWorkspace } from "@/lib/app-workspace";
+import {
+  libraryMeetingScope,
+  loadLibraryFilterOptions,
+  meetingHasTag,
+  resolveLibraryScope,
+} from "@/lib/library-scope";
 import { inputClass } from "../ui";
 import { MeetingStarButton } from "./meeting-star-button";
+import { TeamWorkspaceEmptyState } from "./team-workspace-empty-state";
+import { WorkspaceBadge } from "./workspace-badge";
+import { WorkspaceFilter } from "./workspace-filter";
 
 export interface LibrarySearchParams {
   q?: string;
@@ -30,6 +36,7 @@ export interface LibrarySearchParams {
   tag?: string;
   starred?: string;
   shared?: string;
+  workspace?: string;
 }
 
 function formatWhen(date: Date | null): string {
@@ -47,12 +54,14 @@ function withQuery(
   pathname: string,
   entries: Record<string, string | undefined>,
 ): string {
-  const params = new URLSearchParams();
+  // `pathname` may already carry the workspace filter (`/app?workspace=…`).
+  const [path, existing] = pathname.split("?");
+  const params = new URLSearchParams(existing);
   for (const [key, value] of Object.entries(entries)) {
     if (value) params.set(key, value);
   }
   const query = params.toString();
-  return query ? `${pathname}?${query}` : pathname;
+  return query ? `${path}?${query}` : path!;
 }
 
 export async function MeetingsLibrary({
@@ -78,9 +87,12 @@ export async function MeetingsLibrary({
   const tag = (searchParams.tag ?? "").trim().slice(0, 32);
   const starred = searchParams.starred === "1";
   const shared = sharedOnly || searchParams.shared === "1";
-  const pathname = sharedOnly ? "/app/shared" : "/app";
+  const libraryScope = resolveLibraryScope(workspace.organizations, searchParams.workspace);
+  const basePath = sharedOnly ? "/app/shared" : "/app";
+  const pathname = withQuery(basePath, { workspace: libraryScope.selected?.id });
+  const libraryWorkspaces = workspace.organizations.map((organization) => ({ id: organization.id, name: organization.name, personal: organization.id === workspace.personal.id }));
   const db = getDb();
-  const scope = eq(meetings.organizationId, workspace.activeOrganization.id);
+  const scope = libraryMeetingScope(workspace.session.user.id, libraryScope.organizationIds);
   const conditions = [scope];
 
   if (query) {
@@ -108,9 +120,7 @@ export async function MeetingsLibrary({
     );
   }
   if (tag) {
-    conditions.push(
-      sql`exists (select 1 from meeting_tag_links mtl join meeting_tags mt on mt.id = mtl.tag_id where mtl.meeting_id = ${meetings.id} and mt.organization_id = ${workspace.activeOrganization.id} and mt.name = ${tag})`,
-    );
+    conditions.push(meetingHasTag(tag));
   }
   if (starred) {
     conditions.push(
@@ -119,10 +129,11 @@ export async function MeetingsLibrary({
   }
   if (shared) conditions.push(sql`${meetings.shareToken} is not null`);
 
-  const [rows, folderRows, tagRows, participantRows] = await Promise.all([
+  const [rows, { folders: folderRows, tags: tagRows }, participantRows] = await Promise.all([
     db
       .select({
         id: meetings.id,
+        organizationId: meetings.organizationId,
         title: meetings.title,
         kind: meetings.kind,
         status: meetings.status,
@@ -141,27 +152,7 @@ export async function MeetingsLibrary({
       .where(and(...conditions))
       .orderBy(desc(sql`coalesce(${meetings.startedAt}, ${meetings.createdAt})`))
       .limit(300),
-    db
-      .select({
-        id: folders.id,
-        name: folders.name,
-        count: sql<number>`count(${meetings.id})::int`,
-      })
-      .from(folders)
-      .leftJoin(meetings, eq(meetings.folderId, folders.id))
-      .where(eq(folders.organizationId, workspace.activeOrganization.id))
-      .groupBy(folders.id, folders.name)
-      .orderBy(folders.name),
-    db
-      .select({
-        name: meetingTags.name,
-        count: sql<number>`count(${meetingTagLinks.id})::int`,
-      })
-      .from(meetingTags)
-      .leftJoin(meetingTagLinks, eq(meetingTagLinks.tagId, meetingTags.id))
-      .where(eq(meetingTags.organizationId, workspace.activeOrganization.id))
-      .groupBy(meetingTags.id, meetingTags.name)
-      .orderBy(meetingTags.name),
+    loadLibraryFilterOptions(db, libraryScope.single?.id ?? null),
     db
       .select({ speaker: transcriptSegments.speaker })
       .from(transcriptSegments)
@@ -185,7 +176,7 @@ export async function MeetingsLibrary({
       <aside className="hidden lg:block">
         <div className="sticky top-24">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone">
-            {workspace.activeOrganization.name}
+            {libraryScope.single?.name ?? "All workspaces"}
           </p>
           <nav aria-label="Meeting spaces" className="mt-3 space-y-1">
             <Link
@@ -219,6 +210,8 @@ export async function MeetingsLibrary({
             )}
           </nav>
 
+          {!libraryScope.single && <p className="mt-7 px-3 text-xs leading-relaxed text-stone">Choose a workspace to browse its spaces and tags.</p>}
+          {libraryScope.single && <>
           <p className="mt-7 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-stone">
             Spaces
           </p>
@@ -244,6 +237,7 @@ export async function MeetingsLibrary({
               </Link>
             ))}
           </nav>
+          </>}
 
           <div className="mt-8 rounded-xl border border-sand bg-card-soft p-3">
             <p className="text-xs font-medium text-ink">Cloud copy</p>
@@ -266,9 +260,11 @@ export async function MeetingsLibrary({
           <Link href="/app/mobile-notes" className="text-sm font-medium text-sage-deep hover:underline">Mobile notes and version history →</Link>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone">
-              {workspace.activeOrganization.id === workspace.personal.id
-                ? "Private to you"
-                : "Shared workspace"}
+              {!libraryScope.single
+                ? "All your workspaces"
+                : libraryScope.single.id === workspace.personal.id
+                  ? "Private to you"
+                  : "Shared workspace"}
             </p>
             <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-ink">
               {sharedOnly ? "Shared meetings" : "Meetings"}
@@ -278,6 +274,8 @@ export async function MeetingsLibrary({
             {rows.length} {rows.length === 1 ? "result" : "results"}
           </span>
         </div>
+
+        <WorkspaceFilter basePath={basePath} workspaces={libraryWorkspaces} selectedId={libraryScope.selected?.id ?? null} preserve={{ q: query, type: kind, date, person, starred: starred ? "1" : undefined, shared: shared && !sharedOnly ? "1" : undefined }} />
 
         <form method="get" className="mt-6 rounded-xl border border-sand bg-card p-3">
           <label className="block text-xs font-medium text-bark" htmlFor="meeting-search">
@@ -317,7 +315,7 @@ export async function MeetingsLibrary({
                 ))}
               </select>
             </label>
-            <label className="text-xs font-medium text-bark">
+            {libraryScope.single && <label className="text-xs font-medium text-bark">
               Tag
               <select name="tag" defaultValue={tag} className={`mt-1 ${inputClass}`}>
                 <option value="">Any tag</option>
@@ -325,8 +323,10 @@ export async function MeetingsLibrary({
                   <option key={row.name} value={row.name}>{row.name} ({row.count})</option>
                 ))}
               </select>
-            </label>
+            </label>}
           </div>
+          {libraryScope.selected && <input type="hidden" name="workspace" value={libraryScope.selected.id} />}
+          {!libraryScope.single && tag && <input type="hidden" name="tag" value={tag} />}
           {space && <input type="hidden" name="space" value={space} />}
           {starred && <input type="hidden" name="starred" value="1" />}
           {shared && !sharedOnly && <input type="hidden" name="shared" value="1" />}
@@ -345,7 +345,9 @@ export async function MeetingsLibrary({
           </div>
         </form>
 
-        {rows.length === 0 ? (
+        {rows.length === 0 && !activeFilters && !sharedOnly && libraryScope.selected && libraryScope.selected.id !== workspace.personal.id ? (
+          <TeamWorkspaceEmptyState name={libraryScope.selected.name} />
+        ) : rows.length === 0 ? (
           <div className="mt-14 rounded-2xl border border-dashed border-sand bg-card-soft px-6 py-12 text-center">
             <p className="font-hand text-3xl text-stone">
               {activeFilters ? "nothing matches that view" : "nothing jotted here yet"}
@@ -392,6 +394,7 @@ export async function MeetingsLibrary({
                       </span>
                     </span>
                     <span className="mt-2 flex flex-wrap items-center gap-1.5 sm:mt-0 sm:justify-end">
+                      <WorkspaceBadge organizationId={meeting.organizationId} workspaces={libraryScope.single ? [] : libraryWorkspaces} />
                       {tags.slice(0, 3).map((meetingTag) => (
                         <span key={meetingTag} className="rounded-full bg-card-soft px-2 py-0.5 text-[11px] text-stone">
                           {meetingTag}

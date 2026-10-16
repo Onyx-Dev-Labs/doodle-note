@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+
 interface TranscriptSegment {
   speaker: string;
   startMs: number;
