@@ -97,6 +97,36 @@ Logic lives in framework-free modules so the desktop bearer routes reuse it:
   `INVITATION_FROM_EMAIL`, runs after the response, and is logged instead of sent
   when unconfigured.
 
+## Desktop (DEV-486)
+
+The desktop **Share…** dialog (`apps/desktop/src/renderer/src/ShareDialog.tsx`)
+is the same single panel as the web app, over bearer routes authenticated by the
+device's sync token (`authenticateEntitledSyncRequest`: 401 bad token, 402 no
+subscription, 503 billing not configured). The sharer is the device's user, and
+the meeting must already be synced into the device's workspace; otherwise every
+method returns 404 "Meeting not synced yet — sync it first". Logic lives in
+`lib/sync-meeting-share.ts` and reuses `lib/meeting-share-state.ts` and
+`lib/meeting-recipients-http.ts`.
+
+- `/api/sync/share`: `GET ?meetingId=` returns the share state above plus a
+  top-level `url` (the link URL or null). `POST { meetingId, includeTranscript?,
+  link?, expiresInDays? }` applies a change with the same rules and returns the
+  same shape.
+- `/api/sync/share/recipients?meetingId=<uuid>`: GET / POST `{ emails }` /
+  DELETE `&recipientId=`, exactly like `/api/meetings/<id>/recipients`.
+- **Older desktop builds** send `POST /api/sync/share { meetingId, enable }`.
+  `enable: true` creates (or keeps) the link and returns `{ url, … }`; a new link
+  never expires; it does NOT change Include transcript, which now also governs
+  people added. `enable: false` revokes as before.
+
+`SyncService` (main) exposes `shareState`, `addShareRecipients(meetingId, emails)`,
+`removeShareRecipient` and `updateShareSettings(meetingId, { includeTranscript?,
+link?, expiresInDays? })`. Adding people and every settings change except turning
+the link off pushes the meeting first, and reports an error instead of a link when
+the push is rejected (e.g. the id lives in another cloud workspace). Not linked
+and local-only imports make no request; 401/402/503 map to guidance; the token is
+never logged or returned.
+
 ## Local QA
 
 With no `DATABASE_URL`, no Stripe keys and no Resend keys, local development has

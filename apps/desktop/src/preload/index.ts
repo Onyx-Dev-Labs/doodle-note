@@ -192,9 +192,16 @@ import {
   SYNC_REMOTE_MCP_ELIGIBILITY_CHANNEL,
   SYNC_NOW_CHANNEL,
   SYNC_SHARE_CHANNEL,
+  SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
+  SYNC_SHARE_REMOVE_RECIPIENT_CHANNEL,
+  SYNC_SHARE_STATE_CHANNEL,
+  SYNC_SHARE_UPDATE_CHANNEL,
   SYNC_SET_ENABLED_CHANNEL,
   SYNC_STATUS_EVENT_CHANNEL,
+  type ShareRecipientsResult,
+  type ShareSettingsUpdate,
   type ShareResult,
+  type ShareStateResult,
   type SyncApi,
   type SyncStatus
 } from '../shared/sync-api'
@@ -504,6 +511,30 @@ const syncApi: SyncApi = {
   },
   share(meetingId: string): Promise<ShareResult> {
     return ipcRenderer.invoke(SYNC_SHARE_CHANNEL, meetingId) as Promise<ShareResult>
+  },
+  shareState(meetingId: string): Promise<ShareStateResult> {
+    return ipcRenderer.invoke(SYNC_SHARE_STATE_CHANNEL, meetingId) as Promise<ShareStateResult>
+  },
+  addShareRecipients(meetingId: string, emails: string): Promise<ShareRecipientsResult> {
+    return ipcRenderer.invoke(
+      SYNC_SHARE_ADD_RECIPIENTS_CHANNEL,
+      meetingId,
+      emails
+    ) as Promise<ShareRecipientsResult>
+  },
+  removeShareRecipient(meetingId: string, recipientId: string): Promise<ShareRecipientsResult> {
+    return ipcRenderer.invoke(
+      SYNC_SHARE_REMOVE_RECIPIENT_CHANNEL,
+      meetingId,
+      recipientId
+    ) as Promise<ShareRecipientsResult>
+  },
+  updateShareSettings(meetingId: string, update: ShareSettingsUpdate): Promise<ShareStateResult> {
+    return ipcRenderer.invoke(
+      SYNC_SHARE_UPDATE_CHANNEL,
+      meetingId,
+      update
+    ) as Promise<ShareStateResult>
   },
 
   getStatus(): Promise<SyncStatus> {

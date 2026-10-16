@@ -4386,3 +4386,92 @@ button.fp-row:hover {
 .text-import-actions button:disabled { opacity: .6; cursor: default; }
 
 .tp-imported { grid-template-columns: 76px minmax(0, 1fr); }
+
+/* Share… dialog (DEV-486): one panel, same structure as the web Share panel. */
+.share-dialog {
+  color: var(--body);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 24px 24px;
+  width: min(520px, 92vw);
+  max-height: 85vh;
+  overflow: auto;
+  box-shadow: var(--shadow-panel);
+  font-size: 13px;
+}
+.share-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+.share-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.share-dialog h2 { margin: 0; color: var(--ink); font-size: 17px; overflow-wrap: anywhere; }
+.share-close { padding: 4px 8px; border-radius: 6px; color: var(--muted); }
+.share-close:hover { background: var(--sage-fill); color: var(--ink); }
+.share-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.share-section h3 { margin: 0; font-size: 14px; color: var(--ink); }
+.share-muted { display: block; margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.share-label { display: block; margin: 12px 0 4px; font-size: 12px; font-weight: 600; color: var(--body); }
+.share-input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--ink);
+  font-size: 12.5px;
+  outline: none;
+  user-select: text;
+}
+.share-input:focus { border-color: var(--accent); }
+.share-add { margin-top: 4px; }
+.share-add-row { display: flex; gap: 8px; align-items: center; }
+.share-add-row .share-input { flex: 1; min-width: 0; }
+.share-add-row button {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+}
+.share-add-row button:hover:not(:disabled) { border-color: var(--accent); background: var(--sage-fill); }
+.share-dialog button.share-primary { background: var(--sage-fill); color: var(--accent-deep); font-weight: 500; }
+.share-section h3 + .share-recipients,
+.share-section h3 + .share-select { margin-top: 8px; }
+.share-select { width: 100%; }
+.share-expiry { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }
+.share-expiry .share-muted { margin: 0; }
+.share-expiry .share-input { padding: 4px 6px; font-size: 12px; }
+.share-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.share-row strong { color: var(--ink); font-weight: 500; }
+.share-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.share-actions button,
+.share-recipients button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+}
+.share-actions button:hover:not(:disabled) { border-color: var(--accent); background: var(--sage-fill); }
+.share-dialog button.share-danger { color: var(--danger); }
+.share-dialog button.share-danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger-border); }
+.share-dialog button:disabled { opacity: 0.5; cursor: default; }
+.share-dialog button:focus-visible,
+.share-dialog select:focus-visible,
+.share-dialog input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.share-msg { margin: 10px 0 0; font-size: 12.5px; color: var(--accent-deep); }
+.share-msg.error,
+.share-blocked p { color: var(--danger); }
+.share-blocked p { margin: 16px 0 0; overflow-wrap: anywhere; }
+.share-recipients { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.share-recipients li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--card-soft);
+  border: 1px solid var(--border);
+}
+.share-recipient-main { min-width: 0; }
+.share-recipient-email { display: block; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-link-box { margin-top: 12px; padding: 10px; border-radius: 8px; background: var(--card-soft); border: 1px solid var(--border); }

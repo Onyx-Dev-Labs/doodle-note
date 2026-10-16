@@ -137,7 +137,7 @@ function PeopleIcon(): React.JSX.Element {
 }
 
 /** Light-theme switch (sage when on), used by the calendar display prefs. */
-function Toggle({
+export function Toggle({
   checked,
   onChange,
   disabled = false,
