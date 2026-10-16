@@ -1,4 +1,5 @@
-import { bigint, boolean, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { bigint, boolean, check, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 import { organization, user } from "./auth-schema";
 
@@ -151,6 +152,52 @@ export const meetingTagLinks = pgTable(
       table.tagId,
     ),
     index("meeting_tag_links_meeting_id_idx").on(table.meetingId),
+  ],
+);
+
+/**
+ * Per-person, read-only access to one meeting, granted by a workspace member.
+ *
+ * Keyed by normalized (trimmed, lowercase) email so a share can exist before
+ * the recipient has an account. Access is resolved by matching the signed-in
+ * user's email (verified, when email verification is enabled) or the lazily
+ * attached recipient_user_id. Sharing never changes meetings.organization_id
+ * and never writes to meetings/notes/transcript_segments; deleting the
+ * meeting (including desktop sync DELETE) cascades these rows away.
+ * Whether recipients see the transcript is one meeting-level setting,
+ * meetings.share_include_transcript, shared with the public link.
+ */
+export const meetingShares = pgTable(
+  "meeting_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    meetingId: uuid("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    /** Normalized lowercase email the owner shared with. */
+    recipientEmail: text("recipient_email").notNull(),
+    /** Filled once a matching account opens or lists the share. */
+    recipientUserId: text("recipient_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    sharedByUserId: text("shared_by_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("meeting_shares_meeting_email_uidx").on(
+      table.meetingId,
+      table.recipientEmail,
+    ),
+    index("meeting_shares_recipient_email_idx").on(table.recipientEmail),
+    index("meeting_shares_recipient_user_id_idx").on(table.recipientUserId),
+    check(
+      "meeting_shares_recipient_email_normalized",
+      sql`${table.recipientEmail} = lower(btrim(${table.recipientEmail}))`,
+    ),
   ],
 );
 

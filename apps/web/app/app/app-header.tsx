@@ -8,7 +8,7 @@ import { SignOutButton } from "./sign-out-button";
 
 const navItems = [
   { href: "/app", label: "Meetings", exact: true },
-  { href: "/app/shared", label: "Shared" },
+  { href: "/app/shared", label: "Shared with me" },
   { href: "/app/settings/sync", label: "Settings" },
   { href: "/app/settings/workspace", label: "Teams" },
 ];

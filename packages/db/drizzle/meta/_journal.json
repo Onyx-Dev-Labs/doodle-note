@@ -120,6 +120,13 @@
       "when": 1788798450498,
       "tag": "0016_explicit_legacy_adoption",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791998483802,
+      "tag": "0017_meeting_shares",
+      "breakpoints": true
     }
   ]
 }

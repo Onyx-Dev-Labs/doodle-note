@@ -16,9 +16,12 @@ import {
 } from "@repo/db";
 
 import { getAppWorkspace } from "@/lib/app-workspace";
+import { getSharedMeetingAccess } from "@/lib/meeting-access";
 import { markdownOf } from "@/lib/meeting-content";
+import { isLinkActive } from "@/lib/meeting-share-state";
 import { MeetingBody } from "../../../meeting-body";
 import { MeetingActions } from "./meeting-actions";
+import { SharedMeetingView } from "./shared-meeting-view";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -34,7 +37,13 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const db = getDb();
   const meetingRows = await db.select().from(meetings).where(eq(meetings.id, id)).limit(1);
   const meeting = meetingRows[0];
-  if (!meeting || !memberOrgIds.includes(meeting.organizationId)) notFound();
+  if (!meeting) notFound();
+  if (!memberOrgIds.includes(meeting.organizationId)) {
+    // Not a workspace member: only a per-person share grants (read-only) access.
+    const share = await getSharedMeetingAccess(workspace, id);
+    if (!share) notFound();
+    return <SharedMeetingView share={share} />;
+  }
 
   const [noteRows, segments, tagRows, folderRows] = await Promise.all([
     db.select().from(notes).where(eq(notes.meetingId, id)).limit(1),
@@ -64,7 +73,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${meeting.organizationId === workspace.personal.id ? "bg-sage-fill text-sage-deep" : "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200"}`}>
               {meeting.organizationId === workspace.personal.id ? "Private" : meetingOrganization?.name ?? "Shared workspace"}
             </span>
-            {meeting.shareToken && <span className="rounded-full bg-card px-2.5 py-1 text-xs text-stone">Public link active</span>}
+            {isLinkActive(meeting) && <span className="rounded-full bg-card px-2.5 py-1 text-xs text-stone">Public link active</span>}
           </div>
           <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{meeting.title || "Untitled meeting"}</h1>
           {when && <p className="mt-1.5 text-sm text-stone">{when.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</p>}
@@ -79,9 +88,6 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             title={meeting.title || "Untitled meeting"}
             markdown={markdown}
             segments={segments.map(({ speaker, startMs, text }) => ({ speaker, startMs, text }))}
-            shareToken={meeting.shareToken}
-            shareExpiresAt={meeting.shareExpiresAt?.toISOString() ?? null}
-            shareIncludeTranscript={meeting.shareIncludeTranscript}
             organizationId={meeting.organizationId}
             folderId={meeting.folderId}
             organizations={workspace.organizations.map((organization) => ({ id: organization.id, name: organization.name, personal: organization.id === workspace.personal.id }))}

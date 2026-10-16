@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { SharePanel } from "./share-panel";
 
 interface TranscriptSegment {
   speaker: string;
@@ -37,9 +38,6 @@ export function MeetingActions({
   title,
   markdown,
   segments,
-  shareToken,
-  shareExpiresAt,
-  shareIncludeTranscript,
   organizationId,
   folderId,
   organizations,
@@ -50,9 +48,6 @@ export function MeetingActions({
   title: string;
   markdown: string | null;
   segments: TranscriptSegment[];
-  shareToken: string | null;
-  shareExpiresAt: string | null;
-  shareIncludeTranscript: boolean;
   organizationId: string;
   folderId: string | null;
   organizations: OrganizationOption[];
@@ -64,14 +59,9 @@ export function MeetingActions({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [includeTranscript, setIncludeTranscript] = useState(shareIncludeTranscript);
-  const [expiresInDays, setExpiresInDays] = useState("7");
-  const [currentShareToken, setCurrentShareToken] = useState(shareToken);
-  const [currentShareExpiry, setCurrentShareExpiry] = useState(shareExpiresAt);
   const [targetFolderId, setTargetFolderId] = useState(folderId ?? "");
   const [tagText, setTagText] = useState(tags.join(", "));
 
-  const shareUrl = currentShareToken ? `/share/${currentShareToken}` : null;
   const exportText = useMemo(() => {
     const notes = markdown?.trim() || "_No notes were synced._";
     const transcript = plainTranscript(segments);
@@ -109,48 +99,6 @@ export function MeetingActions({
     link.click();
     URL.revokeObjectURL(url);
     setMessage("Markdown exported.");
-  }
-
-  async function updateShare(enable: boolean) {
-    startAction();
-    try {
-      const response = await fetch(`/api/meetings/${meetingId}/share`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          enable,
-          includeTranscript,
-          expiresInDays: Number(expiresInDays),
-        }),
-      });
-      const body = (await response.json()) as {
-        error?: string;
-        url?: string | null;
-        expiresAt?: string | null;
-      };
-      if (!response.ok) throw new Error(body.error ?? "Could not update sharing");
-      const token = body.url?.split("/").pop() ?? null;
-      setCurrentShareToken(token);
-      setCurrentShareExpiry(body.expiresAt ?? null);
-      setMessage(enable ? "Secure link updated." : "Public link revoked.");
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update sharing");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function copyShareLink() {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(
-        new URL(shareUrl, window.location.origin).toString(),
-      );
-      setMessage("Share link copied.");
-    } catch {
-      setError(new URL(shareUrl, window.location.origin).toString());
-    }
   }
 
   async function moveMeeting() {
@@ -216,45 +164,7 @@ export function MeetingActions({
         </p>
       )}
 
-      {shareOpen && (
-        <section className="mt-4 rounded-xl border border-sand bg-card p-4" aria-label="Share settings">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-display text-base font-semibold text-ink">Secure sharing</h2>
-              <p className="mt-1 text-xs leading-relaxed text-stone">Anyone with the link can read the selected content until you revoke it or it expires.</p>
-            </div>
-            <button type="button" onClick={() => setShareOpen(false)} aria-label="Close share settings" className="rounded-md px-2 py-1 text-stone hover:bg-sage-fill hover:text-ink">×</button>
-          </div>
-          <label className="mt-4 flex items-start gap-2 text-sm text-bark">
-            <input type="checkbox" checked={includeTranscript} onChange={(event) => setIncludeTranscript(event.target.checked)} className="mt-0.5 h-4 w-4 accent-sage-deep" />
-            <span><strong className="text-ink">Include transcript</strong><span className="block text-xs text-stone">Off by default so sharing notes does not expose the full conversation.</span></span>
-          </label>
-          <label className="mt-4 block text-xs font-medium text-bark">
-            Link expires
-            <select value={expiresInDays} onChange={(event) => setExpiresInDays(event.target.value)} className="mt-1 w-full rounded-lg border border-sand bg-card px-3 py-2 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sage-deep">
-              <option value="1">After 24 hours</option>
-              <option value="7">After 7 days</option>
-              <option value="30">After 30 days</option>
-              <option value="0">Never</option>
-            </select>
-          </label>
-          {shareUrl && (
-            <div className="mt-4 rounded-lg bg-card-soft p-3">
-              <p className="break-all text-xs text-bark">{shareUrl}</p>
-              <p className="mt-1 text-[11px] text-stone">
-                {currentShareExpiry ? `Expires ${new Date(currentShareExpiry).toLocaleString()}` : "Does not expire"}
-              </p>
-            </div>
-          )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" disabled={pending} onClick={() => void updateShare(true)} className="rounded-lg bg-ink px-3 py-2 text-sm font-medium text-cream disabled:opacity-50">
-              {pending ? "Saving…" : currentShareToken ? "Update link" : "Create link"}
-            </button>
-            {shareUrl && <button type="button" onClick={() => void copyShareLink()} className="rounded-lg border border-sand px-3 py-2 text-sm font-medium text-ink hover:bg-sage-fill">Copy link</button>}
-            {currentShareToken && <button type="button" disabled={pending} onClick={() => void updateShare(false)} className="rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">Revoke</button>}
-          </div>
-        </section>
-      )}
+      {shareOpen && <SharePanel meetingId={meetingId} title={title} onClose={() => setShareOpen(false)} />}
 
       <section className="mt-5 rounded-xl border border-sand bg-card p-4">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone">Privacy &amp; location</p>
