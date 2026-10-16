@@ -31,6 +31,10 @@ export interface SyncStatus {
   lastSyncAt?: string
   /** Meetings whose local content hasn't been pushed yet. */
   pendingCount: number
+  /** Meetings the cloud refuses because they belong to another workspace. */
+  blockedCount?: number
+  /** User-facing explanation for blockedCount. */
+  blockedMessage?: string
   /** Last push/link error, cleared on the next success. */
   lastError?: string
   /** True while the browser link flow is waiting for approval. */

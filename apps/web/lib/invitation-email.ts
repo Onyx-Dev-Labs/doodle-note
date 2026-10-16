@@ -42,7 +42,7 @@ export async function sendWorkspaceInvitationEmail(data: {
       from: process.env.INVITATION_FROM_EMAIL,
       to: [data.email],
       subject: `Join ${data.organization.name} in DoodleNote`,
-      html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#26281f"><h2>${inviterName} invited you to ${organizationName}</h2><p>Join the shared DoodleNote workspace to see the meetings and notes your team chooses to move there.</p><p><a href="${html(inviteUrl)}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#26281f;color:#f7f5ee;text-decoration:none">Accept invitation</a></p><p style="color:#6f7367;font-size:13px">This invitation was sent to ${html(data.email)}.</p></div>`,
+      html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#26281f"><h2>${inviterName} invited you to ${organizationName}</h2><p>Join the shared DoodleNote workspace to see the meetings and notes your team syncs there.</p><p><a href="${html(inviteUrl)}" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#26281f;color:#f7f5ee;text-decoration:none">Accept invitation</a></p><p style="color:#6f7367;font-size:13px">This invitation was sent to ${html(data.email)}.</p></div>`,
     }),
   });
 
