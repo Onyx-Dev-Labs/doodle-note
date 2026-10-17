@@ -444,6 +444,7 @@ app.whenReady().then(async () => {
   const meetingsService = new MeetingsService(() => join(libraryRoot(), 'meetings'), assertLibrary)
   meetingsService.registerIpc()
   let captureMeetingId: string | undefined
+  let pendingCaptureMeetingId: string | undefined
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
   let captureId: string | undefined
@@ -509,7 +510,15 @@ app.whenReady().then(async () => {
 
   engine.onEvent((rawEvent) => {
     // Bind terminal transcript persistence to the exact capture the renderer saw start.
-    if (rawEvent.event === 'started') captureId = randomUUID()
+    if (rawEvent.event === 'started') {
+      captureId = randomUUID()
+      // Preparing a start must not reroute the previous capture's checkpoints.
+      // Commit the destination/base together with the session's new ownership.
+      captureMeetingId = rawEvent.command === 'live' ? pendingCaptureMeetingId : undefined
+      const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
+      captureBase = captureMeeting?.segments ?? []
+      captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
+    }
     // The host rejects callbacks from superseded processes. Stamp accepted events
     // for snapshot/renderer ownership, and never send filesystem diagnostics to UI.
     const event = captureEventForSession(rawEvent, captureId)
@@ -563,11 +572,8 @@ app.whenReady().then(async () => {
     if (request.command === 'live' && opts.meetingId && opts.persistAudio !== false) {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }
-    captureMeetingId = request.command === 'live' ? opts.meetingId : undefined
-    const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
-    captureBase = captureMeeting?.segments ?? []
-    captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
-    session.bindMeeting(captureMeetingId)
+    pendingCaptureMeetingId = request.command === 'live' ? opts.meetingId : undefined
+    session.bindMeeting(pendingCaptureMeetingId)
     engine.start(request.command, request.filePath, opts)
   })
 

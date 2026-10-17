@@ -105,6 +105,7 @@ async function main() {
     await failNextStart()
     await page.getByTitle('Start recording', { exact: true }).click()
     await expect(page.getByRole('alert')).toContainText(failureMessage)
+    assert.equal(await page.evaluate(() => window.engine.snapshot('qa-audio')), null)
     await allowStart()
     await page.getByTitle('Start recording', { exact: true }).click()
     await expect(page.getByRole('alert')).toHaveCount(0)
@@ -194,6 +195,14 @@ async function main() {
     await failNextStart()
     await page.getByTitle('Resume recording', { exact: true }).click()
     await expect(page.getByRole('alert')).toContainText(failureMessage)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    assert.deepEqual(
+      await page.evaluate(
+        async () => (await window.engine.snapshot('qa-audio')).savedAudioFailures
+      ),
+      { mic: true, system: true }
+    )
+    await expect(warning).toBeVisible()
     await allowStart()
     await page.getByTitle('Resume recording', { exact: true }).click()
     await expect(page.getByRole('alert')).toHaveCount(0)
@@ -208,6 +217,32 @@ async function main() {
     await expect(warning).toBeVisible() // earlier part is still incomplete
     await stop.click()
     await page.getByTitle('Resume recording', { exact: true }).waitFor()
+    // Empty capture A exposes the vacuous .every() in the ended-snapshot filter.
+    await page.getByRole('button', { name: 'Back to home', exact: true }).click()
+    await page.evaluate(() =>
+      window.meetings.upsert({
+        id: 'qa-empty',
+        title: 'Empty degraded capture',
+        rawNotesMarkdown: 'Keep empty capture notes.'
+      })
+    )
+    await page.reload()
+    await page.getByText('Empty degraded capture', { exact: true }).click()
+    await page.getByTitle('Start recording', { exact: true }).click()
+    await expect(stop).toBeVisible()
+    await emit({
+      event: 'status',
+      stage: 'audio_save_failed',
+      channel: 'mic',
+      reason: '/private/empty.caf'
+    })
+    await stop.click()
+    await expect
+      .poll(() => page.evaluate(async () => (await window.engine.snapshot('qa-empty'))?.phase))
+      .toBe('ended')
+    const emptySnapshot = await page.evaluate(() => window.engine.snapshot('qa-empty'))
+    assert.deepEqual(emptySnapshot.segments, [])
+    assert.deepEqual(emptySnapshot.savedAudioFailures, { mic: true })
     // Stay in this main process: B must not receive A's capture ID on a pre-start failure.
     await page.getByRole('button', { name: 'Back to home', exact: true }).click()
     await page.evaluate(() =>
@@ -222,17 +257,38 @@ async function main() {
     await failNextStart()
     await page.getByTitle('Start recording', { exact: true }).click()
     await expect(page.getByRole('alert')).toContainText(failureMessage)
+    // Real TranscriptSession -> snapshot IPC filter -> MeetingView reducer on focus.
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    assert.equal(await page.evaluate(() => window.engine.snapshot('qa-next')), null)
+    await expect(page.locator('.saved-audio-warning')).toHaveCount(0)
+    assert.deepEqual(await page.evaluate(() => window.engine.snapshot('qa-empty')), emptySnapshot)
+    // A delayed accepted checkpoint must keep A's destination and base while B is pending.
+    await emit({ event: 'refined', captureId: emptySnapshot.captureId, transcripts: [] })
+    assert.deepEqual(
+      await page.evaluate(async () => (await window.meetings.get('qa-empty')).savedAudioFailures),
+      { mic: true }
+    )
+    assert.deepEqual(
+      await page.evaluate(
+        async () => (await window.meetings.get('qa-next')).savedAudioFailures ?? {}
+      ),
+      {}
+    )
     await page.screenshot({ path: path.join(evidence, 'next-meeting-startup-failure.png') })
     await allowStart()
     await page.getByTitle('Start recording', { exact: true }).click()
     await expect(stop).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
-    await emit({ event: 'spawn-error', captureId, message: 'Stale previous capture failure' })
+    await emit({
+      event: 'spawn-error',
+      captureId: emptySnapshot.captureId,
+      message: 'Stale previous capture failure'
+    })
     await emit({
       event: 'status',
       stage: 'audio_save_failed',
       channel: 'mic',
-      captureId,
+      captureId: emptySnapshot.captureId,
       reason: '/private/stale.caf'
     })
     await expect(stop).toBeVisible()
@@ -242,6 +298,25 @@ async function main() {
     await expect
       .poll(() => page.evaluate(async () => (await window.engine.snapshot('qa-next'))?.phase))
       .toBe('ended')
+    // A failed file-mode attempt retains the last live snapshot; an actual file
+    // start removes it and cannot route file callbacks into either meeting.
+    const nextSnapshot = await page.evaluate(() => window.engine.snapshot('qa-next'))
+    const nextMeeting = await page.evaluate(() => window.meetings.get('qa-next'))
+    await failNextStart()
+    await page.evaluate(() => window.engine.start('transcribe', 'synthetic.wav'))
+    await expect(page.getByRole('alert')).toContainText(failureMessage)
+    assert.deepEqual(await page.evaluate(() => window.engine.snapshot('qa-next')), nextSnapshot)
+    await allowStart()
+    await page.evaluate(() => window.engine.start('transcribe', 'synthetic.wav'))
+    await expect.poll(() => page.evaluate(() => window.engine.snapshot('qa-next'))).toBe(null)
+    await emit({ event: 'refined', transcripts: [] })
+    await emit({ event: 'done' })
+    await emit({ event: 'exit', code: 0, signal: null })
+    assert.deepEqual(await page.evaluate(() => window.meetings.get('qa-next')), nextMeeting)
+    assert.deepEqual(
+      await page.evaluate(async () => (await window.meetings.get('qa-empty')).savedAudioFailures),
+      { mic: true }
+    )
     await runtime.close()
     runtime = null
     page = await launch()
@@ -278,7 +353,7 @@ async function main() {
       )
     )
     console.log(
-      'PASS: per-channel warning, sanitized IPC, continuing text, hide/show, snapshot, keyboard Stop, Resume, relaunch persistence, stale rejection, fresh meeting, light/dark wide/narrow, first-ever/A-to-B/Resume pre-start errors and successful retry'
+      'PASS: per-channel warning, sanitized IPC, continuing text, hide/show, snapshot, keyboard Stop, Resume, relaunch persistence, stale rejection, fresh meeting, light/dark wide/narrow, first-ever/A-to-B/Resume pre-start errors and successful retry, empty-capture snapshot/checkpoint ownership, file-mode boundaries'
     )
   } finally {
     if (runtime) await runtime.close()

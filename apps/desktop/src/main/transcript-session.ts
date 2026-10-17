@@ -29,12 +29,15 @@ export class TranscriptSession {
   private error: string | undefined
   private captureId: string | undefined
   private meetingId: string | undefined
+  private pendingMeetingId: string | undefined
   private phase: EngineSessionSnapshot['phase'] = 'starting'
   private partials: Partial<Record<EngineChannel, string>> = {}
   private savedAudioFailures: SavedAudioFailures = {}
 
   bindMeeting(meetingId?: string): void {
-    this.meetingId = meetingId
+    // A start attempt may fail before `started`. Keep the previous capture's
+    // snapshot attached to its owner until a new capture actually begins.
+    this.pendingMeetingId = meetingId
   }
 
   snapshot(meetingId: string): EngineSessionSnapshot | null {
@@ -70,6 +73,7 @@ export class TranscriptSession {
     switch (ev.event) {
       case 'started':
         // File modes don't create a session; a new live run resets everything.
+        this.meetingId = ev.command === 'live' ? this.pendingMeetingId : undefined
         this.assembler = ev.command === 'live' ? new SegmentAssembler() : null
         this.segments = []
         this.finals = {}

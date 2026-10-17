@@ -8,7 +8,7 @@ The PR records the exact tested commit. No Swift production code changed.
 
 - `MeetingRecord.savedAudioFailures?: Partial<Record<'mic' | 'system', true>>` is additive metadata, with `SavedAudioFailures` exported from `@repo/meetings-store/types`. Absence means no observed save failure, **not** proof of complete audio. Normalization accepts only known channels with literal `true` values.
 - `TranscriptSession` owns the same field for the current capture, exposes a defensive copy in snapshots, checkpoints it immediately on `audio_save_failed`, and includes it in transcript session backups. The meeting checkpoint merges historical flags, preserving earlier incomplete parts on Resume, re-transcription, and notes edits.
-- Starting another capture resets current session flags. Starting another meeting does not inherit them. An explicit mismatched capture ID is rejected before broadcasting and by the session/renderer. Existing engine-host process guards reject superseded process callbacks; a scripted process regression verifies this. Untagged native events still rely on those existing host lifecycle guards.
+- Only an actual `started` event commits the pending meeting as snapshot/checkpoint owner and resets current session flags. A pre-start failure leaves the prior capture attached to its original meeting: fresh B has no snapshot, failed Resume retains A's snapshot, and late A checkpoints retain A's destination/base. An actual file-mode start removes live ownership. An explicit mismatched capture ID is rejected before broadcasting and by the session/renderer. Existing engine-host process guards reject superseded process callbacks; a scripted process regression verifies this. Untagged native events still rely on those existing host lifecycle guards.
 - Generic transcribing, saved-audio, refinement or completion events cannot prove that previously missing frames were restored and **never clear** historical flags. There is currently no supported full-audio restoration event; do not invent one or clear flags on writer recovery.
 - Main removes raw writer diagnostics before IPC. Renderer copy is fixed, source-specific and separate from transient lifecycle text. Related transcript persistence errors also use fixed copy, leaving diagnostics in main logs.
 - No migration, source revision change, transcript replacement, audio rewrite, or cloud-policy change. Old records remain valid. Rolling back restores old behavior; older clients may drop this additive metadata on rewrite. Original audio/text are unaffected.
@@ -19,7 +19,7 @@ The PR records the exact tested commit. No Swift production code changed.
 The relevant baseline had 13 passing tests. The new persistence regression failed on the old implementation (`savedAudioFailures.mic` was undefined) and passes after the fix.
 
 - Frozen-lockfile install: passed. Package manager retained its configured ignored native build scripts.
-- Desktop: 369 passed, 8 skipped, 0 failed (377 total); node/renderer typechecks and production build passed.
+- Desktop: 372 passed, 8 skipped, 0 failed (380 total); node/renderer typechecks and production build passed.
 - Meetings store: 19 passed; typecheck passed.
 - Workspace lint and production audit passed (no known vulnerabilities).
 - Web typecheck and MCP tests are reported in the PR with exact results.
@@ -54,10 +54,23 @@ Expanded Electron QA passes first-ever failure, A-to-B failure in the same main 
 
 ![Actionable startup error on meeting B after capture A](next-meeting-startup-failure.png)
 
+## Round2 P2: empty-capture snapshot ownership
+
+Review of `14efcc7` confirmed the original startup-error fix, but found that `bindMeeting(B)` relabeled A's completed session before B actually started. An empty A transcript passed the ended-snapshot content filter (`[].every(...)`), so focus recovery attached A's capture ID and mic degradation to B after B's startup failure. Main also changed the checkpoint destination/base before `started`, allowing a late A checkpoint to write into B.
+
+Failing regressions were established before production edits: the real `TranscriptSession` test and the built Electron main/snapshot IPC returned `{ meetingId: B, captureId: A, segments: [], savedAudioFailures: { mic: true }, phase: 'ended' }` instead of no B snapshot. A failed file attempt also incorrectly detached A's snapshot.
+
+The fix stages meeting binding until `started`, committing snapshot ownership and checkpoint destination/base at that lifecycle boundary. It does not clear historical `MeetingRecord` flags, alter the snapshot content filter, relax the renderer capture guard, or change raw-reason sanitization. A failed same-meeting Resume keeps the previous snapshot; a successful Resume resets only current flags. File-mode attempts preserve prior ownership on failure and relinquish it on actual start. Three existing tests now bind before `started`, matching the production call order.
+
+Validation on matching sources: frozen install; focused 22 tests; full desktop 372 passed / 8 unchanged native-platform skips; desktop typecheck/build; workspace lint. Expanded isolated Electron QA traverses the actual session, snapshot IPC filter and renderer reducer on focus: empty degraded A → pre-start failure B → no B snapshot/warning; A remains flagged; delayed A checkpoint stays with A; successful B rejects stale A events. It also verifies first-ever failure, failed Resume snapshot retention, file-mode failure/success boundaries and all earlier warning/persistence/sanitization flows. No engine production changes. Unchanged store/web/MCP checks retain their earlier evidence and were not rerun for this main-only ownership fix.
+
+![Meeting B after empty degraded A, failed start and focus recovery](empty-capture-next-meeting.png)
+
 ## Check this before release
 
 - In a disposable library on a constrained test volume, make the actual native writer fail for mic and system separately. Expect source-specific warning, continuing useful transcription and usable Stop; never fill a personal disk.
 - Restore sufficient space, Stop, reopen and relaunch. Expect warning retained, existing transcript/manual edits retained, and inspect/play each actually saved part. Compare missing frames with native diagnostics; synthetic events do not validate playable parts or native disk-full behavior.
 - Resume the affected meeting: earlier incomplete audio must remain flagged. Start a fresh successful meeting: no inherited warning.
+- Stop an empty degraded A, fail B before `started`, then refocus B: expect its actionable startup error with no inherited audio warning. Reopen A: its mic warning remains. Failed Resume must retain A's warning; successful retry keeps historical flags while resetting current flags.
 - In the packaged Mac candidate at wide/minimum sizes and both themes, use keyboard Stop and VoiceOver. Expect readable warning announced without stealing focus, and accessible notes/Stop.
 - Human review, required CI/CodeQL, signed packaged Mac acceptance and the above native writer checks remain gates. Windows native QA follows Mac acceptance in the parent release lane. This PR does not publish, merge, or claim native QA complete.
