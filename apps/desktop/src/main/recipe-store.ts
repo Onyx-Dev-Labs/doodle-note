@@ -11,32 +11,15 @@ import {
 import { join } from 'node:path'
 import type { RecipeDraft, RecipeOutput, RecipeVersion } from '../shared/recipes-api'
 
-interface RecipeFile {
-  format: 1
-  versions: RecipeVersion[]
-  outputs: RecipeOutput[]
-  [key: string]: unknown
-}
-export function validateRecipe(value: RecipeDraft): RecipeDraft {
-  if (
-    !value ||
-    typeof value.name !== 'string' ||
-    !value.name.trim() ||
-    value.name.length > 120 ||
-    typeof value.prompt !== 'string' ||
-    !value.prompt.trim() ||
-    value.prompt.length > 100_000 ||
-    value.scope !== 'current-meeting' ||
-    !['markdown', 'checklist', 'email-draft'].includes(value.outputKind) ||
-    !['local-only', 'explicit-cloud'].includes(value.policy) ||
-    !value.inputs ||
-    !['personalNotes', 'transcript', 'selectedSummary'].every(
-      (k) => typeof value.inputs[k] === 'boolean'
-    ) ||
-    ![value.inputs.personalNotes, value.inputs.transcript, value.inputs.selectedSummary].some(
-      (v) => v === true
-    )
-  )
+import {
+  assertRecipeFile,
+  assertRecipeOutput,
+  validRecipeDraft,
+  type RecipeFile
+} from './recipe-validation'
+
+export function validateRecipe(value: unknown): RecipeDraft {
+  if (!validRecipeDraft(value))
     throw new Error(
       'Enter a recipe name and prompt, select at least one input, and choose a supported output and model policy.'
     )
@@ -61,17 +44,8 @@ export class RecipeStore {
   }
   read(): RecipeFile {
     try {
-      const data: RecipeFile = JSON.parse(readFileSync(this.file, 'utf8'))
-      if (data.format !== 1 || !Array.isArray(data.versions) || !Array.isArray(data.outputs))
-        throw new Error('Unsupported recipes file')
-      for (const v of data.versions) {
-        validateRecipe(v)
-        if (!v.versionId || !v.recipeId || !Number.isSafeInteger(v.version) || v.version < 1)
-          throw new Error('Invalid recipe version')
-      }
-      for (const o of data.outputs)
-        if (!o.runId || !o.meetingId || typeof o.markdown !== 'string' || !o.source || !o.recipe)
-          throw new Error('Invalid recipe output')
+      const data: unknown = JSON.parse(readFileSync(this.file, 'utf8'))
+      assertRecipeFile(data)
       return data
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
@@ -83,6 +57,7 @@ export class RecipeStore {
     }
   }
   private write(data: RecipeFile): void {
+    assertRecipeFile(data)
     const temporary = `${this.file}.${randomUUID()}.tmp`
     try {
       const fd = openSync(temporary, 'wx', 0o600)
@@ -121,6 +96,7 @@ export class RecipeStore {
     return version
   }
   complete(output: RecipeOutput): RecipeOutput {
+    assertRecipeOutput(output)
     const data = this.read()
     const previous = data.outputs.find((o) => o.runId === output.runId)
     if (previous) {

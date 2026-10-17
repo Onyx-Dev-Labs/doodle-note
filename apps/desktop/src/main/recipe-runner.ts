@@ -1,7 +1,6 @@
 import { withGenerationDeadline, type MergedNotes } from '@repo/ai'
 import type {
   RecipeList,
-  RecipeRun,
   RecipeOutput,
   RecipeScope,
   RecipeDraft,
@@ -11,6 +10,12 @@ import { recipeLibrary, sameRecipeScope } from './recipe-library'
 import { recipeSource } from './recipe-source'
 import { RecipeStore } from './recipe-store'
 import { NotesGenerationJobs } from './notes-generation-job'
+import {
+  assertRecipeRun,
+  validRecipeIdentity,
+  validRecipeMeetingId,
+  validRecipeScope
+} from './recipe-validation'
 
 export interface RecipeGenerator {
   (
@@ -37,6 +42,7 @@ export class RecipeRunner {
     return fence
   }
   list(meetingId: string): RecipeList {
+    if (!validRecipeMeetingId(meetingId)) throw new Error('Invalid meeting ID.')
     const fence = this.fence()
     const data = new RecipeStore(fence.path).read()
     // Never expose outputs for an unavailable/mismatched meeting.
@@ -66,18 +72,23 @@ export class RecipeRunner {
     parent?: string,
     duplicate?: boolean
   ): RecipeVersion {
+    if (!validRecipeScope(scope)) throw new Error('Invalid recipe library scope. Reload recipes.')
+    if (
+      (parent !== undefined && (typeof parent !== 'string' || !parent)) ||
+      (duplicate !== undefined && typeof duplicate !== 'boolean')
+    )
+      throw new Error('Invalid recipe save request.')
     const fence = this.fence(scope)
     return new RecipeStore(fence.path).save(draft, parent, duplicate)
   }
   cancel(identity: { meetingId: string; runId: string }, owner: number): boolean {
-    return this.jobs.cancel(identity, owner)
+    return validRecipeIdentity(identity) && this.jobs.cancel(identity, owner)
   }
   stop(): Promise<void> {
     return this.jobs.stop()
   }
-  async run(request: RecipeRun, owner: number): Promise<RecipeOutput> {
-    if (!request || !/^[A-Za-z0-9-]{1,100}$/.test(request.runId) || !request.library)
-      throw new Error('A recipe run needs a valid run ID and current library.')
+  async run(request: unknown, owner: number): Promise<RecipeOutput> {
+    assertRecipeRun(request)
     return this.jobs.run(request, owner, (signal) =>
       this.activity(() =>
         withGenerationDeadline(signal, 'writing', async (signal) => {

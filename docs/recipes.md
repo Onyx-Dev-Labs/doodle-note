@@ -28,7 +28,13 @@ weight digest or guarantee of identical wording. Hosted model revision metadata 
 not an immutable provider snapshot; cloud execution is disabled as described below.
 
 Writes use a private temporary file, fsync, and atomic rename. Malformed/unsupported
-files fail visibly without resetting data; unknown top-level fields are preserved.
+files fail visibly without resetting data. Runtime run identities, scope and confirmation
+are checked before job admission or generation. Reads and writes validate complete
+recipe versions and output snapshots, including model/source metadata, input kinds,
+IDs and timestamps. Missing, null or wrongly typed required fields reject the whole
+file; they are never silently repaired or replaced. Unknown fields at every level
+are retained. A malformed artifact must be restored from a valid backup before
+recipes can be listed or saved; meeting originals remain usable and untouched.
 No recipe sync, backup-format migration, deletion or external integration is added.
 The explicit `LIBRARY_ENTRIES` relocation allowlist includes `recipes-v1.json`;
 tests verify exact copy, restart and retained originals. Historical output scope is
@@ -87,6 +93,11 @@ Automated synthetic coverage includes version/restart persistence, duplicate/rer
 identity, failed/canceled/late results, busy cleanup, wrong cancel owner, source edit,
 trash/scope/path/identity changes, queued cancellation, missing richer selected summary,
 unknown-file fields/corruption, relocation and cloud refusal before generation.
+Actual recipes:run IPC regressions cover omitted/null/wrongly typed identities,
+request/scope shapes and confirmation, with zero job admission/inference and unchanged
+bytes. Table-driven corrupt-file and direct completion tests cover required nested
+version/model/provenance fields, readable failures and unchanged original bytes;
+valid richer metadata, restart and idempotent retry remain covered.
 Adapter tests cover Unicode/exact boundaries, missing policy, unsupported/oversized
 models, exact wire input/output reserve and allocated local context cleanup.
 
