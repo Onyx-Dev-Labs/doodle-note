@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RecipeDraft, RecipeList, RecipeOutput, RecipeResult } from '../../shared/recipes-api'
 import { flushLibrarySaves } from './lib/library-flush'
-import { registerRecipeRun } from './lib/recipe-run'
+import { invalidateRecipeRun, registerRecipeRun, RecipeAttempts } from './lib/recipe-run'
 import './recipes.css'
 
 const blank = (): RecipeDraft => ({
@@ -42,6 +42,7 @@ export default function RecipePanel({
   const [running, setRunning] = useState(false)
   const run = useRef<string | null>(null)
   const generation = useRef(0)
+  const attempts = useRef(new RecipeAttempts())
   const selectedVersion = list?.versions.find((v) => v.versionId === selected)
   const dirty =
     selectedVersion &&
@@ -130,23 +131,32 @@ export default function RecipePanel({
     setError('')
     setStatus('Preparing recipe…')
     const epoch = ++generation.current
-    const runId = crypto.randomUUID()
+    const runId = attempts.current.begin(JSON.stringify([meetingId, selected, list.scope]))
     run.current = runId
     setRunning(true)
     let invalidated = false
-    const unregister = registerRecipeRun(meetingId, () => {
+    const unregister = registerRecipeRun(meetingId, (reason) => {
       invalidated = true
       void window.recipes.cancel({ meetingId, runId })
-      setStatus('Meeting edited. Canceling recipe…')
+      setStatus(
+        reason === 'edited'
+          ? 'Meeting edited. Canceling recipe…'
+          : 'Canceling; waiting for model cleanup…'
+      )
     })
     try {
       await flushLibrarySaves()
-      if (invalidated || epoch !== generation.current) return
+      if (invalidated || epoch !== generation.current) {
+        if (epoch === generation.current)
+          setStatus('Recipe canceled before generation. You can retry.')
+        return
+      }
       setStatus('Running recipe. Originals are preserved.')
       const output = unwrap(
         await window.recipes.run({ meetingId, runId, versionId: selected, library: list.scope })
       )
       if (epoch !== generation.current) return
+      attempts.current.complete(runId)
       setList((current) =>
         current
           ? {
@@ -159,7 +169,9 @@ export default function RecipePanel({
     } catch (e) {
       if (epoch === generation.current) {
         setError(e instanceof Error ? e.message : String(e))
-        setStatus('No new output saved. You can retry. Previous outputs are retained.')
+        setStatus(
+          'Run did not return a result. Retry to recover this attempt; previous outputs are retained.'
+        )
       }
     } finally {
       unregister()
@@ -299,8 +311,7 @@ export default function RecipePanel({
               <button
                 type="button"
                 onClick={() => {
-                  setStatus('Canceling; waiting for model cleanup…')
-                  void window.recipes.cancel({ meetingId, runId: run.current! })
+                  invalidateRecipeRun(meetingId, 'canceled')
                 }}
               >
                 Cancel run
