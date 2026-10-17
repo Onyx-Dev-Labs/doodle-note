@@ -8,7 +8,7 @@
 
 Can one deliberate capture retain inspectable image evidence and its meeting moment locally, while cancellation, denial and exclusion leave no new content? Can identical image storage be deduplicated without losing repeated observations?
 
-Onyx `fetch self` verified Sean Inman (`3add872b-594c-81ae-9621-000211a17626`, sean@onyxdev.io). DEV-513, the full project/issue contract, Issues schema, related DEV-286 and DEV-506 were read before editing. The saved project view returned 86 rows with no remaining pagination; DEV-513 was unassigned, Backlog, authoring-only. No DEV-513 PR or competing local branch existed. Claim and In Progress readback completed at approximately **2026-10-17T23:38Z**, with claim time **23:37:50Z** (Notion Started stores minute precision).
+Onyx `fetch self` verified Sean Inman. DEV-513, the full project/issue contract, Issues schema, related DEV-286 and DEV-506 were read before editing. The saved project view returned 86 rows with no remaining pagination; DEV-513 was unassigned, Backlog, authoring-only. No DEV-513 PR or competing local branch existed. Claim and In Progress readback completed at approximately **2026-10-17T23:38Z**, with claim time **23:37:50Z** (Notion Started stores minute precision).
 
 - Branch: `t3/research-dev513-capture-prototype`.
 - T3-owned exclusive worktree: `/Users/sean/.t3/worktrees/doodle-note/t3-c1494bab`.
