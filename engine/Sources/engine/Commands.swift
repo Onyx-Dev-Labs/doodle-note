@@ -155,61 +155,10 @@ enum Commands {
         ])
     }
 
-    /// AVAudioFile reads the existing audio imports directly. An MP4 video is
-    /// first normalized to a temporary audio-only M4A so video tracks never
-    /// enter the ASR path and the same channel splitter can process both.
     static func prepareAudioFile(
         _ sourceURL: URL, temporaryParent: URL = FileManager.default.temporaryDirectory
     ) async throws -> PreparedAudioFile {
-        do {
-            let file = try AVAudioFile(forReading: sourceURL)
-            guard file.length > 0 else {
-                throw EngineError.internalError("audio file has no content: \(sourceURL.path)")
-            }
-            return PreparedAudioFile(url: sourceURL, temporaryDirectory: nil)
-        } catch {
-            guard sourceURL.pathExtension.lowercased() == "mp4" else { throw error }
-        }
-
-        let asset = AVURLAsset(url: sourceURL)
-        do {
-            let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-            guard !audioTracks.isEmpty else {
-                throw EngineError.internalError(
-                    "MP4 file has no decodable audio track: \(sourceURL.lastPathComponent)")
-            }
-            guard
-                let exporter = AVAssetExportSession(
-                    asset: asset, presetName: AVAssetExportPresetAppleM4A)
-            else {
-                throw EngineError.internalError(
-                    "MP4 audio is not supported: \(sourceURL.lastPathComponent)")
-            }
-
-            let directory = temporaryParent.appendingPathComponent(
-                "doodlenote-import-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: directory, withIntermediateDirectories: true)
-            let outputURL = directory.appendingPathComponent("audio.m4a")
-            do {
-                try await exporter.export(to: outputURL, as: .m4a)
-                let file = try AVAudioFile(forReading: outputURL)
-                guard file.length > 0 else {
-                    throw EngineError.internalError(
-                        "MP4 file has no decodable audio track: \(sourceURL.lastPathComponent)")
-                }
-                return PreparedAudioFile(url: outputURL, temporaryDirectory: directory)
-            } catch {
-                try? FileManager.default.removeItem(at: directory)
-                throw error
-            }
-        } catch let error as EngineError {
-            throw error
-        } catch {
-            throw EngineError.internalError(
-                "Could not decode an audio track from \(sourceURL.lastPathComponent): "
-                    + error.localizedDescription)
-        }
+        try await AudioFilePreparation.prepare(sourceURL, temporaryParent: temporaryParent)
     }
 
     // MARK: - stream: live partials (Parakeet Unified, built for hours-long sessions)
@@ -281,15 +230,5 @@ enum Commands {
                 describe(.v3, "parakeet-tdt-0.6b-v3"),
             ],
         ])
-    }
-}
-
-struct PreparedAudioFile {
-    let url: URL
-    let temporaryDirectory: URL?
-
-    func removeTemporaryFiles() {
-        guard let temporaryDirectory else { return }
-        try? FileManager.default.removeItem(at: temporaryDirectory)
     }
 }
