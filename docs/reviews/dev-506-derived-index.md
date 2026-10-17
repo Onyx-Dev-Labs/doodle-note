@@ -72,6 +72,16 @@ Follow-up checks: frozen install; meetings-store **30/30**; MCP **11/11**; deskt
 
 The 1k/10k benchmark was not rerun: these fixes change relocation lifecycle and malformed-input coverage, not the valid-library reconciliation/query algorithm. The measurements and latency/RSS tradeoffs above remain evidence from the initial head, not new-head measurements. Native packaged capture/relocation and Windows QA remain open.
 
+## Separate follow-up: cancellation during relocation drain
+
+Independent targeted verification confirmed the two original P2 fixes at `55c81d3` and identified another inherited P2 in the unmerged feature: `sources:cancel` used `libraryIpc`, so cancellation queued behind a relocation drain waiting for the same search/resolve operation. This is a separate finding, not a reversal of the earlier fixes or a full standards-review approval.
+
+Before the fix, two new tests using the actual registered IPC, service, client, worker, storage and library barrier failed with `Cancellation blocked behind relocation drain`. They deliberately hold real worker search **and** resolve replies, start relocation, then cancel. A one-second regression guard releases a failed run without waiting for the production 30-second timeout; it is not a performance benchmark or product latency target. The parent independently reproduced the full timeout before this change.
+
+The cancellation channel now registers directly with Electron and only invokes the existing in-memory/atomic invalidation. `libraryIpc` adds serialization, not sender authorization; no sender check or permission boundary was removed. Search and resolve retain the barrier. After the fix, cancellation rejects both pending requests while their replies are still held, releases library activity, and lets relocation either finish or report the injected real copy failure. Both cases preserve original bytes. Existing one-writer, late/retired/replacement-client, failed/cancelled-transfer, missing-volume and path/scope/revision regressions remain covered; cancellation also succeeds with the active volume disconnected.
+
+Verification on this delta: desktop **368 passed, 8 existing skips (376 total)**; desktop typecheck/build; repository lint; emitted-worker native Electron smoke. The focused service/storage/barrier set is **22/22**. Prior shared-package and actual Node 18 MCP results remain evidence for unchanged code; they were not rerun for this desktop-only IPC change. Benchmark evidence is unchanged and no new measurements are claimed. Exact tested head is recorded in PR223 and Notion.
+
 ## Acceptance mapping and remaining gates
 
 1. **Old full-history passage:** automated 501+ records and 1k/10k datasets; stable segment/source/revision anchors; no summaries required.

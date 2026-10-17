@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { once } from 'node:events'
+import { EventEmitter, once } from 'node:events'
 import { createRequire } from 'node:module'
 import { Worker, type WorkerOptions } from 'node:worker_threads'
 import {
@@ -75,7 +75,16 @@ const { SourceIndexService } =
 const { registerStorageIpc } = require('./storage-service') as typeof import('./storage-service')
 loader._load = original
 
-const event = { sender: { isDestroyed: () => false, send: () => {} } }
+const { libraryActivity } = require('./library-activity') as typeof import('./library-activity')
+const progress = new EventEmitter()
+const event = {
+  sender: {
+    isDestroyed: () => false,
+    send: (_channel: string, value: { phase: string }): void => {
+      progress.emit(value.phase)
+    }
+  }
+}
 const call = <T>(name: string, ...args: unknown[]): Promise<T> =>
   Promise.resolve(handlers.get(name)!(event, ...args) as T)
 
@@ -147,6 +156,7 @@ test('live storage IPC relocation rebinds the worker; edits resolve only against
   assert.deepEqual(readFileSync(join(f.profile, 'meetings/a.json')), originalBytes)
   assert.match(readFileSync(join(f.storage.root, 'meetings/a.json'), 'utf8'), /replacement/)
   renameSync(f.storage.root, f.storage.root + '-disconnected')
+  await call('sources:cancel') // cancellation does not require library access
   await assert.rejects(call('sources:search', 'needle'), /unavailable/)
   await assert.rejects(call('sources:resolve', anchor), /unavailable/)
   assert.deepEqual(readFileSync(join(f.profile, 'meetings/a.json')), originalBytes)
@@ -232,3 +242,74 @@ test('cancelled and failed transfers preserve the active library; unannounced pa
   assert.equal((await call<SourceSearchResult>('sources:search', 'replacement')).hits.length, 1)
   assert.equal(peakWorkers, 1)
 })
+
+for (const failCopy of [false, true]) {
+  test(`IPC cancellation releases relocation drain with pending search and resolve (${failCopy ? 'real copy failure' : 'successful transfer'})`, async (t) => {
+    const f = fixture(
+      t,
+      failCopy
+        ? {
+            copyFile: async () => {
+              throw new Error('synthetic copy failure')
+            }
+          }
+        : undefined
+    )
+    const originalBytes = readFileSync(join(f.profile, 'meetings/a.json'))
+    const anchor = (await call<SourceSearchResult>('sources:search', 'needle')).hits[0]!.anchor
+    const worker = workers.at(-1)!
+    worker.holdResponses = true
+    const searchHeld = once(worker, 'response-held')
+    const searchRejected = assert.rejects(
+      call('sources:search', 'needle'),
+      /scope or content changed/
+    )
+    await searchHeld
+    const resolveHeld = once(worker, 'response-held')
+    const resolveRejected = assert.rejects(
+      call('sources:resolve', anchor),
+      /scope or content changed/
+    )
+    await resolveHeld
+    picked = { canceled: false, filePaths: [f.destination] }
+    const waiting = once(progress, 'waiting')
+    const moving = call<StorageResult>('storage:choose')
+    await waiting
+    assert.equal(libraryActivity.moving, true)
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    try {
+      // A regression guard, not a performance benchmark: cancellation must settle
+      // while the real worker replies remain held and before the 30s drain timer.
+      await Promise.race([
+        Promise.all([call('sources:cancel'), searchRejected, resolveRejected]),
+        new Promise<never>((_resolve, reject) => {
+          deadline = setTimeout(
+            () => reject(new Error('Cancellation blocked behind relocation drain')),
+            1000
+          )
+        })
+      ])
+      const result = await moving
+      assert.equal(libraryActivity.moving, false)
+      if (failCopy) {
+        assert.match(result.error!, /synthetic copy failure/)
+        assert.equal(f.storage.root, f.profile)
+      } else {
+        assert.equal(result.error, undefined)
+        assert.notEqual(f.storage.root, f.profile)
+      }
+      worker.releaseResponses()
+      assert.equal((await call<SourceResolution>('sources:resolve', anchor)).status, 'resolved')
+      assert.equal((await call<SourceSearchResult>('sources:search', 'needle')).hits.length, 1)
+      assert.equal(peakWorkers, 1)
+      assert.deepEqual(readFileSync(join(f.profile, 'meetings/a.json')), originalBytes)
+      assert.deepEqual(readFileSync(join(f.storage.root, 'meetings/a.json')), originalBytes)
+    } finally {
+      clearTimeout(deadline)
+      // Release a failing pre-fix run without waiting for the production 30s timeout.
+      f.service.invalidate()
+      worker.releaseResponses()
+      await Promise.all([moving, searchRejected, resolveRejected])
+    }
+  })
+}

@@ -1,3 +1,4 @@
+import { ipcMain } from 'electron'
 import { Worker } from 'node:worker_threads'
 import { join } from 'node:path'
 import {
@@ -127,7 +128,10 @@ export class SourceIndexService {
   }
 
   registerIpc(): void {
-    libraryIpc.handle(SOURCES_CANCEL, () => this.invalidate())
+    // Cancellation only invalidates in-memory jobs/atomic flags. It must bypass
+    // the library barrier: relocation may be draining the very request it stops.
+    // libraryIpc adds no sender checks; the Electron IPC surface stays unchanged.
+    ipcMain.handle(SOURCES_CANCEL, () => this.invalidate())
     libraryIpc.handle(SOURCES_SEARCH, (_event, query: unknown, limit: unknown) => {
       if (typeof query !== 'string' || query.length > 4096) throw new Error('Invalid source query')
       if (
