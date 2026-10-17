@@ -186,6 +186,8 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     : [];
   return {
     id: raw.id,
+    // Preserve explicit ownership, even malformed values: retrieval fails closed.
+    ...(raw.sourceScope !== undefined ? { sourceScope: raw.sourceScope } : {}),
     ...(raw.batchTranscription &&
     (raw.batchTranscription.backend === "parakeet" ||
       raw.batchTranscription.backend === "whisper") &&

@@ -44,6 +44,11 @@ jobs:
       - name: Desktop tests
         run: pnpm --filter desktop test
 
+      - name: Local source index contracts
+        run: |
+          pnpm --filter @repo/meetings-store typecheck
+          pnpm --filter @repo/meetings-store test
+
       - name: MCP server tests
         run: pnpm --filter doodle-note-mcp test
 
