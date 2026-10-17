@@ -8,7 +8,7 @@ import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
 import { fetchCloudModels } from './cloud-models'
 import { app, ipcMain, safeStorage } from 'electron'
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   GenerationError,
@@ -583,10 +583,13 @@ export class NotesService {
 
   /** Local by default; cloud only when explicitly chosen AND usable —
    *  a readable key, or Ollama which needs none. */
-  private async pickEngine(requireSelectedProvider = false): Promise<NotesEngine> {
+  private async pickEngine(
+    requireSelectedProvider = false,
+    localOnly = false
+  ): Promise<NotesEngine> {
     if (this.activateBusy) throw new Error('A model is being prepared. Try again when it finishes.')
     const { engineChoice, cloud } = this.settings
-    if (engineChoice === 'cloud' && cloud) {
+    if (!localOnly && engineChoice === 'cloud' && cloud) {
       if (cloud.provider === 'groq' || cloud.provider === 'openrouter') {
         throw new Error(
           'Groq and OpenRouter are retired. Select Grok (xAI), paid Gemini, or another provider in Settings and enter its own API key. Your notes and stored settings are preserved.'
@@ -608,7 +611,7 @@ export class NotesService {
       // Key unreadable (keychain changed, etc.) — fall through to local.
     }
 
-    if (requireSelectedProvider && engineChoice === 'cloud' && !cloud) {
+    if (!localOnly && requireSelectedProvider && engineChoice === 'cloud' && !cloud) {
       throw new Error('Set up the selected provider in Settings, then generate notes manually.')
     }
     const selected = LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId)
@@ -620,6 +623,48 @@ export class NotesService {
     throw new Error(
       'The local notes model is missing, unreadable or invalid. Open Settings → Notes model to activate or download it.'
     )
+  }
+
+  /** Recipe-only entry: no settings mutation and no provider fallback. Existing summary/Ask paths are unchanged. */
+  async runRecipe(
+    policy: 'local-only' | 'explicit-cloud',
+    system: string,
+    prompt: string,
+    signal: AbortSignal
+  ): Promise<import('@repo/ai').MergedNotes & { modelRevision: string }> {
+    if (this.askBusy || this.enhanceBusy || this.activateBusy)
+      throw new Error('Another model operation is running. Wait for it to finish, then retry.')
+    this.askBusy = true
+    try {
+      if (
+        policy === 'explicit-cloud' &&
+        (this.settings.engineChoice !== 'cloud' || !this.settings.cloud)
+      )
+        throw new Error(
+          'Select and authorize a cloud provider in Settings, or choose a local-only recipe. No fallback was used.'
+        )
+      const settingsBefore = JSON.stringify(this.settings)
+      const engine = await this.pickEngine(true, policy === 'local-only')
+      signal.throwIfAborted()
+      if (settingsBefore !== JSON.stringify(this.settings))
+        throw new Error('Model settings changed. Retry with the current settings.')
+      if (!engine.runBounded)
+        throw new Error('This model does not support bounded recipe generation.')
+      const revision = (): string => {
+        if (!engine.id.startsWith('local:')) return `provider-model:${engine.id}`
+        if (!this.localEnginePath) throw new Error('Local model path is unavailable.')
+        const file = statSync(this.localEnginePath)
+        return `local-artifact:${engine.id}:${file.size}:${file.mtimeMs}`
+      }
+      const modelRevision = revision()
+      const result = await engine.runBounded(system, prompt, { signal, phase: 'writing' })
+      signal.throwIfAborted()
+      if (modelRevision !== revision() || settingsBefore !== JSON.stringify(this.settings))
+        throw new Error('Model or policy changed during the run. No output was saved; retry.')
+      return { ...result, modelRevision }
+    } finally {
+      this.askBusy = false
+    }
   }
 
   /* ---- settings ---- */

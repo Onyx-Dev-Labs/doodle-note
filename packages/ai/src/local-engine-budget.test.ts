@@ -1,3 +1,4 @@
+import * as boundedRequest from './bounded-request'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -62,6 +63,7 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
     }
   }
   const deps: Record<string, unknown> = {
+    './bounded-request': boundedRequest,
     'node:os': os,
     'node:path': path,
     './generation-control': generation,
@@ -122,4 +124,9 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
   )
   assert.equal(generated, 1, 'oversized question never reaches generation or another provider')
   assert.equal(disposed, 2, 'failed budget releases native context')
+  const recipe = await engine.runBounded!('Recipe system', 'Full synthetic meeting')
+  assert.equal(recipe.markdown, 'Synthetic answer')
+  await assert.rejects(engine.runBounded!('Recipe system', '界'.repeat(25_000)), /exceed/)
+  assert.equal(generated, 2, 'oversized recipe never reaches inference')
+  assert.equal(disposed, 4, 'recipe success and budget rejection both dispose contexts')
 })

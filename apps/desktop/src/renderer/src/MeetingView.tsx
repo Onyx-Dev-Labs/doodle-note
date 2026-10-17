@@ -1,3 +1,5 @@
+import RecipePanel from './RecipePanel'
+import { invalidateRecipeRun } from './lib/recipe-run'
 import { TranscriptSplit } from './TranscriptSplit'
 import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
 import { registerLibrarySave } from './lib/library-flush'
@@ -376,18 +378,20 @@ export default function MeetingView({
   const persist = useCallback(
     (patch: Partial<Omit<MeetingRecord, 'id'>>): void => {
       if (discardingRef.current) return
+      invalidateRecipeRun(meetingId)
       void window.meetings.upsert({ id: meetingId, ...patch }).catch(() => {})
     },
     [meetingId]
   )
 
   const scheduleNotesSave = useCallback((): void => {
+    invalidateRecipeRun(meetingId)
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null
       persist({ title: titleValueRef.current, rawNotesMarkdown: roughMarkdownRef.current })
     }, 700)
-  }, [persist])
+  }, [persist, meetingId])
 
   const flushNotesSave = useCallback((): void => {
     if (saveTimerRef.current !== null) {
@@ -1728,6 +1732,11 @@ export default function MeetingView({
               }}
             />
             <EditorContent editor={editor} className="doc-editor" />
+            <RecipePanel
+              key={meetingId}
+              meetingId={meetingId}
+              disabled={capturing || retranscribing}
+            />
           </div>
         </div>
 

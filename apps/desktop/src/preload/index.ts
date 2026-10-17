@@ -1,3 +1,4 @@
+import { RECIPE_CHANNELS, type RecipesApi } from '../shared/recipes-api'
 import {
   TEXT_IMPORT_PREVIEW,
   TEXT_IMPORT_COMMIT,
@@ -302,6 +303,13 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => {
     ipcRenderer.removeListener(channel, listener)
   }
+}
+
+const recipesApi: RecipesApi = {
+  list: (meetingId) => ipcRenderer.invoke(RECIPE_CHANNELS.list, meetingId),
+  save: (...args) => ipcRenderer.invoke(RECIPE_CHANNELS.save, ...args),
+  run: (request) => ipcRenderer.invoke(RECIPE_CHANNELS.run, request),
+  cancel: (identity) => ipcRenderer.invoke(RECIPE_CHANNELS.cancel, identity)
 }
 
 const notesApi: NotesApi = {
@@ -694,6 +702,7 @@ if (process.contextIsolated) {
     } satisfies StorageApi)
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
+    contextBridge.exposeInMainWorld('recipes', recipesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
