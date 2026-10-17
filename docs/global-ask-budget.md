@@ -77,8 +77,14 @@ not replace selection with full-library retrieval.
   transmission. Only local Llama models using the audited `llama3-instruct`
   template are supported by this fallback; arbitrary templates can repeat input
   and cannot be bounded by their source length. Unknown/custom templates and
-  cloud-backed metadata fail with an actionable error. Count UTF-8 input bytes,
-  reserve twice the audited template's UTF-8 length plus 1,024 wrapper tokens,
+  cloud-backed metadata fail with an actionable error. Embedded `/api/show.messages`
+  must be absent or an empty array: nonempty or malformed values fail before
+  generation, because Ollama prepends these entries even to a request with an
+  explicit system message. Separately, model `system` text is not added when the
+  request starts with our explicit system message; wire regressions verify this
+  invariant with empty/absent messages and a large model system prompt.
+  Count UTF-8 input bytes, reserve twice the audited template's UTF-8 length plus
+  1,024 wrapper tokens,
   and reserve/enforce `min(4096, floor(window / 4))` output tokens. Metadata reads
   contain only the model ID, use the existing localhost server and a 15s timeout.
   No model downloads, settings changes or hosted fallback occur.
@@ -90,15 +96,19 @@ Limits verified October 17, 2026 against primary documentation:
 [Grok 4.6](https://docs.x.ai/developers/models/grok-4.6),
 [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash),
 [Ollama context configuration](https://docs.ollama.com/api/openai-compatibility#setting-the-local-context-size),
-[Ollama Llama template](https://github.com/ollama/ollama/blob/main/template/llama3-instruct.gotmpl).
+[Ollama Llama template](https://github.com/ollama/ollama/blob/main/template/llama3-instruct.gotmpl),
+[Ollama chat assembly](https://github.com/ollama/ollama/blob/main/server/routes.go)
+(`chatMessagesForRequest`).
 
 ## Verification and native gate
 
 Synthetic prompt, adapter-wire and real-service persistence tests cover oversized
 first notes, six large exchanges, Unicode, huge headings, exact boundaries,
 question rejection, source/excerpt metadata, policy denial, unknown models,
-output caps, local context disposal, and retry. Native runtime is replaced in
-adapter/service unit tests: these tests do not qualify installed macOS/Windows.
+output caps, local context disposal, retry, and Ollama embedded-message rejection
+(including a synthetic 500,000-byte hidden system message). Native runtime is
+replaced in adapter/service unit tests: these tests do not qualify installed
+macOS/Windows.
 
 Development launch (separate profile, no personal meetings):
 

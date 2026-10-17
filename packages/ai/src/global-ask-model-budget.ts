@@ -62,8 +62,21 @@ export async function ollamaGlobalAskBudget(model: string): Promise<GlobalAskBud
     parameters?: string
     template?: string
     model_info?: Record<string, unknown>
+    messages?: unknown
     remote_model?: string
     remote_host?: string
+  }
+  // Ollama prepends Modelfile MESSAGE entries even when our request begins
+  // with an explicit system message. The audited template does not bound
+  // those hidden inputs. An absent field or an empty array adds no messages.
+  if (
+    Object.hasOwn(info, 'messages') &&
+    (!Array.isArray(info.messages) || info.messages.length > 0)
+  ) {
+    throw new GlobalAskBudgetError(
+      'unsupported-model-budget',
+      "Ask cannot safely budget this Ollama model's embedded messages. Use a model without Modelfile MESSAGE entries, or select an on-device model in Settings."
+    )
   }
   const configured = Number(info.parameters?.match(/^num_ctx\s+(\d+)\s*$/m)?.[1])
   const architecture = info.model_info?.['general.architecture']
