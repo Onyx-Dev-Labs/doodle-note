@@ -75,8 +75,13 @@ export interface MeetingChatEntry {
   askedAt: string;
 }
 
+/** Missing audio is historical: a later successful write cannot restore lost frames. */
+export type SavedAudioFailures = Partial<Record<MeetingChannel, true>>;
+
 /** Full meeting document as stored on disk. */
 export interface MeetingRecord {
+  /** At least one recorded part lost saved audio for these sources; no raw diagnostics. */
+  savedAudioFailures?: SavedAudioFailures;
   /** Last successful batch pass; live capture remains independent. */
   batchTranscription?: {
     backend: "parakeet" | "whisper";

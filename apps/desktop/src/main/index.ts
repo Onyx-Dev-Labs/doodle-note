@@ -2,6 +2,7 @@ import { beginRecordableMeeting } from './capture-eligibility'
 import { transcribeWithWhisper } from './whisper-transcriber'
 import { transcribeFileToSegments } from './import-logic'
 import { persistCaptureTranscript } from './capture-transcript-checkpoint'
+import { captureEventForSession } from './capture-event'
 import { libraryActivity } from './library-activity'
 import {
   app,
@@ -443,13 +444,15 @@ app.whenReady().then(async () => {
   const meetingsService = new MeetingsService(() => join(libraryRoot(), 'meetings'), assertLibrary)
   meetingsService.registerIpc()
   let captureMeetingId: string | undefined
+  let pendingCaptureMeetingId: string | undefined
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
+  let captureId: string | undefined
   const session = new TranscriptSession(
     broadcastEngineEvent,
     () => join(libraryRoot(), 'sessions'),
     assertLibrary,
-    (segments, ended) => {
+    (segments, ended, savedAudioFailures) => {
       if (!captureMeetingId) return
       persistCaptureTranscript(
         meetingsService,
@@ -457,7 +460,8 @@ app.whenReady().then(async () => {
         captureBase,
         captureBaseEcho,
         segments,
-        ended
+        ended,
+        savedAudioFailures
       )
     }
   )
@@ -506,7 +510,19 @@ app.whenReady().then(async () => {
 
   engine.onEvent((rawEvent) => {
     // Bind terminal transcript persistence to the exact capture the renderer saw start.
-    const event = rawEvent.event === 'started' ? { ...rawEvent, captureId: randomUUID() } : rawEvent
+    if (rawEvent.event === 'started') {
+      captureId = randomUUID()
+      // Preparing a start must not reroute the previous capture's checkpoints.
+      // Commit the destination/base together with the session's new ownership.
+      captureMeetingId = rawEvent.command === 'live' ? pendingCaptureMeetingId : undefined
+      const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
+      captureBase = captureMeeting?.segments ?? []
+      captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
+    }
+    // The host rejects callbacks from superseded processes. Stamp accepted events
+    // for snapshot/renderer ownership, and never send filesystem diagnostics to UI.
+    const event = captureEventForSession(rawEvent, captureId)
+    if (!event) return
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)
@@ -556,11 +572,8 @@ app.whenReady().then(async () => {
     if (request.command === 'live' && opts.meetingId && opts.persistAudio !== false) {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }
-    captureMeetingId = request.command === 'live' ? opts.meetingId : undefined
-    const captureMeeting = captureMeetingId ? meetingsService.get(captureMeetingId) : null
-    captureBase = captureMeeting?.segments ?? []
-    captureBaseEcho = captureMeeting?.echoSuppressed ?? 0
-    session.bindMeeting(captureMeetingId)
+    pendingCaptureMeetingId = request.command === 'live' ? opts.meetingId : undefined
+    session.bindMeeting(pendingCaptureMeetingId)
     engine.start(request.command, request.filePath, opts)
   })
 

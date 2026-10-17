@@ -61,6 +61,8 @@ import { docToMarkdown, markdownToEditorHtml, markdownToHtml } from './lib/markd
 type Phase = 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
 
 interface SessionState {
+  captureId?: string
+  savedAudioFailures?: MeetingRecord['savedAudioFailures']
   phase: Phase
   statusText: string
   segments: TranscriptSegment[]
@@ -93,6 +95,13 @@ function formatClock(totalSec: number): string {
 }
 
 function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
+  if (
+    ev.event !== 'started' &&
+    ev.event !== 'session-snapshot' &&
+    ev.captureId &&
+    ev.captureId !== state.captureId
+  )
+    return state
   const active = ACTIVE_PHASES.includes(state.phase)
   switch (ev.event) {
     case 'session-snapshot': {
@@ -100,6 +109,8 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
       return {
         ...state,
         phase: snapshot.phase,
+        captureId: snapshot.captureId,
+        savedAudioFailures: snapshot.savedAudioFailures,
         segments: snapshot.segments.filter((s) => !s.echo),
         partials: snapshot.partials,
         echoCount: snapshot.segments.filter((s) => s.echo).length,
@@ -112,7 +123,12 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         // A file run from the dev console superseded any live session.
         return active ? { ...state, phase: 'idle', statusText: '' } : state
       }
-      return { ...initialSessionState, phase: 'starting', statusText: 'Starting…' }
+      return {
+        ...initialSessionState,
+        captureId: ev.captureId,
+        phase: 'starting',
+        statusText: 'Starting…'
+      }
     case 'status':
       return applyCaptureStatus(state, ev)
     case 'ready':
@@ -561,6 +577,7 @@ export default function MeetingView({
     dispatch(reset)
     setSavedSegments(record.segments.filter((segment) => !segment.echo))
     setSavedEcho(record.echoSuppressed)
+    setMeeting(record)
   }, [meetingId, cancelEnhance])
 
   // Retry can finish in the app-level progress panel while this editor stays mounted.
@@ -622,6 +639,15 @@ export default function MeetingView({
           cancelEnhance()
           generationRef.current.startCapture(ev.captureId)
           const prev = stateRef.current
+          // Resume starts a fresh capture, but cannot repair earlier missing audio.
+          setMeeting((meeting) =>
+            meeting
+              ? {
+                  ...meeting,
+                  savedAudioFailures: { ...meeting.savedAudioFailures, ...prev.savedAudioFailures }
+                }
+              : meeting
+          )
           if (prev.segments.length > 0) {
             setSavedSegments((s) => reconcileTranscriptSegments(s, prev.segments))
           }
@@ -1613,6 +1639,27 @@ export default function MeetingView({
           <button type="button" onClick={() => dispatch({ event: 'error', message: '' })}>
             ✕
           </button>
+        </div>
+      )}
+
+      {(meeting?.savedAudioFailures?.mic ||
+        meeting?.savedAudioFailures?.system ||
+        state.savedAudioFailures?.mic ||
+        state.savedAudioFailures?.system) && (
+        <div className="saved-audio-warning" role="status" aria-live="polite">
+          <strong>
+            Saved audio incomplete:{' '}
+            {[
+              (meeting?.savedAudioFailures?.mic || state.savedAudioFailures?.mic) && 'Microphone',
+              (meeting?.savedAudioFailures?.system || state.savedAudioFailures?.system) &&
+                'System audio'
+            ]
+              .filter(Boolean)
+              .join(' and ')}
+            .
+          </strong>{' '}
+          Playback and audio recovery may be incomplete. You can keep taking notes and using
+          available transcription.
         </div>
       )}
 
