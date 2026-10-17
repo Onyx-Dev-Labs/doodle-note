@@ -798,7 +798,7 @@ app.whenReady().then(async () => {
   agentAccessService.registerIpc()
 
   const sourceIndex = new SourceIndexService(
-    join(libraryRoot(), 'meetings'),
+    () => join(libraryRoot(), 'meetings'),
     join(app.getPath('userData'), 'derived-source-index'),
     assertLibrary
   )
@@ -824,7 +824,10 @@ app.whenReady().then(async () => {
     registerStorageIpc(
       storage,
       () => recording.busy || importService.isBusy,
-      (previous) => agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
+      (previous) => {
+        sourceIndex.refreshLibraryPath()
+        agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
+      }
     )
 
   // A fresh look at the app deserves fresh events (throttled inside).

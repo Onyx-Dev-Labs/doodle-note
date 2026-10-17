@@ -47,7 +47,7 @@ Both tokenizers were executed in real Node SQLite. In a separate identical-text 
 
 Trigram retains the literal substring contract; unicode61 is faster but misses infixes. Short terms fall back to the common literal predicate. No native addon, embeddings or external service was added.
 
-## Verification evidence
+## Initial verification evidence (`bd2fa54`)
 
 - Frozen pnpm 10.33.2 install succeeded. Host Node 24.22.0.
 - Meetings-store: 29 tests passed, including 501-meeting late recall, edits/trash/restore/import/delete, explicit scope, retained selected summaries, source corruption/unreadability, identity relocation, cache corruption, transactional cancellation, real worker generation fencing and concurrent external file changes.
@@ -59,6 +59,19 @@ Trigram retains the literal substring contract; unicode61 is faster but misses i
 
 Reproduce with commands in [the package README](../../packages/meetings-store/README.md). Raw benchmark measurements follow, so the table can be checked without relying on rounded prose.
 
+## Follow-up verification: live relocation and malformed legacy summaries
+
+Two P2 regressions were reproduced against `bd2fa54ce53e1d6ccb5577aaf888699690c9f006` before the fixes:
+
+- The actual desktop service/client/worker plus storage IPC and `LibraryStorage` moved a synthetic library, then edited its active original. Searching the old text still returned one hit rather than zero because the service retained its constructor path. The service now reads the trusted live path, retires the old worker, waits for its exit before starting another writer, and fences both pending operations and delayed replies. The real relocation callback refreshes retrieval before agent configuration. Missing active volumes fail; the retained recovery copy is never substituted. Failed/cancelled transfers keep the unchanged active library.
+- A nonstring legacy `enhancedMarkdown` produced `unavailableCount: 0` and complete/exhaustive coverage. Both SQLite retrieval and the direct MCP projection now count that summary as unavailable, keep valid passages searchable, and return incomplete coverage. Missing/null legacy summaries remain valid absence. Selected-summary precedence is unchanged, including incomplete coverage for a missing/malformed selected summary. Fixtures remain byte-identical.
+
+Three service lifecycle tests cover actual relocation IPC, edits after moving, stable anchors before edits/stale anchors after edits, delayed search and resolve replies, cancellation while worker retirement is deliberately held, late messages from both old and replacement clients, one live worker at a time, cancelled/failed transfer, missing active volume, and path changes without the callback. Only native Electron transport and the emitted worker entry path are stubbed; the service/client/worker/storage/barrier implementations are real. A shared-package regression covers object/array/number/boolean malformed summaries, absent/null/empty/string values and selected-summary precedence through both backends.
+
+Follow-up checks: frozen install; meetings-store **30/30**; MCP **11/11**; desktop **366 passed, 8 existing skips (374 total)**; meetings-store/MCP/desktop typechecks; desktop/MCP builds; repository lint; production audit (no known vulnerabilities); diff check. The built MCP stdio smoke passed on actual Node **18.20.8**; the emitted worker passed again in a native Electron **44.0.0**, Node **24.18.1**, SQLite **3.53.1** app process. Initial ASAR compatibility evidence above remains applicable; no packaging/dependency changes were made. The PR and Notion handoff record the exact follow-up tested SHA.
+
+The 1k/10k benchmark was not rerun: these fixes change relocation lifecycle and malformed-input coverage, not the valid-library reconciliation/query algorithm. The measurements and latency/RSS tradeoffs above remain evidence from the initial head, not new-head measurements. Native packaged capture/relocation and Windows QA remain open.
+
 ## Acceptance mapping and remaining gates
 
 1. **Old full-history passage:** automated 501+ records and 1k/10k datasets; stable segment/source/revision anchors; no summaries required.
@@ -67,7 +80,7 @@ Reproduce with commands in [the package README](../../packages/meetings-store/RE
 4. **Desktop/MCP parity:** shared projection, lexical semantics and resolution statuses tested; actual Node 18 stdio and Electron ASAR worker smoke passed. Legacy JSON remains readable.
 5. **Performance:** measured tables above; main-loop isolation demonstrated under synthetic capture. No query speedup or real-time native capture claim.
 
-**Check this before approval:** In an isolated packaged Mac app with synthetic originals, call `window.sources.search('rarephrase')` while recording; confirm responsive capture, truthful coverage and inspectable matching source. Edit/trash the matching original during a query; obsolete hits must disappear or the result must be rejected/marked incomplete. Resolve its old anchor and observe stale/missing. Cancel and rerun retrieval. Quit during rebuild, restart, and confirm originals are unchanged and retrieval rebuilds. Relocate through Settings and confirm the same anchors resolve after restart. Corrupt only the disposable cache while closed and verify rebuild; corrupt identity must fail closed. Exercise local MCP with consent on, then revoke while running and verify access fails.
+**Check this before approval:** In an isolated packaged Mac app with synthetic originals, call `window.sources.search('rarephrase')` while recording; confirm responsive capture, truthful coverage and inspectable matching source. Edit/trash the matching original during a query; obsolete hits must disappear or the result must be rejected/marked incomplete. Resolve its old anchor and observe stale/missing. Cancel and rerun retrieval. Quit during rebuild, restart, and confirm originals are unchanged and retrieval rebuilds. Relocate through Settings without restarting: the same anchors must resolve, an edit to the active original must change search results and make old anchors stale, and disconnecting that destination must fail rather than search the recovery copy. Corrupt only the disposable cache while closed and verify rebuild; corrupt identity must fail closed. Exercise local MCP with consent on, then revoke while running and verify access fails.
 
 Remaining: required CI/CodeQL, human review, isolated packaged macOS capture/restart/relocation acceptance, then native Windows validation. Native platform QA and release signing/publication are parent-owned gates. No merge or publication in this lane.
 

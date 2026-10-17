@@ -205,7 +205,11 @@ export function projectSources(
     if (object(summary) && typeof summary.text === "string")
       add("summary", `summary:${string(summary.id)}`, summary.text);
     else unavailableCount++;
-  } else add("summary", "summary:enhanced", string(raw.enhancedMarkdown));
+  } else if (raw.enhancedMarkdown == null) {
+    // Older originals may omit the summary or explicitly store null.
+  } else if (typeof raw.enhancedMarkdown === "string") {
+    add("summary", "summary:enhanced", raw.enhancedMarkdown);
+  } else unavailableCount++;
   const revisionId = digest(
     JSON.stringify({
       passages,

@@ -375,3 +375,54 @@ test(
     }
   },
 );
+
+
+test("malformed legacy summary is unavailable in both backends; absent/null and selected precedence remain valid", (t) => {
+  const f = fixture(t);
+  const index = new DerivedSourceIndex(join(f.root, "cache"));
+  t.after(() => index.close());
+  for (const enhancedMarkdown of [{ text: "needle" }, ["needle"], 7, false]) {
+    f.put("a", { rawNotesMarkdown: "needle", enhancedMarkdown });
+    const before = readFileSync(join(f.dir, "a.json"));
+    for (const result of [index.search(f.context, "needle"), searchOriginalSources(f.context, "needle")]) {
+      assert.equal(result.hits.length, 1, "valid personal text remains retrievable");
+      assert.equal(result.unavailableCount, 1);
+      assert.equal(result.countsAreComplete, false);
+      assert.equal(result.isExhaustive, false);
+    }
+    assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
+  }
+  f.put("a", { enhancedMarkdown: { text: "needle" } });
+  const malformedOnly = readFileSync(join(f.dir, "a.json"));
+  for (const result of [index.search(f.context, "needle"), searchOriginalSources(f.context, "needle")]) {
+    assert.equal(result.hits.length, 0);
+    assert.equal(result.unavailableCount, 1);
+    assert.equal(result.countsAreComplete, false);
+    assert.equal(result.isExhaustive, false);
+  }
+  assert.deepEqual(readFileSync(join(f.dir, "a.json")), malformedOnly);
+  for (const enhancedMarkdown of [undefined, null, "", "needle"]) {
+    f.put("a", { enhancedMarkdown });
+    for (const result of [index.search(f.context, "needle"), searchOriginalSources(f.context, "needle")]) {
+      assert.equal(result.hits.length, enhancedMarkdown === "needle" ? 1 : 0);
+      assert.equal(result.unavailableCount, 0);
+      assert.equal(result.countsAreComplete, true);
+      assert.equal(result.isExhaustive, true);
+    }
+  }
+  for (const text of ["selected needle", null]) {
+    f.put("a", {
+      enhancedMarkdown: { text: "ignored legacy needle" },
+      metadata: { selectedSummaryID: "v1", summaries: [{ id: "v1", text }] },
+    });
+    const before = readFileSync(join(f.dir, "a.json"));
+    for (const result of [index.search(f.context, "needle"), searchOriginalSources(f.context, "needle")]) {
+      assert.equal(result.hits.length, text === null ? 0 : 1);
+      assert.equal(result.unavailableCount, text === null ? 1 : 0);
+      assert.equal(result.countsAreComplete, text !== null);
+      assert.equal(result.isExhaustive, text !== null);
+      if (text) assert.equal(result.hits[0]?.anchor.sourceId, "summary:v1");
+    }
+    assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
+  }
+});
