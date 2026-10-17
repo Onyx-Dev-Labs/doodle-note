@@ -59,7 +59,9 @@ export interface AskInput {
  * The engine's answer to an "ask anything" question — same shape as
  * MergedNotes (markdown payload + which engine + how long it took).
  */
-export type AskAnswer = MergedNotes
+export interface AskAnswer extends MergedNotes {
+  coverage?: import('./global-ask-prompt').GlobalAskCoverage
+}
 
 /** Progress of a long-meeting notes run (map-reduce condensation). */
 export interface GenerationControl {
