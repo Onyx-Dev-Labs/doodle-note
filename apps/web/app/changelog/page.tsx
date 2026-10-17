@@ -9,6 +9,14 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.34",
+    date: "October 6, 2026",
+    highlights: [
+      "Mac: reconnect an existing Google Calendar account when its authorization expires",
+      "Keep new Google Calendar connections unavailable pending verification",
+    ],
+  },
+  {
     version: "0.4.33",
     date: "October 6, 2026",
     highlights: [
