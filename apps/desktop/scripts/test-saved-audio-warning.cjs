@@ -35,6 +35,7 @@ global.mockEngine = engine => {
   engine.startServe = () => {};
   engine.listInputDevices = async () => [];
   engine.start = command => {
+    if (global.qaStartFailure) { engine.emit({ event: 'spawn-error', message: global.qaStartFailure }); return; }
     engine.emit({ event: 'started', command, binaryPath: 'synthetic' });
     engine.emit({ event: 'ready', channels: ['mic', 'system'] });
   };
@@ -91,7 +92,22 @@ async function main() {
     })
     await page.reload()
     await page.getByText('Synthetic audio warning QA', { exact: true }).click()
+    const failureMessage = 'The transcription engine is still starting up. Try again in a moment.'
+    const failNextStart = () =>
+      runtime.evaluate((_, message) => {
+        global.qaStartFailure = message
+      }, failureMessage)
+    const allowStart = () =>
+      runtime.evaluate(() => {
+        global.qaStartFailure = undefined
+      })
+    // First-ever attempt fails before started; show the actionable message and permit retry.
+    await failNextStart()
     await page.getByTitle('Start recording', { exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText(failureMessage)
+    await allowStart()
+    await page.getByTitle('Start recording', { exact: true }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
     const stop = page.getByRole('button', { name: 'Stop recording', exact: true })
     await expect(stop).toBeVisible()
     const emit = (event) => runtime.evaluate((_, ev) => global.qaEngine.emit(ev), event)
@@ -174,7 +190,13 @@ async function main() {
     await page.reload()
     await page.getByText('Synthetic audio warning QA', { exact: true }).click()
     await expect(warning).toContainText('Microphone and System audio')
+    // A failed Resume must also remain actionable, then reset cleanly on retry.
+    await failNextStart()
     await page.getByTitle('Resume recording', { exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText(failureMessage)
+    await allowStart()
+    await page.getByTitle('Resume recording', { exact: true }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
     await expect(stop).toBeVisible()
     await emit({ event: 'status', stage: 'audio_save_failed', channel: 'mic', captureId })
     assert.deepEqual(
@@ -186,6 +208,40 @@ async function main() {
     await expect(warning).toBeVisible() // earlier part is still incomplete
     await stop.click()
     await page.getByTitle('Resume recording', { exact: true }).waitFor()
+    // Stay in this main process: B must not receive A's capture ID on a pre-start failure.
+    await page.getByRole('button', { name: 'Back to home', exact: true }).click()
+    await page.evaluate(() =>
+      window.meetings.upsert({
+        id: 'qa-next',
+        title: 'Next meeting startup failure',
+        rawNotesMarkdown: ''
+      })
+    )
+    await page.reload()
+    await page.getByText('Next meeting startup failure', { exact: true }).click()
+    await failNextStart()
+    await page.getByTitle('Start recording', { exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText(failureMessage)
+    await page.screenshot({ path: path.join(evidence, 'next-meeting-startup-failure.png') })
+    await allowStart()
+    await page.getByTitle('Start recording', { exact: true }).click()
+    await expect(stop).toBeVisible()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await emit({ event: 'spawn-error', captureId, message: 'Stale previous capture failure' })
+    await emit({
+      event: 'status',
+      stage: 'audio_save_failed',
+      channel: 'mic',
+      captureId,
+      reason: '/private/stale.caf'
+    })
+    await expect(stop).toBeVisible()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.locator('.saved-audio-warning')).toHaveCount(0)
+    await stop.click()
+    await expect
+      .poll(() => page.evaluate(async () => (await window.engine.snapshot('qa-next'))?.phase))
+      .toBe('ended')
     await runtime.close()
     runtime = null
     page = await launch()
@@ -222,7 +278,7 @@ async function main() {
       )
     )
     console.log(
-      'PASS: per-channel warning, sanitized IPC, continuing text, hide/show, snapshot, keyboard Stop, Resume, relaunch persistence, stale rejection, fresh meeting, light/dark wide/narrow'
+      'PASS: per-channel warning, sanitized IPC, continuing text, hide/show, snapshot, keyboard Stop, Resume, relaunch persistence, stale rejection, fresh meeting, light/dark wide/narrow, first-ever/A-to-B/Resume pre-start errors and successful retry'
     )
   } finally {
     if (runtime) await runtime.close()

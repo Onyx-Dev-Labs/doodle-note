@@ -19,7 +19,7 @@ The PR records the exact tested commit. No Swift production code changed.
 The relevant baseline had 13 passing tests. The new persistence regression failed on the old implementation (`savedAudioFailures.mic` was undefined) and passes after the fix.
 
 - Frozen-lockfile install: passed. Package manager retained its configured ignored native build scripts.
-- Desktop: 366 passed, 8 skipped, 0 failed (374 total); node/renderer typechecks and production build passed.
+- Desktop: 369 passed, 8 skipped, 0 failed (377 total); node/renderer typechecks and production build passed.
 - Meetings store: 19 passed; typecheck passed.
 - Workspace lint and production audit passed (no known vulnerabilities).
 - Web typecheck and MCP tests are reported in the PR with exact results.
@@ -41,6 +41,18 @@ Passed: mic-only failure, both-source failure while transcript is hidden, ongoin
 ![Light recording warning](recording-1280-light.png)
 ![Dark minimum-width recording warning](recording-800-dark.png)
 ![Warning after complete app relaunch](reopened-after-relaunch.png)
+
+## P2 review revision: pre-start failures
+
+Review of `6768b6e` found that a pre-start `spawn-error` for fresh meeting B was stamped with completed capture A's identity. The renderer correctly rejected that mismatched identity, hiding B's actionable startup error. The Windows worker-restarting branch in `EngineHostWin.start` emits exactly this event before `started`.
+
+The regression was reproduced in the isolated built Electron app: first-ever failure and Resume failure displayed correctly, but A-to-B failed the visible-alert assertion. The helper regression also observed `capture-a` incorrectly attached to the new failure.
+
+Host-guarded `spawn-error` events now preserve their supplied identity, including no identity before `started`. The explicit stale-ID check still runs first; the renderer guard is unchanged. Existing engine-host callback guards remain responsible for untagged events from superseded processes. A scripted process test now verifies both delayed startup errors and audio-save failures are rejected. No engine production change or new attempt/replay protocol is introduced.
+
+Expanded Electron QA passes first-ever failure, A-to-B failure in the same main process, failed Resume, successful retry after each, stale tagged startup/audio-save events after B starts, and the original degradation/sanitization/persistence checks. The focused 17-test group, full desktop suite (369 passed, 8 native/platform skips), desktop typecheck/build and workspace lint passed. This does not establish native Windows or disk-full acceptance.
+
+![Actionable startup error on meeting B after capture A](next-meeting-startup-failure.png)
 
 ## Check this before release
 

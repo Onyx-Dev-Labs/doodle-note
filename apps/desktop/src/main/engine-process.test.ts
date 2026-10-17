@@ -82,6 +82,7 @@ it(
     process.on('SIGTERM', () => {
       setTimeout(() => {
         emit({ event: 'status', stage: 'audio_save_failed', channel: 'mic' });
+        emit({ event: 'spawn-error', message: 'Stale previous process failure' });
         log('late-failure'); process.exit(0);
       }, 80);
     });
@@ -94,6 +95,10 @@ it(
     await waitFor(() => events.filter((e) => e.event === 'ready').length === 2, 'second capture')
     assert.equal(
       events.some((e) => e.event === 'status' && e.stage === 'audio_save_failed'),
+      false
+    )
+    assert.equal(
+      events.some((e) => e.event === 'spawn-error'),
       false
     )
   }
