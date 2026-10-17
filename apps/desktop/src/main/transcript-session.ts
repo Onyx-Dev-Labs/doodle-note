@@ -9,6 +9,7 @@ import type {
 } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
 import { reconcileRefinedTranscript } from './transcript-refinement'
+import type { SavedAudioFailures } from '@repo/meetings-store/types'
 
 /**
  * Owns one live capture session: feeds engine timings through the
@@ -30,6 +31,7 @@ export class TranscriptSession {
   private meetingId: string | undefined
   private phase: EngineSessionSnapshot['phase'] = 'starting'
   private partials: Partial<Record<EngineChannel, string>> = {}
+  private savedAudioFailures: SavedAudioFailures = {}
 
   bindMeeting(meetingId?: string): void {
     this.meetingId = meetingId
@@ -43,6 +45,7 @@ export class TranscriptSession {
       phase: this.phase,
       segments: [...this.segments],
       partials: { ...this.partials },
+      savedAudioFailures: { ...this.savedAudioFailures },
       error: this.error
     }
   }
@@ -55,10 +58,15 @@ export class TranscriptSession {
     private readonly broadcast: (ev: EngineEvent) => void,
     private readonly sessionsDirSource: LibraryPath,
     private readonly assertAvailable: () => void = () => {},
-    private readonly checkpoint: (segments: TranscriptSegment[], ended: boolean) => void = () => {}
+    private readonly checkpoint: (
+      segments: TranscriptSegment[],
+      ended: boolean,
+      savedAudioFailures: SavedAudioFailures
+    ) => void = () => {}
   ) {}
 
   handle(ev: EngineEvent): void {
+    if (ev.event !== 'started' && ev.captureId && ev.captureId !== this.captureId) return
     switch (ev.event) {
       case 'started':
         // File modes don't create a session; a new live run resets everything.
@@ -71,6 +79,7 @@ export class TranscriptSession {
         this.captureId = ev.captureId
         this.phase = 'starting'
         this.partials = {}
+        this.savedAudioFailures = {}
         return
       case 'ready':
         this.phase = 'recording'
@@ -79,6 +88,13 @@ export class TranscriptSession {
         if (ev.channel) this.partials[ev.channel] = ev.text
         return
       case 'status':
+        if (!this.assembler || this.saved) return
+        if (ev.stage === 'audio_save_failed' && (ev.channel === 'mic' || ev.channel === 'system')) {
+          if (!this.savedAudioFailures[ev.channel]) {
+            this.savedAudioFailures[ev.channel] = true
+            this.persistCheckpoint(false)
+          }
+        }
         if (['finishing', 'saving_audio', 'refining_transcript'].includes(ev.stage ?? ''))
           this.phase = 'finishing'
         return
@@ -132,9 +148,11 @@ export class TranscriptSession {
 
   private persistCheckpoint(ended: boolean): void {
     try {
-      this.checkpoint(this.segments, ended)
+      this.checkpoint(this.segments, ended, { ...this.savedAudioFailures })
     } catch (error) {
-      this.error = `Could not save the meeting transcript: ${String(error)}. Keep the recording and retry.`
+      console.error('[transcript] meeting checkpoint failed:', error)
+      this.error =
+        'Could not save the meeting transcript. Keep this window open and free storage before retrying.'
       this.broadcast({ event: 'error', message: this.error })
     }
   }
@@ -170,6 +188,7 @@ export class TranscriptSession {
             startedAt: this.startedAtIso,
             savedAt: new Date().toISOString(),
             finals: this.finals,
+            savedAudioFailures: this.savedAudioFailures,
             segments: this.segments
           },
           null,
@@ -183,7 +202,9 @@ export class TranscriptSession {
         ...(error ? { error } : {})
       })
     } catch (err) {
-      const message = `Failed to save session: ${String(err)}`
+      console.error('[transcript] session save failed:', err)
+      const message =
+        'Failed to save session. Keep this window open and free storage before retrying.'
       this.error = message
       this.broadcast({ event: 'error', message })
       this.broadcast({

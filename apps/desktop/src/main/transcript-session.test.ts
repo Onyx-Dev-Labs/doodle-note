@@ -168,10 +168,13 @@ test('checkpoint failure is reported at finalization while the recovery session 
       dir,
       () => {},
       () => {
-        throw new Error('synthetic disk failure')
+        throw new Error('ENOSPC /private/synthetic/meeting.json')
       }
     )
     session.handle({ event: 'started', command: 'live', binaryPath: 'synthetic' })
+    session.bindMeeting('failed-save')
+    session.handle({ event: 'status', stage: 'audio_save_failed', channel: 'mic' })
+    assert.deepEqual(session.snapshot('failed-save')?.savedAudioFailures, { mic: true })
     session.handle({
       event: 'timings',
       channel: 'mic',
@@ -179,6 +182,10 @@ test('checkpoint failure is reported at finalization while the recovery session 
     })
     session.handle({ event: 'done' })
     assert.ok(events.some((event) => event.event === 'session-saved'))
+    assert.equal(
+      JSON.stringify(events.filter((event) => event.event === 'error')).includes('/private/'),
+      false
+    )
     assert.match(
       (events.at(-1) as { error: string }).error,
       /Could not save the meeting transcript/

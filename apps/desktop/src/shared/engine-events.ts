@@ -104,6 +104,8 @@ export interface EngineStartRequest {
 /* ---- Events emitted by the sidecar itself (parsed from stdout NDJSON) ---- */
 
 export interface EngineStatusEvent {
+  /** Main-owned capture identity; raw sidecar diagnostics have no identity. */
+  captureId?: string
   event: 'status'
   model?: string
   stage?: string
@@ -263,6 +265,7 @@ export interface EngineSegmentsReplacedEvent {
 }
 
 export interface EngineSessionSnapshot {
+  savedAudioFailures?: import('@repo/meetings-store/types').SavedAudioFailures
   meetingId: string
   captureId?: string
   phase: 'starting' | 'recording' | 'finishing' | 'ended'
@@ -283,7 +286,7 @@ export type EngineLifecycleEvent =
   | { event: 'capture-finalized'; captureId?: string; error?: string }
 
 /** Everything the renderer can receive on ENGINE_EVENT_CHANNEL. */
-export type EngineEvent = EngineSidecarEvent | EngineLifecycleEvent
+export type EngineEvent = (EngineSidecarEvent | EngineLifecycleEvent) & { captureId?: string }
 
 /** API surface exposed on `window.engine` by the preload script. */
 export interface EngineApi {

@@ -2,6 +2,7 @@ import { beginRecordableMeeting } from './capture-eligibility'
 import { transcribeWithWhisper } from './whisper-transcriber'
 import { transcribeFileToSegments } from './import-logic'
 import { persistCaptureTranscript } from './capture-transcript-checkpoint'
+import { captureEventForSession } from './capture-event'
 import { libraryActivity } from './library-activity'
 import {
   app,
@@ -445,11 +446,12 @@ app.whenReady().then(async () => {
   let captureMeetingId: string | undefined
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
+  let captureId: string | undefined
   const session = new TranscriptSession(
     broadcastEngineEvent,
     () => join(libraryRoot(), 'sessions'),
     assertLibrary,
-    (segments, ended) => {
+    (segments, ended, savedAudioFailures) => {
       if (!captureMeetingId) return
       persistCaptureTranscript(
         meetingsService,
@@ -457,7 +459,8 @@ app.whenReady().then(async () => {
         captureBase,
         captureBaseEcho,
         segments,
-        ended
+        ended,
+        savedAudioFailures
       )
     }
   )
@@ -506,7 +509,11 @@ app.whenReady().then(async () => {
 
   engine.onEvent((rawEvent) => {
     // Bind terminal transcript persistence to the exact capture the renderer saw start.
-    const event = rawEvent.event === 'started' ? { ...rawEvent, captureId: randomUUID() } : rawEvent
+    if (rawEvent.event === 'started') captureId = randomUUID()
+    // The host rejects callbacks from superseded processes. Stamp accepted events
+    // for snapshot/renderer ownership, and never send filesystem diagnostics to UI.
+    const event = captureEventForSession(rawEvent, captureId)
+    if (!event) return
     broadcastEngineEvent(event)
     session.handle(event)
     if (event.event === 'audio') audioService.onAudioSaved(event)

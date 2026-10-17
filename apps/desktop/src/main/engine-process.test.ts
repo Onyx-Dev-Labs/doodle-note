@@ -73,6 +73,32 @@ function startLive(
 const sawFinishing = (events: EngineEvent[]): boolean =>
   events.some((e) => e.event === 'status' && e.stage === 'finishing')
 
+it(
+  'rejects delayed audio-save failures from a superseded process',
+  { skip: process.platform === 'win32' },
+  async () => {
+    const { binary, log } = fakeEngine(`
+    emit({ event: 'ready' });
+    process.on('SIGTERM', () => {
+      setTimeout(() => {
+        emit({ event: 'status', stage: 'audio_save_failed', channel: 'mic' });
+        log('late-failure'); process.exit(0);
+      }, 80);
+    });
+    process.stdin.resume();
+  `)
+    const { engine, events } = startLive(binary, 100)
+    await waitFor(() => events.some((e) => e.event === 'ready'), 'first capture')
+    engine.start('live')
+    await waitFor(() => logLines(log).includes('late-failure'), 'discarded writer failure')
+    await waitFor(() => events.filter((e) => e.event === 'ready').length === 2, 'second capture')
+    assert.equal(
+      events.some((e) => e.event === 'status' && e.stage === 'audio_save_failed'),
+      false
+    )
+  }
+)
+
 describe('EngineProcess persistent capture', { skip: process.platform === 'win32' }, () => {
   async function serve(wedged = false): Promise<{
     engine: EngineProcess
