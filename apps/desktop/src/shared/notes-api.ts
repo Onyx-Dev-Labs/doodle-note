@@ -191,6 +191,8 @@ export interface GlobalAskRequest {
 
 /** Errors come back as a value, never as a rejected promise. */
 export interface GlobalAskResult {
+  coverage?: import('@repo/ai').GlobalAskCoverage
+  code?: 'question-too-large' | 'unsupported-model-budget'
   answer?: string
   engine?: string
   elapsedMs?: number
@@ -199,6 +201,7 @@ export interface GlobalAskResult {
 
 /** One persisted Home-level exchange (userData/global-chat.json). */
 export interface GlobalChatEntry {
+  coverage?: import('@repo/ai').GlobalAskCoverage
   question: string
   answer: string
   /** ISO timestamp of when the question was asked. */
