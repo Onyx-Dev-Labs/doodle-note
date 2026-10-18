@@ -373,3 +373,102 @@ test('main rollout admission blocks generation and cache validation before any s
   )
   assert.equal(reads, 0)
 })
+
+test('citation admission rejects an original changed during the awaited audio mapping', async (t) => {
+  const f = fixture(t)
+  const service = new serviceModule.MainCitedAskService({
+    sources: f.sources,
+    generate: f.generate,
+    validateModel: async () => true,
+    audio: async () => {
+      f.put('old', 'Orchid changed during audio mapping.')
+      return { status: 'unavailable' }
+    }
+  })
+  const result = await service.run(f.request, f.control)
+  assert.equal(result.status, 'complete')
+  const view = await service.resolveCitation(
+    result.snapshot,
+    result.snapshot.prompt!.ranges[0]!.id,
+    f.request,
+    f.control
+  )
+  assert.equal(view.status, 'stale')
+  assert.equal('passage' in view, false)
+})
+
+test('validation rejects a prior source changing during the final acknowledged resolve', async (t) => {
+  const f = fixture(t)
+  const request = {
+    ...f.request,
+    selection: { mode: 'linked-history' as const, meetingIds: ['old', 'unrelated'] }
+  }
+  const result = await f.service.run(request, f.control)
+  assert.equal(result.status, 'complete')
+  let resolves = 0
+  const service = new serviceModule.MainCitedAskService({
+    sources: {
+      ...f.sources,
+      resolveAcknowledged: async (anchor) => {
+        const resolved = await f.sources.resolveAcknowledged(anchor)
+        if (++resolves === result.snapshot.prompt!.ranges.length)
+          f.put('old', 'Changed after earlier source resolution.')
+        return resolved
+      }
+    },
+    generate: f.generate,
+    validateModel: async () => true
+  })
+  assert.equal((await service.validate(result.snapshot, request, f.control)).status, 'stale')
+})
+
+test('no-model empty validation still fences final source changes without audio work', async (t) => {
+  const f = fixture(t)
+  const request = {
+    purpose: 'library-ask' as const,
+    selection: { mode: 'question' as const, question: 'missingword', filters: {} }
+  }
+  const result = await f.service.run(request, f.control)
+  assert.equal(result.status, 'insufficient-evidence')
+  let audioCalls = 0
+  const service = new serviceModule.MainCitedAskService({
+    sources: {
+      ...f.sources,
+      validateEvidence: async (manifest) => {
+        f.put('old', 'missingword is now present.')
+        return f.sources.validateEvidence(manifest)
+      }
+    },
+    generate: f.generate,
+    validateModel: async () => true,
+    audio: async () => {
+      audioCalls++
+      return { status: 'unavailable' }
+    }
+  })
+  assert.equal((await service.validate(result.snapshot, request, f.control)).status, 'stale')
+  assert.equal(f.generated(), 0)
+  assert.equal(audioCalls, 0)
+})
+
+test('cancel during audio mapping withholds the previously resolved original', async (t) => {
+  const f = fixture(t)
+  const result = await f.service.run(f.request, f.control)
+  assert.equal(result.status, 'complete')
+  const abort = new AbortController()
+  const service = new serviceModule.MainCitedAskService({
+    sources: f.sources,
+    generate: f.generate,
+    validateModel: async () => true,
+    audio: async () => {
+      abort.abort()
+      return { status: 'unavailable' }
+    }
+  })
+  await assert.rejects(
+    service.resolveCitation(result.snapshot, result.snapshot.prompt!.ranges[0]!.id, f.request, {
+      ...f.control,
+      signal: abort.signal
+    })
+  )
+})

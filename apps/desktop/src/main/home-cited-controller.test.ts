@@ -292,3 +292,109 @@ test('actual Home IPC validates owner, frame and payload; returns immediate cove
   )
   assert.ok(sent.every((m) => !('token' in (m.value as object))))
 })
+
+for (const scenario of ['changed-source', 'relocation', 'owner-cancel', 'mapping-failure'] as const)
+  test(`Home playback fences ${scenario} and retains library activity through cleanup`, async (t) => {
+    const f = fixture(t)
+    const result = await f.controller.ask(f.request, f.owner)
+    assert.equal(result.status, 'complete')
+    const evidenceId = result.snapshot.prompt!.ranges[0]!.id
+    const abort = new AbortController()
+    const owner = { ...f.owner, signal: abort.signal }
+    let release!: () => void
+    let started!: () => void
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    const began = new Promise<void>((r) => {
+      started = r
+    })
+    const controller = new HomeCitedController({
+      store: f.store,
+      cited: f.cited,
+      activity: f.activity,
+      enabled: () => true,
+      audio: {
+        play: async () => {
+          started()
+          await held
+          if (scenario === 'mapping-failure') throw new Error('synthetic missing recording')
+          return { bytes: new Uint8Array([1]), mime: 'audio/wav', seekSeconds: 0 }
+        }
+      }
+    })
+    const playing = controller.play('run', evidenceId, 'synthetic-token', owner)
+    await began
+    let entered = false
+    const moving =
+      scenario === 'relocation'
+        ? f.activity.exclusive(async () => {
+            entered = true
+          })
+        : null
+    if (scenario === 'owner-cancel') abort.abort()
+    await new Promise((r) => setImmediate(r))
+    assert.equal(entered, false)
+    if (scenario === 'changed-source') f.put('Orchid source changed while reading audio.')
+    release()
+    await assert.rejects(playing, /unavailable/)
+    if (moving) {
+      await moving
+      assert.equal(entered, true)
+    } else
+      await f.activity.exclusive(async () => {
+        entered = true
+      })
+    assert.equal(entered, true)
+  })
+
+test('Home real audio adapter roundtrip returns the cited recording and refuses post-save source changes', async (t) => {
+  const { CitedSourceAudio } = await import('./cited-source-audio')
+  const f = fixture(t)
+  writeFileSync(
+    f.file,
+    JSON.stringify({
+      id: 'one',
+      segments: [
+        {
+          id: 's',
+          channel: 'mic',
+          text: 'Orchid ships Friday.',
+          startMs: 500,
+          endMs: 1500,
+          absoluteStartMs: 1000500
+        }
+      ]
+    })
+  )
+  const audioDir = join(f.root, 'audio')
+  const part = join(audioDir, 'one', '1000000')
+  mkdirSync(part, { recursive: true })
+  writeFileSync(
+    join(part, 'part.json'),
+    JSON.stringify({ startEpochMs: 1000000, durationMs: 5000, channels: 'split' })
+  )
+  writeFileSync(join(part, 'audio.wav'), 'synthetic PCM stand-in')
+  const audio = new CitedSourceAudio(
+    () => ({ meetingsDir: join(f.root, 'originals'), audioDir }),
+    () => {}
+  )
+  const controller = new HomeCitedController({
+    store: f.store,
+    cited: f.cited,
+    activity: f.activity,
+    enabled: () => true,
+    audio
+  })
+  const result = await controller.ask(f.request, f.owner)
+  assert.equal(result.status, 'complete')
+  const id = result.snapshot.prompt!.ranges[0]!.id
+  const available = await audio.available(result.snapshot, id)
+  assert.equal(available.status, 'available')
+  if (available.status !== 'available') return
+  const playback = await controller.play('run', id, available.token, f.owner)
+  assert.equal(Buffer.from(playback.bytes).toString(), 'synthetic PCM stand-in')
+  assert.equal(playback.seekSeconds, 0.5)
+  f.put('changed original')
+  await assert.rejects(controller.play('run', id, available.token, f.owner), /unavailable/)
+})

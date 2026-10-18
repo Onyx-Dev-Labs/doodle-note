@@ -1,3 +1,4 @@
+import { CitedSourceAudio } from './cited-source-audio'
 import { HomeCitedController } from './home-cited-controller'
 import { installHomeCitedIpc } from './home-cited-ipc'
 import { HOME_CITED_CHANGED } from '../shared/home-cited-api'
@@ -843,10 +844,18 @@ app.whenReady().then(async () => {
   // development override additionally requires an isolated profile.
   const citedEnabled = (): boolean =>
     !app.isPackaged && process.env.DOODLE_CITED_ASK === '1' && !!process.env.DOODLE_USER_DATA
+  const citedAudio = new CitedSourceAudio(
+    () => ({
+      meetingsDir: join(libraryRoot(), 'meetings'),
+      audioDir: join(libraryRoot(), 'audio')
+    }),
+    assertLibrary
+  )
   const sharedCitedHost = createCitedAskHost(
     {
       enabled: citedEnabled,
       sources: sourceIndex,
+      audio: (snapshot, evidenceId) => citedAudio.available(snapshot, evidenceId),
       generate: (input, signal) => notesService!.runCitedAsk(input, signal),
       validateModel: (id, revision) => notesService!.citedModelCurrent(id, revision)
     },
@@ -856,10 +865,12 @@ app.whenReady().then(async () => {
   const homeCited = new HomeCitedController({
     cited: sharedCitedHost.cited,
     store: notesService.globalChatStore,
+    audio: citedAudio,
     enabled: citedEnabled,
     census: (request, signal) => sourceIndex.census(request, signal)
   })
   sharedCitedHost.subscribeInvalidation(() => {
+    citedAudio.invalidate()
     const cleanup = homeCited.invalidate()
     broadcast(HOME_CITED_CHANGED, {})
     return cleanup
@@ -875,6 +886,7 @@ app.whenReady().then(async () => {
     ipc: ipcMain,
     owners: sharedCitedHost.owners,
     controller: homeCited,
+    play: (entryId, evidenceId, token, owner) => homeCited.play(entryId, evidenceId, token, owner),
     enabled: citedEnabled
   })
   // Consumer installation seam: Home and DEV509's brief installer receive

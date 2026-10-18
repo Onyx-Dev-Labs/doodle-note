@@ -330,7 +330,14 @@ export class MainCitedAskService implements CitedAskService {
             return { status: 'stale', reason: 'The exact original quote changed.' }
         }
       }
+      // Earlier passages can change while a later original is being resolved.
+      const finalSources = await this.deps.sources.validateEvidence(
+        snapshot.evidence.manifest,
+        control.signal
+      )
       check()
+      if (finalSources !== 'valid')
+        return { status: finalSources, reason: 'Original sources changed during validation.' }
       return { status: 'valid', observedAt: new Date().toISOString() }
     } catch (error) {
       return {
@@ -367,6 +374,11 @@ export class MainCitedAskService implements CitedAskService {
     }
     control.signal.throwIfAborted()
     control.assertCurrent()
+    // Audio mapping is asynchronous and must not reopen a stale original display.
+    const finalValidation = await this.validate(snapshot, currentRequest, control)
+    control.signal.throwIfAborted()
+    control.assertCurrent()
+    if (finalValidation.status !== 'valid') return finalValidation
     const meeting = snapshot.evidence.meetings.find((m) => m.meetingId === range.anchor.meetingId)
     return {
       status: 'resolved',

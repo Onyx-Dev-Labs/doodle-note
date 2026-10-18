@@ -1,10 +1,16 @@
+import type { CitedSourceAudio } from './cited-source-audio'
 import type {
   EvidenceFilters,
   CensusRequest,
   CensusResult
 } from '@repo/meetings-store/evidence-contract'
 import { isRecord, normalizeEvidenceFilters } from '@repo/meetings-store/evidence'
-import type { AskProgress, CitedAskRequest, CitationView } from '../shared/cited-ask-api'
+import type {
+  AskProgress,
+  CitedAskRequest,
+  CitationView,
+  CitedAudioPlayback
+} from '../shared/cited-ask-api'
 import type { HomeCitedResult, HomeCitedEntry } from '../shared/home-cited-api'
 import type { GlobalChatEntry } from '../shared/notes-api'
 import type { CitedAskService, AskControl } from './cited-ask-service'
@@ -17,6 +23,7 @@ interface Dependencies {
   store: GlobalChatStore
   cited: CitedAskService
   enabled(): boolean
+  audio?: Pick<CitedSourceAudio, 'play'>
   activity?: LibraryActivity
   census?(request: CensusRequest, signal: AbortSignal): Promise<CensusResult>
 }
@@ -298,6 +305,54 @@ export class HomeCitedController {
         status: 'unavailable',
         reason: 'This original could not be validated. Retry or generate a new answer.'
       }
+    }
+  }
+  async play(
+    entryId: unknown,
+    evidenceId: unknown,
+    token: unknown,
+    owner: CitedOwnerLease
+  ): Promise<CitedAudioPlayback> {
+    try {
+      this.checkOwner(owner)
+      if (
+        !this.deps.audio ||
+        typeof entryId !== 'string' ||
+        !ID.test(entryId) ||
+        typeof evidenceId !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(evidenceId)
+      )
+        throw new Error('Invalid citation')
+      const revision = this.revision
+      return await this.activity.run(async () => {
+        const epoch = this.deps.store.epoch()
+        const check = (): void => {
+          this.checkOwner(owner)
+          // Retire playback before a transfer instead of starting more nested reads behind it.
+          if (
+            this.activity.moving ||
+            this.revision !== revision ||
+            this.deps.store.epoch() !== epoch
+          )
+            throw new Error('Playback ownership changed.')
+        }
+        check()
+        const entry = this.deps.store.read().find((e) => e.id === entryId)
+        if (!entry?.citedAnswer) throw new Error('Saved answer unavailable')
+        const request = this.fromEntry(entry)
+        const control = { ...owner, runId: entryId, assertCurrent: check }
+        const before = await this.deps.cited.validate(entry.citedAnswer, request, control)
+        check()
+        if (before.status !== 'valid') throw new Error('Source changed')
+        const playback = await this.deps.audio!.play(token, entry.citedAnswer, evidenceId)
+        check()
+        const after = await this.deps.cited.validate(entry.citedAnswer, request, control)
+        check()
+        if (after.status !== 'valid') throw new Error('Source changed')
+        return playback
+      }, owner.signal)
+    } catch {
+      throw new Error('Recording playback is unavailable. Reopen the original and retry.')
     }
   }
   async census(request: CensusRequest, owner: CitedOwnerLease): Promise<CensusResult> {
