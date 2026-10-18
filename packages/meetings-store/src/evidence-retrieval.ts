@@ -86,9 +86,13 @@ export function selectOriginalEvidence(context: SourceContext, selection: Eviden
   const {documents,unknownDateCount,unavailableCount: domainUnavailable}=filtered(snapshot,selection.mode==='question'?selection.filters:{});
   const originals=documents.flatMap(d=>d.passages.filter(p=>p.anchor.kind==='personal'||p.anchor.kind==='transcript'));
   const df=plan.terms.map(()=>0);
-  if(plan.terms.length)for(const p of originals){
-    checkpoint();const text=normalizeSearch(p.text);
-    plan.terms.forEach((term,i)=>{if(text.includes(term))df[i]!++;});
+  // Request-local match facts (16 terms / 4 phrases), bound to passage index.
+  // No normalized full-library text copy or cache survives this selection.
+  const termMasks=new Uint16Array(originals.length),phraseMasks=new Uint8Array(originals.length);
+  if(plan.terms.length||plan.phrases.length)for(let i=0;i<originals.length;i++){
+    checkpoint();const text=normalizeSearch(originals[i]!.text);
+    plan.terms.forEach((term,j)=>{if(text.includes(term)){df[j]!++;termMasks[i]!|=1<<j;}});
+    plan.phrases.forEach((phrase,j)=>{if(text.includes(phrase))phraseMasks[i]!|=1<<j;});
   }
   type Candidate={p:SourcePassage;start:number;end:number;score:number[]};
   const compare=(a:Candidate,b:Candidate)=>{
@@ -101,15 +105,15 @@ export function selectOriginalEvidence(context: SourceContext, selection: Eviden
     if(selection.mode==='question'){top.push(c);top.sort(compare);if(top.length>64)top.pop();}
     else {const list=linked.get(c.p.anchor.meetingId)??[];list.push(c);linked.set(c.p.anchor.meetingId,list);}
   };
-  for(const p of originals){
+  for(let i=0;i<originals.length;i++){
     checkpoint();
-    const normalized=normalizeSearch(p.text);
-    if(selection.mode==='question' && ![...plan.phrases,...plan.terms].some(t=>normalized.includes(t)))continue;
+    const p=originals[i]!,termMask=termMasks[i]!,phraseMask=phraseMasks[i]!;
+    if(selection.mode==='question' && !(termMask||phraseMask))continue;
     // A complete short passage needs no match-to-original offset map. Preserve
     // the same full range/score and window checkpoint, including astral text.
     if(p.text.length<=1600 || [...p.text].length<=1600){
-      checkpoint();const matches=plan.terms.map(t=>normalized.includes(t));
-      offer({p,start:0,end:p.text.length,score:[plan.phrases.filter(t=>normalized.includes(t)).length,matches.filter(Boolean).length,matches.reduce((n,yes,i)=>n+(yes?Math.log(1+originals.length/(1+df[i]!)):0),0)]});
+      checkpoint();const matches=plan.terms.map((_,j)=>Boolean(termMask&(1<<j)));
+      offer({p,start:0,end:p.text.length,score:[plan.phrases.filter((_,j)=>phraseMask&(1<<j)).length,matches.filter(Boolean).length,matches.reduce((n,yes,i)=>n+(yes?Math.log(1+originals.length/(1+df[i]!)):0),0)]});
       continue;
     }
     const points=[...p.text]; const offsets=[0];for(const c of points)offsets.push(offsets[offsets.length-1]!+c.length);
@@ -120,7 +124,7 @@ export function selectOriginalEvidence(context: SourceContext, selection: Eviden
       // Lowercase the whole string: Unicode final sigma depends on surrounding letters.
       // NFKD expansions and removed marks map back through each original code point;
       // default contextual lowercasing after mark removal preserves these unit lengths.
-      const positions:number[]=[];
+      const normalized=normalizeSearch(p.text),positions:number[]=[];
       points.forEach((c,i)=>{const n=normalizeSearch(c);for(let j=0;j<n.length;j++)positions.push(i);});
       const centers:number[]=[];
       for(const term of [...plan.phrases,...plan.terms]){let from=0;while(from<normalized.length){const match=normalized.indexOf(term,from);if(match<0)break;centers.push(positions[match]!);from=match+Math.max(1,term.length);}}

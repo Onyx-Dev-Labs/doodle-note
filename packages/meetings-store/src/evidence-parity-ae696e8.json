@@ -1,0 +1,2904 @@
+{
+  "productionSha": "ae696e8b41371c540a4c976e7380b12835ab2f54",
+  "cases": [
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha",
+        "filters": {}
+      },
+      "bundleSha256": "5087a90d4a44f09ef1566cc7369a11fa08913b4728fa605921aadd2f4ea8937c",
+      "ranges": [
+        {
+          "id": "c333a407ef1dbc3c0d34b4654de0a2849c3261ddc729b27d62fe2e8e94f33f82",
+          "meetingId": "mask-0",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3192
+        },
+        {
+          "id": "db32837731a724510c70e1290085d34db3cfde143365705388771db42a1381ad",
+          "meetingId": "mask-4",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "meetingId": "tie-000",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "meetingId": "tie-001",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "meetingId": "tie-002",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "meetingId": "tie-003",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "meetingId": "tie-004",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "meetingId": "tie-005",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "meetingId": "tie-006",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "meetingId": "tie-007",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "meetingId": "tie-008",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "meetingId": "tie-009",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "meetingId": "tie-010",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "meetingId": "tie-011",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "meetingId": "tie-012",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "meetingId": "tie-013",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "meetingId": "tie-014",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "meetingId": "tie-015",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "meetingId": "tie-016",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "meetingId": "tie-017",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "meetingId": "tie-018",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "meetingId": "tie-019",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "meetingId": "tie-020",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "meetingId": "tie-021",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha",
+          "filters": {}
+        },
+        "terms": [
+          "alpha"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 80,
+        "matchingSourceCount": 86,
+        "candidateWindowCount": 86,
+        "selectedMeetingCount": 24,
+        "selectedRangeIds": [
+          "c333a407ef1dbc3c0d34b4654de0a2849c3261ddc729b27d62fe2e8e94f33f82",
+          "db32837731a724510c70e1290085d34db3cfde143365705388771db42a1381ad",
+          "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "candidate-cap",
+          "range-cap"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha alpha beta",
+        "filters": {}
+      },
+      "bundleSha256": "e69b6a6ab062d211c32c711b40d04989b6efe0f550e99320ffba48c0f197cd20",
+      "ranges": [
+        {
+          "id": "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "meetingId": "tie-000",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "meetingId": "tie-001",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "meetingId": "tie-002",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "meetingId": "tie-003",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "meetingId": "tie-004",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "meetingId": "tie-005",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "meetingId": "tie-006",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "meetingId": "tie-007",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "meetingId": "tie-008",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "meetingId": "tie-009",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "meetingId": "tie-010",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "meetingId": "tie-011",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "meetingId": "tie-012",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "meetingId": "tie-013",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "meetingId": "tie-014",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "meetingId": "tie-015",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "meetingId": "tie-016",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "meetingId": "tie-017",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "meetingId": "tie-018",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "meetingId": "tie-019",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "meetingId": "tie-020",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "meetingId": "tie-021",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "meetingId": "tie-022",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27",
+          "meetingId": "tie-023",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha alpha beta",
+          "filters": {}
+        },
+        "terms": [
+          "alpha",
+          "beta"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 81,
+        "matchingSourceCount": 88,
+        "candidateWindowCount": 89,
+        "selectedMeetingCount": 24,
+        "selectedRangeIds": [
+          "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "candidate-cap",
+          "range-cap"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "\"alpha beta\" gamma",
+        "filters": {}
+      },
+      "bundleSha256": "6b5223755745bf51b2a3a451943bed9bd3a97b41691010715fb87543f892bf33",
+      "ranges": [
+        {
+          "id": "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "meetingId": "tie-000",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "meetingId": "tie-001",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "meetingId": "tie-002",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "meetingId": "tie-003",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "meetingId": "tie-004",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "meetingId": "tie-005",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "meetingId": "tie-006",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "meetingId": "tie-007",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "meetingId": "tie-008",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "meetingId": "tie-009",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "meetingId": "tie-010",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "meetingId": "tie-011",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "meetingId": "tie-012",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "meetingId": "tie-013",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "meetingId": "tie-014",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "meetingId": "tie-015",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "meetingId": "tie-016",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "meetingId": "tie-017",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "meetingId": "tie-018",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "meetingId": "tie-019",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "meetingId": "tie-020",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "meetingId": "tie-021",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "meetingId": "tie-022",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27",
+          "meetingId": "tie-023",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "\"alpha beta\" gamma",
+          "filters": {}
+        },
+        "terms": [
+          "alpha",
+          "beta",
+          "gamma"
+        ],
+        "phrases": [
+          "alpha beta"
+        ],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 81,
+        "matchingSourceCount": 88,
+        "candidateWindowCount": 90,
+        "selectedMeetingCount": 24,
+        "selectedRangeIds": [
+          "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "candidate-cap",
+          "range-cap"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "ΚΟΣΜΟΣ",
+        "filters": {}
+      },
+      "bundleSha256": "fb147528f6878cb8ff8038d67cb6f67848a62884785ec6645698fa09da651642",
+      "ranges": [
+        {
+          "id": "769c17788804b494bf569b193a77e0859a415b233eb7e90637de58e9f3d67f31",
+          "meetingId": "unicode-0",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 13
+        },
+        {
+          "id": "5d0b0be1732395056cefbab13333d33bfa8d0d611c1246693f9e464c0444ea22",
+          "meetingId": "unicode-0",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 13
+        },
+        {
+          "id": "9b86b716466b2dcd3d14cf11e8a0c8399707dc2113f116449c7e2a7a7fe954f1",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 2402,
+          "end": 4801
+        },
+        {
+          "id": "b2ab19a3188a0214032398e99a352570e457ae3e508c04a39ef26ef224bcd5bc",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 2402,
+          "end": 4801
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "ΚΟΣΜΟΣ",
+          "filters": {}
+        },
+        "terms": [
+          "κοσμος"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 2,
+        "matchingSourceCount": 4,
+        "candidateWindowCount": 4,
+        "selectedMeetingCount": 2,
+        "selectedRangeIds": [
+          "769c17788804b494bf569b193a77e0859a415b233eb7e90637de58e9f3d67f31",
+          "5d0b0be1732395056cefbab13333d33bfa8d0d611c1246693f9e464c0444ea22",
+          "9b86b716466b2dcd3d14cf11e8a0c8399707dc2113f116449c7e2a7a7fe954f1",
+          "b2ab19a3188a0214032398e99a352570e457ae3e508c04a39ef26ef224bcd5bc"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "ΟΣ",
+        "filters": {}
+      },
+      "bundleSha256": "440f78c57e5ecf197d5602284058c790fcbe97cce21f988c567dd91294b36b24",
+      "ranges": [
+        {
+          "id": "769c17788804b494bf569b193a77e0859a415b233eb7e90637de58e9f3d67f31",
+          "meetingId": "unicode-0",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 13
+        },
+        {
+          "id": "5d0b0be1732395056cefbab13333d33bfa8d0d611c1246693f9e464c0444ea22",
+          "meetingId": "unicode-0",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 13
+        },
+        {
+          "id": "ca16c2b8fc8ab2426c79043e42c2cf670eea02adb09b279b83503c7e0fde2c3d",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 2410,
+          "end": 4805
+        },
+        {
+          "id": "3d064f176f42e9ee70ab30cb4804dd6fc7e7761538472603a816200cd36e4c87",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 2410,
+          "end": 4805
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "ΟΣ",
+          "filters": {}
+        },
+        "terms": [
+          "ος"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 2,
+        "matchingSourceCount": 4,
+        "candidateWindowCount": 4,
+        "selectedMeetingCount": 2,
+        "selectedRangeIds": [
+          "769c17788804b494bf569b193a77e0859a415b233eb7e90637de58e9f3d67f31",
+          "5d0b0be1732395056cefbab13333d33bfa8d0d611c1246693f9e464c0444ea22",
+          "ca16c2b8fc8ab2426c79043e42c2cf670eea02adb09b279b83503c7e0fde2c3d",
+          "3d064f176f42e9ee70ab30cb4804dd6fc7e7761538472603a816200cd36e4c87"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "Cafe",
+        "filters": {}
+      },
+      "bundleSha256": "171046ea990a9597af7334ef6bff80904254775adeb546ca0dc88d8b0eda8503",
+      "ranges": [
+        {
+          "id": "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "meetingId": "unicode-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 26
+        },
+        {
+          "id": "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17",
+          "meetingId": "unicode-1",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 26
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "Cafe",
+          "filters": {}
+        },
+        "terms": [
+          "cafe"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 2,
+        "candidateWindowCount": 2,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "İstanbul",
+        "filters": {}
+      },
+      "bundleSha256": "43001e9a23bb1e81549e72f13929eba2970ed5e852e5bc31ab50f95cf98dd6eb",
+      "ranges": [
+        {
+          "id": "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "meetingId": "unicode-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 26
+        },
+        {
+          "id": "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17",
+          "meetingId": "unicode-1",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 26
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "İstanbul",
+          "filters": {}
+        },
+        "terms": [
+          "istanbul"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 2,
+        "candidateWindowCount": 2,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "ﬃ",
+        "filters": {}
+      },
+      "bundleSha256": "f53cad24bf228a58ecceffdf77cbccc39e60ea197766a1b217eb977374bc46e7",
+      "ranges": [
+        {
+          "id": "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "meetingId": "unicode-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 26
+        },
+        {
+          "id": "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17",
+          "meetingId": "unicode-1",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 26
+        },
+        {
+          "id": "59e6d54e9599c5db36df479541355512729ca0c505799d4b1637c06b3e2df251",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 2428,
+          "end": 4814
+        },
+        {
+          "id": "c64815222eb6bbda6fb24812a1d815df11f716d4664a6afc8c1103a635d78c3b",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 2428,
+          "end": 4814
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "ﬃ",
+          "filters": {}
+        },
+        "terms": [
+          "ffi"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 2,
+        "matchingSourceCount": 4,
+        "candidateWindowCount": 4,
+        "selectedMeetingCount": 2,
+        "selectedRangeIds": [
+          "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17",
+          "59e6d54e9599c5db36df479541355512729ca0c505799d4b1637c06b3e2df251",
+          "c64815222eb6bbda6fb24812a1d815df11f716d4664a6afc8c1103a635d78c3b"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "𐐀𐐁",
+        "filters": {}
+      },
+      "bundleSha256": "7e2bc3f936a2ac2e1d45b3cd0c423572c8489d55bb9dca091d5be3fc5bc94171",
+      "ranges": [
+        {
+          "id": "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "meetingId": "unicode-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 26
+        },
+        {
+          "id": "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17",
+          "meetingId": "unicode-1",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 26
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "𐐀𐐁",
+          "filters": {}
+        },
+        "terms": [
+          "𐐨𐐩"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 2,
+        "candidateWindowCount": 2,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "0d3dde436a3e4373f65dfaaae8af0bd38a482f2dd19df7d47324a566a0322200",
+          "7ab0d66ff7f5228b17579ee87da588ee727cc1ecfaf03e113308a551296f3f17"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "no-such-literal",
+        "filters": {}
+      },
+      "bundleSha256": "8af59b5d658b1e00987521b874f4a644fc173b378692d22a8f6cc3bc50b02772",
+      "ranges": [],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "no-such-literal",
+          "filters": {}
+        },
+        "terms": [
+          "no",
+          "such",
+          "literal"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 0,
+        "matchingSourceCount": 0,
+        "candidateWindowCount": 0,
+        "selectedMeetingCount": 0,
+        "selectedRangeIds": [],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho",
+        "filters": {}
+      },
+      "bundleSha256": "1acdd76016a07e8fef36bcaba1657d6a0b478e02304d19a4c2b7758381f43615",
+      "ranges": [
+        {
+          "id": "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "meetingId": "tie-000",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "meetingId": "tie-001",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "meetingId": "tie-002",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "meetingId": "tie-003",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "meetingId": "tie-004",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "meetingId": "tie-005",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "meetingId": "tie-006",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "meetingId": "tie-007",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "meetingId": "tie-008",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "meetingId": "tie-009",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "meetingId": "tie-010",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "meetingId": "tie-011",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "meetingId": "tie-012",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "meetingId": "tie-013",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "meetingId": "tie-014",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "meetingId": "tie-015",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "meetingId": "tie-016",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "meetingId": "tie-017",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "meetingId": "tie-018",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "meetingId": "tie-019",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "meetingId": "tie-020",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "meetingId": "tie-021",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "meetingId": "tie-022",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27",
+          "meetingId": "tie-023",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho",
+          "filters": {}
+        },
+        "terms": [
+          "alpha",
+          "beta",
+          "gamma",
+          "delta",
+          "epsilon",
+          "zeta",
+          "eta",
+          "theta",
+          "iota",
+          "kappa",
+          "lambda",
+          "mu",
+          "nu",
+          "xi",
+          "omicron",
+          "pi"
+        ],
+        "phrases": [],
+        "droppedTerms": [
+          "rho"
+        ],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 81,
+        "matchingSourceCount": 88,
+        "candidateWindowCount": 90,
+        "selectedMeetingCount": 24,
+        "selectedRangeIds": [
+          "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "query-terms",
+          "candidate-cap",
+          "range-cap"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha",
+        "filters": {
+          "folderId": "even"
+        }
+      },
+      "bundleSha256": "060b3c4d4d1d2b5f196b0ba5e9de7af8e5d69cff3f5099a9efe5875a41e960db",
+      "ranges": [
+        {
+          "id": "946385e8bae149c5465b65582339743921f0b02bf70115b8eb43c6f9e552287d",
+          "meetingId": "unicode-2",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8244764d52083e23e80fd39b76ce4424d494e32a5d5a6703e52e950205893312",
+          "meetingId": "unicode-2",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "meetingId": "unicode-4",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "meetingId": "unicode-4",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "f4d51d64e6611f7cbcd340a1e9f59139d24d3f58ff8a4660b01b9f168d96e0d1",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 2416,
+          "end": 4808
+        },
+        {
+          "id": "ca4a458e6c330e50fac915b80a076726fe31e4e4e27a230f956f3d04a35ff4c7",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 2416,
+          "end": 4808
+        },
+        {
+          "id": "ed5711b58f92de51a6ecfc2631789d50db32d003c3e94d0eab646e24480984c0",
+          "meetingId": "unicode-8",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "49b76c1336f80c8522f4cad767b9e3db9f8f005bd9293102cbc113e22cff59eb",
+          "meetingId": "unicode-8",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha",
+          "filters": {
+            "folderId": "even"
+          }
+        },
+        "terms": [
+          "alpha"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 5,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 4,
+        "matchingSourceCount": 8,
+        "candidateWindowCount": 8,
+        "selectedMeetingCount": 4,
+        "selectedRangeIds": [
+          "946385e8bae149c5465b65582339743921f0b02bf70115b8eb43c6f9e552287d",
+          "8244764d52083e23e80fd39b76ce4424d494e32a5d5a6703e52e950205893312",
+          "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "f4d51d64e6611f7cbcd340a1e9f59139d24d3f58ff8a4660b01b9f168d96e0d1",
+          "ca4a458e6c330e50fac915b80a076726fe31e4e4e27a230f956f3d04a35ff4c7",
+          "ed5711b58f92de51a6ecfc2631789d50db32d003c3e94d0eab646e24480984c0",
+          "49b76c1336f80c8522f4cad767b9e3db9f8f005bd9293102cbc113e22cff59eb"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha",
+        "filters": {
+          "dateBefore": "2021-01-01T00:00:00.000Z"
+        }
+      },
+      "bundleSha256": "bfac5b52c195c632e9af6c59ea57c1a581c4f9224053fe0db1d1f2a8f52f2886",
+      "ranges": [
+        {
+          "id": "946385e8bae149c5465b65582339743921f0b02bf70115b8eb43c6f9e552287d",
+          "meetingId": "unicode-2",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8244764d52083e23e80fd39b76ce4424d494e32a5d5a6703e52e950205893312",
+          "meetingId": "unicode-2",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "2bf9f364abf57e1ebe49191a796150c31857fbb449a640d793d212f0fa572911",
+          "meetingId": "unicode-3",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "25515f750c18950cc966e07226e0210bae1feca3d0bddddd04434dff58daf659",
+          "meetingId": "unicode-3",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "meetingId": "unicode-4",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "meetingId": "unicode-4",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "cc9cecf0158f4832ab89cf62a3afeba699deea9ae369fd1ba2253d8a75a5e32f",
+          "meetingId": "unicode-5",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "160a7f47ff9e1718d9368d2edb8f35c3313408be806024139027a0d16bd87f1d",
+          "meetingId": "unicode-5",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "f4d51d64e6611f7cbcd340a1e9f59139d24d3f58ff8a4660b01b9f168d96e0d1",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 2416,
+          "end": 4808
+        },
+        {
+          "id": "ca4a458e6c330e50fac915b80a076726fe31e4e4e27a230f956f3d04a35ff4c7",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 2416,
+          "end": 4808
+        },
+        {
+          "id": "ed5711b58f92de51a6ecfc2631789d50db32d003c3e94d0eab646e24480984c0",
+          "meetingId": "unicode-8",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "49b76c1336f80c8522f4cad767b9e3db9f8f005bd9293102cbc113e22cff59eb",
+          "meetingId": "unicode-8",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha",
+          "filters": {
+            "dateBefore": "2021-01-01T00:00:00.000Z"
+          }
+        },
+        "terms": [
+          "alpha"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 10,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 6,
+        "matchingSourceCount": 12,
+        "candidateWindowCount": 12,
+        "selectedMeetingCount": 6,
+        "selectedRangeIds": [
+          "946385e8bae149c5465b65582339743921f0b02bf70115b8eb43c6f9e552287d",
+          "8244764d52083e23e80fd39b76ce4424d494e32a5d5a6703e52e950205893312",
+          "2bf9f364abf57e1ebe49191a796150c31857fbb449a640d793d212f0fa572911",
+          "25515f750c18950cc966e07226e0210bae1feca3d0bddddd04434dff58daf659",
+          "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "cc9cecf0158f4832ab89cf62a3afeba699deea9ae369fd1ba2253d8a75a5e32f",
+          "160a7f47ff9e1718d9368d2edb8f35c3313408be806024139027a0d16bd87f1d",
+          "f4d51d64e6611f7cbcd340a1e9f59139d24d3f58ff8a4660b01b9f168d96e0d1",
+          "ca4a458e6c330e50fac915b80a076726fe31e4e4e27a230f956f3d04a35ff4c7",
+          "ed5711b58f92de51a6ecfc2631789d50db32d003c3e94d0eab646e24480984c0",
+          "49b76c1336f80c8522f4cad767b9e3db9f8f005bd9293102cbc113e22cff59eb"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 5,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "unknown-date"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha",
+        "filters": {},
+        "meetingIds": []
+      },
+      "bundleSha256": "a991468a96241b4d31b28a9bb9e5b4427ce2e0d31c4dae78d90ed83d3707f3d6",
+      "ranges": [],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha",
+          "filters": {},
+          "meetingIds": []
+        },
+        "terms": [
+          "alpha"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 0,
+        "scannedMeetingCount": 0,
+        "matchingMeetingCount": 0,
+        "matchingSourceCount": 0,
+        "candidateWindowCount": 0,
+        "selectedMeetingCount": 0,
+        "selectedRangeIds": [],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha",
+        "filters": {},
+        "meetingIds": [
+          "unicode-0",
+          "unicode-6"
+        ]
+      },
+      "bundleSha256": "8f897810729d26e9b384f826efed6b4f6d136eda46e57e4f9fc18cf06c6ca81a",
+      "ranges": [
+        {
+          "id": "f4d51d64e6611f7cbcd340a1e9f59139d24d3f58ff8a4660b01b9f168d96e0d1",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 2416,
+          "end": 4808
+        },
+        {
+          "id": "ca4a458e6c330e50fac915b80a076726fe31e4e4e27a230f956f3d04a35ff4c7",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 2416,
+          "end": 4808
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha",
+          "filters": {},
+          "meetingIds": [
+            "unicode-0",
+            "unicode-6"
+          ]
+        },
+        "terms": [
+          "alpha"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 2,
+        "scannedMeetingCount": 2,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 2,
+        "candidateWindowCount": 2,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "f4d51d64e6611f7cbcd340a1e9f59139d24d3f58ff8a4660b01b9f168d96e0d1",
+          "ca4a458e6c330e50fac915b80a076726fe31e4e4e27a230f956f3d04a35ff4c7"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "linked-history",
+        "meetingIds": []
+      },
+      "bundleSha256": "bc5571acda8d8b38edc86f4a31c01c78ec7d5620a2c88f13d7616d989dc93a7d",
+      "ranges": [],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "linked-history",
+          "meetingIds": []
+        },
+        "terms": [],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 0,
+        "scannedMeetingCount": 0,
+        "matchingMeetingCount": 0,
+        "matchingSourceCount": 0,
+        "candidateWindowCount": 0,
+        "selectedMeetingCount": 0,
+        "selectedRangeIds": [],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "linked-history",
+        "meetingIds": [
+          "unicode-0",
+          "unicode-6"
+        ]
+      },
+      "bundleSha256": "2fdb574fc7c30eb63d9169816934977054ae9c3405e5d6b698380e6f93efec62",
+      "ranges": [
+        {
+          "id": "5d0b0be1732395056cefbab13333d33bfa8d0d611c1246693f9e464c0444ea22",
+          "meetingId": "unicode-0",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 13
+        },
+        {
+          "id": "786ef7cdfef74de34d41b31baf6adb0141bfefaa6e3f676299f4cf12e9ce2a22",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 5200,
+          "end": 6016
+        },
+        {
+          "id": "769c17788804b494bf569b193a77e0859a415b233eb7e90637de58e9f3d67f31",
+          "meetingId": "unicode-0",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 13
+        },
+        {
+          "id": "bc2867a38a19840ef7c390fce349851b4b327f4c29d64fb25a0df975ca5f84e8",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3200
+        },
+        {
+          "id": "d3c2b800ae350e70eebbd5090df5b3837e6e2210d9d634ec2eea9e1fd2dbc479",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3200
+        },
+        {
+          "id": "8d41a1033fd65568103b106ce9e1d50edb112f4ad1f3ff2b1041e722e44eb8c3",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 3200,
+          "end": 5200
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "linked-history",
+          "meetingIds": [
+            "unicode-0",
+            "unicode-6"
+          ]
+        },
+        "terms": [],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 2,
+        "scannedMeetingCount": 2,
+        "matchingMeetingCount": 2,
+        "matchingSourceCount": 4,
+        "candidateWindowCount": 8,
+        "selectedMeetingCount": 2,
+        "selectedRangeIds": [
+          "5d0b0be1732395056cefbab13333d33bfa8d0d611c1246693f9e464c0444ea22",
+          "786ef7cdfef74de34d41b31baf6adb0141bfefaa6e3f676299f4cf12e9ce2a22",
+          "769c17788804b494bf569b193a77e0859a415b233eb7e90637de58e9f3d67f31",
+          "bc2867a38a19840ef7c390fce349851b4b327f4c29d64fb25a0df975ca5f84e8",
+          "d3c2b800ae350e70eebbd5090df5b3837e6e2210d9d634ec2eea9e1fd2dbc479",
+          "8d41a1033fd65568103b106ce9e1d50edb112f4ad1f3ff2b1041e722e44eb8c3"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "meeting-cap",
+          "linked-sampling"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "linked-history",
+        "meetingIds": [
+          "unicode-4",
+          "unicode-5",
+          "unicode-6",
+          "unicode-7"
+        ],
+        "topic": "alpha beta"
+      },
+      "bundleSha256": "9f9f5b5a4c9e8b28a748645206dc18af9c6e7ee1c19272c5150775b99d83d08d",
+      "ranges": [
+        {
+          "id": "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "meetingId": "unicode-4",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "cc9cecf0158f4832ab89cf62a3afeba699deea9ae369fd1ba2253d8a75a5e32f",
+          "meetingId": "unicode-5",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "8d41a1033fd65568103b106ce9e1d50edb112f4ad1f3ff2b1041e722e44eb8c3",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 3200,
+          "end": 5200
+        },
+        {
+          "id": "10f8050e3e89183ea42e3e581250c98910672621b7c18626fefa88c3b0c32396",
+          "meetingId": "unicode-7",
+          "sourceId": "transcript:segment",
+          "start": 4800,
+          "end": 5000
+        },
+        {
+          "id": "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "meetingId": "unicode-4",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "8a67c777d7b474566e2267ff6843a2557b36f4e4b1bc420fe810dc99274b53cd",
+          "meetingId": "unicode-5",
+          "sourceId": "transcript:segment",
+          "start": 1600,
+          "end": 1601
+        },
+        {
+          "id": "786ef7cdfef74de34d41b31baf6adb0141bfefaa6e3f676299f4cf12e9ce2a22",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 5200,
+          "end": 6016
+        },
+        {
+          "id": "b934d1fb5c749525b5266b10e4225efd0aa337bfe3d9b4deb8ed37d864ca87f1",
+          "meetingId": "unicode-7",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "160a7f47ff9e1718d9368d2edb8f35c3313408be806024139027a0d16bd87f1d",
+          "meetingId": "unicode-5",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "bc2867a38a19840ef7c390fce349851b4b327f4c29d64fb25a0df975ca5f84e8",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3200
+        },
+        {
+          "id": "660c8ffd6e23d63353d02cfd0ec6e4773f80a89dfcb646f282e0dd4fad9c7299",
+          "meetingId": "unicode-7",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "b0397e7872fb108ca363d3f0d00aaf21cf8178a5f602d37a392395dd1bb0f508",
+          "meetingId": "unicode-5",
+          "sourceId": "personal:0",
+          "start": 1600,
+          "end": 1601
+        },
+        {
+          "id": "d3c2b800ae350e70eebbd5090df5b3837e6e2210d9d634ec2eea9e1fd2dbc479",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3200
+        },
+        {
+          "id": "d559436b49288c57239ca2dc4de158e35536b2aa4a351fa596abcc8d36a0f2cd",
+          "meetingId": "unicode-7",
+          "sourceId": "personal:0",
+          "start": 1600,
+          "end": 3200
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "linked-history",
+          "meetingIds": [
+            "unicode-4",
+            "unicode-5",
+            "unicode-6",
+            "unicode-7"
+          ],
+          "topic": "alpha beta"
+        },
+        "terms": [
+          "alpha",
+          "beta"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 4,
+        "scannedMeetingCount": 4,
+        "matchingMeetingCount": 4,
+        "matchingSourceCount": 8,
+        "candidateWindowCount": 20,
+        "selectedMeetingCount": 4,
+        "selectedRangeIds": [
+          "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "cc9cecf0158f4832ab89cf62a3afeba699deea9ae369fd1ba2253d8a75a5e32f",
+          "8d41a1033fd65568103b106ce9e1d50edb112f4ad1f3ff2b1041e722e44eb8c3",
+          "10f8050e3e89183ea42e3e581250c98910672621b7c18626fefa88c3b0c32396",
+          "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "8a67c777d7b474566e2267ff6843a2557b36f4e4b1bc420fe810dc99274b53cd",
+          "786ef7cdfef74de34d41b31baf6adb0141bfefaa6e3f676299f4cf12e9ce2a22",
+          "b934d1fb5c749525b5266b10e4225efd0aa337bfe3d9b4deb8ed37d864ca87f1",
+          "160a7f47ff9e1718d9368d2edb8f35c3313408be806024139027a0d16bd87f1d",
+          "bc2867a38a19840ef7c390fce349851b4b327f4c29d64fb25a0df975ca5f84e8",
+          "660c8ffd6e23d63353d02cfd0ec6e4773f80a89dfcb646f282e0dd4fad9c7299",
+          "b0397e7872fb108ca363d3f0d00aaf21cf8178a5f602d37a392395dd1bb0f508",
+          "d3c2b800ae350e70eebbd5090df5b3837e6e2210d9d634ec2eea9e1fd2dbc479",
+          "d559436b49288c57239ca2dc4de158e35536b2aa4a351fa596abcc8d36a0f2cd"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "meeting-cap",
+          "linked-sampling"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "linked-history",
+        "meetingIds": [
+          "unicode-4",
+          "unicode-5",
+          "unicode-6",
+          "unicode-7"
+        ]
+      },
+      "bundleSha256": "92540075db7c9a8e54591091e0521c307fdb44d3bd052c4d09d446f32f774027",
+      "ranges": [
+        {
+          "id": "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "meetingId": "unicode-4",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "8a67c777d7b474566e2267ff6843a2557b36f4e4b1bc420fe810dc99274b53cd",
+          "meetingId": "unicode-5",
+          "sourceId": "transcript:segment",
+          "start": 1600,
+          "end": 1601
+        },
+        {
+          "id": "786ef7cdfef74de34d41b31baf6adb0141bfefaa6e3f676299f4cf12e9ce2a22",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 5200,
+          "end": 6016
+        },
+        {
+          "id": "10f8050e3e89183ea42e3e581250c98910672621b7c18626fefa88c3b0c32396",
+          "meetingId": "unicode-7",
+          "sourceId": "transcript:segment",
+          "start": 4800,
+          "end": 5000
+        },
+        {
+          "id": "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "meetingId": "unicode-4",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3194
+        },
+        {
+          "id": "cc9cecf0158f4832ab89cf62a3afeba699deea9ae369fd1ba2253d8a75a5e32f",
+          "meetingId": "unicode-5",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "bc2867a38a19840ef7c390fce349851b4b327f4c29d64fb25a0df975ca5f84e8",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3200
+        },
+        {
+          "id": "b934d1fb5c749525b5266b10e4225efd0aa337bfe3d9b4deb8ed37d864ca87f1",
+          "meetingId": "unicode-7",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "160a7f47ff9e1718d9368d2edb8f35c3313408be806024139027a0d16bd87f1d",
+          "meetingId": "unicode-5",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "d3c2b800ae350e70eebbd5090df5b3837e6e2210d9d634ec2eea9e1fd2dbc479",
+          "meetingId": "unicode-6",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 3200
+        },
+        {
+          "id": "660c8ffd6e23d63353d02cfd0ec6e4773f80a89dfcb646f282e0dd4fad9c7299",
+          "meetingId": "unicode-7",
+          "sourceId": "transcript:segment",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "b0397e7872fb108ca363d3f0d00aaf21cf8178a5f602d37a392395dd1bb0f508",
+          "meetingId": "unicode-5",
+          "sourceId": "personal:0",
+          "start": 1600,
+          "end": 1601
+        },
+        {
+          "id": "8d41a1033fd65568103b106ce9e1d50edb112f4ad1f3ff2b1041e722e44eb8c3",
+          "meetingId": "unicode-6",
+          "sourceId": "personal:0",
+          "start": 3200,
+          "end": 5200
+        },
+        {
+          "id": "d559436b49288c57239ca2dc4de158e35536b2aa4a351fa596abcc8d36a0f2cd",
+          "meetingId": "unicode-7",
+          "sourceId": "personal:0",
+          "start": 1600,
+          "end": 3200
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "linked-history",
+          "meetingIds": [
+            "unicode-4",
+            "unicode-5",
+            "unicode-6",
+            "unicode-7"
+          ]
+        },
+        "terms": [],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 4,
+        "scannedMeetingCount": 4,
+        "matchingMeetingCount": 4,
+        "matchingSourceCount": 8,
+        "candidateWindowCount": 20,
+        "selectedMeetingCount": 4,
+        "selectedRangeIds": [
+          "df83f1b20f67796778656616f9558987c2ec8113a1dfa190c97bb16ab73bdbdb",
+          "8a67c777d7b474566e2267ff6843a2557b36f4e4b1bc420fe810dc99274b53cd",
+          "786ef7cdfef74de34d41b31baf6adb0141bfefaa6e3f676299f4cf12e9ce2a22",
+          "10f8050e3e89183ea42e3e581250c98910672621b7c18626fefa88c3b0c32396",
+          "8b3f7a113cc99762976be4c790dce5857773703cc398f2e72bff5acbd287067a",
+          "cc9cecf0158f4832ab89cf62a3afeba699deea9ae369fd1ba2253d8a75a5e32f",
+          "bc2867a38a19840ef7c390fce349851b4b327f4c29d64fb25a0df975ca5f84e8",
+          "b934d1fb5c749525b5266b10e4225efd0aa337bfe3d9b4deb8ed37d864ca87f1",
+          "160a7f47ff9e1718d9368d2edb8f35c3313408be806024139027a0d16bd87f1d",
+          "d3c2b800ae350e70eebbd5090df5b3837e6e2210d9d634ec2eea9e1fd2dbc479",
+          "660c8ffd6e23d63353d02cfd0ec6e4773f80a89dfcb646f282e0dd4fad9c7299",
+          "b0397e7872fb108ca363d3f0d00aaf21cf8178a5f602d37a392395dd1bb0f508",
+          "8d41a1033fd65568103b106ce9e1d50edb112f4ad1f3ff2b1041e722e44eb8c3",
+          "d559436b49288c57239ca2dc4de158e35536b2aa4a351fa596abcc8d36a0f2cd"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "meeting-cap",
+          "linked-sampling"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "\"the and\"",
+        "filters": {}
+      },
+      "bundleSha256": "aefa87723dc28332cfb9238130df77ac6326a9cd19b91af015ea9a59e43851b9",
+      "ranges": [
+        {
+          "id": "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e",
+          "meetingId": "mask-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 27
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "\"the and\"",
+          "filters": {}
+        },
+        "terms": [],
+        "phrases": [
+          "the and"
+        ],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 1,
+        "candidateWindowCount": 1,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "\"the and\" \"be with\" \"of to\" \"in by\"",
+        "filters": {}
+      },
+      "bundleSha256": "8abe9481bd7e41a271fec50bc6e7f295a406a6bd56919a19055c527f3bf96c46",
+      "ranges": [
+        {
+          "id": "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e",
+          "meetingId": "mask-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 27
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "\"the and\" \"be with\" \"of to\" \"in by\"",
+          "filters": {}
+        },
+        "terms": [],
+        "phrases": [
+          "the and",
+          "be with",
+          "of to",
+          "in by"
+        ],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 1,
+        "candidateWindowCount": 1,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "\"the and\" \"the and\"",
+        "filters": {}
+      },
+      "bundleSha256": "23415555419eddb05fb0df6b4886784781afb56a6059eba11cc21a8fcb6ef365",
+      "ranges": [
+        {
+          "id": "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e",
+          "meetingId": "mask-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 27
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "\"the and\" \"the and\"",
+          "filters": {}
+        },
+        "terms": [],
+        "phrases": [
+          "the and"
+        ],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 1,
+        "candidateWindowCount": 1,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15",
+        "filters": {}
+      },
+      "bundleSha256": "834222f0b3e86e75a4d40b070c80575555f95caaa2f310e4bd99e32922576c35",
+      "ranges": [
+        {
+          "id": "aa2e70c5742bdebdb57c712cf9c0c9cfc09b9dc0bf28d37fee81922ea3d95d29",
+          "meetingId": "mask-3",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 6
+        },
+        {
+          "id": "dd9bd0e75ff6dd06a190a93c1985c700b4fc9620484ba2d7482614bc71c0e43c",
+          "meetingId": "mask-2",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15",
+          "filters": {}
+        },
+        "terms": [
+          "v0",
+          "v1",
+          "v2",
+          "v3",
+          "v4",
+          "v5",
+          "v6",
+          "v7",
+          "v8",
+          "v9",
+          "v10",
+          "v11",
+          "v12",
+          "v13",
+          "v14",
+          "v15"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 2,
+        "matchingSourceCount": 2,
+        "candidateWindowCount": 2,
+        "selectedMeetingCount": 2,
+        "selectedRangeIds": [
+          "aa2e70c5742bdebdb57c712cf9c0c9cfc09b9dc0bf28d37fee81922ea3d95d29",
+          "dd9bd0e75ff6dd06a190a93c1985c700b4fc9620484ba2d7482614bc71c0e43c"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "alpha beta gamma",
+        "filters": {}
+      },
+      "bundleSha256": "e7cc28e507210dbac10cd5edc0c2b257d8a38c7362cd5d3367e22ca35403cd47",
+      "ranges": [
+        {
+          "id": "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "meetingId": "tie-000",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "meetingId": "tie-001",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "meetingId": "tie-002",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "meetingId": "tie-003",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "meetingId": "tie-004",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "meetingId": "tie-005",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "meetingId": "tie-006",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "meetingId": "tie-007",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "meetingId": "tie-008",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "meetingId": "tie-009",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "meetingId": "tie-010",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "meetingId": "tie-011",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "meetingId": "tie-012",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "meetingId": "tie-013",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "meetingId": "tie-014",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "meetingId": "tie-015",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "meetingId": "tie-016",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "meetingId": "tie-017",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "meetingId": "tie-018",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "meetingId": "tie-019",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "meetingId": "tie-020",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "meetingId": "tie-021",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "meetingId": "tie-022",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        },
+        {
+          "id": "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27",
+          "meetingId": "tie-023",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 16
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "alpha beta gamma",
+          "filters": {}
+        },
+        "terms": [
+          "alpha",
+          "beta",
+          "gamma"
+        ],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 87,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 81,
+        "matchingSourceCount": 88,
+        "candidateWindowCount": 90,
+        "selectedMeetingCount": 24,
+        "selectedRangeIds": [
+          "c09a6f99a7a53344872fe675b9957b7a131473b7f64cc12746df89950f0d2d46",
+          "7ed2dab04b53c4e28c2b82f33fb5a1c2cf5345cbadf8c0d5a308ecd0271ca78a",
+          "ead455b0d9ce00981b27f178c026b349a034b7fc9e8642cf7d09338e85af1538",
+          "c7267a2169891aaa18451999117ff92a821fedf3dd2bbbd213875b4f6a42c887",
+          "5f4652761e511edab9a9da7beae3b8f6cc9d82e5e764f4025dfae3c1013234f8",
+          "8f450368a970e0e9006a84fc137583704a3f913bfddbcaf3c97189bba251994c",
+          "557aae991a56be116f8695805c5ff37a0a507b75f018369814d0f254842840ed",
+          "417338b1110fa0901bc0074ac8094291ba32aec000041bf6b88a07efa1cbee0f",
+          "189af8d036bc78db20c2b1647491cb2e5e52b6a717d834f7dcd5e8c63c6c24a5",
+          "8b498aaaff19f0249fda7c73e18e375beb7345ac35318eaed61f41651e947db4",
+          "dba6236699d7a4fe77573c6d1c90d63d8b1939719f1907e15d7952ebbe719a06",
+          "36a77b4e38270768e41295f5cbf49d8a64598491be745b5ad2eba01feed8d114",
+          "1e5d5b388c7b983e9cc52d38a93a5afa1a74e5ddabe5013254c9a112c5dc987b",
+          "3fb63b48e5811a8c952bc9c69bfbf245e10675f1592b9bf0e35835ae0f0554b7",
+          "743cda7b54143ad9763ebafbb66e6dd45d8a6e8c2f96cdc026917415f345ab68",
+          "cf4a9a6c4086a09b7f59dbfa9f8385d813158cf7f46b08329e878ee75d9a4f4a",
+          "ce03f05ebf4b64b1165e05b67934ccf6900f3aff6e7cb994667fade33a25ca6a",
+          "a39ebb94479cb93f132868008272b07ef0ed94d7db10a3815f0b9c4583bfd9af",
+          "074b6df456b923ce674a0ad009e2e5a5cfd5d2c5a018ecb42940c3b20de6190b",
+          "4ceddc4141b215cc408d6a39a588e3ad573f6584e445de5c07680318a0e0718f",
+          "75c05b512cda7b25bd44b5dd30a15fb7b14b3086f3a0e0395ddf0412fc9d9eb7",
+          "81276f21a4dea7691a10c8144e4d85afec378b525030f4e804a1e9d0ece42fae",
+          "8842731df1649e8dd2ca0140e05bad7b59d68a272ef16473b5b50462ae4c5398",
+          "6da6b4157d85e9b71e2d5bd8fea5bcb6732789359402c8c661947fed38a15a27"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": false,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": [
+          "candidate-cap",
+          "range-cap"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "mode": "linked-history",
+        "meetingIds": [
+          "mask-0",
+          "mask-4"
+        ]
+      },
+      "bundleSha256": "5e5e7997998387171542f3e5caed058307f300283fcf8c8e5d66c5bfa37d38c7",
+      "ranges": [
+        {
+          "id": "c333a407ef1dbc3c0d34b4654de0a2849c3261ddc729b27d62fe2e8e94f33f82",
+          "meetingId": "mask-0",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 3192
+        },
+        {
+          "id": "a7bf242e46010cbcc53bf2f30a515a0729b5eff9c921a641ca8b96e8b217a8b3",
+          "meetingId": "mask-4",
+          "sourceId": "personal:0",
+          "start": 3200,
+          "end": 4018
+        },
+        {
+          "id": "db32837731a724510c70e1290085d34db3cfde143365705388771db42a1381ad",
+          "meetingId": "mask-4",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 1600
+        },
+        {
+          "id": "eec8ffe587cb8fd2c65004a4a0533c7c81b579cb6af09b4d65bfc98a03d4e21e",
+          "meetingId": "mask-4",
+          "sourceId": "personal:0",
+          "start": 1600,
+          "end": 3200
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "linked-history",
+          "meetingIds": [
+            "mask-0",
+            "mask-4"
+          ]
+        },
+        "terms": [],
+        "phrases": [],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 2,
+        "scannedMeetingCount": 2,
+        "matchingMeetingCount": 2,
+        "matchingSourceCount": 2,
+        "candidateWindowCount": 4,
+        "selectedMeetingCount": 2,
+        "selectedRangeIds": [
+          "c333a407ef1dbc3c0d34b4654de0a2849c3261ddc729b27d62fe2e8e94f33f82",
+          "a7bf242e46010cbcc53bf2f30a515a0729b5eff9c921a641ca8b96e8b217a8b3",
+          "db32837731a724510c70e1290085d34db3cfde143365705388771db42a1381ad",
+          "eec8ffe587cb8fd2c65004a4a0533c7c81b579cb6af09b4d65bfc98a03d4e21e"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "linked-history",
+        "meetingIds": [
+          "mask-1"
+        ],
+        "topic": "\"in by\""
+      },
+      "bundleSha256": "4440f4dcf603e2c7e751f2b6bdd8a60b926ee6560d0f8224d51039d308aaefa1",
+      "ranges": [
+        {
+          "id": "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e",
+          "meetingId": "mask-1",
+          "sourceId": "personal:0",
+          "start": 0,
+          "end": 27
+        }
+      ],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "linked-history",
+          "meetingIds": [
+            "mask-1"
+          ],
+          "topic": "\"in by\""
+        },
+        "terms": [],
+        "phrases": [
+          "in by"
+        ],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 1,
+        "scannedMeetingCount": 1,
+        "matchingMeetingCount": 1,
+        "matchingSourceCount": 1,
+        "candidateWindowCount": 1,
+        "selectedMeetingCount": 1,
+        "selectedRangeIds": [
+          "634d433d65100d002c82d7b45f099b802cad0af414e60690d977ded8a061313e"
+        ],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    },
+    {
+      "selection": {
+        "mode": "question",
+        "question": "\"in by\"",
+        "filters": {
+          "folderId": "excluded"
+        }
+      },
+      "bundleSha256": "b1bfb6ce373663d14591714388c48659598c256795aacb5e235957fcdf3b9d8b",
+      "ranges": [],
+      "coverage": {
+        "version": 1,
+        "scope": {
+          "libraryId": "synthetic-parity",
+          "accountId": null,
+          "workspaceId": null
+        },
+        "observedAt": "",
+        "selection": {
+          "mode": "question",
+          "question": "\"in by\"",
+          "filters": {
+            "folderId": "excluded"
+          }
+        },
+        "terms": [],
+        "phrases": [
+          "in by"
+        ],
+        "droppedTerms": [],
+        "eligibleMeetingCount": 0,
+        "scannedMeetingCount": 87,
+        "matchingMeetingCount": 0,
+        "matchingSourceCount": 0,
+        "candidateWindowCount": 0,
+        "selectedMeetingCount": 0,
+        "selectedRangeIds": [],
+        "unavailableCount": 0,
+        "unknownDateCount": 0,
+        "scanComplete": true,
+        "selectionComplete": true,
+        "semanticCoverage": "not-exhaustive",
+        "omissions": []
+      }
+    }
+  ]
+}
