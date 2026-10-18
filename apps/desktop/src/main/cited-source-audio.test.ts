@@ -207,3 +207,40 @@ test('recording symlinks and ambiguous file choices are never exposed', async (t
   symlinkSync(f.file, join(dir, 'audio.wav'))
   assert.equal((await f.adapter.available(s, f.id(s))).status, 'unavailable')
 })
+
+test('persisted overlapping timing remains unsafe when one recording is missing or deleted', async (t) => {
+  const f = fixture(t)
+  f.part('2000000', 2000000)
+  const overlap = f.part('2000001', 2000001)
+  const s = f.snapshot()
+  assert.equal((await f.adapter.available(s, f.id(s))).status, 'ambiguous')
+  rmSync(join(overlap, 'audio.wav'))
+  assert.notEqual((await f.adapter.available(s, f.id(s))).status, 'available')
+})
+
+test('an existing token cannot survive a new overlapping metadata-only part', async (t) => {
+  const f = fixture(t)
+  f.part('2000000', 2000000)
+  const s = f.snapshot()
+  const a = await f.adapter.available(s, f.id(s))
+  assert.equal(a.status, 'available')
+  if (a.status !== 'available') return
+  const overlap = f.part('2000001', 2000001)
+  rmSync(join(overlap, 'audio.wav'))
+  await assert.rejects(f.adapter.play(a.token, s, f.id(s)), /unavailable/)
+})
+
+test('known nonoverlapping missing recording preserves the unique valid part', async (t) => {
+  const f = fixture(t)
+  const earlier = f.part('1000000', 1000000)
+  rmSync(join(earlier, 'audio.wav'))
+  f.part('2000000', 2000000)
+  const s = f.snapshot()
+  const a = await f.adapter.available(s, f.id(s))
+  assert.equal(a.status, 'available')
+  if (a.status !== 'available') return
+  assert.equal(
+    Buffer.from((await f.adapter.play(a.token, s, f.id(s))).bytes).toString(),
+    'synthetic-2000000'
+  )
+})

@@ -190,7 +190,8 @@ export class CitedSourceAudio {
         const names = (await readdir(dir)).filter((name) =>
           (AUDIO_FILES as readonly string[]).includes(name)
         )
-        if (!names.length) continue
+        // Persisted timing remains a mapping candidate even when recording bytes
+        // were deleted. Missing audio must not make another overlapping part unique.
         const metaBytes = await this.read(join(dir, 'part.json'), 64 * 1024)
         const meta: unknown = JSON.parse(metaBytes.toString('utf8'))
         if (
@@ -205,6 +206,7 @@ export class CitedSourceAudio {
           throw unavailable()
         if (absolute < meta.startEpochMs || absolute >= meta.startEpochMs + meta.durationMs)
           continue
+        if (!names.length) return 'unavailable'
         if (names.length !== 1) return 'ambiguous'
         if (meta.channels !== 'split' || absoluteEnd > meta.startEpochMs + meta.durationMs)
           return 'unavailable'
