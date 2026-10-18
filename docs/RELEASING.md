@@ -92,12 +92,22 @@ skip notarization when the Apple credentials are absent, so the command exiting
 successfully is not evidence that a distributable build is signed and
 notarized.
 
-The manually dispatched **Mac release** workflow in
-`.github/workflows/mac-release.yml` installs dependencies, builds the Swift
-engine and brand assets, packages with signing and notarization credentials,
-uploads the ZIP, DMG, and `latest-mac.yml`, and stages the updater manifest for
-`main`. Running that workflow publishes to production storage and therefore
-requires explicit authorization.
+The manually dispatched **Mac release candidate** workflow in
+`.github/workflows/mac-release.yml` runs on an Apple Silicon `macos-15` runner.
+It checks the required credentials before installing dependencies, builds the
+Swift and Whisper engines and brand assets, and requires Developer ID signing.
+It notarizes the app and signed DMG, staples the DMG, refreshes its manifest hash,
+and verifies signatures, team, tickets, Gatekeeper, version, archive payloads,
+and updater hashes. The ZIP, DMG, manifest, and source/hash receipt are retained
+as GitHub Actions artifacts for 14 days. The workflow has read-only repository
+permissions and does not publish a feed, create a release, or push a branch.
+
+Follow [GitHub macOS runner setup](qa/github-mac-runner-setup.md) to provision
+credentials without sending their values through chat. A successful candidate
+run still needs native release QA and the publication gates below. Download
+and retain the exact candidate artifacts before retention expires; use those
+same bytes for publication after QA. Rebuilding produces a new candidate that
+must be verified again.
 
 The local maintainer command below also packages and publishes. Do not run it
 without explicit release authorization and the required signing and publication
@@ -108,11 +118,10 @@ cd apps/desktop
 pnpm release
 ```
 
-The current Mac workflow creates and force-pushes a temporary remote
-`chore/stage-v<VERSION>-updater-manifest` branch before opening a pull request.
-That behavior conflicts with an absolute company-wide policy that forbids all
-remote branches. Resolve the policy or update the workflow through a separately
-reviewed change before using it under such a policy.
+The local `pnpm release` command rebuilds artifacts and is not a promotion
+command for an already tested Actions candidate. Publication of that candidate
+must upload its retained artifacts, then stage the matching manifest through
+normal review. The candidate workflow does not require a Blob upload token.
 
 ### macOS checklist
 

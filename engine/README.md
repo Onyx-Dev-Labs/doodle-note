@@ -14,6 +14,15 @@ swift build -c release          # binary at .build/release/engine
 Requires Apple Silicon + macOS 14+. Models download from HuggingFace on first
 use to `~/Library/Application Support/FluidAudio/Models/` (~440MB per model).
 
+## Import compatibility tests
+
+From the repository root, run `engine/tests/test-audio-import.sh`. This compiles
+the import/export path with a macOS 14 deployment target and exercises synthetic
+WAV, M4A and MP4 media, export failures, cancellation and temporary-file cleanup.
+It does not load models or request capture permissions. Set `SDKROOT` to select
+an installed SDK if needed. Running on a newer macOS does not replace macOS 14
+runtime QA.
+
 ## Commands
 
 ```sh
