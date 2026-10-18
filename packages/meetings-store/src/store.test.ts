@@ -73,6 +73,40 @@ test("audio degradation accepts only known channel flags and survives unrelated 
   }
 });
 
+test("unrelated saves preserve source ownership and saved-audio history together", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    // Malformed explicit ownership must also survive: dropping it would make
+    // retrieval treat a restricted original as account-independent content.
+    for (const sourceScope of [
+      {
+        libraryId: "synthetic-library",
+        accountId: "account-a",
+        workspaceId: "workspace-a",
+      },
+      { libraryId: "synthetic-library", accountId: 42 },
+    ]) {
+      writeFileSync(
+        join(dir, "combined-foundations.json"),
+        JSON.stringify({
+          id: "combined-foundations",
+          sourceScope,
+          savedAudioFailures: { mic: true, system: true },
+          segments: [segment("Synthetic original transcript")],
+        }),
+      );
+      store.upsert({ id: "combined-foundations", rawNotesMarkdown: "Edited notes" });
+      const reopened = new MeetingFileStore(dir).get("combined-foundations")!;
+      assert.deepEqual(reopened.sourceScope, sourceScope);
+      assert.deepEqual(reopened.savedAudioFailures, { mic: true, system: true });
+      assert.equal(reopened.rawNotesMarkdown, "Edited notes");
+      assert.equal(reopened.segments[0]?.text, "Synthetic original transcript");
+    }
+  } finally {
+    cleanup();
+  }
+});
+
 test("upsert merges patches; null folderId clears the field", () => {
   const { store, cleanup } = tempStore();
   try {

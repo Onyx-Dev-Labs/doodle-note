@@ -1,3 +1,4 @@
+import type { SourcesApi } from '../shared/source-api'
 import type { TextImporterApi } from '../shared/text-import-api'
 import type { StorageApi } from '../shared/storage-api'
 import type { RecordingApi } from '../shared/recording-api'
@@ -24,6 +25,7 @@ declare global {
     engine: EngineApi
     notes: NotesApi
     meetings: MeetingsApi
+    sources: SourcesApi
     folders: FoldersApi
     calendar: CalendarApi
     sync: SyncApi

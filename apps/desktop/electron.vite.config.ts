@@ -26,7 +26,8 @@ export default defineConfig({
         // own chunk so utilityProcess.fork can load out/main/engine-win.js.
         input: {
           index: resolve('src/main/index.ts'),
-          'engine-win': resolve('src/main/engine-win.ts')
+          'engine-win': resolve('src/main/engine-win.ts'),
+          'source-index-worker': resolve('src/main/source-index-worker.ts')
         },
         external: ['node-llama-cpp', 'sherpa-onnx-node']
       }

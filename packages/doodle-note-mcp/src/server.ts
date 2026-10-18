@@ -1,3 +1,6 @@
+import { LOCAL_SOURCE_TOOLS } from "./source-tools";
+import { LocalMeetingSource } from "./local-source";
+import { AgentToolError } from "@repo/agent-contract";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -21,8 +24,10 @@ export function createServer(source: MeetingSource, version: string): Server {
     { capabilities: { tools: {} } },
   );
 
+  const localTools =
+    source instanceof LocalMeetingSource ? LOCAL_SOURCE_TOOLS : [];
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: AGENT_TOOLS.map((t) => ({
+    tools: [...AGENT_TOOLS, ...localTools].map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
@@ -30,6 +35,31 @@ export function createServer(source: MeetingSource, version: string): Server {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const localTool = localTools.find((t) => t.name === request.params.name);
+    if (localTool) {
+      try {
+        const result = await localTool.run(
+          source,
+          request.params.arguments ?? {},
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                error instanceof AgentToolError
+                  ? error.message
+                  : "Local sources unavailable; originals are preserved.",
+            },
+          ],
+        };
+      }
+    }
     const outcome = await executeAgentTool(
       source,
       request.params.name,

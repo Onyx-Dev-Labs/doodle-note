@@ -1,3 +1,5 @@
+import type { SourceScope } from "./source-contract";
+
 /**
  * The meeting data model shared by every process that touches the store:
  * the Electron app (main + preload + renderer), cloud sync, the standalone
@@ -82,6 +84,8 @@ export type SavedAudioFailures = Partial<Record<MeetingChannel, true>>;
 export interface MeetingRecord {
   /** At least one recorded part lost saved audio for these sources; no raw diagnostics. */
   savedAudioFailures?: SavedAudioFailures;
+  /** Optional explicit ownership; absent means account-independent local content. */
+  sourceScope?: SourceScope;
   /** Last successful batch pass; live capture remains independent. */
   batchTranscription?: {
     backend: "parakeet" | "whisper";

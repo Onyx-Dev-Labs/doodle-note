@@ -1,3 +1,4 @@
+import { SourceIndexService } from './source-index-service'
 import { beginRecordableMeeting } from './capture-eligibility'
 import { transcribeWithWhisper } from './whisper-transcriber'
 import { transcribeFileToSegments } from './import-logic'
@@ -809,8 +810,19 @@ app.whenReady().then(async () => {
   }
   agentAccessService.registerIpc()
 
+  const sourceIndex = new SourceIndexService(
+    () => join(libraryRoot(), 'meetings'),
+    join(app.getPath('userData'), 'derived-source-index'),
+    assertLibrary
+  )
+  sourceIndex.registerIpc()
+  app.on('will-quit', () => {
+    void sourceIndex.dispose()
+  })
+
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
+    sourceIndex.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.
     if (change.deletedId) audioService.deleteFor(change.deletedId)
@@ -825,7 +837,10 @@ app.whenReady().then(async () => {
     registerStorageIpc(
       storage,
       () => recording.busy || importService.isBusy,
-      (previous) => agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
+      (previous) => {
+        sourceIndex.refreshLibraryPath()
+        agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
+      }
     )
 
   // A fresh look at the app deserves fresh events (throttled inside).
