@@ -52,6 +52,8 @@ import {
 } from './cited-ask-validation'
 
 export interface CitedAskDependencies {
+  /** Main rollout gate; no source/model work or cache admission while disabled. */
+  enabled?(): boolean
   sources: {
     retrieveEvidence(selection: EvidenceSelection, signal?: AbortSignal): Promise<EvidenceBundle>
     validateEvidence(
@@ -117,6 +119,8 @@ export class MainCitedAskService implements CitedAskService {
     }
     const shared = { ...control, signal: abort.signal, assertCurrent: check }
     try {
+      if (this.deps.enabled?.() === false)
+        fail('unavailable', 'Cited answers are not enabled in this build.')
       const request = normalizeCitedRequest(input)
       if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(control.runId) || !control.ownerId)
         fail('unauthorized', 'Invalid request ownership.')
@@ -279,6 +283,8 @@ export class MainCitedAskService implements CitedAskService {
     }
     try {
       check()
+      if (this.deps.enabled?.() === false)
+        return { status: 'unavailable', reason: 'Cited answers are not enabled in this build.' }
       const request = normalizeCitedRequest(currentRequest)
       validateSnapshotStructure(snapshot)
       if (

@@ -345,3 +345,31 @@ test('canonical resolved speaker reaches exact inference wire separately from un
     previous = result.snapshot
   }
 })
+
+test('main rollout admission blocks generation and cache validation before any source access', async (t) => {
+  const f = fixture(t)
+  let reads = 0
+  const service = new serviceModule.MainCitedAskService({
+    enabled: () => false,
+    activity: new LibraryActivity(),
+    sources: {
+      ...f.sources,
+      retrieveEvidence: async () => {
+        reads++
+        throw new Error('must not read')
+      }
+    },
+    generate: f.generate,
+    validateModel: async () => true
+  })
+  const result = await service.run(f.request, f.control)
+  assert.equal(result.status, 'error')
+  if (result.status === 'error') assert.equal(result.code, 'unavailable')
+  const existing = await f.service.run(f.request, f.control)
+  assert.equal(existing.status, 'complete')
+  assert.equal(
+    (await service.validate(existing.snapshot, f.request, f.control)).status,
+    'unavailable'
+  )
+  assert.equal(reads, 0)
+})

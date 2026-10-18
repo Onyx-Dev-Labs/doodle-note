@@ -84,3 +84,10 @@ export type CitationView =
       audio: { status: 'available'; token: string } | { status: 'unavailable' | 'ambiguous' }
     }
   | Exclude<SnapshotValidation, { status: 'valid' }>
+
+/** Returned only after a fresh main-owned citation/audio token validation. */
+export interface CitedAudioPlayback {
+  bytes: Uint8Array
+  mime: string
+  seekSeconds: number
+}
