@@ -1,0 +1,15 @@
+ 1:  8e67861 =  1:  9523cae feat: preserve bounded calendar invitee observations for local briefs
+ 2:  8791b44 =  2:  ffb8e11 feat: persist local calendar provenance with fenced accepted starts
+ 3:  ae995b8 =  3:  3fe887e fix: retain occurrence corrections and yield dense context validation
+ 4:  a87ba20 =  4:  906cd0a feat: orchestrate explicit brief sessions through the shared cited service
+ 5:  1106139 =  5:  cdb19dc feat: fence brief IPC ownership and calendar session invalidation
+ 6:  ae41abd =  6:  6ffa96b feat: nominate brief history from shared original evidence with byte fences
+ 7:  f803481 =  7:  6de4331 fix: fence final brief admission and retain closing operation drains
+ 8:  e505b2a =  8:  c1c3aa9 feat: integrate local calendar briefs with shared host and owned playback
+ 9:  a891358 =  9:  b0a6a95 test: record isolated brief renderer scenarios and delivery boundaries
+10:  8b1b575 = 10:  4e51307 docs: record combined lint verification after shared annotation fix
+11:  a49b905 = 11:  860e87d test: freeze 24 synthetic brief scenarios before native evaluation
+12:  5145d5a = 12:  db7ceb4 test: prepare real-service brief evaluator without running inference
+13:  be69595 = 13:  0c60309 docs: retain frozen brief mechanical evidence without native qualification
+14:  562d5ee = 14:  d8c9644 fix: preserve evaluator accounting at the startup signal boundary
+15:  552c67b = 15:  8230951 docs: clarify evaluator first-signal cleanup guarantee
