@@ -1,4 +1,11 @@
 import {
+  SOURCES_SEARCH,
+  SOURCES_CANCEL,
+  SOURCES_RESOLVE,
+  SOURCES_STATE,
+  type SourcesApi
+} from '../shared/source-api'
+import {
   TEXT_IMPORT_PREVIEW,
   TEXT_IMPORT_COMMIT,
   TEXT_IMPORT_CANCEL,
@@ -695,6 +702,12 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
+    contextBridge.exposeInMainWorld('sources', {
+      cancel: () => ipcRenderer.invoke(SOURCES_CANCEL),
+      search: (query, limit) => ipcRenderer.invoke(SOURCES_SEARCH, query, limit),
+      resolve: (anchor) => ipcRenderer.invoke(SOURCES_RESOLVE, anchor),
+      state: () => ipcRenderer.invoke(SOURCES_STATE)
+    } satisfies SourcesApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
     contextBridge.exposeInMainWorld('recording', recordingApi)
