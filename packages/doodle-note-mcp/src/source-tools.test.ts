@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { AGENT_SCHEMA_VERSION } from "@repo/agent-contract";
 import {
   cpSync,
   mkdirSync,
@@ -174,4 +175,36 @@ test("a scope/consent change during a local source request fences its completed 
     return first;
   });
   await assert.rejects(revoked.retrieveSources("needle"), /Revoked/);
+});
+
+test("local MCP uses authoritative participant labels and stales citations after a participant-only edit", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "mcp-participants-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "a.json");
+  const source = new LocalMeetingSource(dir);
+  const raw = {
+    id: "a",
+    participants: [{ id: "far", name: "Alice", source: "manual", confidence: 1 }],
+    segments: [{ id: "s", channel: "system", speakerId: "far", speaker: "Them", text: "needle" }],
+  };
+  writeFileSync(file, JSON.stringify(raw));
+  const before = readFileSync(file);
+  const first = await source.retrieveSources("needle");
+  assert.deepEqual(await LOCAL_SOURCE_TOOLS[0]!.run(source, { query: "needle" }), { schema_version: AGENT_SCHEMA_VERSION, ...first });
+  const anchor = first.hits[0]!.anchor;
+  assert.equal(first.hits[0]!.speaker, "Alice");
+  assert.equal((await source.getTranscript("a"))!.segments[0]!.speaker, "Alice");
+  assert.deepEqual(await source.resolveSource(anchor), { status: "resolved", passage: first.hits[0] });
+  assert.deepEqual(readFileSync(file), before);
+  raw.participants[0]!.name = "Bob";
+  writeFileSync(file, JSON.stringify(raw));
+  const corrected = readFileSync(file);
+  const second = await source.retrieveSources("needle");
+  assert.equal(second.hits[0]!.speaker, "Bob");
+  assert.equal((await source.getTranscript("a"))!.segments[0]!.speaker, "Bob");
+  assert.notEqual(second.hits[0]!.anchor.revisionId, anchor.revisionId);
+  assert.equal((await source.resolveSource(anchor)).status, "stale");
+  assert.deepEqual(await source.resolveSource(second.hits[0]!.anchor), { status: "resolved", passage: second.hits[0] });
+  assert.deepEqual(readFileSync(file), corrected);
+  assert.deepEqual(readdirSync(dir), ["a.json"]);
 });

@@ -25,7 +25,8 @@ import {
   searchOriginalSources,
   SOURCE_IDENTITY_FILE,
 } from "./source-projection";
-import type { SourceContext } from "./source-contract";
+import type { SourceAnchor, SourceContext } from "./source-contract";
+import { MeetingFileStore } from "./store";
 
 function fixture(t: test.TestContext) {
   const root = mkdtempSync(join(tmpdir(), "doodle-sources-"));
@@ -425,4 +426,84 @@ test("malformed legacy summary is unavailable in both backends; absent/null and 
     }
     assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
   }
+});
+
+test("participant-only corrections match canonical labels and invalidate source revisions in both backends", (t) => {
+  const f = fixture(t);
+  const index = new DerivedSourceIndex(join(f.root, "cache"));
+  t.after(() => index.close());
+  const store = new MeetingFileStore(f.dir);
+  let previous: SourceAnchor | undefined;
+  for (const name of ["Alice", "Bob"]) {
+    f.put("a", {
+      participants: [{ id: "far", name, source: "manual", confidence: 1 }],
+      segments: [{ id: "s", channel: "system", speakerId: "far", speaker: "Them", text: "needle", startMs: 0, endMs: 1000 }],
+      ink: { untouched: true },
+    });
+    const before = readFileSync(join(f.dir, "a.json"));
+    assert.equal(store.get("a")!.segments[0]!.speaker, name);
+    const direct = searchOriginalSources(f.context, "needle");
+    const cached = index.search(f.context, "needle");
+    assert.deepEqual(cached, direct);
+    for (const result of [direct, cached]) {
+      const hit = result.hits[0]!;
+      assert.equal(hit.speaker, name);
+      assert.equal(result.countsAreComplete, true);
+      assert.equal(hit.anchor.sourceId, "transcript:s");
+      assert.deepEqual(resolveOriginalSource(f.context, hit.anchor), { status: "resolved", passage: hit });
+      if (previous) {
+        assert.notEqual(hit.anchor.revisionId, previous.revisionId);
+        assert.equal(resolveOriginalSource(f.context, previous).status, "stale");
+      }
+    }
+    previous = direct.hits[0]!.anchor;
+    assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
+  }
+});
+
+test("source labels reuse canonical channel, legacy, cached-name and malformed-participant rules", (t) => {
+  const f = fixture(t);
+  const index = new DerivedSourceIndex(join(f.root, "cache"));
+  t.after(() => index.close());
+  const segments = [
+    { id: "mic", channel: "mic" },
+    { id: "system", channel: "system" },
+    { id: "text", source: "text", channel: "text" },
+    { id: "legacy" },
+    { id: "cached", channel: "system", speaker: "  Cached\n Name\u0000 " },
+    { id: "blank-id", channel: "mic", speakerId: "  " },
+    { id: "custom", channel: "system", speakerId: " far-2 ", speaker: "old" },
+    { id: "unknown-channel", channel: { unexpected: true } },
+  ].map((segment) => ({ ...segment, text: "needle" }));
+  for (const participants of [undefined, null, { far: "wrong shape" }, [null, 1, {}, { id: "far", name: 5 }], [
+    { id: "self", name: " Manual\nMe ", source: "manual" },
+    { id: "far", name: "Alice", source: "manual" },
+    { id: "far", name: "ignored duplicate", source: "self" },
+    { id: "text-unknown", name: "Text author", source: "manual" },
+    { id: " far-2 ", name: " Second\u0000 person ", source: "invalid", confidence: "invalid" },
+  ]]) {
+    f.put("a", { participants, segments });
+    const before = readFileSync(join(f.dir, "a.json"));
+    const canonical = new MeetingFileStore(f.dir).get("a")!;
+    for (const result of [index.search(f.context, "needle"), searchOriginalSources(f.context, "needle")]) {
+      assert.equal(result.hits.length, segments.length);
+      for (const segment of canonical.segments) {
+        const hit = result.hits.find((hit) => hit.anchor.sourceId === `transcript:${segment.id}`)!;
+        assert.equal(hit.speaker, segment.speaker, segment.id);
+      }
+      assert.equal(result.countsAreComplete, true);
+    }
+    assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
+  }
+  // Raw values can be wider than the typed meeting reader accepts. Narrow before
+  // calling speaker helpers so malformed IDs/labels cannot crash retrieval.
+  f.put("a", { participants: [false, { id: "far", name: { invalid: true } }], segments: [
+    { id: "invalid-id", channel: "system", speakerId: 9, speaker: { invalid: true }, text: "needle" },
+  ] });
+  const before = readFileSync(join(f.dir, "a.json"));
+  for (const result of [index.search(f.context, "needle"), searchOriginalSources(f.context, "needle")]) {
+    assert.equal(result.hits[0]?.speaker, "Them");
+    assert.equal(result.countsAreComplete, true);
+  }
+  assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
 });

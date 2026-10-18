@@ -13,6 +13,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import {
+  normalizeParticipants,
+  sanitizeSpeakerName,
+  speakerLabel,
+} from "./speakers";
 import type {
   SourceAnchor,
   SourceContext,
@@ -164,6 +169,7 @@ export function projectSources(
   string(raw.rawNotesMarkdown)
     .split("\n")
     .forEach((text, i) => add("personal", `personal:${i}`, text));
+  const participants = normalizeParticipants(raw.participants);
   const seen = new Set<string>();
   if (raw.segments !== undefined && !Array.isArray(raw.segments))
     throw new Error("Invalid transcript");
@@ -181,9 +187,25 @@ export function projectSources(
     if (seen.has(id)) throw new Error("Ambiguous source identity");
     seen.add(id);
     add("transcript", id, segment.text, {
-      ...(typeof segment.speaker === "string"
-        ? { speaker: segment.speaker }
-        : {}),
+      // Match the canonical reader: participants override the sanitized cached
+      // label; missing/unknown channels use the existing far-side default.
+      // Narrow raw values before helpers that expect typed strings.
+      speaker: speakerLabel(
+        {
+          channel:
+            segment.channel === "mic" || segment.channel === "text"
+              ? segment.channel
+              : "system",
+          speaker:
+            typeof segment.speaker === "string"
+              ? sanitizeSpeakerName(segment.speaker)
+              : "",
+          ...(typeof segment.speakerId === "string"
+            ? { speakerId: segment.speakerId }
+            : {}),
+        },
+        participants,
+      ),
       ...(typeof segment.startMs === "number" &&
       Number.isFinite(segment.startMs)
         ? { startMs: segment.startMs }
