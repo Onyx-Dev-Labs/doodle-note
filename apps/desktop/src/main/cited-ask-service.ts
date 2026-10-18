@@ -367,7 +367,15 @@ export class MainCitedAskService implements CitedAskService {
     }
     control.signal.throwIfAborted()
     control.assertCurrent()
-    return { status: 'resolved', passage: resolved.passage, range, audio }
+    const meeting = snapshot.evidence.meetings.find((m) => m.meetingId === range.anchor.meetingId)
+    return {
+      status: 'resolved',
+      passage: resolved.passage,
+      range,
+      audio,
+      occurredAt: meeting?.occurredAt ?? null,
+      dateBasis: meeting?.dateBasis ?? 'unknown'
+    }
   }
   async cancel(ownerId: string, runId: string): Promise<void> {
     const active = this.active

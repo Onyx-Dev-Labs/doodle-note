@@ -15,7 +15,8 @@ export default function CitedAnswer({
   return (
     <section className="cited-answer" aria-label="Answer with original citations">
       <p className="cited-meta">
-        Generated locally · {new Date(snapshot.askedAt).toLocaleString()}
+        {snapshot.prompt ? 'Generated locally' : 'Checked on this device'} ·{' '}
+        {new Date(snapshot.askedAt).toLocaleString()}
       </p>
       {snapshot.status === 'no-history' && <p>No linked history is available for this request.</p>}
       {snapshot.status === 'insufficient-evidence' && (
@@ -44,7 +45,7 @@ export default function CitedAnswer({
                 <button key={id} type="button" onClick={() => void onOpenCitation(id)}>
                   {index + 1}. {meeting?.title || 'Original'} ·{' '}
                   {meeting?.occurredAt
-                    ? new Date(meeting.occurredAt).toLocaleDateString()
+                    ? `${meeting.dateBasis === 'createdAt' ? 'Created' : 'Meeting'} ${new Date(meeting.occurredAt).toLocaleDateString()}`
                     : 'Date unknown'}
                 </button>
               )

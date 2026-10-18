@@ -1,3 +1,4 @@
+import { GlobalChatStore } from './global-chat-store'
 import { NotesGenerationJobs } from './notes-generation-job'
 import { libraryActivity } from './library-activity'
 import {
@@ -111,6 +112,10 @@ export type NotesBroadcast = (channel: string, payload: unknown) => void
  * Cloud engines are cheap per-call wrappers around the user's key.
  */
 export class NotesService {
+  /** Main composition fans this out to caller-owned cited caches. */
+  onCitedPolicyChange?: () => void
+  onHomeHistoryCleared?: () => void
+  readonly globalChatStore: GlobalChatStore
   private readonly settingsPath: string
   private get globalChatPath(): string {
     return join(resolveLibraryPath(this.libraryRoot), 'global-chat.json')
@@ -136,6 +141,7 @@ export class NotesService {
     private readonly libraryRoot: LibraryPath = userDataDir,
     private readonly assertAvailable: () => void = () => {}
   ) {
+    this.globalChatStore = new GlobalChatStore(() => this.globalChatPath, this.assertAvailable)
     this.settingsPath = join(userDataDir, 'settings.json')
     this.modelStore = new LocalModelStore(
       modelSearchDirectories(userDataDir, app.getPath('appData'), DEFAULT_MODELS_DIR)
@@ -196,9 +202,16 @@ export class NotesService {
     libraryIpc.handle(NOTES_ASK_GLOBAL_CHANNEL, (_event, request: unknown) =>
       this.askGlobal((request ?? {}) as GlobalAskRequest)
     )
-    libraryIpc.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () => this.loadGlobalChat())
+    libraryIpc.handle(NOTES_GLOBAL_CHAT_GET_CHANNEL, () =>
+      this.loadGlobalChat().map((entry) => {
+        const legacy = { ...entry }
+        delete legacy.citedAnswer
+        return legacy
+      })
+    )
     libraryIpc.handle(NOTES_GLOBAL_CHAT_CLEAR_CHANNEL, () => {
-      this.saveGlobalChat([])
+      this.globalChatStore.clear()
+      this.onHomeHistoryCleared?.()
     })
   }
 
@@ -229,6 +242,7 @@ export class NotesService {
       if (adopt) {
         this.settings.activeLocalModelId = adopt.id
         this.saveSettings()
+        this.onCitedPolicyChange?.()
       }
     }
     return {
@@ -282,6 +296,7 @@ export class NotesService {
       await engine.prepare()
       this.settings.activeLocalModelId = spec.id
       this.saveSettings()
+      this.onCitedPolicyChange?.()
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -493,10 +508,13 @@ export class NotesService {
         return { error: 'No meeting notes yet — record a meeting first.' }
       }
 
+      const chatEpoch = this.globalChatStore.epoch()
       const input: GlobalAskInput = {
         meetings,
         availableMeetingCount,
-        history: this.loadGlobalChat().map((e) => ({ question: e.question, answer: e.answer })),
+        history: this.loadGlobalChat()
+          .filter((e) => !e.citedAnswer)
+          .map((e) => ({ question: e.question, answer: e.answer })),
         question
       }
       const engine = await this.pickEngine()
@@ -516,15 +534,15 @@ export class NotesService {
       const notice = canonicalNotice && !hasCanonicalParagraph ? `\n\n${canonicalNotice}` : ''
       if (notice) this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token: notice })
       const answer = result.markdown + notice
-      this.saveGlobalChat([
-        ...this.loadGlobalChat(),
+      this.globalChatStore.append(
         {
           question,
           answer,
           askedAt: new Date().toISOString(),
           ...(result.coverage ? { coverage: result.coverage } : {})
-        }
-      ])
+        },
+        chatEpoch
+      )
       return {
         answer,
         engine: result.engine,
@@ -576,22 +594,7 @@ export class NotesService {
   /* ---- global chat persistence (userData/global-chat.json) ---- */
 
   private loadGlobalChat(): GlobalChatEntry[] {
-    this.assertAvailable()
-    try {
-      const raw = JSON.parse(readFileSync(this.globalChatPath, 'utf8'))
-      return Array.isArray(raw) ? raw.filter(isGlobalChatEntry) : []
-    } catch {
-      return [] // file doesn't exist yet (or is corrupt) — no conversation
-    }
-  }
-
-  private saveGlobalChat(entries: GlobalChatEntry[]): void {
-    this.assertAvailable()
-    try {
-      writeFileSync(this.globalChatPath, JSON.stringify(entries, null, 2))
-    } catch (err) {
-      console.error('[notes] failed to save global chat:', err)
-    }
+    return this.globalChatStore.read()
   }
 
   /** Local by default; cloud only when explicitly chosen AND usable —
@@ -847,7 +850,10 @@ export class NotesService {
       this.settings = previousSettings
       error = 'Could not save notes settings. Please try again.'
     }
-    if (JSON.stringify(previousSettings) !== JSON.stringify(this.settings)) this.citedAbort?.abort()
+    if (JSON.stringify(previousSettings) !== JSON.stringify(this.settings)) {
+      this.citedAbort?.abort()
+      this.onCitedPolicyChange?.()
+    }
     const view = this.settingsView()
     return error ? { ...view, error } : view
   }
@@ -949,12 +955,4 @@ function bestNotesOf(
   let prefix = spoken.slice(0, TRANSCRIPT_EXCERPT_CHARS)
   if (/[\uD800-\uDBFF]$/.test(prefix)) prefix = prefix.slice(0, -1)
   return { notesMarkdown: `${prefix}…`, sourceTruncated: true }
-}
-
-function isGlobalChatEntry(entry: unknown): entry is GlobalChatEntry {
-  if (typeof entry !== 'object' || entry === null) return false
-  const e = entry as Partial<GlobalChatEntry>
-  return (
-    typeof e.question === 'string' && typeof e.answer === 'string' && typeof e.askedAt === 'string'
-  )
 }

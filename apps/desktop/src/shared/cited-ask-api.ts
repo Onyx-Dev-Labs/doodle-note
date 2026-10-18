@@ -80,6 +80,8 @@ export type CitationView =
   | {
       status: 'resolved'
       passage: SourcePassage
+      occurredAt?: string | null
+      dateBasis?: 'startedAt' | 'createdAt' | 'unknown'
       range: EvidenceRange
       audio: { status: 'available'; token: string } | { status: 'unavailable' | 'ambiguous' }
     }

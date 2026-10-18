@@ -1,3 +1,4 @@
+import CitedHome from './CitedHome'
 import TextImportDialog from './TextImportDialog'
 import type { TextImportPreview } from '../../shared/text-import-api'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -469,6 +470,22 @@ export default function HomeView({
   }
 
   /* ---- cross-meeting "ask anything" (thread persisted by main) ---- */
+  const [citedEnabled, setCitedEnabled] = useState<boolean | null>(null)
+  useEffect(() => {
+    let current = true
+    void window.citedAsk
+      .status()
+      .then((result) => {
+        if (current) setCitedEnabled(result.enabled)
+      })
+      .catch(() => {
+        // An unknown gate must never fall through to legacy/cloud generation.
+        if (current) setCitedEnabled(null)
+      })
+    return () => {
+      current = false
+    }
+  }, [])
   const [chatOpen, setChatOpen] = useState(false)
   const [chatThread, setChatThread] = useState<GlobalChatEntry[]>([])
   const [askText, setAskText] = useState('')
@@ -483,7 +500,7 @@ export default function HomeView({
 
   const inTrash = filter.kind === 'trash'
   /** The ask bar lives in 'all' and 'folder' views, never in the trash. */
-  const askVisible = !inTrash
+  const askVisible = !inTrash && citedEnabled === false
 
   // The New menu is a top-level action surface: outside click and Escape
   // dismiss it without affecting any row action menu.
@@ -872,6 +889,9 @@ export default function HomeView({
 
       <div className="home-scroll">
         <div className="home-col">
+          {!inTrash && citedEnabled === true && (
+            <CitedHome folders={folders} onOpenSettings={onOpenSettings} />
+          )}
           {filter.kind === 'all' && (
             // The "Coming up" heading + controls render inside (outside the
             // white card, above it) so paging state stays local.

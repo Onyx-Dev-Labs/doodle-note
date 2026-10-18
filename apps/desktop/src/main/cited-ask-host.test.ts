@@ -31,3 +31,73 @@ test('main renderer owners reject other senders and child frames, retire on relo
   assert.throws(second.assertCurrent)
   assert.equal(owners.publish(second.ownerId, 'synthetic', {}), false)
 })
+
+test('invalidation retires consumers synchronously, isolates listener failures/recursion, and awaits only shared producer cleanup', async () => {
+  let began!: () => void
+  let release!: () => void
+  const started = new Promise<void>((r) => {
+    began = r
+  })
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const shared = host.createCitedAskHost(
+    {
+      sources: {
+        retrieveEvidence: async () => {
+          began()
+          await held
+          throw new Error('synthetic stopped read')
+        },
+        validateEvidence: async () => 'valid',
+        resolveAcknowledged: async () => ({ status: 'missing' })
+      },
+      generate: async () => {
+        throw new Error('must not generate')
+      },
+      validateModel: async () => true
+    },
+    () => null
+  )
+  let retired = 0
+  let recursed = 0
+  const unsubscribe = shared.subscribeInvalidation(() => {
+    retired++
+    throw new Error('synthetic subscriber failure')
+  })
+  shared.subscribeInvalidation(() => {
+    recursed++
+    void shared.invalidate()
+  })
+  shared.subscribeInvalidation(async () => {
+    throw new Error('synthetic asynchronous subscriber failure')
+  })
+  shared.subscribeInvalidation(async () => {
+    await new Promise(() => {})
+  })
+  const run = shared.cited.run(
+    { purpose: 'library-ask', selection: { mode: 'question', question: 'Orchid', filters: {} } },
+    {
+      ownerId: 'owner',
+      runId: 'run',
+      signal: new AbortController().signal,
+      assertCurrent: () => {}
+    }
+  )
+  await started
+  let drained = false
+  const invalidating = shared.invalidate().then(() => {
+    drained = true
+  })
+  assert.equal(retired, 1)
+  assert.equal(recursed, 1)
+  await new Promise((r) => setImmediate(r))
+  assert.equal(drained, false)
+  release()
+  await invalidating
+  assert.equal((await run).status, 'error')
+  unsubscribe()
+  await shared.invalidate()
+  assert.equal(retired, 1)
+  assert.equal(recursed, 2)
+})

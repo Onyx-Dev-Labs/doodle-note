@@ -1,3 +1,4 @@
+import { GlobalChatStore } from './global-chat-store'
 import { EventEmitter } from 'node:events'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -25,6 +26,7 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
   const broadcasts: Array<{ channel: string; payload: Record<string, unknown> }> = []
   const activity = new LibraryActivity()
   const deps: Record<string, unknown> = {
+    './global-chat-store': { GlobalChatStore },
     electron: {
       app: { getPath: () => dir },
       ipcMain: { handle: (channel: string, handler: Handler) => handlers.set(channel, handler) },

@@ -1,3 +1,4 @@
+import { GlobalChatStore } from './global-chat-store'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as fs from 'node:fs'
@@ -17,6 +18,7 @@ import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
 
 interface Service {
+  onHomeHistoryCleared?: () => void
   registerIpc(): void
   pickEngine(requireSelected?: boolean, localOnly?: boolean): Promise<unknown>
   localEnginePath: string | null
@@ -35,12 +37,14 @@ function createService(
 ): {
   service: Service
   ask: (question: string) => Promise<api.GlobalAskResult>
+  clear(): unknown
   broadcasts: Array<{ channel: string; payload: { token?: string } }>
 } {
   type Handler = (...args: unknown[]) => unknown
   const handlers = new Map<string, Handler>()
   const broadcasts: Array<{ channel: string; payload: { token?: string } }> = []
   const deps: Record<string, unknown> = {
+    './global-chat-store': { GlobalChatStore },
     electron: {
       app: { getPath: () => dir },
       ipcMain: { handle: (channel: string, handler: Handler) => handlers.set(channel, handler) },
@@ -89,7 +93,12 @@ function createService(
   service.registerIpc()
   const ask = (question: string): Promise<api.GlobalAskResult> =>
     handlers.get(api.NOTES_ASK_GLOBAL_CHANNEL)!({}, { question }) as Promise<api.GlobalAskResult>
-  return { service, ask, broadcasts }
+  return {
+    service,
+    ask,
+    broadcasts,
+    clear: () => handlers.get(api.NOTES_GLOBAL_CHAT_CLEAR_CHANNEL)!({})
+  }
 }
 
 test('global Ask persists honest coverage, includes upstream omissions, and keeps failed questions out of history', async () => {
@@ -427,6 +436,55 @@ test('cited adapter is local-only under cloud settings, shares busy ownership an
     }
     await assert.rejects(service.runCitedAsk(input, new AbortController().signal), /missing/)
     assert.equal(fs.readFileSync(history, 'utf8'), '[]')
+  } finally {
+    release()
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('legacy clear retires Home display synchronously and prevents pending legacy persistence', async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'dev507-clear-'))
+  const { service, ask, clear } = createService(dir, [
+    {
+      id: 'one',
+      title: 'Synthetic',
+      createdAt: '2026-10-18',
+      rawNotesMarkdown: 'Synthetic original.'
+    }
+  ])
+  let began!: () => void
+  let release!: () => void
+  const started = new Promise<void>((r) => {
+    began = r
+  })
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  let retired = 0
+  service.onHomeHistoryCleared = () => {
+    retired++
+  }
+  service.pickEngine = async () => ({
+    askAcrossMeetings: async () => {
+      began()
+      await held
+      return { markdown: 'Synthetic answer', engine: 'local:fixture', elapsedMs: 1 }
+    }
+  })
+  try {
+    const running = ask('Synthetic?')
+    await Promise.race([
+      started,
+      running.then((result) => {
+        throw new Error(JSON.stringify(result))
+      })
+    ])
+    clear()
+    assert.equal(retired, 1)
+    release()
+    assert.ok((await running).error)
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'global-chat.json'), 'utf8')), [])
   } finally {
     release()
     await service.dispose()

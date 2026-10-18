@@ -98,6 +98,11 @@ function PassageDialog({
         <>
           <h3>{view.passage.title || 'Untitled meeting'}</h3>
           <p className="cited-meta">
+            {view.occurredAt
+              ? `${view.dateBasis === 'createdAt' ? 'Created' : 'Meeting'} ${new Date(view.occurredAt).toLocaleString()}`
+              : 'Date unknown'}
+          </p>
+          <p className="cited-meta">
             {view.range.anchor.kind === 'personal' ? 'Personal notes' : 'Transcript'}
             {view.passage.speaker ? ` · ${view.passage.speaker}` : ''}
           </p>

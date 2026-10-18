@@ -1,3 +1,6 @@
+import { HomeCitedController } from './home-cited-controller'
+import { installHomeCitedIpc } from './home-cited-ipc'
+import { HOME_CITED_CHANGED } from '../shared/home-cited-api'
 import { createCitedAskHost } from './cited-ask-host'
 import { SourceIndexService } from './source-index-service'
 import { RecipeRunner } from './recipe-runner'
@@ -769,7 +772,7 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
   initAutoUpdater(broadcast, async () => {
     citedHost?.owners.retire()
-    await citedHost?.cited.invalidate()
+    await citedHost?.invalidate()
     await recipeRunner?.stop()
     await notesService?.dispose()
   })
@@ -850,6 +853,30 @@ app.whenReady().then(async () => {
     () => mainWindow?.webContents ?? null
   )
   citedHost = sharedCitedHost
+  const homeCited = new HomeCitedController({
+    cited: sharedCitedHost.cited,
+    store: notesService.globalChatStore,
+    enabled: citedEnabled,
+    census: (request, signal) => sourceIndex.census(request, signal)
+  })
+  sharedCitedHost.subscribeInvalidation(() => {
+    const cleanup = homeCited.invalidate()
+    broadcast(HOME_CITED_CHANGED, {})
+    return cleanup
+  })
+  notesService.onHomeHistoryCleared = () => {
+    void homeCited.invalidate().catch(() => {})
+    broadcast(HOME_CITED_CHANGED, {})
+  }
+  notesService.onCitedPolicyChange = () => {
+    void sharedCitedHost.invalidate()
+  }
+  installHomeCitedIpc({
+    ipc: ipcMain,
+    owners: sharedCitedHost.owners,
+    controller: homeCited,
+    enabled: citedEnabled
+  })
   // Consumer installation seam: Home and DEV509's brief installer receive
   // sharedCitedHost.cited and sharedCitedHost.owners. Never construct another producer.
 
@@ -860,7 +887,7 @@ app.whenReady().then(async () => {
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
     sourceIndex.invalidate()
-    void sharedCitedHost.cited.invalidate()
+    void sharedCitedHost.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.
     if (change.deletedId) audioService.deleteFor(change.deletedId)
@@ -876,7 +903,7 @@ app.whenReady().then(async () => {
       storage,
       () => recording.busy || importService.isBusy,
       (previous) => {
-        void sharedCitedHost.cited.invalidate()
+        void sharedCitedHost.invalidate()
         sourceIndex.refreshLibraryPath()
         agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
       }
@@ -913,7 +940,7 @@ app.on('will-quit', () => {
   engine.dispose()
   citedHost?.owners.retire()
   void (async () => {
-    await citedHost?.cited.invalidate()
+    await citedHost?.invalidate()
     await recipeRunner?.stop()
     await notesService?.dispose()
   })()

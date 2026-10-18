@@ -1,3 +1,4 @@
+import type { HomeCitedApi } from '../shared/home-cited-api'
 import type { SourcesApi } from '../shared/source-api'
 import type { RecipesApi } from '../shared/recipes-api'
 import type { TextImporterApi } from '../shared/text-import-api'
@@ -25,6 +26,7 @@ declare global {
     recording: RecordingApi
     engine: EngineApi
     notes: NotesApi
+    citedAsk: HomeCitedApi
     recipes: RecipesApi
     meetings: MeetingsApi
     sources: SourcesApi
