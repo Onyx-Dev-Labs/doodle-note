@@ -186,6 +186,19 @@ export function normalizeRecord(raw: MeetingUpsert): MeetingRecord {
     : [];
   return {
     id: raw.id,
+    ...(raw.savedAudioFailures?.mic === true ||
+    raw.savedAudioFailures?.system === true
+      ? {
+          savedAudioFailures: {
+            ...(raw.savedAudioFailures.mic === true
+              ? { mic: true as const }
+              : {}),
+            ...(raw.savedAudioFailures.system === true
+              ? { system: true as const }
+              : {}),
+          },
+        }
+      : {}),
     ...(raw.batchTranscription &&
     (raw.batchTranscription.backend === "parakeet" ||
       raw.batchTranscription.backend === "whisper") &&

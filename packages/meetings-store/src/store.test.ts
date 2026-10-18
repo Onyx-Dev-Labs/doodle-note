@@ -46,6 +46,33 @@ test("upsert + get round-trips a record and fills defaults", () => {
   }
 });
 
+test("audio degradation accepts only known channel flags and survives unrelated edits", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    writeFileSync(
+      join(dir, "audio-health.json"),
+      JSON.stringify({
+        id: "audio-health",
+        savedAudioFailures: {
+          mic: true,
+          system: "ENOSPC",
+          reason: "/private/synthetic.caf",
+        },
+      }),
+    );
+    assert.deepEqual(store.get("audio-health")?.savedAudioFailures, {
+      mic: true,
+    });
+    store.upsert({ id: "audio-health", rawNotesMarkdown: "Manual correction" });
+    const reopened = new MeetingFileStore(dir).get("audio-health")!;
+    assert.deepEqual(reopened.savedAudioFailures, { mic: true });
+    assert.equal(reopened.rawNotesMarkdown, "Manual correction");
+    assert.equal(store.upsert({ id: "legacy" }).savedAudioFailures, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
 test("upsert merges patches; null folderId clears the field", () => {
   const { store, cleanup } = tempStore();
   try {
