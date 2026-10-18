@@ -145,6 +145,38 @@ test('failure, cancellation races and retry retain previous completed artifacts'
   assert.equal(runner.list('synthetic').outputs.length, 2)
 })
 
+test('runtime acquisition failure writes no recipe output or source bytes and releases retry ownership', async (t) => {
+  const f = fixture(t)
+  const unavailable = new Error(
+    'Local inference is unavailable. No usable CPU-only runtime was found.',
+    {
+      cause: new Error('Synthetic runtime diagnostic')
+    }
+  )
+  let fail = true
+  const runner = new RecipeRunner(
+    () => f.root,
+    () => {},
+    async (...args) => {
+      if (fail) throw unavailable
+      return generated(...args)
+    }
+  )
+  const v = runner.save(recipeLibrary(f.root).scope, draft)
+  const sidecar = join(f.root, 'recipes-v1.json')
+  const before = readFileSync(sidecar, 'utf8')
+  await assert.rejects(
+    runner.run(request(f.root, v.versionId), 1),
+    (error) => error === unavailable
+  )
+  assert.equal(readFileSync(sidecar, 'utf8'), before)
+  assert.equal(readFileSync(join(f.root, 'meetings', 'synthetic.json'), 'utf8'), f.original)
+  assert.equal(runner.list('synthetic').outputs.length, 0)
+  fail = false
+  await runner.run(request(f.root, v.versionId), 1)
+  assert.equal(runner.list('synthetic').outputs.length, 1)
+})
+
 test('source edits, trash, source-scope changes and marker initialization reject late completion', async (t) => {
   for (const change of ['edit', 'trash', 'scope', 'account', 'workspace', 'marker']) {
     const f = fixture(t)

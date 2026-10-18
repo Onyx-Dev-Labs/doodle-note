@@ -65,7 +65,7 @@ export class LocalNotesEngine implements NotesEngine {
   private llama: Llama | null = null
   private model: LlamaModel | null = null
   private modelPath: string | null = null
-  /** GPU layer failed once (load or context) — stay on CPU from then on. */
+  /** Default compute failed once (load or context) — stay on CPU from then on. */
   private forceCpu = false
   private readonly options: LocalEngineOptions
 
@@ -77,9 +77,51 @@ export class LocalNotesEngine implements NotesEngine {
 
   /** Download (if needed) and load the model. Safe to call more than once. */
   async prepare(signal?: AbortSignal): Promise<void> {
+    return this.prepareModel(signal)
+  }
+
+  private async acquireRuntime(
+    cpuOnly: boolean,
+    signal?: AbortSignal,
+    defaultFailure?: unknown
+  ): Promise<Llama> {
+    const { getLlama, NoBinaryFoundError } = await loadNodeLlamaCpp()
+    try {
+      const llama = await getLlama({ ...(cpuOnly ? { gpu: false } : {}), build: 'never' })
+      signal?.throwIfAborted()
+      return llama
+    } catch (error) {
+      signal?.throwIfAborted()
+      const cause =
+        defaultFailure === undefined
+          ? error
+          : new AggregateError(
+              [defaultFailure, error],
+              'Default compute and CPU runtime acquisition failed'
+            )
+      // The exported class has name === 'Error'. Only classify acquisition,
+      // never model loading/context failures or matching message strings.
+      if (!(error instanceof NoBinaryFoundError)) {
+        if (defaultFailure === undefined) throw error
+        throw new Error(
+          'The local inference runtime could not be initialized. Restart DoodleNote to retry.',
+          { cause }
+        )
+      }
+      const prior = defaultFailure === undefined ? '' : 'The default compute attempt failed. '
+      const runtime = cpuOnly ? 'CPU-only' : 'default compute'
+      throw new Error(
+        `Local inference is unavailable. ${prior}No usable ${runtime} runtime was found in this app installation. ` +
+          'Restart DoodleNote to retry the default compute runtime. If this continues, install a compatible DoodleNote build.',
+        { cause }
+      )
+    }
+  }
+
+  private async prepareModel(signal?: AbortSignal, defaultFailure?: unknown): Promise<void> {
     signal?.throwIfAborted()
     if (this.model) return
-    const { getLlama, resolveModelFile } = await loadNodeLlamaCpp()
+    const { resolveModelFile } = await loadNodeLlamaCpp()
     this.modelPath =
       this.options.modelPath ??
       (await resolveModelFile(this.options.modelUri, {
@@ -91,41 +133,50 @@ export class LocalNotesEngine implements NotesEngine {
       }))
     signal?.throwIfAborted()
     // Staged load: the default compute layer first (Metal on mac, Vulkan on
-    // Windows when present), then CPU-only. Shared laptop iGPUs under Vulkan
-    // fail intermittently — whether the weights or the KV cache fit depends
-    // on what else is using GPU memory at that moment — with llama.cpp's
-    // bare "failed to load model". The CPU binary always loads given enough
-    // RAM, and once the GPU misbehaves we stop trusting it (forceCpu).
+    // Windows when present), then CPU-only. A default load or context failure
+    // makes CPU selection sticky; a usable CPU runtime is not guaranteed to
+    // be present in every installation. The failure alone does not prove OOM.
     // build:'never' everywhere: a packaged app must never attempt a
     // from-source build (no toolchain on user machines).
     if (!this.forceCpu) {
       try {
-        this.llama = await getLlama({ build: 'never' })
+        this.llama = await this.acquireRuntime(false, signal)
         this.model = await this.llama.loadModel({
           modelPath: this.modelPath,
           loadSignal: signal
         })
         return
       } catch (gpuErr) {
+        this.llama = null
+        this.model = null
         signal?.throwIfAborted()
         console.error('[local-engine] default compute layer failed, retrying CPU-only:', gpuErr)
+        defaultFailure = gpuErr
         this.forceCpu = true
       }
     }
+    // Keep runtime selection outside the model-load recovery advice: replacing
+    // a GGUF cannot supply a missing or unusable native runtime.
+    this.llama = null
+    this.llama = await this.acquireRuntime(true, signal, defaultFailure)
     try {
-      this.llama = await getLlama({ gpu: false, build: 'never' })
       this.model = await this.llama.loadModel({
         modelPath: this.modelPath,
         loadSignal: signal
       })
     } catch (cpuErr) {
-      signal?.throwIfAborted()
       this.llama = null
       this.model = null
+      signal?.throwIfAborted()
       const detail = cpuErr instanceof Error ? cpuErr.message : String(cpuErr)
+      const attempts = defaultFailure === undefined ? 'CPU' : 'tried default compute, then CPU'
       throw new Error(
-        `The on-device model could not be loaded (tried GPU, then CPU): ${detail}. ` +
-          'If this keeps happening, re-download the model from Settings → Notes model.'
+        `The on-device model could not be loaded (${attempts}): ${detail}. ` +
+          'If this keeps happening, re-download the model from Settings → Notes model.',
+        {
+          cause:
+            defaultFailure === undefined ? cpuErr : new AggregateError([defaultFailure, cpuErr])
+        }
       )
     }
   }
@@ -180,13 +231,14 @@ export class LocalNotesEngine implements NotesEngine {
       } catch (err) {
         signal.throwIfAborted()
         if (this.forceCpu) throw err
-        // Weights fit on the GPU but the KV cache didn't — reload on CPU.
-        console.error('[local-engine] context creation failed on GPU, reloading CPU-only:', err)
+        // Context creation failed on the default compute layer; try CPU without
+        // assuming the cause was GPU memory exhaustion.
+        console.error('[local-engine] default context creation failed, reloading CPU-only:', err)
         this.forceCpu = true
         await this.model?.dispose()
         this.model = null
         this.llama = null
-        await this.prepare(signal)
+        await this.prepareModel(signal, err)
         context = await this.model!.createContext({
           contextSize: this.options.contextSize ?? 16384
         })
