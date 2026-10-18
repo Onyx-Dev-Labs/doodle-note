@@ -1,3 +1,5 @@
+import { normalizeEvidenceFilters } from '@repo/meetings-store/evidence';
+import type { CensusRequest } from '@repo/meetings-store/evidence-contract';
 import {
   AGENT_SCHEMA_VERSION,
   AgentToolError,
@@ -87,3 +89,22 @@ export const LOCAL_SOURCE_TOOLS: AgentToolDef[] = [
     },
   },
 ];
+
+const filtersSchema = { type: 'object', properties: { folderId: {type:'string'}, dateFrom: {type:'string'}, dateBefore: {type:'string'} }, additionalProperties:false };
+LOCAL_SOURCE_TOOLS.push({
+  name: 'retrieve_meeting_evidence',
+  description: 'Retrieve bounded original personal/transcript ranges for a question from the full eligible local library. Reports scan, selection and lexical coverage separately; examples are not an exact total. No model generation.',
+  inputSchema: {type:'object',properties:{question:{type:'string',maxLength:4096},filters:filtersSchema},required:['question'],additionalProperties:false},
+  async run(source,args) {
+    if (!(source instanceof LocalMeetingSource) || Object.keys(args).some(k=>!['question','filters'].includes(k)) || typeof args.question !== 'string') throw new AgentToolError('Invalid local evidence request');
+    return {schema_version:AGENT_SCHEMA_VERSION,...await source.retrieveEvidence({mode:'question',question:args.question,filters:normalizeEvidenceFilters(args.filters??{})})};
+  }
+}, {
+  name: 'count_meeting_sources',
+  description: 'Count eligible meetings or original passages matching ALL literal terms. Not a semantic task/decision count. Incomplete scans are observed lower bounds; lists show at most 100 meetings.',
+  inputSchema: {type:'object',properties:{filters:filtersSchema,predicate:{oneOf:[{type:'object',properties:{kind:{const:'eligible'}},required:['kind'],additionalProperties:false},{type:'object',properties:{kind:{const:'literal'},text:{type:'string',maxLength:4096}},required:['kind','text'],additionalProperties:false}]}},required:['predicate'],additionalProperties:false},
+  async run(source,args) {
+    if (!(source instanceof LocalMeetingSource) || Object.keys(args).some(k=>!['predicate','filters'].includes(k))) throw new AgentToolError('Invalid local census request');
+    return {schema_version:AGENT_SCHEMA_VERSION,...await source.census({filters:normalizeEvidenceFilters(args.filters??{}),predicate:args.predicate as CensusRequest['predicate']})};
+  }
+});

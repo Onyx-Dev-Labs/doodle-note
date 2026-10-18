@@ -1,3 +1,5 @@
+import { retrieveOriginalEvidence, censusOriginalEvidence } from '@repo/meetings-store/evidence';
+import type { EvidenceSelection, EvidenceBundle, CensusRequest, CensusResult } from '@repo/meetings-store/evidence-contract';
 import {
   localSourceScope,
   sameScope,
@@ -59,6 +61,19 @@ export class LocalMeetingSource implements MeetingSource {
   ): Promise<SourceSearchResult> {
     const context = this.sourceContext();
     const result = searchOriginalSources(context, query, limit);
+    this.assertCurrentContext(context);
+    return result;
+  }
+
+  async retrieveEvidence(selection: EvidenceSelection): Promise<EvidenceBundle> {
+    const context = this.sourceContext();
+    const result = retrieveOriginalEvidence(context, selection);
+    this.assertCurrentContext(context);
+    return result;
+  }
+  async census(request: CensusRequest): Promise<CensusResult> {
+    const context = this.sourceContext();
+    const result = censusOriginalEvidence(context, request);
     this.assertCurrentContext(context);
     return result;
   }

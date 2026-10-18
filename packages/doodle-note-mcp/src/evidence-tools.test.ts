@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LOCAL_SOURCE_TOOLS } from './source-tools';
+import { LocalMeetingSource } from './local-source';
+test('readonly evidence and literal census tools enumerate older originals with explicit partial coverage', async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'dev507-mcp-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  writeFileSync(join(dir,'old.json'),JSON.stringify({id:'old',rawNotesMarkdown:'Orchid launch Friday',segments:[{id:'s',text:'Orchid budget'}]}));
+  const before=readFileSync(join(dir,'old.json'));const source=new LocalMeetingSource(dir);
+  const retrieve=LOCAL_SOURCE_TOOLS.find(t=>t.name==='retrieve_meeting_evidence');assert.ok(retrieve);
+  const result=await retrieve.run(source,{question:'When was the Orchid launch?'});
+  assert.equal((result.coverage as {scanComplete:boolean}).scanComplete,true);
+  const census=LOCAL_SOURCE_TOOLS.find(t=>t.name==='count_meeting_sources');assert.ok(census);
+  const count=await census.run(source,{predicate:{kind:'literal',text:'Orchid'}});assert.equal(count.meetingCount,1);assert.equal(count.sourceCount,2);
+  await assert.rejects(retrieve.run(source,{question:'Orchid',meetingIds:[]}));
+  await assert.rejects(census.run(source,{predicate:{kind:'semantic',text:'all tasks'}}));
+  assert.deepEqual(readFileSync(join(dir,'old.json')),before);assert.deepEqual(readdirSync(dir),['old.json']);
+  writeFileSync(join(dir,'bad.json'),'{');const partial=await census.run(source,{predicate:{kind:'eligible'}});assert.equal(partial.exact,false);
+});

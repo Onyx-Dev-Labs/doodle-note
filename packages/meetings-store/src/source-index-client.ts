@@ -1,3 +1,4 @@
+import type { EvidenceSelection, EvidenceBundle, EvidenceManifest, CensusRequest, CensusResult } from './evidence-contract';
 import type { Worker } from "node:worker_threads";
 import type {
   SourceAnchor,
@@ -53,7 +54,8 @@ export class SourceIndexClient {
             task.context !== JSON.stringify(this.context())
           )
             throw new StaleSourceRequestError();
-          if (message.error) throw new Error(message.error);
+          if (Atomics.load(task.cancellation, 0)) throw new Error('Source request cancelled');
+          if (message.error) throw Object.assign(new Error(message.error), {code: message.code});
           task.resolve(message.result);
           this.state = this.pending.size
             ? "reconciling"
@@ -113,15 +115,24 @@ export class SourceIndexClient {
       signal,
     ) as Promise<SourceResolution>;
   }
+  async retrieveEvidence(selection: EvidenceSelection, signal?: AbortSignal): Promise<EvidenceBundle> {
+    return this.request({ operation: 'retrieve-evidence', selection }, signal) as Promise<EvidenceBundle>;
+  }
+  async census(census: CensusRequest, signal?: AbortSignal): Promise<CensusResult> {
+    return this.request({ operation: 'census', census }, signal) as Promise<CensusResult>;
+  }
+  async validateEvidence(manifest: EvidenceManifest, signal?: AbortSignal): Promise<'valid' | 'stale' | 'unavailable'> {
+    return this.request({ operation: 'validate-evidence', manifest }, signal) as Promise<'valid' | 'stale' | 'unavailable'>;
+  }
   private async request(
     input: Pick<
       SourceWorkerRequest,
-      "operation" | "query" | "limit" | "anchor"
+      "operation" | "query" | "limit" | "anchor" | "selection" | "census" | "manifest"
     >,
     signal?: AbortSignal,
   ): Promise<unknown> {
     const generation = this.generation;
-    await this.ready;
+    await awaitSourceReady(this.ready, signal);
     if (signal?.aborted) throw new Error("Source request cancelled");
     if (this.state === "closed" || this.state === "unavailable")
       throw new Error("Source worker unavailable");
@@ -134,6 +145,9 @@ export class SourceIndexClient {
       const cancellation = new Int32Array(new SharedArrayBuffer(4));
       const cancel = (): void => {
         Atomics.store(cancellation, 0, 1);
+        // New operations settle only when this worker acknowledges completion/cancellation.
+        // Preserve the legacy immediate UI cancellation contract for source search/resolve.
+        if (input.operation !== 'search' && input.operation !== 'resolve') return;
         this.pending.delete(id);
         cleanup();
         if (!this.pending.size) this.state = "dirty";
@@ -163,4 +177,14 @@ export class SourceIndexClient {
     await this.worker.terminate();
     this.state = "closed";
   }
+}
+
+/** Abort before readiness/retirement without scheduling a delayed request. */
+export async function awaitSourceReady<T>(ready: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw new Error('Source request cancelled');
+  let cancel!: () => void;
+  const aborted = new Promise<never>((_, reject) => { cancel = () => reject(new Error('Source request cancelled')); });
+  signal?.addEventListener('abort', cancel, { once: true });
+  try { return await Promise.race([ready, aborted]); }
+  finally { signal?.removeEventListener('abort', cancel); }
 }

@@ -65,7 +65,7 @@ function filtered(snapshot: SourceSnapshot, filters: EvidenceFilters) {
   });
   return {documents,unknownDateCount};
 }
-function getSnapshot(context: SourceContext, selection: EvidenceSelection, checkpoint: ()=>void) {
+export function scanEvidenceSources(context: SourceContext, selection: EvidenceSelection, checkpoint: ()=>void) {
   if(!context.authorized)throw new EvidenceError('unauthorized');
   const ids=selection.meetingIds;
   // Explicit [] observes only the current directory/scope binding, never scans the library.
@@ -133,7 +133,7 @@ export function selectOriginalEvidence(context: SourceContext, selection: Eviden
 export function retrieveOriginalEvidence(context: SourceContext, input: EvidenceSelection, checkpoint: ()=>void = ()=>{}): EvidenceBundle {
   const selection=normalizeEvidenceSelection(input);const deadline=Date.now()+15000;
   const check=()=>{checkpoint();if(Date.now()>deadline)throw new EvidenceError('retrieval-timeout');};
-  return selectOriginalEvidence(context,selection,getSnapshot(context,selection,check),check);
+  return selectOriginalEvidence(context,selection,scanEvidenceSources(context,selection,check),check);
 }
 export function validateOriginalEvidence(context: SourceContext, manifest: EvidenceManifest, checkpoint: ()=>void = ()=>{}): 'valid'|'stale'|'unavailable' {
   const current=retrieveOriginalEvidence(context,manifest.selection,checkpoint);

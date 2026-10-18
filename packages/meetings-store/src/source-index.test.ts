@@ -507,3 +507,14 @@ test("source labels reuse canonical channel, legacy, cached-name and malformed-p
   }
   assert.deepEqual(readFileSync(join(f.dir, "a.json")), before);
 });
+
+test('evidence request abort before worker readiness settles without sending later or cancelling other requests',async t=>{
+  const { EventEmitter }=await import('node:events');
+  const f=fixture(t);const worker=new EventEmitter() as InstanceType<typeof EventEmitter> & {postMessage:(x:unknown)=>void;terminate:()=>Promise<number>};
+  const posted:unknown[]=[];worker.postMessage=(x)=>posted.push(x);worker.terminate=async()=>0;
+  const client=new SourceIndexClient(worker as unknown as Worker,()=>f.context);t.after(()=>client.close());
+  const abort=new AbortController();const pending=client.retrieveEvidence({mode:'linked-history',meetingIds:[]},abort.signal);
+  const rejected=assert.rejects(pending,/cancel/i);abort.abort();
+  await Promise.race([rejected,new Promise((_,reject)=>setTimeout(()=>reject(new Error('abort waited for readiness')),200))]);
+  worker.emit('message',{ready:true});await new Promise(resolve=>setImmediate(resolve));assert.equal(posted.length,0);
+});

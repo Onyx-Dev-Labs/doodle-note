@@ -313,3 +313,29 @@ for (const failCopy of [false, true]) {
     }
   })
 }
+
+test('evidence retrieval and validation use the real worker and exact current originals', async t => {
+  const f=fixture(t);
+  assert.equal(typeof f.service.retrieveEvidence,'function');
+  const bundle=await f.service.retrieveEvidence({mode:'question',question:'What about needle?',filters:{}});
+  assert.equal(bundle.ranges[0]!.quote,'original needle');
+  assert.equal(await f.service.validateEvidence(bundle.manifest),'valid');
+  f.put('changed needle');
+  assert.equal(await f.service.validateEvidence(bundle.manifest),'stale');
+  const counts=await f.service.census({filters:{},predicate:{kind:'literal',text:'needle'}});
+  assert.equal(counts.meetingCount,1); assert.equal(counts.exact,true);
+});
+
+test('request-owned evidence abort drains acknowledgement without cancelling another consumer',async t=>{
+  const f=fixture(t);await call('sources:search','needle');
+  const worker=workers.at(-1)!;worker.holdResponses=true;
+  const abort=new AbortController();let settled=false;
+  const held=once(worker,'response-held');
+  const request=f.service.retrieveEvidence({mode:'question',question:'needle',filters:{}},abort.signal);
+  const rejected=assert.rejects(request,/cancel/i).then(()=>{settled=true});
+  await held;abort.abort();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(settled,false,'producer acknowledgement must precede cleanup completion');
+  const other=f.service.retrieveEvidence({mode:'linked-history',meetingIds:['a']});
+  worker.releaseResponses();await rejected;
+  assert.equal((await other).ranges.length,1);
+});
