@@ -123,6 +123,8 @@ import {
   MEETINGS_LIST_CHANNEL,
   MEETINGS_SEARCH_CHANNEL,
   MEETINGS_UPSERT_CHANNEL,
+  MEETINGS_SAVE_NOTES_CHANNEL,
+  type MeetingTextPatch,
   type MeetingRecord,
   type MeetingSearchHit,
   type MeetingSummary,
@@ -397,6 +399,10 @@ const meetingsApi: MeetingsApi = {
 
   upsert(meeting: MeetingUpsert): Promise<MeetingRecord> {
     return ipcRenderer.invoke(MEETINGS_UPSERT_CHANNEL, meeting) as Promise<MeetingRecord>
+  },
+
+  saveNotes(patch: MeetingTextPatch): Promise<MeetingRecord> {
+    return ipcRenderer.invoke(MEETINGS_SAVE_NOTES_CHANNEL, patch) as Promise<MeetingRecord>
   },
 
   delete(id: string): Promise<void> {

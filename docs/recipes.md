@@ -43,6 +43,25 @@ Rollback can revert code while retaining the sidecar for later recovery. An olde
 binary will ignore recipes, but its old relocation allowlist does not copy this new
 file: manually preserve it before relocating with an older binary.
 
+## Pending editor saves
+
+Recipe preparation awaits the MeetingView text-save queue. Clean views issue no
+meeting write, including missing-model and canceled runs. Genuine title/personal-note
+edits serialize through `meetings:save-notes` / `MeetingFileStore.updateText` before
+source capture. Failed saves stay pending and stop the recipe; concurrent flushes
+wait for the same write and drain newer edits. Edits during preparation cancel that
+recipe attempt. Discard waits for already-dispatched writes before deleting a draft.
+
+This additive IPC accepts only `id`, optional string `title`, and optional string
+`rawNotesMarkdown`. It reads the latest raw original and changes only supplied text
+fields, preserving metadata, ink, selected summaries, transcript, ownership and other
+richer fields. Unknown/reserved payload keys are rejected, including `sourceScope`;
+its disk value is never supplied or cleared by the renderer. Missing, unreadable,
+malformed and trashed originals are not replaced/resurrected. No-op text edits retain
+exact bytes. The existing library barrier protects the write during relocation.
+General upsert/summary normalization is unchanged. DEV506 integration must retain
+this raw-preserving text path and its sourceScope rejection/preservation tests.
+
 ## Library and policy boundaries
 
 Only the main-owned active library and current meeting are used. Renderer arguments
@@ -98,6 +117,12 @@ request/scope shapes and confirmation, with zero job admission/inference and unc
 bytes. Table-driven corrupt-file and direct completion tests cover required nested
 version/model/provenance fields, readable failures and unchanged original bytes;
 valid richer metadata, restart and idempotent retry remain covered.
+Actual RecipePanel execute + MeetingView callbacks run through real IPC handlers,
+library barrier, store and source extraction in synthetic tests. They cover clean
+success/repeat/missing-model/cancel byte preservation, dirty corrected-summary/ink
+retention, reserved-field rejection, failed debounce retry, concurrent/newer edits,
+queued relocation and cancellation. Text-save tests cover discard draining and
+missing/corrupt originals without reconstruction.
 Adapter tests cover Unicode/exact boundaries, missing policy, unsupported/oversized
 models, exact wire input/output reserve and allocated local context cleanup.
 
