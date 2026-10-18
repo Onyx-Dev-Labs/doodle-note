@@ -30,7 +30,11 @@ export function splitWhisperWindows(
   if (windowSamples <= 0) throw new Error('Whisper window size must be positive.')
   const windows: Float32Array[] = []
   for (let start = 0; start < samples.length; start += windowSamples) {
-    windows.push(samples.subarray(start, start + windowSamples))
+    const window = samples.subarray(start, start + windowSamples)
+    // Whisper can hallucinate text (for example, "[ Silence ]") on digital
+    // silence. Keep every nonzero sample, including very quiet speech, and
+    // leave the original window boundaries and saved recording untouched.
+    if (window.some((sample) => sample !== 0)) windows.push(window)
   }
   return windows
 }

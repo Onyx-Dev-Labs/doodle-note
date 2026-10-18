@@ -8,8 +8,27 @@ export function cancelWinBatchAudio(jobId: string): void {
 const TARGET_SAMPLE_RATE = 16_000
 const CHUNK_SAMPLES = TARGET_SAMPLE_RATE * 2
 
+/** File stereo is not proof of two people or microphone/system provenance. */
+export function winBatchChannels(
+  decoded: Pick<AudioBuffer, 'numberOfChannels' | 'length' | 'getChannelData'>,
+  mode: 'mixed' | 'split'
+): Float32Array[] {
+  const inputs = Array.from({ length: decoded.numberOfChannels }, (_, index) =>
+    decoded.getChannelData(index)
+  )
+  if (mode === 'split') return inputs.slice(0, 2)
+  const mixed = new Float32Array(decoded.length)
+  for (const input of inputs) {
+    for (let i = 0; i < mixed.length; i++) mixed[i] += input[i]! / inputs.length
+  }
+  return [mixed]
+}
+
 /** Decode an imported file with Chromium and stream 16 kHz PCM back to main. */
-export async function decodeWinBatchAudio(jobId: string): Promise<void> {
+export async function decodeWinBatchAudio(
+  jobId: string,
+  mode: 'mixed' | 'split' = 'mixed'
+): Promise<void> {
   const controller = new AbortController()
   activeDecoders.set(jobId, controller)
   let context: AudioContext | null = null
@@ -26,12 +45,13 @@ export async function decodeWinBatchAudio(jobId: string): Promise<void> {
     context = new AudioContext()
     const decoded = await context.decodeAudioData(encoded.slice(0))
     check()
-    const channelCount = Math.min(2, Math.max(1, decoded.numberOfChannels))
+    const pcm = winBatchChannels(decoded, mode)
+    const channelCount = pcm.length
     const channels: EngineChannel[] = channelCount > 1 ? ['mic', 'system'] : ['mic']
 
     const sourceBuffer = context.createBuffer(channelCount, decoded.length, decoded.sampleRate)
     for (let channel = 0; channel < channelCount; channel += 1) {
-      sourceBuffer.copyToChannel(decoded.getChannelData(channel), channel)
+      sourceBuffer.copyToChannel(pcm[channel] as Float32Array<ArrayBuffer>, channel)
     }
     const outputLength = Math.max(1, Math.ceil(decoded.duration * TARGET_SAMPLE_RATE))
     const offline = new OfflineAudioContext(channelCount, outputLength, TARGET_SAMPLE_RATE)
