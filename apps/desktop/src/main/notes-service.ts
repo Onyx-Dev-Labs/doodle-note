@@ -12,6 +12,8 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   GenerationError,
+  GlobalAskBudgetError,
+  globalAskCoverageNotice,
   withGenerationDeadline,
   CloudNotesEngine,
   DEFAULT_MODELS_DIR,
@@ -65,21 +67,15 @@ import { isStoredCloudProvider } from '../shared/meeting-recovery'
 import type { MeetingsService } from './meetings-service'
 import { modelSearchDirectories } from './model-paths'
 
-/**
- * @repo/ai's index does not re-export the global-ask types (the engines
- * reference them structurally), so they are derived from the engine surface
- * instead of imported.
- */
+/** Keep service evidence shape aligned with the engine request contract. */
 type GlobalAskInput = Parameters<NotesEngine['askAcrossMeetings']>[0]
 type GlobalAskMeeting = GlobalAskInput['meetings'][number]
 
 /** Newest meetings considered for cross-meeting context; the prompt builder
- *  trims further to its character budget. */
+ *  reduces further to its selected model request budget. */
 const MAX_GLOBAL_MEETINGS = 30
 /** Fallback transcript excerpt length for meetings with no notes at all. */
 const TRANSCRIPT_EXCERPT_CHARS = 1500
-/** Prior exchanges replayed into each cross-meeting ask. */
-const MAX_GLOBAL_HISTORY_SENT = 6
 
 /** What actually lands in userData/settings.json. */
 interface StoredCloudSettings {
@@ -487,29 +483,46 @@ export class NotesService {
       const question = typeof request.question === 'string' ? request.question.trim() : ''
       if (!question) return { error: 'Ask a question first.' }
 
-      const meetings = this.globalAskContext()
+      const { meetings, availableMeetingCount } = this.globalAskContext()
       if (meetings.length === 0) {
         return { error: 'No meeting notes yet — record a meeting first.' }
       }
 
       const input: GlobalAskInput = {
         meetings,
-        history: this.loadGlobalChat()
-          .slice(-MAX_GLOBAL_HISTORY_SENT)
-          .map((e) => ({ question: e.question, answer: e.answer })),
+        availableMeetingCount,
+        history: this.loadGlobalChat().map((e) => ({ question: e.question, answer: e.answer })),
         question
       }
       const engine = await this.pickEngine()
       const result = await engine.askAcrossMeetings(input, (token) => {
         this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token })
       })
+      // Deterministic disclosure is visible and persisted even if the model
+      // ignores its coverage instruction. Do not rely on generated prose for it.
+      const notice = result.coverage ? `\n\n${globalAskCoverageNotice(result.coverage)}` : ''
+      if (notice) this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token: notice })
+      const answer = result.markdown + notice
       this.saveGlobalChat([
         ...this.loadGlobalChat(),
-        { question, answer: result.markdown, askedAt: new Date().toISOString() }
+        {
+          question,
+          answer,
+          askedAt: new Date().toISOString(),
+          ...(result.coverage ? { coverage: result.coverage } : {})
+        }
       ])
-      return { answer: result.markdown, engine: result.engine, elapsedMs: result.elapsedMs }
+      return {
+        answer,
+        engine: result.engine,
+        elapsedMs: result.elapsedMs,
+        ...(result.coverage ? { coverage: result.coverage } : {})
+      }
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) }
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        ...(err instanceof GlobalAskBudgetError ? { code: err.code } : {})
+      }
     } finally {
       this.askBusy = false
     }
@@ -519,9 +532,9 @@ export class NotesService {
    * Cross-meeting context: every non-trashed meeting, newest first, reduced
    * to its best available notes. Meetings with nothing to ground an answer
    * on are skipped entirely; the newest MAX_GLOBAL_MEETINGS candidates go to
-   * the prompt builder, which trims further to its character budget.
+   * the prompt builder, which reduces further to its selected model request budget.
    */
-  private globalAskContext(): GlobalAskMeeting[] {
+  private globalAskContext(): { meetings: GlobalAskMeeting[]; availableMeetingCount: number } {
     const records = this.meetings
       .readAll()
       .filter((record) => !record.trashedAt)
@@ -531,17 +544,20 @@ export class NotesService {
         return aIso < bIso ? 1 : aIso > bIso ? -1 : 0
       })
     const out: GlobalAskMeeting[] = []
+    let availableMeetingCount = 0
     for (const record of records) {
-      if (out.length >= MAX_GLOBAL_MEETINGS) break
-      const notes = bestNotesOf(record)
-      if (notes === null) continue
+      const content = bestNotesOf(record)
+      if (content === null) continue
+      availableMeetingCount++
+      if (out.length >= MAX_GLOBAL_MEETINGS) continue
       out.push({
+        sourceId: record.id,
+        ...content,
         title: record.title.trim() || 'Untitled meeting',
-        dateIso: record.startedAt ?? record.createdAt,
-        notesMarkdown: notes
+        dateIso: record.startedAt ?? record.createdAt
       })
     }
-    return out
+    return { meetings: out, availableMeetingCount }
   }
 
   /* ---- global chat persistence (userData/global-chat.json) ---- */
@@ -779,20 +795,23 @@ export class NotesService {
  * user's rough notes, else a short transcript excerpt — else null (nothing
  * to ground on; skip the meeting).
  */
-function bestNotesOf(record: MeetingRecord): string | null {
+function bestNotesOf(
+  record: MeetingRecord
+): Pick<GlobalAskMeeting, 'notesMarkdown' | 'sourceTruncated'> | null {
   const enhanced = record.enhancedMarkdown?.trim()
-  if (enhanced) return enhanced
+  if (enhanced) return { notesMarkdown: enhanced }
   const raw = record.rawNotesMarkdown.trim()
-  if (raw) return raw
+  if (raw) return { notesMarkdown: raw }
   const spoken = record.segments
     .filter((s) => !s.echo)
     .map((s) => `${s.speaker}: ${s.text}`)
     .join('\n')
     .trim()
   if (spoken.length === 0) return null
-  return spoken.length > TRANSCRIPT_EXCERPT_CHARS
-    ? `${spoken.slice(0, TRANSCRIPT_EXCERPT_CHARS)}…`
-    : spoken
+  if (spoken.length <= TRANSCRIPT_EXCERPT_CHARS) return { notesMarkdown: spoken }
+  let prefix = spoken.slice(0, TRANSCRIPT_EXCERPT_CHARS)
+  if (/[\uD800-\uDBFF]$/.test(prefix)) prefix = prefix.slice(0, -1)
+  return { notesMarkdown: `${prefix}…`, sourceTruncated: true }
 }
 
 function isGlobalChatEntry(entry: unknown): entry is GlobalChatEntry {
