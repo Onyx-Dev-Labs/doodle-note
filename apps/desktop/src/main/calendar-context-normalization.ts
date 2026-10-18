@@ -2,7 +2,7 @@ import type { CalendarInvitee, CalendarInvitees, CalendarProvider } from '../sha
 
 const MAX_ENTRIES = 256
 const MAX_BYTES = 64 * 1024
-const controls = /[\u0000-\u001f\u007f-\u009f]/u
+const controls = /\p{Cc}/u
 const object = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -28,7 +28,7 @@ export function normalizeCalendarInvitees(
   let partial = false
   const display = (value: unknown): string | null => {
     if (typeof value !== 'string') return null
-    const chars = Array.from(value.replace(/[\u0000-\u001f\u007f-\u009f]/gu, '').trim())
+    const chars = Array.from(value.replace(/\p{Cc}/gu, '').trim())
     if (chars.length > 256) partial = true
     return chars.slice(0, 256).join('') || null
   }
@@ -162,11 +162,15 @@ export function isCalendarInvitees(value: unknown): value is CalendarInvitees {
       roster.omittedCount === null ||
       (Number.isSafeInteger(roster.omittedCount) && Number(roster.omittedCount) >= 0)
     ) ||
+    (roster.state === 'complete' && roster.omittedCount !== 0) ||
+    (roster.state === 'unknown' && roster.omittedCount !== null) ||
     !Array.isArray(raw.entries) ||
     raw.entries.length > MAX_ENTRIES
   )
     return false
   const ids = new Set<string>()
+  const addresses = new Map<string, number>()
+  const people = new Map<string, number>()
   for (const value of raw.entries) {
     const row = object(value)
     if (
@@ -207,8 +211,26 @@ export function isCalendarInvitees(value: unknown): value is CalendarInvitees {
         return false
       }
     }
+    if (row.address)
+      addresses.set(row.address as string, (addresses.get(row.address as string) ?? 0) + 1)
+    if (row.providerPersonId)
+      people.set(
+        row.providerPersonId as string,
+        (people.get(row.providerPersonId as string) ?? 0) + 1
+      )
     ids.add(row.id)
   }
+  if (
+    raw.entries.some((value) => {
+      const row = object(value)
+      return (
+        row.identifierKey !== null &&
+        ((row.address && addresses.get(row.address as string)! > 1) ||
+          (row.providerPersonId && people.get(row.providerPersonId as string)! > 1))
+      )
+    })
+  )
+    return false
   return Buffer.byteLength(JSON.stringify(value)) <= MAX_BYTES
 }
 

@@ -26,7 +26,8 @@ export const LIBRARY_ENTRIES = [
   'sessions',
   'folders.json',
   'global-chat.json',
-  'recipes-v1.json'
+  'recipes-v1.json',
+  'calendar-context-v1.json'
 ] as const
 const MARKER = '.doodlenote-library.json'
 interface Location {

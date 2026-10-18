@@ -4,7 +4,7 @@ import { normalizeCalendarInvitees, readCalendarInvitees } from './calendar-cont
 import { accountKey, scopeCalendar, scopeEvent } from './calendar-identity'
 
 for (const provider of ['google', 'microsoft'] as const) {
-  const attendee = (address: string, name = 'Same name') =>
+  const attendee = (address: string, name = 'Same name'): Record<string, unknown> =>
     provider === 'google'
       ? { email: address, displayName: name }
       : { emailAddress: { address, name }, type: 'required' }
@@ -150,4 +150,17 @@ test('overflow cannot assert uniqueness of an identifier whose duplicate was omi
     }))
   })
   assert.equal(result.entries[0]!.identifierKey, null)
+})
+
+test('cached ambiguous identifiers and impossible complete-roster counts fail closed', () => {
+  const valid = normalizeCalendarInvitees('google', { attendees: [{ email: 'a@example.test' }] })
+  const ambiguous = {
+    ...valid,
+    entries: [valid.entries[0], { ...valid.entries[0], id: 'invitee:1' }]
+  }
+  assert.equal(readCalendarInvitees(ambiguous).roster.state, 'unknown')
+  assert.equal(
+    readCalendarInvitees({ ...valid, roster: { state: 'complete', omittedCount: 1 } }).roster.state,
+    'unknown'
+  )
 })

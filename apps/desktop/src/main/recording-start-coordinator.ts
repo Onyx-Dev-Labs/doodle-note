@@ -3,6 +3,14 @@ import { calendarJoinUrl, type CalendarStartMeetingEvent } from '../shared/calen
 import type { EngineEvent } from '../shared/engine-events'
 import type { RecordingStartRequest, RecordingState } from '../shared/recording-api'
 
+/** Main-only optional metadata observer. It cannot veto or interrupt valid capture. */
+export interface RecordingStartObserver {
+  accepted?(request: RecordingStartRequest): void
+  attached?(requestId: string, meetingId: string): void
+  engineBegin?(requestId: string | null, meetingId: string | undefined): void
+  reset?(): void
+}
+
 /** Own the reservation before any asynchronous meeting creation or window load. */
 export class RecordingStartCoordinator {
   private state: RecordingState = { phase: 'idle', eligible: false, meetingId: null }
@@ -17,7 +25,8 @@ export class RecordingStartCoordinator {
     private readonly changed: (state: RecordingState) => void,
     private readonly openExternal: (url: string) => Promise<void> = async () => {
       throw new Error('Meeting link opener unavailable.')
-    }
+    },
+    private readonly observer?: RecordingStartObserver
   ) {}
 
   snapshot(): RecordingState {
@@ -46,6 +55,7 @@ export class RecordingStartCoordinator {
   request(event: CalendarStartMeetingEvent): boolean {
     if (!this.state.eligible || this.busy) return false
     this.pending = { id: randomUUID(), event: { ...event, action: 'start' } }
+    this.observe(() => this.observer?.accepted?.(this.pending!))
     this.state.phase = 'requested'
     this.joinTarget = undefined
     delete this.state.join
@@ -95,6 +105,7 @@ export class RecordingStartCoordinator {
   attach(requestId: string, meetingId: string): boolean {
     if (this.pending?.id !== requestId || this.state.phase !== 'requested' || !meetingId)
       return false
+    this.observe(() => this.observer?.attached?.(requestId, meetingId))
     this.state.meetingId = meetingId
     this.state.phase = 'starting'
     this.publish()
@@ -111,6 +122,7 @@ export class RecordingStartCoordinator {
     if (this.busy && !(this.state.phase === 'starting' && this.state.meetingId === meetingId))
       return false
     this.engineClaimed = true
+    this.observe(() => this.observer?.engineBegin?.(this.pending?.id ?? null, meetingId))
     this.pending = null
     this.state.meetingId = meetingId ?? null
     this.state.phase = 'starting'
@@ -148,7 +160,15 @@ export class RecordingStartCoordinator {
     this.delivered = true
     this.deliver(this.pending)
   }
+  private observe(action: () => void): void {
+    try {
+      action()
+    } catch {
+      /* Optional metadata must never interrupt audio. */
+    }
+  }
   private reset(): void {
+    this.observe(() => this.observer?.reset?.())
     this.pending = null
     this.delivered = false
     this.engineClaimed = false
