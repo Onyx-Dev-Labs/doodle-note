@@ -1,0 +1,25 @@
+{
+  "commit": "910e8a4ce60743838dccc01981ed5a10c46f2eff",
+  "checks": [
+    "Open is metadata-only; partial roster, cached calendar and unknown self visible",
+    "Explicit no-history result skips model",
+    "Explicit person creation and occurrence correction persist",
+    "Shared original panel renders exact source/date, disables timingless play and restores citation focus",
+    "Refresh revalidates without inference; originals byte-preserved",
+    "Explicit [] never widens to library history",
+    "Cancel waits for synthetic generator drain; retry succeeds without stale answer",
+    "Account invalidation clears event, names, citations and claims",
+    "Model failure stays explicit and offers settings without download",
+    "Explicit forget preserves originals; Close restores Open brief focus"
+  ],
+  "count": 10,
+  "stats": {
+    "generated": 4,
+    "generating": false,
+    "originalsUnchanged": true,
+    "originalSha": "06620ea4b589466b535688834b1f03c7e22b8f871034f388c0bdbd22c40b2f0a"
+  },
+  "native": false,
+  "generator": "deterministic synthetic",
+  "transport": "loopback HTTP + actual IPC handler"
+}
