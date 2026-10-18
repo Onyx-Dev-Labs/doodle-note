@@ -134,16 +134,64 @@ export class MeetingFileStore {
     }
     const existing = this.get(id);
     const merged = normalizeRecord({ ...(existing ?? {}), ...patch, id });
+    this.writeDocument(id, merged);
+    this.onDidWrite?.(merged.trashedAt ? { deletedId: id } : {});
+    return merged;
+  }
+
+  /** Update only explicit editor text; all other disk fields remain authoritative.
+   * Unlike a general upsert, this must not create/resurrect or normalize an original. */
+  updateText(patch: {
+    id: string;
+    title?: string;
+    rawNotesMarkdown?: string;
+  }): MeetingRecord {
+    this.assertAvailable();
+    if (
+      !patch || typeof patch !== "object" || Array.isArray(patch) ||
+      typeof patch.id !== "string" || !SAFE_ID.test(patch.id) ||
+      Object.keys(patch).some((key) => !["id", "title", "rawNotesMarkdown"].includes(key)) ||
+      ("title" in patch && typeof patch.title !== "string") ||
+      ("rawNotesMarkdown" in patch && typeof patch.rawNotesMarkdown !== "string")
+    ) {
+      throw new Error("Invalid meeting text edit; only title and personal notes can be saved.");
+    }
+    const raw: unknown = JSON.parse(
+      readFileSync(join(this.dir, `${patch.id}.json`), "utf8"),
+    );
+    if (
+      !raw || typeof raw !== "object" || Array.isArray(raw) ||
+      !("id" in raw) || raw.id !== patch.id ||
+      ("trashedAt" in raw && raw.trashedAt != null)
+    ) {
+      throw new Error("The original meeting is invalid, missing or in Trash. Reload before saving.");
+    }
+    const original = raw as Record<string, unknown>;
+    const updated: Record<string, unknown> & { id: string } = { ...original, id: patch.id };
+    let changed = false;
+    for (const key of ["title", "rawNotesMarkdown"] as const) {
+      if (key in patch && patch[key] !== original[key]) {
+        updated[key] = patch[key];
+        changed = true;
+      }
+    }
+    const record = normalizeRecord(updated);
+    if (changed) {
+      this.writeDocument(patch.id, updated);
+      this.onDidWrite?.(record.trashedAt ? { deletedId: patch.id } : {});
+    }
+    return record;
+  }
+
+  private writeDocument(id: string, document: object): void {
     mkdirSync(this.dir, { recursive: true });
     const temporary = join(this.dir, `.${id}-${randomUUID()}.tmp`);
     try {
-      writeFileSync(temporary, JSON.stringify(merged, null, 2), { flag: "wx" });
+      writeFileSync(temporary, JSON.stringify(document, null, 2), { flag: "wx" });
       renameSync(temporary, join(this.dir, `${id}.json`));
     } finally {
       rmSync(temporary, { force: true });
     }
-    this.onDidWrite?.(merged.trashedAt ? { deletedId: id } : {});
-    return merged;
   }
 
   delete(id: string): void {

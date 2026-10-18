@@ -1,3 +1,4 @@
+import { assertRequestFits } from './bounded-request'
 import {
   GENERATION_LIMITS,
   requireCompleteOutput,
@@ -149,6 +150,10 @@ export class LocalNotesEngine implements NotesEngine {
     return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, '', onToken, undefined, input)
   }
 
+  async runBounded(system: string, prompt: string, control?: GenerationControl): Promise<MergedNotes> {
+    return this.runRaw(system, prompt, undefined, control, undefined, true)
+  }
+
   /**
    * One generation against the loaded model. Fresh context per call: no state
    * bleeds between runs, and the model weights stay loaded across calls.
@@ -158,7 +163,8 @@ export class LocalNotesEngine implements NotesEngine {
     userMessage: string,
     onToken?: (text: string) => void,
     control?: GenerationControl,
-    globalAskInput?: GlobalAskInput
+    globalAskInput?: GlobalAskInput,
+    bounded = false
   ): Promise<AskAnswer> {
     await withGenerationDeadline(control?.signal, 'preparing', (signal) => this.prepare(signal))
     return withGenerationDeadline(control?.signal, control?.phase ?? 'writing', async (signal) => {
@@ -209,6 +215,15 @@ export class LocalNotesEngine implements NotesEngine {
                   .contextText.tokenize(this.model!.tokenizer).length
             })
           : undefined
+        if (bounded) assertRequestFits(systemPrompt, userMessage, {
+          contextWindowTokens: context.contextSize,
+          outputReserveTokens: GENERATION_LIMITS.writing.maxTokens,
+          safetyMarginTokens: 256,
+          accounting: 'model-tokenizer',
+          countInputTokens: (_system, user) => session.chatWrapper.generateContextState({
+            chatHistory: [...session.getChatHistory(), { type: 'user', text: user }, { type: 'model', response: [] }]
+          }).contextText.tokenize(this.model!.tokenizer).length
+        })
         signal.throwIfAborted()
         const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
           signal,

@@ -6,6 +6,8 @@ import {
   MEETINGS_DELETE_CHANNEL,
   MEETINGS_GET_CHANNEL,
   MEETINGS_LIST_CHANNEL,
+  MEETINGS_SAVE_NOTES_CHANNEL,
+  type MeetingTextPatch,
   MEETINGS_SEARCH_CHANNEL,
   MEETINGS_UPSERT_CHANNEL
 } from '../shared/meetings-api'
@@ -27,6 +29,9 @@ export class MeetingsService extends MeetingFileStore {
     libraryIpc.handle(MEETINGS_GET_CHANNEL, (_event, id: unknown) => this.get(String(id)))
     libraryIpc.handle(MEETINGS_UPSERT_CHANNEL, (_event, patch: unknown) =>
       this.rendererUpsert((patch ?? {}) as MeetingUpsert)
+    )
+    libraryIpc.handle(MEETINGS_SAVE_NOTES_CHANNEL, (_event, patch: unknown) =>
+      this.updateText(patch as MeetingTextPatch)
     )
     libraryIpc.handle(MEETINGS_DELETE_CHANNEL, (_event, id: unknown) => this.delete(String(id)))
     libraryIpc.handle(MEETINGS_SEARCH_CHANNEL, (_event, query: unknown) =>

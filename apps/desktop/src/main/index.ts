@@ -1,4 +1,6 @@
 import { SourceIndexService } from './source-index-service'
+import { RecipeRunner } from './recipe-runner'
+import { registerRecipes } from './recipe-service'
 import { beginRecordableMeeting } from './capture-eligibility'
 import { transcribeWithWhisper } from './whisper-transcriber'
 import { transcribeFileToSegments } from './import-logic'
@@ -196,6 +198,7 @@ function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
 }
 
 let notesService: NotesService | null = null
+let recipeRunner: RecipeRunner | null = null
 let calendarService: CalendarService | null = null
 let winBatchTranscriber: WinBatchTranscriber | null = null
 
@@ -611,6 +614,13 @@ app.whenReady().then(async () => {
     assertLibrary
   )
   notesService.registerIpc()
+  recipeRunner = new RecipeRunner(
+    libraryRoot,
+    assertLibrary,
+    (policy, system, prompt, signal) => notesService!.runRecipe(policy, system, prompt, signal),
+    (work) => libraryActivity.run(work)
+  )
+  registerRecipes(recipeRunner)
 
   if (engine instanceof WinEngineHost) {
     winBatchTranscriber = new WinBatchTranscriber((onEvent, signal) =>
@@ -752,7 +762,10 @@ app.whenReady().then(async () => {
   })
   // macOS: engine micmon (CoreAudio). Windows: ConsentStore registry poll.
   if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
-  initAutoUpdater(broadcast, () => notesService?.dispose() ?? Promise.resolve())
+  initAutoUpdater(broadcast, async () => {
+    await recipeRunner?.stop()
+    await notesService?.dispose()
+  })
 
   // node-llama-cpp's async workers SIGABRT if they complete during Electron's
   // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —
@@ -872,7 +885,7 @@ function focusMainWindow(): void {
 // Make sure the sidecar never outlives the app.
 app.on('will-quit', () => {
   engine.dispose()
-  void notesService?.dispose()
+  void recipeRunner?.stop().then(() => notesService?.dispose())
   calendarService?.dispose()
   winBatchTranscriber?.dispose()
 })

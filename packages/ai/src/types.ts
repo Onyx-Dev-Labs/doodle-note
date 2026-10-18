@@ -93,6 +93,12 @@ export interface NotesEngine {
    * are condensed first (map-reduce.ts). Unset = the local-context default.
    */
   readonly singlePassThresholdChars?: number
+  /** Complete bounded request, used by versioned recipes. No input truncation. */
+  runBounded?(
+    system: string,
+    prompt: string,
+    control?: GenerationControl
+  ): Promise<MergedNotes>
   /** One raw generation — the primitive the notes orchestration composes. */
   runRaw(
     system: string,

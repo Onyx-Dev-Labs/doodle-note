@@ -48,7 +48,14 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
   }
   interface Service {
     registerIpc(): void
-    pickEngine(): Promise<unknown>
+    pickEngine(requireSelected?: boolean, localOnly?: boolean): Promise<unknown>
+    runRecipe(
+      policy: 'local-only' | 'explicit-cloud',
+      system: string,
+      prompt: string,
+      signal: AbortSignal
+    ): Promise<ai.MergedNotes & { modelRevision: string }>
+    localEnginePath: string
     dispose(): Promise<void>
   }
   const exports: Record<string, new (...args: unknown[]) => Service> = {}
@@ -142,6 +149,49 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
     assert.equal((await enhance({ ...request, runId: 'retry' })).markdown, 'complete')
     assert.equal(request.rawNotesMarkdown, 'Keep this')
     assert.deepEqual(request.segments, [])
+    // Recipe-only engine access shares busy ownership with existing summaries and Ask.
+    const fixtureModel = path.join(dir, 'synthetic-model.gguf')
+    fs.writeFileSync(fixtureModel, 'synthetic model metadata only')
+    service.localEnginePath = fixtureModel
+    service.pickEngine = async (strict, localOnly) => {
+      assert.equal(strict, true)
+      assert.equal(localOnly, true, 'recipe local policy overrides global cloud selection')
+      return {
+        id: 'local:fixture',
+        runBounded: async (_system: string, _prompt: string, control: ai.GenerationControl) => {
+          assert.equal(control.signal?.aborted, false)
+          assert.match((await enhance()).error!, /question is being answered/)
+          return { markdown: 'Recipe result', engine: 'local:fixture', elapsedMs: 1 }
+        }
+      }
+    }
+    const recipe = await service.runRecipe(
+      'local-only',
+      'system',
+      'prompt',
+      new AbortController().signal
+    )
+    assert.equal(recipe.markdown, 'Recipe result')
+    assert.match(recipe.modelRevision, /^local-artifact:local:fixture:/)
+    service.pickEngine = async () => {
+      throw new Error('Synthetic local model missing')
+    }
+    await assert.rejects(
+      service.runRecipe('local-only', 'system', 'prompt', new AbortController().signal),
+      /local model missing/
+    )
+    // Failure releases the same busy guard, with no second engine/provider attempt.
+    service.pickEngine = async () => ({
+      generateNotes: async () => ({
+        markdown: 'after recipe failure',
+        engine: 'fixture',
+        elapsedMs: 1
+      })
+    })
+    assert.equal(
+      (await enhance({ ...request, runId: 'after-recipe' })).markdown,
+      'after recipe failure'
+    )
   } finally {
     await service.dispose()
     fs.rmSync(dir, { recursive: true, force: true })

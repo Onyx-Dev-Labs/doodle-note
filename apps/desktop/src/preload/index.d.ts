@@ -1,4 +1,5 @@
 import type { SourcesApi } from '../shared/source-api'
+import type { RecipesApi } from '../shared/recipes-api'
 import type { TextImporterApi } from '../shared/text-import-api'
 import type { StorageApi } from '../shared/storage-api'
 import type { RecordingApi } from '../shared/recording-api'
@@ -24,6 +25,7 @@ declare global {
     recording: RecordingApi
     engine: EngineApi
     notes: NotesApi
+    recipes: RecipesApi
     meetings: MeetingsApi
     sources: SourcesApi
     folders: FoldersApi

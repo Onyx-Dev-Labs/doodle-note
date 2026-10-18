@@ -1,3 +1,5 @@
+import { assertRequestFits } from './bounded-request'
+import { withGenerationDeadline } from './generation-control'
 import { hostedGlobalAskBudget, ollamaGlobalAskBudget } from './global-ask-model-budget'
 import { requireCompleteOutput } from './generation-control'
 import { createAnthropic } from '@ai-sdk/anthropic'
@@ -115,6 +117,19 @@ export class CloudNotesEngine implements NotesEngine {
       budget.outputReserveTokens
     )
     return { ...result, coverage: prompt.coverage }
+  }
+
+  async runBounded(system: string, prompt: string, control?: GenerationControl): Promise<MergedNotes> {
+    this.assertDataPolicy()
+    return withGenerationDeadline(control?.signal, 'writing', async (signal) => {
+      const model = this.options.model?.trim() || CLOUD_PROVIDER_PRESETS[this.options.provider].defaultModel
+      const budget = this.options.provider === 'ollama'
+        ? await ollamaGlobalAskBudget(model)
+        : hostedGlobalAskBudget(this.options.provider, model)
+      signal.throwIfAborted()
+      assertRequestFits(system, prompt, budget)
+      return this.runRaw(system, prompt, undefined, { ...control, signal }, budget.outputReserveTokens)
+    })
   }
 
   async runRaw(
