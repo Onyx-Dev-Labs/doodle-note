@@ -1,3 +1,4 @@
+import { normalizeCalendarInvitees } from './calendar-context-normalization'
 import { CalendarAuthLoopback } from './calendar-auth-loopback'
 import { calendarPages, CalendarRequestError, mapCalendarTasks } from './calendar-http'
 import { BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
@@ -1492,6 +1493,7 @@ function normalizeGraphEvent(item: unknown, calendar: CalendarInfo): CalendarEve
   const attendeeCount = Array.isArray(raw.attendees) ? raw.attendees.length : 0
 
   return {
+    invitees: normalizeCalendarInvitees('microsoft', raw),
     id: raw.id,
     subject: typeof raw.subject === 'string' ? raw.subject : '',
     startIso,

@@ -25,8 +25,26 @@ export const CALENDAR_EVENTS_CHANNEL = 'calendar:events'
 /** main → renderer: a meeting is starting (banner prompt or notification click). */
 export const CALENDAR_START_MEETING_CHANNEL = 'calendar:start-meeting'
 
+/** Optional v1 observations; absence in older caches means unknown, never an empty roster. */
+export interface CalendarInvitee {
+  id: string
+  identifierKey: string | null
+  displayName: string | null
+  address: string | null
+  providerPersonId: string | null
+  roles: Array<'attendee' | 'organizer' | 'resource'>
+  self: 'confirmed-self' | 'other' | 'unknown'
+  selfEvidence: 'authenticated-address' | 'owned-calendar-marker' | 'unknown'
+}
+export interface CalendarInvitees {
+  version: 1
+  roster: { state: 'complete' | 'partial' | 'unknown'; omittedCount: number | null }
+  entries: CalendarInvitee[]
+}
+
 /** One upcoming event, normalized from a connected calendar provider. */
 export interface CalendarEvent {
+  invitees?: CalendarInvitees
   sourceLabel?: string
   stale?: boolean
   /** Explicit source ownership; absent only in pre-account cache fixtures. */

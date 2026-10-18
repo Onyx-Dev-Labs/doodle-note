@@ -1,3 +1,4 @@
+import { normalizeCalendarInvitees } from './calendar-context-normalization'
 import { calendarPages } from './calendar-http'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync, rmSync } from 'node:fs'
@@ -451,6 +452,7 @@ function normalizeGoogleEvent(raw: unknown, calendar: CalendarInfo): CalendarEve
   const hasAttendees = Array.isArray(item.attendees) && item.attendees.length > 1
 
   return {
+    invitees: normalizeCalendarInvitees('google', item),
     id: `g:${item.id}`,
     subject: item.summary ?? '(no title)',
     startIso: new Date(startIso).toISOString(),
