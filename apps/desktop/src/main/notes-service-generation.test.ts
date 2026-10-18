@@ -12,6 +12,7 @@ import * as api from '../shared/notes-api'
 import * as autoNotes from '../shared/auto-notes'
 import * as batch from '../shared/batch-transcription'
 import * as recovery from '../shared/meeting-recovery'
+import * as markdownHtml from '../shared/markdown-html'
 import * as libraryPath from './library-path'
 import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
@@ -42,6 +43,7 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
     '@repo/ai': ai,
     '@repo/meetings-store': meetings,
     '../shared/notes-api': api,
+    '../shared/markdown-html': markdownHtml,
     '../shared/auto-notes': autoNotes,
     '../shared/batch-transcription': batch,
     '../shared/meeting-recovery': recovery

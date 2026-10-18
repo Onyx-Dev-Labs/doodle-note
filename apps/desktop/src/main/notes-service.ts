@@ -10,6 +10,7 @@ import { fetchCloudModels } from './cloud-models'
 import { app, ipcMain, safeStorage } from 'electron'
 import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { escapeHtml, markdownToHtml } from '../shared/markdown-html'
 import {
   GenerationError,
   GlobalAskBudgetError,
@@ -498,15 +499,17 @@ export class NotesService {
       const result = await engine.askAcrossMeetings(input, (token) => {
         this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token })
       })
-      // Only an exact standalone trailing disclosure satisfies coverage. Compare
-      // without trailing whitespace, but preserve every already streamed byte.
+      // Require both an exact source paragraph and the Ask renderer's paragraph
+      // semantics (not an open code fence). Comparison never rewrites model bytes.
       const canonicalNotice = result.coverage ? globalAskCoverageNotice(result.coverage) : ''
-      const trailingParagraph = result.markdown
-        .trimEnd()
-        .split(/\r?\n[\t ]*\r?\n/)
-        .at(-1)
-      const notice =
-        canonicalNotice && trailingParagraph !== canonicalNotice ? `\n\n${canonicalNotice}` : ''
+      const trimmedMarkdown = result.markdown.trimEnd()
+      const prefix = trimmedMarkdown.slice(0, -canonicalNotice.length)
+      const hasCanonicalParagraph =
+        canonicalNotice &&
+        trimmedMarkdown.endsWith(canonicalNotice) &&
+        (prefix.trim() === '' || /\n[^\S\n]*\n$/.test(prefix)) &&
+        markdownToHtml(trimmedMarkdown).endsWith(`<p>${escapeHtml(canonicalNotice)}</p>`)
+      const notice = canonicalNotice && !hasCanonicalParagraph ? `\n\n${canonicalNotice}` : ''
       if (notice) this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token: notice })
       const answer = result.markdown + notice
       this.saveGlobalChat([

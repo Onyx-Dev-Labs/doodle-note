@@ -11,6 +11,7 @@ import * as api from '../shared/notes-api'
 import * as autoNotes from '../shared/auto-notes'
 import * as batch from '../shared/batch-transcription'
 import * as recovery from '../shared/meeting-recovery'
+import * as markdownHtml from '../shared/markdown-html'
 import * as libraryPath from './library-path'
 import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
@@ -52,6 +53,7 @@ function createService(
     '@repo/ai': ai,
     '@repo/meetings-store': meetings,
     '../shared/notes-api': api,
+    '../shared/markdown-html': markdownHtml,
     '../shared/auto-notes': autoNotes,
     '../shared/batch-transcription': batch,
     '../shared/meeting-recovery': recovery
@@ -177,6 +179,18 @@ test('global Ask appends coverage only when the exact standalone trailing notice
   const notice = ai.globalAskCoverageNotice(coverage)
   const body = 'Ada owns the synthetic prototype.  '
   const cases = [
+    {
+      name: 'P2 open fence embeds the exact trailing notice',
+      markdown: `Answer\n\n\`\`\`text\nexample\n\n${notice}`,
+      append: true,
+      renderedTrailingParagraph: false
+    },
+    {
+      name: 'P2 three newlines precede a standalone notice',
+      markdown: `Answer\n\n\n${notice}`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
     { name: 'exact trailing notice', markdown: `${body}\n\n${notice}`, append: false },
     { name: 'notice alone', markdown: notice, append: false },
     { name: 'trailing whitespace', markdown: `${body}\n\n${notice} \t\n\n`, append: false },
@@ -197,6 +211,91 @@ test('global Ask appends coverage only when the exact standalone trailing notice
     { name: 'followed by answer body', markdown: `${notice}\n\n${body}`, append: true },
     { name: 'quoted notice', markdown: `${body}\n\n> ${notice}`, append: true },
     { name: 'fenced notice', markdown: `${body}\n\n\`\`\`text\n${notice}\n\`\`\``, append: true },
+    ...[4, 5].map((count) => ({
+      name: `${count} LF newlines before notice`,
+      markdown: body + '\n'.repeat(count) + notice,
+      append: false,
+      renderedTrailingParagraph: true
+    })),
+    ...[3, 5].map((count) => ({
+      name: `${count} CRLF newlines before notice`,
+      markdown: body + '\r\n'.repeat(count) + notice,
+      append: false,
+      renderedTrailingParagraph: true
+    })),
+    {
+      name: 'multiple whitespace-only blank lines and trailing whitespace',
+      markdown: `${body}\r\n \t\r\n\n\t \n${notice}\t \r\n\n`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
+    {
+      name: 'leading blank lines before notice alone',
+      markdown: `\n \t\r\n${notice}`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
+    {
+      name: 'renderer whitespace-only blank line includes nonbreaking space',
+      markdown: `${body}\n\n\u00a0\r\n${notice}\u00a0`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
+    ...['````text', '  ```text'].map((fence) => ({
+      name: `open renderer fence ${JSON.stringify(fence)}`,
+      markdown: `${body}\n\n${fence}\nexample\n\n${notice}`,
+      append: true,
+      renderedTrailingParagraph: false
+    })),
+    {
+      name: 'two backticks do not close a renderer fence',
+      markdown: `${body}\n\n\`\`\`text\nexample\n\`\`\n\n${notice}`,
+      append: true,
+      renderedTrailingParagraph: false
+    },
+    {
+      name: 'renderer closes four backticks with three',
+      markdown: `${body}\n\n\`\`\`\`text\nexample\n\`\`\`\n\n${notice}`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
+    {
+      name: 'renderer does not implement tilde fences',
+      markdown: `${body}\n\n~~~text\nexample\n\n${notice}`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
+    {
+      name: 'tilde delimiter does not close backtick fence',
+      markdown: `${body}\n\n\`\`\`text\nexample\n~~~\n\n${notice}`,
+      append: true,
+      renderedTrailingParagraph: false
+    },
+    ...['> > ', '- ', '1. ', '- [ ] ', '  ', '# '].map((marker) => ({
+      name: `notice embedded with ${JSON.stringify(marker)} prefix`,
+      markdown: `${body}\n\n${marker}${notice}`,
+      append: true,
+      renderedTrailingParagraph: false
+    })),
+    {
+      name: 'notice after closed quote and list blocks',
+      markdown: `${body}\n\n> Quote\n- Item\n\n\n${notice}`,
+      append: false,
+      renderedTrailingParagraph: true
+    },
+    {
+      name: 'literal HTML cannot masquerade as the exact paragraph',
+      markdown: `${body}\n\n<p>${notice}</p>`,
+      append: true,
+      renderedTrailingParagraph: false
+    },
+    {
+      name: 'adapter-trimmed return does not rewrite raw streamed whitespace',
+      markdown: body.trim(),
+      streamedMarkdown: body,
+      append: true,
+      renderedTrailingParagraph: false
+    },
     { name: 'no coverage', markdown: body, append: false, noCoverage: true }
   ]
   for (const scenario of cases) {
@@ -208,11 +307,12 @@ test('global Ask appends coverage only when the exact standalone trailing notice
       const expectedCoverage = scenario.noCoverage ? undefined : coverage
       service.pickEngine = async () => ({
         askAcrossMeetings: async (_input: ai.GlobalAskInput, onToken: (text: string) => void) => {
-          // Split inside the notice: service must reason about the completed answer,
-          // without removing or rewriting any already streamed answer bytes.
-          const split = Math.floor(scenario.markdown.length / 2)
-          onToken(scenario.markdown.slice(0, split))
-          onToken(scenario.markdown.slice(split))
+          // Most fixtures stream the returned markdown verbatim. The adapter-trim
+          // case explicitly preserves the preexisting raw-stream/return difference.
+          const streamed = scenario.streamedMarkdown ?? scenario.markdown
+          const split = Math.floor(streamed.length / 2)
+          onToken(streamed.slice(0, split))
+          onToken(streamed.slice(split))
           return {
             markdown: scenario.markdown,
             engine: 'local:fixture',
@@ -222,6 +322,15 @@ test('global Ask appends coverage only when the exact standalone trailing notice
         }
       })
       try {
+        if (scenario.renderedTrailingParagraph !== undefined) {
+          assert.equal(
+            markdownHtml
+              .markdownToHtml(scenario.markdown)
+              .endsWith(`<p>${markdownHtml.escapeHtml(notice)}</p>`),
+            scenario.renderedTrailingParagraph,
+            'actual Ask renderer distinguishes the final paragraph from embedded code'
+          )
+        }
         const result = await ask('Who owns the synthetic prototype?')
         const expected = scenario.markdown + (scenario.append ? `\n\n${notice}` : '')
         assert.equal(result.error, undefined)
@@ -231,14 +340,15 @@ test('global Ask appends coverage only when the exact standalone trailing notice
             .filter(({ channel }) => channel === api.NOTES_ASK_GLOBAL_TOKEN_CHANNEL)
             .map(({ payload }) => payload.token)
             .join(''),
-          expected,
-          'streamed answer matches returned answer byte-for-byte'
+          (scenario.streamedMarkdown ?? scenario.markdown) +
+            (scenario.append ? `\n\n${notice}` : ''),
+          'service preserves raw model tokens and appends only the deterministic suffix'
         )
         const entries = JSON.parse(
           fs.readFileSync(path.join(dir, 'global-chat.json'), 'utf8')
         ) as api.GlobalChatEntry[]
         assert.equal(entries.length, 1)
-        assert.equal(entries[0]!.answer, expected, 'persisted answer matches stream and return')
+        assert.equal(entries[0]!.answer, expected, 'persisted answer matches returned answer')
         assert.deepEqual(result.coverage, expectedCoverage)
         assert.deepEqual(entries[0]!.coverage, expectedCoverage)
       } finally {
