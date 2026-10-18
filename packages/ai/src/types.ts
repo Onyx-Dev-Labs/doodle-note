@@ -93,6 +93,8 @@ export interface NotesEngine {
    * are condensed first (map-reduce.ts). Unset = the local-context default.
    */
   readonly singlePassThresholdChars?: number
+  /** On-device original evidence only; caller owns validation and persistence. */
+  askWithEvidence?(input: import('./cited-ask-prompt').CitedPromptInput, control: GenerationControl): Promise<import('./cited-ask-prompt').CitedGenerationOutput>
   /** Complete bounded request, used by versioned recipes. No input truncation. */
   runBounded?(
     system: string,

@@ -1,3 +1,4 @@
+import * as citedAsk from './cited-ask-prompt'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import os from 'node:os'
@@ -71,6 +72,7 @@ function fixture(
     },
     './ask-prompt': ask,
     './global-ask-prompt': globalAsk,
+    './cited-ask-prompt': citedAsk,
     './map-reduce': mapReduce,
     'node-llama-cpp': {
       NoBinaryFoundError,

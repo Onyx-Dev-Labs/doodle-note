@@ -13,6 +13,9 @@ import { join } from 'node:path'
 import { escapeHtml, markdownToHtml } from '../shared/markdown-html'
 import {
   GenerationError,
+  hashCitedWire,
+  type CitedPromptInput,
+  type CitedGenerationOutput,
   GlobalAskBudgetError,
   globalAskCoverageNotice,
   withGenerationDeadline,
@@ -123,6 +126,7 @@ export class NotesService {
   }
   private askBusy = false
   private activateBusy = false
+  private citedAbort: AbortController | null = null
 
   constructor(
     userDataDir: string,
@@ -629,9 +633,87 @@ export class NotesService {
       const modelPath = await this.modelStore.find(spec)
       if (modelPath) return this.obtainLocalEngine(spec, modelPath)
     }
-    throw new Error(
-      'The local notes model is missing, unreadable or invalid. Open Settings → Notes model to activate or download it.'
+    throw Object.assign(
+      new Error(
+        'The local notes model is missing, unreadable or invalid. Open Settings → Notes model to activate or download it.'
+      ),
+      { code: 'model-absent' }
     )
+  }
+
+  private citedArtifactRevision(engineId: string, modelPath: string): string {
+    const file = statSync(modelPath, { bigint: true })
+    if (!file.isFile()) throw new Error('The cached model is unavailable.')
+    return hashCitedWire(
+      JSON.stringify([
+        engineId,
+        modelPath,
+        String(file.ino),
+        String(file.size),
+        String(file.mtimeNs),
+        String(file.ctimeNs),
+        this.settings
+      ])
+    )
+  }
+
+  /** Validation may locate a cached artifact, but never loads/downloads a model. */
+  async citedModelCurrent(engineId: string, revision: string): Promise<boolean> {
+    const spec = LOCAL_MODELS.find((model) => `local:${model.uri}` === engineId)
+    if (!spec) return false
+    const selected = this.settings.activeLocalModelId
+    if (selected && selected !== spec.id) return false
+    const modelPath = await this.modelStore.find(spec)
+    if (!modelPath) return false
+    try {
+      return this.citedArtifactRevision(engineId, modelPath) === revision
+    } catch {
+      return false
+    }
+  }
+
+  /** Reusable local-only entry. Exact prompt metadata returns to main; no history writes. */
+  async runCitedAsk(
+    input: CitedPromptInput,
+    signal: AbortSignal
+  ): Promise<CitedGenerationOutput & { engineId: string; modelArtifactRevision: string }> {
+    if (this.askBusy || this.enhanceBusy || this.activateBusy)
+      throw Object.assign(
+        new Error('Another model operation is running. Retry after it finishes.'),
+        { code: 'busy' }
+      )
+    this.askBusy = true
+    const abort = new AbortController()
+    this.citedAbort = abort
+    const cancel = (): void => abort.abort()
+    signal.addEventListener('abort', cancel, { once: true })
+    if (signal.aborted) abort.abort()
+    try {
+      abort.signal.throwIfAborted()
+      const settingsBefore = JSON.stringify(this.settings)
+      const engine = await this.pickEngine(true, true)
+      abort.signal.throwIfAborted()
+      if (!engine.id.startsWith('local:') || !engine.askWithEvidence || !this.localEnginePath)
+        throw Object.assign(
+          new Error('A cached on-device model supporting cited Ask is required.'),
+          { code: 'model-absent' }
+        )
+      if (settingsBefore !== JSON.stringify(this.settings))
+        throw Object.assign(new Error('Model policy changed.'), { code: 'stale' })
+      const path = this.localEnginePath
+      const modelArtifactRevision = this.citedArtifactRevision(engine.id, path)
+      const result = await engine.askWithEvidence(input, { signal: abort.signal, phase: 'writing' })
+      abort.signal.throwIfAborted()
+      if (modelArtifactRevision !== this.citedArtifactRevision(engine.id, path))
+        throw Object.assign(new Error('The model or policy changed. No output was saved.'), {
+          code: 'stale'
+        })
+      return { ...result, engineId: engine.id, modelArtifactRevision }
+    } finally {
+      signal.removeEventListener('abort', cancel)
+      this.citedAbort = null
+      this.askBusy = false
+    }
   }
 
   /** Recipe-only entry: no settings mutation and no provider fallback. Existing summary/Ask paths are unchanged. */
@@ -765,6 +847,7 @@ export class NotesService {
       this.settings = previousSettings
       error = 'Could not save notes settings. Please try again.'
     }
+    if (JSON.stringify(previousSettings) !== JSON.stringify(this.settings)) this.citedAbort?.abort()
     const view = this.settingsView()
     return error ? { ...view, error } : view
   }
