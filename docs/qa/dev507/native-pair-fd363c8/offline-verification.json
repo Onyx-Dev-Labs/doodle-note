@@ -1,0 +1,94 @@
+{
+  "scope": "artifact consistency only; no human/semantic/native rerun",
+  "cases": [
+    {
+      "arm": "control",
+      "id": "answer-04",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 2208,
+      "remainingTokens": 9824
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 2206,
+      "remainingTokens": 9826
+    },
+    {
+      "arm": "control",
+      "id": "must-03",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 11955,
+      "remainingTokens": 77
+    },
+    {
+      "arm": "control",
+      "id": "must-09",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 11964,
+      "remainingTokens": 68
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 1255,
+      "remainingTokens": 10777
+    },
+    {
+      "arm": "control",
+      "id": "answer-02",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 4292,
+      "remainingTokens": 7740
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 2229,
+      "remainingTokens": 9803
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 2227,
+      "remainingTokens": 9805
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 11976,
+      "remainingTokens": 56
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 11985,
+      "remainingTokens": 47
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 1276,
+      "remainingTokens": 10756
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02",
+      "checks": "boundary/selected-input/inclusion/schema/grammar/current-admission/cleanup pass",
+      "inputTokens": 4313,
+      "remainingTokens": 7719
+    }
+  ],
+  "frozenFiles": 1483,
+  "priorFilesUnchanged": 708,
+  "sourceFilesUnchanged": 961,
+  "productionByteIdenticalTo": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "passed": true
+}

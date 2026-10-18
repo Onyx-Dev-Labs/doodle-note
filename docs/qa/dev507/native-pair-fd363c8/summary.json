@@ -1,0 +1,639 @@
+{
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "evidenceHead": "ffa54854564ab9ad1b1fc21e844c4a18c92b7b15",
+  "attemptId": "dev507-native-pair-yfv7dzer",
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02"
+  ],
+  "armOrder": [
+    "control",
+    "treatment"
+  ],
+  "cases": [
+    {
+      "arm": "control",
+      "id": "answer-04",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-04",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:26:27.546Z",
+      "endedAt": "2026-10-18T22:26:46.830Z",
+      "elapsedMs": 19280.946875,
+      "runElapsedMs": 19204.640790999998,
+      "admissionElapsedMs": 51.62804200000028,
+      "generationElapsedMs": 19067.945291,
+      "grammarElapsedMs": [
+        9.592500000000655
+      ],
+      "drainElapsedMs": 0.01095799999893643,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:26:46.814Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 2208,
+      "nativeOutputTokens": 773,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-06",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:26:46.838Z",
+      "endedAt": "2026-10-18T22:27:27.339Z",
+      "elapsedMs": 40497.50729200001,
+      "runElapsedMs": 40426.501917,
+      "admissionElapsedMs": 46.36120899999514,
+      "generationElapsedMs": 40287.05312499999,
+      "grammarElapsedMs": [
+        8.964249999997264
+      ],
+      "drainElapsedMs": 0.008459000004222617,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:27:27.321Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 2206,
+      "nativeOutputTokens": 2048,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "control",
+      "id": "must-03",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:must-03",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:27:27.348Z",
+      "endedAt": "2026-10-18T22:29:21.743Z",
+      "elapsedMs": 114392.989042,
+      "runElapsedMs": 114302.67283299999,
+      "admissionElapsedMs": 65.11595799998031,
+      "generationElapsedMs": 114073.550292,
+      "grammarElapsedMs": [
+        7.98270799999591
+      ],
+      "drainElapsedMs": 0.007500000006984919,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:29:21.727Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 11955,
+      "nativeOutputTokens": 3300,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "control",
+      "id": "must-09",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:must-09",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:29:21.753Z",
+      "endedAt": "2026-10-18T22:29:53.672Z",
+      "elapsedMs": 31916.711791999987,
+      "runElapsedMs": 31823.557499999995,
+      "admissionElapsedMs": 68.4898749999993,
+      "generationElapsedMs": 31644.196833000024,
+      "grammarElapsedMs": [
+        8.587540999986231
+      ],
+      "drainElapsedMs": 0.006416000018361956,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:29:53.656Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 11964,
+      "nativeOutputTokens": 22,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-01",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:29:53.681Z",
+      "endedAt": "2026-10-18T22:30:07.155Z",
+      "elapsedMs": 13470.048290999985,
+      "runElapsedMs": 13405.399624999991,
+      "admissionElapsedMs": 41.888375000009546,
+      "generationElapsedMs": 13274.39287499999,
+      "grammarElapsedMs": [
+        8.536791999998968
+      ],
+      "drainElapsedMs": 0.006667000008746982,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:30:07.141Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 1255,
+      "nativeOutputTokens": 652,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "control",
+      "id": "answer-02",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-02",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:30:07.164Z",
+      "endedAt": "2026-10-18T22:30:56.611Z",
+      "elapsedMs": 49444.066291999974,
+      "runElapsedMs": 49370.722792000015,
+      "admissionElapsedMs": 47.87237499997718,
+      "generationElapsedMs": 49216.48862499997,
+      "grammarElapsedMs": [
+        9.73079199998756
+      ],
+      "drainElapsedMs": 0.010917000006884336,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:30:56.595Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 4292,
+      "nativeOutputTokens": 2051,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-04",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:30:56.749Z",
+      "endedAt": "2026-10-18T22:31:23.974Z",
+      "elapsedMs": 27221.391416000028,
+      "runElapsedMs": 27149.02104100003,
+      "admissionElapsedMs": 47.911000000021886,
+      "generationElapsedMs": 27004.155374999973,
+      "grammarElapsedMs": [
+        7.42391700000735
+      ],
+      "drainElapsedMs": 0.009916999959386885,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:31:23.957Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 2229,
+      "nativeOutputTokens": 1172,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-06",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:31:23.983Z",
+      "endedAt": "2026-10-18T22:31:29.147Z",
+      "elapsedMs": 5160.201082999993,
+      "runElapsedMs": 5092.468915999983,
+      "admissionElapsedMs": 46.67766699998174,
+      "generationElapsedMs": 4944.479374999995,
+      "grammarElapsedMs": [
+        7.521124999970198
+      ],
+      "drainElapsedMs": 0.006584000017028302,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:31:29.133Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 2227,
+      "nativeOutputTokens": 25,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:must-03",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:31:29.155Z",
+      "endedAt": "2026-10-18T22:32:59.717Z",
+      "elapsedMs": 90558.30366699997,
+      "runElapsedMs": 90470.019792,
+      "admissionElapsedMs": 61.44750000000931,
+      "generationElapsedMs": 90292.66799999995,
+      "grammarElapsedMs": [
+        8.929333999985829
+      ],
+      "drainElapsedMs": 0.005541999998968095,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:32:59.699Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 11976,
+      "nativeOutputTokens": 2157,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:must-09",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:32:59.727Z",
+      "endedAt": "2026-10-18T22:33:34.595Z",
+      "elapsedMs": 34864.98408300005,
+      "runElapsedMs": 34776.52000000002,
+      "admissionElapsedMs": 63.12095800001407,
+      "generationElapsedMs": 34599.457083000045,
+      "grammarElapsedMs": [
+        9.185540999984369
+      ],
+      "drainElapsedMs": 0.009375000023283064,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:33:34.579Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 11985,
+      "nativeOutputTokens": 22,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-01",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:33:34.604Z",
+      "endedAt": "2026-10-18T22:34:22.053Z",
+      "elapsedMs": 47446.0735,
+      "runElapsedMs": 47379.85924999998,
+      "admissionElapsedMs": 42.49166599998716,
+      "generationElapsedMs": 47196.544834,
+      "grammarElapsedMs": [
+        8.8940419999999
+      ],
+      "drainElapsedMs": 0.0066250000381842256,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:34:22.038Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 1276,
+      "nativeOutputTokens": 2400,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-02",
+      "status": "valid",
+      "startedAt": "2026-10-18T22:34:22.060Z",
+      "endedAt": "2026-10-18T22:35:12.616Z",
+      "elapsedMs": 50553.00020800001,
+      "runElapsedMs": 50484.96641599998,
+      "admissionElapsedMs": 45.01458299998194,
+      "generationElapsedMs": 50289.991625000024,
+      "grammarElapsedMs": [
+        8.564750000019558
+      ],
+      "drainElapsedMs": 0.008416000055149198,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:35:12.601Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 4313,
+      "nativeOutputTokens": 1918,
+      "stopReason": "stopGenerationTrigger"
+    }
+  ],
+  "caseDeadlineMs": 180000,
+  "outerDeadlineMs": 2400000,
+  "seed": "unspecified; production unchanged",
+  "stopRule": "first timeout/cancellation/drain/containment/integrity failure or two consecutive identical grammar/protocol/runtime failures",
+  "historical": "prior79 and prior6 immutable; these12 separate diagnostics, not frozen100 acceptance",
+  "corpusHash": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+  "startedAt": "2026-10-18T22:26:14.496Z",
+  "semanticHumanScore": "UNPERFORMED",
+  "productionGate": "OFF",
+  "stoppedReason": null,
+  "preflight": [
+    {
+      "arm": "control",
+      "id": "answer-04",
+      "status": "passed",
+      "elapsedMs": 7983.6365829999995,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2208,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "status": "passed",
+      "elapsedMs": 260.5020420000001,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2206,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "control",
+      "id": "must-03",
+      "status": "passed",
+      "elapsedMs": 531.1252499999991,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 11955,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "control",
+      "id": "must-09",
+      "status": "passed",
+      "elapsedMs": 415.5332920000001,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 11964,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "status": "passed",
+      "elapsedMs": 246.94808299999931,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1255,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "control",
+      "id": "answer-02",
+      "status": "passed",
+      "elapsedMs": 294.2919160000001,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 4292,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04",
+      "status": "passed",
+      "elapsedMs": 1258.1274580000008,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2229,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06",
+      "status": "passed",
+      "elapsedMs": 254.4187920000004,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2227,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03",
+      "status": "passed",
+      "elapsedMs": 526.5054999999993,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 11976,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09",
+      "status": "passed",
+      "elapsedMs": 427.58487499999865,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 11985,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01",
+      "status": "passed",
+      "elapsedMs": 290.0362499999992,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1276,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02",
+      "status": "passed",
+      "elapsedMs": 286.37033300000076,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 4313,
+      "samplingCalls": 0
+    }
+  ],
+  "samplingCalls": 12,
+  "preflightPassed": true,
+  "engineDisposed": true,
+  "originalsUnchanged": true,
+  "endedAt": "2026-10-18T22:35:12.739Z",
+  "totals": {
+    "valid": 12
+  }
+}

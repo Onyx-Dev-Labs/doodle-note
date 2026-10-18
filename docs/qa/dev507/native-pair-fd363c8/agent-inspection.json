@@ -1,0 +1,834 @@
+{
+  "scope": "AGENT qualitative inspection of all86 raw/admitted claims under frozen rubric; not designated-human scoring, automatic entailment validation, or frozen100 acceptance. Tags overlap and are observations, not a semantic pass rate.",
+  "cases": [
+    {
+      "arm": "control",
+      "id": "answer-04",
+      "structuralStatus": "valid",
+      "rawStatus": "conflicting-evidence",
+      "claimCount": 3,
+      "assessment": "Requested action appears, but false conflict and unrelated material make the answer unfocused.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1"
+          ],
+          "observations": [
+            "supported-core",
+            "extraneous-wrong-subject-references",
+            "false-conflict"
+          ],
+          "inspection": "Willow answer-04 supports the action. Onyx/Fern/Beryl answer-14/24/34 actions are different subjects, not incompatible Willow facts. Conflict kind/status is unjustified."
+        },
+        {
+          "claimIds": [
+            "claim-2"
+          ],
+          "observations": [
+            "irrelevant-attribute"
+          ],
+          "inspection": "The 40/60 variance originals do conflict about variance, but that is not the requested next action. Do not count a real variance disagreement as proof of an action conflict."
+        },
+        {
+          "claimIds": [
+            "claim-3"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "supported-unrequested-fact"
+          ],
+          "inspection": "old-04 contains the archive code. It does not answer the next-action question."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "structuralStatus": "valid",
+      "rawStatus": "conflicting-evidence",
+      "claimCount": 12,
+      "assessment": "Requested12/15 appears but is contradicted by generated denial/absence/conflict claims. Not a reliable answer.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1"
+          ],
+          "observations": [
+            "supported-core",
+            "false-conflict",
+            "extraneous-attribute-reference"
+          ],
+          "inspection": "answer-06 explicitly supports 12/15. The variance40 original does not contradict that result."
+        },
+        {
+          "claimIds": [
+            "claim-2"
+          ],
+          "observations": [
+            "false-conflict",
+            "contradicts-explicit-evidence",
+            "unsupported-cross-attribute-attribution"
+          ],
+          "inspection": "Claim denies the explicit 12/15 result while citing only variance40/60 originals; neither supports the experiment denial."
+        },
+        {
+          "claimIds": [
+            "claim-3",
+            "claim-5",
+            "claim-9"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "unsupported-association"
+          ],
+          "inspection": "old-06 is an archive-code record, not a statement about the experiment or its relationship to that code. Claims transfer archive context to the experiment."
+        },
+        {
+          "claimIds": [
+            "claim-4",
+            "claim-6",
+            "claim-8",
+            "claim-11"
+          ],
+          "observations": [
+            "explicit-evidence-false-absence"
+          ],
+          "inspection": "Claims say the experiment/rate is unspecified, undescribed, unclear or not tied to a rate. Included answer-06 explicitly states 12/15. Their variance/archive references do not establish absence."
+        },
+        {
+          "claimIds": [
+            "claim-7",
+            "claim-10",
+            "claim-12"
+          ],
+          "observations": [
+            "false-conflict",
+            "explicit-evidence-false-absence",
+            "extraneous-attribute-reference"
+          ],
+          "inspection": "Citations combine explicit 12/15 with variance60 and claim lack of consensus/confirmation/outcome. Different attributes do not create a conflict about trial results."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "control",
+      "id": "must-03",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 12,
+      "assessment": "Correct code plus unsupported dataset-wide absence and repetition. Not a focused answer.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1",
+            "claim-5",
+            "claim-7",
+            "claim-9",
+            "claim-11"
+          ],
+          "observations": [
+            "supported-core",
+            "intended-quotation-substitution"
+          ],
+          "inspection": "Each cites old-03 and asserts synthetic-03. Raw paraphrased quotation text becomes the exact original on admission; this produces five admitted copies."
+        },
+        {
+          "claimIds": [
+            "claim-2"
+          ],
+          "observations": [
+            "supported-core"
+          ],
+          "inspection": "old-03 directly supports the recovery code and personal-record provenance."
+        },
+        {
+          "claimIds": [
+            "claim-3",
+            "claim-4",
+            "claim-6",
+            "claim-8",
+            "claim-10",
+            "claim-12"
+          ],
+          "observations": [
+            "unsupported-exhaustive-absence",
+            "other-subject-references",
+            "irrelevant-generalization"
+          ],
+          "inspection": "Only Indigo/Birch/Orchid/Maple archive records are cited for broad no-other-mention/no-contradiction claims about Saffron. These selected passages cannot establish dataset-wide absence; prompt inclusion is nonexhaustive. Claims3/8/12 also use conflict kind while saying no contradiction, not describing incompatible facts."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [
+            {
+              "text": "The recovery code for the Saffron archive is synthetic-03, as stated in the personal record with ID df2e5d62677df1128d9978ed89bf566f471423fd50598cb29a553cc45749cb3c.",
+              "ids": [
+                "claim-7",
+                "claim-11"
+              ],
+              "excessCopies": 1
+            },
+            {
+              "text": "The recovery code for the Saffron archive is not contradicted by any other record in the dataset.",
+              "ids": [
+                "claim-8",
+                "claim-12"
+              ],
+              "excessCopies": 1
+            }
+          ],
+          "groupCount": 2,
+          "excessCopies": 2
+        },
+        "admitted": {
+          "groups": [
+            {
+              "text": "ﬃ Saffron archive: the recovery code is synthetic-03.",
+              "ids": [
+                "claim-1",
+                "claim-5",
+                "claim-7",
+                "claim-9",
+                "claim-11"
+              ],
+              "excessCopies": 4
+            },
+            {
+              "text": "The recovery code for the Saffron archive is not contradicted by any other record in the dataset.",
+              "ids": [
+                "claim-8",
+                "claim-12"
+              ],
+              "excessCopies": 1
+            }
+          ],
+          "groupCount": 2,
+          "excessCopies": 5
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "control",
+      "id": "must-09",
+      "structuralStatus": "valid",
+      "rawStatus": "insufficient-evidence",
+      "claimCount": 0,
+      "assessment": "Unjustified insufficient-evidence abstention: explicit synthetic-09 is first in actual included evidence.",
+      "claimNotes": [],
+      "repetition": {
+        "raw": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": true,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 4,
+      "assessment": "Correct Maple date plus three unrelated admitted quotations. Raw wrong-attribution labels are corrected by intended quotation substitution, not by the model.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1"
+          ],
+          "observations": [
+            "supported-core"
+          ],
+          "inspection": "Exact Maple date from answer-01."
+        },
+        {
+          "claimIds": [
+            "claim-2",
+            "claim-3",
+            "claim-4"
+          ],
+          "observations": [
+            "raw-wrong-subject-citation",
+            "intended-quotation-substitution",
+            "admitted-irrelevant-subject"
+          ],
+          "inspection": "Raw text says Maple but sole references are Quartz/Opal/Garnet answer-11/21/31. Admission replaces the text with each correct cited original, so displayed claims name those other projects rather than falsely quoting Maple. They remain irrelevant to the Maple question."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [
+            {
+              "text": "Maple delivery is due on Friday, 23 October 2026.",
+              "ids": [
+                "claim-1",
+                "claim-2",
+                "claim-3",
+                "claim-4"
+              ],
+              "excessCopies": 3
+            }
+          ],
+          "groupCount": 1,
+          "excessCopies": 3
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "control",
+      "id": "answer-02",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 12,
+      "assessment": "Correct budget plus irrelevant facts and repetition. No focused answer.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1",
+            "claim-6",
+            "claim-9",
+            "claim-10",
+            "claim-11",
+            "claim-12"
+          ],
+          "observations": [
+            "supported-core",
+            "repetition"
+          ],
+          "inspection": "Six exact budget quotations cite answer-02 correctly; repetitions do not add answer value."
+        },
+        {
+          "claimIds": [
+            "claim-2",
+            "claim-7",
+            "claim-8"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "supported-unrequested-variance"
+          ],
+          "inspection": "Variance40/60 originals establish a variance disagreement, not a conflict about the4200 budget. Claims2/7 repeat the same text."
+        },
+        {
+          "claimIds": [
+            "claim-3",
+            "claim-4",
+            "claim-5"
+          ],
+          "observations": [
+            "irrelevant-subject",
+            "supported-unrequested-fact"
+          ],
+          "inspection": "Violet/Laurel/Dahlia budget facts are correctly cited but do not answer the Cobalt question."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [
+            {
+              "text": "The approved budget for Cobalt is 4200 credits.",
+              "ids": [
+                "claim-1",
+                "claim-6",
+                "claim-9",
+                "claim-10",
+                "claim-11",
+                "claim-12"
+              ],
+              "excessCopies": 5
+            },
+            {
+              "text": "Cobalt variance: approved limit is 40 credits.",
+              "ids": [
+                "claim-2",
+                "claim-7"
+              ],
+              "excessCopies": 1
+            }
+          ],
+          "groupCount": 2,
+          "excessCopies": 6
+        },
+        "admitted": {
+          "groups": [
+            {
+              "text": "The approved budget for Cobalt is 4200 credits.",
+              "ids": [
+                "claim-1",
+                "claim-6",
+                "claim-9",
+                "claim-10",
+                "claim-11",
+                "claim-12"
+              ],
+              "excessCopies": 5
+            },
+            {
+              "text": "Cobalt variance: approved limit is 40 credits.",
+              "ids": [
+                "claim-2",
+                "claim-7"
+              ],
+              "excessCopies": 1
+            }
+          ],
+          "groupCount": 2,
+          "excessCopies": 6
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 7,
+      "assessment": "False conflict status removed, but a new explicit false-absence claim and irrelevant/redundant claims remain.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1"
+          ],
+          "observations": [
+            "supported-core",
+            "intended-quotation-substitution"
+          ],
+          "inspection": "Correct Willow source; admitted quotation includes its subject."
+        },
+        {
+          "claimIds": [
+            "claim-2",
+            "claim-3",
+            "claim-4"
+          ],
+          "observations": [
+            "irrelevant-subject",
+            "intended-quotation-substitution"
+          ],
+          "inspection": "Raw bare Morgan/checklist text does not explicitly name Willow, but these references are Onyx/Fern/Beryl. Admission reveals those exact subjects. Correct source text does not make them relevant to Willow."
+        },
+        {
+          "claimIds": [
+            "claim-5"
+          ],
+          "observations": [
+            "supported-core",
+            "semantic-redundancy"
+          ],
+          "inspection": "Correct Willow paraphrase repeats claim1 factual content."
+        },
+        {
+          "claimIds": [
+            "claim-6"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "supported-unrequested-variance"
+          ],
+          "inspection": "Real variance40/60 disagreement is unrelated to next action. Answered status with conflict kind is structurally permitted."
+        },
+        {
+          "claimIds": [
+            "claim-7"
+          ],
+          "observations": [
+            "explicit-evidence-false-absence",
+            "unsupported-cross-attribute-attribution"
+          ],
+          "inspection": "Says Willow action is not specified, citing only archive code old-04 despite explicit included answer-04."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [
+            {
+              "text": "Morgan will draft the checklist by Tuesday.",
+              "ids": [
+                "claim-1",
+                "claim-2",
+                "claim-3",
+                "claim-4"
+              ],
+              "excessCopies": 3
+            }
+          ],
+          "groupCount": 1,
+          "excessCopies": 3
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06",
+      "structuralStatus": "valid",
+      "rawStatus": "insufficient-evidence",
+      "claimCount": 0,
+      "assessment": "Unjustified insufficient-evidence abstention despite explicit12/15: desired answer is lost versus CONTROL. Not a successful alternative to hallucinated conflicts.",
+      "claimNotes": [],
+      "repetition": {
+        "raw": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": true,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 12,
+      "assessment": "All claims are grounded in correct original and requested code; broad absence removed.12claims and eight identical paraphrases still violate the focused/fewest-distinct objective. Narrow grounding improvement only.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1",
+            "claim-4"
+          ],
+          "observations": [
+            "supported-core",
+            "intended-quotation-substitution",
+            "repetition"
+          ],
+          "inspection": "Both correctly cite old-03 and become two copies of its exact quotation."
+        },
+        {
+          "claimIds": [
+            "claim-2",
+            "claim-3",
+            "claim-5",
+            "claim-6",
+            "claim-7",
+            "claim-8",
+            "claim-9",
+            "claim-10",
+            "claim-11",
+            "claim-12"
+          ],
+          "observations": [
+            "supported-core",
+            "repetition"
+          ],
+          "inspection": "All cite old-03 for synthetic-03. Wording varies slightly in3/5; claims2/6/7/8/9/10/11/12 have identical raw/admitted text. Prior broad absence claims are gone, but redundancy remains severe."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [
+            {
+              "text": "The recovery code for the ﬃ Saffron archive is synthetic-03, as stated in the personal record titled 'Synthetic old-03'.",
+              "ids": [
+                "claim-2",
+                "claim-6",
+                "claim-7",
+                "claim-8",
+                "claim-9",
+                "claim-10",
+                "claim-11",
+                "claim-12"
+              ],
+              "excessCopies": 7
+            }
+          ],
+          "groupCount": 1,
+          "excessCopies": 7
+        },
+        "admitted": {
+          "groups": [
+            {
+              "text": "ﬃ Saffron archive: the recovery code is synthetic-03.",
+              "ids": [
+                "claim-1",
+                "claim-4"
+              ],
+              "excessCopies": 1
+            },
+            {
+              "text": "The recovery code for the ﬃ Saffron archive is synthetic-03, as stated in the personal record titled 'Synthetic old-03'.",
+              "ids": [
+                "claim-2",
+                "claim-6",
+                "claim-7",
+                "claim-8",
+                "claim-9",
+                "claim-10",
+                "claim-11",
+                "claim-12"
+              ],
+              "excessCopies": 7
+            }
+          ],
+          "groupCount": 2,
+          "excessCopies": 8
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09",
+      "structuralStatus": "valid",
+      "rawStatus": "insufficient-evidence",
+      "claimCount": 0,
+      "assessment": "Same unjustified abstention as CONTROL despite code on wire; no improvement.",
+      "claimNotes": [],
+      "repetition": {
+        "raw": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": true,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 12,
+      "assessment": "Raw quotation attribution improves, but admitted irrelevant facts increase and unsupported cross-project corroboration/independence claims appear.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1",
+            "claim-2"
+          ],
+          "observations": [
+            "supported-core",
+            "semantic-redundancy"
+          ],
+          "inspection": "Both cite the actual Maple date. Claim2 metadata wording adds no needed fact."
+        },
+        {
+          "claimIds": [
+            "claim-3",
+            "claim-4",
+            "claim-5"
+          ],
+          "observations": [
+            "irrelevant-subject",
+            "supported-unrequested-fact"
+          ],
+          "inspection": "Quartz/Opal/Garnet are now quoted with their own names, but are still irrelevant to Maple."
+        },
+        {
+          "claimIds": [
+            "claim-6",
+            "claim-12"
+          ],
+          "observations": [
+            "extraneous-wrong-subject-references",
+            "unsupported-corroboration-generalization"
+          ],
+          "inspection": "One Maple original plus Quartz/Opal/Garnet does not establish that multiple entries/all evidence report Maple or merely vary its product type. The date itself is supported by answer-01; the asserted corroboration is not."
+        },
+        {
+          "claimIds": [
+            "claim-7",
+            "claim-8",
+            "claim-10"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "supported-unrequested-fact"
+          ],
+          "inspection": "Exact variance/archive quotations do not answer the delivery-date question."
+        },
+        {
+          "claimIds": [
+            "claim-9",
+            "claim-11"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "unsupported-independence-generalization"
+          ],
+          "inspection": "Variance/code originals do not state that delivery is unaffected by, or unrelated to, those attributes. No such causal/independence inference is supported."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        },
+        "admitted": {
+          "groups": [],
+          "groupCount": 0,
+          "excessCopies": 0
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02",
+      "structuralStatus": "valid",
+      "rawStatus": "answered",
+      "claimCount": 12,
+      "assessment": "Correct core remains, but irrelevant material/repetition persist and claim7 newly misattributes budget to variance evidence.",
+      "claimNotes": [
+        {
+          "claimIds": [
+            "claim-1",
+            "claim-8",
+            "claim-9",
+            "claim-10",
+            "claim-11",
+            "claim-12"
+          ],
+          "observations": [
+            "supported-core",
+            "repetition"
+          ],
+          "inspection": "Six exact budget quotations correctly cite answer-02."
+        },
+        {
+          "claimIds": [
+            "claim-2",
+            "claim-3"
+          ],
+          "observations": [
+            "irrelevant-attribute",
+            "supported-unrequested-fact"
+          ],
+          "inspection": "Variance40 and60 are correctly cited as separate facts, but unrelated to the requested budget."
+        },
+        {
+          "claimIds": [
+            "claim-4",
+            "claim-5",
+            "claim-6"
+          ],
+          "observations": [
+            "irrelevant-subject",
+            "supported-unrequested-fact"
+          ],
+          "inspection": "Violet/Laurel/Dahlia budgets remain unrelated to Cobalt."
+        },
+        {
+          "claimIds": [
+            "claim-7"
+          ],
+          "observations": [
+            "false-conflict",
+            "unsupported-cross-attribute-attribution"
+          ],
+          "inspection": "Repeats the4200 Cobalt budget as conflict while citing ONLY variance40/60. Those originals neither support4200 nor conflict about the asked budget. The answer-02 source is available but is not cited by this claim."
+        }
+      ],
+      "repetition": {
+        "raw": {
+          "groups": [
+            {
+              "text": "The approved budget for Cobalt is 4200 credits.",
+              "ids": [
+                "claim-1",
+                "claim-7",
+                "claim-8",
+                "claim-9",
+                "claim-10",
+                "claim-11",
+                "claim-12"
+              ],
+              "excessCopies": 6
+            }
+          ],
+          "groupCount": 1,
+          "excessCopies": 6
+        },
+        "admitted": {
+          "groups": [
+            {
+              "text": "The approved budget for Cobalt is 4200 credits.",
+              "ids": [
+                "claim-1",
+                "claim-7",
+                "claim-8",
+                "claim-9",
+                "claim-10",
+                "claim-11",
+                "claim-12"
+              ],
+              "excessCopies": 6
+            }
+          ],
+          "groupCount": 1,
+          "excessCopies": 6
+        }
+      },
+      "unjustifiedAbstention": false,
+      "fullyFocusedDistinctSupportedAnswer": false
+    }
+  ]
+}
