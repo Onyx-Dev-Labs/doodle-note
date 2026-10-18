@@ -36,7 +36,7 @@ export default function CitedHome({
   const [census, setCensus] = useState<CensusResult | null>(null)
   const active = useRef<string | null>(null)
   const mounted = useRef(false)
-  const epochs = useRef({ history: 0, source: 0 })
+  const epochs = useRef({ history: 0, source: 0, request: 0 })
   const filters = (): EvidenceFilters => ({
     ...(folder ? { folderId: folder } : {}),
     ...(from ? { dateFrom: from + 'T00:00:00.000Z' } : {}),
@@ -70,6 +70,7 @@ export default function CitedHome({
     })
     const ownership = epochs.current
     const off = window.citedAsk.onChanged(() => {
+      epochs.current.request++
       void refresh()
     })
     const offProgress = window.citedAsk.onProgress((event) => {
@@ -82,6 +83,7 @@ export default function CitedHome({
     return () => {
       mounted.current = false
       ownership.history++
+      ownership.request++
       ownership.source++
       off()
       offProgress()
@@ -100,11 +102,12 @@ export default function CitedHome({
     setPhase('queued')
     const runId = crypto.randomUUID()
     active.current = runId
-    const admission = ++epochs.current.history
+    const admission = ++epochs.current.request
+    epochs.current.history++
     setChecking(false)
     try {
       const result = await window.citedAsk.ask({ runId, question: text, filters: filters() })
-      if (!mounted.current || active.current !== runId || admission !== epochs.current.history)
+      if (!mounted.current || active.current !== runId || admission !== epochs.current.request)
         return
       if (result.status === 'error') {
         setError(result.message)
@@ -112,23 +115,19 @@ export default function CitedHome({
         return
       }
       if (result.saved) {
-        setEntries((current) => [
-          ...current.filter((e) => e.id !== runId),
-          {
-            id: runId,
-            question: text,
-            askedAt: result.snapshot.askedAt,
-            status: 'valid',
-            snapshot: result.snapshot
-          }
-        ])
-        setChecking(false)
+        // Focus hydration may have read before the atomic save. Reconcile now,
+        // superseding every older hydration without invalidating this Ask.
+        setPhase('validating')
+        await refresh()
       } else {
+        epochs.current.history++
+        setChecking(false)
         setUnsaved(result)
         setError(result.saveError ?? 'The answer was not saved.')
       }
     } catch {
-      if (mounted.current) setError('The local answer could not be completed. Retry.')
+      if (mounted.current && active.current === runId && admission === epochs.current.request)
+        setError('The local answer could not be completed. Retry.')
     } finally {
       if (active.current === runId) {
         active.current = null
@@ -147,6 +146,7 @@ export default function CitedHome({
     }
   }
   const clear = async (): Promise<void> => {
+    epochs.current.request++
     epochs.current.history++
     epochs.current.source++
     setError(null)
