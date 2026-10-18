@@ -176,3 +176,7 @@ Performance is a gate, not a speedup claim. Existing DEV506 historical 10k p95 ~
 ## Remaining gates
 
 Full source tests, model evaluation, human semantic scoring, packaged QA and final stack review/merge remain. Keep the rollout gate off until qualified. No merge, publication, personal-data access or automatic model download is authorized.
+
+## Implementation clarification: complete request digest (2026-10-18)
+
+`CitedAnswerSnapshot.requestSha256?: string` is additive for TypeScript compatibility. Every new non-error snapshot, including no-history and insufficient-evidence without inference, populates it. Admission requires it; missing historical/untrusted values are never synthesized. The digest is SHA-256 of JSON.stringify of the normalized main request: fixed property order; exact untrimmed question/context/topic; normalized UTC filter instants; sorted, deduplicated explicit IDs; omitted subsets remain different from empty. Purpose, context template and consumerRevision participate. This protects callers that accidentally retain a revision while changing eventText. DEV509 consumes the snapshot unchanged and never constructs this digest. Main service constructor is `new MainCitedAskService({ sources, generate, validateModel, activity?, audio? })`; one shared main instance implements the unchanged CitedAskService interface and never persists.

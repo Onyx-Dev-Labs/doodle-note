@@ -7,8 +7,22 @@ export class LibraryActivity {
     return this.blocked !== null
   }
 
-  async run<T>(operation: () => T | Promise<T>): Promise<T> {
-    while (this.blocked) await this.blocked
+  async run<T>(operation: () => T | Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
+    while (this.blocked) {
+      let cancel!: () => void
+      const aborted = new Promise<never>((_, reject) => {
+        cancel = () => reject(new Error('Library operation cancelled'))
+      })
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        await Promise.race([this.blocked, aborted])
+      } finally {
+        signal?.removeEventListener('abort', cancel)
+      }
+      signal?.throwIfAborted()
+    }
+    signal?.throwIfAborted()
     this.active++
     try {
       return await operation()
