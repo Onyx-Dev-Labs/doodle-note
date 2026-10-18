@@ -48,7 +48,7 @@ export function normalizeCitedRequest(input: unknown): CitedAskRequest {
 export const citedRequestDigest = (request: CitedAskRequest): string =>
   digest(JSON.stringify(normalizeCitedRequest(request)))
 export function validUtf16Range(text: string, start: number, end: number): boolean {
-  const boundary = (n: number) =>
+  const boundary = (n: number): boolean =>
     n === 0 ||
     n === text.length ||
     !(/[\uD800-\uDBFF]/.test(text[n - 1]!) && /[\uDC00-\uDFFF]/.test(text[n]!))
