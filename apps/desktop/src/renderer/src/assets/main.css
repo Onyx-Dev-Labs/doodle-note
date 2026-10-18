@@ -2184,6 +2184,18 @@ button.fp-row:hover {
 
 /* ---- toasts / error surfaces ---- */
 
+.saved-audio-warning {
+  flex-shrink: 0;
+  margin: 0 16px 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--card);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .toast {
   position: absolute;
   top: 14px;

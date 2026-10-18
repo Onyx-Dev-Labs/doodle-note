@@ -105,3 +105,9 @@ The tool contract (names, arguments, response schemas) lives in
 `@repo/agent-contract` and is shared verbatim with DoodleNote's hosted MCP,
 so agents built against this server work unchanged against a DoodleNote
 account's cloud data.
+
+### Original source passages (local only)
+
+`search_meeting_sources` searches the full eligible local history and returns revision-aware original anchors plus coverage/truncation counts. `resolve_meeting_source` rereads the exact original and explicitly reports stale/missing/unauthorized/unavailable evidence. Search terms are case/diacritic-insensitive literal substrings within a passage. Existing transcript segments also include optional `segment_id`.
+
+These tools share the [desktop source contract](../meetings-store/README.md) but only read originals. They do not open SQLite, create an index/identity, contact a model or require desktop to remain open. Node 18 remains supported. Missing legacy library identity uses a path-derived scope; anchors must be searched again after the desktop initializes a stable identity or an uninitialized library moves. Consent and library location are rechecked on every request. Large-library MCP scans can be slow; see the linked contract's benchmark evidence and coverage rules.

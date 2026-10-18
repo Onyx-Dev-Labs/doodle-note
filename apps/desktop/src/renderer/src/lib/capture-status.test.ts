@@ -95,3 +95,31 @@ test('idle and completed sessions ignore delayed status events', () => {
     }
   }
 })
+
+test('channel warnings survive lifecycle copy without stopping transcription or trusting diagnostics', () => {
+  let state: Parameters<typeof applyCaptureStatus>[0] = {
+    phase: 'recording',
+    statusText: '',
+    transcribing: true,
+    captureId: 'current'
+  }
+  const stale = {
+    event: 'status' as const,
+    stage: 'audio_save_failed',
+    channel: 'mic' as const,
+    captureId: 'previous'
+  }
+  assert.equal(applyCaptureStatus(state, stale), state)
+  for (const channel of ['mic', 'system'] as const) {
+    state = applyCaptureStatus(state, { ...stale, channel, captureId: 'current' })
+    assert.equal(state.phase, 'recording')
+    assert.equal(state.transcribing, true)
+    assert.equal(state.savedAudioFailures?.[channel], true)
+  }
+  for (const stage of ['transcribing', 'saving_audio', 'refining_transcript', 'audio_saved']) {
+    state = applyCaptureStatus(state, { event: 'status', stage, captureId: 'current' })
+    assert.deepEqual(state.savedAudioFailures, { mic: true, system: true })
+  }
+  const ended = { ...state, phase: 'ended' as const }
+  assert.equal(applyCaptureStatus(ended, { ...stale, captureId: 'current' }), ended)
+})

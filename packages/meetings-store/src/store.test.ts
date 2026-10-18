@@ -46,6 +46,67 @@ test("upsert + get round-trips a record and fills defaults", () => {
   }
 });
 
+test("audio degradation accepts only known channel flags and survives unrelated edits", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    writeFileSync(
+      join(dir, "audio-health.json"),
+      JSON.stringify({
+        id: "audio-health",
+        savedAudioFailures: {
+          mic: true,
+          system: "ENOSPC",
+          reason: "/private/synthetic.caf",
+        },
+      }),
+    );
+    assert.deepEqual(store.get("audio-health")?.savedAudioFailures, {
+      mic: true,
+    });
+    store.upsert({ id: "audio-health", rawNotesMarkdown: "Manual correction" });
+    const reopened = new MeetingFileStore(dir).get("audio-health")!;
+    assert.deepEqual(reopened.savedAudioFailures, { mic: true });
+    assert.equal(reopened.rawNotesMarkdown, "Manual correction");
+    assert.equal(store.upsert({ id: "legacy" }).savedAudioFailures, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test("unrelated saves preserve source ownership and saved-audio history together", () => {
+  const { store, dir, cleanup } = tempStore();
+  try {
+    // Malformed explicit ownership must also survive: dropping it would make
+    // retrieval treat a restricted original as account-independent content.
+    for (const sourceScope of [
+      {
+        libraryId: "synthetic-library",
+        accountId: "account-a",
+        workspaceId: "workspace-a",
+      },
+      { libraryId: "synthetic-library", accountId: 42 },
+    ]) {
+      writeFileSync(
+        join(dir, "combined-foundations.json"),
+        JSON.stringify({
+          id: "combined-foundations",
+          sourceScope,
+          savedAudioFailures: { mic: true, system: true },
+          segments: [segment("Synthetic original transcript")],
+        }),
+      );
+      store.upsert({ id: "combined-foundations", rawNotesMarkdown: "Edited notes" });
+      const reopened = new MeetingFileStore(dir).get("combined-foundations")!;
+      assert.deepEqual(reopened.sourceScope, sourceScope);
+      assert.deepEqual(reopened.savedAudioFailures, { mic: true, system: true });
+      assert.equal(reopened.rawNotesMarkdown, "Edited notes");
+      assert.equal(reopened.segments[0]?.text, "Synthetic original transcript");
+    }
+  } finally {
+    cleanup();
+  }
+});
+
 test("upsert merges patches; null folderId clears the field", () => {
   const { store, cleanup } = tempStore();
   try {

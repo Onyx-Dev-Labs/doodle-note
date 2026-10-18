@@ -1,3 +1,4 @@
+import { assertRequestFits } from './bounded-request'
 import {
   GENERATION_LIMITS,
   requireCompleteOutput,
@@ -8,7 +9,7 @@ import path from 'node:path'
 import type { Llama, LlamaModel } from 'node-llama-cpp'
 import { buildAskSystemPrompt, buildAskUserMessage } from './ask-prompt'
 import {
-  buildGlobalAskUserMessage,
+  buildGlobalAskPrompt,
   GLOBAL_ASK_SYSTEM_PROMPT,
   type GlobalAskInput
 } from './global-ask-prompt'
@@ -146,7 +147,11 @@ export class LocalNotesEngine implements NotesEngine {
     input: GlobalAskInput,
     onToken?: (text: string) => void
   ): Promise<AskAnswer> {
-    return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
+    return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, '', onToken, undefined, input)
+  }
+
+  async runBounded(system: string, prompt: string, control?: GenerationControl): Promise<MergedNotes> {
+    return this.runRaw(system, prompt, undefined, control, undefined, true)
   }
 
   /**
@@ -157,8 +162,10 @@ export class LocalNotesEngine implements NotesEngine {
     systemPrompt: string,
     userMessage: string,
     onToken?: (text: string) => void,
-    control?: GenerationControl
-  ): Promise<MergedNotes> {
+    control?: GenerationControl,
+    globalAskInput?: GlobalAskInput,
+    bounded = false
+  ): Promise<AskAnswer> {
     await withGenerationDeadline(control?.signal, 'preparing', (signal) => this.prepare(signal))
     return withGenerationDeadline(control?.signal, control?.phase ?? 'writing', async (signal) => {
       signal.throwIfAborted()
@@ -190,7 +197,35 @@ export class LocalNotesEngine implements NotesEngine {
           contextSequence: context.getSequence(),
           systemPrompt
         })
-        const result = await session.promptWithMeta(userMessage, {
+        const prompt = globalAskInput
+          ? buildGlobalAskPrompt(globalAskInput, {
+              contextWindowTokens: context.contextSize,
+              outputReserveTokens: GENERATION_LIMITS.writing.maxTokens,
+              safetyMarginTokens: 256,
+              accounting: 'model-tokenizer',
+              countInputTokens: (_system, user) =>
+                session.chatWrapper
+                  .generateContextState({
+                    chatHistory: [
+                      ...session.getChatHistory(),
+                      { type: 'user', text: user },
+                      { type: 'model', response: [] }
+                    ]
+                  })
+                  .contextText.tokenize(this.model!.tokenizer).length
+            })
+          : undefined
+        if (bounded) assertRequestFits(systemPrompt, userMessage, {
+          contextWindowTokens: context.contextSize,
+          outputReserveTokens: GENERATION_LIMITS.writing.maxTokens,
+          safetyMarginTokens: 256,
+          accounting: 'model-tokenizer',
+          countInputTokens: (_system, user) => session.chatWrapper.generateContextState({
+            chatHistory: [...session.getChatHistory(), { type: 'user', text: user }, { type: 'model', response: [] }]
+          }).contextText.tokenize(this.model!.tokenizer).length
+        })
+        signal.throwIfAborted()
+        const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
           signal,
           maxTokens: GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens,
           temperature: 0.3,
@@ -202,6 +237,7 @@ export class LocalNotesEngine implements NotesEngine {
         signal.throwIfAborted()
         requireCompleteOutput(result.stopReason, control?.phase ?? 'writing')
         return {
+          ...(prompt ? { coverage: prompt.coverage } : {}),
           markdown: result.responseText.trim(),
           engine: this.id,
           elapsedMs: Date.now() - started

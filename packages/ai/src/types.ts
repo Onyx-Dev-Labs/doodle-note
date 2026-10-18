@@ -59,7 +59,9 @@ export interface AskInput {
  * The engine's answer to an "ask anything" question — same shape as
  * MergedNotes (markdown payload + which engine + how long it took).
  */
-export type AskAnswer = MergedNotes
+export interface AskAnswer extends MergedNotes {
+  coverage?: import('./global-ask-prompt').GlobalAskCoverage
+}
 
 /** Progress of a long-meeting notes run (map-reduce condensation). */
 export interface GenerationControl {
@@ -91,6 +93,12 @@ export interface NotesEngine {
    * are condensed first (map-reduce.ts). Unset = the local-context default.
    */
   readonly singlePassThresholdChars?: number
+  /** Complete bounded request, used by versioned recipes. No input truncation. */
+  runBounded?(
+    system: string,
+    prompt: string,
+    control?: GenerationControl
+  ): Promise<MergedNotes>
   /** One raw generation — the primitive the notes orchestration composes. */
   runRaw(
     system: string,

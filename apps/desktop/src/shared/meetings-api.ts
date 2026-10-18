@@ -28,6 +28,12 @@ export type {
 
 export const MEETINGS_LIST_CHANNEL = 'meetings:list'
 export const MEETINGS_GET_CHANNEL = 'meetings:get'
+export const MEETINGS_SAVE_NOTES_CHANNEL = 'meetings:save-notes'
+export interface MeetingTextPatch {
+  id: string
+  title?: string
+  rawNotesMarkdown?: string
+}
 export const MEETINGS_UPSERT_CHANNEL = 'meetings:upsert'
 export const MEETINGS_SEARCH_CHANNEL = 'meetings:search'
 export const MEETINGS_DELETE_CHANNEL = 'meetings:delete'
@@ -41,6 +47,8 @@ export interface MeetingsApi {
   list(): Promise<MeetingSummary[]>
   get(id: string): Promise<MeetingRecord | null>
   upsert(meeting: MeetingUpsert): Promise<MeetingRecord>
+  /** Restricted text edits preserve richer authoritative disk fields. */
+  saveNotes(patch: MeetingTextPatch): Promise<MeetingRecord>
   /** Fires when cloud sync imports/updates/trashes meetings — refetch lists. */
   onChanged(cb: () => void): () => void
   delete(id: string): Promise<void>

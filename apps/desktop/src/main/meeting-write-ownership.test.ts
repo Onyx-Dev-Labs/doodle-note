@@ -51,3 +51,10 @@ test('stale renderer flush cannot replace an imported or reopened authoritative 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('renderer edits cannot reassign an explicitly scoped original to the local library', () => {
+  const scope = { libraryId: 'library', accountId: 'account', workspaceId: 'workspace' }
+  const patch = rendererMeetingPatch({ id: 'owned', title: 'edited', sourceScope: scope })
+  assert.equal(patch.sourceScope, undefined)
+  assert.equal(patch.title, 'edited')
+})

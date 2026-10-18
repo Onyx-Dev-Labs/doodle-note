@@ -6,7 +6,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./speakers": "./src/speakers.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./sources": "./src/source-projection.ts",
+    "./source-contract": "./src/source-contract.ts",
+    "./source-index-client": "./src/source-index-client.ts",
+    "./source-index-worker": "./src/source-index-worker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
