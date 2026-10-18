@@ -1,0 +1,191 @@
+{
+  "revision": "79e506ace65a99352b1bdd9af35b9df7f541b260",
+  "node": "v24.22.0",
+  "measuredAt": "2026-10-18T21:05:27.744Z",
+  "fixture": "Same deterministic 10k x20 segments as benchmark-evidence.ts, regenerated after benchmark cleanup. One bounded diagnostic, no model running.",
+  "originals": 10000,
+  "passages": 230000,
+  "candidates": 200000,
+  "selected": 16,
+  "phases": [
+    {
+      "name": "cold-full-retrieval-and-index",
+      "wallMs": 4745.743292,
+      "cpuUserMs": 4121.363,
+      "cpuSystemMs": 772.489,
+      "rssBeforeMiB": 89.328125,
+      "rssAfterMiB": 462.125
+    },
+    {
+      "name": "warm-full-original-scan-projection-hash",
+      "wallMs": 658.4436249999999,
+      "cpuUserMs": 568.585,
+      "cpuSystemMs": 198.614,
+      "rssBeforeMiB": 462.125,
+      "rssAfterMiB": 639.34375
+    },
+    {
+      "name": "warm-index-reconcile",
+      "wallMs": 22.11779200000001,
+      "cpuUserMs": 24.413,
+      "cpuSystemMs": 1.73,
+      "rssBeforeMiB": 639.34375,
+      "rssAfterMiB": 657.34375
+    },
+    {
+      "name": "ranking-range-construction-manifest-and-final-stat-fence",
+      "wallMs": 891.8634170000005,
+      "cpuUserMs": 909.092,
+      "cpuSystemMs": 41.39,
+      "rssBeforeMiB": 660.375,
+      "rssAfterMiB": 701.828125
+    },
+    {
+      "name": "standalone-final-stat-fence",
+      "wallMs": 31.974709000000075,
+      "cpuUserMs": 16.279,
+      "cpuSystemMs": 19.959,
+      "rssBeforeMiB": 701.84375,
+      "rssAfterMiB": 701.421875
+    },
+    {
+      "name": "validate-manifest-full-rescan-and-rank",
+      "wallMs": 1564.045666000001,
+      "cpuUserMs": 1560.44,
+      "cpuSystemMs": 221.804,
+      "rssBeforeMiB": 701.421875,
+      "rssAfterMiB": 718.234375
+    },
+    {
+      "name": "resolve-all-24-selected-original-ranges",
+      "wallMs": 1.2742089999992459,
+      "cpuUserMs": 1.03,
+      "cpuSystemMs": 0.298,
+      "rssBeforeMiB": 718.234375,
+      "rssAfterMiB": 718.234375
+    }
+  ],
+  "top": [
+    {
+      "selfMs": 369.417,
+      "functionName": "",
+      "scriptId": "211",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/source-projection.ts",
+      "lineNumber": 0,
+      "columnNumber": 756
+    },
+    {
+      "selfMs": 252.708,
+      "functionName": "",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 6145
+    },
+    {
+      "selfMs": 157.333,
+      "functionName": "post",
+      "scriptId": "207",
+      "url": "node:inspector",
+      "lineNumber": 114,
+      "columnNumber": 6
+    },
+    {
+      "selfMs": 132.707,
+      "functionName": "",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 6542
+    },
+    {
+      "selfMs": 30.333,
+      "functionName": "(garbage collector)",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1
+    },
+    {
+      "selfMs": 26.125,
+      "functionName": "lstat",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1
+    },
+    {
+      "selfMs": 19.668,
+      "functionName": "selectOriginalEvidence",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 5181
+    },
+    {
+      "selfMs": 15.501,
+      "functionName": "(program)",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1
+    },
+    {
+      "selfMs": 15.458,
+      "functionName": "",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 7329
+    },
+    {
+      "selfMs": 7.417,
+      "functionName": "update",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1
+    },
+    {
+      "selfMs": 6.375,
+      "functionName": "",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 5612
+    },
+    {
+      "selfMs": 6.251,
+      "functionName": "",
+      "scriptId": "196",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/scripts/profile-evidence.ts",
+      "lineNumber": 0,
+      "columnNumber": 2512
+    },
+    {
+      "selfMs": 3.958,
+      "functionName": "",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 5977
+    },
+    {
+      "selfMs": 2.666,
+      "functionName": "readdir",
+      "scriptId": "0",
+      "url": "",
+      "lineNumber": -1,
+      "columnNumber": -1
+    },
+    {
+      "selfMs": 1.125,
+      "functionName": "",
+      "scriptId": "210",
+      "url": "file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval.ts",
+      "lineNumber": 0,
+      "columnNumber": 6145
+    }
+  ],
+  "staticServiceCallAccounting": "Successful shared run: 4 complete scans/rankings (retrieve, pre-inference manifest validate, validate current retrieval, final manifest validate), selected range resolution before and after generation. Home admission adds 2 complete scans/rankings and prompt range resolution. Each full validation deliberately rereads current originals; these counts are inspected control flow, not native timing."
+}
