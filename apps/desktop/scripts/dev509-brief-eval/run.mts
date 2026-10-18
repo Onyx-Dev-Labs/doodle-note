@@ -73,7 +73,8 @@ const report: Record<string, unknown> & { results: unknown[] } = {
     lockSha256: sha256(readFileSync(join(repo, 'pnpm-lock.yaml')))
   },
   model: model?.provenance ?? null,
-  results: [],
+  results: corpus.cases.map((item) => ({ caseId: item.id, outcome: 'pending', native: false })),
+  mechanicalGates: 'pending',
   cleanup: 'pending',
   limitations: [
     'Synthetic calendar and seeded context, no provider/accounts/native capture/Electron IPC.',
@@ -83,26 +84,30 @@ const report: Record<string, unknown> & { results: unknown[] } = {
   ]
 }
 const writeReport = (): void =>
-  writeFileSync(join(outputDir, 'report.json'), JSON.stringify(report, null, 2) + '\n')
+  writeFileSync(join(outputDir, 'report.json'), JSON.stringify(report, null, 2) + '\n', {
+    flush: true
+  })
 writeFileSync(join(outputDir, 'corpus.json'), readFileSync(corpusPath))
 writeFileSync(join(outputDir, 'rubric.md'), rubric)
-console.log(`DEV509 ${generator.mode} evaluation artifacts: ${outputDir}`)
 let failed = false
 const abort = new AbortController()
 const interrupt = (): void => abort.abort(new Error('Evaluation interrupted; draining owned work'))
 process.once('SIGINT', interrupt)
 process.once('SIGTERM', interrupt)
+// The public ready boundary must already own cancellation and a durable full-case ledger.
+writeReport()
+console.log(`DEV509 ${generator.mode} evaluation artifacts: ${outputDir}`)
 try {
-  for (const item of corpus.cases) {
+  for (const [index, item] of corpus.cases.entries()) {
     try {
       if (abort.signal.aborted) {
         failed = true
-        report.results.push({ caseId: item.id, outcome: 'not-run-cancelled', native: false })
+        report.results[index] = { caseId: item.id, outcome: 'not-run-cancelled', native: false }
         writeReport()
         continue
       }
       const result = await evaluateCase(corpus, item, generator, abort.signal)
-      report.results.push(result)
+      report.results[index] = result
       if (
         !(generator.mode === 'mechanical'
           ? result.mechanicalPass
@@ -114,13 +119,13 @@ try {
       )
     } catch (error) {
       failed = true
-      report.results.push({
+      report.results[index] = {
         caseId: item.id,
         outcome: 'harness-error',
         error: error instanceof Error ? error.stack : String(error),
         native: generator.mode === 'native',
         semanticQuality: 'not-evaluated'
-      })
+      }
     }
     writeReport()
   }
@@ -132,11 +137,12 @@ try {
     failed = true
     report.cleanup = { error: String(error) }
   }
-  process.removeListener('SIGINT', interrupt)
-  process.removeListener('SIGTERM', interrupt)
   report.finishedAt = new Date().toISOString()
+  failed ||= abort.signal.aborted
   report.mechanicalGates = failed ? 'failed' : 'passed'
   // Even a fully green mechanical/native-structure run cannot approve semantic quality.
   writeReport()
+  process.removeListener('SIGINT', interrupt)
+  process.removeListener('SIGTERM', interrupt)
 }
 if (failed) process.exitCode = 1

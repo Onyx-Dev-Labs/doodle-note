@@ -1,0 +1,294 @@
+{
+  "oldHead": "be69595811370eaef8f409e726556a4a291e3259",
+  "old": {
+    "actualNative": false,
+    "inference": false,
+    "controls": [
+      {
+        "signal": "SIGTERM",
+        "mode": "startup-paused",
+        "passed": false,
+        "exit": -15,
+        "initialCases": null,
+        "cases": 0,
+        "uniqueCases": 0,
+        "cleanup": null,
+        "elapsedAfterSignalMs": 1.3585829999999965,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-lBAmBZ/report.json",
+        "outcomes": {},
+        "native": false
+      },
+      {
+        "signal": "SIGTERM",
+        "mode": "immediate",
+        "passed": false,
+        "exit": 1,
+        "initialCases": null,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 9.815249999999997,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-QT8Z8u/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "not-run-cancelled": 23
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGTERM",
+        "mode": "active",
+        "passed": false,
+        "exit": 1,
+        "initialCases": null,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 13.48012500000001,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-xjHn4B/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 2,
+          "not-run-cancelled": 21
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGTERM",
+        "mode": "between-cases",
+        "passed": false,
+        "exit": 1,
+        "initialCases": null,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 9.276000000000062,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-QJekJG/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 1,
+          "not-run-cancelled": 22
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "startup-paused",
+        "passed": false,
+        "exit": -2,
+        "initialCases": null,
+        "cases": 0,
+        "uniqueCases": 0,
+        "cleanup": null,
+        "elapsedAfterSignalMs": 1.802040999999921,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-t0aoAr/report.json",
+        "outcomes": {},
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "immediate",
+        "passed": false,
+        "exit": 1,
+        "initialCases": null,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 10.872166999999934,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-SvIFCm/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "not-run-cancelled": 23
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "active",
+        "passed": false,
+        "exit": 1,
+        "initialCases": null,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 18.07016699999986,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-IWGghn/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 1,
+          "not-run-cancelled": 22
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "between-cases",
+        "passed": false,
+        "exit": 1,
+        "initialCases": null,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 9.39429199999986,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-56KBWT/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 1,
+          "not-run-cancelled": 22
+        },
+        "native": false
+      }
+    ],
+    "allPassed": false,
+    "timingLimit": "Synthetic subprocess scheduling only, not native cleanup latency."
+  },
+  "fixedWorkingTree": {
+    "actualNative": false,
+    "inference": false,
+    "controls": [
+      {
+        "signal": "SIGTERM",
+        "mode": "startup-paused",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 369.806542,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-A7SwhN/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "not-run-cancelled": 23
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGTERM",
+        "mode": "immediate",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 108.80895800000002,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-Yrcf1J/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "not-run-cancelled": 23
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGTERM",
+        "mode": "active",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 98.79004199999997,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-EgeugZ/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 2,
+          "not-run-cancelled": 21
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGTERM",
+        "mode": "between-cases",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 108.01412499999996,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-TXNos4/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 1,
+          "not-run-cancelled": 22
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "startup-paused",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 267.888417,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-F3rq59/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "not-run-cancelled": 23
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "immediate",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 125.11874999999995,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-00pSYl/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "not-run-cancelled": 23
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "active",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 101.50004199999962,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-kgd2XD/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 1,
+          "not-run-cancelled": 22
+        },
+        "native": false
+      },
+      {
+        "signal": "SIGINT",
+        "mode": "between-cases",
+        "passed": true,
+        "exit": 1,
+        "initialCases": 24,
+        "cases": 24,
+        "uniqueCases": 24,
+        "cleanup": "complete",
+        "elapsedAfterSignalMs": 108.31954200000027,
+        "report": "/var/folders/75/d5zbvvmj58v6lmpm5d2zjrjw0000gn/T/dev509-brief-evaluation-KEplLd/report.json",
+        "outcomes": {
+          "harness-error": 1,
+          "mechanical-no-answer": 1,
+          "not-run-cancelled": 22
+        },
+        "native": false
+      }
+    ],
+    "allPassed": true,
+    "timingLimit": "Synthetic subprocess scheduling only, not native cleanup latency."
+  },
+  "limits": "Both real CLI signals; startup-paused control widens actual stdout boundary by150ms. No native imports/inference. Old active/between final accounting succeeded, but initial durable-report requirement failed."
+}
