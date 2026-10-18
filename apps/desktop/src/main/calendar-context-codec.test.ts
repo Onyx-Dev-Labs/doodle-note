@@ -35,3 +35,26 @@ test('closing codec rejects pending work and never permits a late result', async
   await rejection
   await assert.rejects(codec.encode({}), /closed/)
 })
+
+test('original nomination returns only identity/event and exact digest, without transferring original text', async () => {
+  const codec = new CalendarContextCodec()
+  try {
+    const bytes = Buffer.from(
+      JSON.stringify({
+        id: 'meeting',
+        calendarEventId: 'event',
+        rawNotesMarkdown: 'private synthetic text',
+        unknown: [1, 2]
+      })
+    )
+    assert.deepEqual(await codec.originalMetadata(bytes), {
+      id: 'meeting',
+      calendarEventId: 'event',
+      digest: createHash('sha256').update(bytes).digest('hex')
+    })
+    await assert.rejects(codec.originalMetadata(Buffer.from('{"id":5}')))
+    await assert.rejects(codec.originalMetadata(Buffer.from('{"id":"a","calendarEventId":{}}')))
+  } finally {
+    await codec.close()
+  }
+})

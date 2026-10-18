@@ -43,7 +43,10 @@ export class CalendarStartContext {
     private readonly dependencies: {
       resolve(eventId: string): TrustedCalendarObservation | null
       originalExists(meetingId: string): boolean
-      readOriginal(meetingId: string): Promise<CalendarLinkedOriginal | null>
+      readOriginal(
+        meetingId: string,
+        control: ContextControl
+      ): Promise<CalendarLinkedOriginal | null>
       assertOriginalCurrent(original: CalendarLinkedOriginal): void
       persist(start: AcceptedCalendarStart, control: ContextControl): Promise<void>
       warn(message: string): void
@@ -125,7 +128,10 @@ export class CalendarStartContext {
     pending.saving = true
     try {
       this.check(pending)
-      const original = await this.dependencies.readOriginal(meetingId)
+      const original = await this.dependencies.readOriginal(meetingId, {
+        signal: pending.controller.signal,
+        assertCurrent: () => this.check(pending)
+      })
       this.check(pending)
       if (
         !original ||

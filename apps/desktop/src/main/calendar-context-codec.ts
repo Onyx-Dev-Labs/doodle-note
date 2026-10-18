@@ -11,6 +11,13 @@ parentPort.on('message', message => {
     if (message.op === 'decode') {
       const bytes = Buffer.from(message.bytes);
       result = { value: JSON.parse(bytes.toString('utf8')), digest: hash(bytes) };
+    } else if (message.op === 'original-metadata') {
+      const bytes = Buffer.from(message.bytes);
+      const raw = JSON.parse(bytes.toString('utf8'));
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.id !== 'string' ||
+        (raw.calendarEventId !== undefined && typeof raw.calendarEventId !== 'string'))
+        throw new Error('Invalid original nomination');
+      result = { id: raw.id, calendarEventId: raw.calendarEventId, digest: hash(bytes) };
     } else if (message.op === 'encode') {
       const serialized = JSON.stringify(message.value);
       result = { serialized, digest: hash(serialized), bytes: Buffer.byteLength(serialized) };
@@ -70,6 +77,12 @@ export class CalendarContextCodec {
   }
   encode(value: unknown): Promise<{ serialized: string; bytes: number; digest: string }> {
     return this.request('encode', value)
+  }
+  /** Byte-bound nomination only; shared evidence service remains the eligibility authority. */
+  originalMetadata(
+    bytes: Buffer
+  ): Promise<{ id: string; calendarEventId?: string; digest: string }> {
+    return this.request('original-metadata', undefined, bytes)
   }
   hash(bytes: Buffer): Promise<string> {
     return this.request('hash', undefined, bytes)

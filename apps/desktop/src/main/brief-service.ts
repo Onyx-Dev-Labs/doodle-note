@@ -28,8 +28,8 @@ export interface BriefDependencies {
   }
   /** Trusted metadata nomination. CitedAskService remains the final original/citation authority. */
   originals: {
-    get(id: string): Promise<Original | null>
-    list(query: string): Promise<EvidenceMeetingMeta[]>
+    get(id: string, control: AskControl): Promise<Original | null>
+    list(query: string, control: AskControl): Promise<EvidenceMeetingMeta[]>
     assertCurrent(original: Original): void
   }
   publish(ownerId: string, view: BriefView): void
@@ -255,7 +255,7 @@ export class BriefService {
     const history: NonNullable<BriefView['history']> = []
     const inspect = [...new Set([...selected.slice(0, 256), ...linkedIds.slice(0, 256)])]
     for (const meetingId of inspect) {
-      const original = await this.deps.originals.get(meetingId)
+      const original = await this.deps.originals.get(meetingId, control)
       assertCurrent()
       const related = links.filter((c) => c.payload.meetingId === meetingId)
       const available =
@@ -671,7 +671,7 @@ export class BriefService {
     await this.work(s, randomUUID(), async (c) => {
       await this.resolve(s, c, false)
       c.assertCurrent()
-      const found = await this.deps.originals.list(query)
+      const found = await this.deps.originals.list(query, c)
       c.assertCurrent()
       candidates = found
       return structuredClone(s.view)
@@ -695,7 +695,7 @@ export class BriefService {
             ? ['kind', 'personId']
             : ['kind', 'companyId']
       )
-      const original = await this.deps.originals.get(meetingId)
+      const original = await this.deps.originals.get(meetingId, c)
       c.assertCurrent()
       if (!original || original.trashed || !sameScope(original.scope, r.data.scope))
         error('unauthorized', 'Original unavailable in this library.')
