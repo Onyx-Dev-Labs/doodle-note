@@ -1,0 +1,42 @@
+{
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "attemptId": "dev507-native-six-5de0lv8g",
+  "plannedCaseIds": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02"
+  ],
+  "cases": [
+    {
+      "id": "answer-04",
+      "status": "unperformed"
+    },
+    {
+      "id": "answer-06",
+      "status": "unperformed"
+    },
+    {
+      "id": "must-03",
+      "status": "unperformed"
+    },
+    {
+      "id": "must-09",
+      "status": "unperformed"
+    },
+    {
+      "id": "answer-01",
+      "status": "unperformed"
+    },
+    {
+      "id": "answer-02",
+      "status": "unperformed"
+    }
+  ],
+  "prior79": "immutable; separate 33 unique/8 valid/25 failed/67 unperformed plus interrupted attempt",
+  "caseDeadlineMs": 180000,
+  "outerDeadlineMs": 1200000,
+  "stopRule": "two consecutive identical grammar/protocol/runtime failures or first timeout/cancellation/drain failure"
+}

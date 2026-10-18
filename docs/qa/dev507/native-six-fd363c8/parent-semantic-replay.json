@@ -1,0 +1,141 @@
+{
+  "scope": "deterministic captured-output diagnostics only; not a complete semantic scorer or native rerun",
+  "cases": [
+    {
+      "case": "answer-04",
+      "expected": "Answer only the stated fact with this original citation; preserve negation, units, dates, ownership and uncertainty.",
+      "status": "conflicting-evidence",
+      "claims": 2
+    },
+    {
+      "case": "answer-06",
+      "expected": "Answer only the stated fact with this original citation; preserve negation, units, dates, ownership and uncertainty.",
+      "status": "conflicting-evidence",
+      "claims": 12
+    },
+    {
+      "case": "must-03",
+      "expected": "Gold range must be selected and reach the actual model prompt wire; summary-only context does not qualify.",
+      "status": "answered",
+      "claims": 12
+    },
+    {
+      "case": "must-09",
+      "expected": "Gold range must be selected and reach the actual model prompt wire; summary-only context does not qualify.",
+      "status": "conflicting-evidence",
+      "claims": 4
+    },
+    {
+      "case": "answer-01",
+      "expected": "Answer only the stated fact with this original citation; preserve negation, units, dates, ownership and uncertainty.",
+      "status": "answered",
+      "claims": 6
+    },
+    {
+      "case": "answer-02",
+      "expected": "Answer only the stated fact with this original citation; preserve negation, units, dates, ownership and uncertainty.",
+      "status": "answered",
+      "claims": 12
+    }
+  ],
+  "findings": [
+    {
+      "case": "answer-06",
+      "kind": "duplicate-text",
+      "count": 2,
+      "text": "The Juniper experiment measured 12 successful trials out of 15."
+    },
+    {
+      "case": "answer-06",
+      "kind": "gold-text-cites-unrelated-original",
+      "claim": "claim-2",
+      "text": "The Juniper experiment measured 12 successful trials out of 15.",
+      "cited_meetings": [
+        "answer-16",
+        "answer-26",
+        "answer-36"
+      ]
+    },
+    {
+      "case": "must-03",
+      "kind": "nonverbatim-quotation",
+      "claim": "claim-1",
+      "text": "The recovery code for the Saffron archive is synthetic-03."
+    },
+    {
+      "case": "must-03",
+      "kind": "nonverbatim-quotation",
+      "claim": "claim-3",
+      "text": "The recovery code for the Saffron archive is explicitly stated as synthetic-03 in the personal record titled 'Synthetic old-03'."
+    },
+    {
+      "case": "must-03",
+      "kind": "nonverbatim-quotation",
+      "claim": "claim-5",
+      "text": "The recovery code for the Saffron archive is synthetic-03, as confirmed in the personal record titled 'Synthetic old-03'."
+    },
+    {
+      "case": "must-03",
+      "kind": "nonverbatim-quotation",
+      "claim": "claim-7",
+      "text": "The recovery code for the Saffron archive is synthetic-03, as stated in the personal record titled 'Synthetic old-03'."
+    },
+    {
+      "case": "must-03",
+      "kind": "nonverbatim-quotation",
+      "claim": "claim-9",
+      "text": "The recovery code for the Saffron archive is synthetic-03, as directly stated in the personal record titled 'Synthetic old-03'."
+    },
+    {
+      "case": "must-03",
+      "kind": "nonverbatim-quotation",
+      "claim": "claim-11",
+      "text": "The recovery code for the Saffron archive is synthetic-03, as per the personal record titled 'Synthetic old-03'."
+    },
+    {
+      "case": "answer-01",
+      "kind": "duplicate-text",
+      "count": 4,
+      "text": "Maple delivery is due on Friday, 23 October 2026."
+    },
+    {
+      "case": "answer-01",
+      "kind": "gold-text-cites-unrelated-original",
+      "claim": "claim-2",
+      "text": "Maple delivery is due on Friday, 23 October 2026.",
+      "cited_meetings": [
+        "answer-11"
+      ]
+    },
+    {
+      "case": "answer-01",
+      "kind": "gold-text-cites-unrelated-original",
+      "claim": "claim-3",
+      "text": "Maple delivery is due on Friday, 23 October 2026.",
+      "cited_meetings": [
+        "answer-21"
+      ]
+    },
+    {
+      "case": "answer-01",
+      "kind": "gold-text-cites-unrelated-original",
+      "claim": "claim-4",
+      "text": "Maple delivery is due on Friday, 23 October 2026.",
+      "cited_meetings": [
+        "answer-31"
+      ]
+    },
+    {
+      "case": "answer-02",
+      "kind": "duplicate-text",
+      "count": 7,
+      "text": "The approved budget for Cobalt is 4200 credits."
+    },
+    {
+      "case": "answer-02",
+      "kind": "duplicate-text",
+      "count": 2,
+      "text": "Cobalt variance: approved limit is 40 credits."
+    }
+  ]
+}

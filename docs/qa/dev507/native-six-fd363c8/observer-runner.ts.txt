@@ -1,0 +1,249 @@
+/** QA-only observer/ledger. No production mutation, repair, retry or fake inference. */
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { readFileSync, writeFileSync, mkdirSync, lstatSync, openSync, closeSync, fsyncSync } from 'node:fs'
+import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import { Llama, LlamaChatSession, LlamaModel, LlamaContext } from 'node-llama-cpp'
+import { LocalNotesEngine } from '/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai/src/local-engine'
+import { MainCitedAskService } from '/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/cited-ask-service'
+import { LibraryActivity } from '/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/library-activity'
+import { CITED_ASK_PROMPT_VERSION } from '/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/shared/cited-ask-api'
+import { localSourceScope, resolveOriginalSource } from '/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/source-projection'
+import { retrieveOriginalEvidence, validateOriginalEvidence } from '/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval'
+
+const [root, corpusFile, modelPath, sourceSha, deniedSentinel] = process.argv.slice(2)
+assert.ok(root.startsWith('/private/tmp/dev507-native-six-'))
+assert.equal(process.env.HOME, join(root, 'home'))
+assert.equal(sourceSha, 'fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8')
+assert.equal(CITED_ASK_PROMPT_VERSION, 2)
+assert.throws(() => readFileSync(deniedSentinel), /EPERM|EACCES/)
+assert.equal(lstatSync(modelPath).isSymbolicLink(), false)
+const hash = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
+const durable = (name: string, value: unknown) => {
+  const p = join(root, name)
+  writeFileSync(p, JSON.stringify(value, null, 2) + '\n')
+  const fd = openSync(p, 'r'); try { fsyncSync(fd) } finally { closeSync(fd) }
+}
+const initial = JSON.parse(readFileSync(join(root, 'initial-ledger.json'), 'utf8'))
+const ids = ['answer-04', 'answer-06', 'must-03', 'must-09', 'answer-01', 'answer-02']
+assert.deepEqual(initial.plannedCaseIds, ids)
+const corpusBytes = readFileSync(corpusFile), corpusHash = hash(corpusBytes)
+assert.equal(corpusHash, '0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2')
+const corpus = JSON.parse(corpusBytes.toString())
+const planned = ids.map(id => { const c = corpus.cases.find(c => c.id === id); assert.ok(c); return c })
+const summary: any = { ...initial, corpusHash, startedAt: new Date().toISOString(), semanticHumanScore: 'UNPERFORMED', productionGate: 'OFF', stoppedReason: null }
+const dir = join(root, 'originals'); mkdirSync(dir)
+const originals = new Map<string, string>()
+function put(d) { const raw = JSON.stringify(d); originals.set(d.id, raw); writeFileSync(join(dir, d.id + '.json'), raw) }
+for (const d of corpus.documents) put(d)
+for (let i = 0; i < corpus.filler.count; i++) {
+  const { count: _, idPrefix, ...fields } = corpus.filler
+  put({ id: idPrefix + String(i).padStart(4, '0'), ...fields })
+}
+const beforeOriginals = Object.fromEntries([...originals].map(([id, raw]) => [id, hash(raw)]))
+durable('originals-before.json', beforeOriginals)
+const context = { meetingsDir: dir, scope: localSourceScope(dir, true), authorized: true }
+const modelSha = '3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597'
+const engine = new LocalNotesEngine({ modelUri: 'qwen3-4b-instruct', modelPath, modelsDir: join(root, 'models'), contextSize: 16384 })
+let active: any = null, activeAbort: AbortController | undefined, stopping = false
+const allEvents: any[] = []
+const elapsed = () => active ? performance.now() - active.monotonicStart : null
+function event(kind: string, extra = {}) {
+  const e = { kind, at: new Date().toISOString(), caseId: active?.id ?? null, elapsedMs: elapsed(), ...extra }
+  allEvents.push(e); durable('events.json', allEvents)
+  if (active) { active.events.push(e); durable('evidence/' + active.id + '.json', active) }
+}
+function handleStop(signal) {
+  if (stopping) return
+  stopping = true; summary.stoppedReason = 'Owned process received ' + signal
+  event('owned-stop-signal', { signal })
+  activeAbort?.abort(new Error('Owned QA runner stopped: ' + signal))
+}
+process.once('SIGTERM', () => handleStop('SIGTERM'))
+process.once('SIGINT', () => handleStop('SIGINT'))
+const actualGrammar = Llama.prototype.createGrammarForJsonSchema
+const actualPrompt = LlamaChatSession.prototype.promptWithMeta
+const actualCreateContext = LlamaModel.prototype.createContext
+const actualContextDispose = LlamaContext.prototype.dispose
+const actualModelDispose = LlamaModel.prototype.dispose
+const grammars = new WeakMap<object, { runtime: object; record: any }>()
+const runtimeIds = new WeakMap<object, string>()
+let nextRuntime = 0
+function runtimeInfo(runtime) {
+  if (!runtimeIds.has(runtime)) runtimeIds.set(runtime, 'runtime-' + (++nextRuntime))
+  return { id: runtimeIds.get(runtime), gpu: runtime.gpu, buildType: runtime.buildType, llamaCppRelease: runtime.llamaCppRelease }
+}
+Llama.prototype.createGrammarForJsonSchema = async function(schema) {
+  const start = performance.now()
+  const record: any = { schema: JSON.parse(JSON.stringify(schema)), schemaSha256: hash(JSON.stringify(schema)), runtime: runtimeInfo(this), startedAt: new Date().toISOString() }
+  active.grammar.push(record); event('grammar-start', { schemaSha256: record.schemaSha256 })
+  try {
+    const grammar = await actualGrammar.call(this, schema)
+    Object.assign(record, { elapsedMs: performance.now() - start, grammar: grammar.grammar, grammarSha256: hash(grammar.grammar), rootRuleName: grammar.rootRuleName, trimWhitespaceSuffix: grammar.trimWhitespaceSuffix, completed: true })
+    grammars.set(grammar, { runtime: this, record })
+    event('grammar-complete', { elapsedMs: record.elapsedMs, grammarSha256: record.grammarSha256 })
+    return grammar
+  } catch (error) {
+    record.error = String(error); record.elapsedMs = performance.now() - start
+    event('grammar-error', { error: String(error) }); throw error
+  }
+}
+LlamaModel.prototype.createContext = async function(...args) {
+  const start = performance.now(); event('context-start', { requested: args[0], runtime: runtimeInfo(this.llama) })
+  try { const result = await actualCreateContext.apply(this, args); event('context-created', { contextSize: result.contextSize, elapsedMs: performance.now() - start }); return result }
+  catch(error) { event('context-error', { error: String(error) }); throw error }
+}
+LlamaContext.prototype.dispose = async function(...args) {
+  const start = performance.now(); event('context-dispose-start')
+  try { const result = await actualContextDispose.apply(this, args); event('context-dispose-end', { disposed: this.disposed, elapsedMs: performance.now() - start }); return result }
+  catch(error) { event('context-dispose-error', { error: String(error) }); throw error }
+}
+LlamaModel.prototype.dispose = async function(...args) {
+  event('model-dispose-start')
+  try { const result = await actualModelDispose.apply(this, args); event('model-dispose-end', { disposed: this.disposed }); return result }
+  catch(error) { event('model-dispose-error', { error: String(error) }); throw error }
+}
+LlamaChatSession.prototype.promptWithMeta = async function(prompt, options) {
+  const history = this.getChatHistory()
+  const tokens = this.chatWrapper.generateContextState({ chatHistory: [...history, { type: 'user', text: prompt }, { type: 'model', response: [] }] }).contextText.tokenize(this.model.tokenizer)
+  const compiled = grammars.get(options.grammar)
+  assert.ok(compiled, 'native grammar returned by observed current runtime must be supplied')
+  assert.equal(compiled.runtime, this.model.llama)
+  const wire = JSON.parse(prompt)
+  function evidenceEnums(node): string[][] {
+    if (!node || typeof node !== 'object') return []
+    const found = node.properties?.evidenceIds?.items?.enum ? [node.properties.evidenceIds.items.enum] : []
+    return [...found, ...Object.values(node).flatMap(x => Array.isArray(x) ? x.flatMap(evidenceEnums) : evidenceEnums(x))]
+  }
+  const enums = evidenceEnums(compiled.record.schema)
+  assert.ok(enums.length)
+  for (const list of enums) assert.deepEqual(list, [...new Set(wire.evidence.map(r => r.id))])
+  assert.equal(this.context.contextSize, 16384)
+  assert.equal(options.maxTokens, 4096)
+  const observation: any = { history, user: prompt, wireTokens: tokens, wireSha256: hash(JSON.stringify(tokens)), contextSize: this.context.contextSize, temperature: options.temperature, maxTokens: options.maxTokens, outputReserveTokens: 4096, safetyMarginTokens: 256, wrapper: this.chatWrapper.constructor.name, runtime: runtimeInfo(this.model.llama), actualGrammarObjectSupplied: true, grammarSameModelRuntime: true, schemaSha256: compiled.record.schemaSha256, grammarSha256: compiled.record.grammarSha256, evidenceIdEnum: enums[0], startedAt: new Date().toISOString(), meterBefore: this.sequence.tokenMeter.getState() }
+  active.observed.push(observation); event('native-prompt-start')
+  const start = performance.now()
+  try {
+    const result = await actualPrompt.call(this, prompt, options)
+    Object.assign(observation, { responseText: result.responseText, stopReason: result.stopReason, responseTextSha256: hash(result.responseText), elapsedMs: performance.now() - start, meterAfter: this.sequence.tokenMeter.getState(), tokenUsage: this.sequence.tokenMeter.diff(observation.meterBefore) })
+    event('native-response-before-forward', { stopReason: result.stopReason, responseTextSha256: observation.responseTextSha256 })
+    return result // exact native result object; no repair/trim/substitution
+  } catch(error) {
+    Object.assign(observation, { error: String(error), elapsedMs: performance.now() - start, meterAfter: this.sequence.tokenMeter.getState(), tokenUsage: this.sequence.tokenMeter.diff(observation.meterBefore) })
+    event('native-prompt-error', { error: String(error) }); throw error
+  }
+}
+function measuredSource(kind, work) {
+  const start = performance.now()
+  try { return work() } finally { active?.sourceOperations.push({ kind, elapsedMs: performance.now() - start }) }
+}
+const cited = new MainCitedAskService({
+  activity: new LibraryActivity(),
+  sources: {
+    retrieveEvidence: async s => measuredSource('retrieve', () => retrieveOriginalEvidence(context, s)),
+    validateEvidence: async m => measuredSource('manifest-validate', () => validateOriginalEvidence(context, m)),
+    resolveAcknowledged: async a => measuredSource('resolve', () => resolveOriginalSource(context, a))
+  },
+  validateModel: async (id, revision) => id === engine.id && revision === modelSha,
+  generate: async (input, signal) => {
+    const start = performance.now(); active.generation = { input }; event('adapter-start')
+    try {
+      const output = await engine.askWithEvidence(input, { signal, phase: 'writing' })
+      active.generation.output = output
+      const observed = active.observed.at(-1)
+      if (observed) {
+        assert.equal(output.rawJson, observed.responseText)
+        assert.equal(output.inclusion.wireSha256, observed.wireSha256)
+        assert.equal(output.inclusion.inputTokens, observed.wireTokens.length)
+        assert.deepEqual(output.inclusion.ranges.map(r => r.id), observed.evidenceIdEnum)
+        assert.ok(output.inclusion.inputTokens + 4096 + 256 <= 16384)
+        active.rawForwardingExact = true
+      }
+      event('adapter-output', { rawJsonSha256: output.rawJson === null ? null : hash(output.rawJson) })
+      return { ...output, engineId: engine.id, modelArtifactRevision: modelSha }
+    } catch(error) { active.generation.error = String(error); event('adapter-error', { error: String(error) }); throw error }
+    finally { active.generation.elapsedMs = performance.now() - start }
+  }
+})
+let lastFailure = '', repeated = 0
+durable('summary.json', summary)
+try {
+  for (const c of planned) {
+    if (stopping || summary.stoppedReason) break
+    const row = summary.cases.find(r => r.id === c.id)
+    Object.assign(row, { status: 'running', attemptId: initial.attemptId + ':' + c.id, startedAt: new Date().toISOString() })
+    durable('summary.json', summary)
+    active = { ...row, question: c.question, expected: c.expected, gold: c.gold, monotonicStart: performance.now(), events: [], grammar: [], observed: [], sourceOperations: [], generation: null }
+    const abort = new AbortController(); activeAbort = abort
+    let timedOut = false
+    const deadline = setTimeout(() => { timedOut = true; event('case-timeout'); abort.abort(new Error('Native QA case exceeded 180s')) }, 180000)
+    const request = { purpose: 'library-ask' as const, selection: { mode: 'question' as const, question: c.question, filters: {} } }
+    const control = { ownerId: 'isolated-six-native', runId: c.id, signal: abort.signal, assertCurrent() {}, onProgress(phase) { event('service-progress', { phase }) } }
+    let result: any = null, validation: any = null, thrown: string | null = null, drainError: string | null = null
+    const start = performance.now()
+    try {
+      result = await cited.run(request, control)
+      active.runElapsedMs = performance.now() - start; event('service-settled', { status: result.status })
+      if (result.status !== 'error') {
+        assert.equal(result.snapshot.promptVersion, 2)
+        const admission = performance.now()
+        validation = await cited.validate(result.snapshot, request, control)
+        active.admissionElapsedMs = performance.now() - admission; event('admission-settled', { validation })
+      }
+    } catch(error) { thrown = String(error); event('case-exception', { error: thrown }) }
+    finally {
+      const drain = performance.now()
+      try { await cited.cancel(control.ownerId, control.runId); active.drainElapsedMs = performance.now() - drain; event('service-cancel-drained') }
+      catch(error) { drainError = String(error); event('drain-error', { error: drainError }) }
+      clearTimeout(deadline)
+    }
+    const inclusion = active.generation?.output?.inclusion
+    const actualWire = active.observed.at(-1) ? JSON.parse(active.observed.at(-1).user) : null
+    const goldOnWire = c.gold.map(g => {
+      const raw = JSON.parse(originals.get(g.meetingId)!), text = g.kind === 'personal' ? raw.rawNotesMarkdown : raw.segments[0].text
+      assert.equal(text.slice(g.startUtf16, g.endUtf16), g.quote)
+      let start = g.startUtf16, end = g.endUtf16, sourceId = 'transcript:original-segment'
+      if (g.kind === 'personal') { const prefix = text.slice(0, start), lineStart = prefix.lastIndexOf('\n') + 1; sourceId = 'personal:' + (prefix.split('\n').length - 1); start -= lineStart; end -= lineStart }
+      const supplied = active.generation?.input?.ranges ?? []
+      // Actual wire evidence contains anchors/ranges in the existing serialization.
+      return !!actualWire?.evidence.some(r => {
+        const base = inclusion?.ranges.find(x => x.id === r.id) ?? supplied.find(x => x.id === r.id)
+        return base?.anchor.meetingId === g.meetingId && base.anchor.sourceId === sourceId && base.startUtf16 <= start && base.endUtf16 >= end && r.quote.includes(g.quote)
+      })
+    })
+    const lifecycleFailure = active.events.some(e => /dispose-error/.test(e.kind))
+    const status = timedOut ? 'timeout' : stopping || abort.signal.aborted ? 'cancelled' : drainError || lifecycleFailure ? 'drain-failed' : thrown ? 'runner-failed' : result?.status === 'error' ? 'failed' : validation?.status !== 'valid' ? 'admission-failed' : 'valid'
+    Object.assign(row, { status, endedAt: new Date().toISOString(), elapsedMs: performance.now() - start, runElapsedMs: active.runElapsedMs ?? null, admissionElapsedMs: active.admissionElapsedMs ?? null, generationElapsedMs: active.generation?.elapsedMs ?? null, grammarElapsedMs: active.grammar.map(g => g.elapsedMs), drainElapsedMs: active.drainElapsedMs ?? null, code: result?.code ?? null, message: result?.message ?? thrown ?? drainError, validation, timedOut, operatorInterrupted: stopping, cleanup: drainError || lifecycleFailure ? 'unqualified' : 'service/context awaited', goldOnWire, wireObserved: active.observed.length, rawForwardingExact: active.rawForwardingExact ?? null, promptVersion: result?.snapshot?.promptVersion ?? null, inputTokens: inclusion?.inputTokens ?? active.observed.at(-1)?.wireTokens.length ?? null, nativeOutputTokens: active.observed.at(-1)?.tokenUsage?.usedOutputTokens ?? null, stopReason: active.observed.at(-1)?.stopReason ?? null })
+    Object.assign(active, { record: row, result, validation, thrown, drainError }); delete active.monotonicStart
+    durable('evidence/' + c.id + '.json', active)
+    const key = ['failed','runner-failed'].includes(status) ? (row.code ?? status) + ':' + row.message : ''
+    repeated = key && key === lastFailure ? repeated + 1 : key ? 1 : 0; lastFailure = key
+    if (['timeout','cancelled','drain-failed'].includes(status)) summary.stoppedReason = 'Stop on first ' + status
+    else if (repeated >= 2) summary.stoppedReason = 'Two consecutive identical grammar/protocol/runtime failures: ' + key
+    durable('summary.json', summary)
+    console.log(JSON.stringify(row)); activeAbort = undefined; active = null
+  }
+} catch(error) {
+  summary.stoppedReason = 'Unhandled runner failure: ' + String(error)
+  const running = summary.cases.find(r => r.status === 'running')
+  if (running) { running.status = 'runner-failed'; running.message = String(error) }
+  durable('summary.json', summary); throw error
+} finally {
+  try { await engine.dispose(); summary.engineDisposed = true }
+  catch(error) { summary.engineDisposed = false; summary.disposeError = String(error) }
+  Llama.prototype.createGrammarForJsonSchema = actualGrammar
+  LlamaChatSession.prototype.promptWithMeta = actualPrompt
+  LlamaModel.prototype.createContext = actualCreateContext
+  LlamaContext.prototype.dispose = actualContextDispose
+  LlamaModel.prototype.dispose = actualModelDispose
+  const afterOriginals = Object.fromEntries([...originals].map(([id]) => [id, hash(readFileSync(join(dir, id + '.json')))]))
+  durable('originals-after.json', afterOriginals)
+  const unchanged = JSON.stringify(beforeOriginals) === JSON.stringify(afterOriginals)
+  durable('original-integrity.json', { unchanged, count: originals.size })
+  summary.originalsUnchanged = unchanged
+  summary.endedAt = new Date().toISOString()
+  summary.totals = Object.fromEntries([...new Set(summary.cases.map(r => r.status))].map(s => [s, summary.cases.filter(r => r.status === s).length]))
+  durable('summary.json', summary)
+  assert.ok(unchanged)
+}

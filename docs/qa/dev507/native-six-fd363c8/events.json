@@ -1,0 +1,837 @@
+[
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:17.118Z",
+    "caseId": "answer-04",
+    "elapsedMs": 0.48204099999998107,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:17.126Z",
+    "caseId": "answer-04",
+    "elapsedMs": 8.149207999999987,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:17.189Z",
+    "caseId": "answer-04",
+    "elapsedMs": 71.718208,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:17.201Z",
+    "caseId": "answer-04",
+    "elapsedMs": 82.95516600000002,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-18T22:04:17.209Z",
+    "caseId": "answer-04",
+    "elapsedMs": 91.37
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-18T22:04:25.611Z",
+    "caseId": "answer-04",
+    "elapsedMs": 8493.846875,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-18T22:04:26.434Z",
+    "caseId": "answer-04",
+    "elapsedMs": 822.3468750000011,
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-18T22:04:26.497Z",
+    "caseId": "answer-04",
+    "elapsedMs": 9379.2825,
+    "schemaSha256": "59e10b276844c74e810cef0014496cc2a45e43f1996114b278ef859866530c91"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-18T22:04:26.507Z",
+    "caseId": "answer-04",
+    "elapsedMs": 10.366541999999754,
+    "grammarSha256": "c87f68e2ce8c87c6a7d42c94cebdcc0162ec27e0b4774c6106cf769c5d956484"
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-18T22:04:26.517Z",
+    "caseId": "answer-04",
+    "elapsedMs": 9399.582290999999
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-18T22:04:40.994Z",
+    "caseId": "answer-04",
+    "elapsedMs": 23876.473458,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "85d3c8e1a0e76ce6c0f3acede1cd22e94ff076f76534dc372a0e18d2f4833a01"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-18T22:04:41.004Z",
+    "caseId": "answer-04",
+    "elapsedMs": 23886.815
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-18T22:04:41.015Z",
+    "caseId": "answer-04",
+    "elapsedMs": 11.142292000000452,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-18T22:04:41.024Z",
+    "caseId": "answer-04",
+    "elapsedMs": 23906.778958,
+    "rawJsonSha256": "85d3c8e1a0e76ce6c0f3acede1cd22e94ff076f76534dc372a0e18d2f4833a01"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:41.031Z",
+    "caseId": "answer-04",
+    "elapsedMs": 23914.0205,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-18T22:04:41.129Z",
+    "caseId": "answer-04",
+    "elapsedMs": 24011.678,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-18T22:04:41.187Z",
+    "caseId": "answer-04",
+    "elapsedMs": 24069.181582999998,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-18T22:04:41.187Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-18T22:04:41.193Z",
+    "caseId": "answer-04",
+    "elapsedMs": 24075.805833
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:41.212Z",
+    "caseId": "answer-06",
+    "elapsedMs": 0.14933399999790709,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:41.220Z",
+    "caseId": "answer-06",
+    "elapsedMs": 7.905875000000378,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:41.273Z",
+    "caseId": "answer-06",
+    "elapsedMs": 60.60954199999833,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:04:41.281Z",
+    "caseId": "answer-06",
+    "elapsedMs": 68.92533399999957,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-18T22:04:41.289Z",
+    "caseId": "answer-06",
+    "elapsedMs": 76.97154199999932
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-18T22:04:41.296Z",
+    "caseId": "answer-06",
+    "elapsedMs": 84.12995899999805,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-18T22:04:41.411Z",
+    "caseId": "answer-06",
+    "elapsedMs": 115.08504099999845,
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-18T22:04:41.456Z",
+    "caseId": "answer-06",
+    "elapsedMs": 244.17250000000058,
+    "schemaSha256": "57e1f01d1a7fc3457be125f665b7bd1816be37307f5b20e86888ad6584209f28"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-18T22:04:41.464Z",
+    "caseId": "answer-06",
+    "elapsedMs": 7.83574999999837,
+    "grammarSha256": "066035aab0567a7d3203e3b8f32a0302f02ba1691bf1291005e3f1178db98547"
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-18T22:04:41.473Z",
+    "caseId": "answer-06",
+    "elapsedMs": 260.45837499999834
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-18T22:05:31.537Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50324.837292,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "de790f313e01812165a691c2c2a9f6f838fdd69293ae9f87c09b869d83c9056b"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-18T22:05:31.546Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50334.180209
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-18T22:05:31.563Z",
+    "caseId": "answer-06",
+    "elapsedMs": 17.001792000010028,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-18T22:05:31.571Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50359.165292000005,
+    "rawJsonSha256": "de790f313e01812165a691c2c2a9f6f838fdd69293ae9f87c09b869d83c9056b"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:05:31.579Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50367.388875000004,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-18T22:05:31.671Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50459.06324999999,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-18T22:05:31.722Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50510.356334,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-18T22:05:31.722Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-18T22:05:31.729Z",
+    "caseId": "answer-06",
+    "elapsedMs": 50517.136333999995
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:05:31.749Z",
+    "caseId": "must-03",
+    "elapsedMs": 0.1587909999943804,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:05:31.756Z",
+    "caseId": "must-03",
+    "elapsedMs": 6.92020799999591,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:05:31.828Z",
+    "caseId": "must-03",
+    "elapsedMs": 79.09812499998952,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:05:31.836Z",
+    "caseId": "must-03",
+    "elapsedMs": 86.95487499999581,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-18T22:05:31.842Z",
+    "caseId": "must-03",
+    "elapsedMs": 93.06366600000183
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-18T22:05:31.849Z",
+    "caseId": "must-03",
+    "elapsedMs": 99.9792499999894,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-18T22:05:31.969Z",
+    "caseId": "must-03",
+    "elapsedMs": 120.04837499999849,
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-18T22:05:32.263Z",
+    "caseId": "must-03",
+    "elapsedMs": 514.0829159999994,
+    "schemaSha256": "681f470c0035f3ef1df766e2748d3ea92eded1806d8e392918ec675f8fe2b83f"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-18T22:05:32.272Z",
+    "caseId": "must-03",
+    "elapsedMs": 8.909958999996888,
+    "grammarSha256": "31c84e055ea530471cc2b2f474599e1814694c665ab5704b965a9fd0c33bd1f9"
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-18T22:05:32.285Z",
+    "caseId": "must-03",
+    "elapsedMs": 535.4497909999918
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-18T22:07:24.206Z",
+    "caseId": "must-03",
+    "elapsedMs": 112458.044833,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "5d516daead40a0054fc4f85daddc95eee00e1ed8846f1cca0b95e1842b504521"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-18T22:07:24.217Z",
+    "caseId": "must-03",
+    "elapsedMs": 112468.48016600001
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-18T22:07:24.234Z",
+    "caseId": "must-03",
+    "elapsedMs": 17.02012500001001,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-18T22:07:24.242Z",
+    "caseId": "must-03",
+    "elapsedMs": 112493.500041,
+    "rawJsonSha256": "5d516daead40a0054fc4f85daddc95eee00e1ed8846f1cca0b95e1842b504521"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:07:24.250Z",
+    "caseId": "must-03",
+    "elapsedMs": 112501.605791,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-18T22:07:24.364Z",
+    "caseId": "must-03",
+    "elapsedMs": 112616.18029099998,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-18T22:07:24.434Z",
+    "caseId": "must-03",
+    "elapsedMs": 112685.683,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-18T22:07:24.434Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-18T22:07:24.442Z",
+    "caseId": "must-03",
+    "elapsedMs": 112693.77412499998
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:07:24.463Z",
+    "caseId": "must-09",
+    "elapsedMs": 0.1144170000043232,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:07:24.470Z",
+    "caseId": "must-09",
+    "elapsedMs": 6.9572080000070855,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:07:24.543Z",
+    "caseId": "must-09",
+    "elapsedMs": 79.6991670000134,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:07:24.550Z",
+    "caseId": "must-09",
+    "elapsedMs": 86.83329199999571,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-18T22:07:24.557Z",
+    "caseId": "must-09",
+    "elapsedMs": 93.81270800001221
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-18T22:07:24.564Z",
+    "caseId": "must-09",
+    "elapsedMs": 101.06158300000243,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-18T22:07:24.679Z",
+    "caseId": "must-09",
+    "elapsedMs": 114.64049999997951,
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-18T22:07:24.877Z",
+    "caseId": "must-09",
+    "elapsedMs": 414.0949580000015,
+    "schemaSha256": "25225a3bf3f7a80790a2e0798f75e166c9bff494d74dfccafe205e0b23f29063"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-18T22:07:24.885Z",
+    "caseId": "must-09",
+    "elapsedMs": 7.811375000019325,
+    "grammarSha256": "bef19c8a0400f873aa7c513f682906842bdd5b9052adc2f47ff83d4be1b372be"
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-18T22:07:24.897Z",
+    "caseId": "must-09",
+    "elapsedMs": 433.57325000001583
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-18T22:08:18.463Z",
+    "caseId": "must-09",
+    "elapsedMs": 54003.82841700001,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "0bcd2a491d3285cc1db7f2a6a185308acb20d038848ee00dcc3c5ed3321f30cf"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-18T22:08:18.475Z",
+    "caseId": "must-09",
+    "elapsedMs": 54016.07712500001
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-18T22:08:18.491Z",
+    "caseId": "must-09",
+    "elapsedMs": 16.30554200001643,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-18T22:08:18.501Z",
+    "caseId": "must-09",
+    "elapsedMs": 54042.14550000001,
+    "rawJsonSha256": "0bcd2a491d3285cc1db7f2a6a185308acb20d038848ee00dcc3c5ed3321f30cf"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:18.510Z",
+    "caseId": "must-09",
+    "elapsedMs": 54051.316374999995,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-18T22:08:18.627Z",
+    "caseId": "must-09",
+    "elapsedMs": 54168.44191700002,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-18T22:08:18.697Z",
+    "caseId": "must-09",
+    "elapsedMs": 54237.80933300001,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-18T22:08:18.697Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-18T22:08:18.706Z",
+    "caseId": "must-09",
+    "elapsedMs": 54246.95383300001
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:18.728Z",
+    "caseId": "answer-01",
+    "elapsedMs": 0.09041699999943376,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:18.736Z",
+    "caseId": "answer-01",
+    "elapsedMs": 8.526791999989655,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:18.786Z",
+    "caseId": "answer-01",
+    "elapsedMs": 57.76987499999814,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:18.793Z",
+    "caseId": "answer-01",
+    "elapsedMs": 65.01462500001071,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-18T22:08:18.801Z",
+    "caseId": "answer-01",
+    "elapsedMs": 73.00629200000549
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-18T22:08:18.809Z",
+    "caseId": "answer-01",
+    "elapsedMs": 81.04866699999548,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-18T22:08:18.924Z",
+    "caseId": "answer-01",
+    "elapsedMs": 115.0739590000012,
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-18T22:08:18.964Z",
+    "caseId": "answer-01",
+    "elapsedMs": 235.97962500000722,
+    "schemaSha256": "a90ea027778c30384265a891d28498750dfd7c453936c9bea15c77e5df7207ab"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-18T22:08:18.971Z",
+    "caseId": "answer-01",
+    "elapsedMs": 6.9866669999901205,
+    "grammarSha256": "05918cf32a6506599a5569b83a35b34df8a1c3f900776d0326d113d785c61764"
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-18T22:08:18.979Z",
+    "caseId": "answer-01",
+    "elapsedMs": 251.5233339999977
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-18T22:08:37.698Z",
+    "caseId": "answer-01",
+    "elapsedMs": 18971.00370900001,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "2c00f93979265989fbb3b9cd3d1a5f62a12c7173a87a2b3041fb69ff50a11621"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-18T22:08:37.706Z",
+    "caseId": "answer-01",
+    "elapsedMs": 18978.625417000003
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-18T22:08:37.722Z",
+    "caseId": "answer-01",
+    "elapsedMs": 16.536916999990353,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-18T22:08:37.731Z",
+    "caseId": "answer-01",
+    "elapsedMs": 19003.547458999994,
+    "rawJsonSha256": "2c00f93979265989fbb3b9cd3d1a5f62a12c7173a87a2b3041fb69ff50a11621"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:37.738Z",
+    "caseId": "answer-01",
+    "elapsedMs": 19010.771999999997,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-18T22:08:37.800Z",
+    "caseId": "answer-01",
+    "elapsedMs": 19072.62375,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-18T22:08:37.855Z",
+    "caseId": "answer-01",
+    "elapsedMs": 19128.21429199999,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-18T22:08:37.855Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-18T22:08:37.864Z",
+    "caseId": "answer-01",
+    "elapsedMs": 19136.483917000005
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:37.882Z",
+    "caseId": "answer-02",
+    "elapsedMs": 0.07333300000755116,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:37.890Z",
+    "caseId": "answer-02",
+    "elapsedMs": 8.169957999984035,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:37.949Z",
+    "caseId": "answer-02",
+    "elapsedMs": 67.49224999998114,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:08:37.957Z",
+    "caseId": "answer-02",
+    "elapsedMs": 75.06829199998174,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-18T22:08:37.964Z",
+    "caseId": "answer-02",
+    "elapsedMs": 82.15620800000033
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-18T22:08:37.970Z",
+    "caseId": "answer-02",
+    "elapsedMs": 88.2355830000015,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-18T22:08:38.095Z",
+    "caseId": "answer-02",
+    "elapsedMs": 125.19779100001324,
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-18T22:08:38.177Z",
+    "caseId": "answer-02",
+    "elapsedMs": 295.5766669999866,
+    "schemaSha256": "130649a53495dc4bf103c20490b7d364140a4a67d85e03d98be0e83d54b49d61"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-18T22:08:38.186Z",
+    "caseId": "answer-02",
+    "elapsedMs": 8.96204100002069,
+    "grammarSha256": "70076df62cdd86ffc9227eea7edf11c5a40824dcde19b520fa4d1687e9d31b66"
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-18T22:08:38.195Z",
+    "caseId": "answer-02",
+    "elapsedMs": 313.46012499998324
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-18T22:09:26.880Z",
+    "caseId": "answer-02",
+    "elapsedMs": 48999.37333299997,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "af3301fe86da63fae7f27eae2008540a485bdfcc1f727fbf232d24621f808e62"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-18T22:09:26.891Z",
+    "caseId": "answer-02",
+    "elapsedMs": 49009.790083
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-18T22:09:26.909Z",
+    "caseId": "answer-02",
+    "elapsedMs": 17.773832999984734,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-18T22:09:26.917Z",
+    "caseId": "answer-02",
+    "elapsedMs": 49035.806375000015,
+    "rawJsonSha256": "af3301fe86da63fae7f27eae2008540a485bdfcc1f727fbf232d24621f808e62"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-18T22:09:26.925Z",
+    "caseId": "answer-02",
+    "elapsedMs": 49043.837792000006,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-18T22:09:26.999Z",
+    "caseId": "answer-02",
+    "elapsedMs": 49117.959124999965,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-18T22:09:27.059Z",
+    "caseId": "answer-02",
+    "elapsedMs": 49177.54379200001,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-18T22:09:27.058Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-18T22:09:27.067Z",
+    "caseId": "answer-02",
+    "elapsedMs": 49186.17937499998
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-18T22:09:27.085Z",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-18T22:09:27.105Z",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  }
+]

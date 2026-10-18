@@ -1,0 +1,21 @@
+import argparse, collections, json
+from pathlib import Path
+p=argparse.ArgumentParser();p.add_argument('root');a=p.parse_args()
+findings=[]; summaries=[]
+for ident in ['answer-04','answer-06','must-03','must-09','answer-01','answer-02']:
+ d=json.loads((Path(a.root)/'evidence'/f'{ident}.json').read_text())
+ answer=json.loads(d['generation']['output']['rawJson'])
+ ranges={x['id']:x for x in d['generation']['output']['inclusion']['ranges']}
+ counts=collections.Counter(c['text'].strip() for c in answer['claims'])
+ for text,count in counts.items():
+  if count>1:findings.append({'case':ident,'kind':'duplicate-text','count':count,'text':text})
+ for claim in answer['claims']:
+  cited=[ranges[i] for i in claim['evidenceIds']]
+  if claim['kind']=='quotation' and not any(claim['text'] in x['quote'] for x in cited):
+   findings.append({'case':ident,'kind':'nonverbatim-quotation','claim':claim['id'],'text':claim['text']})
+  matching=[g for g in d['gold'] if claim['text']==g['quote']]
+  if matching and not any(g['quote'] in x['quote'] and g['meetingId']==x['anchor']['meetingId'] for g in matching for x in cited):
+   findings.append({'case':ident,'kind':'gold-text-cites-unrelated-original','claim':claim['id'],'text':claim['text'],'cited_meetings':[x['anchor']['meetingId'] for x in cited]})
+ summaries.append({'case':ident,'expected':d['expected'],'status':answer['status'],'claims':len(answer['claims'])})
+print(json.dumps({'scope':'deterministic captured-output diagnostics only; not a complete semantic scorer or native rerun','cases':summaries,'findings':findings},indent=2))
+raise SystemExit(1 if findings else 0)

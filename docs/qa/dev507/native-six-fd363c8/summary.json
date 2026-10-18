@@ -1,0 +1,364 @@
+{
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "attemptId": "dev507-native-six-5de0lv8g",
+  "plannedCaseIds": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02"
+  ],
+  "cases": [
+    {
+      "id": "answer-04",
+      "status": "valid",
+      "attemptId": "dev507-native-six-5de0lv8g:answer-04",
+      "startedAt": "2026-10-18T22:04:17.112Z",
+      "endedAt": "2026-10-18T22:04:41.200Z",
+      "elapsedMs": 24082.829791,
+      "runElapsedMs": 24011.562458,
+      "admissionElapsedMs": 50.40662499999962,
+      "generationElapsedMs": 23822.308624999998,
+      "grammarElapsedMs": [
+        10.366541999999754
+      ],
+      "drainElapsedMs": 0.07504200000039418,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:04:41.187Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 2208,
+      "nativeOutputTokens": 569,
+      "stopReason": "stopGenerationTrigger",
+      "answerStatus": "conflicting-evidence",
+      "claims": 2,
+      "nativePromptElapsedMs": 14467.749665999998,
+      "sourceOperations": {
+        "retrieve": {
+          "calls": 3,
+          "elapsedMs": 116.13212399999628
+        },
+        "manifest-validate": {
+          "calls": 3,
+          "elapsedMs": 78.60916600000235
+        },
+        "resolve": {
+          "calls": 21,
+          "elapsedMs": 0.9894560000001889
+        }
+      },
+      "schemaSha256": "59e10b276844c74e810cef0014496cc2a45e43f1996114b278ef859866530c91",
+      "grammarSha256": "c87f68e2ce8c87c6a7d42c94cebdcc0162ec27e0b4774c6106cf769c5d956484",
+      "wireSha256": "fcb9275c9527d7445e5c092e2c6c48604305430000b121602d415b52c688667b"
+    },
+    {
+      "id": "answer-06",
+      "status": "valid",
+      "attemptId": "dev507-native-six-5de0lv8g:answer-06",
+      "startedAt": "2026-10-18T22:04:41.209Z",
+      "endedAt": "2026-10-18T22:05:31.737Z",
+      "elapsedMs": 50525.083333999995,
+      "runElapsedMs": 50458.987458999996,
+      "admissionElapsedMs": 44.15445899999759,
+      "generationElapsedMs": 50290.177874999994,
+      "grammarElapsedMs": [
+        7.83574999999837
+      ],
+      "drainElapsedMs": 0.006792000000132248,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:05:31.722Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 2206,
+      "nativeOutputTokens": 2603,
+      "stopReason": "stopGenerationTrigger",
+      "answerStatus": "conflicting-evidence",
+      "claims": 12,
+      "nativePromptElapsedMs": 50057.395875,
+      "sourceOperations": {
+        "retrieve": {
+          "calls": 3,
+          "elapsedMs": 105.02508400000443
+        },
+        "manifest-validate": {
+          "calls": 3,
+          "elapsedMs": 67.51654000000053
+        },
+        "resolve": {
+          "calls": 21,
+          "elapsedMs": 0.7015010000068287
+        }
+      },
+      "schemaSha256": "57e1f01d1a7fc3457be125f665b7bd1816be37307f5b20e86888ad6584209f28",
+      "grammarSha256": "066035aab0567a7d3203e3b8f32a0302f02ba1691bf1291005e3f1178db98547",
+      "wireSha256": "3c3668c3f957f6df2ceac4aeda8f4191051b11d88ec98d9af4cb7057460b5993"
+    },
+    {
+      "id": "must-03",
+      "status": "valid",
+      "attemptId": "dev507-native-six-5de0lv8g:must-03",
+      "startedAt": "2026-10-18T22:05:31.745Z",
+      "endedAt": "2026-10-18T22:07:24.451Z",
+      "elapsedMs": 112702.944459,
+      "runElapsedMs": 112616.14158400001,
+      "admissionElapsedMs": 62.396375000011176,
+      "generationElapsedMs": 112408.26204100001,
+      "grammarElapsedMs": [
+        8.909958999996888
+      ],
+      "drainElapsedMs": 0.004333000018959865,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:07:24.434Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 11955,
+      "nativeOutputTokens": 3231,
+      "stopReason": "stopGenerationTrigger",
+      "answerStatus": "answered",
+      "claims": 12,
+      "nativePromptElapsedMs": 111915.604541,
+      "sourceOperations": {
+        "retrieve": {
+          "calls": 3,
+          "elapsedMs": 130.7878330000094
+        },
+        "manifest-validate": {
+          "calls": 3,
+          "elapsedMs": 95.26483299997926
+        },
+        "resolve": {
+          "calls": 61,
+          "elapsedMs": 5.299873999931151
+        }
+      },
+      "schemaSha256": "681f470c0035f3ef1df766e2748d3ea92eded1806d8e392918ec675f8fe2b83f",
+      "grammarSha256": "31c84e055ea530471cc2b2f474599e1814694c665ab5704b965a9fd0c33bd1f9",
+      "wireSha256": "40990979b919803a4513da7be4b6a6dbff11c97230391158bfc2c510fd1f8048"
+    },
+    {
+      "id": "must-09",
+      "status": "valid",
+      "attemptId": "dev507-native-six-5de0lv8g:must-09",
+      "startedAt": "2026-10-18T22:07:24.460Z",
+      "endedAt": "2026-10-18T22:08:18.715Z",
+      "elapsedMs": 54255.92275000003,
+      "runElapsedMs": 54168.406667,
+      "admissionElapsedMs": 61.27808400001959,
+      "generationElapsedMs": 53957.281707999995,
+      "grammarElapsedMs": [
+        7.811375000019325
+      ],
+      "drainElapsedMs": 0.004958000004990026,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:08:18.697Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 11964,
+      "nativeOutputTokens": 913,
+      "stopReason": "stopGenerationTrigger",
+      "answerStatus": "conflicting-evidence",
+      "claims": 4,
+      "nativePromptElapsedMs": 53564.46216699999,
+      "sourceOperations": {
+        "retrieve": {
+          "calls": 3,
+          "elapsedMs": 134.89724900000147
+        },
+        "manifest-validate": {
+          "calls": 3,
+          "elapsedMs": 92.84437499998603
+        },
+        "resolve": {
+          "calls": 69,
+          "elapsedMs": 5.53095799984294
+        }
+      },
+      "schemaSha256": "25225a3bf3f7a80790a2e0798f75e166c9bff494d74dfccafe205e0b23f29063",
+      "grammarSha256": "bef19c8a0400f873aa7c513f682906842bdd5b9052adc2f47ff83d4be1b372be",
+      "wireSha256": "d1353964cd73855f76d2521ebbc571c241ceda0c63eccc9a5a3cc6857cb0179b"
+    },
+    {
+      "id": "answer-01",
+      "status": "valid",
+      "attemptId": "dev507-native-six-5de0lv8g:answer-01",
+      "startedAt": "2026-10-18T22:08:18.724Z",
+      "endedAt": "2026-10-18T22:08:37.871Z",
+      "elapsedMs": 19143.50108300001,
+      "runElapsedMs": 19072.606,
+      "admissionElapsedMs": 47.686083000007784,
+      "generationElapsedMs": 18937.633375000005,
+      "grammarElapsedMs": [
+        6.9866669999901205
+      ],
+      "drainElapsedMs": 0.007833000010577962,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:08:37.855Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 1255,
+      "nativeOutputTokens": 961,
+      "stopReason": "stopGenerationTrigger",
+      "answerStatus": "answered",
+      "claims": 6,
+      "nativePromptElapsedMs": 18711.74429199999,
+      "sourceOperations": {
+        "retrieve": {
+          "calls": 3,
+          "elapsedMs": 77.63675000000512
+        },
+        "manifest-validate": {
+          "calls": 3,
+          "elapsedMs": 62.51770900000702
+        },
+        "resolve": {
+          "calls": 21,
+          "elapsedMs": 0.7235419998760335
+        }
+      },
+      "schemaSha256": "a90ea027778c30384265a891d28498750dfd7c453936c9bea15c77e5df7207ab",
+      "grammarSha256": "05918cf32a6506599a5569b83a35b34df8a1c3f900776d0326d113d785c61764",
+      "wireSha256": "89460ffca379b490b474c36712b474c3e299106a607c404b7876ccbe8aac5137"
+    },
+    {
+      "id": "answer-02",
+      "status": "valid",
+      "attemptId": "dev507-native-six-5de0lv8g:answer-02",
+      "startedAt": "2026-10-18T22:08:37.878Z",
+      "endedAt": "2026-10-18T22:09:27.075Z",
+      "elapsedMs": 49194.156833000015,
+      "runElapsedMs": 49117.921458000026,
+      "admissionElapsedMs": 49.38495899998816,
+      "generationElapsedMs": 48961.55112500003,
+      "grammarElapsedMs": [
+        8.96204100002069
+      ],
+      "drainElapsedMs": 0.009332999994512647,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-18T22:09:27.058Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 4292,
+      "nativeOutputTokens": 1977,
+      "stopReason": "stopGenerationTrigger",
+      "answerStatus": "answered",
+      "claims": 12,
+      "nativePromptElapsedMs": 48677.505083,
+      "sourceOperations": {
+        "retrieve": {
+          "calls": 3,
+          "elapsedMs": 85.50249900005292
+        },
+        "manifest-validate": {
+          "calls": 3,
+          "elapsedMs": 77.17720800003735
+        },
+        "resolve": {
+          "calls": 72,
+          "elapsedMs": 1.6042510001861956
+        }
+      },
+      "schemaSha256": "130649a53495dc4bf103c20490b7d364140a4a67d85e03d98be0e83d54b49d61",
+      "grammarSha256": "70076df62cdd86ffc9227eea7edf11c5a40824dcde19b520fa4d1687e9d31b66",
+      "wireSha256": "c51cda9fc226ed1c294b56c83a6f7dea8fc76faee473c3c59b99118f2bdd2a1c"
+    }
+  ],
+  "prior79": "immutable; separate 33 unique/8 valid/25 failed/67 unperformed plus interrupted attempt",
+  "caseDeadlineMs": 180000,
+  "outerDeadlineMs": 1200000,
+  "stopRule": "two consecutive identical grammar/protocol/runtime failures or first timeout/cancellation/drain failure",
+  "corpusHash": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+  "startedAt": "2026-10-18T22:04:17.052Z",
+  "semanticHumanScore": "UNPERFORMED",
+  "productionGate": "OFF",
+  "stoppedReason": null,
+  "engineDisposed": true,
+  "originalsUnchanged": true,
+  "endedAt": "2026-10-18T22:09:27.124Z",
+  "totals": {
+    "planned": 6,
+    "attempted": 6,
+    "strictAndCurrentValid": 6,
+    "failed": 0,
+    "cancelled": 0,
+    "unperformed": 0,
+    "goldOnActualWire": 6,
+    "rawForwardingExact": 6
+  },
+  "humanSemanticScoring": "UNPERFORMED; agent qualitative observations only",
+  "frozen79Accounting": "UNCHANGED:33 unique/8 structural valid/25 failed/67 unperformed plus interrupted attempt. These six are separate candidate diagnostic attempts, not replacements.",
+  "packet": {
+    "file": "evidence.jsonl.gz",
+    "sha256": "6c6c208882c8750ee861c04053b6d41c089c4d80862503f6bf8baf351125401d",
+    "compressedBytes": 329045,
+    "uncompressedBytes": 2696001,
+    "records": 6
+  },
+  "timingClassification": "Diagnostic direct-I/O standalone701-original elapsed only; no performance gate or desktop/UI/IPC measurement."
+}
