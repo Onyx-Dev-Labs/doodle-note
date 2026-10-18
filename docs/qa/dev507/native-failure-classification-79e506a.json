@@ -1,0 +1,287 @@
+{
+  "sourceSha": "79e506ace65a99352b1bdd9af35b9df7f541b260",
+  "method": "Post-run diagnosis only; production outcomes unchanged; full raw output and actual wire retained in evidence packet. No repairs or retries.",
+  "cases": [
+    {
+      "id": "answer-00",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "answer-01",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "answer-02",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "answer-03",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "answer-04",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "answer-05",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "answer-06",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "conflict-status-without-conflict-claim"
+      ]
+    },
+    {
+      "id": "answer-07",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "answer-08",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "conflict-status-without-conflict-claim"
+      ]
+    },
+    {
+      "id": "answer-09",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "answer-10",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "answer-11",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "answer-12",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-00",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-01",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-02",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-03",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "conflict-claim-needs-two-citations"
+      ]
+    },
+    {
+      "id": "must-04",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-05",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "must-06",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-07",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "must-08",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "must-09",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "claim-count-exceeds-12"
+      ]
+    },
+    {
+      "id": "must-10",
+      "productionStatus": "complete",
+      "productionCode": null,
+      "productionMessage": null,
+      "diagnosticReasons": []
+    },
+    {
+      "id": "must-11",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-12",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "claim-count-exceeds-12"
+      ]
+    },
+    {
+      "id": "must-13",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "claim-count-exceeds-12"
+      ]
+    },
+    {
+      "id": "must-14",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-15",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-16",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-17",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    },
+    {
+      "id": "must-18",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosticReasons": [
+        "claim-count-exceeds-12"
+      ]
+    },
+    {
+      "id": "must-19",
+      "productionStatus": "error",
+      "productionCode": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosticReasons": [
+        "extra-quote-after-json"
+      ]
+    }
+  ]
+}
