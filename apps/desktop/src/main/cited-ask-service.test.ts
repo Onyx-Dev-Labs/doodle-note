@@ -10,11 +10,24 @@ import * as serviceModule from './cited-ask-service'
 import type { CitedAskRequest, CitedAnswerSnapshot } from '../shared/cited-ask-api'
 import { LibraryActivity } from './library-activity'
 
-function fixture(t: test.TestContext) {
+function fixture(t: test.TestContext): {
+  root: string
+  context: Parameters<typeof retrieveOriginalEvidence>[0]
+  put(id: string, text: string): void
+  history: string
+  sources: serviceModule.CitedAskDependencies['sources']
+  generate: serviceModule.CitedAskDependencies['generate']
+  service: serviceModule.MainCitedAskService
+  request: Extract<CitedAskRequest, { purpose: 'calendar-brief' }>
+  control: serviceModule.AskControl
+  generated(): number
+  setMutation(fn: () => void): void
+  setOutput(fn: (ids: string[]) => unknown): void
+} {
   const root = mkdtempSync(join(tmpdir(), 'dev507-service-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const context = { meetingsDir: root, scope: localSourceScope(root, true), authorized: true }
-  const put = (id: string, text: string) =>
+  const put = (id: string, text: string): void =>
     writeFileSync(
       join(root, id + '.json'),
       JSON.stringify({ id, rawNotesMarkdown: text, createdAt: '2020-01-01T00:00:00Z' })
@@ -36,10 +49,12 @@ function fixture(t: test.TestContext) {
       retrieveOriginalEvidence(context, s),
     validateEvidence: async (m: Parameters<typeof validateOriginalEvidence>[1]) =>
       validateOriginalEvidence(context, m),
-    resolve: async (a: Parameters<typeof resolveOriginalSource>[1]) =>
+    resolveAcknowledged: async (a: Parameters<typeof resolveOriginalSource>[1]) =>
       resolveOriginalSource(context, a)
   }
-  const generate = async (input: CitedPromptInput) => {
+  const generate: serviceModule.CitedAskDependencies['generate'] = async (
+    input: CitedPromptInput
+  ) => {
     generated++
     const p = buildCitedAskPrompt(input, {
       contextWindowTokens: 16384,
@@ -209,28 +224,124 @@ test('altered stored range, scope, revision, prompt membership and missing manif
   }
 })
 
-test('request digest normalizes subset order/dedup but binds topic, text and explicit membership for every empty state',async t=>{
-  const f=fixture(t)
-  const request={...f.request,selection:{mode:'linked-history' as const,meetingIds:['old','unrelated','old']}}
-  const result=await f.service.run(request,f.control);assert.notEqual(result.status,'error');if(result.status==='error')return
-  assert.match(result.snapshot.requestSha256!,/^[a-f0-9]{64}$/)
-  const equivalent={...request,selection:{mode:'linked-history' as const,meetingIds:['unrelated','old']}}
-  assert.equal((await f.service.validate(result.snapshot,equivalent,f.control)).status,'valid')
-  for(const changed of [{...equivalent,selection:{...equivalent.selection,topic:'new topic'}},{...equivalent,selection:{...equivalent.selection,meetingIds:['old']}},{...equivalent,context:{templateVersion:1 as const,eventText:'new text'}}])assert.equal((await f.service.validate(result.snapshot,changed,f.control)).status,'stale')
-  const missing=structuredClone(result.snapshot);delete missing.requestSha256;assert.equal((await f.service.validate(missing,equivalent,f.control)).status,'stale')
-  const none=await f.service.run({purpose:'library-ask',selection:{mode:'question',question:'unmatched',filters:{}}},{...f.control,runId:'no-match'})
-  assert.equal(none.status,'insufficient-evidence');if(none.status==='insufficient-evidence')assert.match(none.snapshot.requestSha256!,/^[a-f0-9]{64}$/)
+test('request digest normalizes subset order/dedup but binds topic, text and explicit membership for every empty state', async (t) => {
+  const f = fixture(t)
+  const request = {
+    ...f.request,
+    selection: { mode: 'linked-history' as const, meetingIds: ['old', 'unrelated', 'old'] }
+  }
+  const result = await f.service.run(request, f.control)
+  assert.notEqual(result.status, 'error')
+  if (result.status === 'error') return
+  assert.match(result.snapshot.requestSha256!, /^[a-f0-9]{64}$/)
+  const equivalent = {
+    ...request,
+    selection: { mode: 'linked-history' as const, meetingIds: ['unrelated', 'old'] }
+  }
+  assert.equal((await f.service.validate(result.snapshot, equivalent, f.control)).status, 'valid')
+  for (const changed of [
+    { ...equivalent, selection: { ...equivalent.selection, topic: 'new topic' } },
+    { ...equivalent, selection: { ...equivalent.selection, meetingIds: ['old'] } },
+    { ...equivalent, context: { templateVersion: 1 as const, eventText: 'new text' } }
+  ])
+    assert.equal((await f.service.validate(result.snapshot, changed, f.control)).status, 'stale')
+  const missing = structuredClone(result.snapshot)
+  delete missing.requestSha256
+  assert.equal((await f.service.validate(missing, equivalent, f.control)).status, 'stale')
+  const none = await f.service.run(
+    { purpose: 'library-ask', selection: { mode: 'question', question: 'unmatched', filters: {} } },
+    { ...f.control, runId: 'no-match' }
+  )
+  assert.equal(none.status, 'insufficient-evidence')
+  if (none.status === 'insufficient-evidence')
+    assert.match(none.snapshot.requestSha256!, /^[a-f0-9]{64}$/)
 })
-test('owner-scoped cancel waits for model cleanup and retry cannot overlap the producer',async t=>{
-  const f=fixture(t);let release!:()=>void;const cleanup=new Promise<void>(resolve=>{release=resolve})
-  let started!:()=>void;const ready=new Promise<void>(resolve=>{started=resolve});let aborted=false
-  const service=new serviceModule.MainCitedAskService({sources:f.sources,validateModel:async()=>true,generate:async(input,signal)=>{
-    started();await new Promise<void>(resolve=>signal.addEventListener('abort',()=>{aborted=true;resolve()},{once:true}));await cleanup;return f.generate(input)
-  }})
-  const first=service.run(f.request,f.control);await ready
-  await service.cancel('other','run');assert.equal(aborted,false)
-  const cancelling=service.cancel('owner','run');await new Promise(resolve=>setImmediate(resolve));assert.equal(aborted,true)
-  assert.equal((await service.run(f.request,{...f.control,runId:'retry'})).status,'error')
-  release();await cancelling;const result=await first;assert.equal(result.status,'error');if(result.status==='error')assert.equal(result.code,'cancelled')
-  assert.equal(readFileSync(f.history,'utf8'),'prior history bytes')
+test('owner-scoped cancel waits for model cleanup and retry cannot overlap the producer', async (t) => {
+  const f = fixture(t)
+  let release!: () => void
+  const cleanup = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  let aborted = false
+  const service = new serviceModule.MainCitedAskService({
+    sources: f.sources,
+    validateModel: async () => true,
+    generate: async (input, signal) => {
+      started()
+      await new Promise<void>((resolve) =>
+        signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true
+            resolve()
+          },
+          { once: true }
+        )
+      )
+      await cleanup
+      return f.generate(input, signal)
+    }
+  })
+  const first = service.run(f.request, f.control)
+  await ready
+  await service.cancel('other', 'run')
+  assert.equal(aborted, false)
+  const cancelling = service.cancel('owner', 'run')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(aborted, true)
+  assert.equal((await service.run(f.request, { ...f.control, runId: 'retry' })).status, 'error')
+  release()
+  await cancelling
+  const result = await first
+  assert.equal(result.status, 'error')
+  if (result.status === 'error') assert.equal(result.code, 'cancelled')
+  assert.equal(readFileSync(f.history, 'utf8'), 'prior history bytes')
+})
+
+test('canonical resolved speaker reaches exact inference wire separately from unchanged transcript quote', async (t) => {
+  const f = fixture(t)
+  let wire = ''
+  const service = new serviceModule.MainCitedAskService({
+    sources: f.sources,
+    activity: new LibraryActivity(),
+    validateModel: async () => true,
+    generate: async (input, signal) => {
+      wire = buildCitedAskPrompt(input, {
+        contextWindowTokens: 16384,
+        outputReserveTokens: 4096,
+        safetyMarginTokens: 256,
+        accounting: 'model-tokenizer',
+        countInputTokens: (s, u) => Buffer.byteLength(s + u)
+      }).user
+      return f.generate(input, signal)
+    }
+  })
+  const quote = 'I will send the Orchid proposal Friday.'
+  let previous: CitedAnswerSnapshot | undefined
+  for (const speaker of ['Alice', 'Bob']) {
+    writeFileSync(
+      join(f.root, 'old.json'),
+      JSON.stringify({
+        id: 'old',
+        participants: [{ id: 'far', name: speaker, source: 'manual', confidence: 1 }],
+        segments: [
+          { id: 'segment', channel: 'system', speakerId: 'far', speaker: 'Old label', text: quote }
+        ]
+      })
+    )
+    if (previous)
+      assert.equal((await service.validate(previous, f.request, f.control)).status, 'stale')
+    const result = await service.run(f.request, f.control)
+    assert.equal(result.status, 'complete')
+    const evidence = JSON.parse(wire).evidence
+    assert.equal(evidence[0].speaker, speaker)
+    assert.equal(evidence[0].quote, quote)
+    assert.equal(result.snapshot.prompt!.ranges[0]!.startUtf16, 0)
+    assert.equal(result.snapshot.prompt!.ranges[0]!.endUtf16, quote.length)
+    previous = result.snapshot
+  }
 })

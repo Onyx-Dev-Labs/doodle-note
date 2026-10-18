@@ -1,4 +1,10 @@
-import type { EvidenceSelection, EvidenceBundle, EvidenceManifest, CensusRequest, CensusResult } from './evidence-contract';
+import type {
+  EvidenceSelection,
+  EvidenceBundle,
+  EvidenceManifest,
+  CensusRequest,
+  CensusResult,
+} from "./evidence-contract";
 import type { Worker } from "node:worker_threads";
 import type {
   SourceAnchor,
@@ -29,6 +35,7 @@ export class SourceIndexClient {
       generation: number;
       cleanup: () => void;
       cancellation: Int32Array;
+      drain: boolean;
     }
   >();
   private readonly ready: Promise<void>;
@@ -54,8 +61,12 @@ export class SourceIndexClient {
             task.context !== JSON.stringify(this.context())
           )
             throw new StaleSourceRequestError();
-          if (Atomics.load(task.cancellation, 0)) throw new Error('Source request cancelled');
-          if (message.error) throw Object.assign(new Error(message.error), {code: message.code});
+          if (Atomics.load(task.cancellation, 0))
+            throw new Error("Source request cancelled");
+          if (message.error)
+            throw Object.assign(new Error(message.error), {
+              code: message.code,
+            });
           task.resolve(message.result);
           this.state = this.pending.size
             ? "reconciling"
@@ -67,32 +78,35 @@ export class SourceIndexClient {
           this.state = this.pending.size ? "reconciling" : "dirty";
         }
       });
-      const fail = (): void => {
+      const fail = (exited = false): void => {
         this.state = "unavailable";
         const error = new Error(
           "Source worker stopped; originals are preserved.",
         );
         reject(error);
-        for (const task of this.pending.values()) {
+        for (const [id, task] of this.pending) {
+          if (task.drain && !exited) continue;
+          this.pending.delete(id);
           task.cleanup();
           task.reject(error);
         }
-        this.pending.clear();
       };
-      worker.on("error", fail);
-      worker.on("exit", fail);
+      worker.on("error", () => fail());
+      worker.on("exit", () => fail(true));
     });
     // Startup failure is observable through requests/state, never an unhandled rejection.
     void this.ready.catch(() => {});
   }
   invalidate(): void {
     this.generation++;
-    for (const task of this.pending.values()) {
+    for (const [id, task] of this.pending) {
       Atomics.store(task.cancellation, 0, 1);
+      // Cited operations retain ownership until this worker replies or exits.
+      if (task.drain) continue;
+      this.pending.delete(id);
       task.cleanup();
       task.reject(new StaleSourceRequestError());
     }
-    this.pending.clear();
     if (this.state === "reconciling" || this.state === "ready")
       this.state = "dirty";
   }
@@ -115,21 +129,57 @@ export class SourceIndexClient {
       signal,
     ) as Promise<SourceResolution>;
   }
-  async retrieveEvidence(selection: EvidenceSelection, signal?: AbortSignal): Promise<EvidenceBundle> {
-    return this.request({ operation: 'retrieve-evidence', selection }, signal) as Promise<EvidenceBundle>;
+  /** Cited callers must retain their activity lease until original I/O acknowledges cancellation. */
+  async resolveAcknowledged(
+    anchor: SourceAnchor,
+    signal?: AbortSignal,
+  ): Promise<SourceResolution> {
+    return this.request(
+      { operation: "resolve", anchor },
+      signal,
+      true,
+    ) as Promise<SourceResolution>;
   }
-  async census(census: CensusRequest, signal?: AbortSignal): Promise<CensusResult> {
-    return this.request({ operation: 'census', census }, signal) as Promise<CensusResult>;
+  async retrieveEvidence(
+    selection: EvidenceSelection,
+    signal?: AbortSignal,
+  ): Promise<EvidenceBundle> {
+    return this.request(
+      { operation: "retrieve-evidence", selection },
+      signal,
+    ) as Promise<EvidenceBundle>;
   }
-  async validateEvidence(manifest: EvidenceManifest, signal?: AbortSignal): Promise<'valid' | 'stale' | 'unavailable'> {
-    return this.request({ operation: 'validate-evidence', manifest }, signal) as Promise<'valid' | 'stale' | 'unavailable'>;
+  async census(
+    census: CensusRequest,
+    signal?: AbortSignal,
+  ): Promise<CensusResult> {
+    return this.request(
+      { operation: "census", census },
+      signal,
+    ) as Promise<CensusResult>;
+  }
+  async validateEvidence(
+    manifest: EvidenceManifest,
+    signal?: AbortSignal,
+  ): Promise<"valid" | "stale" | "unavailable"> {
+    return this.request(
+      { operation: "validate-evidence", manifest },
+      signal,
+    ) as Promise<"valid" | "stale" | "unavailable">;
   }
   private async request(
     input: Pick<
       SourceWorkerRequest,
-      "operation" | "query" | "limit" | "anchor" | "selection" | "census" | "manifest"
+      | "operation"
+      | "query"
+      | "limit"
+      | "anchor"
+      | "selection"
+      | "census"
+      | "manifest"
     >,
     signal?: AbortSignal,
+    drain = input.operation !== "search" && input.operation !== "resolve",
   ): Promise<unknown> {
     const generation = this.generation;
     await awaitSourceReady(this.ready, signal);
@@ -147,7 +197,7 @@ export class SourceIndexClient {
         Atomics.store(cancellation, 0, 1);
         // New operations settle only when this worker acknowledges completion/cancellation.
         // Preserve the legacy immediate UI cancellation contract for source search/resolve.
-        if (input.operation !== 'search' && input.operation !== 'resolve') return;
+        if (drain) return;
         this.pending.delete(id);
         cleanup();
         if (!this.pending.size) this.state = "dirty";
@@ -161,15 +211,23 @@ export class SourceIndexClient {
         generation,
         cleanup,
         cancellation,
+        drain,
       });
       signal?.addEventListener("abort", cancel, { once: true });
-      this.worker.postMessage({
-        ...input,
-        id,
-        generation,
-        context,
-        cancellation: cancellation.buffer,
-      });
+      try {
+        this.worker.postMessage({
+          ...input,
+          id,
+          generation,
+          context,
+          cancellation: cancellation.buffer,
+        });
+      } catch (error) {
+        // No worker task was admitted when postMessage fails.
+        this.pending.delete(id);
+        cleanup();
+        reject(error as Error);
+      }
     });
   }
   async close(): Promise<void> {
@@ -180,11 +238,19 @@ export class SourceIndexClient {
 }
 
 /** Abort before readiness/retirement without scheduling a delayed request. */
-export async function awaitSourceReady<T>(ready: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (signal?.aborted) throw new Error('Source request cancelled');
+export async function awaitSourceReady<T>(
+  ready: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted) throw new Error("Source request cancelled");
   let cancel!: () => void;
-  const aborted = new Promise<never>((_, reject) => { cancel = () => reject(new Error('Source request cancelled')); });
-  signal?.addEventListener('abort', cancel, { once: true });
-  try { return await Promise.race([ready, aborted]); }
-  finally { signal?.removeEventListener('abort', cancel); }
+  const aborted = new Promise<never>((_, reject) => {
+    cancel = () => reject(new Error("Source request cancelled"));
+  });
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    return await Promise.race([ready, aborted]);
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
 }

@@ -63,7 +63,11 @@ function filtered(snapshot: SourceSnapshot, filters: EvidenceFilters) {
     }
     return true;
   });
-  return {documents,unknownDateCount};
+  // Failed parses have unknown eligibility and remain conservative. Projection
+  // failures attached to a readable document count only inside the requested domain.
+  const unavailableCount = [...snapshot.inventory.values()].filter(m => m.state === 'unavailable').length
+    + documents.reduce((n, d) => n + d.unavailableCount, 0);
+  return {documents,unknownDateCount,unavailableCount};
 }
 export function scanEvidenceSources(context: SourceContext, selection: EvidenceSelection, checkpoint: ()=>void) {
   if(!context.authorized)throw new EvidenceError('unauthorized');
@@ -79,7 +83,7 @@ export function scanEvidenceSources(context: SourceContext, selection: EvidenceS
 export function selectOriginalEvidence(context: SourceContext, selection: EvidenceSelection, snapshot: SourceSnapshot, checkpoint: ()=>void = ()=>{}): EvidenceBundle {
   const plan=planEvidenceQuestion(selection.mode==='question'?selection.question:selection.topic??'');
   if(selection.mode==='question' && !plan.terms.length && !plan.phrases.length)throw new EvidenceError('refine-query');
-  const {documents,unknownDateCount}=filtered(snapshot,selection.mode==='question'?selection.filters:{});
+  const {documents,unknownDateCount,unavailableCount: domainUnavailable}=filtered(snapshot,selection.mode==='question'?selection.filters:{});
   const originals=documents.flatMap(d=>d.passages.filter(p=>p.anchor.kind==='personal'||p.anchor.kind==='transcript'));
   const df=plan.terms.map(t=>originals.reduce((n,p)=>n+Number(normalizeSearch(p.text).includes(t)),0));
   type Candidate={p:SourcePassage;start:number;end:number;score:number[]};
@@ -100,8 +104,11 @@ export function selectOriginalEvidence(context: SourceContext, selection: Eviden
     if(selection.mode==='linked-history')for(let i=0;i<points.length;i+=1600)windows.push([i,Math.min(points.length,i+1600)]);
     else {
       // Match in normalized text, map each normalized code unit back to its original code point.
-      let normalized='';const positions:number[]=[];
-      points.forEach((c,i)=>{const n=normalizeSearch(c);normalized+=n;for(let j=0;j<n.length;j++)positions.push(i);});
+      // Lowercase the whole string: Unicode final sigma depends on surrounding letters.
+      // NFKD expansions and removed marks map back through each original code point;
+      // default contextual lowercasing after mark removal preserves these unit lengths.
+      const normalized=normalizeSearch(p.text);const positions:number[]=[];
+      points.forEach((c,i)=>{const n=normalizeSearch(c);for(let j=0;j<n.length;j++)positions.push(i);});
       const centers:number[]=[];
       for(const term of [...plan.phrases,...plan.terms]){let from=0;while(from<normalized.length){const match=normalized.indexOf(term,from);if(match<0)break;centers.push(positions[match]!);from=match+Math.max(1,term.length);}}
       centers.sort((a,b)=>a-b);
@@ -119,11 +126,11 @@ export function selectOriginalEvidence(context: SourceContext, selection: Eviden
   const selected:Candidate[]=[];const perMeeting=new Map<string,number>();let meetingCap=false;
   for(const c of top){const count=perMeeting.get(c.p.anchor.meetingId)??0;if(count>=4){meetingCap=true;continue;}if(selected.length>=24)continue;selected.push(c);perMeeting.set(c.p.anchor.meetingId,count+1);}
   checkpoint(); const changed=changedSourceFiles(snapshot,context);checkpoint();
-  const unavailableCount=snapshot.unavailableCount+changed.size;
+  const unavailableCount=domainUnavailable+changed.size;
   const ranges=selected.filter(c=>!changed.has(c.p.anchor.meetingId+'.json')).map(c=>makeEvidenceRange(c.p,c.start,c.end));
   const omissions:EvidenceBundle['coverage']['omissions']=[];
   if(plan.droppedTerms.length)omissions.push('query-terms');if(candidateWindowCount>64)omissions.push('candidate-cap');if(top.length>24)omissions.push('range-cap');if(meetingCap)omissions.push('meeting-cap');
-  if(snapshot.unavailableCount)omissions.push('unavailable');if(changed.size)omissions.push('changed-during-scan');if(unknownDateCount)omissions.push('unknown-date');if(selection.mode==='linked-history'&&ranges.length<candidateWindowCount)omissions.push('linked-sampling');
+  if(domainUnavailable)omissions.push('unavailable');if(changed.size)omissions.push('changed-during-scan');if(unknownDateCount)omissions.push('unknown-date');if(selection.mode==='linked-history'&&ranges.length<candidateWindowCount)omissions.push('linked-sampling');
   const coverage:EvidenceBundle['coverage']={version:1,scope:context.scope,observedAt:new Date().toISOString(),selection,...plan,eligibleMeetingCount:documents.length,scannedMeetingCount:snapshot.documents.length,matchingMeetingCount:matchingMeetings.size,matchingSourceCount:matchingSources.size,candidateWindowCount,selectedMeetingCount:new Set(ranges.map(r=>r.anchor.meetingId)).size,selectedRangeIds:ranges.map(r=>r.id),unavailableCount,unknownDateCount,scanComplete:unavailableCount===0,selectionComplete:ranges.length===candidateWindowCount,semanticCoverage:'not-exhaustive',omissions};
   const {observedAt:_,...stableCoverage}=coverage;
   const inventory=[...snapshot.inventory].sort(([a],[b])=>a.localeCompare(b));
@@ -144,10 +151,14 @@ export function censusOriginalEvidence(context: SourceContext, input: CensusRequ
   if(!isRecord(input)||!exactKeys(input,['filters','predicate'])||!isRecord(input.predicate))throw new Error('Invalid census');
   const filters=normalizeEvidenceFilters(input.filters);const p=input.predicate;
   if(!((p.kind==='eligible'&&exactKeys(p,['kind']))||(p.kind==='literal'&&exactKeys(p,['kind','text'])&&typeof p.text==='string'&&p.text.length<=4096&&p.text.trim())))throw new Error('Invalid census predicate');
-  const snapshot=scanSources(context,checkpoint);const {documents,unknownDateCount}=filtered(snapshot,filters);
-  const terms=p.kind==='literal'?normalizeSearch(p.text).trim().split(/\s+/u):[];let sourceCount=0;const meetings:CensusResult['meetings']=[];
+  const snapshot=scanSources(context,checkpoint);const {documents,unknownDateCount,unavailableCount:domainUnavailable}=filtered(snapshot,filters);
+  const terms=p.kind==='literal'?normalizeSearch(p.text).trim().split(/\s+/u):[];
+  const contributions: Array<{meetingId:string; title:string; sourceCount:number}>=[];
   for(const d of documents){checkpoint();let matches=0;for(const source of d.passages)if((source.anchor.kind==='personal'||source.anchor.kind==='transcript')&&terms.every(t=>normalizeSearch(source.text).includes(t)))matches++;
-    sourceCount+=matches;if(matches||p.kind==='eligible')meetings.push({meetingId:d.meetingId,title:snapshot.inventory.get(d.meetingId+'.json')!.title});}
-  const unavailableCount=snapshot.unavailableCount+changedSourceFiles(snapshot,context).size;checkpoint();
-  return {scope:context.scope,predicate:{filters,predicate:p},meetingCount:meetings.length,sourceCount,exact:unavailableCount===0,unavailableCount,unknownDateCount,meetings:meetings.slice(0,100),listTruncated:meetings.length>100};
+    if(matches||p.kind==='eligible')contributions.push({meetingId:d.meetingId,title:snapshot.inventory.get(d.meetingId+'.json')!.title,sourceCount:matches});}
+  checkpoint();const changed=changedSourceFiles(snapshot,context);
+  const current=contributions.filter(d=>!changed.has(d.meetingId+'.json'));
+  const unavailableCount=domainUnavailable+changed.size;
+  const meetings=current.map(({meetingId,title})=>({meetingId,title}));
+  return {scope:context.scope,predicate:{filters,predicate:p},meetingCount:meetings.length,sourceCount:current.reduce((n,d)=>n+d.sourceCount,0),exact:unavailableCount===0,unavailableCount,unknownDateCount,meetings:meetings.slice(0,100),listTruncated:meetings.length>100};
 }

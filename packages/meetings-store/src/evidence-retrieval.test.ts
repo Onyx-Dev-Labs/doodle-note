@@ -79,3 +79,47 @@ test('linked history samples head middle tail without lexical match and excludes
   assert.ok(b.ranges.some(r=>r.quote.includes('Ship Friday tail')));
   assert.equal(b.coverage.selectionComplete,false); assert.ok(b.coverage.omissions.includes('linked-sampling'));
 });
+
+test('whole-string Unicode normalization preserves literal matches and exact original UTF-16 ranges', t => {
+  const {context, put}=fixture(t);
+  for(const text of ['ΚΟΣΜΟΣ','ΟΣ','ΟΣΑ','Cafe\u0301','\u0130stanbul','ﬃ','𐐀𐐁']){
+    put('unicode',{rawNotesMarkdown:'🌳'.repeat(2000)+' '+text+' '+'🌳'.repeat(2000),segments:[]});
+    const bundle=retrieval.retrieveOriginalEvidence(context,question(text));
+    assert.equal(bundle.ranges.length,1,`verbatim ${text} must match`);
+    const range=bundle.ranges[0]!;assert.ok(range.quote.includes(text));
+    assert.equal(('🌳'.repeat(2000)+' '+text+' '+'🌳'.repeat(2000)).slice(range.startUtf16,range.endUtf16),range.quote);
+    assert.equal(bundle.coverage.scanComplete,true);
+  }
+});
+
+test('known filter-excluded unavailable units do not poison requested-domain completeness; unreadable boundaries do', t => {
+  const {root,context,put}=fixture(t);
+  put('current',{createdAt:'2026-01-01T00:00:00Z',folderId:'current'});
+  put('excluded',{createdAt:'2000-01-01T00:00:00Z',folderId:'old',metadata:{selectedSummaryID:'missing',summaries:[]}});
+  for(const filters of [{dateFrom:'2026-01-01T00:00:00Z'},{dateBefore:'2027-01-01T00:00:00Z',folderId:'current'}]){
+    const result=retrieval.retrieveOriginalEvidence(context,{mode:'question',question:'budget',filters});
+    assert.equal(result.coverage.scanComplete,true);assert.equal(result.coverage.unavailableCount,0);
+    const census=retrieval.censusOriginalEvidence(context,{filters,predicate:{kind:'literal',text:'budget'}});
+    assert.equal(census.exact,true);assert.equal(census.meetingCount,1);
+  }
+  assert.equal(retrieval.retrieveOriginalEvidence(context,question('budget')).coverage.scanComplete,false);
+  writeFileSync(join(root,'excluded.json'),'{');
+  assert.equal(retrieval.retrieveOriginalEvidence(context,{mode:'question',question:'budget',filters:{folderId:'current'}}).coverage.scanComplete,false);
+});
+
+for(const mutation of ['deleted','nonmatching','new-matching'] as const)test(`partial literal census removes ${mutation} unstable contributions from count and list`,t=>{
+  const {root,context,put}=fixture(t);put('one',{rawNotesMarkdown:'Orchid',segments:[]});
+  let calls=0;
+  const result=retrieval.censusOriginalEvidence(context,{filters:{},predicate:{kind:'literal',text:'Orchid'}},()=>{
+    if(++calls===2){
+      if(mutation==='deleted')rmSync(join(root,'one.json'));
+      else if(mutation==='nonmatching')put('one',{rawNotesMarkdown:'unrelated',segments:[]});
+      else put('two',{rawNotesMarkdown:'Orchid',segments:[]});
+    }
+  });
+  const current=retrieval.censusOriginalEvidence(context,{filters:{},predicate:{kind:'literal',text:'Orchid'}});
+  assert.equal(result.exact,false);assert.equal(result.unavailableCount,1);
+  assert.ok(result.meetingCount<=current.meetingCount);assert.ok(result.sourceCount<=current.sourceCount);
+  assert.equal(result.meetingCount,mutation==='new-matching'?1:0);
+  assert.deepEqual(result.meetings.map(m=>m.meetingId),mutation==='new-matching'?['one']:[]);
+});

@@ -58,7 +58,7 @@ export interface CitedAskDependencies {
       manifest: EvidenceManifest,
       signal?: AbortSignal
     ): Promise<'valid' | 'stale' | 'unavailable'>
-    resolve(anchor: SourceAnchor, signal?: AbortSignal): Promise<SourceResolution>
+    resolveAcknowledged(anchor: SourceAnchor, signal?: AbortSignal): Promise<SourceResolution>
     census?(request: CensusRequest, signal?: AbortSignal): Promise<CensusResult>
   }
   generate(
@@ -152,9 +152,10 @@ export class MainCitedAskService implements CitedAskService {
             : {})
         }
         if (evidence.ranges.length) {
+          const speakers = new Map<string, string>()
           // Resolve every selected original before inference; a retrieval hit alone is not permission.
           for (const range of evidence.ranges) {
-            const resolved = await this.deps.sources.resolve(range.anchor, abort.signal)
+            const resolved = await this.deps.sources.resolveAcknowledged(range.anchor, abort.signal)
             check()
             if (resolved.status !== 'resolved')
               return fail(
@@ -166,6 +167,8 @@ export class MainCitedAskService implements CitedAskService {
               resolved.passage.text.slice(range.startUtf16, range.endUtf16) !== range.quote
             )
               fail('stale', 'Original range changed.')
+            if (resolved.passage.speaker !== undefined)
+              speakers.set(range.id, resolved.passage.speaker)
           }
           const promptInput: CitedPromptInput = {
             purpose: request.purpose,
@@ -185,7 +188,7 @@ export class MainCitedAskService implements CitedAskService {
             }),
             ranges: evidence.ranges.map((r) => {
               const m = evidence.meetings.find((m) => m.meetingId === r.anchor.meetingId)!
-              return { ...r, title: m.title, occurredAt: m.occurredAt }
+              return { ...r, title: m.title, occurredAt: m.occurredAt, speaker: speakers.get(r.id) }
             })
           }
           phase('preparing')
@@ -295,7 +298,7 @@ export class MainCitedAskService implements CitedAskService {
           status: 'unavailable',
           reason: 'The complete requested source domain is unavailable.'
         }
-      const stable = (e: EvidenceBundle) =>
+      const stable = (e: EvidenceBundle): string =>
         JSON.stringify({ ...e, coverage: { ...e.coverage, observedAt: '' } })
       if (stable(current) !== stable(snapshot.evidence))
         return {
@@ -310,7 +313,7 @@ export class MainCitedAskService implements CitedAskService {
         check()
         if (!valid) return { status: 'stale', reason: 'The local model or policy changed.' }
         for (const range of snapshot.prompt.ranges) {
-          const resolved = await this.deps.sources.resolve(range.anchor, control.signal)
+          const resolved = await this.deps.sources.resolveAcknowledged(range.anchor, control.signal)
           check()
           if (resolved.status !== 'resolved')
             return { status: resolved.status, reason: 'The cited original is no longer available.' }
@@ -343,7 +346,7 @@ export class MainCitedAskService implements CitedAskService {
     const range = snapshot.prompt?.ranges.find((r) => r.id === evidenceId)
     if (!range)
       return { status: 'missing', reason: 'This range was not included in the model request.' }
-    const resolved = await this.deps.sources.resolve(range.anchor, control.signal)
+    const resolved = await this.deps.sources.resolveAcknowledged(range.anchor, control.signal)
     control.signal.throwIfAborted()
     control.assertCurrent()
     if (resolved.status !== 'resolved')

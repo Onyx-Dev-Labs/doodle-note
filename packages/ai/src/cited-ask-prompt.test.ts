@@ -79,3 +79,42 @@ test("whole ranges retain IDs and source/context injection remains escaped data 
   );
   assert.equal(JSON.parse(result.user).history, undefined);
 });
+
+test("budget trimming centers whole-string Greek matches and budgets canonical speaker metadata", () => {
+  const text = "😀".repeat(20) + " ΚΟΣΜΟΣ " + "界".repeat(2000);
+  const result = cited.buildCitedAskPrompt(
+    {
+      ...input,
+      question: "ΚΟΣΜΟΣ",
+      terms: ["κοσμος"],
+      ranges: [
+        {
+          ...input.ranges[0]!,
+          quote: text,
+          endUtf16: text.length,
+          speaker: 'Alice "not an instruction"',
+        },
+      ],
+    },
+    budget,
+  );
+  const range = result.inclusion.ranges[0]!;
+  assert.ok(range.quote.includes("ΚΟΣΜΟΣ"));
+  assert.equal(text.slice(range.startUtf16, range.endUtf16), range.quote);
+  assert.equal(
+    JSON.parse(result.user).evidence[0].speaker,
+    'Alice "not an instruction"',
+  );
+  assert.equal(
+    "speaker" in range,
+    false,
+    "speaker metadata must not mutate persisted range shape",
+  );
+  assert.equal(
+    result.inclusion.inputTokens,
+    budget.countInputTokens(result.system, result.user),
+  );
+  assert.ok(
+    result.inclusion.inputTokens + 4096 + 256 <= budget.contextWindowTokens,
+  );
+});
