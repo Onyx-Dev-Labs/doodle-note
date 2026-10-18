@@ -19,6 +19,7 @@ import { BriefService, type BriefDependencies } from './brief-service'
 import type { CalendarEvent } from '../shared/calendar-api'
 import { LibraryActivity } from './library-activity'
 import type { BriefView } from '../shared/briefs-api'
+import { CITED_ASK_PROMPT_VERSION, type CitedAnswerSnapshot } from '../shared/cited-ask-api'
 
 interface Fixture {
   root: string
@@ -37,7 +38,8 @@ interface Fixture {
 function fixture(
   t: test.TestContext,
   beforeGenerate?: () => Promise<void>,
-  extra: Partial<BriefDependencies> = {}
+  extra: Partial<BriefDependencies> = {},
+  syntheticAnswer: 'answered' | 'insufficient-evidence' = 'answered'
 ): Fixture {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'dev509-brief-')))
   const meetingsDir = join(root, 'meetings')
@@ -99,15 +101,18 @@ function fixture(
       })
       return {
         rawJson: JSON.stringify({
-          status: 'answered',
-          claims: [
-            {
-              id: 'claim',
-              kind: 'paraphrase',
-              text: 'Orchid ships Friday.',
-              evidenceIds: [prompt.inclusion.ranges[0]!.id]
-            }
-          ]
+          status: syntheticAnswer,
+          claims:
+            syntheticAnswer === 'insufficient-evidence'
+              ? []
+              : [
+                  {
+                    id: 'claim',
+                    kind: 'paraphrase',
+                    text: 'Orchid ships Friday.',
+                    evidenceIds: [prompt.inclusion.ranges[0]!.id]
+                  }
+                ]
         }),
         inclusion: prompt.inclusion,
         engineId: 'local:synthetic',
@@ -740,3 +745,52 @@ test('brief close and relocation wait for held audio; retired bytes never escape
   assert.equal(closed, true)
   assert.equal(moved, true)
 })
+
+for (const outcome of ['complete', 'no-history', 'insufficient-evidence'] as const) {
+  test(`brief prompt policy passes through ${outcome} and rejects old-policy reuse without inference`, async (t) => {
+    const f = fixture(t, undefined, {}, outcome === 'insufficient-evidence' ? outcome : 'answered')
+    const opened = await f.briefs.open('window', f.event.id)
+    if (outcome !== 'no-history')
+      await f.briefs.link('window', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
+    const run = f.cited.run.bind(f.cited)
+    let returned: CitedAnswerSnapshot | undefined
+    let historical = false
+    f.cited.run = async (...args) => {
+      const result = await run(...args)
+      if (result.status !== 'error') {
+        returned = result.snapshot
+        if (historical) returned.promptVersion = 1
+      }
+      return result
+    }
+    const answer = await f.briefs.generate('window', opened.sessionId, 'policy-current', {})
+    assert.equal(answer.result?.status, outcome)
+    assert.equal(answer.result?.snapshot.promptVersion, CITED_ASK_PROMPT_VERSION)
+    assert.equal(CITED_ASK_PROMPT_VERSION, 2)
+    assert.deepEqual(
+      answer.result?.snapshot,
+      returned,
+      'consumer passes shared snapshots unchanged'
+    )
+    const generated = f.generated()
+    const reused = await f.briefs.refresh('window', opened.sessionId)
+    assert.deepEqual(reused.result?.snapshot, answer.result?.snapshot)
+    assert.equal(f.generated(), generated, 'refresh validates without generating')
+
+    // The shared service owns policy admission; simulate a historical cached producer result.
+    returned!.promptVersion = 1
+    const refusedCache = await f.briefs.refresh('window', opened.sessionId)
+    assert.equal(refusedCache.result, undefined)
+    assert.equal(refusedCache.state, 'unavailable')
+    assert.equal(f.generated(), generated)
+    historical = true
+    const refusedFresh = await f.briefs.generate('window', opened.sessionId, 'policy-old', {})
+    assert.equal(refusedFresh.result, undefined)
+    assert.equal(refusedFresh.state, 'unavailable')
+    historical = false
+    const recovered = await f.briefs.generate('window', opened.sessionId, 'policy-new', {})
+    assert.equal(recovered.result?.status, outcome)
+    assert.equal(recovered.result?.snapshot.promptVersion, CITED_ASK_PROMPT_VERSION)
+    if (outcome === 'no-history') assert.equal(f.generated(), 0)
+  })
+}
