@@ -34,7 +34,11 @@ interface Fixture {
   disconnect(): void
   listenerCount(): number
 }
-function fixture(t: test.TestContext, beforeGenerate?: () => Promise<void>): Fixture {
+function fixture(
+  t: test.TestContext,
+  beforeGenerate?: () => Promise<void>,
+  extra: Partial<BriefDependencies> = {}
+): Fixture {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'dev509-brief-')))
   const meetingsDir = join(root, 'meetings')
   mkdirSync(meetingsDir)
@@ -176,7 +180,9 @@ function fixture(t: test.TestContext, beforeGenerate?: () => Promise<void>): Fix
         )
       }
     },
-    publish: (_owner, view) => views.push(view)
+    publish: (_owner, view) => views.push(view),
+    activity,
+    ...extra
   })
   t.after(async () => {
     await briefs.dispose()
@@ -627,4 +633,110 @@ test('dispose joins an already-closing registered shared producer until the synt
     await Promise.all([generating, closing, disposing])
   }
   assert.ok(f.views.every((v) => !v.result))
+})
+
+async function answered(f: Fixture): Promise<BriefView> {
+  const opened = await f.briefs.open('window-one', f.event.id)
+  await f.briefs.link('window-one', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
+  return f.briefs.generate('window-one', opened.sessionId, 'play-answer', {})
+}
+
+test('brief playback uses the injected adapter and validates current sources before and after bytes', async (t) => {
+  let calls = 0
+  const f = fixture(t, undefined, {
+    play: async (token, snapshot, evidenceId) => {
+      calls++
+      assert.equal(token, 'opaque-token')
+      assert.equal(evidenceId, snapshot.prompt!.ranges[0]!.id)
+      return { bytes: new Uint8Array([1, 2]), mime: 'audio/wav', seekSeconds: 2 }
+    }
+  })
+  const result = await answered(f)
+  let validations = 0
+  const validate = f.cited.validate.bind(f.cited)
+  f.cited.validate = async (...args) => {
+    validations++
+    return validate(...args)
+  }
+  const output = await f.briefs.play(
+    'window-one',
+    result.sessionId,
+    result.result!.snapshot.prompt!.ranges[0]!.id,
+    'opaque-token'
+  )
+  assert.deepEqual(output.bytes, new Uint8Array([1, 2]))
+  assert.equal(calls, 1)
+  assert.equal(validations, 2)
+})
+
+test('brief playback withholds bytes on source or sidecar edits during the audio await', async (t) => {
+  for (const kind of ['source', 'context']) {
+    const f = fixture(t, undefined, {
+      play: async () => {
+        if (kind === 'source') f.put('old', 'Orchid changed.')
+        else {
+          const path = join(f.root, 'calendar-context-v1.json')
+          const data = JSON.parse(readFileSync(path, 'utf8'))
+          data.extension = 'external edit at same revision'
+          writeFileSync(path, JSON.stringify(data))
+        }
+        return { bytes: new Uint8Array([1]), mime: 'audio/wav', seekSeconds: 0 }
+      }
+    })
+    const result = await answered(f)
+    await assert.rejects(
+      f.briefs.play(
+        'window-one',
+        result.sessionId,
+        result.result!.snapshot.prompt!.ranges[0]!.id,
+        'opaque-token'
+      ),
+      /unavailable/
+    )
+    assert.equal(f.views.at(-1)?.result, undefined)
+  }
+})
+
+test('brief close and relocation wait for held audio; retired bytes never escape', async (t) => {
+  let release!: () => void
+  let entered!: () => void
+  const started = new Promise<void>((r) => {
+    entered = r
+  })
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const activity = new LibraryActivity()
+  const f = fixture(t, undefined, {
+    activity,
+    play: async () => {
+      entered()
+      await held
+      return { bytes: new Uint8Array([1]), mime: 'audio/wav', seekSeconds: 0 }
+    }
+  })
+  const result = await answered(f)
+  const playing = f.briefs.play(
+    'window-one',
+    result.sessionId,
+    result.result!.snapshot.prompt!.ranges[0]!.id,
+    'opaque-token'
+  )
+  const rejected = assert.rejects(playing, /unavailable/)
+  await started
+  let closed = false,
+    moved = false
+  const closing = f.briefs.close('window-one', result.sessionId).then(() => {
+    closed = true
+  })
+  const moving = activity.exclusive(async () => {
+    moved = true
+  })
+  await new Promise<void>((r) => setImmediate(r))
+  assert.equal(closed, false)
+  assert.equal(moved, false)
+  release()
+  await Promise.all([rejected, closing, moving])
+  assert.equal(closed, true)
+  assert.equal(moved, true)
 })

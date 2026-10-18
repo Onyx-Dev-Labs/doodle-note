@@ -10,13 +10,19 @@ import type {
   BriefResult,
   BriefForgetPreview
 } from '../shared/briefs-api'
-import type { CitationView, CitedAskRequest } from '../shared/cited-ask-api'
+import type {
+  CitationView,
+  CitedAskRequest,
+  CitedAudioPlayback,
+  CitedAnswerSnapshot
+} from '../shared/cited-ask-api'
 import type { CitedAskService, AskControl } from './cited-ask-service'
 import { CalendarContextStore } from './calendar-context-store'
 import type { ContextFileV1, ContextEdit, EventSnapshotV1 } from './calendar-context-types'
 import { contextObject, contextText, contextUuid, foldContext } from './calendar-context-validation'
 import type { TrustedCalendarObservation, CalendarLinkedOriginal } from './calendar-start-context'
 import { briefLinks, briefPeople } from './brief-history'
+import { libraryActivity, type LibraryActivity } from './library-activity'
 
 type Original = CalendarLinkedOriginal & EvidenceMeetingMeta
 export interface BriefDependencies {
@@ -32,6 +38,13 @@ export interface BriefDependencies {
     list(query: string, control: AskControl): Promise<EvidenceMeetingMeta[]>
     assertCurrent(original: Original): void
   }
+  /** Same main-owned trusted audio adapter as Home. No mapping or renderer paths here. */
+  play?(
+    token: string,
+    snapshot: CitedAnswerSnapshot,
+    evidenceId: string
+  ): Promise<CitedAudioPlayback>
+  activity?: LibraryActivity
   publish(ownerId: string, view: BriefView): void
 }
 type Request = Extract<CitedAskRequest, { purpose: 'calendar-brief' }>
@@ -590,12 +603,67 @@ export class BriefService {
         control
       )
       control.assertCurrent()
+      current.assertCurrent()
       citation = resolved
       if (citation.status !== 'resolved')
         this.hide(s, 'stale', 'Original changed. Refresh the brief.')
       return structuredClone(s.view)
     })
     return citation
+  }
+  async play(
+    owner: string,
+    sessionId: string,
+    evidenceId: string,
+    token: string
+  ): Promise<CitedAudioPlayback> {
+    const s = this.session(owner, sessionId)
+    const result = s.view.result
+    if (
+      !result ||
+      !this.deps.play ||
+      !/^[a-f0-9]{64}$/.test(evidenceId) ||
+      typeof token !== 'string' ||
+      token.length > 200
+    )
+      throw new Error('Recording playback is unavailable.')
+    let playback: CitedAudioPlayback | undefined
+    let admission: (() => void) | undefined
+    await this.work(s, randomUUID(), async (control) => {
+      const current = await this.resolve(s, control, false)
+      const activity = this.deps.activity ?? libraryActivity
+      const check = (): void => {
+        control.assertCurrent()
+        current.assertCurrent()
+        if (activity.moving || s.view.result !== result)
+          throw new Error('Playback ownership changed.')
+      }
+      const checked = { ...control, assertCurrent: check }
+      // After work releases its operation slot, retain the same data and session fences.
+      admission = () => {
+        control.signal.throwIfAborted()
+        s.fence.assertCurrent()
+        if (this.sessions.get(s.id) !== s || s.view.result !== result)
+          throw new Error('Recording playback is unavailable.')
+      }
+      await activity.run(async () => {
+        check()
+        const before = await this.deps.cited.validate(result.snapshot, current.request, checked)
+        check()
+        if (before.status !== 'valid') error(before.status, before.reason)
+        const bytes = await this.deps.play!(token, result.snapshot, evidenceId)
+        check()
+        const after = await this.deps.cited.validate(result.snapshot, current.request, checked)
+        check()
+        if (after.status !== 'valid') error(after.status, after.reason)
+        playback = bytes
+      }, control.signal)
+      return structuredClone(s.view)
+    })
+    if (!playback)
+      throw new Error('Recording playback is unavailable. Reopen the original and retry.')
+    admission?.()
+    return playback
   }
   private async editWork(
     owner: string,

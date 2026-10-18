@@ -6,7 +6,7 @@ import { contextObject, contextText, contextUuid } from './calendar-context-vali
 
 export type BriefCommands = Pick<
   BriefService,
-  Exclude<keyof BriefApi, 'onState' | 'available'> | 'closeOwner'
+  Exclude<keyof BriefApi, 'onState' | 'onWarning' | 'available'> | 'closeOwner'
 >
 export type BriefIpcEvent = Parameters<CitedRendererOwners['capture']>[0]
 interface Dependencies {
@@ -215,6 +215,10 @@ export function installBriefIpc({
       case 'citation':
         count(2)
         result = await service.citation(owner, uuid(a[0]), text(a[1], 200))
+        break
+      case 'play':
+        count(3)
+        result = await service.play(owner, uuid(a[0]), text(a[1], 200), text(a[2], 200))
         break
       case 'cancel':
         count(2)

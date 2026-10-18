@@ -1,3 +1,5 @@
+import { installBriefs } from './brief-installer'
+import { BRIEFS_WARNING } from '../shared/briefs-api'
 import { CitedSourceAudio } from './cited-source-audio'
 import { HomeCitedController } from './home-cited-controller'
 import { installHomeCitedIpc } from './home-cited-ipc'
@@ -20,6 +22,7 @@ import {
   desktopCapturer,
   ipcMain,
   nativeTheme,
+  powerMonitor,
   protocol,
   session as electronSession
 } from 'electron'
@@ -202,6 +205,7 @@ function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
   return accepted
 }
 
+let briefInstaller: ReturnType<typeof installBriefs> | null = null
 let citedHost: ReturnType<typeof createCitedAskHost> | null = null
 let notesService: NotesService | null = null
 let recipeRunner: RecipeRunner | null = null
@@ -458,6 +462,7 @@ app.whenReady().then(async () => {
   meetingsService.registerIpc()
   let captureMeetingId: string | undefined
   let pendingCaptureMeetingId: string | undefined
+  let pendingCaptureAttempt: string | undefined
   let captureBase: import('@repo/meetings-store/types').MeetingTranscriptSegment[] = []
   let captureBaseEcho = 0
   let captureId: string | undefined
@@ -538,6 +543,12 @@ app.whenReady().then(async () => {
     if (!event) return
     broadcastEngineEvent(event)
     session.handle(event)
+    if (event.event === 'started') {
+      // The token was captured at accepted engine start, never inferred from a later attempt.
+      void briefInstaller
+        ?.onCaptureStarted(pendingCaptureAttempt, captureId, captureMeetingId)
+        .catch(() => {})
+    }
     if (event.event === 'audio') audioService.onAudioSaved(event)
     logEngineEvent(event)
     recording.handle(event)
@@ -585,6 +596,7 @@ app.whenReady().then(async () => {
     if (request.command === 'live' && opts.meetingId && opts.persistAudio !== false) {
       opts.audioDir = audioService.beginSession(opts.meetingId) ?? undefined
     }
+    pendingCaptureAttempt = request.command === 'live' ? briefInstaller?.pendingAttempt : undefined
     pendingCaptureMeetingId = request.command === 'live' ? opts.meetingId : undefined
     session.bindMeeting(pendingCaptureMeetingId)
     engine.start(request.command, request.filePath, opts)
@@ -774,6 +786,7 @@ app.whenReady().then(async () => {
   initAutoUpdater(broadcast, async () => {
     citedHost?.owners.retire()
     await citedHost?.invalidate()
+    await briefInstaller?.dispose()
     await recipeRunner?.stop()
     await notesService?.dispose()
   })
@@ -790,6 +803,7 @@ app.whenReady().then(async () => {
       return
     }
     quitting = true
+    void briefInstaller?.dispose().catch(() => {})
     recordingTray?.dispose()
     calendarService?.dispose()
     engine.dispose()
@@ -891,6 +905,21 @@ app.whenReady().then(async () => {
   })
   // Consumer installation seam: Home and DEV509's brief installer receive
   // sharedCitedHost.cited and sharedCitedHost.owners. Never construct another producer.
+  briefInstaller = installBriefs({
+    root: libraryRoot,
+    assertAvailable: assertLibrary,
+    enabled: citedEnabled,
+    host: sharedCitedHost,
+    calendar: calendarService,
+    sources: sourceIndex,
+    ipc: ipcMain,
+    recording,
+    power: powerMonitor,
+    play: (token, snapshot, evidenceId) => citedAudio.play(token, snapshot, evidenceId),
+    warn: (message) => {
+      mainWindow?.webContents.send(BRIEFS_WARNING, message)
+    }
+  })
 
   app.on('will-quit', () => {
     void sourceIndex.dispose()
@@ -953,6 +982,7 @@ app.on('will-quit', () => {
   citedHost?.owners.retire()
   void (async () => {
     await citedHost?.invalidate()
+    await briefInstaller?.dispose()
     await recipeRunner?.stop()
     await notesService?.dispose()
   })()

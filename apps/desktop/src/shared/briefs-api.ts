@@ -1,9 +1,10 @@
 import type { CalendarInvitee, CalendarProvider } from './calendar-api'
-import type { AskProgress, CitedAskResult, CitationView } from './cited-ask-api'
+import type { AskProgress, CitedAskResult, CitationView, CitedAudioPlayback } from './cited-ask-api'
 import type { EvidenceMeetingMeta } from '@repo/meetings-store/evidence-contract'
 
 export const BRIEFS_INVOKE = 'briefs:invoke'
 export const BRIEFS_STATE = 'briefs:state'
+export const BRIEFS_WARNING = 'briefs:warning'
 export type BriefResult = Exclude<CitedAskResult, { status: 'error' }>
 export type BriefState =
   | 'checking'
@@ -111,7 +112,9 @@ export interface BriefApi {
   previewForget(sessionId: string): Promise<BriefForgetPreview>
   forget(sessionId: string, previewId: string, revision: number): Promise<BriefView>
   citation(sessionId: string, evidenceId: string): Promise<CitationView>
+  play(sessionId: string, evidenceId: string, token: string): Promise<CitedAudioPlayback>
   cancel(sessionId: string, runId: string): Promise<void>
   close(sessionId: string): Promise<void>
+  onWarning(callback: (message: string) => void): () => void
   onState(callback: (view: BriefView) => void): () => void
 }

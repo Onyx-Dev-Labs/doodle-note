@@ -28,7 +28,7 @@ export class BriefOriginals {
   private codec = new CalendarContextCodec()
   private closed = false
   private pending = new Set<Promise<unknown>>()
-  private current = new WeakMap<Original, () => void>()
+  private current = new WeakMap<CalendarLinkedOriginal, () => void>()
   constructor(
     private store: CalendarContextStore,
     private sources: Pick<SourceIndexService, 'retrieveEvidence' | 'census'>,
@@ -183,7 +183,7 @@ export class BriefOriginals {
       return result
     })
   }
-  assertCurrent(original: Original): void {
+  assertCurrent(original: CalendarLinkedOriginal): void {
     const assertCurrent = this.current.get(original)
     if (!assertCurrent) throw new Error('Original nomination is unavailable.')
     assertCurrent()

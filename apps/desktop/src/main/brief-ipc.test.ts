@@ -47,6 +47,7 @@ function fixture(): Fixture {
     }),
     forget: async () => view,
     citation: async () => ({ status: 'missing', reason: 'missing' }),
+    play: async () => ({ bytes: new Uint8Array(), mime: 'audio/wav', seekSeconds: 0 }),
     cancel: async (...args) => {
       calls.push(['cancel', ...args])
     },

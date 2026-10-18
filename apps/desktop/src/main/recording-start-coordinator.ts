@@ -26,8 +26,19 @@ export class RecordingStartCoordinator {
     private readonly openExternal: (url: string) => Promise<void> = async () => {
       throw new Error('Meeting link opener unavailable.')
     },
-    private readonly observer?: RecordingStartObserver
+    private observer?: RecordingStartObserver
   ) {}
+
+  /** Main composition only; removing metadata observation never changes capture state. */
+  installObserver(observer: RecordingStartObserver): () => void {
+    if (this.observer) throw new Error('Recording metadata observer already installed.')
+    this.observer = observer
+    return () => {
+      if (this.observer !== observer) return
+      this.observe(() => observer.reset?.())
+      this.observer = undefined
+    }
+  }
 
   snapshot(): RecordingState {
     return { ...this.state, ...(this.state.join ? { join: { ...this.state.join } } : {}) }

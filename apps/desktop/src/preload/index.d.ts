@@ -1,3 +1,4 @@
+import type { BriefApi } from '../shared/briefs-api'
 import type { HomeCitedApi } from '../shared/home-cited-api'
 import type { SourcesApi } from '../shared/source-api'
 import type { RecipesApi } from '../shared/recipes-api'
@@ -27,6 +28,7 @@ declare global {
     engine: EngineApi
     notes: NotesApi
     citedAsk: HomeCitedApi
+    briefs: BriefApi
     recipes: RecipesApi
     meetings: MeetingsApi
     sources: SourcesApi

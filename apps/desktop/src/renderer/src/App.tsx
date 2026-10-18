@@ -1,3 +1,4 @@
+import BriefPanel from './BriefPanel'
 import { ImportProgressPanel } from './ImportProgressPanel'
 import type { RecordingState, RecordingJoinState } from '../../shared/recording-api'
 import { prepareRecordingMeeting } from './lib/recording-start'
@@ -50,6 +51,23 @@ function App(): React.JSX.Element {
   const handlingStart = useRef<string | null>(null)
   const [joinState, setJoinState] = useState<RecordingJoinState | undefined>()
   const [recordingError, setRecordingError] = useState<string | null>(null)
+  const [briefEventId, setBriefEventId] = useState<string | null>(null)
+  const [briefEnabled, setBriefEnabled] = useState(false)
+  const [briefWarning, setBriefWarning] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    void window.briefs
+      .available()
+      .then((enabled) => {
+        if (active) setBriefEnabled(enabled)
+      })
+      .catch(() => {})
+    const unsubscribe = window.briefs.onWarning(setBriefWarning)
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
   const [view, setView] = useState<ViewId>('home')
   const [meetingId, setMeetingId] = useState<string | null>(null)
   const [autoRecordRequestId, setAutoRecordRequestId] = useState<string | null>(null)
@@ -647,6 +665,7 @@ function App(): React.JSX.Element {
               search={search}
               calendar={calendar}
               onStartCalendarMeeting={startFromCalendarEvent}
+              onOpenBrief={briefEnabled ? (eventId) => setBriefEventId(eventId) : undefined}
               onOpenMeeting={openMeeting}
               onNewMeeting={() => void newMeeting()}
               onNewNote={() => void newMeeting({ kind: 'note' })}
@@ -723,6 +742,26 @@ function App(): React.JSX.Element {
           <span>{recordingError}</span>
           <button onClick={() => setRecordingError(null)}>Dismiss</button>
         </div>
+      )}
+      {briefWarning && (
+        <div className="meeting-banner no-drag" role="status">
+          <span>{briefWarning}</span>
+          <button type="button" onClick={() => setBriefWarning(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {briefEventId && (
+        <BriefPanel
+          key={briefEventId}
+          eventId={briefEventId}
+          onClose={() => setBriefEventId(null)}
+          onOpenSettings={() => {
+            setBriefEventId(null)
+            setSettingsJump({ section: 'model', n: Date.now() })
+            setView('settings')
+          }}
+        />
       )}
       <ImportProgressPanel onOpen={openMeeting} />
       {wizardOpen && <FirstRunWizard onFinish={closeWizard} />}

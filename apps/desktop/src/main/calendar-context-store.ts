@@ -97,7 +97,14 @@ export class CalendarContextStore {
       throw error
     }
   }
-  /** Final synchronous admission fence over bytes already decoded and validated by read(). */
+  /**
+   * Capture immediately after read(): synchronously asserts that its validated byte digest,
+   * root/scope and file identity remain current. Keep this same closure across later awaits
+   * and call it immediately before admission, with no subsequent await before publication.
+   * It performs no asynchronous read or schema validation and cannot refresh a stale view.
+   * A mutation requires another read before acquiring a fence. Fixture adapters must provide
+   * the same synchronous throwing assertion, never an async function or a no-op.
+   */
   readFence(): () => void {
     const loaded = this.loaded
     if (!loaded || loaded.fileToken === undefined) throw new Error('Read calendar context first.')
