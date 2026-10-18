@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { SiteHeader } from "../app/ui";
+import { SiteHeader, SiteFooter } from "../app/ui";
 
 const uiSource = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../app/ui.tsx"),
@@ -18,8 +18,8 @@ test("marketing brand lockup includes Onyx builder attribution", () => {
   assert.match(uiSource, /Onyx Dev Labs/);
   assert.match(uiSource, /ONYX_URL = "https:\/\/onyxdev\.io"/);
   assert.match(uiSource, /export function BrandLockup/);
-  assert.match(uiSource, /<BrandLockup priority \/>/);
-  assert.match(uiSource, /<BrandLockup compact \/>/);
+  assert.match(uiSource, /<BrandLockup priority placement="header" \/>/);
+  assert.match(uiSource, /<BrandLockup compact placement="footer" \/>/);
   assert.match(uiSource, /layout\?: "horizontal" \| "stacked"/);
 });
 
@@ -58,4 +58,21 @@ test("brand navigation never nests one link inside another", () => {
     assert.ok(anchorDepth <= 1, "links must not be nested");
   }
   assert.equal(anchorDepth, 0);
+});
+
+test("public header and footer identify DoodleNote referrals to Onyx", () => {
+  for (const [Component, placement] of [[SiteHeader, "header"], [SiteFooter, "footer"]] as const) {
+    const html = renderToStaticMarkup(React.createElement(Component));
+    const matches = [...html.matchAll(/href="(https:\/\/onyxdev\.io[^"]*)"/g)];
+    assert.equal(matches.length, 1);
+    const url = new URL(matches[0][1].replaceAll("&amp;", "&"));
+    assert.equal(url.origin, "https://onyxdev.io");
+    assert.equal(url.pathname, "/");
+    assert.deepEqual(Object.fromEntries(url.searchParams), {
+      utm_source: "doodlenote",
+      utm_medium: "referral",
+      utm_campaign: "built_by_onyx",
+      utm_content: placement,
+    });
+  }
 });

@@ -55,7 +55,10 @@ export function Wordmark({ size = "text-lg" }: { size?: string }) {
   );
 }
 
-function BuilderAttribution({ compact = false }: { compact?: boolean }) {
+function BuilderAttribution({ compact = false, placement }: {
+  compact?: boolean;
+  placement?: "header" | "footer";
+}) {
   return (
     <p
       className={`whitespace-nowrap font-normal leading-none tracking-normal text-stone ${
@@ -64,7 +67,9 @@ function BuilderAttribution({ compact = false }: { compact?: boolean }) {
     >
       built by{" "}
       <a
-        href={ONYX_URL}
+        href={placement
+          ? `${ONYX_URL}/?utm_source=doodlenote&utm_medium=referral&utm_campaign=built_by_onyx&utm_content=${placement}`
+          : ONYX_URL}
         className="rounded-[2px] text-bark underline decoration-bark/60 underline-offset-2 transition hover:text-sage-deep hover:decoration-sage-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sage-deep"
         rel="noreferrer"
         target="_blank"
@@ -85,6 +90,7 @@ export function BrandLockup({
   wordmarkSize,
   className = "",
   textClassName = "",
+  placement,
 }: {
   compact?: boolean;
   priority?: boolean;
@@ -94,6 +100,7 @@ export function BrandLockup({
   wordmarkSize?: string;
   className?: string;
   textClassName?: string;
+  placement?: "header" | "footer";
 }) {
   const size = iconSize ?? (compact ? 30 : 34);
   const wmSize = wordmarkSize ?? (compact ? "text-base" : "text-lg");
@@ -110,7 +117,7 @@ export function BrandLockup({
       >
         <Wordmark size={wmSize} />
       </Link>
-      <BuilderAttribution compact={compact} />
+      <BuilderAttribution compact={compact} placement={placement} />
     </div>
   );
 
@@ -144,7 +151,7 @@ export function BrandLockup({
 export function SiteHeader({ nav }: { nav?: React.ReactNode }) {
   return (
     <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-5">
-      <BrandLockup priority />
+      <BrandLockup priority placement="header" />
       <nav className="flex items-center gap-1 sm:gap-2">
         {nav ?? (
           <>
@@ -166,7 +173,7 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-sand">
       <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-5 px-6 py-6 text-sm text-stone lg:grid lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:gap-8">
-        <BrandLockup compact />
+        <BrandLockup compact placement="footer" />
         <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 lg:flex-nowrap">
           <Link href="/pricing" className="whitespace-nowrap hover:text-ink">
             Pricing
