@@ -261,6 +261,10 @@ export interface SourceSnapshot {
   documents: SourceDocument[];
   unavailableCount: number;
   fingerprints: Map<string, string | null>;
+  /** Additive scan facts. Never included in the existing v1 projection hash. */
+  inventory: Map<string, { rawSha256: string; state: 'eligible' | 'excluded' | 'unavailable';
+    title: string; occurredAt: string | null; dateBasis: 'startedAt' | 'createdAt' | 'unknown'; folderId: string | null }>;
+  requestedIds?: string[];
 }
 function fingerprint(path: string): string {
   const info = lstatSync(path, { bigint: true });
@@ -275,47 +279,49 @@ const sourceFiles = (directory: string): string[] =>
 export function scanSources(
   context: SourceContext,
   checkpoint: () => void = () => {},
+  requestedIds?: string[],
 ): SourceSnapshot {
   if (!context.authorized) throw new Error("Source scope is unauthorized");
   const documents: SourceDocument[] = [];
   let unavailableCount = 0;
   const fingerprints = new Map<string, string | null>();
+  const inventory: SourceSnapshot["inventory"] = new Map();
   // Directory failures are errors, never a successful empty/exhaustive library.
-  for (const file of sourceFiles(context.meetingsDir)) {
+  for (const file of requestedIds ? requestedIds.map(id => `${id}.json`) : sourceFiles(context.meetingsDir)) {
     checkpoint();
     fingerprints.set(file, null);
     try {
       const path = join(context.meetingsDir, file);
       const before = fingerprint(path);
       fingerprints.set(file, before);
-      const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+      const bytes = readFileSync(path);
+      const rawSha256 = createHash('sha256').update(bytes).digest('hex');
+      const raw: unknown = JSON.parse(bytes.toString('utf8'));
       if (!object(raw) || `${raw.id}.json` !== file)
         throw new Error("Filename identity mismatch");
       const doc = projectSources(raw, context.scope);
       if (fingerprint(path) !== before)
         throw new Error("Original changed while reading");
+      const validDate = (v: unknown): v is string => typeof v === 'string' && Number.isFinite(Date.parse(v));
+      const dateBasis = validDate(raw.startedAt) ? 'startedAt' : validDate(raw.createdAt) ? 'createdAt' : 'unknown';
+      inventory.set(file, { rawSha256, state: doc ? 'eligible' : 'excluded', title: string(raw.title),
+        occurredAt: dateBasis === 'unknown' ? null : new Date(raw[dateBasis] as string).toISOString(), dateBasis,
+        folderId: typeof raw.folderId === 'string' ? raw.folderId : null });
       if (doc) {
         documents.push(doc);
         unavailableCount += doc.unavailableCount;
       }
     } catch {
       fingerprints.set(file, null);
+      inventory.set(file, { rawSha256: '', state: 'unavailable', title: '', occurredAt: null, dateBasis: 'unknown', folderId: null });
       unavailableCount++;
     }
   }
-  return { documents, unavailableCount, fingerprints };
+  return { documents, unavailableCount, fingerprints, inventory, ...(requestedIds ? { requestedIds } : {}) };
 }
 
-export function sourceResult(
-  snapshot: SourceSnapshot,
-  context: SourceContext,
-  generation: number,
-  hits: SourcePassage[],
-  limit: number,
-): SourceSearchResult {
-  // Atomic JSON writes can happen during a worker scan. Fence changed/deleted rows and
-  // expose incomplete counts instead of presenting a mixed snapshot as exhaustive.
-  const files = new Set(sourceFiles(context.meetingsDir));
+export function changedSourceFiles(snapshot: SourceSnapshot, context: SourceContext): Set<string> {
+  const files = new Set(snapshot.requestedIds ? snapshot.requestedIds.map(id => `${id}.json`) : sourceFiles(context.meetingsDir));
   const changed = new Set<string>();
   for (const [file, before] of snapshot.fingerprints) {
     if (before === null) continue; // already counted as unavailable by the scan
@@ -332,6 +338,19 @@ export function sourceResult(
   }
   for (const file of files)
     if (!snapshot.fingerprints.has(file)) changed.add(file);
+  return changed;
+}
+
+export function sourceResult(
+  snapshot: SourceSnapshot,
+  context: SourceContext,
+  generation: number,
+  hits: SourcePassage[],
+  limit: number,
+): SourceSearchResult {
+  // Atomic JSON writes can happen during a worker scan. Fence changed/deleted rows and
+  // expose incomplete counts instead of presenting a mixed snapshot as exhaustive.
+  const changed = changedSourceFiles(snapshot, context);
   hits = hits.filter((p) => !changed.has(`${p.anchor.meetingId}.json`));
   const unavailableCount = snapshot.unavailableCount + changed.size;
   hits.sort(
