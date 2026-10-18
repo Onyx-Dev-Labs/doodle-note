@@ -1,0 +1,23 @@
+--- CONTROL/cited-ask-prompt.ts
++++ TREATMENT/cited-ask-prompt.ts
+@@ -73,16 +73,16 @@
+     additionalProperties: false,
+     properties: {
+       id: { enum: Array.from({ length: 12 }, (_, i) => `claim-${i + 1}`) },
+-      text: { type: "string", minLength: 1, maxLength: 4096 },
+-      kind: conflict
+-        ? { const: "conflict" }
+-        : { enum: ["quotation", "paraphrase"] },
+       evidenceIds: {
+         type: "array",
+         items: { enum: ids },
+         minItems: conflict ? 2 : 1,
+         maxItems: 4,
+       },
++      text: { type: "string", minLength: 1, maxLength: 4096 },
++      kind: conflict
++        ? { const: "conflict" }
++        : { enum: ["quotation", "paraphrase"] },
+     },
+   });
+   const regular = makeClaim(false),

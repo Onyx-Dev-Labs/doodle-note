@@ -1,0 +1,27 @@
+{
+  "version": "3.20.0",
+  "oldOrder": [
+    "id",
+    "text",
+    "kind",
+    "evidenceIds"
+  ],
+  "newOrder": [
+    "id",
+    "evidenceIds",
+    "text",
+    "kind"
+  ],
+  "gridCount": 6048,
+  "checkCount": 6236,
+  "orderPermutationChecks": 552,
+  "capturedReplays": 18,
+  "capturedNonempty": 15,
+  "oldOrderCaptureRejectedByNewGrammar": 15,
+  "allSchemaSemanticHashesAndParserResultsMatch": true,
+  "genuineConflictAndMinimalAnswersExpressible": true,
+  "emptyAbstentionExpressible": true,
+  "zeroIdsRejected": true,
+  "duplicateInputIdsCollapseToSingle": true,
+  "systemSha256": "24df78445393756a8f757730a415dbb5d0d874b540bde4677f661cf896721dd7"
+}
