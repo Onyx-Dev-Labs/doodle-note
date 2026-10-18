@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+  symlinkSync,
+  existsSync,
+  realpathSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { localSourceScope } from '@repo/meetings-store/sources'
@@ -8,7 +17,10 @@ import { retrieveOriginalEvidence } from '@repo/meetings-store/evidence'
 import type { CitedAnswerSnapshot } from '../shared/cited-ask-api'
 import { CitedSourceAudio } from './cited-source-audio'
 
-function fixture(t: test.TestContext): {
+function fixture(
+  t: test.TestContext,
+  caseAlias = false
+): {
   adapter: CitedSourceAudio
   snapshot(): CitedAnswerSnapshot
   id(snapshot: CitedAnswerSnapshot): string
@@ -34,9 +46,13 @@ function fixture(t: test.TestContext): {
 } {
   const root = mkdtempSync(join(tmpdir(), 'dev507-audio-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
-  const meetingsDir = join(root, 'meetings')
+  const createdMeetingsDir = join(root, caseAlias ? 'Meetings' : 'meetings')
   const audioDir = join(root, 'audio')
-  mkdirSync(meetingsDir)
+  mkdirSync(createdMeetingsDir)
+  // Exercise actual case aliases on macOS/Windows; use the same valid root on
+  // case-sensitive hosts, without mocking filesystem canonicalization.
+  const meetingsDir =
+    caseAlias && existsSync(join(root, 'meetings')) ? join(root, 'meetings') : createdMeetingsDir
   mkdirSync(audioDir)
   let now = 1000
   const adapter = new CitedSourceAudio(
@@ -241,6 +257,23 @@ test('known nonoverlapping missing recording preserves the unique valid part', a
   if (a.status !== 'available') return
   assert.equal(
     Buffer.from((await f.adapter.play(a.token, s, f.id(s))).bytes).toString(),
+    'synthetic-2000000'
+  )
+})
+
+test('audio uses the original manifest path semantics for filesystem case aliases', async (t) => {
+  const f = fixture(t, true)
+  f.part('2000000', 2000000)
+  const snapshot = f.snapshot()
+  const available = await f.adapter.available(snapshot, f.id(snapshot))
+  assert.equal(
+    available.status,
+    'available',
+    JSON.stringify({ requested: f.meetingsDir, manifestPath: realpathSync(f.meetingsDir) })
+  )
+  if (available.status !== 'available') return
+  assert.equal(
+    Buffer.from((await f.adapter.play(available.token, snapshot, f.id(snapshot))).bytes).toString(),
     'synthetic-2000000'
   )
 })

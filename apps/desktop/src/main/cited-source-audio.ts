@@ -1,11 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { constants } from 'node:fs'
-import { lstat, open, readdir, realpath } from 'node:fs/promises'
+import { constants, realpath as realpathCallback } from 'node:fs'
+import { lstat, open, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { localSourceScope, projectSources, sameScope } from '@repo/meetings-store/sources'
 import { isRecord } from '@repo/meetings-store/evidence'
 import type { CitedAnswerSnapshot, CitationView, CitedAudioPlayback } from '../shared/cited-ask-api'
 import { AUDIO_FILES, playbackMime } from './import-media'
+
+// Match the manifest's realpathSync semantics. Promise realpath uses native
+// canonicalization, which can change filesystem case/Windows short-path spelling.
+const realpath = promisify(realpathCallback)
 
 type Availability = Extract<CitationView, { status: 'resolved' }>['audio']
 interface Mapping {
