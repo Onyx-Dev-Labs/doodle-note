@@ -16,7 +16,7 @@ final class Meeting {
     /// AI-generated notes, markdown. Nil until "Generate notes" runs.
     var generatedNotes: String?
     var templateId: String
-    /// "phone" for meetings recorded here, "cloud" for meetings pulled via sync.
+    /// "phone" for local recordings, "watch" for watch imports, "cloud" for synced meetings.
     var origin: String
     /// Content hash last accepted by the sync server; nil = never pushed.
     var lastPushedHash: String?
