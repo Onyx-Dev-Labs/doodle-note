@@ -309,7 +309,14 @@ export class EngineProcess {
     this.discard()
 
     // Instant path: the persistent engine has models loaded and is idle.
-    if (command === 'live' && this.serveReady && this.serveChild && !this.serveSessionActive) {
+    // ponytail: serve only preloads the English model; multilingual takes the classic spawn.
+    if (
+      command === 'live' &&
+      !opts.language &&
+      this.serveReady &&
+      this.serveChild &&
+      !this.serveSessionActive
+    ) {
       this.clearServeStopTimer()
       this.serveSessionActive = true
       this.emit({ event: 'started', command, filePath, binaryPath: this.binaryPath })
@@ -352,6 +359,7 @@ export class EngineProcess {
     if (command === 'live') {
       args.push('--source', opts.source ?? 'both')
       args.push('--exit-on-stdin-close')
+      if (opts.language) args.push('--language', opts.language)
       if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
       if (opts.audioDir) args.push('--audio-dir', opts.audioDir)
       if (opts.systemBackend) args.push('--system-backend', opts.systemBackend)

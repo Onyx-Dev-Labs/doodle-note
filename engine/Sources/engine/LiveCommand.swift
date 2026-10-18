@@ -2,6 +2,7 @@ import AVFoundation
 import AudioToolbox
 import CoreAudio
 import CoreMedia
+import CoreML
 import FluidAudio
 import Foundation
 import ScreenCaptureKit
@@ -61,6 +62,7 @@ enum LiveCommand {
             inputDevice: options.values["input-device"],
             audioDir: options.values["audio-dir"],
             systemBackend: options.values["system-backend"],
+            language: options.values["language"],
             micManager: nil,
             systemManager: nil,
             stopper: stopper
@@ -95,8 +97,9 @@ enum LiveSession {
         inputDevice: String? = nil,
         audioDir: String? = nil,
         systemBackend: String? = nil,
-        micManager: StreamingUnifiedAsrManager?,
-        systemManager: StreamingUnifiedAsrManager?,
+        language: String? = nil,
+        micManager: (any LiveAsr)?,
+        systemManager: (any LiveAsr)?,
         stopper: Stopper
     ) async throws {
         let wantMic = source == "mic" || source == "both"
@@ -131,12 +134,12 @@ enum LiveSession {
         var systemPipeline: ChannelPipeline?
         if wantMic {
             micPipeline = ChannelPipeline(
-                channel: "mic", manager: micManager,
+                channel: "mic", manager: micManager, language: language,
                 recorder: sessionRecorder?.recorder(for: "mic"))
         }
         if wantSystem {
             systemPipeline = ChannelPipeline(
-                channel: "system", manager: systemManager,
+                channel: "system", manager: systemManager, language: language,
                 recorder: sessionRecorder?.recorder(for: "system"))
         }
 
@@ -349,14 +352,139 @@ enum LiveSession {
     }
 }
 
+// MARK: - Live ASR backends
+
+/// What ChannelPipeline needs from a streaming recognizer.
+protocol LiveAsr: Actor {
+    nonisolated var modelName: String { get }
+    func loadModels() async throws
+    func appendAudio(_ buffer: AVAudioPCMBuffer) async throws
+    func processBufferedAudio() async throws
+    func consumeTokenTimings() async -> [TokenTiming]
+    func finish() async throws -> String
+    func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) async
+}
+
+extension StreamingUnifiedAsrManager: LiveAsr {
+    nonisolated var modelName: String { "parakeet-unified-en-0.6b" }
+}
+
+/// Nemotron multilingual streaming (~40 languages) behind the same seam as the
+/// English Unified model. `language` is a FLEURS code ("de-DE") or "auto".
+actor MultilingualLiveAsr: LiveAsr {
+    nonisolated let modelName = "nemotron-streaming-multilingual-0.6b"
+    // ANE compilation of this encoder fails on M1 (macOS 26) and CoreML retries it on
+    // every launch (~80 s before any caption); on the GPU it loads in seconds.
+    // ponytail: unconditional GPU — gate on chip generation if ANE proves faster on M2+.
+    private let inner: StreamingNemotronMultilingualAsrManager
+    private let language: String
+    private var emittedTimings = 0
+    private var finalTimings: [TokenTiming]?
+
+    init(language: String) {
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .cpuAndGPU
+        self.inner = StreamingNemotronMultilingualAsrManager(configuration: configuration)
+        self.language = language
+    }
+
+    // One full multilingual ship for every language (scores identically to the
+    // per-language pruned ships) so pinning a language never triggers a new download.
+    // ponytail: 1120 ms tier — smallest chunk that keeps punctuation over long sessions.
+    private static let chunkMs = 1120
+
+    /// Whether the model is on disk (FluidAudio's default cache root). A meeting
+    /// never waits on a ~650 MB download: uncached sessions caption in English.
+    static var isCached: Bool {
+        let metadata = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FluidAudio/Models", isDirectory: true)
+            .appendingPathComponent(Repo.nemotronMultilingual.folderName, isDirectory: true)
+            .appendingPathComponent("multilingual/\(chunkMs)ms", isDirectory: true)
+            .appendingPathComponent(ModelNames.NemotronMultilingualStreaming.metadata)
+        return FileManager.default.fileExists(atPath: metadata.path)
+    }
+
+    /// Fetches the model while the session captions in English, at most once per
+    /// process (both channels ask). An interrupted download resumes next session
+    /// (FluidAudio keeps `.partial` files and continues by byte range).
+    static let downloadInBackground: Void = {
+        Task.detached {
+            let gate = PercentGate()
+            do {
+                _ = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                    languageCode: "auto", chunkMs: chunkMs
+                ) { progress in
+                    if let pct = gate.advance(progress.fractionCompleted) {
+                        Events.emit([
+                            "event": "status", "stage": "downloading_live_model",
+                            "progress": Double(pct) / 100.0,
+                        ])
+                    }
+                }
+                Events.emit(["event": "status", "stage": "live_model_ready"])
+            } catch {
+                Events.log("multilingual model download failed: \(error)")
+                Events.emit(["event": "status", "stage": "live_model_download_failed"])
+            }
+        }
+    }()
+
+    func loadModels() async throws {
+        // Cached by now (see isCached); the call only repairs a stale tokenizer.
+        let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+            languageCode: "auto", chunkMs: Self.chunkMs)
+        try await inner.loadModels(from: dir)
+        await inner.setLanguage(language == "auto" ? nil : language)
+    }
+
+    func appendAudio(_ buffer: AVAudioPCMBuffer) async throws {
+        try await inner.appendAudio(buffer)
+    }
+
+    func processBufferedAudio() async throws {
+        _ = try await inner.process(samples: [])
+    }
+
+    /// The inner manager exposes cumulative timings; hand out only the new tail.
+    func consumeTokenTimings() async -> [TokenTiming] {
+        let all: [TokenTiming]
+        if let finalTimings {
+            all = finalTimings
+        } else {
+            all = await inner.getTokenTimings()
+        }
+        let tail = all.dropFirst(emittedTimings)
+        emittedTimings += tail.count
+        // Nemotron keeps SentencePiece's "▁" word marker; the desktop splits words
+        // on a leading space, as Unified emits them.
+        return tail.map {
+            TokenTiming(
+                token: $0.token.replacingOccurrences(
+                    of: ASRConstants.sentencePieceWordBoundary, with: " "),
+                tokenId: $0.tokenId, startTime: $0.startTime, endTime: $0.endTime,
+                confidence: $0.confidence)
+        }
+    }
+
+    func finish() async throws -> String {
+        let (text, timings) = try await inner.finishWithTokenTimings()
+        finalTimings = timings
+        return text
+    }
+
+    func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) async {
+        await inner.setPartialCallback(callback)
+    }
+}
+
 // MARK: - Per-channel streaming pipeline
 
-/// Owns one StreamingUnifiedAsrManager and a serial ingest queue bridging capture
+/// Owns one streaming recognizer and a serial ingest queue bridging capture
 /// callbacks (arbitrary threads) into the actor. Capture stays realtime even if
 /// ASR hiccups — buffers queue in the AsyncStream.
 final class ChannelPipeline {
     let channel: String
-    private let manager: StreamingUnifiedAsrManager
+    private var manager: any LiveAsr
     private let recorder: ChannelRecorder?
     private let bufferStream: AsyncStream<AVAudioPCMBuffer>
     private let bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation
@@ -382,13 +510,20 @@ final class ChannelPipeline {
 
     init(
         channel: String,
-        manager: StreamingUnifiedAsrManager? = nil,
+        manager: (any LiveAsr)? = nil,
+        language: String? = nil,
         recorder: ChannelRecorder? = nil,
         probe: ((AVAudioPCMBuffer) -> Void)? = nil
     ) {
         self.channel = channel
         self.preloaded = manager != nil
-        self.manager = manager ?? StreamingUnifiedAsrManager()
+        if let manager {
+            self.manager = manager
+        } else if let language {
+            self.manager = MultilingualLiveAsr(language: language)
+        } else {
+            self.manager = StreamingUnifiedAsrManager()
+        }
         self.recorder = recorder
         self.probe = probe
         (self.bufferStream, self.bufferContinuation) = AsyncStream.makeStream(of: AVAudioPCMBuffer.self)
@@ -398,8 +533,20 @@ final class ChannelPipeline {
     /// Called AFTER capture starts — audio queues until begin() drains it.
     func prepare() async throws {
         if !preloaded {
-            Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": "parakeet-unified-en-0.6b"])
-            try await manager.loadModels()
+            if manager is MultilingualLiveAsr, !MultilingualLiveAsr.isCached {
+                _ = MultilingualLiveAsr.downloadInBackground
+                manager = StreamingUnifiedAsrManager()
+            }
+            Events.emit(["event": "status", "stage": "loading_models", "channel": channel, "model": manager.modelName])
+            do {
+                try await manager.loadModels()
+            } catch let error where manager is MultilingualLiveAsr {
+                // A broken multilingual model must not end the meeting — English still works.
+                Events.log("multilingual load failed (\(error)) — captioning in English")
+                Events.emit(["event": "status", "stage": "live_model_load_failed", "channel": channel])
+                manager = StreamingUnifiedAsrManager()
+                try await manager.loadModels()
+            }
         }
         let ch = channel
         await manager.setPartialTranscriptCallback { text in
