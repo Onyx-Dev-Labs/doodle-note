@@ -1,3 +1,4 @@
+import { RECIPE_CHANNELS, type RecipesApi } from '../shared/recipes-api'
 import {
   TEXT_IMPORT_PREVIEW,
   TEXT_IMPORT_COMMIT,
@@ -122,6 +123,8 @@ import {
   MEETINGS_LIST_CHANNEL,
   MEETINGS_SEARCH_CHANNEL,
   MEETINGS_UPSERT_CHANNEL,
+  MEETINGS_SAVE_NOTES_CHANNEL,
+  type MeetingTextPatch,
   type MeetingRecord,
   type MeetingSearchHit,
   type MeetingSummary,
@@ -304,6 +307,13 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   }
 }
 
+const recipesApi: RecipesApi = {
+  list: (meetingId) => ipcRenderer.invoke(RECIPE_CHANNELS.list, meetingId),
+  save: (...args) => ipcRenderer.invoke(RECIPE_CHANNELS.save, ...args),
+  run: (request) => ipcRenderer.invoke(RECIPE_CHANNELS.run, request),
+  cancel: (identity) => ipcRenderer.invoke(RECIPE_CHANNELS.cancel, identity)
+}
+
 const notesApi: NotesApi = {
   templates(): Promise<NotesTemplateInfo[]> {
     return ipcRenderer.invoke(NOTES_TEMPLATES_CHANNEL) as Promise<NotesTemplateInfo[]>
@@ -389,6 +399,10 @@ const meetingsApi: MeetingsApi = {
 
   upsert(meeting: MeetingUpsert): Promise<MeetingRecord> {
     return ipcRenderer.invoke(MEETINGS_UPSERT_CHANNEL, meeting) as Promise<MeetingRecord>
+  },
+
+  saveNotes(patch: MeetingTextPatch): Promise<MeetingRecord> {
+    return ipcRenderer.invoke(MEETINGS_SAVE_NOTES_CHANNEL, patch) as Promise<MeetingRecord>
   },
 
   delete(id: string): Promise<void> {
@@ -694,6 +708,7 @@ if (process.contextIsolated) {
     } satisfies StorageApi)
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
+    contextBridge.exposeInMainWorld('recipes', recipesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('folders', foldersApi)
     contextBridge.exposeInMainWorld('calendar', calendarApi)
