@@ -1,5 +1,6 @@
 import {
   buildCitedAskPrompt,
+  buildCitedAnswerSchema,
   CITED_ASK_SYSTEM,
   hashCitedWire,
   type CitedPromptInput,
@@ -382,10 +383,20 @@ export class LocalNotesEngine implements NotesEngine {
               cited: { rawJson: null, inclusion: citedPrompt.inclusion },
             };
           signal.throwIfAborted();
+          // Same runtime as the active model, including any context recovery.
+          // Await compilation even after cancellation: context/producer ownership
+          // must not be released while the runtime is still creating its grammar.
+          const grammar = citedPrompt
+            ? await this.llama!.createGrammarForJsonSchema(
+                buildCitedAnswerSchema(citedPrompt.inclusion.ranges),
+              )
+            : undefined;
+          signal.throwIfAborted();
           const result = await session.promptWithMeta(
             citedPrompt?.user ?? prompt?.user ?? userMessage,
             {
               signal,
+              ...(grammar ? { grammar } : {}),
               maxTokens:
                 GENERATION_LIMITS[control?.phase ?? "writing"].maxTokens,
               temperature: 0.3,

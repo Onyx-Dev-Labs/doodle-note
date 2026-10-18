@@ -9,6 +9,7 @@ import { buildCitedAskPrompt, type CitedPromptInput } from '@repo/ai'
 import * as serviceModule from './cited-ask-service'
 import type { CitedAskRequest, CitedAnswerSnapshot } from '../shared/cited-ask-api'
 import { LibraryActivity } from './library-activity'
+import { GlobalChatStore, CITED_CHAT_FALLBACK } from './global-chat-store'
 
 function fixture(t: test.TestContext): {
   root: string
@@ -471,4 +472,71 @@ test('cancel during audio mapping withholds the previously resolved original', a
       signal: abort.signal
     })
   )
+})
+
+test('new prompt policy stamps every state and rejects old cached policy before source/model admission', async (t) => {
+  const f = fixture(t)
+  const requests: CitedAskRequest[] = [
+    f.request,
+    { ...f.request, selection: { mode: 'linked-history', meetingIds: [] } },
+    { purpose: 'library-ask', selection: { mode: 'question', question: 'unmatched', filters: {} } }
+  ]
+  const admitted: Array<{ request: CitedAskRequest; snapshot: CitedAnswerSnapshot }> = []
+  for (const request of requests) {
+    const result = await f.service.run(request, f.control)
+    assert.notEqual(result.status, 'error')
+    if (result.status === 'error') continue
+    assert.equal(result.snapshot.promptVersion, 2)
+    admitted.push({ request, snapshot: result.snapshot })
+  }
+  const service = new serviceModule.MainCitedAskService({
+    sources: {
+      ...f.sources,
+      retrieveEvidence: async () => assert.fail('old policy must not read sources')
+    },
+    generate: async () => assert.fail('old policy must not generate'),
+    validateModel: async () => assert.fail('old policy must not admit model')
+  })
+  for (const { request, snapshot } of admitted) {
+    const old = { ...snapshot, promptVersion: 1 as const }
+    const result = await service.validate(old, request, f.control)
+    assert.equal(result.status, 'stale')
+    assert.match(result.reason, /prompt|policy/i)
+  }
+})
+
+test('known historical prompt policy stays readable and preserved while appending current answers', async (t) => {
+  const f = fixture(t)
+  const result = await f.service.run(f.request, f.control)
+  assert.equal(result.status, 'complete')
+  const old = { ...result.snapshot, promptVersion: 1 as const }
+  const prior = {
+    id: 'historical',
+    question: 'Old question',
+    answer: CITED_CHAT_FALLBACK,
+    askedAt: old.askedAt,
+    citedAnswer: old,
+    extra: { preserved: true }
+  }
+  const file = join(f.root, '.policy-history.json')
+  writeFileSync(file, JSON.stringify([prior]))
+  const store = new GlobalChatStore(
+    () => file,
+    () => {}
+  )
+  assert.deepEqual(store.read()[0], prior)
+  store.append(
+    {
+      id: 'current',
+      question: 'Current question',
+      answer: CITED_CHAT_FALLBACK,
+      askedAt: result.snapshot.askedAt,
+      citedAnswer: result.snapshot
+    },
+    store.epoch()
+  )
+  assert.deepEqual(store.read()[0], prior)
+  assert.equal(store.read()[1]!.citedAnswer!.promptVersion, 2)
+  assert.equal((await f.service.validate(old, f.request, f.control)).status, 'stale')
+  assert.equal((await f.service.validate(result.snapshot, f.request, f.control)).status, 'valid')
 })

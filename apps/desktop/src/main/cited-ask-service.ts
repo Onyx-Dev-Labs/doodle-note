@@ -7,6 +7,7 @@ import type {
   CitationView
 } from '../shared/cited-ask-api'
 export type { CitedAskRequest } from '../shared/cited-ask-api'
+import { CITED_ASK_PROMPT_VERSION } from '../shared/cited-ask-api'
 
 export interface AskControl {
   ownerId: string
@@ -149,7 +150,7 @@ export class MainCitedAskService implements CitedAskService {
           prompt: null,
           engineId: null,
           modelArtifactRevision: null,
-          promptVersion: 1,
+          promptVersion: CITED_ASK_PROMPT_VERSION,
           requestSha256: citedRequestDigest(request),
           ...(request.purpose === 'calendar-brief'
             ? { consumerRevision: request.consumerRevision }
@@ -287,6 +288,8 @@ export class MainCitedAskService implements CitedAskService {
         return { status: 'unavailable', reason: 'Cited answers are not enabled in this build.' }
       const request = normalizeCitedRequest(currentRequest)
       validateSnapshotStructure(snapshot)
+      if (snapshot.promptVersion !== CITED_ASK_PROMPT_VERSION)
+        return { status: 'stale', reason: 'The cited prompt policy changed. Generate again.' }
       if (
         snapshot.purpose !== request.purpose ||
         snapshot.requestSha256 !== citedRequestDigest(request) ||

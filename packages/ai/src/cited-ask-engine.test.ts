@@ -89,6 +89,7 @@ test("actual local adapter reports exact wrapper wire and cleans up success, abo
         throw new Error("forbidden download");
       },
       getLlama: async () => ({
+        createGrammarForJsonSchema: async (schema: unknown) => ({ schema }),
         loadModel: async () => ({
           tokenizer,
           createContext: async () => ({

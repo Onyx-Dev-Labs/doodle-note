@@ -1,4 +1,5 @@
 import { digest } from '@repo/meetings-store/sources'
+import { CITED_ASK_PROMPT_VERSION } from '../shared/cited-ask-api'
 import {
   evidenceRangeId,
   isRecord,
@@ -195,7 +196,7 @@ export function validateSnapshotStructure(snapshot: CitedAnswerSnapshot): void {
   if (
     !isRecord(snapshot) ||
     snapshot.version !== 1 ||
-    snapshot.promptVersion !== 1 ||
+    ![1, CITED_ASK_PROMPT_VERSION].includes(snapshot.promptVersion) ||
     typeof snapshot.runId !== 'string' ||
     !ID.test(snapshot.runId) ||
     typeof snapshot.askedAt !== 'string' ||
