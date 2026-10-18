@@ -120,6 +120,7 @@ export function installBriefIpc({
 }: Dependencies): () => Promise<void> {
   const leases = new Map<string, () => void>()
   const cleanup = new Set<Promise<void>>()
+  const requests = new Set<Promise<unknown>>()
   let disposed = false
   let disposal: Promise<void> | undefined
   const closeOwner = (owner: string): Promise<void> => {
@@ -128,7 +129,7 @@ export function installBriefIpc({
     void pending.catch(() => {}).finally(() => cleanup.delete(pending))
     return pending
   }
-  ipc.handle(BRIEFS_INVOKE, async (event, request) => {
+  const invoke = async (event: BriefIpcEvent, request: unknown): Promise<unknown> => {
     if (disposed) throw new Error('Brief IPC is disposed.')
     const lease = owners.capture(event)
     lease.assertCurrent()
@@ -229,6 +230,12 @@ export function installBriefIpc({
     lease.assertCurrent()
     if (disposed || !enabled()) throw new Error('Brief IPC became unavailable.')
     return result
+  }
+  ipc.handle(BRIEFS_INVOKE, (event, request) => {
+    const pending = invoke(event, request)
+    requests.add(pending)
+    void pending.catch(() => {}).finally(() => requests.delete(pending))
+    return pending
   })
   return () => {
     if (disposal) return disposal
@@ -239,7 +246,7 @@ export function installBriefIpc({
       void closeOwner(owner).catch(() => {})
     }
     leases.clear()
-    disposal = Promise.allSettled([...cleanup]).then(() => {})
+    disposal = Promise.allSettled([...cleanup, ...requests]).then(() => {})
     return disposal
   }
 }

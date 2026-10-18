@@ -34,7 +34,7 @@ interface Fixture {
   disconnect(): void
   listenerCount(): number
 }
-function fixture(t: test.TestContext): Fixture {
+function fixture(t: test.TestContext, beforeGenerate?: () => Promise<void>): Fixture {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'dev509-brief-')))
   const meetingsDir = join(root, 'meetings')
   mkdirSync(meetingsDir)
@@ -84,6 +84,7 @@ function fixture(t: test.TestContext): Fixture {
     activity,
     validateModel: async () => true,
     generate: async (input) => {
+      await beforeGenerate?.()
       generated++
       const prompt = buildCitedAskPrompt(input, {
         contextWindowTokens: 16384,
@@ -117,13 +118,14 @@ function fixture(t: test.TestContext): Fixture {
     )
   put('old', 'Orchid ships Friday.')
   put('unrelated', 'Private unrelated original.')
+  const originalDigests = new WeakMap<object, string>()
   const original = async (id: string): ReturnType<BriefDependencies['originals']['get']> => {
     try {
       const bytes = readFileSync(join(meetingsDir, id + '.json'))
       const raw = JSON.parse(bytes.toString())
       const projected = projectSources(raw, context.scope)
       if (!projected) return null
-      return {
+      const result = {
         meetingId: id,
         title: raw.title,
         occurredAt: raw.createdAt,
@@ -134,6 +136,8 @@ function fixture(t: test.TestContext): Fixture {
         projectedRevisionId: projected.revisionId,
         trashed: false
       }
+      originalDigests.set(result, result.rawSha256)
+      return result
     } catch {
       return null
     }
@@ -163,7 +167,14 @@ function fixture(t: test.TestContext): Fixture {
     originals: {
       get: original,
       list: async () => [(await original('old'))!],
-      assertCurrent: () => {}
+      assertCurrent: (original) => {
+        const bytes = readFileSync(join(meetingsDir, original.meetingId + '.json'))
+        assert.equal(
+          createHash('sha256').update(bytes).digest('hex'),
+          originalDigests.get(original),
+          'Original changed'
+        )
+      }
     },
     publish: (_owner, view) => views.push(view)
   })
@@ -422,4 +433,198 @@ test('a revoked forget preview cannot escape after its final await', async (t) =
     return result
   }
   await assert.rejects(f.briefs.previewForget('window', opened.sessionId), /unavailable/)
+})
+
+test('an original edited during final awaited reconciliation cannot publish or cache its earlier claim', async (t) => {
+  const f = fixture(t)
+  const opened = await f.briefs.open('window', f.event.id)
+  await f.briefs.link('window', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
+  const validate = f.cited.validate.bind(f.cited)
+  let validations = 0
+  let finalValidationFinished = false
+  f.cited.validate = async (...args) => {
+    const result = await validate(...args)
+    if (++validations === 2) {
+      assert.equal(result.status, 'valid')
+      finalValidationFinished = true
+    }
+    return result
+  }
+  const read = f.store.read.bind(f.store)
+  let edited = false
+  f.store.read = async (...args) => {
+    if (finalValidationFinished && !edited) {
+      f.put('old', 'Orchid was cancelled. Do not ship Friday.')
+      edited = true
+    }
+    return read(...args)
+  }
+  const answer = await f.briefs.generate('window', opened.sessionId, 'race-source', {})
+  assert.equal(edited, true)
+  assert.equal(answer.result, undefined)
+  assert.ok(f.views.every((v) => !v.result))
+  const refreshed = await f.briefs.refresh('window', opened.sessionId)
+  assert.equal(refreshed.result, undefined)
+  assert.equal(f.generated(), 1)
+})
+
+for (const teardown of ['dispose', 'closeOwner'] as const) {
+  test(`${teardown} joins an already-closing operation before shared registration`, async (t) => {
+    const f = fixture(t)
+    const opened = await f.briefs.open('window', f.event.id)
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>((r) => {
+      entered = r
+    })
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    const run = f.cited.run.bind(f.cited)
+    f.cited.run = async (...args) => {
+      entered()
+      await held
+      return run(...args)
+    }
+    const generating = f.briefs.generate('window', opened.sessionId, 'held', {})
+    await ready
+    let closed = false,
+      disposed = false
+    const closing = f.briefs.close('window', opened.sessionId).then(() => {
+      closed = true
+    })
+    const disposing = (
+      teardown === 'dispose' ? f.briefs.dispose() : f.briefs.closeOwner('window')
+    ).then(() => {
+      disposed = true
+    })
+    try {
+      await new Promise((r) => setImmediate(r))
+      assert.equal(closed, false)
+      assert.equal(disposed, false)
+    } finally {
+      release()
+      await Promise.all([generating, closing, disposing])
+    }
+    assert.ok(f.views.every((v) => !v.result))
+  })
+}
+
+test('IPC uninstall waits for the actual BriefService close handler and late consumer cleanup', async (t) => {
+  const { installBriefIpc } = await import('./brief-ipc')
+  const { CitedRendererOwners } = await import('./cited-ask-host')
+  const { BRIEFS_INVOKE } = await import('../shared/briefs-api')
+  const f = fixture(t)
+  const renderer = { id: 1, mainFrame: {}, isDestroyed: () => false, send: () => {} }
+  const owners = new CitedRendererOwners(() => renderer)
+  const event = { sender: renderer, senderFrame: renderer.mainFrame }
+  const handlers = new Map<string, (e: typeof event, request: unknown) => Promise<unknown>>()
+  const off = installBriefIpc({
+    ipc: {
+      handle: (k, h) => {
+        handlers.set(k, h)
+      },
+      removeHandler: (k) => {
+        handlers.delete(k)
+      }
+    },
+    owners,
+    service: f.briefs,
+    enabled: () => true
+  })
+  const invoke = (method: string, args: unknown[]): Promise<unknown> =>
+    handlers.get(BRIEFS_INVOKE)!(event, { method, args })
+  const opened = (await invoke('open', [f.event.id])) as BriefView
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>((r) => {
+    entered = r
+  })
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const run = f.cited.run.bind(f.cited)
+  f.cited.run = async (...args) => {
+    entered()
+    await held
+    return run(...args)
+  }
+  const generating = invoke('generate', [opened.sessionId, 'held', {}]).catch(() => {})
+  await ready
+  let closed = false,
+    disposed = false
+  const closing = invoke('close', [opened.sessionId])
+    .catch(() => {})
+    .finally(() => {
+      closed = true
+    })
+  const disposing = off().then(() => {
+    disposed = true
+  })
+  try {
+    await new Promise((r) => setImmediate(r))
+    assert.equal(closed, false)
+    assert.equal(disposed, false)
+    assert.equal(handlers.size, 0)
+  } finally {
+    release()
+    await Promise.all([generating, closing, disposing])
+  }
+})
+
+for (const changed of ['source', 'context'] as const) {
+  test(`final admission rejects ${changed} changes at the last validation await`, async (t) => {
+    const f = fixture(t)
+    const opened = await f.briefs.open('window', f.event.id)
+    await f.briefs.link('window', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
+    const validate = f.cited.validate.bind(f.cited)
+    let validations = 0
+    f.cited.validate = async (...args) => {
+      const result = await validate(...args)
+      if (++validations === 3) {
+        if (changed === 'source') f.put('old', 'Cancelled')
+        else {
+          const path = join(f.root, 'calendar-context-v1.json')
+          writeFileSync(path, readFileSync(path, 'utf8') + '\n')
+        }
+      }
+      return result
+    }
+    const answer = await f.briefs.generate('window', opened.sessionId, 'final-race', {})
+    assert.equal(answer.result, undefined)
+    assert.ok(f.views.every((v) => !v.result))
+  })
+}
+
+test('dispose joins an already-closing registered shared producer until the synthetic model acknowledges', async (t) => {
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>((r) => {
+    entered = r
+  })
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const f = fixture(t, async () => {
+    entered()
+    await held
+  })
+  const opened = await f.briefs.open('window', f.event.id)
+  await f.briefs.link('window', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
+  const generating = f.briefs.generate('window', opened.sessionId, 'registered', {})
+  await ready
+  let closed = false,
+    disposed = false
+  const closing = f.briefs.close('window', opened.sessionId).then(() => {
+    closed = true
+  })
+  const disposing = f.briefs.dispose().then(() => {
+    disposed = true
+  })
+  try {
+    await new Promise((r) => setImmediate(r))
+    assert.equal(closed, false)
+    assert.equal(disposed, false)
+  } finally {
+    release()
+    await Promise.all([generating, closing, disposing])
+  }
+  assert.ok(f.views.every((v) => !v.result))
 })

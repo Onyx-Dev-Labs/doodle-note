@@ -32,7 +32,7 @@ export interface ContextControl {
   signal?: AbortSignal
 }
 type Binding = { root: string; scope: SourceScope }
-type Loaded = Binding & { digest: string | null; revision: number }
+type Loaded = Binding & { digest: string | null; revision: number; fileToken?: string | null }
 const empty = (scope: SourceScope): ContextFileV1 => ({
   version: 1,
   scope,
@@ -86,6 +86,28 @@ export class CalendarContextStore {
   fence(): Binding & { assertCurrent(): void } {
     const binding = this.binding()
     return { ...binding, assertCurrent: () => this.check(binding, { assertCurrent: () => {} }) }
+  }
+  private fileToken(binding: Binding): string | null {
+    try {
+      const stat = lstatSync(join(binding.root, CONTEXT_FILE), { bigint: true })
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Calendar context file changed.')
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }
+  /** Final synchronous admission fence over bytes already decoded and validated by read(). */
+  readFence(): () => void {
+    const loaded = this.loaded
+    if (!loaded || loaded.fileToken === undefined) throw new Error('Read calendar context first.')
+    const check = (): void => {
+      this.check(loaded, { assertCurrent: () => {} })
+      if (this.loaded?.digest !== loaded.digest || this.fileToken(loaded) !== loaded.fileToken)
+        throw new Error('Calendar context changed after reading.')
+    }
+    check()
+    return check
   }
   /** Read immediately after read()/capture(); binds consumer previews to exact sidecar bytes. */
   readToken(): string {
@@ -162,6 +184,7 @@ export class CalendarContextStore {
   }
   async read(control: ContextControl): Promise<ContextFileV1> {
     return this.serial(control, async (binding) => {
+      const fileToken = this.fileToken(binding)
       const bytes = await this.bytes(binding, control)
       this.check(binding, control)
       const decoded =
@@ -173,7 +196,9 @@ export class CalendarContextStore {
         this.check(binding, control)
       )
       this.check(binding, control)
-      this.loaded = { ...binding, digest: decoded.digest, revision: data.revision }
+      if (this.fileToken(binding) !== fileToken)
+        throw new Error('Calendar context changed while reading.')
+      this.loaded = { ...binding, digest: decoded.digest, revision: data.revision, fileToken }
       return data
     })
   }
@@ -260,7 +285,11 @@ export class CalendarContextStore {
         // No JS suspension between final lifetime check, atomic publication and revision publish.
         this.check(binding, control)
         renameSync(temporary, join(binding.root, CONTEXT_FILE))
-        this.loaded = { ...binding, digest: encoded.digest, revision: data.revision }
+        this.loaded = {
+          ...binding,
+          digest: encoded.digest,
+          revision: data.revision
+        }
         return { value: result.value, data }
       } finally {
         await rm(temporary, { force: true }).catch(() => {})

@@ -45,7 +45,13 @@ type Session = {
   view: BriefView
   operation?: Operation
 }
-type Resolved = { data: ContextFileV1; snapshot: EventSnapshotV1; token: string; request: Request }
+type Resolved = {
+  data: ContextFileV1
+  snapshot: EventSnapshotV1
+  token: string
+  request: Request
+  assertCurrent(): void
+}
 const sha = (v: unknown): string => createHash('sha256').update(JSON.stringify(v)).digest('hex')
 const id = (v: unknown): v is string =>
   typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/.test(v)
@@ -65,6 +71,8 @@ export class BriefService {
   private cacheBytes = 0
   private disposed = false
   private closing = false
+  private disposal?: Promise<void>
+  private retiring = new Map<string, { owner: string; done: Promise<void> }>()
   private ownerOpen = new Map<string, number>()
   private readonly unsubscribe: () => void
   private previews = new Map<
@@ -114,7 +122,7 @@ export class BriefService {
       if (s.operation)
         draining.push(this.deps.cited.cancel(this.ownerKey(s), s.operation.id), s.operation.done)
     }
-    await Promise.all(draining)
+    await Promise.all([...draining, ...[...this.retiring.values()].map((s) => s.done)])
   }
   async refreshAll(): Promise<void> {
     await this.invalidate()
@@ -244,6 +252,8 @@ export class BriefService {
     assertCurrent()
     if (data.revision !== captured.revision) error('stale', 'Calendar context changed.')
     const token = this.deps.store.readToken()
+    const contextCurrent = this.deps.store.readFence()
+    const originals: Original[] = []
     const snapshot = data.snapshots[captured.snapshot.id]!
     const folded = foldContext(data)
     const links = briefLinks(data, folded, snapshot, s.selection.includeCompany === true)
@@ -268,7 +278,10 @@ export class BriefService {
             c.payload.target.kind === 'event' &&
             original.calendarEventId !== c.payload.target.eventId
         )
-      if (original && available) this.deps.originals.assertCurrent(original)
+      if (original && available) {
+        this.deps.originals.assertCurrent(original)
+        if (selected.includes(meetingId)) originals.push(original)
+      }
       if (selected.includes(meetingId) && !available)
         error('unavailable', 'Some linked history could not be checked.')
       history.push({
@@ -348,7 +361,17 @@ export class BriefService {
       previous()
       observation.assertCurrent()
     }
-    return { data, snapshot, token, request }
+    return {
+      data,
+      snapshot,
+      token,
+      request,
+      assertCurrent: () => {
+        assertCurrent()
+        contextCurrent()
+        for (const original of originals) this.deps.originals.assertCurrent(original)
+      }
+    }
   }
   async open(owner: string, eventId: string): Promise<BriefView> {
     if (
@@ -417,6 +440,23 @@ export class BriefService {
     control.assertCurrent()
     if (sha(final.request) !== sha(current.request))
       error('stale', 'Brief context changed during validation.')
+    // No awaited context/source reconciliation may follow this final shared eligibility check.
+    // Synchronous byte-lifetime fences close the gap between validation completion and publication.
+    const admissionControl = {
+      ...control,
+      assertCurrent: () => {
+        control.assertCurrent()
+        final.assertCurrent()
+      }
+    }
+    admissionControl.assertCurrent()
+    const admission = await this.deps.cited.validate(
+      result.snapshot,
+      final.request,
+      admissionControl
+    )
+    admissionControl.assertCurrent()
+    if (admission.status !== 'valid') error(admission.status, admission.reason)
     if (cache || this.cache.has(sha(final.request))) this.remember(sha(final.request), result)
     this.emit(s, {
       ...s.view,
@@ -476,34 +516,63 @@ export class BriefService {
     await op.done
   }
   async close(owner: string, sessionId: string): Promise<void> {
+    const existing = this.retiring.get(sessionId)
+    if (existing) {
+      if (existing.owner !== owner) error('unauthorized', 'Brief session owner is unavailable.')
+      return existing.done
+    }
     const s = this.session(owner, sessionId)
     const op = s.operation
+    let finish!: () => void
+    const done = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    // Retain ownership before removing the visible session or yielding to shared cleanup.
+    this.retiring.set(s.id, { owner, done })
     this.sessions.delete(s.id)
     for (const [key, p] of this.previews) if (p.session === s.id) this.previews.delete(key)
-    if (op) {
-      op.abort.abort()
-      await this.deps.cited.cancel(this.ownerKey(s), op.id)
-      await op.done
+    try {
+      if (op) {
+        op.abort.abort()
+        // Even a cleanup rejection cannot release an operation that has not finished yet.
+        const settled = await Promise.allSettled([
+          this.deps.cited.cancel(this.ownerKey(s), op.id),
+          op.done
+        ])
+        const failed = settled.find((result) => result.status === 'rejected')
+        if (failed?.status === 'rejected') throw failed.reason
+      }
+    } finally {
+      this.retiring.delete(s.id)
+      finish()
     }
   }
   async closeOwner(owner: string, keepOpening = false): Promise<void> {
     if (!keepOpening) this.ownerOpen.set(owner, (this.ownerOpen.get(owner) ?? 0) + 1)
-    await Promise.all(
-      [...this.sessions.values()]
-        .filter((s) => s.owner === owner)
-        .map((s) => this.close(owner, s.id))
-    )
+    const closing = [...this.sessions.values()]
+      .filter((s) => s.owner === owner)
+      .map((s) => this.close(owner, s.id))
+    const retired = [...this.retiring.values()].filter((s) => s.owner === owner).map((s) => s.done)
+    const settled = await Promise.allSettled([...closing, ...retired])
+    const failed = settled.find((result) => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
   }
-  async dispose(): Promise<void> {
-    if (this.disposed) return
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal
     this.closing = true
     this.unsubscribe()
-    const owners = [...new Set([...this.sessions.values()].map((s) => s.owner))]
-    await Promise.all(owners.map((owner) => this.closeOwner(owner)))
-    this.disposed = true
-    this.cache.clear()
-    this.cacheBytes = 0
-    this.previews.clear()
+    const owners = new Set(
+      [...this.sessions.values(), ...this.retiring.values()].map((s) => s.owner)
+    )
+    this.disposal = Promise.allSettled([...owners].map((owner) => this.closeOwner(owner))).then(
+      () => {
+        this.disposed = true
+        this.cache.clear()
+        this.cacheBytes = 0
+        this.previews.clear()
+      }
+    )
+    return this.disposal
   }
   async citation(owner: string, sessionId: string, evidenceId: string): Promise<CitationView> {
     const s = this.session(owner, sessionId)
