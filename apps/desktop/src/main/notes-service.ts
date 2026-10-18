@@ -498,9 +498,15 @@ export class NotesService {
       const result = await engine.askAcrossMeetings(input, (token) => {
         this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token })
       })
-      // Deterministic disclosure is visible and persisted even if the model
-      // ignores its coverage instruction. Do not rely on generated prose for it.
-      const notice = result.coverage ? `\n\n${globalAskCoverageNotice(result.coverage)}` : ''
+      // Only an exact standalone trailing disclosure satisfies coverage. Compare
+      // without trailing whitespace, but preserve every already streamed byte.
+      const canonicalNotice = result.coverage ? globalAskCoverageNotice(result.coverage) : ''
+      const trailingParagraph = result.markdown
+        .trimEnd()
+        .split(/\r?\n[\t ]*\r?\n/)
+        .at(-1)
+      const notice =
+        canonicalNotice && trailingParagraph !== canonicalNotice ? `\n\n${canonicalNotice}` : ''
       if (notice) this.broadcast(NOTES_ASK_GLOBAL_TOKEN_CHANNEL, { token: notice })
       const answer = result.markdown + notice
       this.saveGlobalChat([

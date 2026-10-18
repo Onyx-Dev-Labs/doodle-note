@@ -15,9 +15,21 @@ import * as libraryPath from './library-path'
 import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
 
+interface Service {
+  registerIpc(): void
+  pickEngine(): Promise<unknown>
+  dispose(): Promise<void>
+}
+
 /** Real service/persistence; only Electron and model inference are replaced. */
-test('global Ask persists honest coverage, includes upstream omissions, and keeps failed questions out of history', async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), 'dn-global-ask-test-'))
+function createService(
+  dir: string,
+  records: unknown[]
+): {
+  service: Service
+  ask: (question: string) => Promise<api.GlobalAskResult>
+  broadcasts: Array<{ channel: string; payload: { token?: string } }>
+} {
   type Handler = (...args: unknown[]) => unknown
   const handlers = new Map<string, Handler>()
   const broadcasts: Array<{ channel: string; payload: { token?: string } }> = []
@@ -44,11 +56,6 @@ test('global Ask persists honest coverage, includes upstream omissions, and keep
     '../shared/batch-transcription': batch,
     '../shared/meeting-recovery': recovery
   }
-  interface Service {
-    registerIpc(): void
-    pickEngine(): Promise<unknown>
-    dispose(): Promise<void>
-  }
   const exports: Record<string, new (...args: unknown[]) => Service> = {}
   const source = ts.transpileModule(fs.readFileSync('src/main/notes-service.ts', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
@@ -65,6 +72,19 @@ test('global Ask persists honest coverage, includes upstream omissions, and keep
     setInterval,
     clearInterval
   })
+  const service = new exports.NotesService!(
+    dir,
+    (channel: string, payload: { token?: string }) => broadcasts.push({ channel, payload }),
+    { readAll: () => records }
+  )
+  service.registerIpc()
+  const ask = (question: string): Promise<api.GlobalAskResult> =>
+    handlers.get(api.NOTES_ASK_GLOBAL_CHANNEL)!({}, { question }) as Promise<api.GlobalAskResult>
+  return { service, ask, broadcasts }
+}
+
+test('global Ask persists honest coverage, includes upstream omissions, and keeps failed questions out of history', async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'dn-global-ask-test-'))
   const records = Array.from({ length: 35 }, (_, i) => ({
     id: `fixture-${i}`,
     title: `Synthetic ${i}`,
@@ -76,12 +96,7 @@ test('global Ask persists honest coverage, includes upstream omissions, and keep
   }))
   records[0]!.rawNotesMarkdown = '' // empty notes are not candidates
   const original = JSON.stringify(records)
-  const service = new exports.NotesService!(
-    dir,
-    (channel: string, payload: { token?: string }) => broadcasts.push({ channel, payload }),
-    { readAll: () => records }
-  )
-  service.registerIpc()
+  const { service, ask, broadcasts } = createService(dir, records)
   const historyPath = path.join(dir, 'global-chat.json')
   const history = Array.from({ length: 8 }, () => ({
     question: 'q'.repeat(20_000),
@@ -117,8 +132,6 @@ test('global Ask persists honest coverage, includes upstream omissions, and keep
       }
     }
   })
-  const ask = (question: string): Promise<api.GlobalAskResult> =>
-    handlers.get(api.NOTES_ASK_GLOBAL_CHANNEL)!({}, { question }) as Promise<api.GlobalAskResult>
   try {
     const result = await ask('What is next?')
     assert.equal(result.coverage?.availableMeetings, 33)
@@ -140,5 +153,98 @@ test('global Ask persists honest coverage, includes upstream omissions, and keep
   } finally {
     await service.dispose()
     fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('global Ask appends coverage only when the exact standalone trailing notice is missing', async (t) => {
+  const coverage = ai.buildGlobalAskPrompt(
+    {
+      question: 'Who owns the synthetic prototype?',
+      meetings: [
+        { title: 'Synthetic', dateIso: '2026-10-18', notesMarkdown: 'Ada owns the prototype.' }
+      ],
+      availableMeetingCount: 502,
+      history: []
+    },
+    {
+      contextWindowTokens: 16384,
+      outputReserveTokens: 4096,
+      safetyMarginTokens: 256,
+      accounting: 'utf8-upper-bound',
+      countInputTokens: (system, user) => ai.utf8TokenUpperBound(system + user)
+    }
+  ).coverage
+  const notice = ai.globalAskCoverageNotice(coverage)
+  const body = 'Ada owns the synthetic prototype.  '
+  const cases = [
+    { name: 'exact trailing notice', markdown: `${body}\n\n${notice}`, append: false },
+    { name: 'notice alone', markdown: notice, append: false },
+    { name: 'trailing whitespace', markdown: `${body}\n\n${notice} \t\n\n`, append: false },
+    {
+      name: 'CRLF and whitespace blank line',
+      markdown: `${body}\r\n \t\r\n${notice}\r\n`,
+      append: false
+    },
+    { name: 'absent', markdown: body, append: true },
+    {
+      name: 'wrong coverage',
+      markdown: `${body}\n\n${notice.replace('502', '999')}`,
+      append: true
+    },
+    { name: 'incomplete', markdown: `${body}\n\n${notice.slice(0, -1)}`, append: true },
+    { name: 'embedded inline', markdown: `${body} ${notice}`, append: true },
+    { name: 'single newline is not a paragraph', markdown: `${body}\n${notice}`, append: true },
+    { name: 'followed by answer body', markdown: `${notice}\n\n${body}`, append: true },
+    { name: 'quoted notice', markdown: `${body}\n\n> ${notice}`, append: true },
+    { name: 'fenced notice', markdown: `${body}\n\n\`\`\`text\n${notice}\n\`\`\``, append: true },
+    { name: 'no coverage', markdown: body, append: false, noCoverage: true }
+  ]
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const dir = fs.mkdtempSync(path.join(tmpdir(), 'dn-global-ask-test-'))
+      const { service, ask, broadcasts } = createService(dir, [
+        { id: 'synthetic', title: 'Synthetic', createdAt: '2026-10-18', rawNotesMarkdown: body }
+      ])
+      const expectedCoverage = scenario.noCoverage ? undefined : coverage
+      service.pickEngine = async () => ({
+        askAcrossMeetings: async (_input: ai.GlobalAskInput, onToken: (text: string) => void) => {
+          // Split inside the notice: service must reason about the completed answer,
+          // without removing or rewriting any already streamed answer bytes.
+          const split = Math.floor(scenario.markdown.length / 2)
+          onToken(scenario.markdown.slice(0, split))
+          onToken(scenario.markdown.slice(split))
+          return {
+            markdown: scenario.markdown,
+            engine: 'local:fixture',
+            elapsedMs: 1,
+            coverage: expectedCoverage
+          }
+        }
+      })
+      try {
+        const result = await ask('Who owns the synthetic prototype?')
+        const expected = scenario.markdown + (scenario.append ? `\n\n${notice}` : '')
+        assert.equal(result.error, undefined)
+        assert.equal(result.answer, expected)
+        assert.equal(
+          broadcasts
+            .filter(({ channel }) => channel === api.NOTES_ASK_GLOBAL_TOKEN_CHANNEL)
+            .map(({ payload }) => payload.token)
+            .join(''),
+          expected,
+          'streamed answer matches returned answer byte-for-byte'
+        )
+        const entries = JSON.parse(
+          fs.readFileSync(path.join(dir, 'global-chat.json'), 'utf8')
+        ) as api.GlobalChatEntry[]
+        assert.equal(entries.length, 1)
+        assert.equal(entries[0]!.answer, expected, 'persisted answer matches stream and return')
+        assert.deepEqual(result.coverage, expectedCoverage)
+        assert.deepEqual(entries[0]!.coverage, expectedCoverage)
+      } finally {
+        await service.dispose()
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
+    })
   }
 })
