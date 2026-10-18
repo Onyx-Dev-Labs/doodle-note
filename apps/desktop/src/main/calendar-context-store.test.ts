@@ -613,3 +613,41 @@ test('changed snapshot content cannot reuse a stale observation digest; richer n
   await assert.rejects(f.store.read(f.control), /digest/)
   assert.equal(readFileSync(path, 'utf8'), corrupt)
 })
+
+test('content reversion preserves old snapshot history but carries the latest unassignment and self correction', async (t) => {
+  const f = fixture(t)
+  const a = await f.store.capture(f.makeEvent('A'), null, 0, f.control)
+  const person = await f.store.createEntity('person', f.account, 'Alex', a.revision, f.control)
+  const bound = await f.store.change(
+    {
+      op: 'bind-invitee',
+      snapshotId: a.snapshot.id,
+      inviteeId: 'invitee:0',
+      personId: person.entity.id
+    },
+    person.revision,
+    f.control
+  )
+  const b = await f.store.capture(f.makeEvent('B'), null, bound.revision, f.control)
+  const unassigned = await f.store.change(
+    { op: 'bind-invitee', snapshotId: b.snapshot.id, inviteeId: 'invitee:0', personId: null },
+    b.revision,
+    f.control
+  )
+  const self = await f.store.change(
+    { op: 'set-self', snapshotId: b.snapshot.id, inviteeId: 'invitee:0', isSelf: true },
+    unassigned.revision,
+    f.control
+  )
+  const reverted = await f.store.capture(f.makeEvent('A'), null, self.revision, f.control)
+  const after = await f.store.read(f.control)
+  const view = f.store.view(after)
+  assert.notEqual(reverted.snapshot.id, a.snapshot.id)
+  assert.equal(view.bindings[reverted.snapshot.id]?.['invitee:0']?.personId, null)
+  assert.equal(view.self[reverted.snapshot.id]?.['invitee:0'], true)
+  assert.equal(view.bindings[a.snapshot.id]?.['invitee:0']?.personId, person.entity.id)
+  assert.equal(
+    (await f.store.capture(f.makeEvent('A'), null, reverted.revision, f.control)).snapshot.id,
+    reverted.snapshot.id
+  )
+})

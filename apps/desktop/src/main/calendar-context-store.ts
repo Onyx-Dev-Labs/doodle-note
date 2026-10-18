@@ -18,9 +18,8 @@ import {
   contextText,
   foldContext,
   observationDigest,
-  targetAccount,
-  validateContextEdit,
-  validateContextFile
+  contextAccountResolver,
+  validateContextFileAsync
 } from './calendar-context-validation'
 import type { AcceptedCalendarStart } from './calendar-start-context'
 import { CalendarContextCodec } from './calendar-context-codec'
@@ -33,7 +32,7 @@ export interface ContextControl {
   signal?: AbortSignal
 }
 type Binding = { root: string; scope: SourceScope }
-type Loaded = Binding & { digest: string | null; data: ContextFileV1 }
+type Loaded = Binding & { digest: string | null; revision: number }
 const empty = (scope: SourceScope): ContextFileV1 => ({
   version: 1,
   scope,
@@ -83,6 +82,32 @@ export class CalendarContextStore {
       throw new Error('Calendar context is waiting for canonical source identity.')
     return { root, scope }
   }
+  /** Main-only canonical root/scope lifetime. No renderer path or replacement UUID. */
+  fence(): Binding & { assertCurrent(): void } {
+    const binding = this.binding()
+    return { ...binding, assertCurrent: () => this.check(binding, { assertCurrent: () => {} }) }
+  }
+  /** Read immediately after read()/capture(); binds consumer previews to exact sidecar bytes. */
+  readToken(): string {
+    if (!this.loaded) throw new Error('Read calendar context first.')
+    this.check(this.loaded, { assertCurrent: () => {} })
+    return this.loaded.digest ?? 'absent'
+  }
+  async changes(
+    edits: ContextEdit[],
+    revision: number,
+    control: ContextControl
+  ): Promise<ContextFileV1> {
+    if (!Array.isArray(edits) || edits.length < 1 || edits.length > 256)
+      throw new Error('Invalid correction batch.')
+    const frozen = structuredClone(edits)
+    return (
+      await this.mutate(revision, control, (data) => {
+        for (const edit of frozen) this.append(data, edit)
+        return { value: undefined, changed: true }
+      })
+    ).data
+  }
   private check(binding: Binding, control: ContextControl): void {
     control.signal?.throwIfAborted()
     control.assertCurrent()
@@ -96,7 +121,7 @@ export class CalendarContextStore {
       this.activity.run(async () => {
         this.check(binding, control)
         return work(binding)
-      })
+      }, control.signal)
     )
     this.queue = result.catch(() => {})
     return result
@@ -144,10 +169,12 @@ export class CalendarContextStore {
           ? { value: empty(binding.scope), digest: null }
           : await this.codec.decode(bytes)
       this.check(binding, control)
-      const data = decoded.value
-      validateContextFile(data, binding.scope)
-      this.loaded = { ...binding, digest: decoded.digest, data }
-      return structuredClone(data)
+      const data = await validateContextFileAsync(decoded.value, binding.scope, () =>
+        this.check(binding, control)
+      )
+      this.check(binding, control)
+      this.loaded = { ...binding, digest: decoded.digest, revision: data.revision }
+      return data
     })
   }
   view(data: ContextFileV1): ReturnType<typeof foldContext> {
@@ -156,7 +183,10 @@ export class CalendarContextStore {
   private async mutate<T>(
     expectedRevision: number,
     control: ContextControl,
-    edit: (data: ContextFileV1) => { value: T; changed: boolean },
+    edit: (
+      data: ContextFileV1,
+      assertCurrent: () => void
+    ) => { value: T; changed: boolean } | Promise<{ value: T; changed: boolean }>,
     expectedDigest?: string | null
   ): Promise<{ value: T; data: ContextFileV1 }> {
     return this.serial(control, async (binding) => {
@@ -177,14 +207,18 @@ export class CalendarContextStore {
         throw new Error('Calendar context library changed. Read the current library first.')
       if (this.loaded && this.loaded.digest !== hash)
         throw new Error('Calendar context changed externally. Refresh before editing.')
-      const data = decoded.value
-      validateContextFile(data, binding.scope)
+      const data = await validateContextFileAsync(decoded.value, binding.scope, () =>
+        this.check(binding, control)
+      )
+      this.check(binding, control)
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== data.revision)
         throw new Error('Calendar context revision changed. Refresh before editing.')
-      const result = edit(data)
-      if (!result.changed) return { value: result.value, data: structuredClone(data) }
+      const result = await edit(data, () => this.check(binding, control))
+      this.check(binding, control)
+      if (!result.changed) return { value: result.value, data }
       data.revision++
-      validateContextFile(data, binding.scope)
+      await validateContextFileAsync(data, binding.scope, () => this.check(binding, control))
+      this.check(binding, control)
       const encoded = await this.codec.encode(data)
       this.check(binding, control)
       const serialized = encoded.serialized
@@ -226,8 +260,8 @@ export class CalendarContextStore {
         // No JS suspension between final lifetime check, atomic publication and revision publish.
         this.check(binding, control)
         renameSync(temporary, join(binding.root, CONTEXT_FILE))
-        this.loaded = { ...binding, digest: encoded.digest, data }
-        return { value: result.value, data: structuredClone(data) }
+        this.loaded = { ...binding, digest: encoded.digest, revision: data.revision }
+        return { value: result.value, data }
       } finally {
         await rm(temporary, { force: true }).catch(() => {})
       }
@@ -239,7 +273,6 @@ export class CalendarContextStore {
     provenance: ContextChangeV1['provenance'] = 'user',
     supersedes: string | null = null
   ): ContextChangeV1 {
-    validateContextEdit(data, payload)
     const change: ContextChangeV1 = {
       id: randomUUID(),
       revision: data.revision + 1,
@@ -276,9 +309,13 @@ export class CalendarContextStore {
       invitees: roster.entries
     }
     const eventDigest = observationDigest(fields)
-    const result = await this.mutate(expectedRevision, control, (data) => {
-      const existing = Object.values(data.snapshots).find((s) => s.eventDigest === eventDigest)
-      if (existing) return { value: existing, changed: false }
+    const result = await this.mutate(expectedRevision, control, async (data, assertCurrent) => {
+      const previous = Object.values(data.snapshots)
+        .filter((s) => s.eventId === fields.eventId && s.accountId === fields.accountId)
+        .at(-1)
+      // Reuse only the current observation. A→B→A is a new observation carrying B's
+      // latest corrections; reusing historical A would resurrect superseded assignments.
+      if (previous?.eventDigest === eventDigest) return { value: previous, changed: false }
       if (lastSyncIso !== null && !contextDate(lastSyncIso))
         throw new Error('Calendar context sync date is invalid.')
       const snapshot: EventSnapshotV1 = {
@@ -289,13 +326,10 @@ export class CalendarContextStore {
         calendarLastSyncIso: lastSyncIso,
         calendarWasStale: frozen.stale === true
       }
-      const previous = Object.values(data.snapshots)
-        .filter((s) => s.eventId === snapshot.eventId && s.accountId === snapshot.accountId)
-        .at(-1)
       const view = foldContext(data)
       data.snapshots[snapshot.id] = snapshot
       // Validate the new observation before deriving any concrete user/rule bindings.
-      validateContextFile(data, data.scope)
+      await validateContextFileAsync(data, data.scope, assertCurrent)
       for (const invitee of snapshot.invitees) {
         if (!invitee.identifierKey || invitee.roles.includes('resource')) continue
         const previousInvitee = previous?.invitees.find(
@@ -489,7 +523,7 @@ export class CalendarContextStore {
     changes: number
   }> {
     const data = await this.read(control)
-    if (!this.loaded || this.loaded.data.revision !== data.revision)
+    if (!this.loaded || this.loaded.revision !== data.revision)
       throw new Error('Calendar context changed during preview.')
     if (!/^cal2:account:[a-f0-9]{64}$/.test(accountId))
       throw new Error('Calendar account is invalid.')
@@ -509,23 +543,27 @@ export class CalendarContextStore {
       snapshots: Object.values(data.snapshots).filter((s) => s.accountId === accountId).length,
       people: Object.values(data.people).filter((p) => p.accountId === accountId).length,
       companies: Object.values(data.companies).filter((p) => p.accountId === accountId).length,
-      changes: data.changes.filter((c) => this.changeAccount(data, c) === accountId).length
+      changes: (() => {
+        const account = this.accountResolver(data)
+        return data.changes.filter((c) => account(c) === accountId).length
+      })()
     }
   }
-  private changeAccount(data: ContextFileV1, c: ContextChangeV1): string {
-    const p = c.payload
-    if (p.op === 'bind-invitee' || p.op === 'set-self')
-      return data.snapshots[p.snapshotId]!.accountId
-    if (p.op === 'set-rule') return p.accountId
-    if (p.op === 'set-company' || p.op === 'exclude-person')
-      return data.people[p.personId]!.accountId
-    if (p.op === 'link-meeting') return targetAccount(data, p.target)
-    if (p.op === 'unlink-meeting')
-      return this.changeAccount(
-        data,
-        data.changes.find((c) => c.id === p.linkChangeId)!
-      )
-    return data[p.entity === 'person' ? 'people' : 'companies'][p.id]!.accountId
+  private accountResolver(data: ContextFileV1): (c: ContextChangeV1) => string {
+    const targetAccount = contextAccountResolver(data)
+    const changes = new Map(data.changes.map((c) => [c.id, c]))
+    const account = (c: ContextChangeV1): string => {
+      const p = c.payload
+      if (p.op === 'bind-invitee' || p.op === 'set-self')
+        return data.snapshots[p.snapshotId]!.accountId
+      if (p.op === 'set-rule') return p.accountId
+      if (p.op === 'set-company' || p.op === 'exclude-person')
+        return data.people[p.personId]!.accountId
+      if (p.op === 'link-meeting') return targetAccount(p.target)
+      if (p.op === 'unlink-meeting') return account(changes.get(p.linkChangeId)!)
+      return data[p.entity === 'person' ? 'people' : 'companies'][p.id]!.accountId
+    }
+    return account
   }
   async forget(
     accountId: string,
@@ -550,7 +588,8 @@ export class CalendarContextStore {
         (data) => {
           if (!/^cal2:account:[a-f0-9]{64}$/.test(accountId))
             throw new Error('Calendar context account is invalid.')
-          data.changes = data.changes.filter((c) => this.changeAccount(data, c) !== accountId)
+          const account = this.accountResolver(data)
+          data.changes = data.changes.filter((c) => account(c) !== accountId)
           for (const map of [data.snapshots, data.people, data.companies])
             for (const [id, item] of Object.entries(map))
               if (item.accountId === accountId) delete map[id]

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
+import { setImmediate as yieldMain } from 'node:timers/promises'
 import type { SourceScope } from '@repo/meetings-store/source-contract'
 import { sameScope } from '@repo/meetings-store/sources'
 import { isCalendarInvitees } from './calendar-context-normalization'
@@ -53,7 +55,37 @@ function reference<T>(map: Record<string, T>, id: string, kind: string): T {
 function sameAccount(a: string, b: string): void {
   if (a !== b) fail('account reference is invalid')
 }
-export function targetAccount(data: ContextFileV1, target: ContextTarget): string {
+type ReferenceIndex = {
+  events: Set<string>
+  identifiers: Set<string>
+  eventIdentifiers: Set<string>
+}
+const referenceKey = (...parts: string[]): string => JSON.stringify(parts)
+const emptyIndex = (): ReferenceIndex => ({
+  events: new Set(),
+  identifiers: new Set(),
+  eventIdentifiers: new Set()
+})
+function indexSnapshot(index: ReferenceIndex, snapshot: EventSnapshotV1): void {
+  index.events.add(referenceKey(snapshot.accountId, snapshot.eventId))
+  for (const invitee of snapshot.invitees)
+    if (invitee.identifierKey) {
+      index.identifiers.add(referenceKey(snapshot.accountId, invitee.identifierKey))
+      index.eventIdentifiers.add(
+        referenceKey(snapshot.accountId, snapshot.eventId, invitee.identifierKey)
+      )
+    }
+}
+function referenceIndex(data: ContextFileV1): ReferenceIndex {
+  const index = emptyIndex()
+  for (const snapshot of Object.values(data.snapshots)) indexSnapshot(index, snapshot)
+  return index
+}
+export function targetAccount(
+  data: ContextFileV1,
+  target: ContextTarget,
+  index?: ReferenceIndex
+): string {
   if (!contextObject(target)) return fail('target reference is invalid')
   if (target.kind === 'person') return reference(data.people, target.personId, 'person').accountId
   if (target.kind === 'company')
@@ -62,9 +94,7 @@ export function targetAccount(data: ContextFileV1, target: ContextTarget): strin
     target.kind !== 'event' ||
     !key(target.accountId, 'account') ||
     !key(target.eventId, 'event') ||
-    !Object.values(data.snapshots).some(
-      (s) => s.accountId === target.accountId && s.eventId === target.eventId
-    )
+    !(index ?? referenceIndex(data)).events.has(referenceKey(target.accountId, target.eventId))
   )
     return fail('event reference is invalid')
   return target.accountId
@@ -106,7 +136,8 @@ export function observationDigest(
 export function validateContextEdit(
   data: ContextFileV1,
   edit: ContextEdit,
-  previous = data.changes
+  previous = new Map(data.changes.map((c) => [c.id, c])),
+  index = referenceIndex(data)
 ): void {
   if (!contextObject(edit)) fail('change is invalid')
   const person = (id: string): ContextEntityV1 => reference(data.people, id, 'person')
@@ -131,27 +162,14 @@ export function validateContextEdit(
       if (!key(edit.eventId, 'event') || !identifier(edit.identifierKey))
         fail('exclusion is invalid')
       const account = person(edit.personId).accountId
-      if (
-        !Object.values(data.snapshots).some(
-          (s) =>
-            s.eventId === edit.eventId &&
-            s.accountId === account &&
-            s.invitees.some((i) => i.identifierKey === edit.identifierKey)
-        )
-      )
+      if (!index.eventIdentifiers.has(referenceKey(account, edit.eventId, edit.identifierKey)))
         fail('event reference is invalid')
       break
     }
     case 'set-rule':
       if (!key(edit.accountId, 'account') || !identifier(edit.identifierKey))
         fail('rule is invalid')
-      if (
-        !Object.values(data.snapshots).some(
-          (s) =>
-            s.accountId === edit.accountId &&
-            s.invitees.some((i) => i.identifierKey === edit.identifierKey)
-        )
-      )
+      if (!index.identifiers.has(referenceKey(edit.accountId, edit.identifierKey)))
         fail('rule observation reference is invalid')
       if (edit.personId !== null) sameAccount(person(edit.personId).accountId, edit.accountId)
       break
@@ -168,7 +186,7 @@ export function validateContextEdit(
         !hash(edit.originalHashAtLink)
       )
         fail('meeting reference is invalid')
-      const account = targetAccount(data, edit.target)
+      const account = targetAccount(data, edit.target, index)
       if (edit.snapshotId !== null) {
         const snapshot = reference(data.snapshots, edit.snapshotId, 'snapshot')
         sameAccount(account, snapshot.accountId)
@@ -180,7 +198,7 @@ export function validateContextEdit(
       break
     }
     case 'unlink-meeting':
-      if (!previous.some((c) => c.id === edit.linkChangeId && c.payload.op === 'link-meeting'))
+      if (previous.get(edit.linkChangeId)?.payload.op !== 'link-meeting')
         fail('link reference is invalid')
       break
     case 'rename':
@@ -198,10 +216,7 @@ export function validateContextEdit(
   }
 }
 
-export function validateContextFile(
-  value: unknown,
-  scope: SourceScope
-): asserts value is ContextFileV1 {
+function* validationSteps(value: unknown, scope: SourceScope): Generator<void> {
   if (!contextObject(value) || value.version !== 1) fail('version or document is unsupported')
   const data = value as unknown as ContextFileV1
   if (
@@ -220,6 +235,7 @@ export function validateContextFile(
     !Array.isArray(data.changes)
   )
     fail('schema is invalid')
+  const index = emptyIndex()
   for (const [id, s] of Object.entries(data.snapshots)) {
     if (
       !contextObject(s) ||
@@ -246,6 +262,8 @@ export function validateContextFile(
     if (s.eventDigest !== observationDigest(s)) fail('snapshot digest is invalid')
     if (s.invitees.some((i) => i.identifierKey && JSON.parse(i.identifierKey)[0] !== s.provider))
       fail('snapshot provider is invalid')
+    indexSnapshot(index, s)
+    yield
   }
   for (const entities of [data.people, data.companies])
     for (const [id, e] of Object.entries(entities)) {
@@ -259,9 +277,10 @@ export function validateContextFile(
         !contextDate(e.createdAt)
       )
         fail('entity schema is invalid')
+      yield
     }
   const seen = new Set<string>()
-  const previous: ContextChangeV1[] = []
+  const previous = new Map<string, ContextChangeV1>()
   let revision = 0
   for (const c of data.changes) {
     if (
@@ -277,13 +296,48 @@ export function validateContextFile(
       !(c.supersedes === null || seen.has(c.supersedes))
     )
       fail('change history is invalid')
-    validateContextEdit(data, c.payload, previous)
+    validateContextEdit(data, c.payload, previous, index)
     seen.add(c.id)
-    previous.push(c)
+    previous.set(c.id, c)
     revision = c.revision
+    yield
   }
 }
 
+/** Synchronous pure validator retained for small direct callers; same checks as the store path. */
+export function validateContextFile(
+  value: unknown,
+  scope: SourceScope
+): asserts value is ContextFileV1 {
+  const steps = validationSteps(value, scope)
+  while (!steps.next().done) {
+    /* complete all checks */
+  }
+}
+/** Bounded main work between yields; cancellation/root fences are rechecked after every suspension. */
+export async function validateContextFileAsync(
+  value: unknown,
+  scope: SourceScope,
+  assertCurrent: () => void
+): Promise<ContextFileV1> {
+  assertCurrent()
+  let deadline = performance.now() + 3
+  const steps = validationSteps(value, scope)
+  while (!steps.next().done) {
+    if (performance.now() >= deadline) {
+      await yieldMain()
+      assertCurrent()
+      deadline = performance.now() + 3
+    }
+  }
+  assertCurrent()
+  return value as ContextFileV1
+}
+
+export function contextAccountResolver(data: ContextFileV1): (target: ContextTarget) => string {
+  const index = referenceIndex(data)
+  return (target) => targetAccount(data, target, index)
+}
 export function foldContext(data: ContextFileV1): ContextView {
   const result: ContextView = { bindings: {}, self: {}, companies: {}, names: {}, links: [] }
   const removed = new Set<string>()
@@ -297,11 +351,17 @@ export function foldContext(data: ContextFileV1): ContextView {
     else if (p.op === 'link-meeting') result.links.push({ ...c, payload: p })
     else if (p.op === 'unlink-meeting') removed.add(p.linkChangeId)
   }
+  const byEvent = new Map<string, EventSnapshotV1[]>()
+  if (data.changes.some((c) => c.payload.op === 'exclude-person'))
+    for (const snapshot of Object.values(data.snapshots)) {
+      const rows = byEvent.get(snapshot.eventId) ?? []
+      rows.push(snapshot)
+      byEvent.set(snapshot.eventId, rows)
+    }
   for (const c of data.changes) {
     const p = c.payload
     if (p.op !== 'exclude-person') continue
-    for (const snapshot of Object.values(data.snapshots)) {
-      if (snapshot.eventId !== p.eventId) continue
+    for (const snapshot of byEvent.get(p.eventId) ?? []) {
       for (const invitee of snapshot.invitees) {
         const binding = result.bindings[snapshot.id]?.[invitee.id]
         if (invitee.identifierKey === p.identifierKey && binding?.personId === p.personId)
