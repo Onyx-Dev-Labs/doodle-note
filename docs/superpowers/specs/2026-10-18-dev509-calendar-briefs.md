@@ -150,7 +150,7 @@ Optional sidecar persistence failure must not interrupt an otherwise valid recor
 
 ## Shared DEV507 seam
 
-DEV507 and DEV509 design owners agreed on one main-owned `CitedAskService`. DEV509 does not implement another source ranker, prompt builder, inference engine, citation validator, source UI or Home-chat persistence path. The exact shared declarations are owned by [DEV507 DESIGN](./2026-10-18-dev507-cited-ask.md), sections “Exact additive contracts” and “Generation, freshness and lifecycle”; the following is the agreed caller shape (orchestration pseudocode, not product code):
+DEV507 and DEV509 design owners agreed on one main-owned `CitedAskService`. DEV509 does not implement another source ranker, prompt builder, inference engine, citation validator, source UI or Home-chat persistence path. The exact shared declarations are owned by [DEV507 DESIGN](./2026-10-18-dev507-cited-ask-design.md), sections “Exact additive contracts” and “Generation, freshness and lifecycle”; the following is the agreed caller shape (orchestration pseudocode, not product code):
 
 ```ts
 const request = {

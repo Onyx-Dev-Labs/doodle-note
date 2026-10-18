@@ -78,7 +78,9 @@ export class BriefService {
     }
   >()
   constructor(private readonly deps: BriefDependencies) {
-    this.unsubscribe = deps.calendar.subscribeBrief(() => this.invalidate())
+    this.unsubscribe = deps.calendar.subscribeBrief(() => {
+      void this.invalidate().catch(() => {})
+    })
   }
   private session(owner: string, sessionId: string): Session {
     const s = this.sessions.get(sessionId)
@@ -101,18 +103,21 @@ export class BriefService {
     return this.emit(s, { sessionId: s.id, state, message })
   }
   /** Synchronous admission revocation; producer cleanup continues through the shared cancel API. */
-  invalidate(): void {
+  async invalidate(): Promise<void> {
     this.cache.clear()
     this.cacheBytes = 0
     this.previews.clear()
+    const draining: Promise<unknown>[] = []
     for (const s of this.sessions.values()) {
       s.operation?.abort.abort()
       this.hide(s, 'stale', 'Local context changed. Refresh to check it again.')
-      if (s.operation) void this.deps.cited.cancel(this.ownerKey(s), s.operation.id).catch(() => {})
+      if (s.operation)
+        draining.push(this.deps.cited.cancel(this.ownerKey(s), s.operation.id), s.operation.done)
     }
+    await Promise.all(draining)
   }
   async refreshAll(): Promise<void> {
-    this.invalidate()
+    await this.invalidate()
     await Promise.all(
       [...this.sessions.values()].map((s) => this.refresh(s.owner, s.id).catch(() => {}))
     )
@@ -803,8 +808,9 @@ export class BriefService {
     await this.work(s, randomUUID(), async (c) => {
       const r = await this.resolve(s, c, false)
       c.assertCurrent()
-      preview = await this.deps.store.previewForget(r.snapshot.accountId, c)
+      const current = await this.deps.store.previewForget(r.snapshot.accountId, c)
       c.assertCurrent()
+      preview = current
       return structuredClone(s.view)
     })
     if (!preview) error('unavailable', 'Forget preview unavailable.')

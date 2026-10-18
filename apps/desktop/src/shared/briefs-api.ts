@@ -88,6 +88,7 @@ export interface BriefForgetPreview {
   changes: number
 }
 export interface BriefApi {
+  available(): Promise<boolean>
   open(eventId: string): Promise<BriefView>
   select(sessionId: string, selection: BriefSelection): Promise<BriefView>
   refresh(sessionId: string): Promise<BriefView>

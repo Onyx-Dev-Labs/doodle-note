@@ -76,7 +76,7 @@ function fixture(t: test.TestContext): Fixture {
       retrieveOriginalEvidence(context, selection),
     validateEvidence: async (manifest: Parameters<typeof validateOriginalEvidence>[1]) =>
       validateOriginalEvidence(context, manifest),
-    resolve: async (anchor: Parameters<typeof resolveOriginalSource>[1]) =>
+    resolveAcknowledged: async (anchor: Parameters<typeof resolveOriginalSource>[1]) =>
       resolveOriginalSource(context, anchor)
   }
   const cited = new MainCitedAskService({
@@ -374,4 +374,52 @@ test('an older concurrent Open cannot leave an orphan owned session', async (t) 
   const current = await second
   await f.briefs.closeOwner('window')
   await assert.rejects(f.briefs.refresh('window', current.sessionId), /owner/)
+})
+
+test('host invalidation clears display synchronously and waits for consumer cleanup without reinference', async (t) => {
+  const f = fixture(t)
+  const opened = await f.briefs.open('window', f.event.id)
+  let entered!: () => void
+  const ready = new Promise<void>((r) => {
+    entered = r
+  })
+  let release!: () => void
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  const run = f.cited.run.bind(f.cited)
+  f.cited.run = async (...args) => {
+    entered()
+    await held
+    return run(...args)
+  }
+  const generating = f.briefs.generate('window', opened.sessionId, 'held', {})
+  await ready
+  let drained = false
+  const invalidating = Promise.resolve(f.briefs.invalidate()).then(() => {
+    drained = true
+  })
+  assert.equal(f.views.at(-1)?.event, undefined)
+  assert.equal(f.views.at(-1)?.result, undefined)
+  await new Promise((r) => setImmediate(r))
+  try {
+    assert.equal(drained, false)
+  } finally {
+    release()
+  }
+  await invalidating
+  assert.equal((await generating).result, undefined)
+  assert.equal(f.generated(), 0)
+})
+
+test('a revoked forget preview cannot escape after its final await', async (t) => {
+  const f = fixture(t)
+  const opened = await f.briefs.open('window', f.event.id)
+  const preview = f.store.previewForget.bind(f.store)
+  f.store.previewForget = async (...args) => {
+    const result = await preview(...args)
+    f.disconnect()
+    return result
+  }
+  await assert.rejects(f.briefs.previewForget('window', opened.sessionId), /unavailable/)
 })
