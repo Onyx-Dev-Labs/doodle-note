@@ -34,14 +34,14 @@ export function recipeSource(
       !sameRecipeScope(owner as unknown as RecipeScope, scope)
     )
       throw new Error(
-        'This meeting belongs to a different or unsupported library scope. Recipes only use this local meeting.'
+        'This meeting belongs to a different or unsupported library scope. Fetches only use this local meeting.'
       )
   }
   // This base has no authoritative per-meeting export authorization API. Neither legacy
   // absence nor a null/null sourceScope proves permission to send shared/imported content.
   if (recipe.policy === 'explicit-cloud')
     throw new Error(
-      'Cloud recipes are unavailable for this source because export authorization cannot be verified. Save a local-only version to run on this device.'
+      'Cloud fetches are unavailable for this source because export authorization cannot be verified. Save a local-only version to run on this device.'
     )
   const inputKinds: string[] = []
   const inputs: Record<string, unknown> = {}

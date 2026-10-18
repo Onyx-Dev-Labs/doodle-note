@@ -147,7 +147,7 @@ test('actual run IPC rejects malformed request shapes before admission, inferenc
   for (const cloudConfirmed of [null, 'true', 1, {}]) invalid.push({ ...f.request, cloudConfirmed })
   for (const request of invalid) {
     const result = await service.invoke(api.RECIPE_CHANNELS.run, request)
-    assert.match(result.error ?? '', /valid recipe run/i, JSON.stringify(request))
+    assert.match(result.error ?? '', /valid fetch run/i, JSON.stringify(request))
     assert.equal(result.value, undefined)
     assert.equal(f.calls(), 0)
     assert.equal(f.admitted(), 0)
@@ -242,18 +242,18 @@ test('malformed persisted versions and artifacts reject read/list/save/complete 
       const before = JSON.stringify(data)
       writeFileSync(f.file, before)
       const label = `${path} = ${JSON.stringify(value)}`
-      assert.throws(() => f.store.read(), /Recipes could not be read/, label)
+      assert.throws(() => f.store.read(), /Fetches could not be read/, label)
       assert.match(
         (await service.invoke(api.RECIPE_CHANNELS.list, 'fixture')).error ?? '',
-        /Recipes could not be read/,
+        /Fetches could not be read/,
         label
       )
       assert.match(
         (await service.invoke(api.RECIPE_CHANNELS.save, f.scope, draft)).error ?? '',
-        /Recipes could not be read/,
+        /Fetches could not be read/,
         label
       )
-      assert.throws(() => f.store.complete(output), /Recipes could not be read/, label)
+      assert.throws(() => f.store.complete(output), /Fetches could not be read/, label)
       assert.equal(readFileSync(f.file, 'utf8'), before, label)
       assert.deepEqual(readdirSync(f.root).sort(), ['meetings', 'recipes-v1.json'])
     }
@@ -274,7 +274,7 @@ test('complete validates new artifacts and retry payloads before any write', asy
         change(broken, path.slice('outputs.0.'.length), value)
         assert.throws(
           () => f.store.complete(broken),
-          /Invalid recipe/,
+          /Invalid fetch/,
           `${path} = ${JSON.stringify(value)}`
         )
         assert.equal(readFileSync(f.file, 'utf8'), before)
@@ -322,7 +322,7 @@ test('actual save/list/cancel IPC rejects malformed arguments without changing t
   ])
     assert.match(
       (await service.invoke(api.RECIPE_CHANNELS.save, scope, draft)).error ?? '',
-      /Invalid recipe library scope/
+      /Invalid fetch library scope/
     )
   for (const value of [
     undefined,
@@ -368,7 +368,7 @@ test('duplicate stored identities and invalid generated model metadata cannot re
     duplicate[key].push(duplicate[key][0])
     const broken = JSON.stringify(duplicate)
     writeFileSync(f.file, broken)
-    assert.throws(() => f.store.save(draft), /Recipes could not be read/)
+    assert.throws(() => f.store.save(draft), /Fetches could not be read/)
     assert.equal(readFileSync(f.file, 'utf8'), broken)
   }
   writeFileSync(f.file, before)
@@ -383,7 +383,7 @@ test('duplicate stored identities and invalid generated model metadata cannot re
         modelRevision: modelRevision as string
       })
     )
-    await assert.rejects(runner.run({ ...f.request, runId: 'new-run' }, 1), /Invalid recipe output/)
+    await assert.rejects(runner.run({ ...f.request, runId: 'new-run' }, 1), /Invalid fetch result/)
     assert.equal(readFileSync(f.file, 'utf8'), before)
   }
   const completed = await f.runner.run({ ...f.request, runId: 'new-run' }, 1)

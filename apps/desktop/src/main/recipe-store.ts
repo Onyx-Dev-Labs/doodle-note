@@ -21,7 +21,7 @@ import {
 export function validateRecipe(value: unknown): RecipeDraft {
   if (!validRecipeDraft(value))
     throw new Error(
-      'Enter a recipe name and prompt, select at least one input, and choose a supported output and model policy.'
+      'Enter a fetch name and prompt, select at least one input, and choose a supported result format and model policy.'
     )
   return {
     name: value.name.trim(),
@@ -51,7 +51,7 @@ export class RecipeStore {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
         return { format: 1, versions: [], outputs: [] }
       throw new Error(
-        'Recipes could not be read. Restore recipes-v1.json from a backup; existing files were not replaced.',
+        'Fetches could not be read. Restore recipes-v1.json from a backup; existing files were not replaced.',
         { cause: error }
       )
     }
@@ -79,7 +79,7 @@ export class RecipeStore {
       ? data.versions.find((v) => v.versionId === parentVersionId)
       : undefined
     if (parentVersionId && !parent)
-      throw new Error('That recipe version is unavailable. Reload recipes.')
+      throw new Error('That fetch version is unavailable. Reload fetches.')
     const recipeId = parent && !duplicate ? parent.recipeId : randomUUID()
     const version: RecipeVersion = {
       ...valid,
@@ -104,7 +104,7 @@ export class RecipeStore {
         previous.meetingId !== output.meetingId ||
         previous.recipe.versionId !== output.recipe.versionId
       )
-        throw new Error('This run ID already belongs to another recipe output.')
+        throw new Error('This run ID already belongs to another fetch result.')
       return previous
     }
     data.outputs.push(output)

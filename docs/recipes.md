@@ -1,16 +1,21 @@
-# Single-meeting recipes (DEV-510)
+# Fetches (DEV-510)
 
-Meeting → Recipes creates a named local prompt with immutable versions. Saving edits
-adds a version; Duplicate creates a new recipe. Select any saved version and run it
-against this meeting's declared personal notes, transcript, and/or selected summary.
-Outputs are separate, retained artifacts. Export downloads Markdown with provenance;
-email output is an unsent draft. No action replaces an original or sends an email.
+Open **Meeting → Fetches**, choose **New fetch**, enter a name and instructions,
+then select **Create fetch**. Choose a saved version and select **Run fetch** to use
+this meeting's declared personal notes, transcript, and/or selected summary.
+**Save new version** retains earlier versions; Duplicate creates a new fetch.
+**Saved results** stay separate from original notes and summaries. Export downloads
+Markdown with provenance as `fetch-<run ID>.md`; email results are unsent drafts.
+No action replaces an original or sends an email.
+
+Fetches is the user-facing name. Internal recipe identifiers, JSON keys, IPC/API
+names, and `recipes-v1.json` remain unchanged; no data migration is needed.
 
 ## Storage and compatibility
 
 `<library>/recipes-v1.json` is an additive, versioned local file containing `versions`
 and completed `outputs`. Each output includes its unique run ID, complete immutable
-recipe snapshot, meeting ID, original-source SHA-256 revision, source scope and input
+fetch snapshot, meeting ID, original-source SHA-256 revision, source scope and input
 kinds, captured/start/completion timestamps, model ID/revision and Markdown. A repeated
 completed run ID returns that artifact, never a second generation. Explicit reruns
 have new IDs and retain previous outputs. Failed/canceled attempts commit nothing.
@@ -30,27 +35,27 @@ not an immutable provider snapshot; cloud execution is disabled as described bel
 Writes use a private temporary file, fsync, and atomic rename. Malformed/unsupported
 files fail visibly without resetting data. Runtime run identities, scope and confirmation
 are checked before job admission or generation. Reads and writes validate complete
-recipe versions and output snapshots, including model/source metadata, input kinds,
+fetch versions and output snapshots, including model/source metadata, input kinds,
 IDs and timestamps. Missing, null or wrongly typed required fields reject the whole
 file; they are never silently repaired or replaced. Unknown fields at every level
 are retained. A malformed artifact must be restored from a valid backup before
-recipes can be listed or saved; meeting originals remain usable and untouched.
-No recipe sync, backup-format migration, deletion or external integration is added.
+fetches can be listed or saved; meeting originals remain usable and untouched.
+No fetch sync, backup-format migration, deletion or external integration is added.
 The explicit `LIBRARY_ENTRIES` relocation allowlist includes `recipes-v1.json`;
 tests verify exact copy, restart and retained originals. Historical output scope is
 preserved after relocation or canonical identity initialization, not rewritten.
 Rollback can revert code while retaining the sidecar for later recovery. An older
-binary will ignore recipes, but its old relocation allowlist does not copy this new
+binary will ignore fetches, but its old relocation allowlist does not copy this new
 file: manually preserve it before relocating with an older binary.
 
 ## Pending editor saves
 
-Recipe preparation awaits the MeetingView text-save queue. Clean views issue no
+Fetch preparation awaits the MeetingView text-save queue. Clean views issue no
 meeting write, including missing-model and canceled runs. Genuine title/personal-note
 edits serialize through `meetings:save-notes` / `MeetingFileStore.updateText` before
-source capture. Failed saves stay pending and stop the recipe; concurrent flushes
+source capture. Failed saves stay pending and stop the fetch; concurrent flushes
 wait for the same write and drain newer edits. Edits during preparation cancel that
-recipe attempt. Discard waits for already-dispatched writes before deleting a draft.
+fetch attempt. Discard waits for already-dispatched writes before deleting a draft.
 
 This additive IPC accepts only `id`, optional string `title`, and optional string
 `rawNotesMarkdown`. It reads the latest raw original and changes only supplied text
@@ -76,11 +81,11 @@ Cancel bypasses that barrier, including a run queued behind relocation. Reload/c
 unmount, unsaved editor changes, timeout and explicit Cancel abort the producer and
 wait for cleanup. Existing summary/Ask busy ownership prevents concurrent model use.
 
-Recipes now read identity through `@repo/meetings-store/sources` using
+Fetches now read identity through `@repo/meetings-store/sources` using
 `localSourceScope(meetingsDir, false)` and compare all three scope fields with
 `sameScope`. The canonical root path remains a separate fence; the meetings directory
 is resolved to its realpath before identity lookup. Only the source-index worker
-initializes the canonical marker; recipe reads
+initializes the canonical marker; fetch reads
 never create a UUID/marker or a second identity writer. Legacy records without
 `sourceScope` remain eligible under local null/null scope; explicit mismatches,
 malformed markers and unreadable identities fail closed. A worker-created identity
@@ -94,10 +99,10 @@ missing models produce an actionable error with no network/provider fallback. No
 model download is triggered by Run. After model setup this path works without a
 network/account; native offline inference remains a manual qualification gate.
 
-Explicit-cloud versions may be stored, edited and duplicated, but **cloud recipe
+Explicit-cloud versions may be stored, edited and duplicated, but **cloud fetch
 execution is currently unavailable for every source**. This base has no trustworthy
 per-meeting export-authorization API. Missing provenance flags, a local sourceScope,
-sign-in, recipe policy, and per-run consent are not proof of export permission.
+sign-in, fetch policy, and per-run consent are not proof of export permission.
 Main rejects before selecting/calling a provider, and the UI explains how to save
 an on-device version. Enabling cloud requires a future authoritative authorization
 contract plus configured provider/data-policy and per-run consent; this PR does not
@@ -108,7 +113,7 @@ infer permission or introduce guessed provenance fields.
 Additive optional `NotesEngine.runBounded(system, prompt, control)` retains the entire
 request or rejects it before inference. It reuses DEV-505's actual local allocation,
 resolved chat wrapper/tokenizer, output reserve and conservative supported provider
-budget contracts. It never silently truncates the recipe or declared inputs. Limits,
+budget contracts. It never silently truncates the fetch or declared inputs. Limits,
 abort signals, output-limit failures and context disposal are preserved. Built-in
 summary templates, global Ask assembly and auto-generate-after-Stop are unchanged.
 
@@ -137,7 +142,9 @@ distinct from the index projection revision and does not become a citation.
 Generation adapter tests cover Unicode/exact boundaries, missing policy, unsupported/oversized
 models, exact wire input/output reserve and allocated local context cleanup.
 
-The real RecipePanel was exercised in an isolated browser fixture with synthetic IPC
+The following historical component evidence predates the Fetches wording change;
+its screenshots retain the earlier Recipes labels. The real RecipePanel was exercised
+in an isolated browser fixture with synthetic IPC
 (no native inference): create, edit into v2, duplicate, missing-model error/retry,
 successful output display and Markdown/provenance download. At 1280×1000 light and
 480×1100 dark, labels/readable states fit without horizontal overflow; Tab moves from
@@ -153,7 +160,7 @@ Check this in an isolated synthetic desktop profile:
 DOODLE_USER_DATA=/tmp/doodlenote-dev510-qa pnpm --filter desktop dev
 ```
 
-- With a cached on-device model, create/edit/duplicate a recipe, restart, select v1,
+- With a cached on-device model, create/edit/duplicate a fetch, restart, select v1,
   run offline, rerun, and export. Previous outputs and original notes/transcript/
   selected summary must remain intact; provenance must identify the chosen version.
 - Cancel during preparation and decoding, then retry after cleanup. Edit source text
@@ -161,7 +168,7 @@ DOODLE_USER_DATA=/tmp/doodlenote-dev510-qa pnpm --filter desktop dev
   actionable errors without a hosted request or incomplete artifact.
 - Select explicit-cloud: save succeeds, run is unavailable with use-local guidance.
   Repeat with global Settings configured for cloud; local-only still stays on device.
-- Move the library with the existing relocation UI and restart; recipe versions,
+- Move the library with the existing relocation UI and restart; fetch versions,
   outputs and originals must survive. Test keyboard focus, narrow/wide and light/dark
   layouts in the actual MeetingView, then verify ordinary Stop auto-summary behavior.
 

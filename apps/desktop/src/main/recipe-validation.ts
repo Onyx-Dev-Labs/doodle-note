@@ -43,7 +43,7 @@ export function assertRecipeRun(value: unknown): asserts value is RecipeRun {
     (value.cloudConfirmed !== undefined && typeof value.cloudConfirmed !== 'boolean')
   )
     throw new Error(
-      'A valid recipe run needs meeting, version and run IDs, a current library scope, and boolean confirmation when supplied.'
+      'A valid fetch run needs meeting, version and run IDs, a current library scope, and boolean confirmation when supplied.'
     )
 }
 export function validRecipeDraft(value: unknown): value is RecipeDraft {
@@ -98,12 +98,12 @@ export function assertRecipeOutput(value: unknown): asserts value is RecipeOutpu
     !timestamp(value.completedAt) ||
     typeof value.markdown !== 'string'
   )
-    throw new Error('Invalid recipe output metadata. No output was saved.')
+    throw new Error('Invalid fetch result metadata. No result was saved.')
   const recipe = value.recipe
   const kinds = value.source.inputKinds
   const selected = inputKeys.filter((key) => recipe.inputs[key])
   if (kinds.length !== selected.length || !selected.every((key) => kinds.includes(key)))
-    throw new Error('Invalid recipe output inputs. No output was saved.')
+    throw new Error('Invalid fetch result inputs. No result was saved.')
 }
 export interface RecipeFile {
   format: 1
@@ -119,13 +119,13 @@ export function assertRecipeFile(value: unknown): asserts value is RecipeFile {
     !Array.isArray(value.versions) ||
     !Array.isArray(value.outputs)
   )
-    throw new Error('Invalid recipe file format')
+    throw new Error('Invalid fetch file format')
   for (const version of value.versions)
-    if (!validVersion(version)) throw new Error('Invalid recipe version metadata')
+    if (!validVersion(version)) throw new Error('Invalid fetch version metadata')
   for (const output of value.outputs) assertRecipeOutput(output)
   if (
     new Set(value.versions.map((version) => version.versionId)).size !== value.versions.length ||
     new Set(value.outputs.map((output) => output.runId)).size !== value.outputs.length
   )
-    throw new Error('Invalid recipe file: duplicate version or run IDs')
+    throw new Error('Invalid fetch file: duplicate version or run IDs')
 }

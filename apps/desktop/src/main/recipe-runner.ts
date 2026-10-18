@@ -38,7 +38,7 @@ export class RecipeRunner {
     this.available()
     const fence = recipeLibrary(this.root())
     if (expected && !sameRecipeScope(fence.scope, expected))
-      throw new Error('The library changed. Reload recipes before retrying.')
+      throw new Error('The library changed. Reload fetches before retrying.')
     return fence
   }
   list(meetingId: string): RecipeList {
@@ -72,12 +72,12 @@ export class RecipeRunner {
     parent?: string,
     duplicate?: boolean
   ): RecipeVersion {
-    if (!validRecipeScope(scope)) throw new Error('Invalid recipe library scope. Reload recipes.')
+    if (!validRecipeScope(scope)) throw new Error('Invalid fetch library scope. Reload fetches.')
     if (
       (parent !== undefined && (typeof parent !== 'string' || !parent)) ||
       (duplicate !== undefined && typeof duplicate !== 'boolean')
     )
-      throw new Error('Invalid recipe save request.')
+      throw new Error('Invalid fetch save request.')
     const fence = this.fence(scope)
     return new RecipeStore(fence.path).save(draft, parent, duplicate)
   }
@@ -97,7 +97,7 @@ export class RecipeRunner {
           const store = new RecipeStore(initial.path)
           const data = store.read()
           const recipe = data.versions.find((v) => v.versionId === request.versionId)
-          if (!recipe) throw new Error('That recipe version is unavailable. Reload recipes.')
+          if (!recipe) throw new Error('That fetch version is unavailable. Reload fetches.')
           const source = recipeSource(initial.path, request.meetingId, recipe, initial.scope)
           const previous = data.outputs.find((o) => o.runId === request.runId)
           if (previous) {
@@ -111,7 +111,7 @@ export class RecipeRunner {
           }
           if (recipe.policy === 'explicit-cloud' && request.cloudConfirmed !== true)
             throw new Error(
-              'Confirm sending these selected meeting inputs to your configured provider for this run, or choose a local-only recipe.'
+              'Confirm sending these selected meeting inputs to your configured provider for this run, or choose a local-only fetch.'
             )
           const startedAt = new Date().toISOString()
           const result = await this.generate(

@@ -650,7 +650,7 @@ export class NotesService {
         (this.settings.engineChoice !== 'cloud' || !this.settings.cloud)
       )
         throw new Error(
-          'Select and authorize a cloud provider in Settings, or choose a local-only recipe. No fallback was used.'
+          'Select and authorize a cloud provider in Settings, or choose a local-only fetch. No fallback was used.'
         )
       const settingsBefore = JSON.stringify(this.settings)
       const engine = await this.pickEngine(true, policy === 'local-only')
@@ -658,7 +658,7 @@ export class NotesService {
       if (settingsBefore !== JSON.stringify(this.settings))
         throw new Error('Model settings changed. Retry with the current settings.')
       if (!engine.runBounded)
-        throw new Error('This model does not support bounded recipe generation.')
+        throw new Error('This model does not support bounded fetch generation.')
       const revision = (): string => {
         if (!engine.id.startsWith('local:')) return `provider-model:${engine.id}`
         if (!this.localEnginePath) throw new Error('Local model path is unavailable.')

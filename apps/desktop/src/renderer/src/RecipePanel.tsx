@@ -21,7 +21,7 @@ function exportOutput(output: RecipeOutput): void {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
-  link.download = `recipe-${output.runId}.md`
+  link.download = `fetch-${output.runId}.md`
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
@@ -129,7 +129,7 @@ export default function RecipePanel({
     if (!list || !selected || dirty) return
     setBusy(true)
     setError('')
-    setStatus('Preparing recipe…')
+    setStatus('Preparing fetch…')
     const epoch = ++generation.current
     const runId = attempts.current.begin(JSON.stringify([meetingId, selected, list.scope]))
     run.current = runId
@@ -140,7 +140,7 @@ export default function RecipePanel({
       void window.recipes.cancel({ meetingId, runId })
       setStatus(
         reason === 'edited'
-          ? 'Meeting edited. Canceling recipe…'
+          ? 'Meeting edited. Canceling fetch…'
           : 'Canceling; waiting for model cleanup…'
       )
     })
@@ -148,10 +148,10 @@ export default function RecipePanel({
       await flushLibrarySaves()
       if (invalidated || epoch !== generation.current) {
         if (epoch === generation.current)
-          setStatus('Recipe canceled before generation. You can retry.')
+          setStatus('Fetch canceled before generation. You can retry.')
         return
       }
-      setStatus('Running recipe. Originals are preserved.')
+      setStatus('Running fetch. Originals are preserved.')
       const output = unwrap(
         await window.recipes.run({ meetingId, runId, versionId: selected, library: list.scope })
       )
@@ -165,12 +165,12 @@ export default function RecipePanel({
             }
           : current
       )
-      setStatus(`Saved output from ${output.recipe.name} v${output.recipe.version}.`)
+      setStatus(`Saved result from ${output.recipe.name} v${output.recipe.version}.`)
     } catch (e) {
       if (epoch === generation.current) {
         setError(e instanceof Error ? e.message : String(e))
         setStatus(
-          'Run did not return a result. Retry to recover this attempt; previous outputs are retained.'
+          'Run did not return a result. Retry to recover this attempt; previous results are retained.'
         )
       }
     } finally {
@@ -183,25 +183,25 @@ export default function RecipePanel({
     }
   }
   return (
-    <section className="recipe-panel" aria-label="Meeting recipes">
+    <section className="recipe-panel" aria-label="Meeting fetches">
       <button
         type="button"
         className="recipe-toggle"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        Recipes <span>{open ? '−' : '+'}</span>
+        Fetches <span>{open ? '−' : '+'}</span>
       </button>
       {open && (
         <div className="recipe-body">
           <p className="models-sub">
-            Reusable prompts for this meeting. Outputs stay separate from your notes and summary.
-            Email drafts are never sent.
+            Reusable prompts to find answers in this meeting. Results stay separate from your notes
+            and summary. Email drafts are never sent.
           </p>
           <label>
-            Recipe version
+            Fetch version
             <select value={selected} disabled={busy} onChange={(e) => select(e.target.value)}>
-              <option value="">New recipe</option>
+              <option value="">New fetch</option>
               {list?.versions.map((v) => (
                 <option key={v.versionId} value={v.versionId}>
                   {v.name} · v{v.version}
@@ -210,7 +210,7 @@ export default function RecipePanel({
             </select>
           </label>
           <fieldset disabled={busy}>
-            <legend>Recipe configuration</legend>
+            <legend>Fetch configuration</legend>
             <label>
               Name
               <input
@@ -230,7 +230,7 @@ export default function RecipePanel({
             </label>
             <div className="recipe-grid">
               <label>
-                Output kind
+                Result format
                 <select
                   value={draft.outputKind}
                   onChange={(e) =>
@@ -276,10 +276,10 @@ export default function RecipePanel({
                 onClick={() => void save()}
                 disabled={!list || !draft.name.trim() || !draft.prompt.trim()}
               >
-                {selected ? 'Save new version' : 'Create recipe'}
+                {selected ? 'Save new version' : 'Create fetch'}
               </button>
               <button type="button" disabled={!selected} onClick={() => void save(true)}>
-                Duplicate as new recipe
+                Duplicate as new fetch
               </button>
             </div>
           </fieldset>
@@ -291,7 +291,7 @@ export default function RecipePanel({
           )}
           {dirty && <p>Save a new version or select a saved version before running.</p>}
           {disabled && (
-            <p>Stop recording and wait for transcription to finish before running a recipe.</p>
+            <p>Stop recording and wait for transcription to finish before running a fetch.</p>
           )}
           <div className="recipe-actions">
             <button
@@ -305,7 +305,7 @@ export default function RecipePanel({
               }
               onClick={() => void execute()}
             >
-              Run selected version
+              Run fetch
             </button>
             {running && (
               <button
@@ -326,8 +326,8 @@ export default function RecipePanel({
               {error}
             </p>
           )}
-          <h3>Saved outputs</h3>
-          {!list?.outputs.length && <p>No recipe outputs yet.</p>}
+          <h3>Saved results</h3>
+          {!list?.outputs.length && <p>No fetch results yet.</p>}
           {[...(list?.outputs ?? [])].reverse().map((o) => (
             <details className="recipe-output" key={o.runId}>
               <summary>
