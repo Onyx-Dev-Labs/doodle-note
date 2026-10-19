@@ -1,0 +1,17 @@
+ 1:  9523cae =  1:  ba79b3b feat: preserve bounded calendar invitee observations for local briefs
+ 2:  ffb8e11 =  2:  6023aa8 feat: persist local calendar provenance with fenced accepted starts
+ 3:  3fe887e =  3:  5649856 fix: retain occurrence corrections and yield dense context validation
+ 4:  906cd0a =  4:  4fb4008 feat: orchestrate explicit brief sessions through the shared cited service
+ 5:  cdb19dc =  5:  9af7071 feat: fence brief IPC ownership and calendar session invalidation
+ 6:  6ffa96b =  6:  1972176 feat: nominate brief history from shared original evidence with byte fences
+ 7:  6de4331 =  7:  76540a7 fix: fence final brief admission and retain closing operation drains
+ 8:  c1c3aa9 =  8:  c11ace1 feat: integrate local calendar briefs with shared host and owned playback
+ 9:  b0a6a95 =  9:  cb2daa7 test: record isolated brief renderer scenarios and delivery boundaries
+10:  4e51307 = 10:  cc75347 docs: record combined lint verification after shared annotation fix
+11:  860e87d = 11:  484228a test: freeze 24 synthetic brief scenarios before native evaluation
+12:  db7ceb4 = 12:  18983b3 test: prepare real-service brief evaluator without running inference
+13:  0c60309 = 13:  fd457be docs: retain frozen brief mechanical evidence without native qualification
+14:  d8c9644 = 14:  eb73c24 fix: preserve evaluator accounting at the startup signal boundary
+15:  8230951 = 15:  c9e4575 docs: clarify evaluator first-signal cleanup guarantee
+16:  0af05b8 = 16:  96b7f2f test: verify brief shared prompt policy admission and cache reuse
+17:  e1cabc8 = 17:  cc290d6 docs: record combined software integration of shared grammar candidate
