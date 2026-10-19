@@ -1,0 +1,109 @@
+{
+  "attemptId": "dev507-quality-annby45k",
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "evidenceHead": "5481a4f8ee3e480819c525e52b55f308ab7c452a",
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02",
+    "conflict-01",
+    "unknown-01"
+  ],
+  "samplingOrder": [
+    {
+      "arm": "qwen",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "qwen",
+      "id": "unknown-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-04"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01"
+    }
+  ],
+  "cases": [
+    {
+      "arm": "qwen",
+      "id": "conflict-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "qwen",
+      "id": "unknown-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "unperformed"
+    }
+  ]
+}

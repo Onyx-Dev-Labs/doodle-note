@@ -1,0 +1,14 @@
+{
+  "rawRoot": "/private/tmp/dev507-quality-annby45k",
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "evidenceStartingHead": "5481a4f8ee3e480819c525e52b55f308ab7c452a",
+  "runnerSha256": "51874b028498b24275541bc03e467ac50694a04ab194aa4fb99a60c5f509c2d1",
+  "freezeSha256": "9e6f0e3e62c0c525ac8499b0f2fda1209eebefdd33c6cb3e17e4d1a6894594f0",
+  "packetSha256": "e2835a5f620afc6130308d2af346d52856040e17da3eb50385a0e2ad63b0efce",
+  "modelSha256": "15b8fd9d8672cd4240c178c217ca781409291f34e353d2e913b29c7602ceb3ff",
+  "actualNativeGenerations": 2,
+  "gemmaNativeGenerations": 0,
+  "counterAdjudication": "attempt-adjudication.json",
+  "decision": "Stopped observer failure; offline production wrapper omission prevents QA-only successor. No Quality capability conclusion; separately authorized production fix follows.",
+  "productionGate": "OFF"
+}
