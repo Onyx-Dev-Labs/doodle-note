@@ -1,3 +1,4 @@
+import { BRIEFS_INVOKE, BRIEFS_STATE, BRIEFS_WARNING, type BriefApi } from '../shared/briefs-api'
 import * as homeCited from '../shared/home-cited-api'
 import { RECIPE_CHANNELS, type RecipesApi } from '../shared/recipes-api'
 import {
@@ -313,6 +314,29 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => {
     ipcRenderer.removeListener(channel, listener)
   }
+}
+
+const briefInvoke = <T>(method: string, ...args: unknown[]): Promise<T> =>
+  ipcRenderer.invoke(BRIEFS_INVOKE, { method, args })
+const briefsApi: BriefApi = {
+  available: (...args) => briefInvoke('available', ...args),
+  open: (...args) => briefInvoke('open', ...args),
+  select: (...args) => briefInvoke('select', ...args),
+  refresh: (...args) => briefInvoke('refresh', ...args),
+  generate: (...args) => briefInvoke('generate', ...args),
+  edit: (...args) => briefInvoke('edit', ...args),
+  candidates: (...args) => briefInvoke('candidates', ...args),
+  link: (...args) => briefInvoke('link', ...args),
+  previewHistory: (...args) => briefInvoke('previewHistory', ...args),
+  applyHistory: (...args) => briefInvoke('applyHistory', ...args),
+  previewForget: (...args) => briefInvoke('previewForget', ...args),
+  forget: (...args) => briefInvoke('forget', ...args),
+  citation: (...args) => briefInvoke('citation', ...args),
+  play: (...args) => briefInvoke('play', ...args),
+  cancel: (...args) => briefInvoke('cancel', ...args),
+  close: (...args) => briefInvoke('close', ...args),
+  onState: (listener) => subscribe(BRIEFS_STATE, listener),
+  onWarning: (listener) => subscribe(BRIEFS_WARNING, listener)
 }
 
 const homeCitedApi: homeCited.HomeCitedApi = {
@@ -732,6 +756,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
     contextBridge.exposeInMainWorld('citedAsk', homeCitedApi)
+    contextBridge.exposeInMainWorld('briefs', briefsApi)
     contextBridge.exposeInMainWorld('recipes', recipesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('sources', {
@@ -786,7 +811,11 @@ if (process.contextIsolated) {
   window.audio = audioApi
   // @ts-ignore (defined in index.d.ts)
   window.importer = importerApi
-  Object.assign(window, { textImporter: textImporterApi, citedAsk: homeCitedApi })
+  Object.assign(window, {
+    textImporter: textImporterApi,
+    citedAsk: homeCitedApi,
+    briefs: briefsApi
+  })
   // @ts-ignore (defined in index.d.ts)
   window.wizard = wizardApi
   // @ts-ignore (defined in index.d.ts)

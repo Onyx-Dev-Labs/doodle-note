@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.web.json",
+  "compilerOptions": { "composite": false, "types": ["vite/client", "node"] },
+  "include": ["*.tsx", "*.mts", "../../src/preload/index.d.ts", "../../src/renderer/src/env.d.ts"]
+}

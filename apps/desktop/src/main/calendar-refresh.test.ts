@@ -13,6 +13,7 @@ import {
 import { CalendarAccountStore } from './calendar-account-store'
 import { scopeCalendar, scopeEvent } from './calendar-identity'
 import { CalendarRequestError } from './calendar-http'
+import type { TrustedCalendarObservation } from './calendar-start-context'
 const require = createRequire(import.meta.url)
 const loader = require('node:module') as { _load: (id: string, ...args: unknown[]) => unknown }
 const originalLoad = loader._load
@@ -57,6 +58,12 @@ interface Fixture {
   lastSyncIso?: string
   refreshEvents(): Promise<void>
   restoreSnapshots(): void
+  resolveBrief(eventId: string): TrustedCalendarObservation | null
+  subscribeBrief(listener: () => void): () => void
+  broadcastState(): void
+  dispose(): void
+  prefs: { showNoParticipants: boolean; visibleCalendarIds: string[] | null }
+  selectionGeneration: number
 }
 function fixture(t: TestContext, providers: CalendarProvider[] = ['google', 'microsoft']): Fixture {
   const dir = mkdtempSync(join(tmpdir(), 'calendar-refresh-'))
@@ -95,7 +102,10 @@ function fixture(t: TestContext, providers: CalendarProvider[] = ['google', 'mic
     prefs: { ...DEFAULT_CALENDAR_PREFS },
     restoreErrors: {},
     checkMeetingStarts: () => {},
-    broadcastState: () => {}
+    broadcast: () => {},
+    pollTimer: null,
+    watchTimer: null,
+    authGeneration: 0
   }) as Fixture
   s.restoreSnapshots()
   return s
@@ -203,4 +213,75 @@ test('provider Retry-After suppresses subsequent refresh attempts without blocki
   await s.refreshEvents()
   assert.equal(calls, 1)
   assert.equal(s.rawEvents.find((e) => e.accountId === healthy!.id)?.subject, 'Updated')
+})
+
+test('brief observations are cached only, account-specific, and fenced against content, selection and connection lifetimes', (t) => {
+  const s = fixture(t, ['google', 'google', 'microsoft', 'microsoft'])
+  for (const event of s.rawEvents) {
+    const observation = s.resolveBrief(event.id)!
+    assert.ok(observation)
+    assert.equal(observation.event.accountId, event.accountId)
+    assert.equal(observation.lastSyncIso, oldSync)
+    observation.assertCurrent()
+    observation.event.subject = 'Mutated caller copy'
+    assert.equal(s.resolveBrief(event.id)?.event.subject, 'Fixture')
+    observation.assertCurrent()
+  }
+  const event = s.rawEvents[0]!
+  const beforeContent = s.resolveBrief(event.id)!
+  event.subject = 'Changed while open'
+  assert.throws(beforeContent.assertCurrent, /changed/)
+  const beforeSelection = s.resolveBrief(event.id)!
+  s.selectionGeneration++
+  assert.throws(beforeSelection.assertCurrent, /changed/)
+  const beforeHide = s.resolveBrief(event.id)!
+  s.prefs.visibleCalendarIds = [s.rawEvents[1]!.calendarId]
+  assert.equal(s.resolveBrief(event.id), null)
+  assert.throws(beforeHide.assertCurrent, /changed/)
+  s.prefs.visibleCalendarIds = null
+  const beforeReconnect = s.resolveBrief(event.id)!
+  const entry = s.accounts.get(event.accountId!)!
+  s.accounts.put(entry.identity, { email: entry.view.email }, 'new synthetic credential', true)
+  assert.throws(beforeReconnect.assertCurrent, /changed/)
+  const beforeSource = s.resolveBrief(event.id)!
+  s.sources.set(event.accountId!, { ...s.sources.get(event.accountId!)! })
+  assert.throws(beforeSource.assertCurrent, /changed/)
+  const beforeRemoval = s.resolveBrief(event.id)!
+  s.accounts.remove(event.accountId!)
+  assert.equal(s.resolveBrief(event.id), null)
+  assert.throws(beforeRemoval.assertCurrent, /changed/)
+})
+
+test('brief subscriptions dispose independently, failed sync retains stale context, and disposal revokes observations', (t) => {
+  const s = fixture(t, ['google'])
+  const event = s.rawEvents[0]!
+  let changes = 0
+  const off = s.subscribeBrief(() => {
+    changes++
+  })
+  const throwing = s.subscribeBrief(() => {
+    throw new Error('optional observer')
+  })
+  const before = s.resolveBrief(event.id)!
+  s.syncState.set(event.accountId!, { syncing: false, error: 'offline', lastSyncIso: oldSync })
+  assert.doesNotThrow(() => s.broadcastState())
+  assert.equal(changes, 1)
+  assert.throws(before.assertCurrent, /changed/)
+  const stale = s.resolveBrief(event.id)!
+  assert.equal(stale.event.stale, true)
+  assert.equal(stale.lastSyncIso, oldSync)
+  stale.assertCurrent()
+  off()
+  throwing()
+  s.broadcastState()
+  assert.equal(changes, 1)
+  s.subscribeBrief(() => {
+    changes++
+  })
+  s.dispose()
+  assert.equal(changes, 2)
+  assert.equal(s.resolveBrief(event.id), null)
+  assert.throws(stale.assertCurrent, /changed/)
+  s.broadcastState()
+  assert.equal(changes, 2)
 })

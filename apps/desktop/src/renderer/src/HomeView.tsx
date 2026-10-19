@@ -174,10 +174,12 @@ function SlidersIcon(): React.JSX.Element {
 function ComingUpCard({
   calendar,
   onStart,
+  onOpenBrief,
   onOpenSettings
 }: {
   calendar: CalendarState | null
   onStart: (event: CalendarEvent) => void
+  onOpenBrief?: (eventId: string) => void
   onOpenSettings: () => void
 }): React.JSX.Element {
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -331,6 +333,15 @@ function ComingUpCard({
                             )}
                           </span>
                         </span>
+                        {onOpenBrief && (
+                          <button
+                            type="button"
+                            className="cu-take-notes"
+                            onClick={() => onOpenBrief(event.id)}
+                          >
+                            Open brief
+                          </button>
+                        )}
                         {canTakeNotes && (
                           <button
                             type="button"
@@ -364,6 +375,7 @@ export default function HomeView({
   search,
   calendar,
   onStartCalendarMeeting,
+  onOpenBrief,
   onOpenMeeting,
   onNewMeeting,
   onNewNote,
@@ -376,6 +388,7 @@ export default function HomeView({
   search: string
   calendar: CalendarState | null
   onStartCalendarMeeting: (event: CalendarEvent) => void
+  onOpenBrief?: (eventId: string) => void
   onOpenMeeting: (id: string) => void
   onNewMeeting: () => void
   onNewNote: () => void
@@ -898,6 +911,7 @@ export default function HomeView({
             <ComingUpCard
               calendar={calendar}
               onStart={onStartCalendarMeeting}
+              onOpenBrief={onOpenBrief}
               onOpenSettings={onOpenSettings}
             />
           )}

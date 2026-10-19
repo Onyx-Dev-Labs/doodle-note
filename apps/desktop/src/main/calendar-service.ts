@@ -1,3 +1,5 @@
+import type { TrustedCalendarObservation } from './calendar-start-context'
+import { normalizeCalendarInvitees } from './calendar-context-normalization'
 import { CalendarAuthLoopback } from './calendar-auth-loopback'
 import { calendarPages, CalendarRequestError, mapCalendarTasks } from './calendar-http'
 import { BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
@@ -204,6 +206,7 @@ export class CalendarService {
   get refreshBusy(): boolean {
     return !!this.refreshWork
   }
+  private briefListeners?: Set<() => void>
   private disposed = false
 
   /** Boot-time account restore; IPC handlers await this before answering. */
@@ -299,6 +302,69 @@ export class CalendarService {
       : null
   }
 
+  /** Local snapshot only: opening a brief never refreshes a provider or changes consent. */
+  resolveBrief(eventId: string): TrustedCalendarObservation | null {
+    const currentEvent = (): CalendarEvent | undefined => {
+      if (this.disposed) return undefined
+      const event = this.visibleEvents().find((e) => e.id === eventId)
+      if (!event?.accountId || !event.provider || Date.parse(event.endIso) <= Date.now())
+        return undefined
+      const account = this.accounts.get(event.accountId)
+      const source = this.sources.get(event.accountId)
+      const calendar = this.allCalendars().find((c) => c.id === event.calendarId)
+      if (
+        !account ||
+        !source ||
+        source.provider !== event.provider ||
+        account.identity.provider !== event.provider ||
+        calendar?.accountId !== event.accountId
+      )
+        return undefined
+      return event
+    }
+    const event = currentEvent()
+    if (!event?.accountId) return null
+    const accountId = event.accountId
+    const epoch = this.accounts.epoch(accountId)
+    const source = this.sources.get(accountId)
+    const selection = this.selectionGeneration
+    const lastSyncIso = this.syncState.get(accountId)?.lastSyncIso ?? null
+    const content = JSON.stringify(event)
+    return {
+      event: structuredClone(event),
+      lastSyncIso,
+      assertCurrent: () => {
+        if (
+          !this.accounts.current(accountId, epoch) ||
+          this.sources.get(accountId) !== source ||
+          selection !== this.selectionGeneration ||
+          JSON.stringify(currentEvent()) !== content ||
+          (this.syncState.get(accountId)?.lastSyncIso ?? null) !== lastSyncIso
+        )
+          throw Object.assign(new Error('Calendar observation changed.'), { code: 'stale' })
+      }
+    }
+  }
+
+  subscribeBrief(listener: () => void): () => void {
+    if (this.disposed) throw new Error('Calendar service is disposed.')
+    this.briefListeners ??= new Set()
+    this.briefListeners.add(listener)
+    return () => {
+      this.briefListeners?.delete(listener)
+    }
+  }
+
+  private notifyBriefs(): void {
+    for (const listener of this.briefListeners ?? []) {
+      try {
+        listener()
+      } catch {
+        /* Optional briefs never interrupt calendar/capture behavior. */
+      }
+    }
+  }
+
   registerIpc(): void {
     const handle = (
       channel: string,
@@ -369,6 +435,8 @@ export class CalendarService {
 
   dispose(): void {
     this.disposed = true
+    this.notifyBriefs()
+    this.briefListeners?.clear()
     this.cancelAuth()
     for (const controller of this.inflight.values()) controller.abort()
     for (const source of this.sources.values()) source.google?.cancelPending()
@@ -433,6 +501,7 @@ export class CalendarService {
   }
 
   private broadcastState(): void {
+    this.notifyBriefs()
     this.updateMenuBarState()
     this.broadcast(CALENDAR_EVENTS_CHANNEL, this.state())
   }
@@ -1492,6 +1561,7 @@ function normalizeGraphEvent(item: unknown, calendar: CalendarInfo): CalendarEve
   const attendeeCount = Array.isArray(raw.attendees) ? raw.attendees.length : 0
 
   return {
+    invitees: normalizeCalendarInvitees('microsoft', raw),
     id: raw.id,
     subject: typeof raw.subject === 'string' ? raw.subject : '',
     startIso,
