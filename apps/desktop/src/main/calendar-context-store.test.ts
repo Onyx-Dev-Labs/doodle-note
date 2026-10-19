@@ -1,6 +1,7 @@
 import type { CalendarEvent } from '../shared/calendar-api'
 import type { SourceScope } from '@repo/meetings-store/source-contract'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { test } from 'node:test'
 import {
   mkdtempSync,
@@ -144,8 +145,92 @@ test('snapshot reuse ignores observation time; corrections/rules retain immutabl
     person.entity.id
   )
   assert.deepEqual(saved.scope, f.scope)
-  assert.equal(statSync(join(f.root, CONTEXT_FILE)).mode & 0o777, 0o600)
+  // Windows mode bits do not express owner/group/other access; test its DACL below.
+  if (process.platform !== 'win32')
+    assert.equal(statSync(join(f.root, CONTEXT_FILE)).mode & 0o777, 0o600)
 })
+
+test(
+  'Windows context creation and atomic replacement inherit the restricted library DACL',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const f = fixture(t)
+    const powershell = (script: string): void => {
+      // Paths are data, never interpolated into shell code. Only this test-owned root changes.
+      execFileSync(
+        'powershell.exe',
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-EncodedCommand',
+          Buffer.from(`$ErrorActionPreference = 'Stop'\n${script}`, 'utf16le').toString('base64')
+        ],
+        {
+          env: { ...process.env, DEV509_ACL_FIXTURE_ROOT: f.root },
+          timeout: 30_000,
+          stdio: 'pipe'
+        }
+      )
+    }
+    const identity = `
+      $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+      $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+      $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+      $allow = [System.Security.AccessControl.AccessControlType]::Allow
+    `
+    try {
+      powershell(`${identity}
+        $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+          $sid, $full, $inherit, [System.Security.AccessControl.PropagationFlags]::None, $allow))
+        Set-Acl -LiteralPath $env:DEV509_ACL_FIXTURE_ROOT -AclObject $acl
+        $actual = Get-Acl -LiteralPath $env:DEV509_ACL_FIXTURE_ROOT
+        $rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        if (-not $actual.AreAccessRulesProtected -or $rules.Count -ne 1) {
+          throw 'Synthetic root must have exactly one protected explicit access rule'
+        }
+        $rule = $rules[0]
+        if ($rule.IdentityReference.Value -ne $sid.Value -or $rule.IsInherited -or
+            $rule.AccessControlType -ne $allow -or $rule.FileSystemRights -ne $full -or
+            $rule.InheritanceFlags -ne $inherit -or $rule.PropagationFlags -ne 'None') {
+          throw 'Synthetic root must grant only the current test user inheritable FullControl'
+        }
+      `)
+      const assertInherited = (): void =>
+        powershell(`${identity}
+        $path = Join-Path $env:DEV509_ACL_FIXTURE_ROOT '${CONTEXT_FILE}'
+        $acl = Get-Acl -LiteralPath $path
+        $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        if ($acl.AreAccessRulesProtected -or $rules.Count -ne 1) {
+          throw 'Context file must inherit exactly the restricted root access rule'
+        }
+        $rule = $rules[0]
+        if (-not $rule.IsInherited -or $rule.IdentityReference.Value -ne $sid.Value -or
+            $rule.AccessControlType -ne $allow -or $rule.FileSystemRights -ne $full -or
+            $rule.InheritanceFlags -ne 'None' -or $rule.PropagationFlags -ne 'None') {
+          throw 'Context file DACL changed the inherited identity or access rights'
+        }
+      `)
+      const first = await f.store.capture(f.makeEvent('Initial'), null, 0, f.control)
+      assertInherited()
+      const next = await f.store.capture(
+        f.makeEvent('Replacement'),
+        null,
+        first.revision,
+        f.control
+      )
+      assert.equal(next.revision, first.revision + 1)
+      assertInherited()
+      const saved = await f.store.read(f.control)
+      assert.equal(saved.snapshots[first.snapshot.id]!.subject, 'Initial')
+      assert.equal(saved.snapshots[next.snapshot.id]!.subject, 'Replacement')
+    } finally {
+      await f.store.dispose()
+    }
+  }
+)
 
 test('same-address accounts stay separate; negative occurrence corrections beat future rules', async (t) => {
   const f = fixture(t)
