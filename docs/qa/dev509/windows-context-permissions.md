@@ -64,3 +64,35 @@ qualification, native model/audio QA, inference or performance job was run.
 This test checks DACL inheritance under an explicit synthetic root policy, not
 an ACL guarantee for every user's chosen directory. Production remains gated OFF;
 prior semantic failures, human review and other acceptance/release gates remain.
+
+## Hosted harness follow-up
+
+At `d35d77593c8cb53b2c413a50f2b30866729c24c6`,
+[Windows job118186931475](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/39289732316/job/118186931475)
+failed Desktop tests: 608 passed, one failed, 16 skipped. The original snapshot
+test passed. The new DACL test failed during its first root setup, before any
+store calls: `Set-Acl` reported `CouldNotAutoloadMatchingModule` for
+`Microsoft.PowerShell.Security`. No root/file DACL assertion passed in that run.
+The original job log remains `/tmp/dev509-windows-job-118186931475.log`.
+
+The log identifies the workflow shell as `C:\Program Files\PowerShell\7\pwsh.EXE`;
+the test launched Windows PowerShell (`powershell.exe`) through Node. Microsoft
+documents [module autoload failure across this intermediate-process boundary](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_psmodulepath?view=powershell-7.5).
+Inherited PS7 module paths are consistent with this error; the old probe did not
+emit the inner loader cause, so path versus execution-policy cause is not proven.
+This is test-harness failure, not evidence of a production ACL defect.
+
+The follow-up uses installed `pwsh.exe`, matching this workflow, and explicitly
+imports its bundled security module from `PSHOME/Modules`. Plain-text diagnostics
+include the shell version/home, exception and error ID; process launch/timeout
+failures also fail visibly without dumping an encoded command. There is no shell
+fallback, download, global policy/module-path change or Windows probe skip.
+The restricted synthetic root readback and both exact inherited file descriptor
+assertions are unchanged. Windows contributors need PowerShell 7 installed to
+run this test, as the hosted Windows workflow already does.
+
+Local follow-up: the affected store file again passes 16 tests on macOS, with
+the one Windows-only test explicitly skipped. Desktop node types, touched-file
+ESLint and diff checks pass; logs are `/tmp/dev509-windows-shell-fix/`. macOS
+cannot execute this ACL branch. A new hosted Windows pass is still required;
+all earlier failed evidence and remaining feature/native/human gates remain.

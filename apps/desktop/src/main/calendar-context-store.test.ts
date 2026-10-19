@@ -1,7 +1,7 @@
 import type { CalendarEvent } from '../shared/calendar-api'
 import type { SourceScope } from '@repo/meetings-store/source-contract'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import {
   mkdtempSync,
@@ -157,20 +157,37 @@ test(
     const f = fixture(t)
     const powershell = (script: string): void => {
       // Paths are data, never interpolated into shell code. Only this test-owned root changes.
-      execFileSync(
-        'powershell.exe',
+      // Match CI's PowerShell 7; a Node intermediary can pass its module paths to
+      // incompatible Windows PowerShell 5.1. Import this shell's bundled module.
+      const result = spawnSync(
+        'pwsh.exe',
         [
           '-NoLogo',
           '-NoProfile',
           '-NonInteractive',
-          '-EncodedCommand',
-          Buffer.from(`$ErrorActionPreference = 'Stop'\n${script}`, 'utf16le').toString('base64')
+          '-OutputFormat',
+          'Text',
+          '-Command',
+          `$ErrorActionPreference = 'Stop'
+          try {
+            Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1" -ErrorAction Stop
+            ${script}
+          } catch {
+            [Console]::Error.WriteLine("PowerShell $($PSVersionTable.PSVersion) [$PSHOME]: $($_.Exception) [$($_.FullyQualifiedErrorId)]")
+            exit 1
+          }`
         ],
         {
           env: { ...process.env, DEV509_ACL_FIXTURE_ROOT: f.root },
           timeout: 30_000,
+          encoding: 'utf8',
           stdio: 'pipe'
         }
+      )
+      assert.equal(
+        result.status,
+        0,
+        `Windows ACL probe failed (signal=${result.signal}): ${result.error?.message ?? result.stderr.trim()}`
       )
     }
     const identity = `
