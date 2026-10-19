@@ -1,0 +1,12 @@
+
+> desktop@0.4.33 typecheck /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop
+> pnpm run typecheck:node && pnpm run typecheck:web
+
+
+> desktop@0.4.33 typecheck:node /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop
+> tsc --noEmit -p tsconfig.node.json --composite false
+
+
+> desktop@0.4.33 typecheck:web /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop
+> tsc --noEmit -p tsconfig.web.json --composite false
+

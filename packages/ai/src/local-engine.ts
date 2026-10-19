@@ -318,6 +318,9 @@ export class LocalNotesEngine implements NotesEngine {
           const session = new LlamaChatSession({
             contextSequence: context.getSequence(),
             systemPrompt,
+            // Gemma folds explicit system history into its user turn. Without
+            // this public option the session silently drops supplied rules.
+            forceAddSystemPrompt: true,
           });
           const prompt = globalAskInput
             ? buildGlobalAskPrompt(globalAskInput, {

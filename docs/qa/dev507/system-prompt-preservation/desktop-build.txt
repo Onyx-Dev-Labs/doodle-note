@@ -1,0 +1,33 @@
+
+> desktop@0.4.33 build /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop
+> electron-vite build
+
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 259 modules transformed.
+rendering chunks...
+out/main/chunks/mascot-square-BbNfBog5.png         72.06 kB
+out/main/chunks/_commonjsHelpers-DHfMLFPC.js        0.21 kB
+out/main/chunks/token-util-DhNAtZ0Q.js              0.98 kB
+out/main/chunks/index-Ckb4DQnR.js                   2.21 kB
+out/main/chunks/token-BF6nvNUy.js                   3.55 kB
+out/main/source-index-worker.js                     7.00 kB
+out/main/engine-win.js                             16.45 kB
+out/main/chunks/evidence-retrieval-DexGEQJ-.js     31.18 kB
+out/main/index.js                               1,578.16 kB
+✓ built in 2.51s
+vite v7.3.6 building ssr environment for production...
+transforming...
+✓ 22 modules transformed.
+rendering chunks...
+out/preload/index.js  22.52 kB
+✓ built in 41ms
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 141 modules transformed.
+rendering chunks...
+../../out/renderer/index.html                             0.59 kB
+../../out/renderer/assets/mascot-square-BbNfBog5.png     72.06 kB
+../../out/renderer/assets/index-B_gxXfnM.css             83.26 kB
+../../out/renderer/assets/index-CPg19WE7.js           1,826.50 kB
+✓ built in 786ms

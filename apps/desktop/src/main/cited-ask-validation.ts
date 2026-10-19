@@ -196,7 +196,7 @@ export function validateSnapshotStructure(snapshot: CitedAnswerSnapshot): void {
   if (
     !isRecord(snapshot) ||
     snapshot.version !== 1 ||
-    ![1, CITED_ASK_PROMPT_VERSION].includes(snapshot.promptVersion) ||
+    ![1, 2, CITED_ASK_PROMPT_VERSION].includes(snapshot.promptVersion) ||
     typeof snapshot.runId !== 'string' ||
     !ID.test(snapshot.runId) ||
     typeof snapshot.askedAt !== 'string' ||

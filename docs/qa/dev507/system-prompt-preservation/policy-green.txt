@@ -1,0 +1,12 @@
+✔ new prompt policy stamps every state and rejects old cached policy before source/model admission (20.977042ms)
+✔ known historical prompt policy stays readable and preserved while appending current answers (18.509458ms)
+✔ policy 1 history stays intact while current answers hydrate and old citation/play/cache are denied (30.727458ms)
+✔ policy 2 history stays intact while current answers hydrate and old citation/play/cache are denied (21.703875ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 265.947792

@@ -399,51 +399,52 @@ test('Home real audio adapter roundtrip returns the cited recording and refuses 
   await assert.rejects(controller.play('run', id, available.token, f.owner), /unavailable/)
 })
 
-test('mixed prompt-policy history hydrates current answers only and denies old citation/play without changing bytes', async (t) => {
-  const f = fixture(t)
-  const result = await f.controller.ask(f.request, f.owner)
-  assert.equal(result.status, 'complete')
-  const saved = JSON.parse(readFileSync(f.history, 'utf8'))
-  saved[1].citedAnswer.promptVersion = 1
-  saved[1].unknownPolicyField = { preserved: true }
-  writeFileSync(f.history, JSON.stringify(saved))
-  const before = readFileSync(f.history)
-  const range = result.snapshot.prompt!.ranges[0]!
-  let audioCalls = 0
-  const controller = new HomeCitedController({
-    store: f.store,
-    cited: f.cited,
-    activity: f.activity,
-    enabled: () => true,
-    audio: {
-      play: async () => {
-        audioCalls++
-        throw new Error('old policy must never reach audio')
+for (const oldPolicy of [1, 2] as const)
+  test(`policy ${oldPolicy} history stays intact while current answers hydrate and old citation/play/cache are denied`, async (t) => {
+    const f = fixture(t)
+    const result = await f.controller.ask(f.request, f.owner)
+    assert.equal(result.status, 'complete')
+    const saved = JSON.parse(readFileSync(f.history, 'utf8'))
+    saved[1].citedAnswer.promptVersion = oldPolicy
+    saved[1].unknownPolicyField = { preserved: true }
+    writeFileSync(f.history, JSON.stringify(saved))
+    const before = readFileSync(f.history)
+    const range = result.snapshot.prompt!.ranges[0]!
+    let audioCalls = 0
+    const controller = new HomeCitedController({
+      store: f.store,
+      cited: f.cited,
+      activity: f.activity,
+      enabled: () => true,
+      audio: {
+        play: async () => {
+          audioCalls++
+          throw new Error('old policy must never reach audio')
+        }
       }
-    }
+    })
+    const first = await controller.history(f.owner)
+    assert.equal(first.entries[1]!.status, 'stale')
+    assert.equal('snapshot' in first.entries[1]!, false)
+    assert.equal('answer' in first.entries[1]!, false)
+    assert.equal((await controller.resolve('run', range.id, f.owner)).status, 'stale')
+    await assert.rejects(controller.play('run', range.id, 'old-token', f.owner), /unavailable/)
+    assert.equal(audioCalls, 0)
+    assert.equal((await controller.ask(f.request, f.owner)).status, 'error')
+    assert.equal(f.generated(), 1)
+    assert.deepEqual(
+      readFileSync(f.history),
+      before,
+      'hydration and denied reuse preserve exact bytes'
+    )
+    const next = await controller.ask({ ...f.request, runId: 'current' }, f.owner)
+    assert.equal(next.status, 'complete')
+    assert.equal(next.snapshot.promptVersion, 3)
+    const hydrated = await controller.history(f.owner)
+    assert.deepEqual(
+      hydrated.entries.map((e) => e.status),
+      ['legacy', 'stale', 'valid']
+    )
+    assert.deepEqual(JSON.parse(readFileSync(f.history, 'utf8'))[1], saved[1])
+    assert.deepEqual(readFileSync(f.file), f.original)
   })
-  const first = await controller.history(f.owner)
-  assert.equal(first.entries[1]!.status, 'stale')
-  assert.equal('snapshot' in first.entries[1]!, false)
-  assert.equal('answer' in first.entries[1]!, false)
-  assert.equal((await controller.resolve('run', range.id, f.owner)).status, 'stale')
-  await assert.rejects(controller.play('run', range.id, 'old-token', f.owner), /unavailable/)
-  assert.equal(audioCalls, 0)
-  assert.equal((await controller.ask(f.request, f.owner)).status, 'error')
-  assert.equal(f.generated(), 1)
-  assert.deepEqual(
-    readFileSync(f.history),
-    before,
-    'hydration and denied reuse preserve exact bytes'
-  )
-  const next = await controller.ask({ ...f.request, runId: 'current' }, f.owner)
-  assert.equal(next.status, 'complete')
-  assert.equal(next.snapshot.promptVersion, 2)
-  const hydrated = await controller.history(f.owner)
-  assert.deepEqual(
-    hydrated.entries.map((e) => e.status),
-    ['legacy', 'stale', 'valid']
-  )
-  assert.deepEqual(JSON.parse(readFileSync(f.history, 'utf8'))[1], saved[1])
-  assert.deepEqual(readFileSync(f.file), f.original)
-})

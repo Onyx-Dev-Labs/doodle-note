@@ -1,0 +1,4 @@
+
+> @repo/ai@0.1.0 typecheck /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai
+> tsc --noEmit
+

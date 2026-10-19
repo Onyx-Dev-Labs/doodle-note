@@ -1,0 +1,18 @@
+{
+  "REPORT.md": "a578e09b50ae7e062f4122e106c1a946ef29cee27cc818aa2d276a1d6c924016",
+  "ai-tests.txt": "27e7b1e59b26ff2a42bbc4e2d297cc729ee87e430c393ff7ffd8bad107e6274f",
+  "ai-types.txt": "8c30f3383be3d32cc9b006c6e3f0fe7a6c6f82edd7315266215c60af802c2a5a",
+  "desktop-build.txt": "6484a120c855a1158856bcfed5dc89cf9680d34429031e673c7bdf2aa1806e53",
+  "desktop-tests.txt": "a295aa9879decfe78d2c7fa36fd7a974b3131a374af338e13a738f0c189785ef",
+  "desktop-types.txt": "f7c7219803eb970a6339ea3a6b7874d4feec8ad149d3f96e9c998b6ab93a0e0d",
+  "observer-tests.txt": "24739a5cb4e8d3316aadc58a7ddb9fe72b5c3dc50ba6159dfdba8454da72baaa",
+  "observer-wire.mjs": "9e9b8ae6b29cba791c7878ca8cdc1e67708b068413564a2ad5069c788c795f01",
+  "observer.test.mjs": "497275e8306ac247accae4761764229d02a19a7f1ffb37fc99b630c6bfc35a7b",
+  "policy-green.txt": "a983efd8a767d0c3bbbcba24de33ee31b511244b250ef20b1e8704d680923e3e",
+  "policy-red.txt": "84a185bd73191a08fd6edc3849e20c3ae77e3931ed8878427fcfed6646c472c9",
+  "root-lint.txt": "59099143af6c261feb7be97d504c8e8d9d5ae6ef704a61c8fea2a79520093243",
+  "tested-source-sha256.json": "726e2fea7b5fa979f1705daf9f5e18881cc6812b37cb656486493274e5606a60",
+  "wrapper-expanded.txt": "2c77aebbda176735dd6a7cd284b4b9897958b330032147d45afa29f29d16cbfb",
+  "wrapper-green.txt": "d830283247708c75d1ab775ea2152a9072aad8f9957f691717dd9864baf6d542",
+  "wrapper-red.txt": "6059426da8c874754565d693126b259172f9f26ac222578f13d8331188a65084"
+}

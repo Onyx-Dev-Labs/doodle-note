@@ -5,8 +5,8 @@ import type {
 } from '@repo/meetings-store/evidence-contract'
 import type { SourcePassage } from '@repo/meetings-store/source-contract'
 
-/** Current generation policy; historical v1 remains decodable but cannot be admitted. */
-export const CITED_ASK_PROMPT_VERSION = 2 as const
+/** Current generation policy; historical v1/v2 remain decodable but cannot be admitted. */
+export const CITED_ASK_PROMPT_VERSION = 3 as const
 
 export type CitedAskRequest =
   | { purpose: 'library-ask'; selection: Extract<EvidenceSelection, { mode: 'question' }> }
@@ -51,7 +51,7 @@ export interface CitedAnswerSnapshot {
   prompt: PromptInclusion | null
   engineId: string | null
   modelArtifactRevision: string | null
-  promptVersion: 1 | typeof CITED_ASK_PROMPT_VERSION
+  promptVersion: 1 | 2 | typeof CITED_ASK_PROMPT_VERSION
   consumerRevision?: string
 }
 export type CitedAskResult =

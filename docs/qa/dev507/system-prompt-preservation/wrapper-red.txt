@@ -1,0 +1,32 @@
+✖ Gemma actual session/wrapper retains cited system rules exactly once in measured and generated wire (60.200542ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 458.573208
+
+✖ failing tests:
+
+test at src/local-engine-system.test.ts:1:4719
+✖ Gemma actual session/wrapper retains cited system rules exactly once in measured and generated wire (60.200542ms)
+  AssertionError [ERR_ASSERTION]: full wrapper input preserves instructions exactly once
+  
+  0 !== 1
+  
+      at once (/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai/src/local-engine-system.test.ts:104:10)
+      at TestContext.<anonymous> (/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai/src/local-engine-system.test.ts:110:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+undefined
+/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: tsx --test src/local-engine-system.test.ts

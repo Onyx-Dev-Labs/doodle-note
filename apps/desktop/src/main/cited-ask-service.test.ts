@@ -486,23 +486,26 @@ test('new prompt policy stamps every state and rejects old cached policy before 
     const result = await f.service.run(request, f.control)
     assert.notEqual(result.status, 'error')
     if (result.status === 'error') continue
-    assert.equal(result.snapshot.promptVersion, 2)
+    assert.equal(result.snapshot.promptVersion, 3)
     admitted.push({ request, snapshot: result.snapshot })
   }
   const service = new serviceModule.MainCitedAskService({
     sources: {
       ...f.sources,
-      retrieveEvidence: async () => assert.fail('old policy must not read sources')
+      retrieveEvidence: async () => assert.fail('old policy must not read sources'),
+      validateEvidence: async () => assert.fail('old policy must not validate sources'),
+      resolveAcknowledged: async () => assert.fail('old policy must not resolve sources')
     },
     generate: async () => assert.fail('old policy must not generate'),
     validateModel: async () => assert.fail('old policy must not admit model')
   })
-  for (const { request, snapshot } of admitted) {
-    const old = { ...snapshot, promptVersion: 1 as const }
-    const result = await service.validate(old, request, f.control)
-    assert.equal(result.status, 'stale')
-    assert.match(result.reason, /prompt|policy/i)
-  }
+  for (const { request, snapshot } of admitted)
+    for (const promptVersion of [1, 2] as const) {
+      const old = { ...snapshot, promptVersion }
+      const result = await service.validate(old, request, f.control)
+      assert.equal(result.status, 'stale')
+      assert.match(result.reason, /prompt|policy/i)
+    }
 })
 
 test('known historical prompt policy stays readable and preserved while appending current answers', async (t) => {
@@ -519,12 +522,20 @@ test('known historical prompt policy stays readable and preserved while appendin
     extra: { preserved: true }
   }
   const file = join(f.root, '.policy-history.json')
-  writeFileSync(file, JSON.stringify([prior]))
+  const old2 = {
+    ...prior,
+    id: 'historical-2',
+    citedAnswer: { ...old, promptVersion: 2 as const },
+    extra: { preserved: true, policy: 2 }
+  }
+  writeFileSync(file, JSON.stringify([prior, old2]))
+  const bytesBefore = readFileSync(file)
   const store = new GlobalChatStore(
     () => file,
     () => {}
   )
-  assert.deepEqual(store.read()[0], prior)
+  assert.deepEqual(store.read(), [prior, old2])
+  assert.deepEqual(readFileSync(file), bytesBefore)
   store.append(
     {
       id: 'current',
@@ -536,7 +547,9 @@ test('known historical prompt policy stays readable and preserved while appendin
     store.epoch()
   )
   assert.deepEqual(store.read()[0], prior)
-  assert.equal(store.read()[1]!.citedAnswer!.promptVersion, 2)
+  assert.deepEqual(store.read()[1], old2)
+  assert.equal(store.read()[2]!.citedAnswer!.promptVersion, 3)
+  assert.equal((await f.service.validate(old2.citedAnswer, f.request, f.control)).status, 'stale')
   assert.equal((await f.service.validate(old, f.request, f.control)).status, 'stale')
   assert.equal((await f.service.validate(result.snapshot, f.request, f.control)).status, 'valid')
 })

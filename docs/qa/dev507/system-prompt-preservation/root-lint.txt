@@ -1,0 +1,25 @@
+
+> doodle-note@ lint /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c
+> turbo lint
+
+• turbo 2.10.3
+
+   • Packages in scope: @repo/agent-contract, @repo/ai, @repo/cloud-reader, @repo/db, @repo/meetings-store, desktop, doodle-note-mcp, web
+   • Running lint in 8 packages
+   • Remote caching disabled, using shared worktree cache
+
+desktop:lint: cache miss, executing 87017d3e0f916621
+web:lint: cache hit, replaying logs cfc5cd80dcda298e
+web:lint: 
+web:lint: > web@0.1.0 lint /Users/sean/.t3/worktrees/doodle-note/t3-2e328e68/apps/web
+web:lint: > eslint
+web:lint: 
+desktop:lint: 
+desktop:lint: > desktop@0.4.33 lint /Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop
+desktop:lint: > eslint --cache .
+desktop:lint: 
+
+ Tasks:    2 successful, 2 total
+Cached:    1 cached, 2 total
+  Time:    3.676s 
+
