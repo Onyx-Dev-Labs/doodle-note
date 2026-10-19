@@ -747,50 +747,93 @@ test('brief close and relocation wait for held audio; retired bytes never escape
 })
 
 for (const outcome of ['complete', 'no-history', 'insufficient-evidence'] as const) {
-  test(`brief prompt policy passes through ${outcome} and rejects old-policy reuse without inference`, async (t) => {
-    const f = fixture(t, undefined, {}, outcome === 'insufficient-evidence' ? outcome : 'answered')
-    const opened = await f.briefs.open('window', f.event.id)
-    if (outcome !== 'no-history')
-      await f.briefs.link('window', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
-    const run = f.cited.run.bind(f.cited)
-    let returned: CitedAnswerSnapshot | undefined
-    let historical = false
-    f.cited.run = async (...args) => {
-      const result = await run(...args)
-      if (result.status !== 'error') {
-        returned = result.snapshot
-        if (historical) returned.promptVersion = 1
+  for (const oldPolicy of [1, 2] as const) {
+    test(`brief prompt policy passes through ${outcome} and rejects policy ${oldPolicy} without refresh inference`, async (t) => {
+      let played = 0
+      const f = fixture(
+        t,
+        undefined,
+        {
+          play: async () => {
+            played++
+            return { bytes: new Uint8Array([1]), mime: 'audio/wav', seekSeconds: 0 }
+          }
+        },
+        outcome === 'insufficient-evidence' ? outcome : 'answered'
+      )
+      const opened = await f.briefs.open('window', f.event.id)
+      if (outcome !== 'no-history')
+        await f.briefs.link('window', opened.sessionId, opened.revision!, 'old', { kind: 'event' })
+      const originalBytes = readFileSync(join(f.root, 'meetings/old.json'))
+      const contextBytes = readFileSync(join(f.root, 'calendar-context-v1.json'))
+      const run = f.cited.run.bind(f.cited)
+      let returned: CitedAnswerSnapshot | undefined
+      let historical = false
+      f.cited.run = async (...args) => {
+        const result = await run(...args)
+        if (result.status !== 'error') {
+          returned = result.snapshot
+          if (historical) returned.promptVersion = oldPolicy
+        }
+        return result
       }
-      return result
-    }
-    const answer = await f.briefs.generate('window', opened.sessionId, 'policy-current', {})
-    assert.equal(answer.result?.status, outcome)
-    assert.equal(answer.result?.snapshot.promptVersion, CITED_ASK_PROMPT_VERSION)
-    assert.equal(CITED_ASK_PROMPT_VERSION, 2)
-    assert.deepEqual(
-      answer.result?.snapshot,
-      returned,
-      'consumer passes shared snapshots unchanged'
-    )
-    const generated = f.generated()
-    const reused = await f.briefs.refresh('window', opened.sessionId)
-    assert.deepEqual(reused.result?.snapshot, answer.result?.snapshot)
-    assert.equal(f.generated(), generated, 'refresh validates without generating')
+      const answer = await f.briefs.generate('window', opened.sessionId, 'policy-current', {})
+      assert.equal(answer.result?.status, outcome)
+      assert.equal(answer.result?.snapshot.promptVersion, CITED_ASK_PROMPT_VERSION)
+      assert.equal(CITED_ASK_PROMPT_VERSION, 3)
+      assert.deepEqual(
+        answer.result?.snapshot,
+        returned,
+        'consumer passes shared snapshots unchanged'
+      )
+      const generated = f.generated()
+      const reused = await f.briefs.refresh('window', opened.sessionId)
+      assert.deepEqual(reused.result?.snapshot, answer.result?.snapshot)
+      assert.equal(f.generated(), generated, 'refresh validates without generating')
 
-    // The shared service owns policy admission; simulate a historical cached producer result.
-    returned!.promptVersion = 1
-    const refusedCache = await f.briefs.refresh('window', opened.sessionId)
-    assert.equal(refusedCache.result, undefined)
-    assert.equal(refusedCache.state, 'unavailable')
-    assert.equal(f.generated(), generated)
-    historical = true
-    const refusedFresh = await f.briefs.generate('window', opened.sessionId, 'policy-old', {})
-    assert.equal(refusedFresh.result, undefined)
-    assert.equal(refusedFresh.state, 'unavailable')
-    historical = false
-    const recovered = await f.briefs.generate('window', opened.sessionId, 'policy-new', {})
-    assert.equal(recovered.result?.status, outcome)
-    assert.equal(recovered.result?.snapshot.promptVersion, CITED_ASK_PROMPT_VERSION)
-    if (outcome === 'no-history') assert.equal(f.generated(), 0)
-  })
+      // The shared service owns policy admission; simulate a historical cached producer result.
+      returned!.promptVersion = oldPolicy
+      const refusedCache = await f.briefs.refresh('window', opened.sessionId)
+      assert.equal(refusedCache.result, undefined)
+      assert.equal(refusedCache.state, 'unavailable')
+      assert.equal(f.generated(), generated)
+      historical = true
+      const refusedFresh = await f.briefs.generate('window', opened.sessionId, 'policy-old', {})
+      assert.equal(refusedFresh.result, undefined)
+      assert.equal(refusedFresh.state, 'unavailable')
+      historical = false
+      const recovered = await f.briefs.generate('window', opened.sessionId, 'policy-new', {})
+      assert.equal(recovered.result?.status, outcome)
+      assert.equal(recovered.result?.snapshot.promptVersion, CITED_ASK_PROMPT_VERSION)
+      if (outcome === 'no-history') assert.equal(f.generated(), 0)
+
+      if (outcome === 'complete') {
+        const evidenceId = recovered.result!.snapshot.prompt!.ranges[0]!.id
+        const currentCitation = await f.briefs.citation('window', opened.sessionId, evidenceId)
+        assert.equal(currentCitation.status, 'resolved')
+        await f.briefs.play('window', opened.sessionId, evidenceId, 'synthetic-token')
+        assert.equal(played, 1, 'current policy can reach the injected playback dependency')
+        const beforeDenied = f.generated()
+        returned!.promptVersion = oldPolicy
+        const oldCitation = await f.briefs.citation('window', opened.sessionId, evidenceId)
+        assert.equal(oldCitation.status, 'stale')
+        assert.equal(f.views.at(-1)?.result, undefined)
+        assert.equal(f.generated(), beforeDenied)
+
+        // A new visible current result gives playback an independent policy-admission check.
+        await f.briefs.generate('window', opened.sessionId, 'policy-play', {})
+        returned!.promptVersion = oldPolicy
+        const beforePlay = f.generated()
+        await assert.rejects(
+          f.briefs.play('window', opened.sessionId, evidenceId, 'synthetic-token'),
+          /unavailable/
+        )
+        assert.equal(f.views.at(-1)?.result, undefined)
+        assert.equal(f.generated(), beforePlay)
+        assert.equal(played, 1, 'historical policy is rejected before any audio dependency call')
+      }
+      assert.deepEqual(readFileSync(join(f.root, 'meetings/old.json')), originalBytes)
+      assert.deepEqual(readFileSync(join(f.root, 'calendar-context-v1.json')), contextBytes)
+    })
+  }
 }
