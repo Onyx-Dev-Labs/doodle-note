@@ -1,0 +1,444 @@
+{
+  "method": "Frozen qualitative rubric, all18raw/admitted claims inspected against cited original ranges. Not an automatic entailment validator or human acceptance score.",
+  "cases": [
+    {
+      "caseId": "answer-04",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": false,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Requested Willow action is correct and includes answer-04 support; three Onyx/Fern/Beryl citations are extraneous. Equal actions across different subjects are not a conflict."
+          ],
+          "rawText": "Morgan will draft the checklist by Tuesday.",
+          "admittedText": "Morgan will draft the checklist by Tuesday.",
+          "refs": [
+            {
+              "meetingId": "answer-04",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "dd3e38e8c2d9f9932a9c3d8a528ea47b9d7f4c087b01b61c51641a1da053b9e0"
+            },
+            {
+              "meetingId": "answer-14",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "6177a6d089c9ce06bfb9941a3ed666318f0f5be97757720b299de3d8d95b0008"
+            },
+            {
+              "meetingId": "answer-24",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "81b843287d12189545473866f9f2852cf9a64c72d8d6eaddbeaafd7743d0c99a"
+            },
+            {
+              "meetingId": "answer-34",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "74e0a4ce793d78ad21eaa9bcfad9f727a315203fd71b85c0089a428c1a90c69f"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "Actual Willow40/60 variance disagreement is unrelated to the asked action; the claim states one limit and cites both."
+          ],
+          "rawText": "Willow's approved limit is 40 credits.",
+          "admittedText": "Willow's approved limit is 40 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-04-a",
+              "sourceId": "personal:0",
+              "rangeId": "7f14b9fe0cc8d75b9cd09c03a072e65322fac74534fb99c03e9f359881450f22"
+            },
+            {
+              "meetingId": "conflict-04-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "002c24ad5f8169d95d56d794ffc0418c17810c818e87e1434ad448737cccce78"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "answer-06",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": false,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Requested Juniper12/15 result is correct and includes answer-06 support; Amber/Clover/Poppy citations are extraneous. No incompatible result is established."
+          ],
+          "rawText": "The Juniper experiment measured 12 successful trials out of 15.",
+          "admittedText": "The Juniper experiment measured 12 successful trials out of 15.",
+          "refs": [
+            {
+              "meetingId": "answer-06",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "7c950bec1bedd7fa945f939d9278e1dc6e977ceced6884bf3ed7c4f124b118bc"
+            },
+            {
+              "meetingId": "answer-16",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "a4620662022b0016cc1a4e247f09013e883bf4cb34bbfd098df4f04491494740"
+            },
+            {
+              "meetingId": "answer-26",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "377d00e447b1aa163dac86abc979227224a988d370e5f6cc5bb367cadde64bc0"
+            },
+            {
+              "meetingId": "answer-36",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "5b4510b90fea613aad1040a5f0d13771974ed92f2fa64a3a834e3ef6d5380f52"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "Correctly describes a real Juniper40/60 variance disagreement, but that attribute is unrelated to the asked experiment result."
+          ],
+          "rawText": "There is a conflict regarding the approved limit for Juniper variance, with one source stating 40 credits and another stating 60 credits.",
+          "admittedText": "There is a conflict regarding the approved limit for Juniper variance, with one source stating 40 credits and another stating 60 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-06-a",
+              "sourceId": "personal:0",
+              "rangeId": "f261ab75c2165d95bb241c5d1628747cb46382775915ac9f39154a3cc1684669"
+            },
+            {
+              "meetingId": "conflict-06-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "599200bbe54b4befb0caf7781d436f19f04b03c6215dd49fa818e3ca70bdec8f"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "must-03",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": false,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Correct Saffron synthetic-03 with exact supporting original; raw quotation paraphrase becomes exact original on admission."
+          ],
+          "rawText": "The recovery code for ﬃ Saffron archive is synthetic-03.",
+          "admittedText": "ﬃ Saffron archive: the recovery code is synthetic-03.",
+          "refs": [
+            {
+              "meetingId": "old-03",
+              "sourceId": "personal:1",
+              "rangeId": "df2e5d62677df1128d9978ed89bf566f471423fd50598cb29a553cc45749cb3c"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "Supported Indigo synthetic-08, but unrelated archive. Admitted exact passage includes799 tree glyphs and closing filler."
+          ],
+          "rawText": "The recovery code for ﬃ Indigo archive is synthetic-08.",
+          "admittedText": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nﬃ Indigo archive: the recovery code is synthetic-08.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussio",
+          "refs": [
+            {
+              "meetingId": "old-08",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "b934d9adcd8dac009c68b626147b6d5f274dd2d82807b81f27a1f57a4067aae6"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-3",
+          "notes": [
+            "Supported Birch synthetic-13, but unrelated archive."
+          ],
+          "rawText": "The recovery code for ﬃ Birch archive is synthetic-13.",
+          "admittedText": "ﬃ Birch archive: the recovery code is synthetic-13.",
+          "refs": [
+            {
+              "meetingId": "old-13",
+              "sourceId": "personal:1",
+              "rangeId": "c29977a4479a7741ca109b3bef50f84514a2571c494b3e04a297c43fe34ae2f2"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-4",
+          "notes": [
+            "Supported Pine synthetic-18, but unrelated archive. Admitted exact passage includes799 tree glyphs and closing filler."
+          ],
+          "rawText": "The recovery code for ﬃ Pine archive is synthetic-18.",
+          "admittedText": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nﬃ Pine archive: the recovery code is synthetic-18.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion.",
+          "refs": [
+            {
+              "meetingId": "old-18",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "44186b037de32c84edee5aa3b4e5085042257fb2d03ffafb3138f1109cd8c5b6"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "must-09",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": false,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Correct Coral synthetic-09 with exact supporting original."
+          ],
+          "rawText": "The recovery code for İstanbul Coral archive is synthetic-09.",
+          "admittedText": "İstanbul Coral archive: the recovery code is synthetic-09.",
+          "refs": [
+            {
+              "meetingId": "old-09",
+              "sourceId": "personal:1",
+              "rangeId": "13d866301acd73ca3877e5c5e10638707f5e99431bdc6d57fd5a575f158f5ecb"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "Supported Willow synthetic-04, but unrelated archive. Admitted exact passage includes799 tree glyphs and closing filler."
+          ],
+          "rawText": "The recovery code for İstanbul Willow archive is synthetic-04.",
+          "admittedText": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nİstanbul Willow archive: the recovery code is synthetic-04.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing di",
+          "refs": [
+            {
+              "meetingId": "old-04",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "aff65b106de11374d4d1c6ad66f87cc195cc09a1ed35f02ad347acc180391929"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "answer-01",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": false,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Correct Maple Friday23October2026 date, but adds variance40 as a citation and falsely labels different attributes a conflict."
+          ],
+          "rawText": "Maple delivery is due on Friday, 23 October 2026.",
+          "admittedText": "Maple delivery is due on Friday, 23 October 2026.",
+          "refs": [
+            {
+              "meetingId": "answer-01",
+              "sourceId": "personal:0",
+              "rangeId": "116f67f41953e92d7d15fd2aa4d96f8ccb9028f5cb52ec3784ee6de43b4f0e1f"
+            },
+            {
+              "meetingId": "conflict-01-a",
+              "sourceId": "personal:0",
+              "rangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "Maple variance40 is not the requested delivery date."
+          ],
+          "rawText": "Maple variance is approved for 40 credits.",
+          "admittedText": "Maple variance is approved for 40 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-01-a",
+              "sourceId": "personal:0",
+              "rangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-3",
+          "notes": [
+            "Maple variance60 versus40 is a real but unrelated disagreement."
+          ],
+          "rawText": "Maple variance is approved for 60 credits.",
+          "admittedText": "Maple variance is approved for 60 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-01-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+            },
+            {
+              "meetingId": "conflict-01-a",
+              "sourceId": "personal:0",
+              "rangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "answer-02",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": false,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Correct Cobalt4200 budget supported by answer-02; variance40 is an unrelated attribute, not a contradiction."
+          ],
+          "rawText": "The approved budget for Cobalt is 4200 credits.",
+          "admittedText": "The approved budget for Cobalt is 4200 credits.",
+          "refs": [
+            {
+              "meetingId": "answer-02",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "c8f87ebbfbfcf295fb2fd90ad8c8357ebb2ecdc7ee1ee94f85d62ea52c007f6d"
+            },
+            {
+              "meetingId": "conflict-02-a",
+              "sourceId": "personal:0",
+              "rangeId": "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "Unrequested Cobalt40 variance; equal Orchid40 statement is an extraneous subject and not a conflict."
+          ],
+          "rawText": "The approved limit for Cobalt variance is 40 credits.",
+          "admittedText": "The approved limit for Cobalt variance is 40 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-02-a",
+              "sourceId": "personal:0",
+              "rangeId": "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6"
+            },
+            {
+              "meetingId": "conflict-00-a",
+              "sourceId": "personal:0",
+              "rangeId": "8351e26bcbe7766fe0fc0708df702d4f4c20a4fd8230aec87dc6491c233e1844"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-3",
+          "notes": [
+            "Unrequested Cobalt60 variance; equal Orchid60 statement is an extraneous subject and not a conflict."
+          ],
+          "rawText": "The approved limit for Cobalt variance is 60 credits.",
+          "admittedText": "The approved limit for Cobalt variance is 60 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-02-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "fe36b4a27eb69c8e5461702a9d0dabb4cb12bb483e20a50a5b3175fbc705113a"
+            },
+            {
+              "meetingId": "conflict-00-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "e0f1e9b9b784447fc35cb7bbaa00b20c482f3ea895e2de1d257476da8d463836"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "conflict-01",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": true,
+      "fullyFocusedSoundAnswer": true,
+      "justifiedAbstention": false,
+      "claims": [
+        {
+          "claimId": "claim-1",
+          "notes": [
+            "Requested genuine Maple variance conflict: states40 and cites both incompatible40/60 originals."
+          ],
+          "rawText": "The approved Maple variance limit is 40 credits.",
+          "admittedText": "The approved Maple variance limit is 40 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-01-a",
+              "sourceId": "personal:0",
+              "rangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            {
+              "meetingId": "conflict-01-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+            }
+          ]
+        },
+        {
+          "claimId": "claim-2",
+          "notes": [
+            "States60 and cites the same two incompatible originals; together with conflicting status represents actual disagreement without choosing a definitive limit."
+          ],
+          "rawText": "The approved Maple variance limit is 60 credits.",
+          "admittedText": "The approved Maple variance limit is 60 credits.",
+          "refs": [
+            {
+              "meetingId": "conflict-01-a",
+              "sourceId": "personal:0",
+              "rangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            {
+              "meetingId": "conflict-01-b",
+              "sourceId": "transcript:original-segment",
+              "rangeId": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+            }
+          ]
+        }
+      ],
+      "note": "All claims assessed; no exclusion of irrelevant/incorrect claims."
+    },
+    {
+      "caseId": "unknown-01",
+      "assessment": "AGENT inspection, not designated human score",
+      "requestedFactSupported": false,
+      "fullyFocusedSoundAnswer": true,
+      "justifiedAbstention": true,
+      "claims": [],
+      "note": "No Quartz password stated; empty insufficient answer is appropriate."
+    }
+  ],
+  "observations": {
+    "requestedFactsPresentSixOfSix": true,
+    "fullyFocusedSoundAmongSix": 0,
+    "irrelevantClaims": 10,
+    "falseConflictClaims": 6,
+    "solelyWrongSubjectClaimsObserved": 0,
+    "claimsWithExtraneousOtherSubjectCitations": 4,
+    "falseAbsenceObserved": 0,
+    "adversarialInstructionEchoObserved": 0,
+    "exactClaimRepetitionGroupsRaw": 0,
+    "exactClaimRepetitionGroupsAdmitted": 0,
+    "quotationSubstitutions": 6,
+    "fillerTreeGlyphsInAdmittedQuotes": 2397,
+    "sentinels": "genuine conflict and unknown handled appropriately"
+  }
+}

@@ -1,0 +1,14 @@
+✔ Gemma actual session/wrapper retains cited system rules exactly once in measured and generated wire (56.6415ms)
+✔ Qwen catalog wrapper wire is identical to the old default with one system message (21.433666ms)
+✔ Llama3 catalog wrapper wire is identical to the old default with one system message (16.225625ms)
+✔ Gemma preserves unchanged instructions for global Ask, bounded Fetches, per-meeting Ask and notes (16.178917ms)
+✔ Gemma rejects an oversized system before bounded Fetch generation and disposes context (16.093625ms)
+✔ Gemma cited shortening and empty paths count the same complete wrapper including rules (27.434166ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 513.25625

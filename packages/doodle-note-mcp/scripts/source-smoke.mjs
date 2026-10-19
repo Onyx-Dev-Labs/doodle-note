@@ -23,6 +23,17 @@ try {
   const search = await call('tools/call', { name: 'search_meeting_sources', arguments: { query: 'needle' } });
   const result = JSON.parse(search.result.content[0].text); assert.equal(result.hits.length, 1); assert.equal(result.hits[0].speaker, 'Alice');
   const anchor = result.hits[0].anchor;
+  assert.ok(list.result.tools.some(t => t.name === 'retrieve_meeting_evidence'));
+  assert.ok(list.result.tools.some(t => t.name === 'count_meeting_sources'));
+  const evidenceReply = await call('tools/call', { name: 'retrieve_meeting_evidence', arguments: { question: 'needle' } });
+  const evidence = JSON.parse(evidenceReply.result.content[0].text);
+  assert.equal(evidence.coverage.scanComplete, true);
+  assert.equal(evidence.ranges.length, 1);
+  assert.equal(evidence.ranges[0].anchor.sourceId, anchor.sourceId);
+  assert.equal(evidence.ranges[0].quote, 'offline needle');
+  const censusReply = await call('tools/call', { name: 'count_meeting_sources', arguments: { predicate: { kind: 'literal', text: 'offline needle' } } });
+  const census = JSON.parse(censusReply.result.content[0].text);
+  assert.equal(census.exact, true); assert.equal(census.meetingCount, 1); assert.equal(census.sourceCount, 1);
   const resolved = await call('tools/call', { name: 'resolve_meeting_source', arguments: { anchor } }); assert.equal(JSON.parse(resolved.result.content[0].text).status, 'resolved');
   assert.deepEqual(readdirSync(dir), ['synthetic.json']);
   assert.equal(readFileSync(join(dir, 'synthetic.json'), 'utf8'), JSON.stringify(original));
@@ -38,5 +49,6 @@ try {
   const stale = await call('tools/call', { name: 'resolve_meeting_source', arguments: { anchor } }); assert.equal(JSON.parse(stale.result.content[0].text).status, 'stale');
   writeFileSync(config, JSON.stringify({ enabled: false, meetingsDir: dir }));
   const revoked = await call('tools/call', { name: 'search_meeting_sources', arguments: { query: 'needle' } }); assert.equal(revoked.result.isError, true);
-  console.log(JSON.stringify({ passed: true, node: process.versions.node, checks: ['stdio initialize', 'local source tools', 'resolve', 'participant-only correction and stale anchor', 'stale edit', 'revocation', 'no identity/cache writes'] }));
+  const revokedEvidence = await call('tools/call', { name: 'retrieve_meeting_evidence', arguments: { question: 'needle' } }); assert.equal(revokedEvidence.result.isError, true);
+  console.log(JSON.stringify({ passed: true, node: process.versions.node, checks: ['stdio initialize', 'local source tools', 'original evidence and complete scan', 'literal census', 'resolve', 'participant-only correction and stale anchor', 'stale edit', 'source and evidence revocation', 'no identity/cache writes'] }));
 } finally { child.kill(); for (const w of waiters.values()) clearTimeout(w.timeout); rmSync(root, { recursive: true, force: true }); }

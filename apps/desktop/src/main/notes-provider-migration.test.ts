@@ -1,3 +1,4 @@
+import { GlobalChatStore } from './global-chat-store'
 import { NotesGenerationJobs } from './notes-generation-job'
 import * as batchTranscription from '../shared/batch-transcription'
 import { LibraryActivity } from './library-activity'
@@ -25,6 +26,7 @@ test('retired settings survive reload, block requests, and never migrate keys to
   let decryptions = 0
   const exports: Record<string, new (...args: unknown[]) => { registerIpc(): void }> = {}
   const deps: Record<string, unknown> = {
+    './global-chat-store': { GlobalChatStore },
     electron: {
       app: { getPath: () => dir },
       ipcMain: {

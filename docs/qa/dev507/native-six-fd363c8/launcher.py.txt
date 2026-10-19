@@ -1,0 +1,29 @@
+import pathlib,subprocess,os,json,signal,sys,hashlib,stat,time
+root=pathlib.Path(sys.argv[1]);cfg=json.loads((root/'launch.json').read_text());repo=pathlib.Path(cfg['repo']);model=pathlib.Path(cfg['model']);node=cfg['node']
+sha=subprocess.check_output(['/Library/Developer/CommandLineTools/usr/bin/git','rev-parse','HEAD'],cwd=repo,text=True).strip();assert sha=='fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8';assert not subprocess.check_output(['/Library/Developer/CommandLineTools/usr/bin/git','status','--porcelain'],cwd=repo,text=True);cfg['sourceSha']=sha
+subprocess.run(['pnpm','--filter','doodle-note-mcp','exec','esbuild',str(root/'runner.ts'),'--bundle','--platform=node','--format=esm','--external:node-llama-cpp','--outfile='+str(root/'runner.mjs')],cwd=repo,check=True)
+cmd=['/usr/bin/sandbox-exec','-f',str(root/'contain.sb'),'-D','REPO='+str(repo),'-D','MODEL='+str(model),'-D','RUN='+str(root),'-D','NODE='+node,node,str(root/'runner.mjs'),str(root),str(root/'corpus.json'),str(model),sha,cfg['sentinel']]
+env={'PATH':'/usr/bin:/bin','HOME':str(root/'home'),'CFFIXED_USER_HOME':str(root/'home'),'TMPDIR':str(root/'tmp'),'XDG_CACHE_HOME':str(root/'home/.cache')}
+start=time.time()
+with (root/'stdout.log').open('w') as out,(root/'stderr.log').open('w') as err:
+ p=subprocess.Popen(cmd,cwd=root,env=env,stdout=out,stderr=err,start_new_session=True,close_fds=True)
+ cfg.update({'argv':cmd,'environment':env,'pid':p.pid,'startedAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'policySha256':hashlib.sha256((root/'contain.sb').read_bytes()).hexdigest(),'runnerSha256':hashlib.sha256((root/'runner.mjs').read_bytes()).hexdigest(),'observerSourceSha256':hashlib.sha256((root/'runner.ts').read_bytes()).hexdigest(),'launcherSha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'outerDeadlineSeconds':1200});(root/'launch.json').write_text(json.dumps(cfg,indent=2))
+ try:code=p.wait(timeout=1200)
+ except subprocess.TimeoutExpired:
+  (root/'outer-watchdog.json').write_text(json.dumps({'event':'20min outer deadline','action':'one SIGTERM then await30s, SIGKILL last resort','at':time.time()}));os.killpg(p.pid,signal.SIGTERM)
+  try:p.wait(timeout=30)
+  except subprocess.TimeoutExpired:
+   (root/'forced-termination.json').write_text(json.dumps({'cleanup':'UNQUALIFIED','signal':'SIGKILL','at':time.time()}));os.killpg(p.pid,signal.SIGKILL);p.wait()
+  code=124
+# Reconcile all six rows even if startup or forced termination prevented runner finalization.
+ledger=root/'summary.json';summary=json.loads(ledger.read_text()) if ledger.exists() else json.loads((root/'initial-ledger.json').read_text())
+if code!=0:
+ for row in summary['cases']:
+  if row['status']=='running':row.update({'status':'forced/interrupted' if (root/'forced-termination.json').exists() else 'runner-failed','cleanup':'UNQUALIFIED'})
+ summary['launcherExit']=code;ledger.write_text(json.dumps(summary,indent=2))
+h=hashlib.sha256()
+with model.open('rb') as f:
+ for b in iter(lambda:f.read(1024*1024),b''):h.update(b)
+s=model.lstat();after={'path':str(model),'mode':oct(stat.S_IMODE(s.st_mode)),'bytes':s.st_size,'sha256':h.hexdigest(),'inode':s.st_ino,'mtimeNs':s.st_mtime_ns};(root/'model-after.json').write_text(json.dumps(after,indent=2));assert after==json.loads((root/'model-before.json').read_text())
+(root/'exit.json').write_text(json.dumps({'code':code,'elapsedSeconds':time.time()-start,'modelUnchanged':True,'forcedTermination':(root/'forced-termination.json').exists(),'nativeChildExited':p.poll() is not None},indent=2));print(root,code)
+sys.exit(code)

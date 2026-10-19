@@ -1,0 +1,1 @@
+{"passed":true,"node":"24.22.0","electron":null,"worker":"out/main/source-index-worker.js","checks":["retrieval","Greek exact match","manifest valid/stale","resolve","census","explicit empty subset","original byte preservation"],"nativeApp":false}

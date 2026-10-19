@@ -1,0 +1,126 @@
+{
+  "revision": "bbb352bd96fc60b504ecf73793f6ea4564c54d16",
+  "mode": "foundation-search",
+  "count": 1000,
+  "node": "v24.22.0",
+  "measuredAt": "2026-10-18T20:43:38.659Z",
+  "hardware": {
+    "os": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro",
+    "memoryGiB": 24
+  },
+  "method": "Identical deterministic 20-segment originals; separate fresh process/cache; cold + one warmup + 20 mixed queries; 20ms synthetic PCM callback and 200ms atomic write outside evidence domain. No native capture/model.",
+  "coldMs": 443.19375,
+  "queryP50Ms": 134.24141599999984,
+  "queryP95Ms": 144.0737909999998,
+  "mainLoopP95Ms": 1.299455,
+  "mainLoopMaxMs": 2.166783,
+  "processPeakRssMiB": 413.171875,
+  "resourceMaxRssMiB": 413.5,
+  "captureTicks": 125,
+  "checksum": 49.23611592253996,
+  "elapsedMs": 2508.560916,
+  "samples": [
+    {
+      "query": "rarephrase",
+      "ms": 77.118833,
+      "status": "search-complete"
+    },
+    {
+      "query": "cafe",
+      "ms": 141.55983300000003,
+      "status": "search-complete"
+    },
+    {
+      "query": "launch",
+      "ms": 138.72750000000008,
+      "status": "search-complete"
+    },
+    {
+      "query": "budget",
+      "ms": 153.1456250000001,
+      "status": "search-complete"
+    },
+    {
+      "query": "東京計画",
+      "ms": 140.53529200000003,
+      "status": "search-complete"
+    },
+    {
+      "query": "rarephrase",
+      "ms": 77.82366699999989,
+      "status": "search-complete"
+    },
+    {
+      "query": "cafe",
+      "ms": 141.6238330000001,
+      "status": "search-complete"
+    },
+    {
+      "query": "launch",
+      "ms": 138.638459,
+      "status": "search-complete"
+    },
+    {
+      "query": "budget",
+      "ms": 136.23566700000015,
+      "status": "search-complete"
+    },
+    {
+      "query": "東京計画",
+      "ms": 133.38533300000017,
+      "status": "search-complete"
+    },
+    {
+      "query": "rarephrase",
+      "ms": 74.3020419999998,
+      "status": "search-complete"
+    },
+    {
+      "query": "cafe",
+      "ms": 137.01629200000025,
+      "status": "search-complete"
+    },
+    {
+      "query": "launch",
+      "ms": 144.0737909999998,
+      "status": "search-complete"
+    },
+    {
+      "query": "budget",
+      "ms": 132.79604199999994,
+      "status": "search-complete"
+    },
+    {
+      "query": "東京計画",
+      "ms": 133.7255839999998,
+      "status": "search-complete"
+    },
+    {
+      "query": "rarephrase",
+      "ms": 71.42320800000016,
+      "status": "search-complete"
+    },
+    {
+      "query": "cafe",
+      "ms": 131.51637500000015,
+      "status": "search-complete"
+    },
+    {
+      "query": "launch",
+      "ms": 133.20000000000027,
+      "status": "search-complete"
+    },
+    {
+      "query": "budget",
+      "ms": 134.24141599999984,
+      "status": "search-complete"
+    },
+    {
+      "query": "東京計画",
+      "ms": 137.43933300000026,
+      "status": "search-complete"
+    }
+  ]
+}

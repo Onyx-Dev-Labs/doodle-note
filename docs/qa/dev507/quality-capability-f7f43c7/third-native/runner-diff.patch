@@ -1,0 +1,28 @@
+--- second-frozen/runner.ts
++++ third-candidate/runner.ts
+@@ -1,6 +1,7 @@
+ /** QA-only observer/ledger. No production mutation, repair, retry or fake inference. */
+ import assert from 'node:assert/strict'
+ import { observePrompt } from './observer-wire.mjs'
++import { normalizeCitedInput } from './input-normalization.mjs'
+ import { createHash } from 'node:crypto'
+ import { readFileSync, writeFileSync, readdirSync, lstatSync, openSync, closeSync, fsyncSync } from 'node:fs'
+ import { join } from 'node:path'
+@@ -214,7 +215,7 @@
+   },
+   validateModel: async (id, revision) => id === engine.id && revision === modelSha,
+   generate: async (input, signal) => {
+-    if (prior[active.id]) invariant(() => assert.deepEqual(JSON.parse(JSON.stringify(input)), prior[active.id].generation.input))
++    if (prior[active.id]) invariant(() => assert.deepEqual(normalizeCitedInput(input), prior[active.id].generation.input))
+     if (mode === 'preflight') {
+       await engine.prepare(signal)
+       signal.throwIfAborted()
+@@ -253,7 +254,7 @@
+       throw new Error('QA_PREFLIGHT_ONLY_NO_SAMPLING')
+     }
+     const frozen = JSON.parse(readFileSync(join(root, 'preflight', arm + '-' + active.id + '.json'), 'utf8')).preflight
+-    invariant(()=>assert.deepEqual(input,frozen.input))
++    invariant(()=>assert.deepEqual(normalizeCitedInput(input),frozen.input))
+     active.expectedPrompt = frozen.prompt
+     const start = performance.now(); active.generation = { input }; event('adapter-start')
+     try {

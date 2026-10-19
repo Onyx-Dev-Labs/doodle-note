@@ -1,3 +1,6 @@
+import type { EvidenceSelection, EvidenceBundle } from './evidence-contract';
+import { normalizeEvidenceSelection, scanEvidenceSources, selectOriginalEvidence, EvidenceError } from './evidence-retrieval';
+import type { SourceSnapshot } from './source-projection';
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -59,6 +62,31 @@ export class DerivedSourceIndex {
   ): SourceSearchResult {
     const terms = searchTerms(query);
     const snapshot = scanSources(context, checkpoint);
+    this.reconcile(context, snapshot, checkpoint);
+    const candidates = terms.filter(
+      (t) => [...t].length >= 3 && !t.includes("\0"),
+    );
+    // Trigram accelerates substring search; short terms use the same literal predicate below.
+    const rows = candidates.length
+      ? this.db
+          .prepare("SELECT key FROM passages WHERE passages MATCH ?")
+          .all(
+            candidates.map((t) => `"${t.replaceAll('"', '""')}"`).join(" AND "),
+          )
+      : this.db.prepare("SELECT key FROM passages").all();
+    const keys = new Set(rows.map((r) => String(r.key)));
+    const hits: SourcePassage[] = terms.length
+      ? snapshot.documents
+          .flatMap((d) => d.passages)
+          .filter(
+            (p) =>
+              keys.has(`${p.anchor.meetingId}:${p.anchor.sourceId}`) &&
+              terms.every((t) => normalizeSearch(p.text).includes(t)),
+          )
+      : [];
+    return sourceResult(snapshot, context, generation, hits, limit);
+  }
+  private reconcile(context: SourceContext, snapshot: SourceSnapshot, checkpoint: () => void): void {
     const scopeKey = digest(JSON.stringify(context.scope));
     const current = new Map(snapshot.documents.map((d) => [d.meetingId, d]));
     // The cache belongs to exactly one scope per transaction; a scope change clears prior rows.
@@ -103,28 +131,15 @@ export class DerivedSourceIndex {
       this.db.exec("ROLLBACK");
       throw error;
     }
-    const candidates = terms.filter(
-      (t) => [...t].length >= 3 && !t.includes("\0"),
-    );
-    // Trigram accelerates substring search; short terms use the same literal predicate below.
-    const rows = candidates.length
-      ? this.db
-          .prepare("SELECT key FROM passages WHERE passages MATCH ?")
-          .all(
-            candidates.map((t) => `"${t.replaceAll('"', '""')}"`).join(" AND "),
-          )
-      : this.db.prepare("SELECT key FROM passages").all();
-    const keys = new Set(rows.map((r) => String(r.key)));
-    const hits: SourcePassage[] = terms.length
-      ? snapshot.documents
-          .flatMap((d) => d.passages)
-          .filter(
-            (p) =>
-              keys.has(`${p.anchor.meetingId}:${p.anchor.sourceId}`) &&
-              terms.every((t) => normalizeSearch(p.text).includes(t)),
-          )
-      : [];
-    return sourceResult(snapshot, context, generation, hits, limit);
+  }
+  retrieveEvidence(context: SourceContext, input: EvidenceSelection, checkpoint: () => void = () => {}): EvidenceBundle {
+    const selection = normalizeEvidenceSelection(input);
+    const deadline = Date.now() + 15000;
+    const check = (): void => { checkpoint(); if (Date.now() > deadline) throw new EvidenceError('retrieval-timeout'); };
+    const snapshot = scanEvidenceSources(context, selection, check);
+    // A subset must not evict the full-scope cache. Both modes rank the same originals directly.
+    if (selection.meetingIds === undefined) this.reconcile(context, snapshot, check);
+    return selectOriginalEvidence(context, selection, snapshot, check);
   }
   close(): void {
     this.db.close();

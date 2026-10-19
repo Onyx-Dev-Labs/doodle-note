@@ -111,3 +111,14 @@ account's cloud data.
 `search_meeting_sources` searches the full eligible local history and returns revision-aware original anchors plus coverage/truncation counts. `resolve_meeting_source` rereads the exact original and explicitly reports stale/missing/unauthorized/unavailable evidence. Search terms are case/diacritic-insensitive literal substrings within a passage. Existing transcript segments also include optional `segment_id`.
 
 These tools share the [desktop source contract](../meetings-store/README.md) but only read originals. They do not open SQLite, create an index/identity, contact a model or require desktop to remain open. Node 18 remains supported. Missing legacy library identity uses a path-derived scope; anchors must be searched again after the desktop initializes a stable identity or an uninitialized library moves. Consent and library location are rechecked on every request. Large-library MCP scans can be slow; see the linked contract's benchmark evidence and coverage rules.
+
+`retrieve_meeting_evidence({question, filters?})` adds bounded original personal/
+transcript ranges with scan/selection coverage and a freshness manifest. Filters
+accept a folder ID and UTC date bounds. It performs no generation; incomplete
+scans are explicitly reported and must not authorize a generated answer.
+`count_meeting_sources({predicate, filters?})` counts eligible meetings or literal
+AND matches across all eligible originals. Lists cap at 100 and incomplete
+counts are observed lower bounds after removing detected changed contributions.
+Neither tool exposes trusted calendar subsets, chooses a filesystem root from
+tool arguments, writes identity/cache/originals, or adds hosted registration.
+See [cited Ask semantics and limits](../../docs/cited-ask.md).

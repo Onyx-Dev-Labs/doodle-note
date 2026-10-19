@@ -44,3 +44,6 @@ export type {
 export { NOTE_TEMPLATES, templateById, type NoteTemplate } from './templates'
 
 export { GenerationError, GENERATION_LIMITS, withGenerationDeadline } from './generation-control'
+
+export { buildCitedAskPrompt, CITED_ASK_SYSTEM, hashCitedWire } from './cited-ask-prompt'
+export type { CitedPromptInput, CitedPromptInclusion, CitedGenerationOutput } from './cited-ask-prompt'

@@ -1,0 +1,13 @@
+✔ Gemma-empty full wire captured; arguments/result untouched (1.169166ms)
+✔ Qwen-system full wire captured; arguments/result untouched (0.26925ms)
+✔ OLD empty-history assertion is RED before forwarding (0.155084ms)
+✔ wire/grammar drift fails before forwarding rather than skipping accounting (1.220125ms)
+✔ native error and cancellation reason propagate with exact signal/options (0.256167ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63.302

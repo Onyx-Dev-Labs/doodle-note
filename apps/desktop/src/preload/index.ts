@@ -1,3 +1,4 @@
+import * as homeCited from '../shared/home-cited-api'
 import { RECIPE_CHANNELS, type RecipesApi } from '../shared/recipes-api'
 import {
   SOURCES_SEARCH,
@@ -312,6 +313,21 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => {
     ipcRenderer.removeListener(channel, listener)
   }
+}
+
+const homeCitedApi: homeCited.HomeCitedApi = {
+  status: () => ipcRenderer.invoke(homeCited.HOME_CITED_STATUS),
+  ask: (request) => ipcRenderer.invoke(homeCited.HOME_CITED_ASK, request),
+  cancel: (runId) => ipcRenderer.invoke(homeCited.HOME_CITED_CANCEL, runId),
+  history: () => ipcRenderer.invoke(homeCited.HOME_CITED_HISTORY),
+  clear: () => ipcRenderer.invoke(homeCited.HOME_CITED_CLEAR),
+  resolve: (entryId, evidenceId) =>
+    ipcRenderer.invoke(homeCited.HOME_CITED_RESOLVE, entryId, evidenceId),
+  play: (entryId, evidenceId, token) =>
+    ipcRenderer.invoke(homeCited.HOME_CITED_PLAY, entryId, evidenceId, token),
+  census: (request) => ipcRenderer.invoke(homeCited.HOME_CITED_CENSUS, request),
+  onProgress: (listener) => subscribe(homeCited.HOME_CITED_PROGRESS, listener),
+  onChanged: (listener) => subscribe(homeCited.HOME_CITED_CHANGED, listener)
 }
 
 const recipesApi: RecipesApi = {
@@ -715,6 +731,7 @@ if (process.contextIsolated) {
     } satisfies StorageApi)
     contextBridge.exposeInMainWorld('engine', engineApi)
     contextBridge.exposeInMainWorld('notes', notesApi)
+    contextBridge.exposeInMainWorld('citedAsk', homeCitedApi)
     contextBridge.exposeInMainWorld('recipes', recipesApi)
     contextBridge.exposeInMainWorld('meetings', meetingsApi)
     contextBridge.exposeInMainWorld('sources', {
@@ -769,7 +786,7 @@ if (process.contextIsolated) {
   window.audio = audioApi
   // @ts-ignore (defined in index.d.ts)
   window.importer = importerApi
-  Object.assign(window, { textImporter: textImporterApi })
+  Object.assign(window, { textImporter: textImporterApi, citedAsk: homeCitedApi })
   // @ts-ignore (defined in index.d.ts)
   window.wizard = wizardApi
   // @ts-ignore (defined in index.d.ts)

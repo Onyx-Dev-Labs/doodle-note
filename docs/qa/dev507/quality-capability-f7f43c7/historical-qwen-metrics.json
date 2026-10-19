@@ -1,0 +1,82 @@
+[
+  {
+    "id": "answer-01",
+    "rawClaims": 6,
+    "admittedClaims": 6,
+    "elapsedMs": 19143.50108300001,
+    "rawRepetitionGroups": 1,
+    "rawRepetitionExcess": 3,
+    "admittedRepetitionGroups": 1,
+    "admittedRepetitionExcess": 3
+  },
+  {
+    "id": "answer-02",
+    "rawClaims": 12,
+    "admittedClaims": 12,
+    "elapsedMs": 49194.156833000015,
+    "rawRepetitionGroups": 2,
+    "rawRepetitionExcess": 7,
+    "admittedRepetitionGroups": 2,
+    "admittedRepetitionExcess": 7
+  },
+  {
+    "id": "answer-04",
+    "rawClaims": 2,
+    "admittedClaims": 2,
+    "elapsedMs": 24082.829791,
+    "rawRepetitionGroups": 0,
+    "rawRepetitionExcess": 0,
+    "admittedRepetitionGroups": 0,
+    "admittedRepetitionExcess": 0
+  },
+  {
+    "id": "answer-06",
+    "rawClaims": 12,
+    "admittedClaims": 12,
+    "elapsedMs": 50525.083333999995,
+    "rawRepetitionGroups": 1,
+    "rawRepetitionExcess": 1,
+    "admittedRepetitionGroups": 1,
+    "admittedRepetitionExcess": 1
+  },
+  {
+    "id": "conflict-01",
+    "rawClaims": 12,
+    "admittedClaims": 12,
+    "elapsedMs": 60000.947667,
+    "rawRepetitionGroups": 0,
+    "rawRepetitionExcess": 0,
+    "admittedRepetitionGroups": 1,
+    "admittedRepetitionExcess": 2
+  },
+  {
+    "id": "must-03",
+    "rawClaims": 12,
+    "admittedClaims": 12,
+    "elapsedMs": 112702.944459,
+    "rawRepetitionGroups": 0,
+    "rawRepetitionExcess": 0,
+    "admittedRepetitionGroups": 1,
+    "admittedRepetitionExcess": 5
+  },
+  {
+    "id": "must-09",
+    "rawClaims": 4,
+    "admittedClaims": 4,
+    "elapsedMs": 54255.92275000003,
+    "rawRepetitionGroups": 0,
+    "rawRepetitionExcess": 0,
+    "admittedRepetitionGroups": 0,
+    "admittedRepetitionExcess": 0
+  },
+  {
+    "id": "unknown-01",
+    "rawClaims": 0,
+    "admittedClaims": 0,
+    "elapsedMs": 3849.1582500000077,
+    "rawRepetitionGroups": 0,
+    "rawRepetitionExcess": 0,
+    "admittedRepetitionGroups": 0,
+    "admittedRepetitionExcess": 0
+  }
+]

@@ -1,0 +1,18 @@
+from pathlib import Path
+import json,gzip,hashlib,shutil
+r=Path(__file__).parent;repo=Path(json.loads((r/'launch.json').read_text())['repo']);dest=repo/'docs/qa/dev507/native-pair-fd363c8';dest.mkdir(exist_ok=False)
+def gz(name,b): (dest/name).write_bytes(gzip.compress(b,mtime=0))
+def jsonl(name,records):gz(name,b''.join((json.dumps(x,ensure_ascii=False,separators=(',',':'))+'\n').encode() for x in records))
+s=json.loads((r/'summary.json').read_text())
+jsonl('evidence.jsonl.gz',[json.loads((r/'evidence'/f"{x['arm']}-{x['id']}.json").read_text()) for x in s['cases']])
+jsonl('preflight.jsonl.gz',[json.loads((r/'preflight'/f"{x['arm']}-{x['id']}.json").read_text()) for x in s['cases']])
+jsonl('originals.jsonl.gz',[{'path':str(p.relative_to(r/'arms/control/originals')),'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'rawUtf8':p.read_text()} for p in sorted((r/'arms/control/originals').iterdir()) if p.is_file()])
+jsonl('arm-sources.jsonl.gz',[{'path':str(p.relative_to(r)),'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'rawUtf8':p.read_text()} for a in ['control','treatment'] for p in sorted((r/'arms'/a/'ai/src').rglob('*')) if p.is_file()])
+for name in ['runner.mjs','claim-source-pairs.json','arm-hashes.json','source-before.json','prior-hashes.json','freeze.json','events.json']:
+ gz(name+'.gz',(r/name).read_bytes())
+for name in ['PLAN.md','RUBRIC.md','initial-ledger.json','runner.ts','launch.py','contain.sb','treatment.diff','launch.json','summary.json','model-before.json','model-after.json','exit.json','source-prior-freeze-integrity.json','original-integrity.json','process-exit-proof.json','offline-verification.json','agent-inspection.json','verify-artifacts.py','collect-inspection.py','inspect-output.py','annotate.py','package.py']:
+ shutil.copyfile(r/name,dest/name)
+for name in ['stdout','stderr']:shutil.copyfile(r/(name+'.log'),dest/(name+'.txt'))
+provenance={'rawRoot':str(r),'productionSha':'fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8','evidenceStartingHead':'ffa54854564ab9ad1b1fc21e844c4a18c92b7b15','freezeSha256':hashlib.sha256((r/'freeze.json').read_bytes()).hexdigest(),'runnerSha256':hashlib.sha256((r/'runner.mjs').read_bytes()).hexdigest(),'observerSourceSha256':hashlib.sha256((r/'runner.ts').read_bytes()).hexdigest(),'launcherSha256':hashlib.sha256((r/'launch.py').read_bytes()).hexdigest(),'treatmentDiffSha256':hashlib.sha256((r/'treatment.diff').read_bytes()).hexdigest(),'corpusSha256':'0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2','frozen100RubricSha256':'782d8ac7def0d49073a7b5a304d6204761f2f9da05a6418fd2f597c800bc5777','prior79PacketSha256':'03099a2de708a36bdeff6d4930bbbaa7e83e944f88a5cd25a97ab2d6a142adcb','priorSixPacketSha256':'6c6c208882c8750ee861c04053b6d41c089c4d80862503f6bf8baf351125401d','offlineDiagnosis':'/tmp/dev507-six-diagnosis-yt21yh5i/REPORT.md','offlineDiagnosisSha256':hashlib.sha256((r/'diagnosis.md').read_bytes()).hexdigest(),'parentDecision':'Do not adopt the added sentence in production. No further experiments under this authorization.','productionGate':'OFF','syntheticOriginals':701,'canonicalMarker':1,'modelCopied':False,'evidencePacketSha256':hashlib.sha256((dest/'evidence.jsonl.gz').read_bytes()).hexdigest(),'claimPairsSha256':hashlib.sha256((dest/'claim-source-pairs.json.gz').read_bytes()).hexdigest(),'notes':'All captured outputs preserved. Packet compression is transport only. Paired QA overlay is outside checkout; production and strict parser unchanged. No fixed seed; no causal generalization; no human score.'}
+(dest/'provenance.json').write_text(json.dumps(provenance,indent=2)+'\n')
+print(dest);print(json.dumps({k:provenance[k] for k in ['freezeSha256','runnerSha256','evidencePacketSha256','claimPairsSha256']},indent=2))

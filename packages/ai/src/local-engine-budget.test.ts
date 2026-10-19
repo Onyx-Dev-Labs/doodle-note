@@ -1,3 +1,4 @@
+import * as citedAsk from './cited-ask-prompt'
 import * as boundedRequest from './bounded-request'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -69,6 +70,7 @@ test('local adapter counts the actual wrapper/allocation, enforces reserve and d
     './generation-control': generation,
     './ask-prompt': ask,
     './global-ask-prompt': globalAsk,
+    './cited-ask-prompt': citedAsk,
     './map-reduce': mapReduce,
     'node-llama-cpp': {
       getLlama: async () => ({

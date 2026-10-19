@@ -1,0 +1,143 @@
+{
+  "attemptId": "dev507-native-order-3p598a3i",
+  "createdAt": "2026-10-18T22:52:43.370379+00:00",
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "evidenceHead": "c1fbb2e0a9d548f8d466229853d83a7d5ec71597",
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02"
+  ],
+  "samplingOrder": [
+    {
+      "arm": "control",
+      "id": "answer-04"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06"
+    },
+    {
+      "arm": "control",
+      "id": "answer-06"
+    },
+    {
+      "arm": "control",
+      "id": "must-03"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09"
+    },
+    {
+      "arm": "control",
+      "id": "must-09"
+    },
+    {
+      "arm": "control",
+      "id": "answer-01"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02"
+    },
+    {
+      "arm": "control",
+      "id": "answer-02"
+    }
+  ],
+  "perCaseDeadlineMs": 180000,
+  "outerDeadlineMs": 2400000,
+  "seed": "unspecified production default; no seed added",
+  "scope": "one descriptive alternating12 screen, no repeats/causal proof/frozen100 acceptance",
+  "stopRule": "first timeout/cancellation/drain/containment/integrity failure or two consecutive identical protocol/runtime/grammar failures",
+  "cases": [
+    {
+      "arm": "control",
+      "id": "answer-04",
+      "attemptId": "dev507-native-order-3p598a3i:control:answer-04",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04",
+      "attemptId": "dev507-native-order-3p598a3i:treatment:answer-04",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06",
+      "attemptId": "dev507-native-order-3p598a3i:treatment:answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "attemptId": "dev507-native-order-3p598a3i:control:answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "must-03",
+      "attemptId": "dev507-native-order-3p598a3i:control:must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03",
+      "attemptId": "dev507-native-order-3p598a3i:treatment:must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09",
+      "attemptId": "dev507-native-order-3p598a3i:treatment:must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "must-09",
+      "attemptId": "dev507-native-order-3p598a3i:control:must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "attemptId": "dev507-native-order-3p598a3i:control:answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01",
+      "attemptId": "dev507-native-order-3p598a3i:treatment:answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02",
+      "attemptId": "dev507-native-order-3p598a3i:treatment:answer-02",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "answer-02",
+      "attemptId": "dev507-native-order-3p598a3i:control:answer-02",
+      "status": "unperformed"
+    }
+  ]
+}

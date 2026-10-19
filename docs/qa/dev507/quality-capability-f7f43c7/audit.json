@@ -1,0 +1,12 @@
+{
+  "payloadMembersVerifiedExcludingAudit": 85,
+  "recordHashesVerified": 25,
+  "originalFilesAndMarker": 702,
+  "thirdNativeCalls": 8,
+  "thirdStrictCurrentValid": 8,
+  "rawAdmittedClaimPairs": 18,
+  "secondNativeCalls": 0,
+  "sourceProductionUnchanged": true,
+  "wireGrammarForwardPolicyAndCleanup": true,
+  "semanticAcceptance": "NOT CLAIMED"
+}

@@ -313,3 +313,87 @@ for (const failCopy of [false, true]) {
     }
   })
 }
+
+test('evidence retrieval and validation use the real worker and exact current originals', async (t) => {
+  const f = fixture(t)
+  assert.equal(typeof f.service.retrieveEvidence, 'function')
+  const bundle = await f.service.retrieveEvidence({
+    mode: 'question',
+    question: 'What about needle?',
+    filters: {}
+  })
+  assert.equal(bundle.ranges[0]!.quote, 'original needle')
+  assert.equal(await f.service.validateEvidence(bundle.manifest), 'valid')
+  f.put('changed needle')
+  assert.equal(await f.service.validateEvidence(bundle.manifest), 'stale')
+  const counts = await f.service.census({
+    filters: {},
+    predicate: { kind: 'literal', text: 'needle' }
+  })
+  assert.equal(counts.meetingCount, 1)
+  assert.equal(counts.exact, true)
+})
+
+test('request-owned evidence abort drains acknowledgement without cancelling another consumer', async (t) => {
+  const f = fixture(t)
+  await call('sources:search', 'needle')
+  const worker = workers.at(-1)!
+  worker.holdResponses = true
+  const abort = new AbortController()
+  let settled = false
+  const held = once(worker, 'response-held')
+  const request = f.service.retrieveEvidence(
+    { mode: 'question', question: 'needle', filters: {} },
+    abort.signal
+  )
+  const rejected = assert.rejects(request, /cancel/i).then(() => {
+    settled = true
+  })
+  await held
+  abort.abort()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(settled, false, 'producer acknowledgement must precede cleanup completion')
+  const other = f.service.retrieveEvidence({ mode: 'linked-history', meetingIds: ['a'] })
+  worker.releaseResponses()
+  await rejected
+  assert.equal((await other).ranges.length, 1)
+})
+
+for (const retire of [false, true]) {
+  test(`acknowledged resolve retains host activity through ${retire ? 'retirement' : 'invalidation'} and rejects late replies`, async (t) => {
+    const f = fixture(t)
+    const anchor = (await call<SourceSearchResult>('sources:search', 'needle')).hits[0]!.anchor
+    const worker = workers.at(-1)!
+    worker.holdResponses = true
+    const held = once(worker, 'response-held')
+    let settled = false
+    const resolving = f.service.resolveAcknowledged(anchor)
+    const rejected = assert.rejects(resolving, /changed|stopped/).then(() => {
+      settled = true
+    })
+    await held
+    let release!: () => void
+    worker.retirementGate = new Promise<void>((r) => {
+      release = r
+    })
+    try {
+      if (retire) f.service.refreshLibraryPath()
+      else f.service.invalidate()
+      await new Promise((r) => setImmediate(r))
+      assert.equal(settled, false)
+      if (retire) {
+        release()
+        await rejected
+        worker.releaseResponses()
+      } else {
+        worker.releaseResponses()
+        await rejected
+      }
+      assert.equal((await f.service.resolveAcknowledged(anchor)).status, 'resolved')
+      assert.equal(peakWorkers, 1)
+    } finally {
+      release()
+      worker.releaseResponses()
+    }
+  })
+}

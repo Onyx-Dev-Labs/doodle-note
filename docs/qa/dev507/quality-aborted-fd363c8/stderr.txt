@@ -1,0 +1,9 @@
+[node-llama-cpp] load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+[node-llama-cpp] load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+[node-llama-cpp] load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+[node-llama-cpp] load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+[node-llama-cpp] load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+(node:82878) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 beforeExit listeners added to [process]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+[node-llama-cpp] load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+[node-llama-cpp] load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden

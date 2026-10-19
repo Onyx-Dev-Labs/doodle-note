@@ -1,0 +1,123 @@
+{
+  "nativeGeneration": false,
+  "tokenizer": "captured native tokens replayed offline, no runtime",
+  "results": [
+    {
+      "id": "answer-04",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 18
+    },
+    {
+      "id": "answer-06",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 18
+    },
+    {
+      "id": "must-03",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 47
+    },
+    {
+      "id": "must-09",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 47
+    },
+    {
+      "id": "answer-01",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 18
+    },
+    {
+      "id": "answer-02",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 52
+    },
+    {
+      "id": "conflict-01",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 52
+    },
+    {
+      "id": "unknown-01",
+      "status": "offline-pass",
+      "underlying": "FAKE",
+      "rawForwardExact": true,
+      "policy": 3,
+      "sourceOperations": 16
+    },
+    {
+      "control": "wire",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "schema",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "grammar",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "budget",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "speaker",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "quote",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "question",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "id",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "range",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "scope",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "order",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "coverage",
+      "status": "rejected-before-fake-generation"
+    },
+    {
+      "control": "underlying-error",
+      "status": "unchanged error, cleanup awaited"
+    }
+  ],
+  "successfulFakeForwardings": 8
+}

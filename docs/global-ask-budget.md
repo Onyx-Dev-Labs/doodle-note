@@ -1,5 +1,11 @@
 # Global Ask request budget (DEV-505)
 
+DEV-507 adds a separate production-gated [cited local Ask path](cited-ask.md).
+It uses original evidence and no chat history, with native exact-wire range
+inclusion and current-request/source validation. The legacy Global Ask behavior
+documented below remains compatible; its selected-note coverage is not upgraded
+into an original-evidence or complete-library claim.
+
 `buildGlobalAskPrompt(input, budget)` returns `{ system, user, coverage }`. Callers
 must send these exact strings and enforce `budget.outputReserveTokens` as their
 maximum generated tokens. The complete input count + output reserve + safety

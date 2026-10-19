@@ -1,0 +1,8 @@
+{
+  "packages/ai/src/local-engine.ts": "8a03374ee7d6f3cee1c888b57851a302c3a9d7541508b391e11cbe135014128b",
+  "packages/ai/src/local-engine-system.test.ts": "06c4052f7b2c860d2d61878e98a1d994e899fd2e337b1da35cadbc57b2eebecb",
+  "apps/desktop/src/shared/cited-ask-api.ts": "5abf71052822ac9aa054d62601b13273001b5acd3b498c2c5e1eb44abf583e71",
+  "apps/desktop/src/main/cited-ask-validation.ts": "4aefb6ca90f6f1790fc0a5272d3843c7edbfd3aeb670297ec0e4a1b7f09db621",
+  "apps/desktop/src/main/cited-ask-service.test.ts": "3d74bbebede1c634e53415ed39e9944674facbb579b7d8886b24af43e94c9935",
+  "apps/desktop/src/main/home-cited-controller.test.ts": "d95655080cf500c75ee574d7598361e7f31ba40b7660bf909e04dc572dae1c5f"
+}

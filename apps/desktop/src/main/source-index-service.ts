@@ -1,13 +1,21 @@
+import type {
+  EvidenceSelection,
+  EvidenceBundle,
+  EvidenceManifest,
+  CensusRequest,
+  CensusResult
+} from '@repo/meetings-store/evidence-contract'
 import { ipcMain } from 'electron'
 import { Worker } from 'node:worker_threads'
 import { join } from 'node:path'
 import {
   SourceIndexClient,
+  awaitSourceReady,
   StaleSourceRequestError,
   type SourceIndexState
 } from '@repo/meetings-store/source-index-client'
 import { localSourceScope } from '@repo/meetings-store/sources'
-import type { SourceAnchor } from '@repo/meetings-store/source-contract'
+import type { SourceAnchor, SourceResolution } from '@repo/meetings-store/source-contract'
 import { libraryIpc } from './library-ipc'
 import {
   SOURCES_CANCEL,
@@ -69,7 +77,11 @@ export class SourceIndexService {
     })
   }
 
-  private async withClient<T>(operation: (client: SourceIndexClient) => Promise<T>): Promise<T> {
+  private async withClient<T>(
+    operation: (client: SourceIndexClient) => Promise<T>,
+    signal?: AbortSignal,
+    drain = false
+  ): Promise<T> {
     if (this.closed) throw new Error('Source worker unavailable')
     this.assertAvailable()
     const directory = this.meetingsDir()
@@ -80,9 +92,12 @@ export class SourceIndexService {
     const cancelled = new Promise<never>((_resolve, reject) => {
       cancel = reject
     })
-    this.pending.add(cancel)
+    if (!drain) this.pending.add(cancel)
     try {
-      return await Promise.race([this.run(directory, generation, operation), cancelled])
+      const result = this.run(directory, generation, operation, signal)
+      // Legacy IPC settles invalidation promptly; cited operations keep their activity lease.
+      if (drain) return await result
+      return await Promise.race([result, cancelled])
     } finally {
       this.pending.delete(cancel)
     }
@@ -91,9 +106,10 @@ export class SourceIndexService {
   private async run<T>(
     directory: string,
     generation: number,
-    operation: (client: SourceIndexClient) => Promise<T>
+    operation: (client: SourceIndexClient) => Promise<T>,
+    signal?: AbortSignal
   ): Promise<T> {
-    await this.retirement
+    await awaitSourceReady(this.retirement, signal)
     this.assertAvailable()
     if (this.closed || generation !== this.generation || directory !== this.meetingsDir())
       throw new StaleSourceRequestError()
@@ -107,6 +123,25 @@ export class SourceIndexService {
     )
       throw new StaleSourceRequestError()
     return result
+  }
+
+  retrieveEvidence(selection: EvidenceSelection, signal?: AbortSignal): Promise<EvidenceBundle> {
+    return this.withClient((client) => client.retrieveEvidence(selection, signal), signal, true)
+  }
+  census(request: CensusRequest, signal?: AbortSignal): Promise<CensusResult> {
+    return this.withClient((client) => client.census(request, signal), signal, true)
+  }
+  validateEvidence(
+    manifest: EvidenceManifest,
+    signal?: AbortSignal
+  ): Promise<'valid' | 'stale' | 'unavailable'> {
+    return this.withClient((client) => client.validateEvidence(manifest, signal), signal, true)
+  }
+  resolveAcknowledged(anchor: SourceAnchor, signal?: AbortSignal): Promise<SourceResolution> {
+    return this.withClient((client) => client.resolveAcknowledged(anchor, signal), signal, true)
+  }
+  resolve(anchor: SourceAnchor, signal?: AbortSignal): Promise<SourceResolution> {
+    return this.withClient((client) => client.resolve(anchor, signal), signal)
   }
 
   private state(): SourceIndexState {

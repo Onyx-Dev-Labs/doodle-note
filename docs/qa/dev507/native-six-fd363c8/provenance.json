@@ -1,0 +1,117 @@
+{
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "attemptId": "dev507-native-six-5de0lv8g",
+  "launch": {
+    "root": "/private/tmp/dev507-native-six-5de0lv8g",
+    "repo": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c",
+    "model": "/private/tmp/dn230-inference-AHCmaZ/QAmodelcache/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "node": "/private/tmp/dev507-native-six-5de0lv8g/helpers/node",
+    "sentinel": "/private/tmp/dev507-denied-ra1r2m50",
+    "sourceSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+    "argv": [
+      "/usr/bin/sandbox-exec",
+      "-f",
+      "/private/tmp/dev507-native-six-5de0lv8g/contain.sb",
+      "-D",
+      "REPO=/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c",
+      "-D",
+      "MODEL=/private/tmp/dn230-inference-AHCmaZ/QAmodelcache/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "-D",
+      "RUN=/private/tmp/dev507-native-six-5de0lv8g",
+      "-D",
+      "NODE=/private/tmp/dev507-native-six-5de0lv8g/helpers/node",
+      "/private/tmp/dev507-native-six-5de0lv8g/helpers/node",
+      "/private/tmp/dev507-native-six-5de0lv8g/runner.mjs",
+      "/private/tmp/dev507-native-six-5de0lv8g",
+      "/private/tmp/dev507-native-six-5de0lv8g/corpus.json",
+      "/private/tmp/dn230-inference-AHCmaZ/QAmodelcache/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+      "/private/tmp/dev507-denied-ra1r2m50"
+    ],
+    "environment": {
+      "PATH": "/usr/bin:/bin",
+      "HOME": "/private/tmp/dev507-native-six-5de0lv8g/home",
+      "CFFIXED_USER_HOME": "/private/tmp/dev507-native-six-5de0lv8g/home",
+      "TMPDIR": "/private/tmp/dev507-native-six-5de0lv8g/tmp",
+      "XDG_CACHE_HOME": "/private/tmp/dev507-native-six-5de0lv8g/home/.cache"
+    },
+    "pid": 66818,
+    "startedAt": "2026-10-18T22:04:15Z",
+    "policySha256": "db030acf9da31d94f89d0ea953e1c5653468590d62d7cee7aa35875e5d7b3f22",
+    "runnerSha256": "ccdd93381576d3bf371ce0f6c0c397e689a81645a08c147e63b663ec79cb23de",
+    "observerSourceSha256": "2b8cdd0da73fa2883ec7a8c52c2db0b1a85e705da349d7cfa309894a80fc13d8",
+    "launcherSha256": "2396a9dd67a2aed0a881f69456889e846abd337683a31d2773a4c4637b35d975",
+    "outerDeadlineSeconds": 1200
+  },
+  "modelBefore": {
+    "path": "/private/tmp/dn230-inference-AHCmaZ/QAmodelcache/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "mode": "0o444",
+    "bytes": 2497281120,
+    "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+    "inode": 2650967,
+    "mtimeNs": 1792333550535754478
+  },
+  "modelAfter": {
+    "path": "/private/tmp/dn230-inference-AHCmaZ/QAmodelcache/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "mode": "0o444",
+    "bytes": 2497281120,
+    "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+    "inode": 2650967,
+    "mtimeNs": 1792333550535754478
+  },
+  "exit": {
+    "code": 0,
+    "elapsedSeconds": 313.1261260509491,
+    "modelUnchanged": true,
+    "forcedTermination": false,
+    "nativeChildExited": true
+  },
+  "integrity": {
+    "sourceFilesUnchanged": 293,
+    "trackedStatusClean": true,
+    "sourceSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+    "modelUnchanged": true,
+    "originalsUnchanged": true,
+    "nativePid": 66818,
+    "nativePidAbsent": true,
+    "nativeProcessGroupAbsent": true
+  },
+  "originalIntegrity": {
+    "unchanged": true,
+    "count": 701
+  },
+  "priorArtifactsUnchangedSha256": {
+    "native-evidence-79e506a.jsonl.gz": "03099a2de708a36bdeff6d4930bbbaa7e83e944f88a5cd25a97ab2d6a142adcb",
+    "native-summary-79e506a.json": "d5043582d6e1c32a442bc47f2b191bcd5c32793224a26c849127a8136a2210a9",
+    "quality-corpus-v1.json": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+    "quality-rubric.md": "782d8ac7def0d49073a7b5a304d6204761f2f9da05a6418fd2f597c800bc5777"
+  },
+  "reviewReports": {
+    "standards": {
+      "source": "/tmp/dev507-standards-fd363c81.QiuSrh/REPORT.md",
+      "sha256": "d8554461dcf0cb6b1736365f904a46e8c90d379cce16e00f828528d790c68f78"
+    },
+    "spec": {
+      "source": "/tmp/dev507-spec-review-fd363c8/REPORT.md",
+      "sha256": "3ddee89e11f515952be892110aa76f6d94c6e902a72ec2b9154c5a8d96eeb7fb"
+    }
+  },
+  "nodeVersion": "v24.22.0",
+  "nodeBinarySha256": "b468fb9c67427c9d3aec07ee1105e63020923a631a9a2a00beb71a7ba3768bfd",
+  "host": {
+    "os": "26.6.2",
+    "build": "25G83",
+    "arch": "arm64",
+    "nodeLlamaCpp": "3.20.0"
+  },
+  "observerLimitations": "Public native runtime/session methods wrapped only to observe arguments/results/lifecycle and forward unchanged. Added fsync telemetry influences elapsed times. No sampler token trace; token counts use actual sequence token meter. No model weights or prior profile copied.",
+  "parentOfflineReplay": {
+    "source": "/tmp/dev507-semantic-replay-jzacyfh9",
+    "command": "python3 /tmp/dev507-semantic-replay-jzacyfh9/replay.py /private/tmp/dev507-native-six-5de0lv8g",
+    "exitCode": 1,
+    "execution": "Parent independently executed; implementer read/copied without rerun",
+    "scriptSha256": "28cc9515e4e082ea0e21c408ce8907427f1a0c15cb8953b85a5cbeab19908227",
+    "resultsSha256": "ca14174211cd9db3b0403f2432603ca662406113872bddbaf7a601cb59df8159",
+    "scope": "captured raw-output diagnostics only, no inference or human scoring"
+  }
+}

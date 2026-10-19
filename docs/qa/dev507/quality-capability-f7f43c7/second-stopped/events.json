@@ -1,0 +1,1039 @@
+[
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:41.533Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 12591.253708,
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7241924608,
+      "heapTotal": 41271296,
+      "heapUsed": 38062344,
+      "external": 3308506,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:41.542Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 12600.255916,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:42.172Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 630.4030830000011,
+    "memory": {
+      "rss": 7569063936,
+      "heapTotal": 44679168,
+      "heapUsed": 38355392,
+      "external": 3308546,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:42.228Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 13286.797833,
+    "schemaSha256": "59e10b276844c74e810cef0014496cc2a45e43f1996114b278ef859866530c91"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:42.240Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 11.892958000000363,
+    "grammarSha256": "c87f68e2ce8c87c6a7d42c94cebdcc0162ec27e0b4774c6106cf769c5d956484"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:42.249Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 13307.985583
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:42.315Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 65.07925000000068,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:42.332Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:42.376Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:42.380Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:46.805Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 4360.520375,
+    "runtime": {
+      "id": "runtime-2",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7466270720,
+      "heapTotal": 41533440,
+      "heapUsed": 38097096,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:46.813Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 4369.398416,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-2",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:47.487Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 673.0460829999975,
+    "memory": {
+      "rss": 7610089472,
+      "heapTotal": 44417024,
+      "heapUsed": 38341032,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:47.529Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 5084.599582999999,
+    "schemaSha256": "57e1f01d1a7fc3457be125f665b7bd1816be37307f5b20e86888ad6584209f28"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:47.539Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 9.889209000000847,
+    "grammarSha256": "066035aab0567a7d3203e3b8f32a0302f02ba1691bf1291005e3f1178db98547"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:47.548Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 5103.606415999999
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:47.574Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 26.532042000002548,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:47.591Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:47.633Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:47.637Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:49.099Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 1396.6406659999993,
+    "runtime": {
+      "id": "runtime-3",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7771815936,
+      "heapTotal": 41795584,
+      "heapUsed": 38788840,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:49.105Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 1403.0446250000023,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-3",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:49.669Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 563.103750000002,
+    "memory": {
+      "rss": 8097087488,
+      "heapTotal": 41795584,
+      "heapUsed": 38961256,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:49.913Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 2210.7262499999997,
+    "schemaSha256": "0d347717907529b7f89d5b9a46d737fa22de19341d0b01ee29617455300936c1"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:49.924Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 10.464458999998897,
+    "grammarSha256": "c5e12f7228d2b0def450c9bb28d7e65247445774ae2687ee9dbcc75be72bef75"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:49.933Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 2230.3089580000014
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:49.961Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 28.667833999999857,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:49.980Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:50.019Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:50.023Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:51.392Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 1356.0187499999993,
+    "runtime": {
+      "id": "runtime-4",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7800963072,
+      "heapTotal": 44417024,
+      "heapUsed": 39033176,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:51.403Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 1366.2773749999978,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-4",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:51.923Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 520.382458,
+    "memory": {
+      "rss": 8206696448,
+      "heapTotal": 44417024,
+      "heapUsed": 39201296,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:52.165Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 2129.144708,
+    "schemaSha256": "9dee358cf65a5f36aee99f3f3fdc6782e2048c714c58838ac9891bf749eb5287"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:52.175Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 9.89154100000087,
+    "grammarSha256": "16708fa7d1eda67dc121bd2a51325dc91d435523a13aa2ee953f524a0534713a"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:52.185Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 2148.2797919999975
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:52.213Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 28.807458000002953,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:52.230Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:52.273Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:52.278Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:53.578Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1286.049417000002,
+    "runtime": {
+      "id": "runtime-5",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7821230080,
+      "heapTotal": 42057728,
+      "heapUsed": 38874752,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:53.587Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1295.4095000000016,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-5",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:54.066Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 478.80395900000076,
+    "memory": {
+      "rss": 8402993152,
+      "heapTotal": 45203456,
+      "heapUsed": 39126120,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:54.110Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1818.6035420000007,
+    "schemaSha256": "a90ea027778c30384265a891d28498750dfd7c453936c9bea15c77e5df7207ab"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:54.121Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 10.809541000002355,
+    "grammarSha256": "05918cf32a6506599a5569b83a35b34df8a1c3f900776d0326d113d785c61764"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:54.129Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1837.5701670000017
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:54.158Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 28.578708000000915,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:54.173Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:54.213Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:54.217Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:55.482Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1251.223582999999,
+    "runtime": {
+      "id": "runtime-6",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7825752064,
+      "heapTotal": 42582016,
+      "heapUsed": 38987504,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:55.491Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1260.5723749999997,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-6",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:55.887Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 395.99175000000105,
+    "memory": {
+      "rss": 8462663680,
+      "heapTotal": 45727744,
+      "heapUsed": 39250568,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:55.997Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1766.2150000000001,
+    "schemaSha256": "130649a53495dc4bf103c20490b7d364140a4a67d85e03d98be0e83d54b49d61"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:56.006Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 8.892667000000074,
+    "grammarSha256": "70076df62cdd86ffc9227eea7edf11c5a40824dcde19b520fa4d1687e9d31b66"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:56.013Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1782.4463329999999
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:56.040Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 27.159875000001193,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:56.058Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:56.096Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:56.101Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:57.363Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1248.6682499999988,
+    "runtime": {
+      "id": "runtime-7",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7830224896,
+      "heapTotal": 42319872,
+      "heapUsed": 39184824,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:57.371Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1256.948124999999,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-7",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:57.793Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 421.6375829999997,
+    "memory": {
+      "rss": 8469250048,
+      "heapTotal": 42319872,
+      "heapUsed": 39372096,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:57.883Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1768.5306249999994,
+    "schemaSha256": "92f7e269fbd3d2fce73c6c0ccbc954be4babc3a07cb112771af017c8620b15be"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:57.891Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 8.638874999996915,
+    "grammarSha256": "fed32e6aae44cd9b98f29eb4d4fd5efa779238f24d1de6e11ca7af398c08f820"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:57.900Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1785.4702499999985
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:57.926Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 26.633292000002257,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:57.944Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:57.983Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:57.988Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:13:59.247Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1245.961292,
+    "runtime": {
+      "id": "runtime-8",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7834533888,
+      "heapTotal": 43368448,
+      "heapUsed": 39299408,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:13:59.255Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1254.3706669999992,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-8",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:13:59.710Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 454.44474999999875,
+    "memory": {
+      "rss": 8505393152,
+      "heapTotal": 46252032,
+      "heapUsed": 39575064,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:13:59.752Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1751.2617499999978,
+    "schemaSha256": "9c2381b1ef7968410d2371ecabf2b00f67019a3bdc072182b2c034deb1154f5c"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:13:59.763Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 10.904791000000841,
+    "grammarSha256": "5061b6fc60eab267ed4819136ec496a4b4a103dea5de582dc633896cfacd901b"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:13:59.772Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1771.286
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:13:59.801Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 28.67254200000025,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:13:59.818Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:13:59.857Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:59.860Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "all-eight-preflights-passed",
+    "at": "2026-10-19T15:13:59.877Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:13:59.884Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 0.16358300000138115,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:13:59.892Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 8.029833000000508,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:13:59.954Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 69.62320800000089,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:13:59.962Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 78.05641699999978,
+    "phase": "generating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:13:59.973Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 88.62937500000044,
+    "status": "error"
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:13:59.981Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 97.03125
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:13:59.998Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:14:00.013Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 133.00895799999853
+  }
+]

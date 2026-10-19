@@ -1,0 +1,85 @@
+✖ new prompt policy stamps every state and rejects old cached policy before source/model admission (23.1075ms)
+✖ known historical prompt policy stays readable and preserved while appending current answers (18.591083ms)
+✖ policy 1 history stays intact while current answers hydrate and old citation/play/cache are denied (32.967542ms)
+✖ policy 2 history stays intact while current answers hydrate and old citation/play/cache are denied (18.687375ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 316.37025
+
+✖ failing tests:
+
+test at src/main/cited-ask-service.test.ts:2:16827
+✖ new prompt policy stamps every state and rejects old cached policy before source/model admission (23.1075ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 3
+  
+      at TestContext.<anonymous> (/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/cited-ask-service.test.ts:489:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/cited-ask-service.test.ts:2:18384
+✖ known historical prompt policy stays readable and preserved while appending current answers (18.591083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 3
+  
+      at TestContext.<anonymous> (/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/cited-ask-service.test.ts:545:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/home-cited-controller.test.ts:2:13411
+✖ policy 1 history stays intact while current answers hydrate and old citation/play/cache are denied (32.967542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 3
+  
+      at TestContext.<anonymous> (/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/home-cited-controller.test.ts:441:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/main/home-cited-controller.test.ts:2:13411
+✖ policy 2 history stays intact while current answers hydrate and old citation/play/cache are denied (18.687375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'valid' !== 'stale'
+  
+      at TestContext.<anonymous> (/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/home-cited-controller.test.ts:426:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'valid',
+    expected: 'stale',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+undefined
+/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: tsx --test --test-name-pattern=policy|historical prompt src/main/cited-ask-service.test.ts src/main/home-cited-controller.test.ts

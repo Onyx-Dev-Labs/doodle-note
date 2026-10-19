@@ -1,3 +1,8 @@
+import { CitedSourceAudio } from './cited-source-audio'
+import { HomeCitedController } from './home-cited-controller'
+import { installHomeCitedIpc } from './home-cited-ipc'
+import { HOME_CITED_CHANGED } from '../shared/home-cited-api'
+import { createCitedAskHost } from './cited-ask-host'
 import { SourceIndexService } from './source-index-service'
 import { RecipeRunner } from './recipe-runner'
 import { registerRecipes } from './recipe-service'
@@ -197,6 +202,7 @@ function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
   return accepted
 }
 
+let citedHost: ReturnType<typeof createCitedAskHost> | null = null
 let notesService: NotesService | null = null
 let recipeRunner: RecipeRunner | null = null
 let calendarService: CalendarService | null = null
@@ -255,14 +261,17 @@ function createWindow(): void {
     }
   })
   window.on('closed', () => {
+    citedHost?.owners.retire(window.webContents)
     if (mainWindow === window) mainWindow = null
     recording.rendererGone()
   })
   window.webContents.on('did-start-loading', () => {
+    citedHost?.owners.retire(window.webContents)
     if (recording.busy && engine.running) engine.stop()
     recording.rendererGone()
   })
   window.webContents.on('render-process-gone', () => {
+    citedHost?.owners.retire(window.webContents)
     engine.stop()
     recording.rendererGone()
   })
@@ -763,6 +772,8 @@ app.whenReady().then(async () => {
   // macOS: engine micmon (CoreAudio). Windows: ConsentStore registry poll.
   if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
   initAutoUpdater(broadcast, async () => {
+    citedHost?.owners.retire()
+    await citedHost?.invalidate()
     await recipeRunner?.stop()
     await notesService?.dispose()
   })
@@ -829,6 +840,58 @@ app.whenReady().then(async () => {
     assertLibrary
   )
   sourceIndex.registerIpc()
+  // Rollout stays off until native/semantic/performance gates pass. The explicit
+  // development override additionally requires an isolated profile.
+  const citedEnabled = (): boolean =>
+    !app.isPackaged && process.env.DOODLE_CITED_ASK === '1' && !!process.env.DOODLE_USER_DATA
+  const citedAudio = new CitedSourceAudio(
+    () => ({
+      meetingsDir: join(libraryRoot(), 'meetings'),
+      audioDir: join(libraryRoot(), 'audio')
+    }),
+    assertLibrary
+  )
+  const sharedCitedHost = createCitedAskHost(
+    {
+      enabled: citedEnabled,
+      sources: sourceIndex,
+      audio: (snapshot, evidenceId) => citedAudio.available(snapshot, evidenceId),
+      generate: (input, signal) => notesService!.runCitedAsk(input, signal),
+      validateModel: (id, revision) => notesService!.citedModelCurrent(id, revision)
+    },
+    () => mainWindow?.webContents ?? null
+  )
+  citedHost = sharedCitedHost
+  const homeCited = new HomeCitedController({
+    cited: sharedCitedHost.cited,
+    store: notesService.globalChatStore,
+    audio: citedAudio,
+    enabled: citedEnabled,
+    census: (request, signal) => sourceIndex.census(request, signal)
+  })
+  sharedCitedHost.subscribeInvalidation(() => {
+    citedAudio.invalidate()
+    const cleanup = homeCited.invalidate()
+    broadcast(HOME_CITED_CHANGED, {})
+    return cleanup
+  })
+  notesService.onHomeHistoryCleared = () => {
+    void homeCited.invalidate().catch(() => {})
+    broadcast(HOME_CITED_CHANGED, {})
+  }
+  notesService.onCitedPolicyChange = () => {
+    void sharedCitedHost.invalidate()
+  }
+  installHomeCitedIpc({
+    ipc: ipcMain,
+    owners: sharedCitedHost.owners,
+    controller: homeCited,
+    play: (entryId, evidenceId, token, owner) => homeCited.play(entryId, evidenceId, token, owner),
+    enabled: citedEnabled
+  })
+  // Consumer installation seam: Home and DEV509's brief installer receive
+  // sharedCitedHost.cited and sharedCitedHost.owners. Never construct another producer.
+
   app.on('will-quit', () => {
     void sourceIndex.dispose()
   })
@@ -836,6 +899,7 @@ app.whenReady().then(async () => {
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
     sourceIndex.invalidate()
+    void sharedCitedHost.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.
     if (change.deletedId) audioService.deleteFor(change.deletedId)
@@ -851,6 +915,7 @@ app.whenReady().then(async () => {
       storage,
       () => recording.busy || importService.isBusy,
       (previous) => {
+        void sharedCitedHost.invalidate()
         sourceIndex.refreshLibraryPath()
         agentAccessService.refreshLibraryPath(join(previous, 'meetings'))
       }
@@ -885,7 +950,12 @@ function focusMainWindow(): void {
 // Make sure the sidecar never outlives the app.
 app.on('will-quit', () => {
   engine.dispose()
-  void recipeRunner?.stop().then(() => notesService?.dispose())
+  citedHost?.owners.retire()
+  void (async () => {
+    await citedHost?.invalidate()
+    await recipeRunner?.stop()
+    await notesService?.dispose()
+  })()
   calendarService?.dispose()
   winBatchTranscriber?.dispose()
 })

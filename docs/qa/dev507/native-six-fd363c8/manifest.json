@@ -1,0 +1,74 @@
+{
+  "REPORT.md": {
+    "bytes": 12646,
+    "sha256": "76cc6974300d69f543675265635f8c690bb0b9d0a1e8023f1f4fb1670ad24832"
+  },
+  "contain.sb": {
+    "bytes": 1143,
+    "sha256": "db030acf9da31d94f89d0ea953e1c5653468590d62d7cee7aa35875e5d7b3f22"
+  },
+  "events.json": {
+    "bytes": 21232,
+    "sha256": "c49e464f8c71c9fb09a6abc9f827fe26083e9951b48f953ca35f954bbc62a7f7"
+  },
+  "evidence.jsonl.gz": {
+    "bytes": 329045,
+    "sha256": "6c6c208882c8750ee861c04053b6d41c089c4d80862503f6bf8baf351125401d"
+  },
+  "final-integrity.json": {
+    "bytes": 263,
+    "sha256": "3b1f2483bb4b249fedc2d98b415627e29d2b3abfd8bee961729b14cc5572c70e"
+  },
+  "initial-ledger.json": {
+    "bytes": 938,
+    "sha256": "9f13b1d99c1d9161f3ca38d382b8faae09f57f01c612a357d7e88cafc83346bd"
+  },
+  "launcher.py.txt": {
+    "bytes": 3562,
+    "sha256": "2396a9dd67a2aed0a881f69456889e846abd337683a31d2773a4c4637b35d975"
+  },
+  "native-stderr.log": {
+    "bytes": 147,
+    "sha256": "be8cb22a2e9cdbae4157287e61b6630e61e48a88e1d1dc33c8536d0315b37e45"
+  },
+  "observer-runner.ts.txt": {
+    "bytes": 18663,
+    "sha256": "2b8cdd0da73fa2883ec7a8c52c2db0b1a85e705da349d7cfa309894a80fc13d8"
+  },
+  "originals-sha256.json": {
+    "bytes": 59468,
+    "sha256": "b814eafe34948825083b79b9eca7b77c1f7e004f28ef903028d0ab335e644065"
+  },
+  "parent-semantic-replay.json": {
+    "bytes": 4538,
+    "sha256": "ca14174211cd9db3b0403f2432603ca662406113872bddbaf7a601cb59df8159"
+  },
+  "parent-semantic-replay.py.txt": {
+    "bytes": 1624,
+    "sha256": "28cc9515e4e082ea0e21c408ce8907427f1a0c15cb8953b85a5cbeab19908227"
+  },
+  "prepare.py.txt": {
+    "bytes": 3630,
+    "sha256": "c547d857e4dbf456f11c5b53edad327b938598e9b7a877ba2495c32c26b07c05"
+  },
+  "provenance.json": {
+    "bytes": 5250,
+    "sha256": "f85978b7ea593303dd11231f0b2eaf8d580e5693043fea5aefe5a4a5339b8ed9"
+  },
+  "source-hashes.json": {
+    "bytes": 33969,
+    "sha256": "6935eb6feba167c93bb41bd27c2ef9875a024e082798d85cacc595cbd188eec6"
+  },
+  "spec-review.md": {
+    "bytes": 9572,
+    "sha256": "3ddee89e11f515952be892110aa76f6d94c6e902a72ec2b9154c5a8d96eeb7fb"
+  },
+  "standards-review.md": {
+    "bytes": 8083,
+    "sha256": "d8554461dcf0cb6b1736365f904a46e8c90d379cce16e00f828528d790c68f78"
+  },
+  "summary.json": {
+    "bytes": 11828,
+    "sha256": "de0e9abe94935b2fcdba4844092102b5223a110d21dda63607017e5c0004b5e5"
+  }
+}

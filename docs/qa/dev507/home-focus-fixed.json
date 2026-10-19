@@ -1,0 +1,17 @@
+{
+  "toolIcon": {
+    "_tag": "website",
+    "pageUrl": "http://localhost:5197/real.html"
+  },
+  "value": {
+    "saved": [
+      {},
+      {
+        "id": "31f40969-0f89-4ea7-ab16-7a29b9908781",
+        "claim": "Orchid ships Friday."
+      }
+    ],
+    "visible": true,
+    "idle": true
+  }
+}

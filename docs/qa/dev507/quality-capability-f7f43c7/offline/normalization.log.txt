@@ -1,0 +1,11 @@
+✔ exact captured input with faithful live undefined reproduces OLD failure and normalized equality (1.778709ms)
+✔ factual/structural changes rejected (5.091708ms)
+✔ invalid non-JSON values never silently disappear (0.751958ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.548084

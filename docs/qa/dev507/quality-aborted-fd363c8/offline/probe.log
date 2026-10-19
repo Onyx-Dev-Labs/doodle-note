@@ -1,0 +1,1 @@
+PASS: actual session constructor omits supplied system on Gemma default; Qwen retains it. OLD observer Gemma RED/Qwen GREEN. Native/runtime imports blocked; no inference.

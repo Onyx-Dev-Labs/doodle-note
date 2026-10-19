@@ -1,0 +1,17 @@
+file:///private/tmp/dev507-quality-annby45k/offline/no-native.mjs:5
+ if(url.endsWith('.node')||/node-llama-cpp\/dist\/(index|bindings)\b/.test(url)||(/node-llama-cpp\/dist\/evaluator\//.test(url)&&!url.endsWith('/evaluator/LlamaChatSession/LlamaChatSession.js'))) throw Error('Forbidden native/runtime import: '+url);
+                                                                                                                                                                                                          ^
+
+Error: Forbidden native/runtime import: file:///Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/node_modules/.pnpm/node-llama-cpp@3.20.0_typescript@5.9.3/node_modules/node-llama-cpp/dist/bindings/types.js
+    at load (file:///private/tmp/dev507-quality-annby45k/offline/no-native.mjs:5:203)
+    at nextStep (node:internal/modules/customization_hooks:189:26)
+    at loadWithHooks (node:internal/modules/customization_hooks:374:18)
+    at #loadSync (node:internal/modules/esm/loader:829:16)
+    at ModuleLoader.load (node:internal/modules/esm/loader:787:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:498:31)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:564:36)
+    at afterResolve (node:internal/modules/esm/loader:611:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:617:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:276:33)
+
+Node.js v24.22.0

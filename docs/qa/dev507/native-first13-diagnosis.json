@@ -1,0 +1,151 @@
+{
+  "productionSha": "79e506ace65a99352b1bdd9af35b9df7f541b260",
+  "corpusSha256": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+  "modelSha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+  "noParserRepair": true,
+  "cases": [
+    {
+      "id": "answer-00",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim-1\",\"text\":\"Orchid migration is owned by Avery\",\"kind\":\"quotation\",\"evidenceIds\":[\"2b41deef93f2067d3427f49dbb376888b22c6cd76929dc7f33070661ef6c04ec\"]},{\"id\":\"claim-2\",\"text\":\"The ownership of Orchid migration is attributed to Avery\",\"kind\":\"paraphrase\",\"evidenceIds\":[\"2b41deef93f2067d3427f49dbb376888b22c6cd76929dc7f33070661ef6c04ec\"]},{\"id\":\"claim-3\",\"text\":\"Avery owns Orchid migration\",\"kind\":\"paraphrase\",\"evidenceIds\":[\"2b41deef93f2067d3427f49dbb376888b22c6cd76929dc7f33070661ef6c04ec\"]},{\"id\":\"claim-4\",\"text\":\"Orchid variance: approved limit is 40 credits\",\"kind\":\"quotation\",\"evidenceIds\":[\"5d2c7787174d7f38afa320468cec142d80ac1946aee61e41299f43d91b382824\"]},{\"id\":\"claim-5\",\"text\":\"Orchid variance: approved limit is 60 credits\",\"kind\":\"quotation\",\"evidenceIds\":[\"5e67966bddeab98f7af0b85b8ea292d235187ff0cbadce5a7e542f5986ffa736\"]},{\"id\":\"claim-6\",\"text\":\"The recovery code for Orchid archive is synthetic-00\",\"kind\":\"quotation\",\"evidenceIds\":[\"83207d71a4bfdd993debddf5899a1949b8b3f1d8347e1b324b133d0efe8181b5\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-9aak57oq"
+    },
+    {
+      "id": "answer-01",
+      "status": "complete",
+      "code": null,
+      "productionMessage": null,
+      "diagnosis": null,
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim-1\",\"text\":\"Maple delivery is due on Friday, 23 October 2026.\",\"kind\":\"quotation\",\"evidenceIds\":[\"484087d3c51796c5cc9bb9524f1ad64638eb4b6046827d35aad200af5354ee7f\"]},{\"id\":\"claim-2\",\"text\":\"Quartz delivery is due on Friday, 23 October 2026.\",\"kind\":\"quotation\",\"evidenceIds\":[\"068ee4385c40787a594d0fff830d081a469a1bd03083f38e3a906fcbad4bea87\"]},{\"id\":\"claim-3\",\"text\":\"Opal delivery is due on Friday, 23 October 2026.\",\"kind\":\"quotation\",\"evidenceIds\":[\"86fb119b902c350f5d457528126699073eda0adb41a34edeff5e6f30250a91d5\"]},{\"id\":\"claim-4\",\"text\":\"Garnet delivery is due on Friday, 23 October 2026.\",\"kind\":\"quotation\",\"evidenceIds\":[\"5bdd87ab9bda9f2ce270de8f86668423555ee1c6f52e025bdbc165469f8e8009\"]},{\"id\":\"claim-5\",\"text\":\"Maple variance: approved limit is 40 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"31eed7983aca7e8dbc33b59bec5fcf32089099b94f5a6b7da9ab0a6cec8c3b81\"]},{\"id\":\"claim-6\",\"text\":\"Maple variance: approved limit is 60 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"0281674565b79cc57e4dc47d418964074a4d73af47e2e715b68a1477c0d969e4\"]},{\"id\":\"claim-7\",\"text\":\"Café Maple archive: the recovery code is synthetic-01.\",\"kind\":\"quotation\",\"evidenceIds\":[\"d4f113a78b0d3b021d2c56245906a8d39f1c89423c269ec01939c471f57eb14e\"]}]}",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-9aak57oq"
+    },
+    {
+      "id": "answer-02",
+      "status": "complete",
+      "code": null,
+      "productionMessage": null,
+      "diagnosis": null,
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"cobalt-budget-1\",\"text\":\"The approved budget for Cobalt is 4200 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"82edb6c76bed285ca29eaac03346b9378ec53f55ab3ad8e0e5b858e731cb4301\"]},{\"id\":\"cobalt-variance-1\",\"text\":\"Cobalt variance: approved limit is 40 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"91229954b63211c683eca5545d9b4bdc6c2fd2f29d16e1e3c3134dbfa0e88ddf\"]},{\"id\":\"cobalt-variance-2\",\"text\":\"Cobalt variance: approved limit is 60 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"e19a28c878f6df8660910f2906e9814caff71596604f3b9417cf0b2a0fd9ba3e\"]}]}",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-9aak57oq"
+    },
+    {
+      "id": "answer-03",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"saffron-launch-decision\",\"text\":\"We decided to postpone the Saffron launch until the accessibility audit passes.\",\"kind\":\"quotation\",\"evidenceIds\":[\"e6bb2042fb44741684ca7e5782d6f350a5e47c1877189ec639b4e78ce3951a9f\"]},{\"id\":\"saffron-credit-variance-conflict\",\"text\":\"There is conflicting evidence regarding the approved credit limit for Saffron: one source states 40 credits, another states 60 credits.\",\"kind\":\"conflict\",\"evidenceIds\":[\"4cad10e328a9f648ef1bb10fa1f2ea88a65ac892a3a2d61e6039395a6e7d7869\",\"ce84c9d9833b36433cbc58f47dd4c9c496a1ee8e9303fc1779633bac1c6870db\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-04",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"next-action-willow\",\"text\":\"Morgan will draft the checklist by Tuesday.\",\"kind\":\"quotation\",\"evidenceIds\":[\"1beff2702b89873a3ce341054afd89af3a0448bcff91d1b099a1bcbd88d77abc\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-05",
+      "status": "complete",
+      "code": null,
+      "productionMessage": null,
+      "diagnosis": null,
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim1\",\"text\":\"The Topaz dependency on the sandbox certificate is blocked\",\"kind\":\"quotation\",\"evidenceIds\":[\"a791adf5df2ba2fba85dc6b2b57242a9cb7d73015892f38c8c2c25e90c4862ea\"]},{\"id\":\"claim2\",\"text\":\"The Hazel dependency on the sandbox certificate is blocked\",\"kind\":\"quotation\",\"evidenceIds\":[\"5be4e3a10e7c3bc50ede6de66a10ad8f34e81ded14a017a04a34bb0da89b75cc\"]},{\"id\":\"claim3\",\"text\":\"The Pearl dependency on the sandbox certificate is blocked\",\"kind\":\"quotation\",\"evidenceIds\":[\"423817db965c07fac661772020912f52131b9f357312e153bbf137b99ce354f1\"]},{\"id\":\"claim4\",\"text\":\"The Linden dependency on the sandbox certificate is blocked\",\"kind\":\"quotation\",\"evidenceIds\":[\"10eb9b4adbe052a1e1e768a17d6e2b57aa9b506629149d4f48cc07df7a5a3147\"]},{\"id\":\"claim5\",\"text\":\"Topaz variance is reported as 40 credits in one instance\",\"kind\":\"quotation\",\"evidenceIds\":[\"402729573d8897b96af8cfe009166ee3a13b9c2ad17d9bba63e27a96cf2ffb9d\"]},{\"id\":\"claim6\",\"text\":\"Topaz variance is reported as 60 credits in another instance\",\"kind\":\"quotation\",\"evidenceIds\":[\"06e3ce87d545bd324e5b067805ee8b474e501f931ecb368ba32452236311845e\"]},{\"id\":\"claim7\",\"text\":\"The Topaz archive recovery code is marked as synthetic\",\"kind\":\"quotation\",\"evidenceIds\":[\"b85908209fbe402beafb8448d040bdfb3ecb6359bd27445ee56603e7a09efad2\"]}]}",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-06",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosis": "conflicting-evidence status without any conflict-kind claim",
+      "rawJson": "{\"status\":\"conflicting-evidence\",\"claims\":[{\"id\":\"juniper-trials\",\"text\":\"The Juniper experiment measured 12 successful trials out of 15\",\"kind\":\"quotation\",\"evidenceIds\":[\"e2e69794b242924053d69e18f0c6566328726c20c2f5c5462d48aa074b6f435b\"]},{\"id\":\"juniper-variance-40\",\"text\":\"Juniper variance: approved limit is 40 credits\",\"kind\":\"quotation\",\"evidenceIds\":[\"efb673b4db4495ac93ebf618365175818454abc7f455a70d202367514a20fcb1\"]},{\"id\":\"juniper-variance-60\",\"text\":\"Juniper variance: approved limit is 60 credits\",\"kind\":\"quotation\",\"evidenceIds\":[\"af0e3985f239cd38846df3f037b9d89bd8ea9e5f903fc9568ec69f97a9d67c73\"]},{\"id\":\"synthetic-recovery-code\",\"text\":\"Café Juniper archive: the recovery code is synthetic-06\",\"kind\":\"quotation\",\"evidenceIds\":[\"4c90f40d621eea471a3cd026b6939829c3cfe7d6a71be6ae21d76e81850821cb\"]}]}",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-07",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim1\",\"text\":\"The northern region is excluded from the Cedar pilot.\",\"kind\":\"quotation\",\"evidenceIds\":[\"68358f5aa0373205317f0283ac8cc4f03c5ca54a6563c244d394bd993610eb99\"]},{\"id\":\"claim2\",\"text\":\"Multiple pilot programs mention exclusion of the northern region, including Lotus, Slate, and Agate.\",\"kind\":\"paraphrase\",\"evidenceIds\":[\"7b7a3dc8d8e01550ad800bf3223aba6146a97920b2dfd44a61a89fa1613e5aba\",\"38ffbdea732d190a19a248eb40a42f9a2113c9107b4d24d219a7aabf6be89b0c\",\"a9a3d9db43e41d4eb8e6cec45b92e4afff0f604deac942d8dda65c81e457b5df\"]},{\"id\":\"claim3\",\"text\":\"The exclusion of the northern region is stated in multiple synthetic answers related to different pilot programs.\",\"kind\":\"conflict\",\"evidenceIds\":[\"7b7a3dc8d8e01550ad800bf3223aba6146a97920b2dfd44a61a89fa1613e5aba\",\"38ffbdea732d190a19a248eb40a42f9a2113c9107b4d24d219a7aabf6be89b0c\",\"a9a3d9db43e41d4eb8e6cec45b92e4afff0f604deac942d8dda65c81e457b5df\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-08",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned an invalid cited answer. Retry.",
+      "diagnosis": "conflicting-evidence status without any conflict-kind claim",
+      "rawJson": "{\"status\":\"conflicting-evidence\",\"claims\":[{\"id\":\"claim-1\",\"text\":\"Riley committed to reviewing the Indigo report, not implementing the adapter\",\"kind\":\"quotation\",\"evidenceIds\":[\"16ae0147f17cd9587cf6e14304f7fad30a4ab0ca89e0b351d82c1788017b7b37\"]},{\"id\":\"claim-2\",\"text\":\"Riley committed to reviewing the Pine report, not implementing the adapter\",\"kind\":\"quotation\",\"evidenceIds\":[\"acf9c85dca76c97c0243bc756de545f015728d265befaffb73ab0aa06f145efe\"]},{\"id\":\"claim-3\",\"text\":\"Riley committed to reviewing the Aster report, not implementing the adapter\",\"kind\":\"quotation\",\"evidenceIds\":[\"c42383d304399bf7bb9ff6f7c27ed85ee30790bf170131377204bb5d3cc3818a\"]},{\"id\":\"claim-4\",\"text\":\"Riley committed to reviewing the Rowan report, not implementing the adapter\",\"kind\":\"quotation\",\"evidenceIds\":[\"faf76695c5952e1d22ab2d1e5ca06e5bdaca540aa4b784b359506db443dbcf9a\"]},{\"id\":\"claim-5\",\"text\":\"Indigo variance: approved limit is 40 credits\",\"kind\":\"quotation\",\"evidenceIds\":[\"0b86b4d63a19cb42bb9d8ceeaed94df5950fc184d8406776045c1a3294df0da0\"]},{\"id\":\"claim-6\",\"text\":\"Indigo variance: approved limit is 60 credits\",\"kind\":\"quotation\",\"evidenceIds\":[\"bd3d1139eed4a880aa4e2513648987662e9be7c5ee0851a046f018673d4b9ae3\"]},{\"id\":\"claim-7\",\"text\":\"The recovery code is synthetic-08\",\"kind\":\"quotation\",\"evidenceIds\":[\"0c21b55e351f96f3acaaf384c5df1988ad78fcfc56c0b4e3b1d037edc1be0d22\"]}]}",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-09",
+      "status": "complete",
+      "code": null,
+      "productionMessage": null,
+      "diagnosis": null,
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"c1\",\"text\":\"The Coral support owner is still unknown; no assignment was made.\",\"kind\":\"quotation\",\"evidenceIds\":[\"2c2ccb583a83efcff41dca83a5789862053125a986308244b18ac917031fba38\"]},{\"id\":\"c2\",\"text\":\"Coral variance: approved limit is 40 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"9454ef5a1f5de77c8870b4717d0791dace94f88f21c0bde504f21ccbe9c29037\"]},{\"id\":\"c3\",\"text\":\"Coral variance: approved limit is 60 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"2885674fb4ea7900714d9d69196e08af77e258a5566710a885d1f148166f2f61\"]},{\"id\":\"c4\",\"text\":\"İstanbul Coral archive: the recovery code is synthetic-09.\",\"kind\":\"quotation\",\"evidenceIds\":[\"4588f41c6cfaad785c32638c92dcbbcf45fe0082ad2bad6fdb00ac2dfdda19fb\"]},{\"id\":\"c5\",\"text\":\"The Jade support owner is still unknown; no assignment was made.\",\"kind\":\"paraphrase\",\"evidenceIds\":[\"ea45333e5ca3da50e5f33ffdf2cccaee7d3cf469344e430ee869f6b52cbeff6d\"]},{\"id\":\"c6\",\"text\":\"The Ruby support owner is still unknown; no assignment was made.\",\"kind\":\"paraphrase\",\"evidenceIds\":[\"b66cf3aa519a10f678e093c51401d01e1fdcfeede22271288bc41e2d4ad8a0bd\"]},{\"id\":\"c7\",\"text\":\"The Sage support owner is still unknown; no assignment was made.\",\"kind\":\"paraphrase\",\"evidenceIds\":[\"ba98a6506e71fa1bc76313f29b4a7f48289a0d6dcb737b78fcb73a8988a2364e\"]}]}",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-10",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim1\",\"text\":\"Aspen migration is owned by Avery\",\"kind\":\"quotation\",\"evidenceIds\":[\"bcaea52e9dde9a1fa9f16d011d26548cab252b4d1020f9306d6654ca1c4e1acc\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-11",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim1\",\"text\":\"Quartz delivery is due on Friday, 23 October 2026.\",\"kind\":\"quotation\",\"evidenceIds\":[\"4d43fe9925df14e9266205746faa7c54d4c7b8fad8cabda6ffd6e8d5f47255dd\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    },
+    {
+      "id": "answer-12",
+      "status": "error",
+      "code": "invalid-answer",
+      "productionMessage": "The model returned malformed JSON. Retry.",
+      "diagnosis": "extra trailing quote after completed JSON",
+      "rawJson": "{\"status\":\"answered\",\"claims\":[{\"id\":\"claim-1\",\"text\":\"The approved budget for Violet is 4200 credits.\",\"kind\":\"quotation\",\"evidenceIds\":[\"a7f2e8001f9d617c5134add2347682b8090d37a927f3aa3ef45dc06df55f7f4a\"]}]}\"",
+      "rawOutputUnchanged": true,
+      "noFailedRetry": true,
+      "sourceRun": "/private/tmp/dev507-native-hf0lukvg"
+    }
+  ]
+}

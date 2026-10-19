@@ -1,0 +1,18 @@
+{
+  "qwen": {
+    "path": "/private/tmp/dn230-inference-AHCmaZ/QAmodelcache/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "mode": "0o444",
+    "bytes": 2497281120,
+    "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+    "inode": 2650967,
+    "mtimeNs": 1792333550535754478
+  },
+  "gemma": {
+    "path": "/private/tmp/dev507-quality-annby45k/model/gemma-3-12b-it-Q4_K_M.gguf",
+    "mode": "0o444",
+    "bytes": 7300778336,
+    "sha256": "15b8fd9d8672cd4240c178c217ca781409291f34e353d2e913b29c7602ceb3ff",
+    "inode": 4738223,
+    "mtimeNs": 1792420949861587642
+  }
+}

@@ -2,6 +2,15 @@
 
 JSON/audio remain authoritative. DEV-506 adds a lexical source contract and an on-demand desktop worker cache. It does not replace the existing Home search or Global Ask UI; DEV-507 consumes the new interface.
 
+DEV-507 adds `evidence-contract` and `evidence` exports plus worker/client
+`retrieveEvidence`, `validateEvidence`, `census` and cited-only
+`resolveAcknowledged`. It ranks original personal/transcript ranges, retains
+complete requested-domain scans and manifests, and separates bounded evidence
+from literal counts. The legacy source APIs below keep their behavior. See
+[cited Ask](../../docs/cited-ask.md) for limits, consumer lifecycle and the
+production-off acceptance gate. Performance measurements and original results
+remain in `docs/qa/dev507`; earlier DEV-506 numbers are not current acceptance.
+
 ## Consumer contract
 
 Types live at `@repo/meetings-store/source-contract`. Desktop exposes `window.sources.search(query, limit?)`, `.resolve(anchor)`, `.state()` and `.cancel()`. Main selects the library; renderer input cannot select a path, account or workspace. The worker owns all enumeration, parsing, hashing, reconciliation and SQLite work. `SourceIndexClient` supports `AbortSignal` for non-renderer consumers.

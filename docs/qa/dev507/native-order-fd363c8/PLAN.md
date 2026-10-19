@@ -1,0 +1,29 @@
+# Frozen final schema-order descriptive screen
+
+Production fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8, evidence HEAD c1fbb2e0a9d548f8d466229853d83a7d5ec71597, exclusive t3-d30e320c. One external QA-only schema-order variant. No production patch or hypothetical production variant commit. The rejected relevance sentence is absent; original system/user descriptors remain byte-identical.
+
+Exactly12 new sampling attempts, one CONTROL/TREATMENT per fixed case, alternating arm order by case:
+1. answer-04 CONTROL then TREATMENT
+2. answer-06 TREATMENT then CONTROL
+3. must-03 CONTROL then TREATMENT
+4. must-09 TREATMENT then CONTROL
+5. answer-01 CONTROL then TREATMENT
+6. answer-02 TREATMENT then CONTROL
+
+No retries, repetitions, best-of, output repairs, seed addition, additional sentinel/corpus/brief calls or broader acceptance denominator. This is NOT the report's24-call repeated recommendation and NOT statistically causal evidence. One stochastic observation per arm/case balances arm order across cases only. All historical33/six/relevance-pair12 results remain immutable and separate.
+
+Single source difference: move only evidenceIds from fourth to second in makeClaim properties: id,text,kind,evidenceIds -> id,evidenceIds,text,kind. This changes all five recognized regular/conflict schema occurrences for these multi-ID requests. Preserve every other object key order/value, array order, enum/cap/prefix/reference constraint and relative id/text/kind order. Root status remains first. No prompt/parser/retrieval/ID remapping/deduplication/source/model/temperature/budget changes.
+
+Setup verification: copied offline research probe with native/runtime-import blocker, own output/repository paths, plus equality checks between actual external overlay schemas and the research variant at all8 setups.6236 object checks (6048 grid) +552 property permutations +18 captured replays pass; this is structural setup only, not native quality. Original research inputs are copied/hashed. Native source imports remain blocked for this setup probe.
+
+BEFORE any sampling, prepare all12 in the frozen alternating order using actual MainCitedAskService selection/resolve, actual LocalNotesEngine/model/context/session tokenizer and normal production prompt builder. Require exact originalfd-six selected input, system/user text, entire wire token array/hash, final ranges/IDs/quotes/order/UTF16 offsets/parent IDs/omissions/completeness/budget. Recursively sorted object-key schemas must equal baseline, preserving arrays. Every recognized claim properties order and every other key order must match the sole intended move. Compile actual current-runtime native grammar: CONTROL equals captured baseline GBNF; TREATMENT equals frozen pure-compiler expected GBNF and differs from baseline. Native preparation throws only the designated QA_PREFLIGHT_ONLY_NO_SAMPLING sentinel after awaited context cleanup; this is no answer/sampling attempt. Any unexpected drift aborts all12 unperformed. Never repair/adapt/relaunch mid-run.
+
+Sampling uses actual production LocalNotesEngine + MainCitedAskService. Same exact approved readonly GGUF, prebuilt Metal/build:never, context16384/temp0.3/output4096/margin256 and original prompt. Each preparation and call uses a fresh engine/model/context disposed before the next entry; no models overlap. Observer only records/forwards exact native options/result, asserts same-runtime actual grammar object, wire/inclusion and schema, and records native JSON root/claim key order without reserialization. Strict parser/currentpolicy2 validation remains unchanged. Complete native responseText/stopReason before adapter forwarding and resulting rawJson are retained, including failures. No fake inference or substitution.
+
+Fresh /private/tmp synthetic HOME/TMP, copies of all701 originals plus exact canonical marker, prior approved Seatbelt policy, clean environment, approved Metal compiler lookup and exact artifact path only. No Electron, personal profile/accounts/calendar/keychain/devices, downloads, model lookup/copy/fallback artifact or concurrent native/performance work. Pre/post model SHA/mode/size/inode/mtime, originals/marker, previousroots, production and frozen files must match. Native runtime must be prebuilt Metal. Raw root and stdout/stderr/boundary logs preserved.
+
+180s AbortSignal per preparation/call, awaited service.cancel/context cleanup.40min outer owned process watchdog; one handled graceful signal then30s drain before last-resort group kill. First timeout/cancellation/drain/containment/integrity failure or two consecutive identical grammar/protocol/runtime errors stops, remaining ledger entries unperformed. Ordinary semantic failures do not change the fixed experiment. Native output key order inspected, not repaired. At12 or stop, dispose models/contexts, verify owned PID/group exit and integrity, then no further inference/timing/implementation.
+
+Apply byte-identical existing paired RUBRIC.md uniformly to all raw/admitted claims and all failures/empty answers. Preserve wrong-subject/source attribution, cross-attribute false conflicts, explicit-gold false absence/abstention, unrelated claims, repeated-text excess and supported requested answers. AGENT inspection only, not designated-human scoring or an entailment oracle. Empty answers are not grounding improvement. Require consistent meaningful grounded-answer benefit without new missed answers/regressions before even proposing wider qualification. Mixed/inconsistent outcome stops the order/prompt route, not a third variant. Even favorable results are not adoption or full acceptance. Timing is diagnostic, not a benchmark. Existing gates remain OFF.
+
+Finish evidence-only packet/report/commit and Notion/PR readback; parent independently inspects and owns next model-capability/product/release-scope decision. No nested agents, merge, release, broad suites,24-call repeat plan or extra qualification.

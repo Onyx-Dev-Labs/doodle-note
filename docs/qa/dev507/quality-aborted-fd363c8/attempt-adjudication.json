@@ -1,0 +1,16 @@
+{
+  "samplingCounterMeaning": "Observer entry counter increments before integrity assertions; NOT actual generation count",
+  "interceptedPromptEntries": 3,
+  "actualNativePromptCalls": 2,
+  "qwenActualNativeCalls": 2,
+  "gemmaActualNativeCalls": 0,
+  "firstGemma": "Observer integrity TypeError before actualPrompt.call; no native output. Not a model-quality failure.",
+  "remainingGemmaUnperformed": 7,
+  "ledgerTotalsRaw": {
+    "valid": 2,
+    "failed": 1,
+    "unperformed": 7
+  },
+  "successorStatus": "NOT STARTED: offline correction exposed production Gemma system-prompt omission; parent conditional stop boundary applies.",
+  "productionGate": "OFF"
+}

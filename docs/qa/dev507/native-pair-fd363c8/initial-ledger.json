@@ -1,0 +1,96 @@
+{
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "evidenceHead": "ffa54854564ab9ad1b1fc21e844c4a18c92b7b15",
+  "attemptId": "dev507-native-pair-yfv7dzer",
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02"
+  ],
+  "armOrder": [
+    "control",
+    "treatment"
+  ],
+  "cases": [
+    {
+      "arm": "control",
+      "id": "answer-04",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-04",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "must-03",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "must-09",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "control",
+      "id": "answer-02",
+      "attemptId": "dev507-native-pair-yfv7dzer:control:answer-02",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-04",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-04",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-06",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-03",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "must-09",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-01",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "treatment",
+      "id": "answer-02",
+      "attemptId": "dev507-native-pair-yfv7dzer:treatment:answer-02",
+      "status": "unperformed"
+    }
+  ],
+  "caseDeadlineMs": 180000,
+  "outerDeadlineMs": 2400000,
+  "seed": "unspecified; production unchanged",
+  "stopRule": "first timeout/cancellation/drain/containment/integrity failure or two consecutive identical grammar/protocol/runtime failures",
+  "historical": "prior79 and prior6 immutable; these12 separate diagnostics, not frozen100 acceptance"
+}

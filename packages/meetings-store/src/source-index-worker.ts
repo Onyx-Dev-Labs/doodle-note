@@ -1,3 +1,5 @@
+import type { EvidenceSelection, EvidenceManifest, CensusRequest } from './evidence-contract';
+import { censusOriginalEvidence, validateOriginalEvidence, EvidenceError } from './evidence-retrieval';
 import { parentPort, workerData } from "node:worker_threads";
 import { resolve, sep } from "node:path";
 import { DerivedSourceIndex } from "./derived-index";
@@ -13,7 +15,10 @@ export interface SourceWorkerRequest {
   cancellation: SharedArrayBuffer;
   generation: number;
   context: SourceContext;
-  operation: "search" | "resolve";
+  operation: "search" | "resolve" | "retrieve-evidence" | "census" | "validate-evidence";
+  selection?: EvidenceSelection;
+  manifest?: EvidenceManifest;
+  census?: CensusRequest;
   query?: string;
   limit?: number;
   anchor?: SourceAnchor;
@@ -54,6 +59,9 @@ parentPort.on("message", (request: SourceWorkerRequest) => {
             request.generation,
             checkpoint,
           )
+        : request.operation === 'retrieve-evidence' ? index.retrieveEvidence(context, request.selection!, checkpoint)
+        : request.operation === 'census' ? censusOriginalEvidence(context, request.census!, checkpoint)
+        : request.operation === 'validate-evidence' ? validateOriginalEvidence(context, request.manifest!, checkpoint)
         : resolveOriginalSource(context, request.anchor!);
     checkpoint();
     parentPort!.postMessage({
@@ -61,12 +69,13 @@ parentPort.on("message", (request: SourceWorkerRequest) => {
       generation: request.generation,
       result,
     });
-  } catch {
+  } catch (error) {
     parentPort!.postMessage({
       id: request.id,
       generation: request.generation,
       cancelled: Boolean(Atomics.load(new Int32Array(request.cancellation), 0)),
-      error: "Source index unavailable; originals are preserved.",
+      error: error instanceof EvidenceError ? error.message : "Source index unavailable; originals are preserved.",
+      code: error instanceof EvidenceError ? error.code : undefined,
     });
   }
 });

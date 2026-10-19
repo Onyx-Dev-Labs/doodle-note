@@ -126,3 +126,30 @@ test('concurrent transfers are rejected and ordinary operation errors release th
   )
   await gate.exclusive(async () => {})
 })
+
+test('a cancelled queued operation settles during relocation and never runs after the barrier opens', async () => {
+  const gate = new LibraryActivity(),
+    hold = deferred()
+  const transfer = gate.exclusive(() => hold.promise)
+  const abort = new AbortController()
+  let ran = false
+  const queued = gate.run(() => {
+    ran = true
+  }, abort.signal)
+  const rejected = assert.rejects(queued, /abort|cancel/i)
+  abort.abort()
+  try {
+    await Promise.race([
+      rejected,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('queued cancellation waited for relocation')), 100)
+      )
+    ])
+    assert.equal(ran, false)
+  } finally {
+    hold.resolve()
+    await transfer
+    await queued.catch(() => {})
+  }
+  assert.equal(ran, false)
+})

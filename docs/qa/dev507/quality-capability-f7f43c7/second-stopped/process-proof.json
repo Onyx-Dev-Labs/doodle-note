@@ -1,0 +1,22 @@
+{
+  "pid": 18478,
+  "pidAbsent": true,
+  "eventCounts": {
+    "model-loaded": 8,
+    "context-start": 8,
+    "context-created": 8,
+    "grammar-start": 8,
+    "grammar-complete": 8,
+    "context-dispose-start": 8,
+    "context-dispose-end": 8,
+    "model-dispose-start": 8,
+    "model-dispose-end": 8,
+    "arm-engine-disposed": 9,
+    "all-eight-preflights-passed": 1,
+    "service-progress": 4,
+    "service-settled": 1,
+    "service-cancel-drained": 1,
+    "sampling-entry-complete": 1
+  },
+  "modelIdentityEqual": true
+}

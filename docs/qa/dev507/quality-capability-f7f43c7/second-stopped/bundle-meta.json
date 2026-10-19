@@ -1,0 +1,480 @@
+{
+  "inputs": {
+    "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/observer-wire.mjs": {
+      "bytes": 1515,
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "packages/ai/src/global-ask-prompt.ts": {
+      "bytes": 9813,
+      "imports": [],
+      "format": "esm"
+    },
+    "packages/ai/src/cited-ask-prompt.ts": {
+      "bytes": 10022,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "packages/ai/src/global-ask-prompt.ts",
+          "kind": "import-statement",
+          "original": "./global-ask-prompt"
+        }
+      ],
+      "format": "esm"
+    },
+    "packages/ai/src/bounded-request.ts": {
+      "bytes": 964,
+      "imports": [],
+      "format": "esm"
+    },
+    "packages/ai/src/generation-control.ts": {
+      "bytes": 2133,
+      "imports": [],
+      "format": "esm"
+    },
+    "packages/ai/src/templates.ts": {
+      "bytes": 6067,
+      "imports": [],
+      "format": "esm"
+    },
+    "packages/ai/src/prompt.ts": {
+      "bytes": 6926,
+      "imports": [
+        {
+          "path": "packages/ai/src/templates.ts",
+          "kind": "import-statement",
+          "original": "./templates"
+        }
+      ],
+      "format": "esm"
+    },
+    "packages/ai/src/ask-prompt.ts": {
+      "bytes": 3185,
+      "imports": [
+        {
+          "path": "packages/ai/src/prompt.ts",
+          "kind": "import-statement",
+          "original": "./prompt"
+        }
+      ],
+      "format": "esm"
+    },
+    "packages/ai/src/map-reduce.ts": {
+      "bytes": 7986,
+      "imports": [
+        {
+          "path": "packages/ai/src/generation-control.ts",
+          "kind": "import-statement",
+          "original": "./generation-control"
+        },
+        {
+          "path": "packages/ai/src/prompt.ts",
+          "kind": "import-statement",
+          "original": "./prompt"
+        }
+      ],
+      "format": "esm"
+    },
+    "packages/ai/src/local-engine.ts": {
+      "bytes": 15404,
+      "imports": [
+        {
+          "path": "packages/ai/src/cited-ask-prompt.ts",
+          "kind": "import-statement",
+          "original": "./cited-ask-prompt"
+        },
+        {
+          "path": "packages/ai/src/bounded-request.ts",
+          "kind": "import-statement",
+          "original": "./bounded-request"
+        },
+        {
+          "path": "packages/ai/src/generation-control.ts",
+          "kind": "import-statement",
+          "original": "./generation-control"
+        },
+        {
+          "path": "node:os",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "packages/ai/src/ask-prompt.ts",
+          "kind": "import-statement",
+          "original": "./ask-prompt"
+        },
+        {
+          "path": "packages/ai/src/global-ask-prompt.ts",
+          "kind": "import-statement",
+          "original": "./global-ask-prompt"
+        },
+        {
+          "path": "packages/ai/src/map-reduce.ts",
+          "kind": "import-statement",
+          "original": "./map-reduce"
+        },
+        {
+          "path": "node-llama-cpp",
+          "kind": "dynamic-import",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "apps/desktop/src/shared/cited-ask-api.ts": {
+      "bytes": 3106,
+      "imports": [],
+      "format": "esm"
+    },
+    "packages/meetings-store/src/speakers.ts": {
+      "bytes": 8381,
+      "imports": [],
+      "format": "esm"
+    },
+    "packages/meetings-store/src/source-projection.ts": {
+      "bytes": 15086,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:fs",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "packages/meetings-store/src/speakers.ts",
+          "kind": "import-statement",
+          "original": "./speakers"
+        }
+      ],
+      "format": "esm"
+    },
+    "packages/meetings-store/src/evidence-retrieval.ts": {
+      "bytes": 16807,
+      "imports": [
+        {
+          "path": "node:fs",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "packages/meetings-store/src/source-projection.ts",
+          "kind": "import-statement",
+          "original": "./source-projection"
+        }
+      ],
+      "format": "esm"
+    },
+    "apps/desktop/src/main/library-activity.ts": {
+      "bytes": 1922,
+      "imports": [],
+      "format": "esm"
+    },
+    "apps/desktop/src/main/cited-ask-validation.ts": {
+      "bytes": 8796,
+      "imports": [
+        {
+          "path": "packages/meetings-store/src/source-projection.ts",
+          "kind": "import-statement",
+          "original": "@repo/meetings-store/sources"
+        },
+        {
+          "path": "apps/desktop/src/shared/cited-ask-api.ts",
+          "kind": "import-statement",
+          "original": "../shared/cited-ask-api"
+        },
+        {
+          "path": "packages/meetings-store/src/evidence-retrieval.ts",
+          "kind": "import-statement",
+          "original": "@repo/meetings-store/evidence"
+        }
+      ],
+      "format": "esm"
+    },
+    "apps/desktop/src/main/cited-ask-service.ts": {
+      "bytes": 16250,
+      "imports": [
+        {
+          "path": "apps/desktop/src/shared/cited-ask-api.ts",
+          "kind": "import-statement",
+          "original": "../shared/cited-ask-api"
+        },
+        {
+          "path": "packages/meetings-store/src/evidence-retrieval.ts",
+          "kind": "import-statement",
+          "original": "@repo/meetings-store/evidence"
+        },
+        {
+          "path": "apps/desktop/src/main/library-activity.ts",
+          "kind": "import-statement",
+          "original": "./library-activity"
+        },
+        {
+          "path": "apps/desktop/src/main/cited-ask-validation.ts",
+          "kind": "import-statement",
+          "original": "./cited-ask-validation"
+        }
+      ],
+      "format": "esm"
+    },
+    "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/runner.ts": {
+      "bytes": 30840,
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/observer-wire.mjs",
+          "kind": "import-statement",
+          "original": "./observer-wire.mjs"
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:fs",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:perf_hooks",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node-llama-cpp",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "packages/ai/src/local-engine.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai/src/local-engine"
+        },
+        {
+          "path": "packages/ai/src/cited-ask-prompt.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/ai/src/cited-ask-prompt"
+        },
+        {
+          "path": "apps/desktop/src/main/cited-ask-service.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/cited-ask-service"
+        },
+        {
+          "path": "apps/desktop/src/main/library-activity.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/main/library-activity"
+        },
+        {
+          "path": "apps/desktop/src/shared/cited-ask-api.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/apps/desktop/src/shared/cited-ask-api"
+        },
+        {
+          "path": "packages/meetings-store/src/source-projection.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/source-projection"
+        },
+        {
+          "path": "packages/meetings-store/src/evidence-retrieval.ts",
+          "kind": "import-statement",
+          "original": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c/packages/meetings-store/src/evidence-retrieval"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/runner.mjs": {
+      "imports": [
+        {
+          "path": "node:assert/strict",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:assert/strict",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:fs",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:perf_hooks",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node-llama-cpp",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:os",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node-llama-cpp",
+          "kind": "dynamic-import",
+          "external": true
+        },
+        {
+          "path": "node:fs",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:fs",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:path",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/runner.ts",
+      "inputs": {
+        "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/runner.ts": {
+          "bytesInOutput": 31183
+        },
+        "../../../../../../private/tmp/dev507-quality-successor-5ks880sv/observer-wire.mjs": {
+          "bytesInOutput": 1407
+        },
+        "packages/ai/src/cited-ask-prompt.ts": {
+          "bytesInOutput": 7962
+        },
+        "packages/ai/src/global-ask-prompt.ts": {
+          "bytesInOutput": 5880
+        },
+        "packages/ai/src/bounded-request.ts": {
+          "bytesInOutput": 758
+        },
+        "packages/ai/src/generation-control.ts": {
+          "bytesInOutput": 1586
+        },
+        "packages/ai/src/local-engine.ts": {
+          "bytesInOutput": 10483
+        },
+        "packages/ai/src/templates.ts": {
+          "bytesInOutput": 5542
+        },
+        "packages/ai/src/prompt.ts": {
+          "bytesInOutput": 4908
+        },
+        "packages/ai/src/ask-prompt.ts": {
+          "bytesInOutput": 2143
+        },
+        "packages/ai/src/map-reduce.ts": {
+          "bytesInOutput": 5281
+        },
+        "apps/desktop/src/shared/cited-ask-api.ts": {
+          "bytesInOutput": 34
+        },
+        "packages/meetings-store/src/evidence-retrieval.ts": {
+          "bytesInOutput": 14033
+        },
+        "packages/meetings-store/src/source-projection.ts": {
+          "bytesInOutput": 10154
+        },
+        "packages/meetings-store/src/speakers.ts": {
+          "bytesInOutput": 2135
+        },
+        "apps/desktop/src/main/library-activity.ts": {
+          "bytesInOutput": 1578
+        },
+        "apps/desktop/src/main/cited-ask-validation.ts": {
+          "bytesInOutput": 7354
+        },
+        "apps/desktop/src/main/cited-ask-service.ts": {
+          "bytesInOutput": 12239
+        }
+      },
+      "bytes": 125998
+    }
+  }
+}

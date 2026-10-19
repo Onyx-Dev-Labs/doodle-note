@@ -1,0 +1,62 @@
+{
+  "scope": "narrow exact-gold-text / sole wrong-source diagnostic only, not a general entailment validator or human score",
+  "counts": {
+    "control": 6
+  },
+  "findings": [
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "claim": "claim-2",
+      "text": "The Juniper experiment measured 12 successful trials out of 15.",
+      "refs": [
+        "answer-16"
+      ]
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "claim": "claim-3",
+      "text": "The Juniper experiment measured 12 successful trials out of 15.",
+      "refs": [
+        "answer-26"
+      ]
+    },
+    {
+      "arm": "control",
+      "id": "answer-06",
+      "claim": "claim-4",
+      "text": "The Juniper experiment measured 12 successful trials out of 15.",
+      "refs": [
+        "answer-36"
+      ]
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "claim": "claim-2",
+      "text": "Maple delivery is due on Friday, 23 October 2026.",
+      "refs": [
+        "answer-11"
+      ]
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "claim": "claim-3",
+      "text": "Maple delivery is due on Friday, 23 October 2026.",
+      "refs": [
+        "answer-21"
+      ]
+    },
+    {
+      "arm": "control",
+      "id": "answer-01",
+      "claim": "claim-4",
+      "text": "Maple delivery is due on Friday, 23 October 2026.",
+      "refs": [
+        "answer-31"
+      ]
+    }
+  ]
+}

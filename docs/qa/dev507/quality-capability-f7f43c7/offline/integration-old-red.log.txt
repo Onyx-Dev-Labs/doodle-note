@@ -1,0 +1,20 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: {"status":"error","code":"model-failed","message":"Expected values to be strictly deep-equal:\n+ actual - expected\n... Skipped lines\n\n  {\n    coverage: '{\"scanComplete\":true,\"selectionComplete\":true,\"eligibleMeetings\":701,\"selectedMeetings\":7,\"omissions\":[],\"semanticCoverage\":\"not-exhaustive\"}',\n    purpose: 'library-ask',\n    question: 'What is the next action for Willow?',\n    ranges: [\n...\n        quote: 'Willow variance: approved limit is 40 credits.',\n+       speaker: undefined,\n        startUtf16: 0,\n        title: 'Synthetic conflict-04-a'\n      },\n      {\n        anchor: {\n"}
++ actual - expected
+
++ 'error'
+- 'insufficient-evidence'
+
+    at file:///private/tmp/dev507-successor-offline/integration.mjs:1528:11 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'error',
+  expected: 'insufficient-evidence',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.22.0

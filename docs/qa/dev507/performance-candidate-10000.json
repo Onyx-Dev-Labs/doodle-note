@@ -1,0 +1,146 @@
+{
+  "revision": "6392708830543d3fbc2e6c0daa0b2e0e951be210",
+  "mode": "candidate-evidence",
+  "count": 10000,
+  "node": "v24.22.0",
+  "measuredAt": "2026-10-18T20:47:51.305Z",
+  "hardware": {
+    "os": "darwin 25.6.0",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro",
+    "memoryGiB": 24
+  },
+  "method": "Identical deterministic 20-segment originals; separate fresh process/cache; cold + one warmup + 20 mixed queries; 20ms synthetic PCM callback and 200ms atomic write outside evidence domain. No native capture/model.",
+  "coldMs": 9933.13175,
+  "queryP50Ms": 7712.9788329999865,
+  "queryP95Ms": 7794.467207999987,
+  "mainLoopP95Ms": 1.289215,
+  "mainLoopMaxMs": 13.320191,
+  "processPeakRssMiB": 1264.671875,
+  "resourceMaxRssMiB": 1264.671875,
+  "captureTicks": 7494,
+  "checksum": 2951.8036217959507,
+  "elapsedMs": 151465.255209,
+  "samples": [
+    {
+      "query": "rarephrase",
+      "ms": 6699.230041999999,
+      "status": "scan-complete",
+      "selected": 1
+    },
+    {
+      "query": "cafe",
+      "ms": 7768.935625000002,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "launch",
+      "ms": 7755.474667000002,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "budget",
+      "ms": 7723.985541000002,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "東京計画",
+      "ms": 8672.758667000002,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "rarephrase",
+      "ms": 6779.952833000003,
+      "status": "scan-complete",
+      "selected": 1
+    },
+    {
+      "query": "cafe",
+      "ms": 7784.186542000003,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "launch",
+      "ms": 7792.144625000001,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "budget",
+      "ms": 7751.136958999996,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "東京計画",
+      "ms": 7794.467207999987,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "rarephrase",
+      "ms": 6715.660832999987,
+      "status": "scan-complete",
+      "selected": 1
+    },
+    {
+      "query": "cafe",
+      "ms": 7718.326000000001,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "launch",
+      "ms": 7690.799916000004,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "budget",
+      "ms": 7691.838291000007,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "東京計画",
+      "ms": 7712.9788329999865,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "rarephrase",
+      "ms": 6671.699457999988,
+      "status": "scan-complete",
+      "selected": 1
+    },
+    {
+      "query": "cafe",
+      "ms": 7629.971625000006,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "launch",
+      "ms": 7680.900709000009,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "budget",
+      "ms": 7643.742499999993,
+      "status": "scan-complete",
+      "selected": 16
+    },
+    {
+      "query": "東京計画",
+      "ms": 7787.021124999999,
+      "status": "scan-complete",
+      "selected": 16
+    }
+  ]
+}

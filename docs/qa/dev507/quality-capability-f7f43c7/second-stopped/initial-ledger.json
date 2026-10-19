@@ -1,0 +1,101 @@
+{
+  "attemptId": "dev507-quality-successor-5ks880sv",
+  "productionSha": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "evidenceHead": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "lineage": {
+    "priorRoot": "/private/tmp/dev507-quality-annby45k",
+    "priorActualGenerations": {
+      "qwen": 2,
+      "gemma": 0
+    },
+    "priorObserverFailure": 1,
+    "priorUnperformed": 7,
+    "qwenReruns": 0
+  },
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02",
+    "conflict-01",
+    "unknown-01"
+  ],
+  "samplingOrder": [
+    {
+      "arm": "gemma",
+      "id": "answer-04"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01"
+    }
+  ],
+  "cases": [
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "unperformed"
+    }
+  ]
+}

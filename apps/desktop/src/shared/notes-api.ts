@@ -201,6 +201,8 @@ export interface GlobalAskResult {
 
 /** One persisted Home-level exchange (userData/global-chat.json). */
 export interface GlobalChatEntry {
+  id?: string
+  citedAnswer?: import('./cited-ask-api').CitedAnswerSnapshot
   coverage?: import('@repo/ai').GlobalAskCoverage
   question: string
   answer: string

@@ -1,0 +1,17 @@
+{
+  "toolIcon": {
+    "_tag": "website",
+    "pageUrl": "http://localhost:54617/"
+  },
+  "value": [
+    "focus while generating displays persisted answer",
+    "late pre-save history cannot overwrite completion",
+    "focus preserves generation error",
+    "focus preserves cancellation and no persistence",
+    "genuine source invalidation still retires active answer",
+    "owner revocation withholds completion",
+    "older history cannot replace newer refresh",
+    "late source response remains fenced after refresh",
+    "unmount cancels active ownership"
+  ]
+}

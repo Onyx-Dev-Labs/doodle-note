@@ -1,0 +1,8 @@
+{
+  "gemma": {
+    "path": "/private/tmp/dev507-quality-annby45k/model/gemma-3-12b-it-Q4_K_M.gguf",
+    "sha256": "15b8fd9d8672cd4240c178c217ca781409291f34e353d2e913b29c7602ceb3ff",
+    "bytes": 7300778336,
+    "uri": "hf:unsloth/gemma-3-12b-it-GGUF/gemma-3-12b-it-Q4_K_M.gguf#d15e4c7dc21dc55d56bf8549db57a71ad8a2a35d"
+  }
+}

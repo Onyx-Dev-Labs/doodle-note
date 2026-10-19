@@ -1,0 +1,15 @@
+{
+  "root": "/private/tmp/dev507-quality-successor-5ks880sv",
+  "pid": 18478,
+  "pidAbsent": true,
+  "nativeGenerations": 0,
+  "observerEntries": 0,
+  "modelPrePostEqual": true,
+  "exit": {
+    "code": 0,
+    "elapsedSeconds": 35.18670392036438,
+    "modelUnchanged": true,
+    "forcedTermination": false,
+    "nativeChildExited": true
+  }
+}

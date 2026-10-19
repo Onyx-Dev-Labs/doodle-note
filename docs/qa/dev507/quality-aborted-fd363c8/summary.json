@@ -1,0 +1,369 @@
+{
+  "attemptId": "dev507-quality-annby45k",
+  "productionSha": "fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8",
+  "evidenceHead": "5481a4f8ee3e480819c525e52b55f308ab7c452a",
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02",
+    "conflict-01",
+    "unknown-01"
+  ],
+  "samplingOrder": [
+    {
+      "arm": "qwen",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "qwen",
+      "id": "unknown-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-04"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01"
+    }
+  ],
+  "cases": [
+    {
+      "arm": "qwen",
+      "id": "conflict-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-annby45k:qwen:conflict-01",
+      "startedAt": "2026-10-19T14:43:24.808Z",
+      "endedAt": "2026-10-19T14:44:24.813Z",
+      "elapsedMs": 60000.947667,
+      "runElapsedMs": 59929.40770900001,
+      "admissionElapsedMs": 46.24099999999453,
+      "generationElapsedMs": 59779.339958,
+      "grammarElapsedMs": [
+        9.186208999999508
+      ],
+      "drainElapsedMs": 0.008999999990919605,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T14:44:24.797Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true,
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 3338,
+      "nativeOutputTokens": 2728,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "qwen",
+      "id": "unknown-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-annby45k:qwen:unknown-01",
+      "startedAt": "2026-10-19T14:44:24.880Z",
+      "endedAt": "2026-10-19T14:44:28.733Z",
+      "elapsedMs": 3849.1582500000077,
+      "runElapsedMs": 3773.6246250000113,
+      "admissionElapsedMs": 54.4776669999992,
+      "generationElapsedMs": 3629.685375000001,
+      "grammarElapsedMs": [
+        8.253792000003159
+      ],
+      "drainElapsedMs": 0.006666000001132488,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T14:44:28.720Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 2,
+      "inputTokens": 1129,
+      "nativeOutputTokens": 22,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "failed",
+      "attemptId": "dev507-quality-annby45k:gemma:answer-04",
+      "startedAt": "2026-10-19T14:44:28.801Z",
+      "endedAt": "2026-10-19T14:44:31.791Z",
+      "elapsedMs": 2986.293292000002,
+      "runElapsedMs": 2969.118875,
+      "admissionElapsedMs": null,
+      "generationElapsedMs": 2886.31683299999,
+      "grammarElapsedMs": [
+        9.579791999989538
+      ],
+      "drainElapsedMs": 0.006582999994861893,
+      "code": "model-failed",
+      "message": "Cannot read properties of undefined (reading 'text')",
+      "validation": null,
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        false
+      ],
+      "wireObserved": 0,
+      "rawForwardingExact": null,
+      "promptVersion": null,
+      "inputTokens": null,
+      "nativeOutputTokens": null,
+      "stopReason": null
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "unperformed"
+    }
+  ],
+  "corpusHash": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+  "startedAt": "2026-10-19T14:42:57.477Z",
+  "semanticHumanScore": "UNPERFORMED",
+  "productionGate": "OFF",
+  "stoppedReason": "Integrity failure: TypeError: Cannot read properties of undefined (reading 'text')",
+  "preflight": [
+    {
+      "arm": "qwen",
+      "id": "conflict-01",
+      "status": "passed",
+      "elapsedMs": 9757.385834,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 3338,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "qwen",
+      "id": "unknown-01",
+      "status": "passed",
+      "elapsedMs": 1270.9412080000002,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1129,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "passed",
+      "elapsedMs": 5385.231207999999,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1871,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "passed",
+      "elapsedMs": 1488.7412079999995,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1867,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "passed",
+      "elapsedMs": 1773.7561249999999,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 12031,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "passed",
+      "elapsedMs": 1574.7668329999979,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 12032,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "passed",
+      "elapsedMs": 1260.846207999999,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 927,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "passed",
+      "elapsedMs": 1347.8073330000007,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 3942,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "passed",
+      "elapsedMs": 1304.5268750000032,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2997,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "passed",
+      "elapsedMs": 1246.033124999998,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 803,
+      "samplingCalls": 0
+    }
+  ],
+  "samplingCalls": 3,
+  "preflightPassed": true,
+  "engineDisposed": true,
+  "originalsUnchanged": true,
+  "endedAt": "2026-10-19T14:44:31.892Z",
+  "totals": {
+    "valid": 2,
+    "failed": 1,
+    "unperformed": 7
+  }
+}

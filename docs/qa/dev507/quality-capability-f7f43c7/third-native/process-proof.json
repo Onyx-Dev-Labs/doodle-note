@@ -1,0 +1,30 @@
+{
+  "pid": 25340,
+  "pidAbsent": true,
+  "eventCounts": {
+    "model-loaded": 16,
+    "context-start": 16,
+    "context-created": 16,
+    "grammar-start": 16,
+    "grammar-complete": 16,
+    "context-dispose-start": 16,
+    "context-dispose-end": 16,
+    "model-dispose-start": 16,
+    "model-dispose-end": 16,
+    "arm-engine-disposed": 16,
+    "all-eight-preflights-passed": 1,
+    "service-progress": 40,
+    "adapter-start": 8,
+    "observer-ready": 8,
+    "observer-full-wire": 8,
+    "native-prompt-start": 8,
+    "observer-native-response": 8,
+    "native-response-before-forward": 8,
+    "adapter-output": 8,
+    "service-settled": 8,
+    "admission-settled": 8,
+    "service-cancel-drained": 8,
+    "sampling-entry-complete": 8
+  },
+  "modelIdentityEqual": true
+}

@@ -1,3 +1,4 @@
+import { GlobalChatStore } from './global-chat-store'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import * as fs from 'node:fs'
@@ -17,8 +18,15 @@ import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
 
 interface Service {
+  onHomeHistoryCleared?: () => void
   registerIpc(): void
-  pickEngine(): Promise<unknown>
+  pickEngine(requireSelected?: boolean, localOnly?: boolean): Promise<unknown>
+  localEnginePath: string | null
+  runCitedAsk(
+    input: ai.CitedPromptInput,
+    signal: AbortSignal
+  ): Promise<ai.CitedGenerationOutput & { engineId: string; modelArtifactRevision: string }>
+  citedModelCurrent(engineId: string, revision: string): Promise<boolean>
   dispose(): Promise<void>
 }
 
@@ -29,12 +37,14 @@ function createService(
 ): {
   service: Service
   ask: (question: string) => Promise<api.GlobalAskResult>
+  clear(): unknown
   broadcasts: Array<{ channel: string; payload: { token?: string } }>
 } {
   type Handler = (...args: unknown[]) => unknown
   const handlers = new Map<string, Handler>()
   const broadcasts: Array<{ channel: string; payload: { token?: string } }> = []
   const deps: Record<string, unknown> = {
+    './global-chat-store': { GlobalChatStore },
     electron: {
       app: { getPath: () => dir },
       ipcMain: { handle: (channel: string, handler: Handler) => handlers.set(channel, handler) },
@@ -69,6 +79,7 @@ function createService(
       return deps[name]
     },
     Buffer,
+    AbortController,
     process,
     console,
     setInterval,
@@ -82,7 +93,12 @@ function createService(
   service.registerIpc()
   const ask = (question: string): Promise<api.GlobalAskResult> =>
     handlers.get(api.NOTES_ASK_GLOBAL_CHANNEL)!({}, { question }) as Promise<api.GlobalAskResult>
-  return { service, ask, broadcasts }
+  return {
+    service,
+    ask,
+    broadcasts,
+    clear: () => handlers.get(api.NOTES_GLOBAL_CHAT_CLEAR_CHANNEL)!({})
+  }
 }
 
 test('global Ask persists honest coverage, includes upstream omissions, and keeps failed questions out of history', async () => {
@@ -356,5 +372,122 @@ test('global Ask appends coverage only when the exact standalone trailing notice
         fs.rmSync(dir, { recursive: true, force: true })
       }
     })
+  }
+})
+
+test('cited adapter is local-only under cloud settings, shares busy ownership and never persists', async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'dev507-notes-'))
+  fs.writeFileSync(
+    path.join(dir, 'settings.json'),
+    JSON.stringify({ engineChoice: 'cloud', cloud: { provider: 'ollama' } })
+  )
+  const { service, ask } = createService(dir, [])
+  const history = path.join(dir, 'global-chat.json')
+  fs.writeFileSync(history, '[]')
+  const model = path.join(dir, 'synthetic.gguf')
+  fs.writeFileSync(model, 'synthetic test artifact')
+  service.localEnginePath = model
+  const input: ai.CitedPromptInput = {
+    purpose: 'library-ask',
+    question: 'Orchid?',
+    coverage: 'complete',
+    terms: ['orchid'],
+    ranges: []
+  }
+  let release!: () => void
+  const hold = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let selected = false
+  service.pickEngine = async (requireSelected, localOnly) => {
+    assert.equal(requireSelected, true)
+    assert.equal(localOnly, true)
+    selected = true
+    return {
+      id: 'local:fixture',
+      askWithEvidence: async () => {
+        await hold
+        return {
+          rawJson: null,
+          inclusion: ai.buildCitedAskPrompt(input, {
+            contextWindowTokens: 16384,
+            outputReserveTokens: 4096,
+            safetyMarginTokens: 256,
+            accounting: 'model-tokenizer',
+            countInputTokens: (s, u) => Buffer.byteLength(s + u)
+          }).inclusion
+        }
+      }
+    }
+  }
+  try {
+    assert.equal(typeof service.runCitedAsk, 'function')
+    const run = service.runCitedAsk(input, new AbortController().signal)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(selected, true)
+    assert.match((await ask('other')).error!, /previous question/)
+    release()
+    const result = await run
+    assert.equal(result.engineId, 'local:fixture')
+    assert.ok(result.modelArtifactRevision)
+    assert.equal(fs.readFileSync(history, 'utf8'), '[]')
+    service.pickEngine = async () => {
+      throw new Error('cached local model missing')
+    }
+    await assert.rejects(service.runCitedAsk(input, new AbortController().signal), /missing/)
+    assert.equal(fs.readFileSync(history, 'utf8'), '[]')
+  } finally {
+    release()
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('legacy clear retires Home display synchronously and prevents pending legacy persistence', async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), 'dev507-clear-'))
+  const { service, ask, clear } = createService(dir, [
+    {
+      id: 'one',
+      title: 'Synthetic',
+      createdAt: '2026-10-18',
+      rawNotesMarkdown: 'Synthetic original.'
+    }
+  ])
+  let began!: () => void
+  let release!: () => void
+  const started = new Promise<void>((r) => {
+    began = r
+  })
+  const held = new Promise<void>((r) => {
+    release = r
+  })
+  let retired = 0
+  service.onHomeHistoryCleared = () => {
+    retired++
+  }
+  service.pickEngine = async () => ({
+    askAcrossMeetings: async () => {
+      began()
+      await held
+      return { markdown: 'Synthetic answer', engine: 'local:fixture', elapsedMs: 1 }
+    }
+  })
+  try {
+    const running = ask('Synthetic?')
+    await Promise.race([
+      started,
+      running.then((result) => {
+        throw new Error(JSON.stringify(result))
+      })
+    ])
+    clear()
+    assert.equal(retired, 1)
+    release()
+    assert.ok((await running).error)
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'global-chat.json'), 'utf8')), [])
+  } finally {
+    release()
+    await service.dispose()
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
