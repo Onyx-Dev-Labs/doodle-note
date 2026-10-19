@@ -1,0 +1,3058 @@
+[
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:16.793Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 8239.684959,
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7627653120,
+      "heapTotal": 43630592,
+      "heapUsed": 38044088,
+      "external": 3308506,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:16.802Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 8248.693875,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-1",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:17.435Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 633.4382499999992,
+    "memory": {
+      "rss": 8141963264,
+      "heapTotal": 46514176,
+      "heapUsed": 38321432,
+      "external": 3308546,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:17.491Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 8937.978084,
+    "schemaSha256": "59e10b276844c74e810cef0014496cc2a45e43f1996114b278ef859866530c91"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:17.502Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 10.814833000000363,
+    "grammarSha256": "c87f68e2ce8c87c6a7d42c94cebdcc0162ec27e0b4774c6106cf769c5d956484"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:17.511Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 8957.477917
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:17.557Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-04",
+    "elapsedMs": 46.08587500000067,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:17.574Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:17.616Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:17.620Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:18.910Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 1272.839082999999,
+    "runtime": {
+      "id": "runtime-2",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7800782848,
+      "heapTotal": 41533440,
+      "heapUsed": 38065736,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:18.920Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 1283.0860830000001,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-2",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:19.475Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 555.5724580000006,
+    "memory": {
+      "rss": 8348008448,
+      "heapTotal": 41533440,
+      "heapUsed": 38199936,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:19.522Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 1884.9344579999997,
+    "schemaSha256": "57e1f01d1a7fc3457be125f665b7bd1816be37307f5b20e86888ad6584209f28"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:19.531Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 9.767165999999634,
+    "grammarSha256": "066035aab0567a7d3203e3b8f32a0302f02ba1691bf1291005e3f1178db98547"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:19.541Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 1903.9527909999997
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:19.572Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-06",
+    "elapsedMs": 30.88195799999994,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:19.588Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:19.626Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:19.630Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:20.857Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 1213.268666,
+    "runtime": {
+      "id": "runtime-3",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7814807552,
+      "heapTotal": 42319872,
+      "heapUsed": 38732096,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:20.867Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 1222.9412909999992,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-3",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:21.484Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 617.0171660000015,
+    "memory": {
+      "rss": 8395685888,
+      "heapTotal": 45465600,
+      "heapUsed": 38992368,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:21.721Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 2077.2046659999996,
+    "schemaSha256": "0d347717907529b7f89d5b9a46d737fa22de19341d0b01ee29617455300936c1"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:21.730Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 8.50866700000006,
+    "grammarSha256": "c5e12f7228d2b0def450c9bb28d7e65247445774ae2687ee9dbcc75be72bef75"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:21.739Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 2094.8754160000008
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:21.767Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-03",
+    "elapsedMs": 27.585959000000003,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:21.782Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:21.818Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:21.822Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:23.029Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 1193.8224580000006,
+    "runtime": {
+      "id": "runtime-4",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7832043520,
+      "heapTotal": 42844160,
+      "heapUsed": 39032328,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:23.037Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 1201.2029999999995,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-4",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:23.513Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 476.6211660000008,
+    "memory": {
+      "rss": 8450064384,
+      "heapTotal": 45989888,
+      "heapUsed": 39290776,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:23.770Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 1934.1437499999993,
+    "schemaSha256": "9dee358cf65a5f36aee99f3f3fdc6782e2048c714c58838ac9891bf749eb5287"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:23.781Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 11.754708000000392,
+    "grammarSha256": "16708fa7d1eda67dc121bd2a51325dc91d435523a13aa2ee953f524a0534713a"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:23.790Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 1954.2273750000004
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:23.814Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "must-09",
+    "elapsedMs": 23.855208999999377,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:23.832Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:23.868Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:23.873Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:25.091Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1206.246624999998,
+    "runtime": {
+      "id": "runtime-5",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7830913024,
+      "heapTotal": 42057728,
+      "heapUsed": 38903408,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:25.097Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1212.6357919999991,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-5",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:25.561Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 464.3441249999996,
+    "memory": {
+      "rss": 8464629760,
+      "heapTotal": 45203456,
+      "heapUsed": 39160296,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:25.604Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1719.7962499999976,
+    "schemaSha256": "a90ea027778c30384265a891d28498750dfd7c453936c9bea15c77e5df7207ab"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:25.612Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 8.254542000002402,
+    "grammarSha256": "05918cf32a6506599a5569b83a35b34df8a1c3f900776d0326d113d785c61764"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:25.621Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 1736.2517089999983
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:25.647Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-01",
+    "elapsedMs": 26.64604099999997,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:25.664Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:25.705Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:25.708Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:26.951Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1229.4752499999995,
+    "runtime": {
+      "id": "runtime-6",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7835320320,
+      "heapTotal": 42582016,
+      "heapUsed": 38966824,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:26.958Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1236.330667000002,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-6",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:27.408Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 450.6621669999986,
+    "memory": {
+      "rss": 8270020608,
+      "heapTotal": 42582016,
+      "heapUsed": 39144136,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:27.515Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1793.9384590000009,
+    "schemaSha256": "130649a53495dc4bf103c20490b7d364140a4a67d85e03d98be0e83d54b49d61"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:27.524Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 8.969500000002881,
+    "grammarSha256": "70076df62cdd86ffc9227eea7edf11c5a40824dcde19b520fa4d1687e9d31b66"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:27.532Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 1810.996417000002
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:27.560Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "answer-02",
+    "elapsedMs": 27.306166999998823,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:27.576Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:27.613Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:27.617Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:28.853Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1223.6859170000025,
+    "runtime": {
+      "id": "runtime-7",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7834877952,
+      "heapTotal": 43630592,
+      "heapUsed": 39187432,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:28.861Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1231.9781670000011,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-7",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:29.307Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 445.5392920000013,
+    "memory": {
+      "rss": 8399896576,
+      "heapTotal": 46514176,
+      "heapUsed": 39453608,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:29.402Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1772.5159590000003,
+    "schemaSha256": "92f7e269fbd3d2fce73c6c0ccbc954be4babc3a07cb112771af017c8620b15be"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:29.409Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 7.359334000000672,
+    "grammarSha256": "fed32e6aae44cd9b98f29eb4d4fd5efa779238f24d1de6e11ca7af398c08f820"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:29.417Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 1788.0057500000003
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:29.443Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "conflict-01",
+    "elapsedMs": 25.5034169999999,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:29.458Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:29.496Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:29.500Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:30.745Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1231.8136659999982,
+    "runtime": {
+      "id": "runtime-8",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7841660928,
+      "heapTotal": 44941312,
+      "heapUsed": 39309144,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:30.754Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1240.148666000001,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-8",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:31.211Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 457.5929160000014,
+    "memory": {
+      "rss": 8545550336,
+      "heapTotal": 48349184,
+      "heapUsed": 39591872,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:31.253Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1739.0467910000007,
+    "schemaSha256": "9c2381b1ef7968410d2371ecabf2b00f67019a3bdc072182b2c034deb1154f5c"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:31.263Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 10.892791999998735,
+    "grammarSha256": "5061b6fc60eab267ed4819136ec496a4b4a103dea5de582dc633896cfacd901b"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:20:31.272Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 1758.419332999998
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:20:31.299Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": "unknown-01",
+    "elapsedMs": 27.237209000002622,
+    "disposed": true
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:20:31.316Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:20:31.358Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:20:31.362Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "all-eight-preflights-passed",
+    "at": "2026-10-19T15:20:31.379Z",
+    "arm": "gemma",
+    "mode": "preflight",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:20:31.386Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 0.21774999999979627,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:20:31.395Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 9.035958000000392,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:20:31.456Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 70.140542000001,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:20:31.464Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 77.98312500000247,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:20:31.473Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 87.03437499999927
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:20:32.656Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 1269.8799580000014,
+    "runtime": {
+      "id": "runtime-9",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 7846510592,
+      "heapTotal": 46252032,
+      "heapUsed": 39688464,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:20:32.665Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 1279.3904580000017,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-9",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:20:33.057Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 391.53612500000236,
+    "memory": {
+      "rss": 8564604928,
+      "heapTotal": 49922048,
+      "heapUsed": 40200760,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:20:33.100Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 1713.8044580000023,
+    "schemaSha256": "59e10b276844c74e810cef0014496cc2a45e43f1996114b278ef859866530c91"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:20:33.109Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 9.950208999998722,
+    "grammarSha256": "c87f68e2ce8c87c6a7d42c94cebdcc0162ec27e0b4774c6106cf769c5d956484"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:20:33.123Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 1737.4932919999992
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:20:33.134Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 1748.0234170000003
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:20:33.145Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 1759.6394580000015
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:21:04.887Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33500.786083
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:21:04.898Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33512.208375,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "b53f0f2b336ad5d5426e788ea5fe33d83ba2fd2d53dac3939216ac9b43f38d02"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:21:04.908Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33522.079833
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:21:05.029Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 120.96033399999578,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:21:05.039Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33652.746292,
+    "rawJsonSha256": "b53f0f2b336ad5d5426e788ea5fe33d83ba2fd2d53dac3939216ac9b43f38d02"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:05.049Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33662.974083,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:21:05.178Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33791.575708000004,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:21:05.240Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33854.352208000004,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:21:05.240Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:21:05.250Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-04",
+    "elapsedMs": 33863.937583
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:21:05.265Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:21:05.304Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:21:05.308Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:21:05.321Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 33938.203125
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:05.332Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 0.13895899999624817,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:05.340Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 7.999374999999418,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:05.401Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 69.2467919999981,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:05.410Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 77.95791699999972,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:21:05.419Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 87.03687499999796
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:21:06.436Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 1104.2474999999977,
+    "runtime": {
+      "id": "runtime-10",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8531443712,
+      "heapTotal": 44679168,
+      "heapUsed": 40427544,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:21:06.444Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 1111.744958999996,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-10",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:21:06.678Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 234.26974999999948,
+    "memory": {
+      "rss": 10194452480,
+      "heapTotal": 44679168,
+      "heapUsed": 40887104,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:21:06.718Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 1385.7230419999978,
+    "schemaSha256": "57e1f01d1a7fc3457be125f665b7bd1816be37307f5b20e86888ad6584209f28"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:21:06.726Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 8.460416999994777,
+    "grammarSha256": "066035aab0567a7d3203e3b8f32a0302f02ba1691bf1291005e3f1178db98547"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:21:06.741Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 1408.7840419999993
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:21:06.752Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 1420.4183749999938
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:21:06.762Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 1430.1287919999959
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:21:36.912Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31579.623291999997
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:21:36.924Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31592.130417,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "f4e068637fb626f21819d5c4a5006e48f3bd7018807fc64f955484ef064fc677"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:21:36.933Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31601.106999999996
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:21:37.063Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 129.3744580000057,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:21:37.072Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31740.07754199999,
+    "rawJsonSha256": "f4e068637fb626f21819d5c4a5006e48f3bd7018807fc64f955484ef064fc677"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:37.079Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31747.226583999996,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:21:37.186Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31854.320499999994,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:21:37.248Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31915.980084000003,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:21:37.248Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:21:37.255Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-06",
+    "elapsedMs": 31923.028083999998
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:21:37.271Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:21:37.313Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:21:37.318Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:21:37.332Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 32002.429167000002
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:37.341Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 0.13800000000628643,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:37.348Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 7.05037500000617,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:37.432Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 91.16320799999812,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:21:37.440Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 98.93583299999591,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:21:37.451Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 109.43845800000418
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:21:38.503Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 1161.964082999999,
+    "runtime": {
+      "id": "runtime-11",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8175943680,
+      "heapTotal": 48611328,
+      "heapUsed": 41433568,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:21:38.513Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 1171.4687080000003,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-11",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:21:38.777Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 264.6181660000002,
+    "memory": {
+      "rss": 9839558656,
+      "heapTotal": 51970048,
+      "heapUsed": 42214136,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:21:39.040Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 1699.3014580000017,
+    "schemaSha256": "0d347717907529b7f89d5b9a46d737fa22de19341d0b01ee29617455300936c1"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:21:39.050Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 9.644000000000233,
+    "grammarSha256": "c5e12f7228d2b0def450c9bb28d7e65247445774ae2687ee9dbcc75be72bef75"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:21:39.067Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 1725.8584580000024
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:21:39.082Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 1741.1091250000027
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:21:39.095Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 1753.9752920000028
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:22:58.993Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 81640.21725
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:22:59.036Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 81683.148458,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "2b689cb65a66bab73fb0d1988ea5f27923850501d6be453ddcb8b56ad30b1cbd"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:22:59.048Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 81694.920875
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:22:59.120Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 72.49837499999558,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:22:59.130Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 81777.148333,
+    "rawJsonSha256": "2b689cb65a66bab73fb0d1988ea5f27923850501d6be453ddcb8b56ad30b1cbd"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:22:59.140Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 81787.2215,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:22:59.326Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 81972.759458,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:22:59.409Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 82055.85104200001,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:22:59.409Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:22:59.418Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-03",
+    "elapsedMs": 82065.10937499999
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:22:59.440Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:22:59.485Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:22:59.490Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:22:59.503Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 82152.92395800001
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:22:59.514Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 0.1682499999878928,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:22:59.521Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 7.044624999980442,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:22:59.603Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 89.03474999999162,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:22:59.610Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 96.07024999998976,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:22:59.620Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 105.95929099997738
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:23:00.620Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 1104.6486250000016,
+    "runtime": {
+      "id": "runtime-12",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8445149184,
+      "heapTotal": 45465600,
+      "heapUsed": 41532640,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:23:00.628Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 1113.0672909999848,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-12",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:23:00.871Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 242.9847080000036,
+    "memory": {
+      "rss": 10109009920,
+      "heapTotal": 49086464,
+      "heapUsed": 42241160,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:23:01.117Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 1601.785791000002,
+    "schemaSha256": "9dee358cf65a5f36aee99f3f3fdc6782e2048c714c58838ac9891bf749eb5287"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:23:01.127Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 10.047624999977415,
+    "grammarSha256": "16708fa7d1eda67dc121bd2a51325dc91d435523a13aa2ee953f524a0534713a"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:23:01.145Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 1629.7325409999758
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:23:01.159Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 1644.2372909999976
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:23:01.172Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 1657.2462079999968
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:24:11.066Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71542.07116599998
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:24:11.093Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71568.90654099997,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "2310fb3f1c676c1c5ff7b93908469746e5d98ac13eb3949af12bb5d11a4f06fb"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:24:11.105Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71580.78516599999
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:24:11.122Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 16.389541999989888,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:24:11.132Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71607.93974999999,
+    "rawJsonSha256": "2310fb3f1c676c1c5ff7b93908469746e5d98ac13eb3949af12bb5d11a4f06fb"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:11.142Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71617.129625,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:24:11.293Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71768.12220799999,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:24:11.375Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71850.53570799998,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:24:11.375Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:24:11.383Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "must-09",
+    "elapsedMs": 71858.40516599998
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:24:11.400Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:24:11.441Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:24:11.445Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:24:11.458Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 71937.60908299999
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:11.469Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 0.11874999999417923,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:11.476Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 6.971500000014203,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:11.534Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 65.49158299999544,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:11.542Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 73.88345799999661,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:24:11.551Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 82.84950000001118
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:24:12.587Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 1118.8561669999908,
+    "runtime": {
+      "id": "runtime-13",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8495693824,
+      "heapTotal": 47300608,
+      "heapUsed": 40924440,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:24:12.596Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 1127.3406250000116,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-13",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:24:12.830Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 233.66104199999245,
+    "memory": {
+      "rss": 10158374912,
+      "heapTotal": 47300608,
+      "heapUsed": 41387328,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:24:12.868Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 1399.2950420000125,
+    "schemaSha256": "a90ea027778c30384265a891d28498750dfd7c453936c9bea15c77e5df7207ab"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:24:12.876Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 7.976709000009578,
+    "grammarSha256": "05918cf32a6506599a5569b83a35b34df8a1c3f900776d0326d113d785c61764"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:24:12.889Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 1420.1716249999881
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:24:12.898Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 1429.5564580000064
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:24:12.911Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 1442.2460420000134
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:24:36.357Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 24887.987958000012
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:24:36.366Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 24896.55266700001,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "33327b4dc97877c90ce6dba61d4e6cd97f6b2c07b052bb0edab602f166afd7e5"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:24:36.375Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 24906.484417
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:24:36.396Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 20.913500000024214,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:24:36.405Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 24935.597582999995,
+    "rawJsonSha256": "33327b4dc97877c90ce6dba61d4e6cd97f6b2c07b052bb0edab602f166afd7e5"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:36.414Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 24944.576875,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:24:36.523Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 25054.14833299999,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:24:36.581Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 25111.684916999977,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:24:36.581Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:24:36.588Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-01",
+    "elapsedMs": 25119.48208299998
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:24:36.605Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:24:36.645Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:24:36.649Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:24:36.663Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 25198.25354200002
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:36.675Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 0.08654200000455603,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:36.681Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 7.022500000020955,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:36.746Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 71.47487500001444,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:24:36.754Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 79.74612500000512,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:24:36.764Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 89.10329200001433
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:24:37.726Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 1051.4743749999907,
+    "runtime": {
+      "id": "runtime-14",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8481374208,
+      "heapTotal": 46252032,
+      "heapUsed": 41199480,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:24:37.735Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 1060.882500000007,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-14",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:24:37.960Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 224.24929100001464,
+    "memory": {
+      "rss": 10145513472,
+      "heapTotal": 46252032,
+      "heapUsed": 42027784,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:24:38.057Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 1382.7543750000186,
+    "schemaSha256": "130649a53495dc4bf103c20490b7d364140a4a67d85e03d98be0e83d54b49d61"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:24:38.067Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 9.652166999992914,
+    "grammarSha256": "70076df62cdd86ffc9227eea7edf11c5a40824dcde19b520fa4d1687e9d31b66"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:24:38.079Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 1404.831708999991
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:24:38.090Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 1415.9715839999844
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:24:38.103Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 1428.1776250000112
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:25:18.239Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41564.51537500002
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:25:18.250Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41575.05420900002,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "2c3206409df12117819e7dff46e4405be033374bb3f2dbdbfc917ba36d29370c"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:25:18.260Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41584.936999999976
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:25:18.281Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 21.46366599999601,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:25:18.290Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41615.04562500003,
+    "rawJsonSha256": "2c3206409df12117819e7dff46e4405be033374bb3f2dbdbfc917ba36d29370c"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:18.299Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41624.18975000002,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:25:18.424Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41748.939709,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:25:18.491Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41815.83241700003,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:25:18.491Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:25:18.498Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "answer-02",
+    "elapsedMs": 41822.94983400003
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:25:18.515Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:25:18.554Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:25:18.558Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:25:18.571Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 41900.03895900003
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:18.582Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 0.10833400004776195,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:18.590Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 7.976834000030067,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:18.647Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 65.31770900002448,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:18.656Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 74.05687500000931,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:25:18.666Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 84.20787500002189
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:25:19.692Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 1110.2520840000361,
+    "runtime": {
+      "id": "runtime-15",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8519499776,
+      "heapTotal": 46514176,
+      "heapUsed": 41210632,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:25:19.701Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 1119.615959000017,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-15",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:25:19.933Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 232.00195800000802,
+    "memory": {
+      "rss": 10182361088,
+      "heapTotal": 46514176,
+      "heapUsed": 42011408,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:25:20.019Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 1436.719959000009,
+    "schemaSha256": "92f7e269fbd3d2fce73c6c0ccbc954be4babc3a07cb112771af017c8620b15be"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:25:20.028Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 10.033125000016298,
+    "grammarSha256": "fed32e6aae44cd9b98f29eb4d4fd5efa779238f24d1de6e11ca7af398c08f820"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:25:20.042Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 1460.6128340000287
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:25:20.052Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 1470.6481670000358
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:25:20.064Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 1482.46783400001
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:25:50.050Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31467.58491700003
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:25:50.059Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31476.74470900005,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "10b3be995ec280e4eea6538530f96c28bf3c08303f0fca7d1c4a675433798f46"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:25:50.069Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31486.62095900002
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:25:50.093Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 24.579458000021987,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:25:50.103Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31520.59950000001,
+    "rawJsonSha256": "10b3be995ec280e4eea6538530f96c28bf3c08303f0fca7d1c4a675433798f46"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:50.111Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31528.79125000001,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:25:50.232Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31650.27687500004,
+    "status": "complete"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:25:50.289Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31706.93104200001,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:25:50.289Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:25:50.297Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "conflict-01",
+    "elapsedMs": 31714.647667000012
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:25:50.316Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:25:50.367Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:25:50.371Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:25:50.384Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 31805.978208000015
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:50.395Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 0.1433750000433065,
+    "phase": "queued"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:50.401Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 6.118667000031564,
+    "phase": "retrieving"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:50.458Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 62.94908300001407,
+    "phase": "preparing"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:50.465Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 69.9873329999973,
+    "phase": "generating"
+  },
+  {
+    "kind": "adapter-start",
+    "at": "2026-10-19T15:25:50.473Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 78.73533300001873
+  },
+  {
+    "kind": "model-loaded",
+    "at": "2026-10-19T15:25:52.052Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 1657.6705000000075,
+    "runtime": {
+      "id": "runtime-16",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    },
+    "memory": {
+      "rss": 8535031808,
+      "heapTotal": 47038464,
+      "heapUsed": 41312440,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    }
+  },
+  {
+    "kind": "context-start",
+    "at": "2026-10-19T15:25:52.061Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 1666.0561250000028,
+    "requested": {
+      "contextSize": 16384
+    },
+    "runtime": {
+      "id": "runtime-16",
+      "gpu": "metal",
+      "buildType": "prebuilt",
+      "llamaCppRelease": {
+        "repo": "ggml-org/llama.cpp",
+        "release": "b10361"
+      }
+    }
+  },
+  {
+    "kind": "context-created",
+    "at": "2026-10-19T15:25:52.320Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 258.7533340000082,
+    "memory": {
+      "rss": 10197975040,
+      "heapTotal": 50184192,
+      "heapUsed": 41738560,
+      "external": 3300722,
+      "arrayBuffers": 633130
+    },
+    "contextSize": 16384
+  },
+  {
+    "kind": "grammar-start",
+    "at": "2026-10-19T15:25:52.357Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 1962.531958000036,
+    "schemaSha256": "9c2381b1ef7968410d2371ecabf2b00f67019a3bdc072182b2c034deb1154f5c"
+  },
+  {
+    "kind": "grammar-complete",
+    "at": "2026-10-19T15:25:52.365Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 7.807374999974854,
+    "grammarSha256": "5061b6fc60eab267ed4819136ec496a4b4a103dea5de582dc633896cfacd901b"
+  },
+  {
+    "kind": "observer-ready",
+    "at": "2026-10-19T15:25:52.378Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 1983.5099170000176
+  },
+  {
+    "kind": "observer-full-wire",
+    "at": "2026-10-19T15:25:52.387Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 1991.8310000000056
+  },
+  {
+    "kind": "native-prompt-start",
+    "at": "2026-10-19T15:25:52.398Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 2003.2859579999931
+  },
+  {
+    "kind": "observer-native-response",
+    "at": "2026-10-19T15:25:58.569Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8174.397958000016
+  },
+  {
+    "kind": "native-response-before-forward",
+    "at": "2026-10-19T15:25:58.581Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8186.243875000044,
+    "stopReason": "stopGenerationTrigger",
+    "responseTextSha256": "4280b1305e8c787ca1299dcb6672f0e4b2c7905f0ec8133a490864fb4c4a4f3f"
+  },
+  {
+    "kind": "context-dispose-start",
+    "at": "2026-10-19T15:25:58.590Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8195.20983300003
+  },
+  {
+    "kind": "context-dispose-end",
+    "at": "2026-10-19T15:25:58.604Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 13.771792000043206,
+    "disposed": true
+  },
+  {
+    "kind": "adapter-output",
+    "at": "2026-10-19T15:25:58.611Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8216.347375000012,
+    "rawJsonSha256": "4280b1305e8c787ca1299dcb6672f0e4b2c7905f0ec8133a490864fb4c4a4f3f"
+  },
+  {
+    "kind": "service-progress",
+    "at": "2026-10-19T15:25:58.619Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8224.329333000001,
+    "phase": "validating"
+  },
+  {
+    "kind": "service-settled",
+    "at": "2026-10-19T15:25:58.683Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8287.740875000018,
+    "status": "insufficient-evidence"
+  },
+  {
+    "kind": "admission-settled",
+    "at": "2026-10-19T15:25:58.741Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8346.441667000006,
+    "validation": {
+      "status": "valid",
+      "observedAt": "2026-10-19T15:25:58.741Z"
+    }
+  },
+  {
+    "kind": "service-cancel-drained",
+    "at": "2026-10-19T15:25:58.751Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": "unknown-01",
+    "elapsedMs": 8356.180458000046
+  },
+  {
+    "kind": "model-dispose-start",
+    "at": "2026-10-19T15:25:58.769Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "model-dispose-end",
+    "at": "2026-10-19T15:25:58.810Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null,
+    "disposed": true
+  },
+  {
+    "kind": "arm-engine-disposed",
+    "at": "2026-10-19T15:25:58.815Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": null
+  },
+  {
+    "kind": "sampling-entry-complete",
+    "at": "2026-10-19T15:25:58.828Z",
+    "arm": "gemma",
+    "mode": "sampling",
+    "caseId": null,
+    "elapsedMs": 8437.158708000032
+  }
+]

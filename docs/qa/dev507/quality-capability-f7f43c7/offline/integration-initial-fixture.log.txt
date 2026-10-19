@@ -1,0 +1,20 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: {"status":"error","code":"unavailable","message":"Invalid model identity"}
++ actual - expected
+
++ 'error'
+- 'insufficient-evidence'
+
+    at file:///private/tmp/dev507-successor-offline/integration.mjs:1524:11 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'error',
+  expected: 'insufficient-evidence',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.22.0

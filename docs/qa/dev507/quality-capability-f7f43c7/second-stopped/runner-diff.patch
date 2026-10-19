@@ -1,0 +1,144 @@
+--- aborted-fd/runner.ts
++++ successor-f7/runner.ts
+@@ -1,5 +1,6 @@
+ /** QA-only observer/ledger. No production mutation, repair, retry or fake inference. */
+ import assert from 'node:assert/strict'
++import { observePrompt } from './observer-wire.mjs'
+ import { createHash } from 'node:crypto'
+ import { readFileSync, writeFileSync, readdirSync, lstatSync, openSync, closeSync, fsyncSync } from 'node:fs'
+ import { join } from 'node:path'
+@@ -18,8 +19,8 @@
+ const [root, corpusFile, modelPath, sourceSha, deniedSentinel] = process.argv.slice(2)
+ assert.ok(root.startsWith('/private/tmp/dev507-quality-'))
+ assert.equal(process.env.HOME, join(root, 'home'))
+-assert.equal(sourceSha, 'fd363c81d5b7d8f2845ca85b3342cd1c7a6119e8')
+-assert.equal(CITED_ASK_PROMPT_VERSION, 2)
++assert.equal(sourceSha, 'f7f43c7d8a898a61015650b44a218167c1dedf76')
++assert.equal(CITED_ASK_PROMPT_VERSION, 3)
+ assert.throws(() => readFileSync(deniedSentinel), /EPERM|EACCES/)
+ assert.equal(lstatSync(modelPath).isSymbolicLink(), false)
+ const hash = (s: string | Buffer) => createHash('sha256').update(s).digest('hex')
+@@ -35,21 +36,21 @@
+ assert.equal(corpusHash, '0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2')
+ const corpus = JSON.parse(corpusBytes.toString())
+ const planned = ids.map(id => { const c = corpus.cases.find(c => c.id === id); assert.ok(c); return c })
+-const summary: any = { ...initial, corpusHash, startedAt: new Date().toISOString(), semanticHumanScore: 'UNPERFORMED', productionGate: 'OFF', stoppedReason: null, preflight: [], samplingCalls: 0 }
++const summary: any = { ...initial, corpusHash, startedAt: new Date().toISOString(), semanticHumanScore: 'UNPERFORMED', productionGate: 'OFF', stoppedReason: null, preflight: [], samplingCalls: 0, nativeGenerationCalls: 0 }
+ const armHashes = JSON.parse(readFileSync(join(root, 'arm-hashes.json'), 'utf8'))
+-const prior = Object.fromEntries(ids.slice(0,6).map(id => [id, JSON.parse(readFileSync(join(root, 'prior', id + '.json'), 'utf8'))]))
+-let arm = 'qwen', mode = 'preflight', fatalIntegrityReason: string | null = null
++const prior = Object.fromEntries(ids.map(id => [id, JSON.parse(readFileSync(join(root, 'prior', id + '.json'), 'utf8'))]))
++let arm = 'gemma', mode = 'preflight', fatalIntegrityReason: string | null = null
+ let engine: any, model: any
+ const armPrompt = () => controlPrompt
+ const originalsDir = () => join(root, 'arms', arm, 'originals')
+ const original = (id: string) => readFileSync(join(originalsDir(), id + '.json'), 'utf8')
+ const sourceContext = () => ({ meetingsDir: originalsDir(), scope: localSourceScope(originalsDir()), authorized: true })
+ const modelConfig = JSON.parse(readFileSync(join(root,'model-config.json'),'utf8'))
+-let modelSha = modelConfig.qwen.sha256
++let modelSha = modelConfig.gemma.sha256
+ const makeEngine = () => { modelSha = modelConfig[arm].sha256; return new ControlEngine({ modelUri: modelConfig[arm].uri, modelPath: modelConfig[arm].path, modelsDir: join(root,'models'), contextSize:16384 }) }
+ function invariant(work: () => void) { try { work() } catch(error) { fatalIntegrityReason = String(error); throw error } }
+ function originalsIntegrity() {
+-  for (const a of ['qwen','gemma']) for (const [name, expected] of Object.entries(armHashes[a].originals))
++  for (const a of ['gemma']) for (const [name, expected] of Object.entries(armHashes[a].originals))
+     invariant(() => assert.equal(hash(readFileSync(join(root, 'arms', a, 'originals', name))), expected))
+ }
+ function canonical(value: any): any {
+@@ -142,11 +143,13 @@
+ }
+ LlamaChatSession.prototype.promptWithMeta = async function(prompt, options) {
+   invariant(() => assert.equal(mode, 'sampling', 'preflight must never call native promptWithMeta'))
+-  invariant(() => { assert.equal(summary.preflightPassed, true); assert.ok(summary.samplingCalls < 10) })
++  invariant(() => { assert.equal(summary.preflightPassed, true); assert.ok(summary.samplingCalls < 8) })
+   invariant(() => assert.deepEqual(initial.samplingOrder[summary.samplingCalls], { arm, id: active.id }))
+   summary.samplingCalls++; durable('summary.json', summary)
+   const history = this.getChatHistory()
+-  const tokens = this.chatWrapper.generateContextState({ chatHistory: [...history, { type: 'user', text: prompt }, { type: 'model', response: [] }] }).contextText.tokenize(this.model.tokenizer)
++  const fullWire = this.chatWrapper.generateContextState({ chatHistory: [...history, { type: 'user', text: prompt }, { type: 'model', response: [] }] }).contextText
++  const tokens = fullWire.tokenize(this.model.tokenizer)
++  const prepared = JSON.parse(readFileSync(join(root,'preflight',arm+'-'+active.id+'.json'),'utf8')).preflight
+   const compiled = grammars.get(options.grammar)
+   invariant(() => {
+     assert.ok(compiled, 'native grammar returned by observed current runtime must be supplied')
+@@ -154,7 +157,11 @@
+   })
+   const wire = JSON.parse(prompt)
+   invariant(() => {
+-    assert.equal(history[0].text, armPrompt().CITED_ASK_SYSTEM)
++    assert.deepEqual(history.filter(h=>h.type==='system').map(h=>h.text), [armPrompt().CITED_ASK_SYSTEM])
++    assert.equal(this.chatWrapper.constructor.name,'GemmaChatWrapper')
++    assert.equal(JSON.stringify(fullWire.toJSON()).split(JSON.stringify(armPrompt().CITED_ASK_SYSTEM).slice(1,-1)).length-1,1)
++    assert.deepEqual(tokens,prepared.wireTokens)
++    assert.deepEqual(fullWire.toJSON(),prepared.wrapperWire)
+     assert.equal(prompt, active.expectedPrompt.user)
+     assert.equal(hash(JSON.stringify(tokens)), active.expectedPrompt.inclusion.wireSha256)
+   })
+@@ -172,10 +179,16 @@
+     assert.equal(options.temperature, 0.3)
+   })
+   const observation: any = { history, user: prompt, wireTokens: tokens, wireSha256: hash(JSON.stringify(tokens)), contextSize: this.context.contextSize, temperature: options.temperature, maxTokens: options.maxTokens, outputReserveTokens: 4096, safetyMarginTokens: 256, wrapper: this.chatWrapper.constructor.name, runtime: runtimeInfo(this.model.llama), actualGrammarObjectSupplied: true, grammarSameModelRuntime: true, schemaSha256: compiled.record.schemaSha256, grammarSha256: compiled.record.grammarSha256, evidenceIdEnum: enums[0], startedAt: new Date().toISOString(), meterBefore: this.sequence.tokenMeter.getState() }
+-  active.observed.push(observation); event('native-prompt-start')
++  active.observed.push(observation); event('observer-ready')
+   const start = performance.now()
+   try {
+-    const result = await actualPrompt.call(this, prompt, options)
++    const result = await observePrompt(this, async function(user, sameOptions) {
++      invariant(()=>{ assert.equal(user,prompt); assert.equal(sameOptions,options) })
++      summary.nativeGenerationCalls++; durable('summary.json',summary); event('native-prompt-start')
++      return await actualPrompt.call(this,user,sameOptions)
++    }, prompt, options, {user:prepared.prompt.user,tokens:prepared.wireTokens,wrapperSerializationSha256:prepared.wrapperSerializationSha256,wireSha256:prepared.prompt.inclusion.wireSha256,contextSize:16384,grammar:options.grammar,grammarRuntime:compiled.runtime}, record=>{
++      observation.observerRecords ??= []; observation.observerRecords.push(record); event(record.responseText!==undefined?'observer-native-response':'observer-full-wire')
++    })
+     Object.assign(observation, { responseText: result.responseText, stopReason: result.stopReason, responseTextSha256: hash(result.responseText), elapsedMs: performance.now() - start, meterAfter: this.sequence.tokenMeter.getState(), tokenUsage: this.sequence.tokenMeter.diff(observation.meterBefore) })
+     try {
+       const parsed = JSON.parse(result.responseText)
+@@ -207,15 +220,19 @@
+       signal.throwIfAborted()
+       const ctx = await model.createContext({ contextSize: 16384 })
+       try {
+-        const session = new LlamaChatSession({ contextSequence: ctx.getSequence(), systemPrompt: armPrompt().CITED_ASK_SYSTEM })
+-        const tokenArray = (user: string) => session.chatWrapper.generateContextState({ chatHistory: [...session.getChatHistory(), { type: 'user', text: user }, { type: 'model', response: [] }] }).contextText.tokenize(model.tokenizer)
++        const session = new LlamaChatSession({ contextSequence: ctx.getSequence(), systemPrompt: armPrompt().CITED_ASK_SYSTEM, forceAddSystemPrompt: true })
++        const fullWire = (user: string) => session.chatWrapper.generateContextState({ chatHistory: [...session.getChatHistory(), { type: 'user', text: user }, { type: 'model', response: [] }] }).contextText
++        const tokenArray = (user: string) => fullWire(user).tokenize(model.tokenizer)
+         const prompt = armPrompt().buildCitedAskPrompt(input, { contextWindowTokens: ctx.contextSize, outputReserveTokens: 4096, safetyMarginTokens: 256, accounting: 'model-tokenizer', countInputTokens: (_s, user) => tokenArray(user).length, wireSha256: (_s, user) => hash(JSON.stringify(tokenArray(user))) })
+         const schema = armPrompt().buildCitedAnswerSchema(prompt.inclusion.ranges)
+-        active.preflight = { input, prompt, schema, wireTokens: tokenArray(prompt.user), wrapper: session.chatWrapper.constructor.name, runtime: runtimeInfo(model.llama) }
++        active.preflight = { input, prompt, schema, history:session.getChatHistory(), wrapperWire:fullWire(prompt.user).toJSON(), wrapperSerializationSha256:hash(JSON.stringify(fullWire(prompt.user).toJSON())), wireTokens: tokenArray(prompt.user), wrapper: session.chatWrapper.constructor.name, runtime: runtimeInfo(model.llama) }
+         invariant(() => {
+           assert.equal(ctx.contextSize,16384)
+           assert.ok(prompt.inclusion.inputTokens+4096+256<=16384)
+           assert.equal(prompt.system,controlPrompt.CITED_ASK_SYSTEM)
++          assert.equal(session.chatWrapper.constructor.name,'GemmaChatWrapper')
++          assert.deepEqual(session.getChatHistory().filter(h=>h.type==='system').map(h=>h.text),[controlPrompt.CITED_ASK_SYSTEM])
++          assert.equal(JSON.stringify(fullWire(prompt.user).toJSON()).split(JSON.stringify(controlPrompt.CITED_ASK_SYSTEM).slice(1,-1)).length-1,1)
+           assertSchemaOrder(schema)
+         })
+         active.preflight.goldOnWire=goldIncluded(planned.find(c=>c.id===active.id),input,prompt.inclusion,prompt.user)
+@@ -236,6 +253,7 @@
+       throw new Error('QA_PREFLIGHT_ONLY_NO_SAMPLING')
+     }
+     const frozen = JSON.parse(readFileSync(join(root, 'preflight', arm + '-' + active.id + '.json'), 'utf8')).preflight
++    invariant(()=>assert.deepEqual(input,frozen.input))
+     active.expectedPrompt = frozen.prompt
+     const start = performance.now(); active.generation = { input }; event('adapter-start')
+     try {
+@@ -302,7 +320,7 @@
+     originalsIntegrity()
+   }
+   invariant(() => assert.equal(summary.samplingCalls, 0))
+-  summary.preflightPassed = true; durable('summary.json', summary); event('all-ten-preflights-passed')
++  summary.preflightPassed = true; durable('summary.json', summary); event('all-eight-preflights-passed')
+   mode = 'sampling'
+   for (const entry of initial.samplingOrder) {
+     if (stopping || summary.stoppedReason) break
+@@ -326,7 +344,7 @@
+       result = await cited.run(request, control)
+       active.runElapsedMs = performance.now() - start; event('service-settled', { status: result.status })
+       if (result.status !== 'error') {
+-        assert.equal(result.snapshot.promptVersion, 2)
++        assert.equal(result.snapshot.promptVersion, 3)
+         const admission = performance.now()
+         validation = await cited.validate(result.snapshot, request, control)
+         active.admissionElapsedMs = performance.now() - admission; event('admission-settled', { validation })

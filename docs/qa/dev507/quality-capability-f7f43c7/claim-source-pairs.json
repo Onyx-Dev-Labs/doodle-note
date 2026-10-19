@@ -1,0 +1,1515 @@
+[
+  {
+    "id": "answer-04",
+    "question": "What is the next action for Willow?",
+    "record": {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-04",
+      "startedAt": "2026-10-19T15:20:31.383Z",
+      "endedAt": "2026-10-19T15:21:05.257Z",
+      "elapsedMs": 33871.074166000006,
+      "runElapsedMs": 33791.498958,
+      "admissionElapsedMs": 54.97445799999696,
+      "generationElapsedMs": 33575.391416,
+      "grammarElapsedMs": [
+        9.950208999998722
+      ],
+      "drainElapsedMs": 0.008083000000624452,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:21:05.240Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 2185,
+      "nativeOutputTokens": 455,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "conflicting-evidence",
+    "admittedStatus": "conflicting-evidence",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "Morgan will draft the checklist by Tuesday.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "dd3e38e8c2d9f9932a9c3d8a528ea47b9d7f4c087b01b61c51641a1da053b9e0",
+            "6177a6d089c9ce06bfb9941a3ed666318f0f5be97757720b299de3d8d95b0008",
+            "81b843287d12189545473866f9f2852cf9a64c72d8d6eaddbeaafd7743d0c99a",
+            "74e0a4ce793d78ad21eaa9bcfad9f727a315203fd71b85c0089a428c1a90c69f"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "Morgan will draft the checklist by Tuesday.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "dd3e38e8c2d9f9932a9c3d8a528ea47b9d7f4c087b01b61c51641a1da053b9e0",
+            "6177a6d089c9ce06bfb9941a3ed666318f0f5be97757720b299de3d8d95b0008",
+            "81b843287d12189545473866f9f2852cf9a64c72d8d6eaddbeaafd7743d0c99a",
+            "74e0a4ce793d78ad21eaa9bcfad9f727a315203fd71b85c0089a428c1a90c69f"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "dd3e38e8c2d9f9932a9c3d8a528ea47b9d7f4c087b01b61c51641a1da053b9e0",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-04",
+                "revisionId": "9703ee79e9c0970b07fc5913f9a6fd81c6d8f7429b5048734d415de97ed66fd7",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 67,
+              "quote": "Next action for Willow: Morgan will draft the checklist by Tuesday.",
+              "parentRangeId": "dd3e38e8c2d9f9932a9c3d8a528ea47b9d7f4c087b01b61c51641a1da053b9e0"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-04.json",
+            "originalSha256": "60c79bbb39d39b8bc11a4c18f13b784d3de32276767c0b24566d6884339fa73d"
+          },
+          {
+            "range": {
+              "id": "6177a6d089c9ce06bfb9941a3ed666318f0f5be97757720b299de3d8d95b0008",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-14",
+                "revisionId": "c1890b2587befa025343b7f39b42219ce0646e0b4f27afbcfa27456951ead8f2",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 65,
+              "quote": "Next action for Onyx: Morgan will draft the checklist by Tuesday.",
+              "parentRangeId": "6177a6d089c9ce06bfb9941a3ed666318f0f5be97757720b299de3d8d95b0008"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-14.json",
+            "originalSha256": "7a400ade5224952b2c26489e5b7a863ac449e803d9f9900f5f4f86f0a36b7e55"
+          },
+          {
+            "range": {
+              "id": "81b843287d12189545473866f9f2852cf9a64c72d8d6eaddbeaafd7743d0c99a",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-24",
+                "revisionId": "4229456f1af4b6d7b98bdd5bfa4918919f110e2ac87b16dafe60f3540d4cf444",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 65,
+              "quote": "Next action for Fern: Morgan will draft the checklist by Tuesday.",
+              "parentRangeId": "81b843287d12189545473866f9f2852cf9a64c72d8d6eaddbeaafd7743d0c99a"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-24.json",
+            "originalSha256": "72e24912fe6e748bae8aea9529f6fbbd66fd05d8921318813cfc11066dfceded"
+          },
+          {
+            "range": {
+              "id": "74e0a4ce793d78ad21eaa9bcfad9f727a315203fd71b85c0089a428c1a90c69f",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-34",
+                "revisionId": "0ff0180e24975b2f0a1c0db3151c9639d65a289930f36416f1171a420c9dd5b8",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 66,
+              "quote": "Next action for Beryl: Morgan will draft the checklist by Tuesday.",
+              "parentRangeId": "74e0a4ce793d78ad21eaa9bcfad9f727a315203fd71b85c0089a428c1a90c69f"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-34.json",
+            "originalSha256": "0ec2e0acb7d691885f16d0a0be716a5a39f0816c9bb208a4a043aa0953a74c8e"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "Willow's approved limit is 40 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "7f14b9fe0cc8d75b9cd09c03a072e65322fac74534fb99c03e9f359881450f22",
+            "002c24ad5f8169d95d56d794ffc0418c17810c818e87e1434ad448737cccce78"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "Willow's approved limit is 40 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "7f14b9fe0cc8d75b9cd09c03a072e65322fac74534fb99c03e9f359881450f22",
+            "002c24ad5f8169d95d56d794ffc0418c17810c818e87e1434ad448737cccce78"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "7f14b9fe0cc8d75b9cd09c03a072e65322fac74534fb99c03e9f359881450f22",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-04-a",
+                "revisionId": "b0a992b5163456c8db0c7da08763263d42c4b157b6f2be2f28e47e45bce3da3e",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Willow variance: approved limit is 40 credits.",
+              "parentRangeId": "7f14b9fe0cc8d75b9cd09c03a072e65322fac74534fb99c03e9f359881450f22"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-04-a.json",
+            "originalSha256": "b85788a43b52e3cf1d1d4ab6c49603425711b8f0dd01faf2c857a38048ffaeea"
+          },
+          {
+            "range": {
+              "id": "002c24ad5f8169d95d56d794ffc0418c17810c818e87e1434ad448737cccce78",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-04-b",
+                "revisionId": "ee68a4b0db7048a3101c7d9e5c556dfc73b25524aabfd970d567581de8522d2d",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Willow variance: approved limit is 60 credits.",
+              "parentRangeId": "002c24ad5f8169d95d56d794ffc0418c17810c818e87e1434ad448737cccce78"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-04-b.json",
+            "originalSha256": "64781eddec414b0cb46e659b5615fd628e1c154970b4cd7bfd8d3d76c244a772"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "answer-06",
+    "question": "What did the Juniper experiment show?",
+    "record": {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-06",
+      "startedAt": "2026-10-19T15:21:05.329Z",
+      "endedAt": "2026-10-19T15:21:37.262Z",
+      "elapsedMs": 31930.1155,
+      "runElapsedMs": 31854.258082999993,
+      "admissionElapsedMs": 53.9931660000002,
+      "generationElapsedMs": 31660.009832999996,
+      "grammarElapsedMs": [
+        8.460416999994777
+      ],
+      "drainElapsedMs": 0.00533299999369774,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:21:37.248Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 2181,
+      "nativeOutputTokens": 462,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "conflicting-evidence",
+    "admittedStatus": "conflicting-evidence",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "The Juniper experiment measured 12 successful trials out of 15.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "7c950bec1bedd7fa945f939d9278e1dc6e977ceced6884bf3ed7c4f124b118bc",
+            "a4620662022b0016cc1a4e247f09013e883bf4cb34bbfd098df4f04491494740",
+            "377d00e447b1aa163dac86abc979227224a988d370e5f6cc5bb367cadde64bc0",
+            "5b4510b90fea613aad1040a5f0d13771974ed92f2fa64a3a834e3ef6d5380f52"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "The Juniper experiment measured 12 successful trials out of 15.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "7c950bec1bedd7fa945f939d9278e1dc6e977ceced6884bf3ed7c4f124b118bc",
+            "a4620662022b0016cc1a4e247f09013e883bf4cb34bbfd098df4f04491494740",
+            "377d00e447b1aa163dac86abc979227224a988d370e5f6cc5bb367cadde64bc0",
+            "5b4510b90fea613aad1040a5f0d13771974ed92f2fa64a3a834e3ef6d5380f52"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "7c950bec1bedd7fa945f939d9278e1dc6e977ceced6884bf3ed7c4f124b118bc",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-06",
+                "revisionId": "7b00cee0adb03ad7a971bd56ccef394e607e1c681ffbccdfdef8e8d56c9d0ffe",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 63,
+              "quote": "The Juniper experiment measured 12 successful trials out of 15.",
+              "parentRangeId": "7c950bec1bedd7fa945f939d9278e1dc6e977ceced6884bf3ed7c4f124b118bc"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-06.json",
+            "originalSha256": "85e2462a4a6417397242d00a3ef4638b09bf92f742e7f846be6ed90157fc68da"
+          },
+          {
+            "range": {
+              "id": "a4620662022b0016cc1a4e247f09013e883bf4cb34bbfd098df4f04491494740",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-16",
+                "revisionId": "78192b9905f1db65dcb8e6398514bd4a22cfc52fd908e5900ca455f50fb23e70",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 61,
+              "quote": "The Amber experiment measured 12 successful trials out of 15.",
+              "parentRangeId": "a4620662022b0016cc1a4e247f09013e883bf4cb34bbfd098df4f04491494740"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-16.json",
+            "originalSha256": "bea23c29a324da39fdd92d643a4063d0301002b18b3191f58b2591109cff1ff3"
+          },
+          {
+            "range": {
+              "id": "377d00e447b1aa163dac86abc979227224a988d370e5f6cc5bb367cadde64bc0",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-26",
+                "revisionId": "102f8515e7152db89ac7982a6f7f6001e180e922f04626a39374dd75753e3469",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 62,
+              "quote": "The Clover experiment measured 12 successful trials out of 15.",
+              "parentRangeId": "377d00e447b1aa163dac86abc979227224a988d370e5f6cc5bb367cadde64bc0"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-26.json",
+            "originalSha256": "859bcbee0afd8e6e3a8c8593762bfc04464e7295bbe992706791a0bcd63df7b7"
+          },
+          {
+            "range": {
+              "id": "5b4510b90fea613aad1040a5f0d13771974ed92f2fa64a3a834e3ef6d5380f52",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-36",
+                "revisionId": "0cb11e99b7bf3def0c1ae028d60db5ccdc204c022cbb4ace57530d79d5944532",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 61,
+              "quote": "The Poppy experiment measured 12 successful trials out of 15.",
+              "parentRangeId": "5b4510b90fea613aad1040a5f0d13771974ed92f2fa64a3a834e3ef6d5380f52"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-36.json",
+            "originalSha256": "377cc6f33e2a7ef231bd06a3fef04f8cab08b17fb9dd2e83a02418c51d133126"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "There is a conflict regarding the approved limit for Juniper variance, with one source stating 40 credits and another stating 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "f261ab75c2165d95bb241c5d1628747cb46382775915ac9f39154a3cc1684669",
+            "599200bbe54b4befb0caf7781d436f19f04b03c6215dd49fa818e3ca70bdec8f"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "There is a conflict regarding the approved limit for Juniper variance, with one source stating 40 credits and another stating 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "f261ab75c2165d95bb241c5d1628747cb46382775915ac9f39154a3cc1684669",
+            "599200bbe54b4befb0caf7781d436f19f04b03c6215dd49fa818e3ca70bdec8f"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "f261ab75c2165d95bb241c5d1628747cb46382775915ac9f39154a3cc1684669",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-06-a",
+                "revisionId": "4aa792f093351a74bf0c1814b567833af91d6b523fa67d20c1ccf79c3244e870",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 47,
+              "quote": "Juniper variance: approved limit is 40 credits.",
+              "parentRangeId": "f261ab75c2165d95bb241c5d1628747cb46382775915ac9f39154a3cc1684669"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-06-a.json",
+            "originalSha256": "a194436c8f6a83c176f93241f1683a420b95dc188881f5ab842a5adb868e3a74"
+          },
+          {
+            "range": {
+              "id": "599200bbe54b4befb0caf7781d436f19f04b03c6215dd49fa818e3ca70bdec8f",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-06-b",
+                "revisionId": "5319dc87a5ea6402442b225a8477cc022a1526bfd9d99f7d71f051c1ac29e1b3",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 47,
+              "quote": "Juniper variance: approved limit is 60 credits.",
+              "parentRangeId": "599200bbe54b4befb0caf7781d436f19f04b03c6215dd49fa818e3ca70bdec8f"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-06-b.json",
+            "originalSha256": "503064efd1a4abf6707c100ac75f90f1b4e91f7641ed71fabc733298d8739e23"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "must-03",
+    "question": "Find \"ﬃ Saffron archive\" recovery code.",
+    "record": {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:must-03",
+      "startedAt": "2026-10-19T15:21:37.338Z",
+      "endedAt": "2026-10-19T15:22:59.429Z",
+      "elapsedMs": 82075.357875,
+      "runElapsedMs": 81972.705291,
+      "admissionElapsedMs": 72.93362500000512,
+      "generationElapsedMs": 81677.296625,
+      "grammarElapsedMs": [
+        9.644000000000233
+      ],
+      "drainElapsedMs": 0.0050829999963752925,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:22:59.409Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 12002,
+      "nativeOutputTokens": 400,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "answered",
+    "admittedStatus": "answered",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "The recovery code for ﬃ Saffron archive is synthetic-03.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "df2e5d62677df1128d9978ed89bf566f471423fd50598cb29a553cc45749cb3c"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "ﬃ Saffron archive: the recovery code is synthetic-03.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "df2e5d62677df1128d9978ed89bf566f471423fd50598cb29a553cc45749cb3c"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "df2e5d62677df1128d9978ed89bf566f471423fd50598cb29a553cc45749cb3c",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "old-03",
+                "revisionId": "f7d6feae49db1491d34feed84b9ba687e9b4d3bcfc03b5f01f04ded6b0b6cd87",
+                "sourceId": "personal:1",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 53,
+              "quote": "ﬃ Saffron archive: the recovery code is synthetic-03.",
+              "parentRangeId": "df2e5d62677df1128d9978ed89bf566f471423fd50598cb29a553cc45749cb3c"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/old-03.json",
+            "originalSha256": "3d4018d4a37cc950efcd03826a133190a7bf3738842927bcc30158c451829eed"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "The recovery code for ﬃ Indigo archive is synthetic-08.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "b934d9adcd8dac009c68b626147b6d5f274dd2d82807b81f27a1f57a4067aae6"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nﬃ Indigo archive: the recovery code is synthetic-08.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussio",
+          "kind": "quotation",
+          "evidenceIds": [
+            "b934d9adcd8dac009c68b626147b6d5f274dd2d82807b81f27a1f57a4067aae6"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "b934d9adcd8dac009c68b626147b6d5f274dd2d82807b81f27a1f57a4067aae6",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "old-08",
+                "revisionId": "a70f3bf5718ee625b14ac2bd1f0279a5954a1ea7a17dbd86e66f777264934f57",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 4802,
+              "endUtf16": 7201,
+              "quote": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nﬃ Indigo archive: the recovery code is synthetic-08.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussio",
+              "parentRangeId": "b934d9adcd8dac009c68b626147b6d5f274dd2d82807b81f27a1f57a4067aae6"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/old-08.json",
+            "originalSha256": "8a6147f9e0f94a44163bd2687497bf16f4619270af4ebfa49d9a5b31f6cc097d"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-3",
+          "text": "The recovery code for ﬃ Birch archive is synthetic-13.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "c29977a4479a7741ca109b3bef50f84514a2571c494b3e04a297c43fe34ae2f2"
+          ]
+        },
+        "admitted": {
+          "id": "claim-3",
+          "text": "ﬃ Birch archive: the recovery code is synthetic-13.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "c29977a4479a7741ca109b3bef50f84514a2571c494b3e04a297c43fe34ae2f2"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "c29977a4479a7741ca109b3bef50f84514a2571c494b3e04a297c43fe34ae2f2",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "old-13",
+                "revisionId": "5e264857e61ad18c850000febf28264742c9506b68742742a67901d14d549fbc",
+                "sourceId": "personal:1",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 51,
+              "quote": "ﬃ Birch archive: the recovery code is synthetic-13.",
+              "parentRangeId": "c29977a4479a7741ca109b3bef50f84514a2571c494b3e04a297c43fe34ae2f2"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/old-13.json",
+            "originalSha256": "1cace58bb3e198aa02449f1bb71d5c82985b568bed0199cbe05475b2e0f5d481"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-4",
+          "text": "The recovery code for ﬃ Pine archive is synthetic-18.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "44186b037de32c84edee5aa3b4e5085042257fb2d03ffafb3138f1109cd8c5b6"
+          ]
+        },
+        "admitted": {
+          "id": "claim-4",
+          "text": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nﬃ Pine archive: the recovery code is synthetic-18.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "44186b037de32c84edee5aa3b4e5085042257fb2d03ffafb3138f1109cd8c5b6"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "44186b037de32c84edee5aa3b4e5085042257fb2d03ffafb3138f1109cd8c5b6",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "old-18",
+                "revisionId": "3e57e2b6a55229e2222c3357b965417d3816448fa812837a5dfd7e5ce92ac341",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 4802,
+              "endUtf16": 7201,
+              "quote": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nﬃ Pine archive: the recovery code is synthetic-18.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion.",
+              "parentRangeId": "44186b037de32c84edee5aa3b4e5085042257fb2d03ffafb3138f1109cd8c5b6"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/old-18.json",
+            "originalSha256": "4e42dd94397decd95963a53dd8c9ab045018215f8d6c7186cd536935e0879c0e"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "must-09",
+    "question": "Find \"İstanbul Coral archive\" recovery code.",
+    "record": {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:must-09",
+      "startedAt": "2026-10-19T15:22:59.510Z",
+      "endedAt": "2026-10-19T15:24:11.390Z",
+      "elapsedMs": 71865.451,
+      "runElapsedMs": 71768.04074999999,
+      "admissionElapsedMs": 73.87916700000642,
+      "generationElapsedMs": 71510.72266600002,
+      "grammarElapsedMs": [
+        10.047624999977415
+      ],
+      "drainElapsedMs": 0.017499999987194315,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:24:11.375Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 12006,
+      "nativeOutputTokens": 211,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "answered",
+    "admittedStatus": "answered",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "The recovery code for İstanbul Coral archive is synthetic-09.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "13d866301acd73ca3877e5c5e10638707f5e99431bdc6d57fd5a575f158f5ecb"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "İstanbul Coral archive: the recovery code is synthetic-09.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "13d866301acd73ca3877e5c5e10638707f5e99431bdc6d57fd5a575f158f5ecb"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "13d866301acd73ca3877e5c5e10638707f5e99431bdc6d57fd5a575f158f5ecb",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "old-09",
+                "revisionId": "7674d85345569ee26805ed663318c4c4d841292af72ec83dfe1ecc9a40feaad2",
+                "sourceId": "personal:1",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 58,
+              "quote": "İstanbul Coral archive: the recovery code is synthetic-09.",
+              "parentRangeId": "13d866301acd73ca3877e5c5e10638707f5e99431bdc6d57fd5a575f158f5ecb"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/old-09.json",
+            "originalSha256": "2f8a67439d0fe982cfe627489c43526b6d30fe57f2046926e29ed8b0b81a5dc4"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "The recovery code for İstanbul Willow archive is synthetic-04.",
+          "kind": "quotation",
+          "evidenceIds": [
+            "aff65b106de11374d4d1c6ad66f87cc195cc09a1ed35f02ad347acc180391929"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nİstanbul Willow archive: the recovery code is synthetic-04.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing di",
+          "kind": "quotation",
+          "evidenceIds": [
+            "aff65b106de11374d4d1c6ad66f87cc195cc09a1ed35f02ad347acc180391929"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "aff65b106de11374d4d1c6ad66f87cc195cc09a1ed35f02ad347acc180391929",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "old-04",
+                "revisionId": "dd26165d2e3d2f5f83f97c88420c2e5b7e60de028a640db83eb39e9665c6175a",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 4802,
+              "endUtf16": 7201,
+              "quote": "🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳🌳\nİstanbul Willow archive: the recovery code is synthetic-04.\nUnrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing discussion. Unrelated closing di",
+              "parentRangeId": "aff65b106de11374d4d1c6ad66f87cc195cc09a1ed35f02ad347acc180391929"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/old-04.json",
+            "originalSha256": "5739868f2bf294b274ea03fe361029d14cbde3546540cab169f4866690b84595"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "answer-01",
+    "question": "When is Maple delivery due?",
+    "record": {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-01",
+      "startedAt": "2026-10-19T15:24:11.465Z",
+      "endedAt": "2026-10-19T15:24:36.597Z",
+      "elapsedMs": 25127.57366699996,
+      "runElapsedMs": 25054.04037500001,
+      "admissionElapsedMs": 49.18608299997868,
+      "generationElapsedMs": 24861.591916000005,
+      "grammarElapsedMs": [
+        7.976709000009578
+      ],
+      "drainElapsedMs": 0.006542000046465546,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:24:36.581Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 1241,
+      "nativeOutputTokens": 429,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "conflicting-evidence",
+    "admittedStatus": "conflicting-evidence",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "Maple delivery is due on Friday, 23 October 2026.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "116f67f41953e92d7d15fd2aa4d96f8ccb9028f5cb52ec3784ee6de43b4f0e1f",
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "Maple delivery is due on Friday, 23 October 2026.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "116f67f41953e92d7d15fd2aa4d96f8ccb9028f5cb52ec3784ee6de43b4f0e1f",
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "116f67f41953e92d7d15fd2aa4d96f8ccb9028f5cb52ec3784ee6de43b4f0e1f",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-01",
+                "revisionId": "35c330a7ab2582b9cbb7b2e3e7dc23ecadf254d6f8e68d079ef84e7aae335060",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 49,
+              "quote": "Maple delivery is due on Friday, 23 October 2026.",
+              "parentRangeId": "116f67f41953e92d7d15fd2aa4d96f8ccb9028f5cb52ec3784ee6de43b4f0e1f"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-01.json",
+            "originalSha256": "3e4993b06934b28ae74e8153d44caf0c5bc76cb334df2bad31fc66f9fb8291a1"
+          },
+          {
+            "range": {
+              "id": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-a",
+                "revisionId": "f69c959ff1e0667b97e9faa43ed119e3d4d22a41237ee79de451ecdba0234dcd",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 40 credits.",
+              "parentRangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-a.json",
+            "originalSha256": "84fa35a68ac6dc880c2e50b5222a438cc7c3a7c56a1224518e89f957e3511448"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "Maple variance is approved for 40 credits.",
+          "kind": "paraphrase",
+          "evidenceIds": [
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "Maple variance is approved for 40 credits.",
+          "kind": "paraphrase",
+          "evidenceIds": [
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-a",
+                "revisionId": "f69c959ff1e0667b97e9faa43ed119e3d4d22a41237ee79de451ecdba0234dcd",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 40 credits.",
+              "parentRangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-a.json",
+            "originalSha256": "84fa35a68ac6dc880c2e50b5222a438cc7c3a7c56a1224518e89f957e3511448"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-3",
+          "text": "Maple variance is approved for 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291",
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+          ]
+        },
+        "admitted": {
+          "id": "claim-3",
+          "text": "Maple variance is approved for 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291",
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-b",
+                "revisionId": "ac90c6082ca49c8af669b510dcb8e9b45b2196cc23d511225c929453eb6240ef",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 60 credits.",
+              "parentRangeId": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-b.json",
+            "originalSha256": "76e3f410868c5094f0a33ecc7595ca22600d4fedb5f304bb374aa3173d88d727"
+          },
+          {
+            "range": {
+              "id": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-a",
+                "revisionId": "f69c959ff1e0667b97e9faa43ed119e3d4d22a41237ee79de451ecdba0234dcd",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 40 credits.",
+              "parentRangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-a.json",
+            "originalSha256": "84fa35a68ac6dc880c2e50b5222a438cc7c3a7c56a1224518e89f957e3511448"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "answer-02",
+    "question": "What budget was approved for Cobalt?",
+    "record": {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-02",
+      "startedAt": "2026-10-19T15:24:36.670Z",
+      "endedAt": "2026-10-19T15:25:18.505Z",
+      "elapsedMs": 41830.07591700001,
+      "runElapsedMs": 41748.88170899998,
+      "admissionElapsedMs": 57.89179199998034,
+      "generationElapsedMs": 41534.85804099997,
+      "grammarElapsedMs": [
+        9.652166999992914
+      ],
+      "drainElapsedMs": 0.011832999996840954,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:25:18.491Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 4256,
+      "nativeOutputTokens": 482,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "conflicting-evidence",
+    "admittedStatus": "conflicting-evidence",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "The approved budget for Cobalt is 4200 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "c8f87ebbfbfcf295fb2fd90ad8c8357ebb2ecdc7ee1ee94f85d62ea52c007f6d",
+            "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "The approved budget for Cobalt is 4200 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "c8f87ebbfbfcf295fb2fd90ad8c8357ebb2ecdc7ee1ee94f85d62ea52c007f6d",
+            "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "c8f87ebbfbfcf295fb2fd90ad8c8357ebb2ecdc7ee1ee94f85d62ea52c007f6d",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "answer-02",
+                "revisionId": "ea5fabe2a0e43925539cd602a170f49047c41a88f0dff3b4930141eb632b1452",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 47,
+              "quote": "The approved budget for Cobalt is 4200 credits.",
+              "parentRangeId": "c8f87ebbfbfcf295fb2fd90ad8c8357ebb2ecdc7ee1ee94f85d62ea52c007f6d"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/answer-02.json",
+            "originalSha256": "2695d2bab995aae7482a37c27e8efa7f4cd93d681be18e32766c3ec726bafd1f"
+          },
+          {
+            "range": {
+              "id": "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-02-a",
+                "revisionId": "53e3cbf497debf40b7337f15660fbc543438133285e305abc9c06877f1948200",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Cobalt variance: approved limit is 40 credits.",
+              "parentRangeId": "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-02-a.json",
+            "originalSha256": "39b9bee5e3eeec034be83d5b3e1679d32f39bf95f789fc059cd70061bc87fafe"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "The approved limit for Cobalt variance is 40 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6",
+            "8351e26bcbe7766fe0fc0708df702d4f4c20a4fd8230aec87dc6491c233e1844"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "The approved limit for Cobalt variance is 40 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6",
+            "8351e26bcbe7766fe0fc0708df702d4f4c20a4fd8230aec87dc6491c233e1844"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-02-a",
+                "revisionId": "53e3cbf497debf40b7337f15660fbc543438133285e305abc9c06877f1948200",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Cobalt variance: approved limit is 40 credits.",
+              "parentRangeId": "b3f18ee7760f7234f75f406f931cdb9a4c6fa27cdec89f07c8d1211662aab6e6"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-02-a.json",
+            "originalSha256": "39b9bee5e3eeec034be83d5b3e1679d32f39bf95f789fc059cd70061bc87fafe"
+          },
+          {
+            "range": {
+              "id": "8351e26bcbe7766fe0fc0708df702d4f4c20a4fd8230aec87dc6491c233e1844",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-00-a",
+                "revisionId": "fab100c70040d9b7dd09c0df06f7aaf50056d24c03d1ecf7ff61e10b2ca7ab40",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Orchid variance: approved limit is 40 credits.",
+              "parentRangeId": "8351e26bcbe7766fe0fc0708df702d4f4c20a4fd8230aec87dc6491c233e1844"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-00-a.json",
+            "originalSha256": "7e8781c410a586063ae3c02ac8b41781db2e6634de1b240f9d264fd0117fc206"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-3",
+          "text": "The approved limit for Cobalt variance is 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "fe36b4a27eb69c8e5461702a9d0dabb4cb12bb483e20a50a5b3175fbc705113a",
+            "e0f1e9b9b784447fc35cb7bbaa00b20c482f3ea895e2de1d257476da8d463836"
+          ]
+        },
+        "admitted": {
+          "id": "claim-3",
+          "text": "The approved limit for Cobalt variance is 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "fe36b4a27eb69c8e5461702a9d0dabb4cb12bb483e20a50a5b3175fbc705113a",
+            "e0f1e9b9b784447fc35cb7bbaa00b20c482f3ea895e2de1d257476da8d463836"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "fe36b4a27eb69c8e5461702a9d0dabb4cb12bb483e20a50a5b3175fbc705113a",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-02-b",
+                "revisionId": "47bea4060fb212659d39a964fdca4a9b9daa27b1ed46cdd0f08e33bcf2b1ef06",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Cobalt variance: approved limit is 60 credits.",
+              "parentRangeId": "fe36b4a27eb69c8e5461702a9d0dabb4cb12bb483e20a50a5b3175fbc705113a"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-02-b.json",
+            "originalSha256": "3a237a3f7c504932f4c061f2ad8c10de672143c758d1d1629bc049851db9daf9"
+          },
+          {
+            "range": {
+              "id": "e0f1e9b9b784447fc35cb7bbaa00b20c482f3ea895e2de1d257476da8d463836",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-00-b",
+                "revisionId": "b9f585dc0dc4ac255526187cad221015dbbf9d1b31bffbceef21da10c2199f5b",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 46,
+              "quote": "Orchid variance: approved limit is 60 credits.",
+              "parentRangeId": "e0f1e9b9b784447fc35cb7bbaa00b20c482f3ea895e2de1d257476da8d463836"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-00-b.json",
+            "originalSha256": "a4909d92ce78d18da49c3b79d3fd75550566618f1265211b664cd1c4d38fb8bc"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "conflict-01",
+    "question": "What is the approved Maple variance limit?",
+    "record": {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:conflict-01",
+      "startedAt": "2026-10-19T15:25:18.578Z",
+      "endedAt": "2026-10-19T15:25:50.306Z",
+      "elapsedMs": 31723.69108300004,
+      "runElapsedMs": 31650.193582999986,
+      "admissionElapsedMs": 49.33933399996022,
+      "generationElapsedMs": 31444.43845799996,
+      "grammarElapsedMs": [
+        10.033125000016298
+      ],
+      "drainElapsedMs": 0.020416999992448837,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:25:50.289Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true,
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 3311,
+      "nativeOutputTokens": 329,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "conflicting-evidence",
+    "admittedStatus": "conflicting-evidence",
+    "claims": [
+      {
+        "raw": {
+          "id": "claim-1",
+          "text": "The approved Maple variance limit is 40 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+            "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+          ]
+        },
+        "admitted": {
+          "id": "claim-1",
+          "text": "The approved Maple variance limit is 40 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+            "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-a",
+                "revisionId": "f69c959ff1e0667b97e9faa43ed119e3d4d22a41237ee79de451ecdba0234dcd",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 40 credits.",
+              "parentRangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-a.json",
+            "originalSha256": "84fa35a68ac6dc880c2e50b5222a438cc7c3a7c56a1224518e89f957e3511448"
+          },
+          {
+            "range": {
+              "id": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-b",
+                "revisionId": "ac90c6082ca49c8af669b510dcb8e9b45b2196cc23d511225c929453eb6240ef",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 60 credits.",
+              "parentRangeId": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-b.json",
+            "originalSha256": "76e3f410868c5094f0a33ecc7595ca22600d4fedb5f304bb374aa3173d88d727"
+          }
+        ]
+      },
+      {
+        "raw": {
+          "id": "claim-2",
+          "text": "The approved Maple variance limit is 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+            "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+          ]
+        },
+        "admitted": {
+          "id": "claim-2",
+          "text": "The approved Maple variance limit is 60 credits.",
+          "kind": "conflict",
+          "evidenceIds": [
+            "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+            "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+          ]
+        },
+        "citedOriginals": [
+          {
+            "range": {
+              "id": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-a",
+                "revisionId": "f69c959ff1e0667b97e9faa43ed119e3d4d22a41237ee79de451ecdba0234dcd",
+                "sourceId": "personal:0",
+                "kind": "personal"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 40 credits.",
+              "parentRangeId": "d25815dd71e6cadded0f9d3532c64514c9ffc4b6683ab59b7d37bba348ce2068"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-a.json",
+            "originalSha256": "84fa35a68ac6dc880c2e50b5222a438cc7c3a7c56a1224518e89f957e3511448"
+          },
+          {
+            "range": {
+              "id": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291",
+              "anchor": {
+                "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+                "accountId": null,
+                "workspaceId": null,
+                "version": 1,
+                "meetingId": "conflict-01-b",
+                "revisionId": "ac90c6082ca49c8af669b510dcb8e9b45b2196cc23d511225c929453eb6240ef",
+                "sourceId": "transcript:original-segment",
+                "kind": "transcript"
+              },
+              "startUtf16": 0,
+              "endUtf16": 45,
+              "quote": "Maple variance: approved limit is 60 credits.",
+              "parentRangeId": "5bc442c288997b674102ef27669e275764095e7ba478a93f2ad4a99df5d13291"
+            },
+            "originalPath": "/private/tmp/dev507-quality-third-ox_5jgyg/arms/gemma/originals/conflict-01-b.json",
+            "originalSha256": "76e3f410868c5094f0a33ecc7595ca22600d4fedb5f304bb374aa3173d88d727"
+          }
+        ]
+      }
+    ],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  },
+  {
+    "id": "unknown-01",
+    "question": "What is the Quartz secret launch password?",
+    "record": {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:unknown-01",
+      "startedAt": "2026-10-19T15:25:50.391Z",
+      "endedAt": "2026-10-19T15:25:58.760Z",
+      "elapsedMs": 8365.210124999983,
+      "runElapsedMs": 8287.633958999999,
+      "admissionElapsedMs": 51.12479099998018,
+      "generationElapsedMs": 8145.415749999986,
+      "grammarElapsedMs": [
+        7.807374999974854
+      ],
+      "drainElapsedMs": 0.008749999979045242,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:25:58.741Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 1117,
+      "nativeOutputTokens": 18,
+      "stopReason": "stopGenerationTrigger"
+    },
+    "rawStatus": "insufficient-evidence",
+    "admittedStatus": "insufficient-evidence",
+    "claims": [],
+    "exactTextRepetition": {
+      "raw": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      },
+      "admitted": {
+        "groups": [],
+        "groupCount": 0,
+        "excessCopies": 0
+      }
+    }
+  }
+]

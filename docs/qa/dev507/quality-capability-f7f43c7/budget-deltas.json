@@ -1,0 +1,369 @@
+[
+  {
+    "id": "answer-04",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 1871,
+    "newTokens": 2185,
+    "headroom": 9847,
+    "oldIncludedCount": 7,
+    "newIncludedCount": 7,
+    "removedRanges": [],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [],
+    "newOmittedInputRanges": [],
+    "goldOnWire": [
+      true
+    ]
+  },
+  {
+    "id": "answer-06",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 1867,
+    "newTokens": 2181,
+    "headroom": 9851,
+    "oldIncludedCount": 7,
+    "newIncludedCount": 7,
+    "removedRanges": [],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [],
+    "newOmittedInputRanges": [],
+    "goldOnWire": [
+      true
+    ]
+  },
+  {
+    "id": "must-03",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 12031,
+    "newTokens": 12002,
+    "headroom": 30,
+    "oldIncludedCount": 23,
+    "newIncludedCount": 20,
+    "removedRanges": [
+      {
+        "id": "509d61d44e6fa81afce1f451d0ffb7524c64cf9617de48f5c5ed4a1be9bc7e14",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "answer-03",
+          "revisionId": "e7f74288b10573c263153a149ae0f5351fc68016712d9ec6f92e104e72e6418d",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 79,
+        "quote": "We decided to postpone the Saffron launch until the accessibility audit passes.",
+        "parentRangeId": "509d61d44e6fa81afce1f451d0ffb7524c64cf9617de48f5c5ed4a1be9bc7e14"
+      },
+      {
+        "id": "6b4801dcb39753fc1ec4c04c5d017fc862fe4d23f1969e51eed3da213b1b9973",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-03-a",
+          "revisionId": "1208d87d2976e48cf5bd27538261c8bf45d4784ad3cc09598ae3b58a981f3195",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 47,
+        "quote": "Saffron variance: approved limit is 40 credits.",
+        "parentRangeId": "6b4801dcb39753fc1ec4c04c5d017fc862fe4d23f1969e51eed3da213b1b9973"
+      },
+      {
+        "id": "b03c0476de7e220f5dcd873fea913c65af057e2b0530b86dd12231baafd38690",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-03-b",
+          "revisionId": "da2089c4f02c465bde9d3ddf12c4fcbfd005767c7664e8ba09a20f6179bce05f",
+          "sourceId": "transcript:original-segment",
+          "kind": "transcript"
+        },
+        "startUtf16": 0,
+        "endUtf16": 2,
+        "quote": "Sa",
+        "parentRangeId": "62286fd04fc83ac4ff90baf9c8a72308ebd9c0992e39c696e5c48fcbe919569b"
+      }
+    ],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [
+      "509d61d44e6fa81afce1f451d0ffb7524c64cf9617de48f5c5ed4a1be9bc7e14",
+      "6b4801dcb39753fc1ec4c04c5d017fc862fe4d23f1969e51eed3da213b1b9973",
+      "62286fd04fc83ac4ff90baf9c8a72308ebd9c0992e39c696e5c48fcbe919569b"
+    ],
+    "newOmittedInputRanges": [
+      {
+        "id": "509d61d44e6fa81afce1f451d0ffb7524c64cf9617de48f5c5ed4a1be9bc7e14",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "answer-03",
+          "revisionId": "e7f74288b10573c263153a149ae0f5351fc68016712d9ec6f92e104e72e6418d",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 79,
+        "quote": "We decided to postpone the Saffron launch until the accessibility audit passes.",
+        "title": "Synthetic answer-03",
+        "occurredAt": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "id": "6b4801dcb39753fc1ec4c04c5d017fc862fe4d23f1969e51eed3da213b1b9973",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-03-a",
+          "revisionId": "1208d87d2976e48cf5bd27538261c8bf45d4784ad3cc09598ae3b58a981f3195",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 47,
+        "quote": "Saffron variance: approved limit is 40 credits.",
+        "title": "Synthetic conflict-03-a",
+        "occurredAt": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "id": "62286fd04fc83ac4ff90baf9c8a72308ebd9c0992e39c696e5c48fcbe919569b",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-03-b",
+          "revisionId": "da2089c4f02c465bde9d3ddf12c4fcbfd005767c7664e8ba09a20f6179bce05f",
+          "sourceId": "transcript:original-segment",
+          "kind": "transcript"
+        },
+        "startUtf16": 0,
+        "endUtf16": 47,
+        "quote": "Saffron variance: approved limit is 60 credits.",
+        "title": "Synthetic conflict-03-b",
+        "occurredAt": "2026-10-01T00:00:00.000Z",
+        "speaker": "Synthetic speaker"
+      }
+    ],
+    "goldOnWire": [
+      true
+    ]
+  },
+  {
+    "id": "must-09",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 12032,
+    "newTokens": 12006,
+    "headroom": 26,
+    "oldIncludedCount": 23,
+    "newIncludedCount": 20,
+    "removedRanges": [
+      {
+        "id": "7e704ce9b27813b567bd50c26a21069d9f07d9ed4a9bea97cea7b68261d98ea2",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "answer-09",
+          "revisionId": "75ad2e1d3ac905ca719394c18c7344415a921f44eb6473f33a15a50723d4df54",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 65,
+        "quote": "The Coral support owner is still unknown; no assignment was made.",
+        "parentRangeId": "7e704ce9b27813b567bd50c26a21069d9f07d9ed4a9bea97cea7b68261d98ea2"
+      },
+      {
+        "id": "edfe53f0138be7b549b01d4bb834d7f6d9ee1acfb8fce9da97c192fa86ebb42d",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-09-a",
+          "revisionId": "f3e9185f8c78fe0f67ef57ad6fd1cb6ea98ab9fa3804767a1bbffba4e95097e0",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 45,
+        "quote": "Coral variance: approved limit is 40 credits.",
+        "parentRangeId": "edfe53f0138be7b549b01d4bb834d7f6d9ee1acfb8fce9da97c192fa86ebb42d"
+      },
+      {
+        "id": "058dd80988528f80fe6a305257b368eaa6d6334df74cc526cb28c593068c658b",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-09-b",
+          "revisionId": "df99010fe23c47fedd7254eb62fe51a61bc2396a9398bc22df5667d966ca2b73",
+          "sourceId": "transcript:original-segment",
+          "kind": "transcript"
+        },
+        "startUtf16": 0,
+        "endUtf16": 5,
+        "quote": "Coral",
+        "parentRangeId": "94ddc222a66585c1b2efe50352dd82ff87a02ba4f097dd2712167c91e998c95f"
+      }
+    ],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [
+      "7e704ce9b27813b567bd50c26a21069d9f07d9ed4a9bea97cea7b68261d98ea2",
+      "edfe53f0138be7b549b01d4bb834d7f6d9ee1acfb8fce9da97c192fa86ebb42d",
+      "94ddc222a66585c1b2efe50352dd82ff87a02ba4f097dd2712167c91e998c95f"
+    ],
+    "newOmittedInputRanges": [
+      {
+        "id": "7e704ce9b27813b567bd50c26a21069d9f07d9ed4a9bea97cea7b68261d98ea2",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "answer-09",
+          "revisionId": "75ad2e1d3ac905ca719394c18c7344415a921f44eb6473f33a15a50723d4df54",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 65,
+        "quote": "The Coral support owner is still unknown; no assignment was made.",
+        "title": "Synthetic answer-09",
+        "occurredAt": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "id": "edfe53f0138be7b549b01d4bb834d7f6d9ee1acfb8fce9da97c192fa86ebb42d",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-09-a",
+          "revisionId": "f3e9185f8c78fe0f67ef57ad6fd1cb6ea98ab9fa3804767a1bbffba4e95097e0",
+          "sourceId": "personal:0",
+          "kind": "personal"
+        },
+        "startUtf16": 0,
+        "endUtf16": 45,
+        "quote": "Coral variance: approved limit is 40 credits.",
+        "title": "Synthetic conflict-09-a",
+        "occurredAt": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "id": "94ddc222a66585c1b2efe50352dd82ff87a02ba4f097dd2712167c91e998c95f",
+        "anchor": {
+          "libraryId": "5eb8ae6f-4fed-4057-bdd3-c040ccd0c6bc",
+          "accountId": null,
+          "workspaceId": null,
+          "version": 1,
+          "meetingId": "conflict-09-b",
+          "revisionId": "df99010fe23c47fedd7254eb62fe51a61bc2396a9398bc22df5667d966ca2b73",
+          "sourceId": "transcript:original-segment",
+          "kind": "transcript"
+        },
+        "startUtf16": 0,
+        "endUtf16": 45,
+        "quote": "Coral variance: approved limit is 60 credits.",
+        "title": "Synthetic conflict-09-b",
+        "occurredAt": "2026-10-01T00:00:00.000Z",
+        "speaker": "Synthetic speaker"
+      }
+    ],
+    "goldOnWire": [
+      true
+    ]
+  },
+  {
+    "id": "answer-01",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 927,
+    "newTokens": 1241,
+    "headroom": 10791,
+    "oldIncludedCount": 7,
+    "newIncludedCount": 7,
+    "removedRanges": [],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [],
+    "newOmittedInputRanges": [],
+    "goldOnWire": [
+      true
+    ]
+  },
+  {
+    "id": "answer-02",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 3942,
+    "newTokens": 4256,
+    "headroom": 7776,
+    "oldIncludedCount": 24,
+    "newIncludedCount": 24,
+    "removedRanges": [],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [],
+    "newOmittedInputRanges": [],
+    "goldOnWire": [
+      true
+    ]
+  },
+  {
+    "id": "conflict-01",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 2997,
+    "newTokens": 3311,
+    "headroom": 8721,
+    "oldIncludedCount": 24,
+    "newIncludedCount": 24,
+    "removedRanges": [],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [],
+    "newOmittedInputRanges": [],
+    "goldOnWire": [
+      true,
+      true
+    ]
+  },
+  {
+    "id": "unknown-01",
+    "oldBaseline": "INVALID missing-system preflight; comparison only",
+    "selectedInputUnchanged": true,
+    "oldTokens": 803,
+    "newTokens": 1117,
+    "headroom": 10915,
+    "oldIncludedCount": 6,
+    "newIncludedCount": 6,
+    "removedRanges": [],
+    "addedRanges": [],
+    "changedSameIdRanges": [],
+    "newOmittedRangeIds": [],
+    "newOmittedInputRanges": [],
+    "goldOnWire": []
+  }
+]

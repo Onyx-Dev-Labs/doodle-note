@@ -1,0 +1,481 @@
+{
+  "attemptId": "dev507-quality-third-ox_5jgyg",
+  "productionSha": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "evidenceHead": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "lineage": {
+    "priorRoot": "/private/tmp/dev507-quality-annby45k",
+    "priorActualGenerations": {
+      "qwen": 2,
+      "gemma": 0
+    },
+    "priorObserverFailure": 1,
+    "priorUnperformed": 7,
+    "qwenReruns": 0,
+    "secondRoot": "/private/tmp/dev507-quality-successor-5ks880sv",
+    "secondActualNativeGenerations": 0,
+    "secondQaPreGenerationFailures": 1,
+    "secondUnperformed": 7,
+    "qaAttempt": 3
+  },
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02",
+    "conflict-01",
+    "unknown-01"
+  ],
+  "samplingOrder": [
+    {
+      "arm": "gemma",
+      "id": "answer-04"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01"
+    }
+  ],
+  "cases": [
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-04",
+      "startedAt": "2026-10-19T15:20:31.383Z",
+      "endedAt": "2026-10-19T15:21:05.257Z",
+      "elapsedMs": 33871.074166000006,
+      "runElapsedMs": 33791.498958,
+      "admissionElapsedMs": 54.97445799999696,
+      "generationElapsedMs": 33575.391416,
+      "grammarElapsedMs": [
+        9.950208999998722
+      ],
+      "drainElapsedMs": 0.008083000000624452,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:21:05.240Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 2185,
+      "nativeOutputTokens": 455,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-06",
+      "startedAt": "2026-10-19T15:21:05.329Z",
+      "endedAt": "2026-10-19T15:21:37.262Z",
+      "elapsedMs": 31930.1155,
+      "runElapsedMs": 31854.258082999993,
+      "admissionElapsedMs": 53.9931660000002,
+      "generationElapsedMs": 31660.009832999996,
+      "grammarElapsedMs": [
+        8.460416999994777
+      ],
+      "drainElapsedMs": 0.00533299999369774,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:21:37.248Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 2181,
+      "nativeOutputTokens": 462,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:must-03",
+      "startedAt": "2026-10-19T15:21:37.338Z",
+      "endedAt": "2026-10-19T15:22:59.429Z",
+      "elapsedMs": 82075.357875,
+      "runElapsedMs": 81972.705291,
+      "admissionElapsedMs": 72.93362500000512,
+      "generationElapsedMs": 81677.296625,
+      "grammarElapsedMs": [
+        9.644000000000233
+      ],
+      "drainElapsedMs": 0.0050829999963752925,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:22:59.409Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 12002,
+      "nativeOutputTokens": 400,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:must-09",
+      "startedAt": "2026-10-19T15:22:59.510Z",
+      "endedAt": "2026-10-19T15:24:11.390Z",
+      "elapsedMs": 71865.451,
+      "runElapsedMs": 71768.04074999999,
+      "admissionElapsedMs": 73.87916700000642,
+      "generationElapsedMs": 71510.72266600002,
+      "grammarElapsedMs": [
+        10.047624999977415
+      ],
+      "drainElapsedMs": 0.017499999987194315,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:24:11.375Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 12006,
+      "nativeOutputTokens": 211,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-01",
+      "startedAt": "2026-10-19T15:24:11.465Z",
+      "endedAt": "2026-10-19T15:24:36.597Z",
+      "elapsedMs": 25127.57366699996,
+      "runElapsedMs": 25054.04037500001,
+      "admissionElapsedMs": 49.18608299997868,
+      "generationElapsedMs": 24861.591916000005,
+      "grammarElapsedMs": [
+        7.976709000009578
+      ],
+      "drainElapsedMs": 0.006542000046465546,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:24:36.581Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 1241,
+      "nativeOutputTokens": 429,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:answer-02",
+      "startedAt": "2026-10-19T15:24:36.670Z",
+      "endedAt": "2026-10-19T15:25:18.505Z",
+      "elapsedMs": 41830.07591700001,
+      "runElapsedMs": 41748.88170899998,
+      "admissionElapsedMs": 57.89179199998034,
+      "generationElapsedMs": 41534.85804099997,
+      "grammarElapsedMs": [
+        9.652166999992914
+      ],
+      "drainElapsedMs": 0.011832999996840954,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:25:18.491Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 4256,
+      "nativeOutputTokens": 482,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:conflict-01",
+      "startedAt": "2026-10-19T15:25:18.578Z",
+      "endedAt": "2026-10-19T15:25:50.306Z",
+      "elapsedMs": 31723.69108300004,
+      "runElapsedMs": 31650.193582999986,
+      "admissionElapsedMs": 49.33933399996022,
+      "generationElapsedMs": 31444.43845799996,
+      "grammarElapsedMs": [
+        10.033125000016298
+      ],
+      "drainElapsedMs": 0.020416999992448837,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:25:50.289Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        true,
+        true
+      ],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 3311,
+      "nativeOutputTokens": 329,
+      "stopReason": "stopGenerationTrigger"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "valid",
+      "attemptId": "dev507-quality-third-ox_5jgyg:gemma:unknown-01",
+      "startedAt": "2026-10-19T15:25:50.391Z",
+      "endedAt": "2026-10-19T15:25:58.760Z",
+      "elapsedMs": 8365.210124999983,
+      "runElapsedMs": 8287.633958999999,
+      "admissionElapsedMs": 51.12479099998018,
+      "generationElapsedMs": 8145.415749999986,
+      "grammarElapsedMs": [
+        7.807374999974854
+      ],
+      "drainElapsedMs": 0.008749999979045242,
+      "code": null,
+      "message": null,
+      "validation": {
+        "status": "valid",
+        "observedAt": "2026-10-19T15:25:58.741Z"
+      },
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [],
+      "wireObserved": 1,
+      "rawForwardingExact": true,
+      "promptVersion": 3,
+      "inputTokens": 1117,
+      "nativeOutputTokens": 18,
+      "stopReason": "stopGenerationTrigger"
+    }
+  ],
+  "corpusHash": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+  "startedAt": "2026-10-19T15:20:08.523Z",
+  "semanticHumanScore": "UNPERFORMED",
+  "productionGate": "OFF",
+  "stoppedReason": null,
+  "preflight": [
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "passed",
+      "elapsedMs": 9012.459417,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2185,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "passed",
+      "elapsedMs": 1943.0220000000008,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2181,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "passed",
+      "elapsedMs": 2129.5657919999994,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 12002,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "passed",
+      "elapsedMs": 1987.0833329999987,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 12006,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "passed",
+      "elapsedMs": 1770.302208000001,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1241,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "passed",
+      "elapsedMs": 1847.0776250000017,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 4256,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "passed",
+      "elapsedMs": 1820.0254999999997,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 3311,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "passed",
+      "elapsedMs": 1793.335583,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1117,
+      "samplingCalls": 0
+    }
+  ],
+  "samplingCalls": 8,
+  "nativeGenerationCalls": 8,
+  "preflightPassed": true,
+  "engineDisposed": true,
+  "originalsUnchanged": true,
+  "endedAt": "2026-10-19T15:25:58.847Z",
+  "totals": {
+    "valid": 8
+  }
+}

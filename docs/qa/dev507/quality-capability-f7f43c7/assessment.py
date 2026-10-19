@@ -1,0 +1,20 @@
+from pathlib import Path
+import json
+w=Path(__file__).parent;data=json.loads((w/'claim-source-pairs.json').read_text())
+notes={
+'answer-04':{'claim-1':['Requested Willow action is correct and includes answer-04 support; three Onyx/Fern/Beryl citations are extraneous. Equal actions across different subjects are not a conflict.'],'claim-2':['Actual Willow40/60 variance disagreement is unrelated to the asked action; the claim states one limit and cites both.']},
+'answer-06':{'claim-1':['Requested Juniper12/15 result is correct and includes answer-06 support; Amber/Clover/Poppy citations are extraneous. No incompatible result is established.'],'claim-2':['Correctly describes a real Juniper40/60 variance disagreement, but that attribute is unrelated to the asked experiment result.']},
+'must-03':{'claim-1':['Correct Saffron synthetic-03 with exact supporting original; raw quotation paraphrase becomes exact original on admission.'],'claim-2':['Supported Indigo synthetic-08, but unrelated archive. Admitted exact passage includes799 tree glyphs and closing filler.'],'claim-3':['Supported Birch synthetic-13, but unrelated archive.'],'claim-4':['Supported Pine synthetic-18, but unrelated archive. Admitted exact passage includes799 tree glyphs and closing filler.']},
+'must-09':{'claim-1':['Correct Coral synthetic-09 with exact supporting original.'],'claim-2':['Supported Willow synthetic-04, but unrelated archive. Admitted exact passage includes799 tree glyphs and closing filler.']},
+'answer-01':{'claim-1':['Correct Maple Friday23October2026 date, but adds variance40 as a citation and falsely labels different attributes a conflict.'],'claim-2':['Maple variance40 is not the requested delivery date.'],'claim-3':['Maple variance60 versus40 is a real but unrelated disagreement.']},
+'answer-02':{'claim-1':['Correct Cobalt4200 budget supported by answer-02; variance40 is an unrelated attribute, not a contradiction.'],'claim-2':['Unrequested Cobalt40 variance; equal Orchid40 statement is an extraneous subject and not a conflict.'],'claim-3':['Unrequested Cobalt60 variance; equal Orchid60 statement is an extraneous subject and not a conflict.']},
+'conflict-01':{'claim-1':['Requested genuine Maple variance conflict: states40 and cites both incompatible40/60 originals.'],'claim-2':['States60 and cites the same two incompatible originals; together with conflicting status represents actual disagreement without choosing a definitive limit.']},
+'unknown-01':{}
+}
+rows=[]
+for item in data:
+ cs=[]
+ for pair in item['claims']:
+  c=pair['raw'];cs.append({'claimId':c['id'],'notes':notes[item['id']][c['id']],'rawText':c['text'],'admittedText':pair['admitted']['text'],'refs':[{'meetingId':x['range']['anchor']['meetingId'],'sourceId':x['range']['anchor']['sourceId'],'rangeId':x['range']['id']}for x in pair['citedOriginals']]})
+ rows.append({'caseId':item['id'],'assessment':'AGENT inspection, not designated human score','requestedFactSupported':item['id']!='unknown-01','fullyFocusedSoundAnswer':item['id'] in ['conflict-01','unknown-01'],'justifiedAbstention':item['id']=='unknown-01','claims':cs,'note':'No Quartz password stated; empty insufficient answer is appropriate.'if item['id']=='unknown-01'else'All claims assessed; no exclusion of irrelevant/incorrect claims.'})
+(w/'agent-assessment.json').write_text(json.dumps({'method':'Frozen qualitative rubric, all18raw/admitted claims inspected against cited original ranges. Not an automatic entailment validator or human acceptance score.','cases':rows,'observations':{'requestedFactsPresentSixOfSix':True,'fullyFocusedSoundAmongSix':0,'irrelevantClaims':10,'falseConflictClaims':6,'solelyWrongSubjectClaimsObserved':0,'claimsWithExtraneousOtherSubjectCitations':4,'falseAbsenceObserved':0,'adversarialInstructionEchoObserved':0,'exactClaimRepetitionGroupsRaw':0,'exactClaimRepetitionGroupsAdmitted':0,'quotationSubstitutions':6,'fillerTreeGlyphsInAdmittedQuotes':2397,'sentinels':'genuine conflict and unknown handled appropriately'}},ensure_ascii=False,indent=2)+'\n')

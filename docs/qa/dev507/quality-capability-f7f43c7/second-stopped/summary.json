@@ -1,0 +1,270 @@
+{
+  "attemptId": "dev507-quality-successor-5ks880sv",
+  "productionSha": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "evidenceHead": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "lineage": {
+    "priorRoot": "/private/tmp/dev507-quality-annby45k",
+    "priorActualGenerations": {
+      "qwen": 2,
+      "gemma": 0
+    },
+    "priorObserverFailure": 1,
+    "priorUnperformed": 7,
+    "qwenReruns": 0
+  },
+  "caseOrder": [
+    "answer-04",
+    "answer-06",
+    "must-03",
+    "must-09",
+    "answer-01",
+    "answer-02",
+    "conflict-01",
+    "unknown-01"
+  ],
+  "samplingOrder": [
+    {
+      "arm": "gemma",
+      "id": "answer-04"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01"
+    }
+  ],
+  "cases": [
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "failed",
+      "attemptId": "dev507-quality-successor-5ks880sv:gemma:answer-04",
+      "startedAt": "2026-10-19T15:13:59.880Z",
+      "endedAt": "2026-10-19T15:13:59.989Z",
+      "elapsedMs": 105.09045900000274,
+      "runElapsedMs": 88.56758400000035,
+      "admissionElapsedMs": null,
+      "generationElapsedMs": null,
+      "grammarElapsedMs": [],
+      "drainElapsedMs": 0.006916999998793472,
+      "code": "model-failed",
+      "message": "Expected values to be strictly deep-equal:\n+ actual - expected\n... Skipped lines\n\n  {\n    coverage: '{\"scanComplete\":true,\"selectionComplete\":true,\"eligibleMeetings\":701,\"selectedMeetings\":7,\"omissions\":[],\"semanticCoverage\":\"not-exhaustive\"}',\n    purpose: 'library-ask',\n    question: 'What is the next action for Willow?',\n    ranges: [\n...\n        quote: 'Willow variance: approved limit is 40 credits.',\n+       speaker: undefined,\n        startUtf16: 0,\n        title: 'Synthetic conflict-04-a'\n      },\n      {\n        anchor: {\n",
+      "validation": null,
+      "timedOut": false,
+      "operatorInterrupted": false,
+      "cleanup": "service/context awaited",
+      "goldOnWire": [
+        false
+      ],
+      "wireObserved": 0,
+      "rawForwardingExact": null,
+      "promptVersion": null,
+      "inputTokens": null,
+      "nativeOutputTokens": null,
+      "stopReason": null
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "unperformed"
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "unperformed"
+    }
+  ],
+  "corpusHash": "0c2ed0eb2408cbff8cfc85dfad5bbbc8367a0421d0e26c4dc9780148f525b2c2",
+  "startedAt": "2026-10-19T15:13:28.856Z",
+  "semanticHumanScore": "UNPERFORMED",
+  "productionGate": "OFF",
+  "stoppedReason": "Integrity failure: AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n... Skipped lines\n\n  {\n    coverage: '{\"scanComplete\":true,\"selectionComplete\":true,\"eligibleMeetings\":701,\"selectedMeetings\":7,\"omissions\":[],\"semanticCoverage\":\"not-exhaustive\"}',\n    purpose: 'library-ask',\n    question: 'What is the next action for Willow?',\n    ranges: [\n...\n        quote: 'Willow variance: approved limit is 40 credits.',\n+       speaker: undefined,\n        startUtf16: 0,\n        title: 'Synthetic conflict-04-a'\n      },\n      {\n        anchor: {\n",
+  "preflight": [
+    {
+      "arm": "gemma",
+      "id": "answer-04",
+      "status": "passed",
+      "elapsedMs": 13381.326374999999,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2185,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-06",
+      "status": "passed",
+      "elapsedMs": 5138.701166999999,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 2181,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "must-03",
+      "status": "passed",
+      "elapsedMs": 2269.4037500000013,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 12002,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "must-09",
+      "status": "passed",
+      "elapsedMs": 2184.8247499999998,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 12006,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-01",
+      "status": "passed",
+      "elapsedMs": 1874.598791999997,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1241,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "answer-02",
+      "status": "passed",
+      "elapsedMs": 1818.505833000003,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 4256,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "conflict-01",
+      "status": "passed",
+      "elapsedMs": 1820.4815839999974,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 3311,
+      "samplingCalls": 0
+    },
+    {
+      "arm": "gemma",
+      "id": "unknown-01",
+      "status": "passed",
+      "elapsedMs": 1808.436875000003,
+      "result": {
+        "status": "error",
+        "code": "model-failed",
+        "message": "QA_PREFLIGHT_ONLY_NO_SAMPLING"
+      },
+      "timedOut": false,
+      "drainError": null,
+      "reason": null,
+      "inputTokens": 1117,
+      "samplingCalls": 0
+    }
+  ],
+  "samplingCalls": 0,
+  "nativeGenerationCalls": 0,
+  "preflightPassed": true,
+  "engineDisposed": true,
+  "originalsUnchanged": true,
+  "endedAt": "2026-10-19T15:14:00.035Z",
+  "totals": {
+    "failed": 1,
+    "unperformed": 7
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "root": "/private/tmp/dev507-quality-successor-5ks880sv",
+  "repo": "/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c",
+  "node": "/private/tmp/dev507-quality-successor-5ks880sv/helpers/node",
+  "model": "/private/tmp/dev507-quality-annby45k/model/gemma-3-12b-it-Q4_K_M.gguf",
+  "sentinel": "/private/tmp/dev507-successor-denied-7x3dnhfk",
+  "sourceSha": "f7f43c7d8a898a61015650b44a218167c1dedf76",
+  "argv": [
+    "/usr/bin/sandbox-exec",
+    "-f",
+    "/private/tmp/dev507-quality-successor-5ks880sv/contain.sb",
+    "-D",
+    "REPO=/Users/sean/.t3/worktrees/doodle-note/t3-d30e320c",
+    "-D",
+    "MODEL=/private/tmp/dev507-quality-annby45k/model/gemma-3-12b-it-Q4_K_M.gguf",
+    "-D",
+    "RUN=/private/tmp/dev507-quality-successor-5ks880sv",
+    "-D",
+    "NODE=/private/tmp/dev507-quality-successor-5ks880sv/helpers/node",
+    "/private/tmp/dev507-quality-successor-5ks880sv/helpers/node",
+    "/private/tmp/dev507-quality-successor-5ks880sv/runner.mjs",
+    "/private/tmp/dev507-quality-successor-5ks880sv",
+    "/private/tmp/dev507-quality-successor-5ks880sv/corpus.json",
+    "/private/tmp/dev507-quality-annby45k/model/gemma-3-12b-it-Q4_K_M.gguf",
+    "f7f43c7d8a898a61015650b44a218167c1dedf76",
+    "/private/tmp/dev507-successor-denied-7x3dnhfk"
+  ],
+  "environment": {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/private/tmp/dev507-quality-successor-5ks880sv/home",
+    "CFFIXED_USER_HOME": "/private/tmp/dev507-quality-successor-5ks880sv/home",
+    "TMPDIR": "/private/tmp/dev507-quality-successor-5ks880sv/tmp",
+    "XDG_CACHE_HOME": "/private/tmp/dev507-quality-successor-5ks880sv/home/.cache"
+  },
+  "pid": 18478,
+  "startedAt": "2026-10-19T15:13:28Z",
+  "policySha256": "50d72dc148e06b9ffec60baaee3720d9e50b1a07a4e195e8011c858d18e6ee12",
+  "runnerSha256": "1a4a44dbc1f4797c5d010bb8837837002e92d7ddf8bb54a54ae085844ce9c8bf",
+  "observerSourceSha256": "c95270c61f7a535b74a783a1ca30f22bee61710d1a933931ceb9359328864336",
+  "launcherSha256": "ec5c9fe21b1b41bed4518d4b68fcdb5bcae26c95bc9bd473e5b5eccf6f4cc032",
+  "outerDeadlineSeconds": 3000
+}
