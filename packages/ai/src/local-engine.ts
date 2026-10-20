@@ -247,7 +247,9 @@ export class LocalNotesEngine implements NotesEngine {
         signal.throwIfAborted()
         const session = new LlamaChatSession({
           contextSequence: context.getSequence(),
-          systemPrompt
+          systemPrompt,
+          // Gemma requires explicit admission before folding system rules into its user turn.
+          forceAddSystemPrompt: true
         })
         const prompt = globalAskInput
           ? buildGlobalAskPrompt(globalAskInput, {
