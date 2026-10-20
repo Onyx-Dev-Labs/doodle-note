@@ -1,6 +1,8 @@
 import type { EngineStatusEvent } from '../../../shared/engine-events'
 
 interface CaptureStatusState {
+  captureId?: string
+  savedAudioFailures?: import('@repo/meetings-store/types').SavedAudioFailures
   phase: 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
   statusText: string
   transcribing: boolean
@@ -12,7 +14,12 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
   ev: EngineStatusEvent
 ): T {
   if (state.phase === 'idle' || state.phase === 'ended') return state
+  if (ev.captureId && ev.captureId !== state.captureId) return state
   switch (ev.stage) {
+    case 'audio_save_failed':
+      return ev.channel === 'mic' || ev.channel === 'system'
+        ? { ...state, savedAudioFailures: { ...state.savedAudioFailures, [ev.channel]: true } }
+        : state
     case 'requesting_permission': {
       if (state.phase !== 'starting') return state
       const permission =

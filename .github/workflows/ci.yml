@@ -38,11 +38,23 @@ jobs:
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Mac candidate verification boundaries
+        run: |
+          python3 -m unittest discover -s apps/desktop/scripts -p 'test_verify_existing_mac_candidate.py'
+          node --test apps/desktop/scripts/mac-candidate-runtime-smoke.test.cjs
+          ruby apps/desktop/scripts/test_mac_verification_workflow.rb
+          ruby apps/desktop/scripts/test_mac_release_manifest.rb
+
       - name: Desktop typecheck
         run: pnpm --filter desktop typecheck
 
       - name: Desktop tests
         run: pnpm --filter desktop test
+
+      - name: Local source index contracts
+        run: |
+          pnpm --filter @repo/meetings-store typecheck
+          pnpm --filter @repo/meetings-store test
 
       - name: MCP server tests
         run: pnpm --filter doodle-note-mcp test

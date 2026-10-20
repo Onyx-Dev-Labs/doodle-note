@@ -1,0 +1,102 @@
+.recipe-panel {
+  margin: 20px 0;
+  border: 1px solid var(--border, #8886);
+  border-radius: 10px;
+}
+.recipe-toggle {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.recipe-body {
+  padding: 0 14px 14px;
+  font-size: 13px;
+}
+.recipe-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 10px 0;
+}
+.recipe-body input:not([type='checkbox']),
+.recipe-body textarea,
+.recipe-body select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg, transparent);
+  border: 1px solid #8888;
+  border-radius: 5px;
+  padding: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.recipe-body textarea {
+  resize: vertical;
+}
+.recipe-body fieldset {
+  min-width: 0;
+  border: 1px solid #8885;
+  border-radius: 6px;
+}
+.recipe-body legend {
+  padding: 0 5px;
+}
+.recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.recipe-inputs,
+.recipe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.recipe-inputs label,
+.recipe-body .recipe-consent {
+  flex-direction: row;
+  align-items: flex-start;
+}
+.recipe-body button:not(.recipe-toggle) {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid #8888;
+  border-radius: 5px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.recipe-body button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.recipe-panel :focus-visible {
+  outline: 2px solid #b57a35;
+  outline-offset: 3px;
+}
+.recipe-output {
+  border-top: 1px solid #8885;
+  padding: 12px 0;
+}
+.recipe-output summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.recipe-output pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 420px;
+  overflow: auto;
+}
+.recipe-error {
+  color: var(--error, #bf553e);
+  overflow-wrap: anywhere;
+}

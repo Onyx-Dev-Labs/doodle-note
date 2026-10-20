@@ -13,6 +13,7 @@ import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import * as api from '../shared/notes-api'
 import * as recovery from '../shared/meeting-recovery'
+import * as markdownHtml from '../shared/markdown-html'
 import { fetchCloudModels } from './cloud-models'
 import * as autoNotes from '../shared/auto-notes'
 
@@ -59,6 +60,7 @@ test('retired settings survive reload, block requests, and never migrate keys to
     },
     '@repo/meetings-store': { sanitizeSpeakerName: (value: string) => value.trim() },
     '../shared/notes-api': api,
+    '../shared/markdown-html': markdownHtml,
     '../shared/batch-transcription': batchTranscription,
     '../shared/auto-notes': autoNotes,
     '../shared/meeting-recovery': recovery,

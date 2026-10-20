@@ -1,25 +1,67 @@
-name: Mac release
+name: Mac release candidate
 
-# Builds, signs, notarizes, and publishes the Mac updater feed.
+# Builds and verifies a signed/notarized candidate. Does not publish the feed.
 # Required repo secrets:
 #   DOODLENOTE_GOOGLE_CLIENT_SECRET (Desktop client, not Web)
-#   BLOB_READ_WRITE_TOKEN
 #   MAC_CSC_LINK (base64 .p12) + MAC_CSC_KEY_PASSWORD
 #   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
-# Or run locally on a signed Mac: cd apps/desktop && pnpm release
+# Secure setup: python3 apps/desktop/scripts/configure-mac-release-secrets.py
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Build a candidate or verify an existing signed artifact
+        type: choice
+        options: [candidate, verify-existing]
+        default: candidate
+      candidate_run_id:
+        description: Exact successful signing run ID (verify-existing only)
+        type: string
+      candidate_artifact_id:
+        description: Exact immutable artifact ID (verify-existing only)
+        type: string
+      candidate_sha:
+        description: Exact 40-character candidate source SHA (verify-existing only)
+        type: string
+      candidate_version:
+        description: Version inside the signed candidate (verify-existing only)
+        type: string
+      expected_archive_sha256:
+        description: Trusted artifact archive SHA256 from GitHub metadata (verify-existing only)
+        type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: mac-release-${{ inputs.operation || 'candidate' }}${{ inputs.operation == 'verify-existing' && format('-{0}', inputs.candidate_artifact_id) || '' }}
+  cancel-in-progress: false
 
 jobs:
   release:
-    if: github.repository == 'Onyx-Dev-Labs/doodle-note'
-    runs-on: macos-latest
+    if: github.repository == 'Onyx-Dev-Labs/doodle-note' && (inputs.operation == 'candidate' || inputs.operation == '')
+    runs-on: macos-15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test release tooling
+        run: |
+          python3 -m unittest discover -s apps/desktop/scripts -p 'test_mac_release_secrets.py'
+          ruby apps/desktop/scripts/test_mac_release_manifest.rb
+          ruby apps/desktop/scripts/test_mac_verification_workflow.rb
+
+      - name: Check required release credentials
+        env:
+          DOODLENOTE_GOOGLE_CLIENT_SECRET: ${{ secrets.DOODLENOTE_GOOGLE_CLIENT_SECRET }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          python3 apps/desktop/scripts/configure-mac-release-secrets.py --check-env
+          test "$(uname -m)" = arm64
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -45,7 +87,7 @@ jobs:
           node apps/desktop/scripts/check-google-oauth.mjs
           pnpm --filter doodle-note-mcp build
           pnpm --filter desktop exec electron-vite build
-          pnpm --filter desktop exec electron-builder --mac
+          pnpm --filter desktop exec electron-builder --mac --arm64 --publish never -c.forceCodeSigning=true -c.dmg.sign=true
         env:
           DOODLENOTE_GOOGLE_CLIENT_SECRET: ${{ secrets.DOODLENOTE_GOOGLE_CLIENT_SECRET }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -54,10 +96,22 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Publish updater feed to Blob
-        run: node apps/desktop/scripts/publish-release.mjs --mac
+      - name: Notarize and staple the signed DMG
         env:
-          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          version="$(node -p 'require("./apps/desktop/package.json").version')"
+          dmg="apps/desktop/release/DoodleNote-${version}-arm64.dmg"
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --timeout 20m
+          xcrun stapler staple "$dmg"
+          ruby apps/desktop/scripts/mac-release-manifest.rb apps/desktop/release "$version" --refresh-dmg
+
+      - name: Verify signed and notarized distributables
+        env:
+          EXPECTED_TEAM_ID: VTZW6K32K4
+        run: bash apps/desktop/scripts/verify-mac-release.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -66,26 +120,52 @@ jobs:
             apps/desktop/release/DoodleNote-*.zip
             apps/desktop/release/DoodleNote-*.dmg
             apps/desktop/release/latest-mac.yml
+            apps/desktop/release/release-receipt.txt
           retention-days: 14
+          if-no-files-found: error
 
-      - name: Open PR to stage updater manifest on main
-        env:
-          GH_TOKEN: ${{ github.token }}
+  verify-existing:
+    if: github.repository == 'Onyx-Dev-Labs/doodle-note' && inputs.operation == 'verify-existing' && github.ref != 'refs/heads/main'
+    runs-on: macos-14
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test verification boundaries (no candidate execution)
         run: |
-          VERSION=$(node -p "require('./apps/desktop/package.json').version")
-          BRANCH="chore/stage-v${VERSION}-updater-manifest"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add apps/web/public/updates/latest-mac.yml
-          if git diff --staged --quiet; then
-            echo "latest-mac.yml unchanged — manifest may already be staged"
-            exit 0
-          fi
-          git commit -m "chore: stage v${VERSION} updater manifest"
-          git push --force origin "$BRANCH"
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "chore: stage v${VERSION} updater manifest" \
-            --body "Automated manifest from the Mac release workflow. Merge to make Check for Updates report v${VERSION}."
+          python3 -m unittest discover -s apps/desktop/scripts -p 'test_verify_existing_mac_candidate.py'
+          node --test apps/desktop/scripts/mac-candidate-runtime-smoke.test.cjs
+          ruby apps/desktop/scripts/test_mac_release_manifest.rb
+          ruby apps/desktop/scripts/test_mac_verification_workflow.rb
+
+      - name: Verify exact signed candidate on macOS 14
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          ARCHIVE_SHA256: ${{ inputs.expected_archive_sha256 }}
+          HARNESS_SHA: ${{ github.sha }}
+        run: |
+          python3 apps/desktop/scripts/verify-existing-mac-candidate.py \
+            --run-id "$CANDIDATE_RUN_ID" --artifact-id "$CANDIDATE_ARTIFACT_ID" \
+            --candidate-sha "$CANDIDATE_SHA" --version "$CANDIDATE_VERSION" \
+            --archive-sha256 "$ARCHIVE_SHA256" --harness-sha "$HARNESS_SHA" \
+            --output "$RUNNER_TEMP/mac-candidate-verification"
+
+      - name: Retain bounded verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mac14-verification-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/mac-candidate-verification/result.json
+            ${{ runner.temp }}/mac-candidate-verification/commands.log
+          retention-days: 14
+          if-no-files-found: warn

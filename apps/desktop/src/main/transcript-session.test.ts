@@ -6,6 +6,69 @@ import { test } from 'node:test'
 import type { EngineEvent } from '../shared/engine-events'
 import { TranscriptSession } from './transcript-session'
 
+test('a pending meeting cannot take ownership of an empty ended capture', () => {
+  const session = new TranscriptSession(() => {}, 'unused-empty-session')
+  session.bindMeeting('a')
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'capture-a' })
+  session.handle({ event: 'status', stage: 'audio_save_failed', channel: 'mic' })
+  session.handle({ event: 'done' })
+  const ended = session.snapshot('a')!
+  assert.deepEqual(ended.segments, [])
+  assert.deepEqual(ended.savedAudioFailures, { mic: true })
+
+  session.bindMeeting('b')
+  session.handle({ event: 'spawn-error', message: 'Worker restarting' })
+  assert.equal(session.snapshot('b'), null)
+  assert.deepEqual(session.snapshot('a'), ended)
+
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'capture-b' })
+  session.handle({
+    event: 'status',
+    stage: 'audio_save_failed',
+    channel: 'system',
+    captureId: 'capture-a'
+  })
+  session.handle({ event: 'done', captureId: 'capture-a' })
+  assert.equal(session.snapshot('a'), null)
+  assert.deepEqual(session.snapshot('b')?.savedAudioFailures, {})
+  assert.equal(session.snapshot('b')?.phase, 'starting')
+})
+
+test('first failed start has no snapshot; failed Resume retains the completed capture', () => {
+  const session = new TranscriptSession(() => {}, 'unused-empty-session')
+  session.bindMeeting('a')
+  session.handle({ event: 'spawn-error', message: 'Worker restarting' })
+  assert.equal(session.snapshot('a'), null)
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'capture-a' })
+  session.handle({ event: 'status', stage: 'audio_save_failed', channel: 'mic' })
+  session.handle({ event: 'done' })
+  const ended = session.snapshot('a')
+  session.bindMeeting('a')
+  session.handle({ event: 'spawn-error', message: 'Worker restarting' })
+  assert.deepEqual(session.snapshot('a'), ended)
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'resume-a' })
+  assert.deepEqual(session.snapshot('a')?.savedAudioFailures, {})
+})
+
+test('file attempts preserve the live owner until started, then remove the live snapshot', () => {
+  const session = new TranscriptSession(() => {}, 'unused-empty-session')
+  session.bindMeeting('a')
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'capture-a' })
+  session.handle({ event: 'status', stage: 'audio_save_failed', channel: 'mic' })
+  session.handle({ event: 'done' })
+  const ended = session.snapshot('a')
+  session.bindMeeting()
+  session.handle({ event: 'spawn-error', message: 'No file' })
+  assert.deepEqual(session.snapshot('a'), ended)
+  session.handle({ event: 'started', command: 'transcribe', binaryPath: 'test', captureId: 'file' })
+  assert.equal(session.snapshot('a'), null)
+  session.bindMeeting('b')
+  session.handle({ event: 'spawn-error', message: 'Worker restarting' })
+  assert.equal(session.snapshot('b'), null)
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test', captureId: 'capture-b' })
+  assert.deepEqual(session.snapshot('b')?.savedAudioFailures, {})
+})
+
 test('persists refined wording while preserving the live seek anchor', () => {
   const dir = mkdtempSync(join(tmpdir(), 'doodlenote-session-test-'))
   const events: EngineEvent[] = []
@@ -67,8 +130,8 @@ test('abnormal exit preserves available transcript but does not report successfu
   const events: EngineEvent[] = []
   try {
     const session = new TranscriptSession((event) => events.push(event), dir)
-    session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
     session.bindMeeting('failed-capture')
+    session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
     session.handle({ event: 'exit', code: 1, signal: null })
     assert.match((events.at(-1) as { error: string }).error, /before finalization/)
     assert.match(session.snapshot('failed-capture')?.error ?? '', /before finalization/)
@@ -86,6 +149,7 @@ test('a session persistence failure produces an explicit failed completion after
     const blocked = join(dir, 'file-not-directory')
     writeFileSync(blocked, 'synthetic fixture')
     const session = new TranscriptSession((event) => events.push(event), blocked)
+    session.bindMeeting('failed-save')
     session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
     session.handle({
       event: 'timings',
@@ -95,7 +159,6 @@ test('a session persistence failure produces an explicit failed completion after
     session.handle({ event: 'done' })
     assert.ok(events.some((event) => event.event === 'segments'))
     assert.match((events.at(-1) as { error: string }).error, /Failed to save session/)
-    session.bindMeeting('failed-save')
     assert.match(session.snapshot('failed-save')?.error ?? '', /Failed to save session/)
     assert.equal(
       events.some((event) => event.event === 'session-saved'),
@@ -168,10 +231,13 @@ test('checkpoint failure is reported at finalization while the recovery session 
       dir,
       () => {},
       () => {
-        throw new Error('synthetic disk failure')
+        throw new Error('ENOSPC /private/synthetic/meeting.json')
       }
     )
+    session.bindMeeting('failed-save')
     session.handle({ event: 'started', command: 'live', binaryPath: 'synthetic' })
+    session.handle({ event: 'status', stage: 'audio_save_failed', channel: 'mic' })
+    assert.deepEqual(session.snapshot('failed-save')?.savedAudioFailures, { mic: true })
     session.handle({
       event: 'timings',
       channel: 'mic',
@@ -179,6 +245,10 @@ test('checkpoint failure is reported at finalization while the recovery session 
     })
     session.handle({ event: 'done' })
     assert.ok(events.some((event) => event.event === 'session-saved'))
+    assert.equal(
+      JSON.stringify(events.filter((event) => event.event === 'error')).includes('/private/'),
+      false
+    )
     assert.match(
       (events.at(-1) as { error: string }).error,
       /Could not save the meeting transcript/
