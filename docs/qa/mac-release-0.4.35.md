@@ -21,7 +21,7 @@ The engine change and version increment require a fresh signed package. Prior si
 - Retained bbb app ZIP structure and receipt validated with the new read-only verifier helpers, without extraction/execution. Existing signed ZIP/DMG/manifest SHA256 matched their original receipt during preflight.
 - `pnpm install --frozen-lockfile --ignore-scripts` passed, no downloads, lockfile unchanged. Lifecycle scripts were intentionally disabled; this verifies dependency resolution, not native engine build/packaging.
 
-The independent review at immutable4fd6139 found0 meaningful standards findings and2 P2 spec findings in the verifier (no core/version finding). The [focused F1/F2 fixes](pr230-verifier-fixes.md) now pass31 Python,10 Node,3 workflow/34 assertions and4 manifest/5 assertions, without skips or native execution. Standards and spec outcomes remain separate; fresh independent verification of these fixes is pending and signing remains held.
+The independent review at immutable4fd6139 found0 meaningful standards findings and2 P2 spec findings in the verifier (no core/version finding). The [focused F1/F2 fixes](pr230-verifier-fixes.md) now pass31 Python,10 Node,3 workflow/34 assertions and4 manifest/5 assertions, without skips or native execution. Fresh independent review at187cd6a resolved F2 within its bounded fixture scope, but found a transient group-probe false failure in F1. The follow-up passes38 Python tests; F1 remains open pending fresh independent verification and signing remains held. Raw extensible-WAV compatibility is a separate runtime qualification: the documented runner Python supports it, local Python3.9 does not, and an interpreter capability preflight is proposed but not implemented.
 
 ## Release gates still open
 

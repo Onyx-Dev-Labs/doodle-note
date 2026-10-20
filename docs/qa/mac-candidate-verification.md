@@ -30,6 +30,10 @@ These also run in regular PR CI. Archive tests reject traversal, collisions, spe
 
 Channel checks use phase/gain-independent tone energy over the central half-second (at least75% at the expected frequency), avoiding codec edge padding. Synthetic tolerance tests cover gain, phase, DC, noise, padding and±0.5Hz drift; full-pipeline negative controls reject duplicated/swapped/wrong channels. These local tests do not execute AAC conversion or qualify a package. See [the separate F1/F2 review follow-up](pr230-verifier-fixes.md).
 
+## Python runtime and raw WAV compatibility
+
+The workflow currently uses unpinned `python3`. Raw afconvert WAV can use WAVE_FORMAT_EXTENSIBLE PCM, which requires Python3.12+ stdlib support; Python3.9 boundary tests alone do not qualify that path. The documented macOS14 ARM64 image currently lists Python3.14.7, but actual job interpreter identity and raw pipeline execution remain unverified. A capability/identity preflight is proposed, not implemented; see the [runtime evidence and minimal seam](pr230-verifier-fixes.md#separate-raw-wav-runtime-qualification). Do not normalize candidate outputs or treat the review's sample-preserving header normalization as a raw-pipeline pass.
+
 ## What a green runtime job means
 
 - Packaged `engine prepare-batch-audio` accepts synthetic mono/stereo WAV and audio-only MP4, emits the expected channel protocol, and produces non-silent 16kHz PCM with bounded duration and expected440Hz mic/660Hz system identity. Original inputs are unchanged.

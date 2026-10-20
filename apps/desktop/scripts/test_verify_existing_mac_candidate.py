@@ -1,5 +1,6 @@
 import argparse
 import copy
+import errno
 import hashlib
 import importlib.util
 import io
@@ -201,10 +202,18 @@ class CandidateVerificationTest(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertIn('TIMEOUT', (self.root / 'commands.log').read_text())
 
-    def redirected_descendant(self, exit_code, timeout=False):
+    def redirected_descendant(self, exit_code, timeout=False, grandchild=False):
         marker, pid_file = self.root / 'late-marker', self.root / 'child.pid'
+        pid_files = [pid_file]
         child = (f'import os,pathlib,time; pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); '
                  f'time.sleep(.3); pathlib.Path({str(marker)!r}).touch(); time.sleep(30)')
+        if grandchild:
+            middle_pid = self.root / 'middle.pid'
+            pid_files.append(middle_pid)
+            child = ('import os,pathlib,subprocess,sys,time; '
+                     f'pathlib.Path({str(middle_pid)!r}).write_text(str(os.getpid())); '
+                     f'subprocess.Popen([sys.executable,"-c",{child!r}], '
+                     'stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(30)')
         parent = ('import subprocess,sys,pathlib,time; '
                   f'subprocess.Popen([sys.executable,"-c",{child!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); '
                   f'target=pathlib.Path({str(pid_file)!r});'
@@ -223,14 +232,16 @@ class CandidateVerificationTest(unittest.TestCase):
                               self.root, candidate.runtime_env(self.root), timeout=2))
             time.sleep(.4)
             self.assertFalse(marker.exists(), 'Owned child wrote after run returned')
-            with self.assertRaises(ProcessLookupError):
-                os.kill(int(pid_file.read_text()), 0)
+            for path in pid_files:
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(path.read_text()), 0)
             self.assertIsNone(unrelated.poll(), 'Unrelated process was terminated')
             self.assertIn('parent diagnostic', (self.root / 'commands.log').read_text())
         finally:
-            if pid_file.exists():
-                try: os.kill(int(pid_file.read_text()), signal.SIGKILL)
-                except ProcessLookupError: pass
+            for path in pid_files:
+                if path.exists():
+                    try: os.kill(int(path.read_text()), signal.SIGKILL)
+                    except ProcessLookupError: pass
             unrelated.kill(); unrelated.wait(timeout=2)
 
     def test_failed_parent_cleans_redirected_descendant(self):
@@ -241,6 +252,82 @@ class CandidateVerificationTest(unittest.TestCase):
 
     def test_timeout_cleans_redirected_descendant(self):
         self.redirected_descendant(0, timeout=True)
+
+    def test_successful_parent_drains_actual_grandchild(self):
+        self.redirected_descendant(0, grandchild=True)
+
+    def test_failed_parent_drains_actual_grandchild(self):
+        self.redirected_descendant(3, grandchild=True)
+
+    def test_timed_out_parent_drains_actual_grandchild(self):
+        self.redirected_descendant(0, timeout=True, grandchild=True)
+
+    def test_transient_probe_errors_require_confirmed_disappearance(self):
+        from unittest.mock import Mock
+        for observation in (PermissionError(errno.EPERM, 'transient'),
+                            OSError(errno.EIO, 'transient')):
+            with self.subTest(error=type(observation).__name__):
+                process = Mock(pid=12345)
+                with patch.object(candidate.os, 'killpg',
+                                  side_effect=[None, observation, None, ProcessLookupError()]) as kill:
+                    candidate.cleanup_group(process, timeout=.1)
+                self.assertEqual(kill.call_args_list, [
+                    unittest.mock.call(12345, signal.SIGKILL),
+                    unittest.mock.call(12345, 0),
+                    unittest.mock.call(12345, 0),
+                    unittest.mock.call(12345, 0)])
+
+    def test_persistent_probe_errors_wait_until_deadline_and_fail(self):
+        from unittest.mock import Mock
+        for observation in (PermissionError(errno.EPERM, 'persistent'),
+                            OSError(errno.EIO, 'persistent')):
+            with self.subTest(error=type(observation).__name__):
+                def probe(group, sig):
+                    if sig == 0:
+                        raise observation
+                started = time.monotonic()
+                with patch.object(candidate.os, 'killpg', side_effect=probe) as kill:
+                    with self.assertRaisesRegex(ValueError, 'cleanup timed out') as failure:
+                        candidate.cleanup_group(Mock(pid=12345), timeout=.03)
+                self.assertIs(failure.exception.__cause__, observation)
+                self.assertGreaterEqual(time.monotonic() - started, .03)
+                self.assertLess(time.monotonic() - started, .5)
+                self.assertGreaterEqual(kill.call_count, 3)
+                self.assertTrue(all(call.args[0] == 12345 for call in kill.call_args_list))
+
+    def test_signal_failure_survives_eventual_confirmed_disappearance(self):
+        from unittest.mock import Mock
+        signal_error = PermissionError(errno.EPERM, 'signal denied')
+        with patch.object(candidate.os, 'killpg', side_effect=[
+                signal_error, PermissionError(errno.EPERM, 'probe unresolved'), ProcessLookupError()]) as kill:
+            with self.assertRaises(PermissionError) as failure:
+                candidate.cleanup_group(Mock(pid=12345), timeout=.1)
+        self.assertIs(failure.exception, signal_error)
+        self.assertEqual(kill.call_count, 3)
+
+    def test_persistent_probe_failure_preserves_primary_exit_and_timeout_logs(self):
+        real_killpg, cleanup = os.killpg, candidate.cleanup_group
+        def probe(group, sig):
+            if sig == 0:
+                raise PermissionError(errno.EPERM, 'unresolved probe')
+            try:
+                return real_killpg(group, sig)
+            except ProcessLookupError:
+                pass
+        for mode, ending, message in [('exit', 'raise SystemExit(3)', 'Command failed'),
+                                      ('timeout', 'time.sleep(30)', 'Command timed out')]:
+            with self.subTest(mode=mode):
+                with patch.object(candidate.os, 'killpg', side_effect=probe), \
+                     patch.object(candidate, 'cleanup_group', side_effect=lambda p: cleanup(p, timeout=.03)):
+                    with self.assertRaisesRegex(ValueError, message) as failure:
+                        candidate.run([sys.executable, '-c',
+                                       'import time; print("primary diagnostic", flush=True); ' + ending],
+                                      self.root, candidate.runtime_env(self.root), timeout=.2)
+                self.assertIn('cleanup timed out', str(failure.exception.__cause__))
+                self.assertIsInstance(failure.exception.__cause__.__cause__, PermissionError)
+                log = (self.root / 'commands.log').read_text()
+                self.assertIn('primary diagnostic', log)
+                self.assertIn('CLEANUP FAILED', log)
 
     def test_cleanup_error_preserves_primary_failure_and_logs(self):
         real_killpg = os.killpg

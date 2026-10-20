@@ -218,12 +218,19 @@ def cleanup_group(process, timeout=2):
     try:
         process.wait(timeout=max(.001, deadline - time.monotonic()))
         while True:
+            observation = None
             try:
                 os.killpg(process.pid, 0)
             except ProcessLookupError:
                 break
-            require(time.monotonic() < deadline, 'Owned process group cleanup timed out')
-            time.sleep(.01)
+            except OSError as error:
+                # An existence probe can transiently fail while killed descendants
+                # drain. Neither that error nor a successful probe confirms absence.
+                observation = error
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError('Owned process group cleanup timed out') from observation
+            time.sleep(min(.01, remaining))
     except Exception as error:
         failure = failure or error
     if failure:
