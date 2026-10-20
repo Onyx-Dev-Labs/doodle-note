@@ -28,10 +28,12 @@ ruby apps/desktop/scripts/test_mac_release_manifest.rb
 
 These also run in regular PR CI. Archive tests reject traversal, collisions, special files, unsafe links and expansion limits. Process tests exercise real child failure, timeout and cleanup. Artifact identity, hash, receipt and execution-order tests fail closed. The pure-wrapper core tests remain a separate AI suite.
 
+Channel checks use phase/gain-independent tone energy over the central half-second (at least75% at the expected frequency), avoiding codec edge padding. Synthetic tolerance tests cover gain, phase, DC, noise, padding and±0.5Hz drift; full-pipeline negative controls reject duplicated/swapped/wrong channels. These local tests do not execute AAC conversion or qualify a package. See [the separate F1/F2 review follow-up](pr230-verifier-fixes.md).
+
 ## What a green runtime job means
 
-- Packaged `engine prepare-batch-audio` accepts synthetic mono/stereo WAV and audio-only MP4, emits the expected channel protocol, and produces non-silent 16kHz PCM with bounded duration. Original inputs are unchanged.
-- Packaged `engine merge-audio` exports synthetic CAF checkpoints into decodable two-channel AAC with the expected completion protocol; corrupt-only checkpoints fail and remain available.
+- Packaged `engine prepare-batch-audio` accepts synthetic mono/stereo WAV and audio-only MP4, emits the expected channel protocol, and produces non-silent 16kHz PCM with bounded duration and expected440Hz mic/660Hz system identity. Original inputs are unchanged.
+- Packaged `engine merge-audio` exports distinct440Hz/660Hz CAF checkpoints into decodable two-channel AAC with preserved channel identity and the expected completion protocol; corrupt-only checkpoints fail and remain available.
 - Packaged Electron loads its bundled Metal native addon and SQLite FTS5 without a model. The exact ASAR worker passes ready/search/resolve/stale/cancellation/scope-refusal and original-byte checks.
 - The exact bundled MCP CLI passes stdio initialize/tools/search/resolve/participant-correction/stale/revocation and original-byte checks.
 

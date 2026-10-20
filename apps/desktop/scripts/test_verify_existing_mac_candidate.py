@@ -4,10 +4,13 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 from pathlib import Path
+import shutil
 import stat
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,6 +19,7 @@ import unittest
 from unittest.mock import patch
 import urllib.error
 import zipfile
+import wave
 
 spec = importlib.util.spec_from_file_location('candidate', Path(__file__).with_name('verify-existing-mac-candidate.py'))
 candidate = importlib.util.module_from_spec(spec)
@@ -357,6 +361,110 @@ class CandidateVerificationTest(unittest.TestCase):
             output.writeframes(b'\0' * 32000)
         with self.assertRaisesRegex(ValueError, 'silent'):
             candidate.check_wave(audio)
+
+    def pcm(self, path, signals):
+        with wave.open(str(path), 'wb') as output:
+            output.setparams((len(signals), 2, 16000, 0, 'NONE', 'not compressed'))
+            output.writeframes(b''.join(struct.pack('<h', int(value))
+                                       for frame in zip(*signals) for value in frame))
+
+    def read_pcm(self, path):
+        with wave.open(str(path), 'rb') as audio:
+            channels = audio.getnchannels()
+            values = struct.unpack('<' + 'h' * audio.getnframes() * channels,
+                                   audio.readframes(audio.getnframes()))
+            return [values[c::channels] for c in range(channels)]
+
+    def tone(self, frequency, tolerant=False):
+        # Independent fixture generator. Phase, gain, DC, noise and edge padding
+        # model permissible decoded-signal changes without invoking native media.
+        return [0 if tolerant and (frame < 700 or frame > 15300) else
+                int((4000 if tolerant else 10000) *
+                    math.sin(2 * math.pi * frequency * frame / 16000 + .7) +
+                    (300 + 150 * math.sin(frame * 1.713) if tolerant else 0))
+                for frame in range(16000)]
+
+    def audio_commands(self, defect=None, stage=None, violation=None):
+        def run(command, root, env, timeout=60, expected=0):
+            command = list(map(str, command))
+            if command[0] == '/usr/bin/afconvert':
+                shutil.copyfile(command[-2], command[-1])
+                return ''
+            if command[1] == 'prepare-batch-audio':
+                source = Path(command[command.index('--file') + 1])
+                output = Path(command[command.index('--output-dir') + 1])
+                channels = ['mic', 'system'] if command[-1] == 'split' else ['mic']
+                signals = self.read_pcm(source)
+                if len(channels) == 2 and stage == 'split':
+                    signals = corrupt(signals)
+                for channel, samples in zip(channels, signals):
+                    self.pcm(output / (channel + '.wav'), [samples])
+                if violation == 'original':
+                    source.write_bytes(source.read_bytes() + b'changed original')
+                return json.dumps({'event': 'wrong' if violation == 'protocol' else 'prepared',
+                                   'channels': channels, 'audioSeconds': 1})
+            self.assertEqual(command[1], 'merge-audio')
+            session = Path(command[-1])
+            if session.name == 'broken':
+                self.assertEqual(expected, 64)
+                if violation == 'corrupt-checkpoint':
+                    (session / 'checkpoints/mic-000000.caf').write_bytes(b'changed')
+                return json.dumps({'event': 'error'})
+            signals = [self.read_pcm(session / 'checkpoints' / (c + '-000000.caf'))[0]
+                       for c in ('mic', 'system')]
+            if stage == 'merge':
+                signals = corrupt(signals)
+            self.pcm(session / 'audio.m4a', signals)
+            if violation != 'retained-checkpoints':
+                shutil.rmtree(session / 'checkpoints')
+            return '\n'.join([json.dumps({'event': 'audio', 'path': str(session / 'audio.m4a'),
+                                         'durationMs': 1000}), json.dumps({'event': 'done'})])
+
+        def corrupt(signals):
+            if defect == 'duplicate':
+                return [signals[0], signals[0]]
+            if defect == 'swap':
+                return signals[::-1]
+            if defect == 'wrong':
+                return [self.tone(880), self.tone(990)]
+            raise AssertionError('Unknown defect')
+        return run
+
+    def test_complete_audio_smoke_rejects_wrong_channel_identity(self):
+        for stage in ('split', 'merge'):
+            for defect in ('duplicate', 'swap', 'wrong'):
+                with self.subTest(stage=stage, defect=defect):
+                    root = self.root / (stage + '-' + defect)
+                    root.mkdir()
+                    with patch.object(candidate, 'run', side_effect=self.audio_commands(defect, stage)):
+                        with self.assertRaisesRegex(ValueError, 'content'):
+                            candidate.audio_smoke(Path('/synthetic/app'), root, {})
+
+    def test_complete_audio_smoke_accepts_distinct_channels(self):
+        with patch.object(candidate, 'run', side_effect=self.audio_commands()):
+            candidate.audio_smoke(Path('/synthetic/app'), self.root, {})
+        signals = self.read_pcm(self.root / 'audio/merged.wav')
+        self.assertTrue(signals[0] != signals[1], 'Merge fixture must distinguish channel ownership')
+
+    def test_audio_identity_tolerates_decode_changes_but_rejects_mixed_content(self):
+        path = self.root / 'decoded.wav'
+        self.pcm(path, [self.tone(440.5, True), self.tone(659.5, True)])
+        candidate.check_wave(path, channels=2)
+        mixed = [a // 2 + b // 2 for a, b in zip(self.tone(440), self.tone(660))]
+        self.pcm(path, [mixed, mixed])
+        with self.assertRaisesRegex(ValueError, 'content'):
+            candidate.check_wave(path, channels=2)
+
+    def test_complete_audio_smoke_retains_protocol_and_preservation_checks(self):
+        for violation, message in [('protocol', 'protocol'), ('original', 'originals'),
+                                   ('corrupt-checkpoint', 'checkpoint'),
+                                   ('retained-checkpoints', 'checkpoints')]:
+            with self.subTest(violation=violation):
+                root = self.root / violation
+                root.mkdir()
+                with patch.object(candidate, 'run', side_effect=self.audio_commands(violation=violation)):
+                    with self.assertRaisesRegex(ValueError, message):
+                        candidate.audio_smoke(Path('/synthetic/app'), root, {})
 
 
 if __name__ == '__main__':

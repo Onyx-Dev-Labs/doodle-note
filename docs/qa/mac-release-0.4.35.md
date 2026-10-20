@@ -16,10 +16,12 @@ The engine change and version increment require a fresh signed package. Prior si
 
 - RED against bbb352b: Qwen/Llama3 parity controls passed; Gemma core rules were absent (`0 !== 1`) and oversized-system rejection was missing. Tests use the installed node-llama-cpp3.20.0 session constructor/history and pure wrappers, with synthetic native/model/tokenizer generation. No GGUF/runtime allocation/download.
 - GREEN after the core fix: AI73 passed,0 skipped; desktop448 passed,8 existing native-engine skips. AI/desktop types, desktop production build and repository lint passed. Tests cover core paths, exact-once supplied instructions, measured wrapper budget, oversized Fetch refusal and disposal. Existing runtime-acquisition/cancellation/deadline tests remain green.
-- Verifier boundaries:20 Python tests; runtime protocol/lifecycle:10 Node tests; workflow policy:3 Ruby tests/34 assertions; manifest:4 Ruby tests/5 assertions. All passed without skips. Timeouts, child failures, wrong metadata/hash/receipt, unsafe archives, secret isolation and failure reports are exercised. Normal PR CI now runs these checks.
+- Initial tooling verification at3425b49:20 Python tests; runtime protocol/lifecycle:10 Node tests; workflow policy:3 Ruby tests/34 assertions; manifest:4 Ruby tests/5 assertions. All passed without skips. Timeouts, child failures, wrong metadata/hash/receipt, unsafe archives, secret isolation and failure reports are exercised. Normal PR CI now runs these checks.
 - New protocol harness passed against locally emitted worker/MCP with host Node24.22.0: ready/search/resolve/stale/cancel/scope refusal; stdio initialize/tools/search/resolve/participant correction/stale/revocation; originals preserved. This is not packaged macOS14 evidence.
 - Retained bbb app ZIP structure and receipt validated with the new read-only verifier helpers, without extraction/execution. Existing signed ZIP/DMG/manifest SHA256 matched their original receipt during preflight.
 - `pnpm install --frozen-lockfile --ignore-scripts` passed, no downloads, lockfile unchanged. Lifecycle scripts were intentionally disabled; this verifies dependency resolution, not native engine build/packaging.
+
+The independent review at immutable4fd6139 found0 meaningful standards findings and2 P2 spec findings in the verifier (no core/version finding). The [focused F1/F2 fixes](pr230-verifier-fixes.md) now pass31 Python,10 Node,3 workflow/34 assertions and4 manifest/5 assertions, without skips or native execution. Standards and spec outcomes remain separate; fresh independent verification of these fixes is pending and signing remains held.
 
 ## Release gates still open
 

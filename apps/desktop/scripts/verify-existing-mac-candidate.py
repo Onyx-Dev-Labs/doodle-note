@@ -335,7 +335,7 @@ def write_wave(path, channels=1, frequency=440):
             for frame in range(16000) for channel in range(channels)))
 
 
-def check_wave(path, channels=1, seconds=1):
+def check_wave(path, channels=1, seconds=1, frequencies=None):
     with wave.open(str(path), 'rb') as audio:
         require(audio.getnchannels() == channels and audio.getframerate() == 16000
                 and audio.getsampwidth() == 2 and abs(audio.getnframes() / 16000 - seconds) < .15,
@@ -343,20 +343,41 @@ def check_wave(path, channels=1, seconds=1):
         values = struct.unpack('<' + 'h' * audio.getnframes() * channels, audio.readframes(audio.getnframes()))
         require(all(max(abs(v) for v in values[c::channels]) > 1000 for c in range(channels)),
                 'Decoded channel is silent')
+        frequencies = frequencies or tuple(440 + c * 220 for c in range(channels))
+        require(len(frequencies) == channels, 'Expected audio content must identify every channel')
+        for channel, frequency in enumerate(frequencies):
+            samples = values[channel::channels]
+            # Use the central half second, avoiding codec delay/padding. Quadrature
+            # energy is insensitive to phase and gain. At least 75% must be the
+            # expected tone: allow modest decode noise/drift, reject lost, swapped
+            # or equally mixed signals. This is fixture identity, not audio quality.
+            start = (len(samples) - 8000) // 2
+            samples = samples[start:start + 8000]
+            mean = sum(samples) / len(samples)
+            samples = [value - mean for value in samples]
+            energy = sum(value * value for value in samples)
+            real = sum(value * math.cos(2 * math.pi * frequency * n / 16000)
+                       for n, value in enumerate(samples))
+            imaginary = sum(value * math.sin(2 * math.pi * frequency * n / 16000)
+                            for n, value in enumerate(samples))
+            require(energy > 0 and 2 * (real * real + imaginary * imaginary)
+                    / (len(samples) * energy) >= .75, 'Decoded channel content mismatch')
 
 
 def audio_smoke(app, root, env):
     engine = app / 'Contents/Resources/engine/engine'
     fixture = root / 'audio'
     fixture.mkdir()
-    mono, stereo = fixture / 'mono.wav', fixture / 'stereo.wav'
+    mono, stereo, system = fixture / 'mono.wav', fixture / 'stereo.wav', fixture / 'system.wav'
     write_wave(mono)
     write_wave(stereo, 2)
-    original_hashes = {str(p): digest(p) for p in (mono, stereo)}
+    write_wave(system, frequency=660)
+    original_hashes = {str(p): digest(p) for p in (mono, stereo, system)}
     # System afconvert produces an audio-only MP4 container. This qualifies
     # accepted MP4 input, not video-track fallback normalization coverage.
     mp4 = fixture / 'audio.mp4'
     run(['/usr/bin/afconvert', '-f', 'mp4f', '-d', 'aac', '-b', '32000', mono, mp4], root, env)
+    original_hashes[str(mp4)] = digest(mp4)
     for source, mode, channels in [(mono, 'mixed', ['mic']), (stereo, 'split', ['mic', 'system']),
                                    (mp4, 'mixed', ['mic'])]:
         output = fixture / (source.stem + '-' + mode)
@@ -368,12 +389,12 @@ def audio_smoke(app, root, env):
         require(sorted(p.name for p in output.iterdir()) == sorted(c + '.wav' for c in channels),
                 'Unexpected import temporary files')
         for channel in channels:
-            check_wave(output / (channel + '.wav'))
+            check_wave(output / (channel + '.wav'), frequencies=(660 if channel == 'system' else 440,))
     session = fixture / 'session'
     checkpoints = session / 'checkpoints'
     checkpoints.mkdir(parents=True)
-    for channel in ('mic', 'system'):
-        run(['/usr/bin/afconvert', '-f', 'caff', '-d', 'LEF32', mono,
+    for channel, source in (('mic', mono), ('system', system)):
+        run(['/usr/bin/afconvert', '-f', 'caff', '-d', 'LEF32', source,
              checkpoints / (channel + '-000000.caf')], root, env)
     events = [json.loads(line) for line in run([engine, 'merge-audio', '--dir', session], root, env).splitlines()]
     require(any(e.get('event') == 'audio' and e.get('path') == str(session / 'audio.m4a')
