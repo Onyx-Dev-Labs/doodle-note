@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 import stat
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -194,6 +196,95 @@ class CandidateVerificationTest(unittest.TestCase):
         time.sleep(.6)
         self.assertFalse(marker.exists())
         self.assertIn('TIMEOUT', (self.root / 'commands.log').read_text())
+
+    def redirected_descendant(self, exit_code, timeout=False):
+        marker, pid_file = self.root / 'late-marker', self.root / 'child.pid'
+        child = (f'import os,pathlib,time; pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); '
+                 f'time.sleep(.3); pathlib.Path({str(marker)!r}).touch(); time.sleep(30)')
+        parent = ('import subprocess,sys,pathlib,time; '
+                  f'subprocess.Popen([sys.executable,"-c",{child!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); '
+                  f'target=pathlib.Path({str(pid_file)!r});'
+                  '\nwhile not target.exists(): time.sleep(.005)\n'
+                  'print("parent diagnostic", flush=True)\n' +
+                  ('time.sleep(30)' if timeout else f'raise SystemExit({exit_code})'))
+        unrelated = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                     start_new_session=True)
+        try:
+            if timeout or exit_code:
+                with self.assertRaisesRegex(ValueError, 'timed out' if timeout else 'Command failed'):
+                    candidate.run([sys.executable, '-c', parent], self.root,
+                                  candidate.runtime_env(self.root), timeout=.2 if timeout else 2)
+            else:
+                self.assertIn('parent diagnostic', candidate.run([sys.executable, '-c', parent],
+                              self.root, candidate.runtime_env(self.root), timeout=2))
+            time.sleep(.4)
+            self.assertFalse(marker.exists(), 'Owned child wrote after run returned')
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), 0)
+            self.assertIsNone(unrelated.poll(), 'Unrelated process was terminated')
+            self.assertIn('parent diagnostic', (self.root / 'commands.log').read_text())
+        finally:
+            if pid_file.exists():
+                try: os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError: pass
+            unrelated.kill(); unrelated.wait(timeout=2)
+
+    def test_failed_parent_cleans_redirected_descendant(self):
+        self.redirected_descendant(3)
+
+    def test_successful_parent_cleans_redirected_descendant(self):
+        self.redirected_descendant(0)
+
+    def test_timeout_cleans_redirected_descendant(self):
+        self.redirected_descendant(0, timeout=True)
+
+    def test_cleanup_error_preserves_primary_failure_and_logs(self):
+        real_killpg = os.killpg
+        def denied_after_cleanup(group, sig):
+            if sig == signal.SIGKILL:
+                try: real_killpg(group, sig)
+                except ProcessLookupError: pass
+                raise PermissionError('synthetic cleanup failure')
+            return real_killpg(group, sig)
+        with patch.object(candidate.os, 'killpg', side_effect=denied_after_cleanup):
+            with self.assertRaisesRegex(ValueError, 'Command failed'):
+                candidate.run([sys.executable, '-c', 'print("primary output"); raise SystemExit(3)'],
+                              self.root, candidate.runtime_env(self.root))
+        log = (self.root / 'commands.log').read_text()
+        self.assertIn('primary output', log)
+        self.assertIn('CLEANUP FAILED', log)
+
+    def test_cleanup_error_cannot_report_success(self):
+        with patch.object(candidate.os, 'killpg', side_effect=PermissionError('synthetic cleanup failure')):
+            with self.assertRaisesRegex(ValueError, 'cleanup'):
+                candidate.run([sys.executable, '-c', 'print("completed")'],
+                              self.root, candidate.runtime_env(self.root))
+
+    def test_group_drain_has_a_deadline(self):
+        from unittest.mock import Mock
+        process = Mock(pid=12345)
+        started = time.monotonic()
+        with patch.object(candidate.os, 'killpg') as kill:
+            with self.assertRaisesRegex(ValueError, 'cleanup timed out'):
+                candidate.cleanup_group(process, timeout=.02)
+        self.assertLess(time.monotonic() - started, .5)
+        self.assertEqual(kill.call_args_list[0].args, (12345, signal.SIGKILL))
+        self.assertTrue(all(call.args[0] == 12345 for call in kill.call_args_list))
+        process.wait.assert_called_once()
+
+    def test_timeout_remains_primary_when_cleanup_reports_failure(self):
+        cleanup = candidate.cleanup_group
+        def cleanup_then_fail(process):
+            cleanup(process)
+            raise OSError('synthetic cleanup diagnostic')
+        with patch.object(candidate, 'cleanup_group', side_effect=cleanup_then_fail):
+            with self.assertRaisesRegex(ValueError, 'Command timed out'):
+                candidate.run([sys.executable, '-c', 'import time; print("before timeout", flush=True); time.sleep(30)'],
+                              self.root, candidate.runtime_env(self.root), timeout=.1)
+        log = (self.root / 'commands.log').read_text()
+        self.assertIn('before timeout', log)
+        self.assertIn('TIMEOUT', log)
+        self.assertIn('CLEANUP FAILED', log)
 
     def test_nonzero_command_is_failure(self):
         with self.assertRaisesRegex(ValueError, 'Command failed'):

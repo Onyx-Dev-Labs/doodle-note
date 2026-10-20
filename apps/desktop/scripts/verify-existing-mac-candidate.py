@@ -14,6 +14,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -204,22 +205,65 @@ def runtime_env(root):
     return env
 
 
-def run(command, root, env, timeout=60, expected=0):
-    # New process group lets timeout clean up only this invocation and descendants.
-    process = subprocess.Popen([str(x) for x in command], stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, env=env, start_new_session=True)
+def cleanup_group(process, timeout=2):
+    # Only the dedicated group created by this invocation; never scan by name.
+    deadline = time.monotonic() + timeout
+    failure = None
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
-        stdout, stderr = process.communicate()
-        with (root / 'commands.log').open('ab') as log:
-            log.write(b'TIMEOUT\n' + stdout + stderr)
-        raise ValueError('Command timed out: ' + Path(command[0]).name) from None
-    with (root / 'commands.log').open('ab') as log:
-        log.write(('COMMAND ' + ' '.join(map(str, command)) + '\n').encode() + stdout + stderr)
-    require(process.returncode == expected, 'Command failed: ' + Path(command[0]).name)
-    return stdout.decode('utf8', errors='replace')
+    except ProcessLookupError:
+        pass
+    except OSError as error:
+        failure = error
+    try:
+        process.wait(timeout=max(.001, deadline - time.monotonic()))
+        while True:
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                break
+            require(time.monotonic() < deadline, 'Owned process group cleanup timed out')
+            time.sleep(.01)
+    except Exception as error:
+        failure = failure or error
+    if failure:
+        raise failure
+
+
+def run(command, root, env, timeout=60, expected=0):
+    # Files cannot keep communicate() blocked when a descendant inherits pipes.
+    # Collect diagnostics only after bounded cleanup, on every parent exit path.
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen([str(x) for x in command], stdout=output,
+                                   stderr=errors, env=env, start_new_session=True)
+        primary, cleanup = None, None
+        try:
+            process.wait(timeout=timeout)
+            if process.returncode != expected:
+                primary = ValueError('Command failed: ' + Path(command[0]).name)
+        except subprocess.TimeoutExpired:
+            primary = ValueError('Command timed out: ' + Path(command[0]).name)
+        except BaseException as error:
+            primary = error
+        finally:
+            try:
+                cleanup_group(process)
+            except Exception as error:
+                cleanup = error
+            output.seek(0); errors.seek(0)
+            stdout, stderr = output.read(), errors.read()
+            with (root / 'commands.log').open('ab') as log:
+                log.write(('COMMAND ' + ' '.join(map(str, command)) + '\n').encode())
+                if primary:
+                    log.write(('TIMEOUT\n' if 'timed out' in str(primary) else 'FAILED\n').encode())
+                log.write(stdout + stderr)
+                if cleanup:
+                    log.write(('\nCLEANUP FAILED: ' + type(cleanup).__name__ + '\n').encode())
+        if primary:
+            raise primary from cleanup
+        if cleanup:
+            raise ValueError('Owned process group cleanup failed') from cleanup
+        return stdout.decode('utf8', errors='replace')
 
 
 def inventory(root):
