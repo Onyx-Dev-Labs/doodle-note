@@ -62,3 +62,50 @@ receipt/immutable/public-byte validation, source89 and signed artifacts are
 unchanged. Blob/static deployment is still non-atomic; remote completion before
 cancellation remains ambiguous. See [publication/recovery instructions](mac-publisher.md).
 Fresh independent verification is parent-owned; no reviews were launched here.
+
+## Combined independent verification record (2026-10-27)
+
+Both fresh reports independently compared exact OLD
+`20a360f1af5f04a46d070fc7106732b3f92d4463` to implementation FIX
+`46314deec5445940b4a5cc7a70c96701cf764183`. Both original unique P2s are
+resolved under the accepted unique-proposal/static-untouched contract. Neither
+axis found a substantiated introduced finding. This record does not change FIX.
+
+- Spec: `/tmp/pr239-fix-spec-jiedzq4w/report.md`. Independently reproduced
+  three desired-behavior OLD failures, then 45 checked-in Node tests and four
+  Ruby tests passing at FIX. Fourteen additional behavior tests and real locked-
+  SDK worker probes passed, including incomplete responses/socket closure, exact
+  binary and manifest retry bytes/CAS headers, multiple proposals with actual
+  concurrent edits, and activation/proposal failure recovery.
+- Standards: `/tmp/pr239-fix-review-klvildx9/report.md`. Independently reproduced
+  OLD failures and the same 45 Node plus four Ruby passes at FIX, with seven
+  additional integration tests and worker-exit/socket probes. No substantiated
+  standards breach or material heuristic finding. Its initial partial-upload
+  socket probe needed to drain queued peer bytes before observing EOF; corrected
+  evidence and the unsuccessful diagnostic attempts remain in that report's
+  directory. This was a probe observation error, not a product finding.
+
+The removed final-read hook alone is not proof of concurrent-writer preservation
+at FIX: that hook no longer fires. The actual writer tests during activation,
+including successive edits and distinct proposals/backups, establish preservation.
+Observed cancellation timings are local measurements, not an SLA. Wrong-store
+rejection remains post-write and pre-existing, not preventive destination
+validation or a newly counted finding. Remote commits can precede cancellation;
+recovery evidence and manual coordinated static replacement remain necessary.
+
+Both independent reviews ran Node 24.22.0 locally, not hosted Node 22. No live
+Blob/CDN publication, installed updater/relaunch, native or human acceptance is
+claimed. Signed candidate/source89, Windows production behavior, dependencies
+and workflows remain untouched. PR239 remains draft pending parent-owned hosted
+CI and readiness checks. Reports and probe artifacts are local evidence paths,
+not portable CI attachments.
+
+Hosted CI subsequently exposed a separate test-harness path conversion defect at
+FIX: run `40546032871`, retained log
+`/tmp/pr239-ci-46314de-40546032871.log`. Three Windows Node 22.23.4 subprocess
+tests fail before their scripts load because URL `.pathname` becomes
+`D:\D:\a\...`. This does not reopen the two reviewed production P2s. The
+correction is tracked separately as native file-URL conversion in test code,
+without skips or Windows production changes. The separate Linux production-audit
+failure (19 vulnerabilities) is parent-owned dependency triage; no dependency,
+lockfile or audit-threshold change belongs to this publisher correction.
