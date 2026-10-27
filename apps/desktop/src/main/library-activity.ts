@@ -1,10 +1,25 @@
 /** Serializes relocation against complete IPC/background operations, not just file writes. */
 export class LibraryActivity {
+  private shuttingDown = false
   private active = 0
   private blocked: Promise<void> | null = null
   private idle: (() => void) | null = null
   get moving(): boolean {
     return this.blocked !== null
+  }
+
+  /** Reserve transfer admission synchronously through the final host quit. */
+  tryBeginShutdown(): (() => void) | null {
+    if (this.blocked || this.shuttingDown) return null
+    this.shuttingDown = true
+    return () => {
+      this.shuttingDown = false
+    }
+  }
+
+  assertTransferAllowed(): void {
+    if (this.shuttingDown)
+      throw new Error('DoodleNote is shutting down. Try again if quitting fails.')
   }
 
   async run<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -18,6 +33,7 @@ export class LibraryActivity {
   }
 
   async exclusive<T>(operation: () => Promise<T>, timeoutMs = 30_000): Promise<T> {
+    this.assertTransferAllowed()
     if (this.blocked) throw new Error('A library transfer is already running.')
     let release!: () => void
     this.blocked = new Promise<void>((resolve) => {

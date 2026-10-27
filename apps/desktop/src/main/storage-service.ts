@@ -126,6 +126,7 @@ export function registerStorageIpc(
   )
   ipcMain.handle(STORAGE_CANCEL_CHANNEL, () =>
     result(() => {
+      libraryActivity.assertTransferAllowed()
       if (libraryActivity.moving || choosing)
         throw new Error('Wait for the current transfer to finish.')
       storage.cancel()
@@ -133,6 +134,7 @@ export function registerStorageIpc(
   )
   ipcMain.handle(STORAGE_RETRY_CHANNEL, (event) =>
     result(async () => {
+      libraryActivity.assertTransferAllowed()
       if (choosing || busy())
         throw new Error('Finish recording or importing before moving the library.')
       await transfer(event)
@@ -140,6 +142,7 @@ export function registerStorageIpc(
   )
   ipcMain.handle(STORAGE_CHOOSE_CHANNEL, (event) =>
     result(async () => {
+      libraryActivity.assertTransferAllowed()
       if (choosing || libraryActivity.moving || busy())
         throw new Error('Finish recording or importing before moving the library.')
       choosing = true

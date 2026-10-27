@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import { test, type TestContext } from 'node:test'
 import ts from 'typescript'
+import { LibraryActivity } from './library-activity'
 import { EngineProcess } from './engine-process'
 import type { EngineEvent } from '../shared/engine-events'
 
@@ -172,12 +173,12 @@ function quitHook(
       },
       process: { exit: host.exit },
       engine,
-      libraryActivity: { moving: false },
+      libraryActivity: new LibraryActivity(),
       quitting: false,
       recordingTray: null,
       calendarService: null,
       micWatcher: {
-        stop() {
+        dispose() {
           /* No mic watcher is launched in this host fixture. */
         }
       },
@@ -326,6 +327,7 @@ test(
     const childProcess = nodeRequire('node:child_process') as typeof import('node:child_process')
     const signals: string[] = []
     const diagnostics: string[] = []
+    t.mock.method(console, 'error', (...args: unknown[]) => diagnostics.push(args.join(' ')))
     const exports: { EngineProcess?: typeof EngineProcess } = {}
     runInNewContext(
       ts.transpileModule(readFileSync(join(__dirname, 'engine-process.ts'), 'utf8'), {
@@ -373,8 +375,11 @@ test(
     })
     await until(() => failures.length === 1)
     const failure = failures[0] as AggregateError
-    assert.match(String(failure), /Engine shutdown failed/)
-    assert.match(String(failure.errors[0]), /exit not observed after SIGKILL deadline/)
+    assert.match(String(failure), /Recorder shutdown failed/)
+    assert.match(
+      String((failure.errors[0] as AggregateError).errors[0]),
+      /exit not observed after SIGKILL deadline/
+    )
     assert.ok(diagnostics.some((line) => line.includes('SIGTERM: Error: signal not delivered')))
     assert.ok(diagnostics.some((line) => line.includes('SIGKILL: Error: signal not delivered')))
     assert.ok(pids().every(alive), 'failure cannot be reported as successful containment')

@@ -773,18 +773,26 @@ app.whenReady().then(async () => {
   app.on(
     'before-quit',
     createBeforeQuitHandler({
-      blocked: () => libraryActivity.moving,
-      cleanup: () => {
+      acquire: () => libraryActivity.tryBeginShutdown(),
+      cleanup: async () => {
         quitting = true
         recordingTray?.dispose()
         calendarService?.dispose()
-        micWatcher.stop()
-        return engine.dispose()
+        const results = await Promise.allSettled([engine.dispose(), micWatcher.dispose()])
+        const failures = results.filter((result) => result.status === 'rejected')
+        if (failures.length)
+          throw new AggregateError(
+            failures.map((result) => result.reason),
+            'Recorder shutdown failed'
+          )
       },
       isUpdate: isQuittingForUpdate,
       quit: () => app.quit(),
       hardExit: () => process.exit(0),
-      failed: (error) => console.error('[quit] Engine shutdown failed; host retained:', error)
+      failed: (error) => {
+        quitting = false
+        console.error('[quit] Recorder shutdown failed; host retained:', error)
+      }
     })
   )
 

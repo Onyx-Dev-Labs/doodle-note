@@ -1,6 +1,6 @@
 /** Host seam: no Electron or native addon imports are needed to test ordering. */
 export function createBeforeQuitHandler(host: {
-  blocked(): boolean
+  acquire(): (() => void) | null
   cleanup(): void | Promise<void>
   isUpdate(): boolean
   quit(): void
@@ -12,7 +12,9 @@ export function createBeforeQuitHandler(host: {
   return (event) => {
     if (complete) return // the resumed updater quit must flow through Electron
     event.preventDefault()
-    if (cleanup || host.blocked()) return
+    if (cleanup) return
+    const release = host.acquire()
+    if (!release) return
     cleanup = Promise.resolve().then(() => host.cleanup())
     void cleanup.then(
       () => {
@@ -21,7 +23,10 @@ export function createBeforeQuitHandler(host: {
         else host.hardExit()
       },
       (error: unknown) => {
-        // Keep the host alive on an unobserved exit; never report containment.
+        // Keep the host alive, but allow a new attempt after failure. Retain
+        // the reservation on success through the reentrant updater quit.
+        release()
+        cleanup = undefined
         host.failed(error)
       }
     )
