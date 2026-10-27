@@ -4,8 +4,8 @@ This is a bounded **session prerequisite report**, not GUI or updater acceptance
 It never downloads an artifact, launches DoodleNote, builds/signs an app, acquires
 models, captures audio/screens, changes permissions/trust/DNS, or drives native UI.
 Even all-positive probes exit **2 (BLOCKED)**. A green unit test run is fixture
-coverage, not observed hosted behavior. The parent executed the first hosted
-probe below; the subsequent parser correction was tested offline only.
+coverage, not observed hosted behavior. Both parent-executed hosted runs below
+remain BLOCKED; the corrected run observes session prerequisites only.
 
 ## Scope and runner
 
@@ -83,9 +83,8 @@ gh workflow run 343291536 --repo Onyx-Dev-Labs/doodle-note \
   -f operation=gui-session-preflight
 ```
 
-The parent exercised this route at the initial head in the run recorded below.
-The corrected parser has **not** been dispatched; a rerun belongs to the parent
-after reviewing its exact head.
+The parent exercised this route at both exact implementation heads recorded below.
+This evidence update does not authorize or perform another dispatch.
 Record the resulting run's `head_sha` and compare it with the reviewed PR head
 before attributing evidence. No artifact/candidate inputs are needed. Expect a
 failed job with exit 2, and artifact `hosted-mac-gui-session-<run_id>` containing
@@ -125,7 +124,32 @@ missing-UID cause**. Preserve its original report; interpret console-login match
 as unknown. Do not retrofit a pass. Schema 2 parses before truncation, keeps only
 root fields and parse status, and excludes nested identities. No native commands,
 new dispatch, app launch, signed-byte changes or environment changes were used
-for the correction. Only a reviewed future parent rerun can supply new evidence.
+for the correction itself. The subsequent parent rerun supplies separate evidence
+below; it does not alter the original run's unknown login match.
+
+## Corrected hosted session evidence (2026-10-27)
+
+After full review of exact `c3508e3e3eda935fa37135d579e51898311e151c` and rerunning
+14 Python tests plus 6 Ruby tests / 59 assertions, the parent dispatched
+[run 40545214783](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/40545214783)
+at that head. It completed with the expected **BLOCKED exit 2**; the parent
+reports release and verify-existing jobs **SKIPPED**. The complete downloaded
+`/tmp/doodlenote-hosted-session-40545214783/result.json` was read, with SHA256
+`1e9b1705b22fecccda96ae9ef56e1abca03e386e6ba736ecdde79cb74e75e62c`.
+
+Schema 2 records macOS **15.7.9 / 24G830 / arm64**, image **20260907.0337.1**,
+all eight prerequisites true, probe/console/login UID **501**, login name
+**runner** with evidence **parsed**, and WindowServer PID **160**. All 15 owned
+probes exited 0 and were reaped without timeout. `session_prerequisites` is
+`observed`; `gui_availability` remains `unestablished`, and visible window,
+actual app, updater, artifact acquisition and model acquisition are `unperformed`.
+
+Scope is strictly `hosted-session-prerequisites-only`, not usable GUI or updater
+acceptance. A usable remote **CUA route to the guest** and reviewed
+**pre-staged-model/no-download planning** remain unresolved. Both original
+reports and signed bytes remain unchanged; the first run's login match stays
+unknown. This record-only update adds no implementation, probes, dispatch,
+app/model activity, network-policy changes or UI work.
 
 ## Later actual-updater requirements
 
