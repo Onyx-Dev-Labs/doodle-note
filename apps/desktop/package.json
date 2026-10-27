@@ -22,7 +22,7 @@
     "publish:win-beta": "node scripts/publish-windows-beta.mjs"
   },
   "dependencies": {
-    "@azure/msal-node": "^5.3.1",
+    "@azure/msal-node": "7.1.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@repo/ai": "workspace:*",
     "@repo/meetings-store": "workspace:*",
