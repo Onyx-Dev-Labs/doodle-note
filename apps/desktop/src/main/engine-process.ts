@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessByStdio } from 'node:child_process'
+import { spawn, type ChildProcess, type ChildProcessByStdio } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { Readable, Writable } from 'node:stream'
 import type {
@@ -30,7 +30,8 @@ export const CAPTURE_TEARDOWN_GRACE_MS = 4_000
  * Shape produced by spawn(..., { stdio: ['pipe', 'pipe', 'pipe'] }).
  * stdin stays open but unused: it's the engine's parent-death watchdog — if
  * this process dies or hot-restarts, the OS closes the pipe and the engine
- * finishes its session instead of recording forever as an orphan.
+ * attempts to finish its session. A blocked native start can prevent exit;
+ * ordinary host shutdown must still supervise termination.
  */
 type EngineChild = ChildProcessByStdio<Writable, Readable, Readable>
 
@@ -56,6 +57,12 @@ export class EngineProcess {
   private serveRestartTimer: NodeJS.Timeout | null = null
   private serveStopTimer: NodeJS.Timeout | null = null
   private disposed = false
+  private disposal: Promise<void> | null = null
+  // Includes superseded sessions and short-lived helpers until actual exit.
+  private readonly owned = new Map<ChildProcess, { exited: Promise<void>; done: boolean }>()
+  private readonly terminating = new WeakMap<ChildProcess, Promise<void>>()
+  private readonly termSent = new WeakSet<ChildProcess>()
+  private readonly stopTimers = new Map<ChildProcess, NodeJS.Timeout>()
   /** True from the engine's "finishing" status until the session ends. */
   private sessionFinishing = false
 
@@ -63,7 +70,9 @@ export class EngineProcess {
     private readonly binaryPath: string,
     /** Overridable for tests; production uses the default. */
     private readonly finishingGraceMs = FINISHING_EXIT_GRACE_MS,
-    private readonly serveStopGraceMs = 25_000
+    private readonly serveStopGraceMs = 25_000,
+    private readonly terminationGraceMs = CAPTURE_TEARDOWN_GRACE_MS,
+    private readonly exitObservationMs = 4_000
   ) {}
 
   /**
@@ -81,6 +90,7 @@ export class EngineProcess {
       console.error('[engine serve] spawn failed:', err)
       return
     }
+    this.own(child)
     this.serveChild = child
     this.serveBuffer = ''
     this.serveReady = false
@@ -106,7 +116,7 @@ export class EngineProcess {
     child.on('error', (err) => {
       console.error('[engine serve] error:', err.message)
     })
-    child.on('close', () => {
+    child.on('close', (code, signal) => {
       if (this.serveChild !== child) return
       this.clearServeStopTimer()
       this.serveChild = null
@@ -114,7 +124,7 @@ export class EngineProcess {
       // A crash mid-session must end the session for the renderer too.
       if (this.serveSessionActive) {
         this.serveSessionActive = false
-        this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
+        this.emit({ event: 'exit', code, signal })
       }
       if (!this.disposed) {
         this.serveRestartTimer = setTimeout(() => this.startServe(), 5_000)
@@ -176,7 +186,7 @@ export class EngineProcess {
    */
   listInputDevices(): Promise<EngineInputDevice[]> {
     return new Promise((resolve) => {
-      if (!existsSync(this.binaryPath)) {
+      if (this.disposed || !existsSync(this.binaryPath)) {
         resolve([])
         return
       }
@@ -187,6 +197,7 @@ export class EngineProcess {
         resolve([])
         return
       }
+      this.own(child)
       let out = ''
       let settled = false
       const finish = (devices: EngineInputDevice[]): void => {
@@ -196,7 +207,7 @@ export class EngineProcess {
         resolve(devices)
       }
       const timeout = setTimeout(() => {
-        child.kill('SIGKILL')
+        if (!this.disposed) child.kill('SIGKILL')
         finish([])
       }, 5_000)
       child.stdout?.setEncoding('utf8')
@@ -235,7 +246,7 @@ export class EngineProcess {
   /** Spawn `engine tap-selftest` and parse its verdict. */
   tapSelfTest(): Promise<{ ok: boolean; reason?: string }> {
     return new Promise((resolve) => {
-      if (!existsSync(this.binaryPath)) {
+      if (this.disposed || !existsSync(this.binaryPath)) {
         resolve({ ok: false, reason: 'engine binary not found' })
         return
       }
@@ -246,9 +257,10 @@ export class EngineProcess {
         resolve({ ok: false, reason: String(err) })
         return
       }
+      this.own(child)
       let out = ''
       const timeout = setTimeout(() => {
-        child.kill('SIGKILL')
+        if (!this.disposed) child.kill('SIGKILL')
         resolve({ ok: false, reason: 'self-test timed out' })
       }, 30_000)
       child.stdout?.setEncoding('utf8')
@@ -286,6 +298,7 @@ export class EngineProcess {
    * otherwise it's a no-op and the next start's opts carry the choice.
    */
   setInputDevice(uid: string | null): void {
+    if (this.disposed) return
     const command = { cmd: 'set-input', uid: uid ?? '' }
     if (this.serveSessionActive) {
       this.serveWrite(command)
@@ -305,14 +318,17 @@ export class EngineProcess {
   }
 
   start(command: EngineCommand, filePath?: string, opts: EngineStartOptions = {}): void {
+    if (this.disposed) return
     // Only one sidecar at a time; a new start supersedes (hard-discards) the previous run.
     this.discard()
+    if (this.disposed) return
 
     // Instant path: the persistent engine has models loaded and is idle.
     if (command === 'live' && this.serveReady && this.serveChild && !this.serveSessionActive) {
       this.clearServeStopTimer()
       this.serveSessionActive = true
       this.emit({ event: 'started', command, filePath, binaryPath: this.binaryPath })
+      if (this.disposed) return
       const ok = this.serveWrite({
         cmd: 'start',
         source: opts.source ?? 'both',
@@ -329,6 +345,7 @@ export class EngineProcess {
     if (command === 'live' && this.serveSessionActive) {
       this.restartServe()
     }
+    if (this.disposed) return
 
     if (command !== 'stream' && command !== 'transcribe' && command !== 'live') {
       this.emit({ event: 'spawn-error', message: `Unknown engine command: ${String(command)}` })
@@ -372,6 +389,7 @@ export class EngineProcess {
       return
     }
 
+    this.own(child)
     this.child = child
     this.stdoutBuffer = ''
     this.emit({ event: 'started', command, filePath, binaryPath: this.binaryPath })
@@ -392,7 +410,7 @@ export class EngineProcess {
 
     child.on('error', (err) => {
       if (this.child !== child) return
-      this.child = null
+      if (!child.pid) this.child = null
       this.emit({
         event: 'spawn-error',
         message: `Failed to spawn engine at ${this.binaryPath}: ${err.message}`
@@ -414,6 +432,7 @@ export class EngineProcess {
    * Escalates to SIGKILL if the sidecar hangs.
    */
   stop(): void {
+    if (this.disposed) return
     if (this.serveSessionActive) {
       if (this.serveStopTimer) return
       this.serveWrite({ cmd: 'stop' })
@@ -428,9 +447,9 @@ export class EngineProcess {
       return
     }
     const child = this.child
-    if (!child) return
+    if (!child || this.stopTimers.has(child)) return
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM')
+      if (child.kill('SIGTERM')) this.termSent.add(child)
       // Generous grace period: on stop the engine may still be finishing model
       // warm-up and then has to transcribe all queued audio before it can emit
       // finals — killing it early throws the user's words away.
@@ -438,54 +457,24 @@ export class EngineProcess {
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
       }, 20_000)
       forceKill.unref()
-      child.once('close', () => clearTimeout(forceKill))
+      this.stopTimers.set(child, forceKill)
+      child.once('close', () => {
+        clearTimeout(forceKill)
+        this.stopTimers.delete(child)
+      })
     }
   }
 
-  /**
-   * Hard-discard the current child when a new run supersedes it (or on app
-   * quit): detach listeners first so the old child's tail events can't leak
-   * into the new run, then kill. Reports the stop synthetically since the
-   * real close event can no longer reach anyone. A session caught mid-finish
-   * gets `graceMs` to exit on its own first: killing the engine during the
-   * finishing drain can strand its ScreenCaptureKit teardown (stale "System
-   * Audio Recording" attribution in Control Center).
-   */
+  /** Retire a superseded session; suppress its tail events but retain ownership. */
   private discard(graceMs = 0): void {
     if (!this.child) return
     const child = this.child
     this.child = null
     this.stdoutBuffer = ''
-    child.removeAllListeners()
-    child.stdout.removeAllListeners()
-    child.stderr.removeAllListeners()
-    if (child.exitCode === null && child.signalCode === null) {
-      const alive = (): boolean => child.exitCode === null && child.signalCode === null
-      const escalate = (): void => {
-        if (!alive()) return
-        child.kill('SIGTERM')
-        const forceKill = setTimeout(() => {
-          if (alive()) child.kill('SIGKILL')
-        }, CAPTURE_TEARDOWN_GRACE_MS)
-        forceKill.unref()
-        child.once('close', () => clearTimeout(forceKill))
-      }
-      if (graceMs > 0) {
-        // Closing stdin tells the engine the host is going away (its
-        // --exit-on-stdin-close watchdog); it drops its capture taps at once
-        // and exits cleanly, usually well inside the grace window.
-        try {
-          child.stdin.end()
-        } catch {
-          // stdin already gone — the escalation timer still bounds the exit.
-        }
-        const grace = setTimeout(escalate, graceMs)
-        grace.unref()
-        child.once('close', () => clearTimeout(grace))
-      } else {
-        escalate()
-      }
-    }
+    // Identity checks suppress old session events; ownership listeners stay.
+    void this.terminateChild(child, graceMs).catch((error) =>
+      console.error('[engine discard]', error)
+    )
     this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
   }
 
@@ -500,20 +489,7 @@ export class EngineProcess {
       this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
     }
     if (child) {
-      child.removeAllListeners()
-      child.stdout.removeAllListeners()
-      child.stderr.removeAllListeners()
-      if (child.exitCode === null && child.signalCode === null) {
-        // SIGTERM first: the engine's signal handler tears its capture taps
-        // down synchronously; an immediate SIGKILL would strand the
-        // ScreenCaptureKit tap (stale Control Center attribution).
-        child.kill('SIGTERM')
-        const forceKill = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-        }, CAPTURE_TEARDOWN_GRACE_MS)
-        forceKill.unref()
-        child.once('close', () => clearTimeout(forceKill))
-      }
+      void this.terminateChild(child).catch((error) => console.error('[engine restart]', error))
     }
     if (!this.disposed) {
       this.serveRestartTimer = setTimeout(() => this.startServe(), 1_000)
@@ -521,21 +497,119 @@ export class EngineProcess {
     }
   }
 
-  /**
-   * Kill the sidecars on app shutdown. A session still finishing gets a grace
-   * window to complete its capture teardown before we escalate to signals.
-   */
-  dispose(): void {
+  /** Own each exact handle before exposing events that could trigger shutdown. */
+  private own(child: ChildProcess): void {
+    let resolveExit!: () => void
+    const state = {
+      exited: new Promise<void>((resolve) => {
+        resolveExit = resolve
+      }),
+      done: false
+    }
+    this.owned.set(child, state)
+    const exited = (): void => {
+      state.done = true
+      this.owned.delete(child)
+      resolveExit()
+    }
+    let observedExit = false
+    child.once('exit', () => {
+      observedExit = true
+    })
+    child.once('close', () => {
+      // Drain final stdout before resolving. Failed spawns have no OS process
+      // and emit close without exit; a signal request alone never gets here.
+      if (observedExit || !child.pid) exited()
+    })
+    // Broken stdin is an unsuccessful graceful request, never proof of exit.
+    child.stdin?.on('error', (error) => console.error('[engine stdin]', error.message))
+  }
+
+  /** Resolves only on observed exit (or a spawn failure with no process). */
+  private terminateChild(child: ChildProcess, graceMs = 0): Promise<void> {
+    const existing = this.terminating.get(child)
+    if (existing) return existing
+    const state = this.owned.get(child)
+    if (!state) return Promise.resolve() // already observed
+    const wait = async (ms: number): Promise<boolean> => {
+      if (state.done) return true
+      let timer: NodeJS.Timeout | undefined
+      try {
+        await Promise.race([
+          state.exited,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, ms)
+          })
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
+      return state.done
+    }
+    const signalErrors: string[] = []
+    const signal = (name: NodeJS.Signals): void => {
+      if (state.done || (name === 'SIGTERM' && this.termSent.has(child))) return
+      try {
+        if (!child.kill(name)) throw new Error('signal not delivered')
+        if (name === 'SIGTERM') this.termSent.add(child)
+      } catch (error) {
+        const message = `engine PID ${child.pid ?? 'unspawned'} ${name}: ${String(error)}`
+        signalErrors.push(message)
+        console.error(message)
+      }
+    }
+    const termination = (async (): Promise<void> => {
+      if (graceMs > 0) {
+        try {
+          child.stdin?.end()
+        } catch (error) {
+          console.error('[engine stdin close]', error)
+        }
+        if (await wait(graceMs)) return
+      }
+      signal('SIGTERM')
+      if (await wait(this.terminationGraceMs)) return
+      signal('SIGKILL')
+      if (await wait(this.exitObservationMs)) return
+      throw new Error(
+        `Engine PID ${child.pid ?? 'unspawned'} exit not observed after SIGKILL deadline${signalErrors.length ? `: ${signalErrors.join('; ')}` : ''}`
+      )
+    })()
+    this.terminating.set(child, termination)
+    return termination
+  }
+
+  /** Bounded shutdown; callers must keep the host alive until it settles. */
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal
     this.disposed = true
+    const stopSent = this.serveStopTimer !== null
     this.clearServeStopTimer()
     if (this.serveRestartTimer) clearTimeout(this.serveRestartTimer)
-    const serve = this.serveChild
-    this.serveChild = null
-    if (serve && serve.exitCode === null && serve.signalCode === null) {
-      serve.stdin.end() // its stdin watchdog exits it cleanly
-    }
-    this.discard(this.sessionFinishing ? this.finishingGraceMs : 0)
-    this.listeners.clear()
+    this.serveRestartTimer = null
+    for (const timer of this.stopTimers.values()) clearTimeout(timer)
+    this.stopTimers.clear()
+    // Publish the completion promise before writes/signals can reenter listeners.
+    this.disposal = Promise.resolve().then(async () => {
+      if (this.serveSessionActive && !stopSent) this.serveWrite({ cmd: 'stop' })
+      const terminations = [...this.owned.keys()].map((child) =>
+        this.terminateChild(
+          child,
+          child === this.serveChild || (child === this.child && this.sessionFinishing)
+            ? this.finishingGraceMs
+            : 0
+        )
+      )
+      const results = await Promise.allSettled(terminations)
+      const failures = results.filter((result) => result.status === 'rejected')
+      if (failures.length)
+        throw new AggregateError(
+          failures.map((result) => result.reason),
+          'Engine shutdown failed'
+        )
+      this.listeners.clear()
+    })
+    return this.disposal
   }
 
   /* ---- NDJSON line parsing ---- */

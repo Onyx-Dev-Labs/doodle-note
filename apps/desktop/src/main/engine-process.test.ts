@@ -15,10 +15,10 @@ import type { EngineEvent } from '../shared/engine-events'
  * `<script>.log`, which is what the assertions read.
  */
 
-const cleanups: Array<() => void> = []
+const cleanups: Array<() => void | Promise<void>> = []
 
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.()
+afterEach(async () => {
+  while (cleanups.length > 0) await cleanups.pop()?.()
 })
 
 /** Writes an executable fake engine; returns its path and its log path. */
@@ -165,12 +165,12 @@ describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => 
   it('lets a finishing session exit cleanly without any signal', async () => {
     const { binary, log } = fakeEngine(
       [
-        "emit({ event: 'ready', mode: 'live' })",
-        "emit({ event: 'status', stage: 'finishing' })",
         "process.on('SIGTERM', () => { log('SIGTERM'); process.exit(7) })",
         // The clean path: host closes stdin, engine finishes and exits itself.
         "process.stdin.on('end', () => { log('clean-exit'); emit({ event: 'done' }); process.exit(0) })",
-        'process.stdin.resume()'
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'live' })",
+        "emit({ event: 'status', stage: 'finishing' })"
       ].join('\n')
     )
     const { engine, events } = startLive(binary, 2_000)
@@ -185,11 +185,11 @@ describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => 
     const graceMs = 500
     const { binary, log } = fakeEngine(
       [
-        "emit({ event: 'ready', mode: 'live' })",
-        "emit({ event: 'status', stage: 'finishing' })",
         "process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0) })",
         // Wedged: ignores stdin close, only a signal gets it out.
-        'process.stdin.resume()'
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'live' })",
+        "emit({ event: 'status', stage: 'finishing' })"
       ].join('\n')
     )
     const { engine, events } = startLive(binary, graceMs)
@@ -207,9 +207,9 @@ describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => 
   it('signals immediately when no session is finishing', async () => {
     const { binary, log } = fakeEngine(
       [
-        "emit({ event: 'ready', mode: 'live' })",
         "process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0) })",
-        'process.stdin.resume()'
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'live' })"
       ].join('\n')
     )
     // A huge grace proves the grace path is not taken while recording.
@@ -223,11 +223,11 @@ describe('EngineProcess dispose', { skip: process.platform === 'win32' }, () => 
   it('clears the finishing state once the session reports done', async () => {
     const { binary, log } = fakeEngine(
       [
+        "process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0) })",
+        'process.stdin.resume()',
         "emit({ event: 'ready', mode: 'live' })",
         "emit({ event: 'status', stage: 'finishing' })",
-        "emit({ event: 'done' })",
-        "process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0) })",
-        'process.stdin.resume()'
+        "emit({ event: 'done' })"
       ].join('\n')
     )
     const { engine, events } = startLive(binary, 60_000)
