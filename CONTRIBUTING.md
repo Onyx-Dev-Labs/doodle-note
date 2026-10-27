@@ -18,7 +18,7 @@ corepack enable
 pnpm install --frozen-lockfile
 ```
 
-Node.js 22+ is required. Desktop work on macOS also requires macOS 14+, Apple Silicon, and the Xcode command-line tools:
+Node.js 22.12.0 or later is required. Desktop work on macOS also requires macOS 14+, Apple Silicon, and the Xcode command-line tools:
 
 ```sh
 pnpm engine:build
