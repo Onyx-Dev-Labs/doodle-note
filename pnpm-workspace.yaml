@@ -12,18 +12,34 @@ ignoredBuiltDependencies:
 onlyBuiltDependencies:
   - electron
 
-# Security floors for transitive packages whose direct parents have not yet
-# released compatible patched dependency ranges. Keep these selectors narrow
-# and remove them when the parent packages absorb the fixes.
+# Single source of truth for transitive security floors. Do not duplicate these
+# in package.json pnpm.overrides: pnpm 10 can report workspace configuration
+# while generating the lockfile from the package.json declaration.
+# Preserve the stronger floor when consolidating overlapping selectors.
 overrides:
-  esbuild@<=0.24.2: 0.25.0
-  js-yaml@>=4.0.0 <4.3.1: 4.3.1
-  nanoid@>=3.0.0 <3.3.18: 3.3.18
+  "@xmldom/xmldom@>=0.7.0 <0.8.15": 0.8.15
+  "qs@>=2.2.5 <6.16.0": 6.16.0
+  brace-expansion@1: 1.1.18
+  brace-expansion@2: 2.1.4
+  brace-expansion@5: 5.0.9
+  esbuild@<=0.24.2: 0.25.12
   postcss@<=8.5.22: 8.5.23
-  sharp@<0.35.0: 0.35.0
-  tar@>=7.0.0 <=7.5.20: 7.5.21
-  undici@>=6.0.0 <6.28.1: 6.28.1
-  undici@>=7.0.0 <7.29.1: 7.29.1
+  postcss@8.4.31: 8.5.26
+  sharp@<0.35.5: 0.35.5
+  js-yaml@4: 4.3.2
+  baseline-browser-mapping@2: 2.11.0
+  browserslist@4: 4.28.7
+  node-llama-cpp>simple-git: 4.0.2
+  prosemirror-view@1: 1.42.3
+  source-map-js@1: 1.2.2
+  "fast-uri@>=3.0.0 <3.1.8": 3.1.8
+  # Retain the already-locked patch; the old 3.3.18 floor would downgrade it.
+  "nanoid@>=3.0.0 <3.3.20": 3.3.20
+  "tar@>=7.0.0 <=7.5.20": 7.5.21
+  "undici@>=6.0.0 <6.29.1": 6.29.1
+  "undici@>=7.0.0 <7.30.1": 7.30.1
+  # Includes @vercel/cli-config's exact 4.1.11 pin and AI/MCP SDK peers.
+  "zod@>=4.0.0 <4.6.6": 4.6.6
 
 # Cross-building the Windows app from macOS: pnpm must also install the
 # win32-x64 platform binaries (sherpa-onnx, node-llama-cpp) so
