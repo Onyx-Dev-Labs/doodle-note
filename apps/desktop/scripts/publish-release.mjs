@@ -76,7 +76,7 @@ async function main() {
   if (flags.length === 1 && flags[0] === '--win') return publishWindows()
   if (flags.includes('--help')) {
     console.log(
-      'Usage: publish-release.mjs --mac|--dmg-only --source-sha SHA [--release-dir DIR] [--dry-run] [--activate --rollback-dir DIR]\n       publish-release.mjs --win (legacy Windows workflow)\nMac defaults to payload upload/verification only. --activate publishes Blob feed last and stages the static feed for review. See docs/qa/mac-publisher.md.'
+      'Usage: publish-release.mjs --mac|--dmg-only --source-sha SHA [--release-dir DIR] [--dry-run] [--activate --rollback-dir DIR]\n       publish-release.mjs --win (legacy Windows workflow)\nMac defaults to payload upload/verification only. --activate publishes Blob feed last and returns a unique static-feed proposal for manual review/replacement. See docs/qa/mac-publisher.md.'
     )
     return
   }
@@ -120,7 +120,7 @@ async function main() {
     flags.includes('--dry-run')
       ? 'Local validation only; no network or feed changes.'
       : result.activated
-        ? 'Blob feed verified; static Mac manifest staged for review/deployment. Keep rollback records. Public web activation and real updater acceptance still require verification.'
+        ? 'Blob feed verified; static feed untouched. Review stagedManifest, then manually replace/commit/deploy the static manifest. Keep rollback records. Real updater acceptance still requires verification.'
         : 'Payloads verified; no feed activation or web staging.'
   )
 }

@@ -113,9 +113,11 @@ Use [receipt-bound Mac publication](qa/mac-publisher.md) to promote the retained
 candidate. Start with `publish-release.mjs --mac --source-sha <candidate SHA>
 --release-dir <payload directory> --dry-run`. Authorized live execution without
 `--dry-run` uploads/verifies immutable payloads only. Explicit `--activate
---rollback-dir <evidence directory>` gates Blob manifest activation and local
-static-manifest staging on payload verification. Review/deploy the staged web
-manifest separately. The candidate workflow does not require a Blob upload token.
+--rollback-dir <evidence directory>` gates Blob manifest activation and a unique
+static-manifest proposal on payload verification. The returned `stagedManifest`
+path is for manual review/replacement of the intended static manifest, then a
+separate reviewed deployment. The publisher leaves the checkout's static feed
+untouched. The candidate workflow does not require a Blob upload token.
 
 The old `pnpm release` rebuild-and-publish shortcut is no longer supported: its
 publisher invocation lacks the required receipt source SHA. Do not use it for

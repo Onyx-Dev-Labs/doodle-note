@@ -110,7 +110,7 @@ test('uploads only exact payloads, verifies public bytes, and leaves feeds untou
   )
 })
 
-test('activation is last and conditional, with prior manifests saved before replacing either feed', async (t) => {
+test('activation is last and conditional, with prior manifests saved and a separate static proposal', async (t) => {
   const f = await fixture(t)
   const transport = fakeTransport()
   transport.objects.set(`updates/${feed}`, {
@@ -151,7 +151,8 @@ test('activation is last and conditional, with prior manifests saved before repl
     await readFile(path.join(result.backupDir, 'web-latest-mac.yml'), 'utf8'),
     'old static feed'
   )
-  assert.deepEqual(await readFile(path.join(webUpdatesDir, feed)), f.files[feed])
+  assert.equal(await readFile(path.join(webUpdatesDir, feed), 'utf8'), 'old static feed')
+  assert.deepEqual(await readFile(result.stagedManifest), f.files[feed])
   const puts = transport.events.filter((e) => e[0] === 'put')
   assert.deepEqual(
     puts.map((e) => e[1]),
@@ -314,12 +315,7 @@ for (const failure of ['404', '403', 'truncated', 'different', 'too large', 'str
   })
 }
 
-for (const failure of [
-  'concurrent activation',
-  'lost acknowledgement',
-  'stale public feed',
-  'local edit'
-]) {
+for (const failure of ['concurrent activation', 'lost acknowledgement', 'stale public feed']) {
   test(`activation ${failure} retains rollback evidence and does not stage the static feed`, async (t) => {
     const f = await fixture(t)
     const options = await activationOptions(f)
@@ -336,8 +332,6 @@ for (const failure of [
         transport.objects.set(key, { bytes: Buffer.from('another release'), etag: 'new-etag' })
       const result = await put(key, body, config)
       if (failure === 'lost acknowledgement') throw new Error('Lost acknowledgement')
-      if (failure === 'local edit')
-        await writeFile(path.join(options.webUpdatesDir, feed), 'maintainer edit')
       return result
     }
     transport.fetch = (url) =>
@@ -345,7 +339,7 @@ for (const failure of [
         ? Promise.resolve(new Response('old Blob feed'))
         : fetch(url)
     await assert.rejects(publishMacRelease({ ...options, transport }), (asyncError) => {
-      assert.match(asyncError.message, /Blob feed may be active; static feed was not staged/)
+      assert.match(asyncError.message, /Blob feed may be active; static feed remains untouched/)
       assert.match(asyncError.message, /Retain rollback records at/)
       return true
     })
@@ -359,10 +353,7 @@ for (const failure of [
       f.files[feed]
     )
     assert.deepEqual(await readdir(options.webUpdatesDir), [feed])
-    assert.equal(
-      await readFile(path.join(options.webUpdatesDir, feed), 'utf8'),
-      failure === 'local edit' ? 'maintainer edit' : 'old static feed'
-    )
+    assert.equal(await readFile(path.join(options.webUpdatesDir, feed), 'utf8'), 'old static feed')
     if (failure === 'concurrent activation')
       assert.equal(transport.objects.get(`updates/${feed}`).bytes.toString(), 'another release')
   })
@@ -498,6 +489,7 @@ test('locked Blob SDK replays file bytes on HTTP retry and sends immutable/CAS h
       const transport = await createBlobTransport()
       const body = await openAsBlob(${JSON.stringify(path.join(f.dir, zip))})
       await transport.put('updates/probe.zip', body, {
+        sourceFile: ${JSON.stringify(path.join(f.dir, zip))},
         access: 'public', addRandomSuffix: false, allowOverwrite: false,
         abortSignal: AbortSignal.timeout(10000)
       })
@@ -620,4 +612,140 @@ test('explicit --win preserves legacy Windows selection/options/staging and neve
   await assert.rejects(readFile(path.join(f.dir, 'apps/web/public/updates/latest-mac.yml')), {
     code: 'ENOENT'
   })
+})
+
+// Deterministic interleaving from both independent F1 probes: the read has
+// obtained the old bytes, then another writer edits before the publisher resumes.
+test('an edit after the final static read survives activation and the candidate remains a separate proposal', async (t) => {
+  const { default: fsPromises } = await import('node:fs/promises')
+  const { syncBuiltinESMExports } = await import('node:module')
+  const f = await fixture(t)
+  const options = await activationOptions(f)
+  const webFile = path.join(options.webUpdatesDir, feed)
+  const originalRead = fsPromises.readFile
+  let reads = 0
+  fsPromises.readFile = async (...args) => {
+    const bytes = await originalRead(...args)
+    if (args[0] === webFile && ++reads === 2)
+      await writeFile(webFile, 'concurrent edit after final read')
+    return bytes
+  }
+  syncBuiltinESMExports()
+  try {
+    const result = await publishMacRelease({ ...options, transport: fakeTransport() })
+    assert.equal(result.activated, true)
+    assert.ok(reads > 0)
+    assert.equal(
+      await originalRead(webFile, 'utf8'),
+      reads === 2 ? 'concurrent edit after final read' : 'old static feed'
+    )
+    assert.notEqual(result.stagedManifest, webFile)
+    assert.deepEqual(await originalRead(result.stagedManifest), f.files[feed])
+  } finally {
+    fsPromises.readFile = originalRead
+    syncBuiltinESMExports()
+  }
+})
+
+for (const mode of ['active', 'retry-delay']) {
+  test(`locked SDK deadline terminates ${mode} and prevents later requests`, async (t) => {
+    const f = await fixture(t)
+    const result = spawnSync(
+      process.execPath,
+      [
+        new URL('./publish-blob-deadline-probe.mjs', import.meta.url).pathname,
+        mode,
+        path.join(f.dir, zip)
+      ],
+      {
+        encoding: 'utf8',
+        timeout: 15000,
+        env: {
+          PATH: process.env.PATH,
+          HOME: f.dir,
+          BLOB_READ_WRITE_TOKEN: 'vercel_blob_rw_z4d0oe5bcxlyzvar_test-only-not-a-secret',
+          VERCEL_BLOB_RETRIES: '1'
+        }
+      }
+    )
+    assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stderr}`)
+    console.log(result.stdout.trim())
+  })
+}
+
+test('an edit during remote activation is preserved alongside the unique static proposal', async (t) => {
+  const f = await fixture(t)
+  const options = await activationOptions(f)
+  const transport = fakeTransport()
+  const put = transport.put.bind(transport)
+  transport.put = async (key, body, config) => {
+    const result = await put(key, body, config)
+    if (key === `updates/${feed}`)
+      await writeFile(path.join(options.webUpdatesDir, feed), 'maintainer edit')
+    return result
+  }
+  const result = await publishMacRelease({ ...options, transport })
+  assert.equal(await readFile(path.join(options.webUpdatesDir, feed), 'utf8'), 'maintainer edit')
+  assert.deepEqual(await readFile(result.stagedManifest), f.files[feed])
+  assert.equal(
+    await readFile(path.join(result.backupDir, 'web-latest-mac.yml'), 'utf8'),
+    'old static feed'
+  )
+})
+
+test('cancelled payload stops the publish run without a later retry or activation', async (t) => {
+  const f = await fixture(t)
+  const options = await activationOptions(f)
+  const transport = fakeTransport()
+  const put = transport.put.bind(transport)
+  transport.put = async (key, body, config) => {
+    await put(key, body, config)
+    throw new DOMException('Worker deadline', 'AbortError')
+  }
+  await assert.rejects(
+    publishMacRelease({ ...options, transport, sleep: async () => {} }),
+    /remote upload may have completed; feeds unchanged/
+  )
+  assert.deepEqual(
+    transport.events.filter((e) => e[0] === 'put').map((e) => e[1]),
+    [`updates/${zip}`]
+  )
+  assert.equal(transport.objects.has(`updates/${feed}`), false)
+  assert.equal(await readFile(path.join(options.webUpdatesDir, feed), 'utf8'), 'old static feed')
+})
+
+test('cancelled manifest preserves ambiguous-activation recovery evidence and offers no verified proposal', async (t) => {
+  const f = await fixture(t)
+  const options = await activationOptions(f)
+  const transport = fakeTransport()
+  transport.objects.set(`updates/${feed}`, {
+    bytes: Buffer.from('old Blob feed'),
+    etag: 'old-etag'
+  })
+  const put = transport.put.bind(transport)
+  transport.put = async (key, body, config) => {
+    const result = await put(key, body, config)
+    if (key === `updates/${feed}`)
+      throw new DOMException('Worker deadline after remote commit', 'AbortError')
+    return result
+  }
+  await assert.rejects(
+    publishMacRelease({ ...options, transport }),
+    /Blob feed may be active; static feed remains untouched.*Retain rollback records/s
+  )
+  const [backup] = await readdir(options.rollbackDir)
+  assert.equal(
+    await readFile(path.join(options.rollbackDir, backup, 'blob-latest-mac.yml'), 'utf8'),
+    'old Blob feed'
+  )
+  assert.deepEqual(
+    await readFile(path.join(options.rollbackDir, backup, 'candidate-latest-mac.yml')),
+    f.files[feed]
+  )
+  await assert.rejects(
+    readFile(path.join(options.rollbackDir, backup, 'web-proposal-latest-mac.yml')),
+    { code: 'ENOENT' }
+  )
+  assert.equal(await readFile(path.join(options.webUpdatesDir, feed), 'utf8'), 'old static feed')
+  assert.deepEqual(transport.objects.get(`updates/${feed}`).bytes, f.files[feed])
 })

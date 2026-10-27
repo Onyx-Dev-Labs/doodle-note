@@ -2,11 +2,12 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { constants, createReadStream, openAsBlob } from 'node:fs'
-import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+import { Worker } from 'node:worker_threads'
 
 // Must match the installed updater URL and the web artifact proxy's store.
 export const BLOB_BASE = 'https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/updates'
@@ -103,6 +104,7 @@ async function ensureArtifact(transport, entry, sleep) {
       // ReadStream is not. Each outer attempt also opens a new body.
       const body = await openAsBlob(entry.file)
       const uploaded = await transport.put(key, body, {
+        sourceFile: entry.file,
         access: 'public',
         addRandomSuffix: false,
         allowOverwrite: false,
@@ -111,6 +113,12 @@ async function ensureArtifact(transport, entry, sleep) {
       checkLocation(uploaded, entry.name)
       break
     } catch (error) {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        throw new Error(
+          `Upload cancelled: ${entry.name}; remote upload may have completed; feeds unchanged. Inspect before rerunning the same receipt.`,
+          { cause: error }
+        )
+      }
       // A lost acknowledgement or competing writer can leave an object behind.
       // Resolve by bytes, never by an SDK error-message substring or overwrite.
       const current = await readBlob(transport, entry.name)
@@ -131,13 +139,63 @@ async function ensureArtifact(transport, entry, sleep) {
   await verifyPublic(transport, `${PUBLIC_BASE}/${entry.name}`, entry)
 }
 
+function uploadInWorker(key, body, options) {
+  const { sourceFile, abortSignal = AbortSignal.timeout(300_000), ...sdkOptions } = options
+  const cancelled = () =>
+    new DOMException('Blob upload deadline/cancellation; SDK worker terminated', 'AbortError')
+  if (abortSignal.aborted) return Promise.reject(cancelled())
+  const worker = new Worker(new URL('./publish-blob-worker.mjs', import.meta.url), {
+    // File-backed Blobs cannot be cloned. Reopen the same validated snapshot
+    // inside the worker; small manifest buffers are cloned without a live stream.
+    workerData: { key, sourceFile, body: sourceFile ? undefined : body, options: sdkOptions },
+    execArgv: []
+  })
+  return new Promise((resolve, reject) => {
+    let stopping = false
+    const finish = async (error, result) => {
+      if (stopping) return
+      stopping = true
+      try {
+        // This is a cleanup barrier, not Promise.race: no SDK request or retry
+        // timer remains running when the caller resumes or removes its snapshot.
+        await worker.terminate()
+        if (abortSignal.aborted) reject(cancelled())
+        else if (error) reject(error)
+        else resolve(result)
+      } catch (cleanupError) {
+        reject(cleanupError)
+      } finally {
+        abortSignal.removeEventListener('abort', abort)
+      }
+    }
+    const abort = () => {
+      worker.postMessage('abort') // normalize cancellation to the SDK's AbortError
+      void finish(cancelled()) // also stop an already-running SDK retry delay
+    }
+    worker.once('message', ({ result, error }) => {
+      void finish(
+        error ? Object.assign(new Error(error.message), { name: error.name }) : null,
+        result
+      )
+    })
+    worker.once('error', (error) => {
+      void finish(error)
+    })
+    worker.once('exit', (code) => {
+      void finish(new Error(`Blob upload worker exited without a result (${code})`))
+    })
+    abortSignal.addEventListener('abort', abort, { once: true })
+    if (abortSignal.aborted) abort()
+  })
+}
+
 export async function createBlobTransport() {
   const token = process.env.BLOB_READ_WRITE_TOKEN
   if (!token)
     throw new Error(
       'BLOB_READ_WRITE_TOKEN must be supplied by the environment; Mac promotion does not read .env files'
     )
-  const { get, put } = await import('@vercel/blob')
+  const { get } = await import('@vercel/blob')
   return {
     get: (key) =>
       get(key, {
@@ -146,7 +204,7 @@ export async function createBlobTransport() {
         token,
         abortSignal: AbortSignal.timeout(300_000)
       }),
-    put: (key, body, options) => put(key, body, { ...options, token }),
+    put: (key, body, options) => uploadInWorker(key, body, { ...options, token }),
     fetch: (url, options) => fetch(url, options)
   }
 }
@@ -207,13 +265,8 @@ async function activateFeed(transport, entry, { rollbackDir, webUpdatesDir, sour
     { flag: 'wx' }
   )
 
-  // Prove local staging is writable before the remote activation boundary.
-  await mkdir(webUpdatesDir, { recursive: true })
-  const stageDir = await mkdtemp(path.join(webUpdatesDir, '.mac-stage-'))
-  const staged = path.join(stageDir, feed)
   let activationAttempted = false
   try {
-    await writeFile(staged, candidate, { flag: 'wx' })
     // Even identical observed bytes need CAS: public CDN reads can be stale.
     // Never turn a cached candidate into permission to stage over a newer feed.
     activationAttempted = true
@@ -230,23 +283,17 @@ async function activateFeed(transport, entry, { rollbackDir, webUpdatesDir, sour
     if (!activated) throw new Error('Activated feed is missing')
     await verifyBytes(activated.stream, entry)
     await verifyPublic(transport, `${BLOB_BASE}/${feed}`, entry)
-    const nowWeb = await readOptional(webFile)
-    if (
-      (previousWeb === null) !== (nowWeb === null) ||
-      (previousWeb && !previousWeb.equals(nowWeb))
-    ) {
-      throw new Error('Local static feed changed during activation; refusing to replace it')
-    }
-    await rename(staged, webFile)
-    return backupDir
+    // A read/check/rename cannot provide CAS against arbitrary filesystem writers.
+    // Return a unique proposal for reviewed manual replacement instead.
+    const stagedManifest = path.join(backupDir, 'web-proposal-latest-mac.yml')
+    await writeFile(stagedManifest, candidate, { flag: 'wx' })
+    return { backupDir, stagedManifest }
   } catch (error) {
     throw new Error(
-      `${activationAttempted ? 'Blob feed may be active; static feed was not staged.' : 'Feed activation not attempted.'} ` +
+      `${activationAttempted ? 'Blob feed may be active; static feed remains untouched.' : 'Feed activation not attempted.'} ` +
         `Retain rollback records at ${backupDir}. Inspect live Blob/static feeds before retrying; restore only with the current ETag and reviewed prior web manifest. See docs/qa/mac-publisher.md. ${error.message}`,
       { cause: error }
     )
-  } finally {
-    await rm(stageDir, { recursive: true, force: true })
   }
 }
 
@@ -313,11 +360,14 @@ export async function publishMacRelease({
     transport ??= await createBlobTransport()
     for (const entry of artifacts) await ensureArtifact(transport, entry, sleep)
     if (activate) {
-      result.backupDir = await activateFeed(transport, entries[2], {
-        rollbackDir,
-        webUpdatesDir,
-        sourceSha
-      })
+      Object.assign(
+        result,
+        await activateFeed(transport, entries[2], {
+          rollbackDir,
+          webUpdatesDir,
+          sourceSha
+        })
+      )
       result.activated = true
     }
     return result

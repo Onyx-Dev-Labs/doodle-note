@@ -37,7 +37,8 @@ For authorized live execution, supply `BLOB_READ_WRITE_TOKEN` through the proces
 environment using the maintainer's approved credential mechanism. Mac publication
 no longer searches `.env.local`. Do not paste the token into command arguments,
 logs, or review evidence. The destination is the existing store used by the web
-proxy; a returned object from another store/path is rejected.
+proxy; a returned object from another store/path is rejected after the request.
+This does not prevent a wrong-store token from uploading before that rejection.
 
 Run the same command **without `--dry-run`** to upload and verify payloads only.
 It does not publish either manifest surface. All immutable puts use
@@ -49,9 +50,15 @@ owner, normally by creating a new version and restarting qualification.
 
 Each upload attempt opens a fresh file-backed `Blob` from the validated snapshot.
 Unlike the old consumed `ReadStream`, this is replayable inside SDK retries too.
-Outer attempts are capped at three, with bounded per-operation deadlines. Public
-verification streams the full bytes from both the raw Blob URL and the installed
-client route, `https://www.doodlenote.ai/updates/<exact filename>`, without auth,
+Outer attempts are capped at three for non-cancellation failures. Each SDK put
+runs in an owned worker with a five-minute deadline including SDK retry backoff.
+Cancellation terminates that worker (requests and retry timers) and awaits its
+exit before returning or deleting the snapshot. It stops this publication run;
+it does not start another outer retry, payload write, or feed activation. A remote
+write may have committed before cancellation, so inspect before a deliberate
+rerun. SDK GETs and anonymous fetches also have five-minute request/body deadlines.
+Public verification streams the full bytes from both the raw Blob URL and the
+installed client route, `https://www.doodlenote.ai/updates/<exact filename>`, without auth,
 redirects, or range requests. A missing response, challenge page, truncated
 download, wrong digest, or wrong byte count blocks activation. It is safe to rerun
 the same receipt after a transient failure; identical artifacts are reused.
@@ -71,10 +78,17 @@ directory, and only then writes `updates/latest-mac.yml`. An existing feed
 requires its observed ETag (`ifMatch`); an absent feed uses create-only semantics.
 Even an observed identical feed requires a conditional write. The feed gets a
 60-second cache TTL. After its read-back and anonymous public hash check pass,
-the same candidate manifest is atomically staged into
-`apps/web/public/updates/latest-mac.yml` in this checkout. A concurrent local edit
-is refused. Review/commit/deploy that static manifest separately; the publisher
-does not commit or deploy it.
+the command returns `stagedManifest`, the path to the unique
+`<backupDir>/web-proposal-latest-mac.yml`. This verified proposal is created with
+exclusive-create semantics. The publisher never replaces or creates
+`apps/web/public/updates/latest-mac.yml`; concurrent local edits stay untouched.
+
+For static activation, inspect the current checkout/deployed manifest and the
+returned proposal, review their diff, and manually replace the intended static
+manifest as a separate coordinated change. Review/commit/deploy that change.
+There is no automatic static-file compare-and-swap or arbitrary-writer locking
+claim. `activated: true` reports verified Blob activation and a ready proposal,
+not a deployed or replaced static feed.
 
 Both feed surfaces can activate clients. They are **not a distributed atomic
 transaction**. Serialize publication/deployment with other maintainers. The
@@ -90,15 +104,19 @@ caches or preserve launch arguments through updater relaunch.
 - Before the manifest put, payload errors leave both manifests unchanged.
   Successfully uploaded immutable files can remain for a safe retry.
 - Once a manifest put is attempted, a timeout, lost acknowledgement, ETag
-  conflict, stale public read, or local staging failure exits nonzero with the
+  conflict, stale public read, or proposal-write failure exits nonzero with the
   rollback directory. **Blob may already be active.** Do not infer rollback from
   an error or blindly retry using a newly observed feed as authority.
 - Keep the earliest rollback directory as well as records from retries. It
   contains `blob-latest-mac.yml` / `web-latest-mac.yml` when those existed,
   `candidate-latest-mac.yml`, and `activation.json` (previous ETag, absence flags,
-  source SHA, candidate digest and destinations). The local static backup is
-  not proof of the currently deployed static bytes; retain the prior deployment
-  commit separately.
+  source SHA, candidate digest and destinations). A successful result returns
+  `web-proposal-latest-mac.yml` as `stagedManifest`; neither a candidate evidence
+  file nor a possibly partial proposal left by a failed run is a ready-to-deploy
+  signal. Require the successful result and verify its receipt-bound digest.
+  The local static backup is a historical observation, not proof of the current
+  checkout/deployed bytes;
+  retain the prior deployment commit separately.
 - Inspect the current Blob feed and current ETag. With explicit rollback
   authorization, restore the saved prior Blob bytes using an ETag-conditional
   put (`allowOverwrite: true`, `ifMatch: <current ETag>`, 60-second TTL), or
@@ -108,8 +126,8 @@ caches or preserve launch arguments through updater relaunch.
   public feeds after propagation. No automatic rollback races another publisher.
 - Public CDN propagation can lag. SDK 2.8.0 applies `useCache: false` only to
   private reads; public reads can still be stale. Conditional writes reject stale
-  ETags. A stale post-write public digest fails closed before local staging. Allow
-  CDN propagation and inspect both surfaces before a deliberate retry.
+  ETags. A stale post-write public digest fails closed before creating the verified
+  proposal. Allow CDN propagation and inspect both surfaces before a deliberate retry.
 - Rollback stops future update discovery; it cannot undo already installed
   updates. Those clients may require a qualified higher-version corrective build.
 
@@ -119,7 +137,10 @@ caches or preserve launch arguments through updater relaunch.
   explicitly; Windows runs separately.
 - Old `--mac` now requires `--source-sha` and a verification receipt, and defaults
   to payload-only upload/verification. Add `--activate --rollback-dir DIR` for
-  intentional feed activation and web staging.
+  intentional Blob feed activation and a unique web proposal. Unlike the initial
+  PR239 implementation at `20a360f`, successful activation no longer replaces the
+  checkout's static feed; use the returned `stagedManifest` in the separate
+  reviewed manual replacement step above.
 - Old `--dmg-only` remains a backfill with no ZIP upload or manifest mutation,
   but requires the complete receipt-bound candidate (including ZIP/manifest for
   validation). It cannot be combined with `--activate`.
@@ -136,8 +157,10 @@ caches or preserve launch arguments through updater relaunch.
 ## Validation and SDK sources
 
 `node --test apps/desktop/scripts/publish-mac-release.test.mjs` runs synthetic
-file/transport tests plus a locked-SDK loopback HTTP retry/header test. The same
-suite runs in normal desktop CI via `src/main/publish-mac-release.test.ts`.
+file/transport tests plus locked-SDK loopback retry/header and deadline tests.
+Deadline probes cover active requests and an already-running retry delay, wait
+for peer closure, and keep the peer available to detect forbidden later writes.
+The same suite runs in normal desktop CI via `src/main/publish-mac-release.test.ts`.
 No production token, service, candidate execution, native engine or model is used.
 
 The implementation follows the [official SDK reference](https://vercel.com/docs/vercel-blob/using-blob-sdk)
