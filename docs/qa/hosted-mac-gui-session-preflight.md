@@ -4,8 +4,8 @@ This is a bounded **session prerequisite report**, not GUI or updater acceptance
 It never downloads an artifact, launches DoodleNote, builds/signs an app, acquires
 models, captures audio/screens, changes permissions/trust/DNS, or drives native UI.
 Even all-positive probes exit **2 (BLOCKED)**. A green unit test run is fixture
-coverage, not observed hosted behavior. No hosted dispatch was performed while
-preparing this implementation; actual OS/build/architecture remain unobserved.
+coverage, not observed hosted behavior. The parent executed the first hosted
+probe below; the subsequent parser correction was tested offline only.
 
 ## Scope and runner
 
@@ -30,6 +30,9 @@ The separate `hosted-mac-gui-session-preflight.py` script:
 - Records console owner and `scutil` console login, compares them with the runner
   user, queries `gui/<uid>` bootstrap existence, and records WindowServer PIDs.
   These do **not** establish a visible, usable display or responsive app window.
+  ConsoleUser is projected to its top-level Name/UID before output truncation;
+  nested sessions are discarded. Schema 2 records unknown login matches as
+  `null` with a parse-evidence reason, rather than an observed mismatch (`false`).
 - Queries only named Node/Electron/dynamic-loader launch variables. It retains
   presence flags, never their values; the bootstrap domain dump is discarded.
   Query failure is unknown/incomplete, not a clean launch environment. It does
@@ -41,7 +44,10 @@ The separate `hosted-mac-gui-session-preflight.py` script:
   Each read-only probe has 3 seconds, then kills only its own child and allows
   1 second to reap it. A failed reap is explicitly recorded; no global process
   kill or service cleanup occurs. Normal exits record PID, exit code, duration
-  and reap state; retained probe text is limited to 512 characters, and raw
+  and reap state; generic returned probe text is limited to 512 characters. The
+  ConsoleUser parser examines at most 65,536 characters and returns only Name
+  (maximum 128 characters), UID (maximum 10 digits) and a fixed evidence reason.
+  Oversize, malformed, duplicate or missing fields leave the match unknown. Raw
   stdout/stderr are not included in evidence. The script step has a 2-minute
   timeout inside a 5-minute job. Only `result.json` is uploaded, including on
   blocked/failure exits, with 14-day retention.
@@ -77,8 +83,9 @@ gh workflow run 343291536 --repo Onyx-Dev-Labs/doodle-note \
   -f operation=gui-session-preflight
 ```
 
-This command is a prepared route, **not executed dispatch evidence**. Registry
-and ref support are verified by API/docs; actual scheduling remains untested.
+The parent exercised this route at the initial head in the run recorded below.
+The corrected parser has **not** been dispatched; a rerun belongs to the parent
+after reviewing its exact head.
 Record the resulting run's `head_sha` and compare it with the reviewed PR head
 before attributing evidence. No artifact/candidate inputs are needed. Expect a
 failed job with exit 2, and artifact `hosted-mac-gui-session-<run_id>` containing
@@ -86,6 +93,39 @@ failed job with exit 2, and artifact `hosted-mac-gui-session-<run_id>` containin
 `gui_availability` remains `unestablished`, and app/updater remain `unperformed`.
 If checkout/runner provisioning fails before the script, no report exists: that
 is infrastructure failure, not negative or positive GUI evidence.
+
+## First hosted evidence and offline parser correction
+
+Parent-dispatched [run 40543893127](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/40543893127)
+at `01a5dac2bfc8a5dba631c189f8d6c965c44aa7eb` exited 2 as designed. Parent reports
+candidate/release and verify-existing jobs skipped. The retained report at
+`/tmp/doodlenote-hosted-session-40543893127/result.json` was read in full and left
+unchanged (SHA256 `d8d57788b12704b29ddeaccfc869f308e296f8d5332483f40aae4eb8f7d15e02`).
+It records actual macOS 15.7.9 / 24G830 / arm64, image 20260907.0337.1, GUI
+bootstrap present, WindowServer PID 155, probe and console owner UID 501,
+login name runner, absent default profile, clear checked launch variables, and
+all 15 owned probe processes exited 0 and were reaped. App/GUI/updater remain
+unperformed/unestablished.
+
+Its `login_uid: null` does **not** prove a login mismatch. That revision truncated
+all command output to 512 characters before searching for UID. Apple's
+[ConsoleUser implementation](https://github.com/apple-oss-distributions/configd/blob/585b7f2fca293f4642d21d15c5daf187f63c4796/SystemConfiguration.fproj/SCDConsoleUser.c)
+defines root Name/UID separately from SessionInfo. The
+[SCPrint formatter](https://github.com/apple-oss-distributions/configd/blob/585b7f2fca293f4642d21d15c5daf187f63c4796/SystemConfiguration.fproj/SCD.c)
+sorts dictionary keys and indents nested collections by two spaces; scutil's
+[show command](https://github.com/apple-oss-distributions/configd/blob/585b7f2fca293f4642d21d15c5daf187f63c4796/scutil.tproj/cache.c)
+prints that structured value. SessionInfo can therefore push root UID beyond
+the limit. An offline synthetic two-session fixture is 691 characters, with
+root UID at offset 677: the real probe transport (mocked subprocess) reproduced
+`501` becoming `null` before the fix and correctly returns `501` after it.
+
+The original raw stdout was intentionally not retained, so this is a reproduced
+instrumentation defect and plausible explanation, **not proof of that run's
+missing-UID cause**. Preserve its original report; interpret console-login match
+as unknown. Do not retrofit a pass. Schema 2 parses before truncation, keeps only
+root fields and parse status, and excludes nested identities. No native commands,
+new dispatch, app launch, signed-byte changes or environment changes were used
+for the correction. Only a reviewed future parent rerun can supply new evidence.
 
 ## Later actual-updater requirements
 

@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location(
     "session_preflight", Path(__file__).with_name("hosted-mac-gui-session-preflight.py")
@@ -16,21 +16,54 @@ preflight = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preflight)
 
 
+# Synthetic ConsoleUser shape: Apple SCPrint sorts Name, SessionInfo, then UID.
+# This is not raw output recovered from the first hosted run.
+LONG_CONSOLE_USER = """<dictionary> {
+  GID : 20
+  Name : runner
+  SessionInfo : <array> {
+    0 : <dictionary> {
+      kCGSSessionAuditIDKey : 100012
+      kCGSSessionConsoleSetKey : 0
+      kCGSSessionGroupIDKey : 20
+      kCGSSessionIDKey : 257
+      kCGSSessionLoginwindowSafeLogin : FALSE
+      kCGSSessionOnConsoleKey : TRUE
+      kCGSSessionSystemSafeBoot : FALSE
+      kCGSSessionUserIDKey : 501
+      kCGSSessionUserNameKey : runner
+      kCGSessionLoginDoneKey : TRUE
+    }
+    1 : <dictionary> {
+      kCGSSessionIDKey : 258
+      kCGSSessionOnConsoleKey : FALSE
+      kCGSSessionUserIDKey : 502
+      kCGSSessionUserNameKey : synthetic-other
+      kCGSessionLoginDoneKey : TRUE
+    }
+  }
+  UID : 501
+}
+"""
+
+
 class FakeProbes:
     def __init__(self, overrides=None):
         self.events = []
         self.answers = {
             "os": "Darwin", "os-version": "15.7.9", "os-build": "24G830",
             "architecture": "arm64", "console-owner": "501",
-            "console-login": "<dictionary> {\n Name : runner\n UID : 501\n}",
+            "console-login": "<dictionary> {\n  Name : runner\n  UID : 501\n}",
             "gui-bootstrap": "", "windowserver": "121",
             **{f"launch-env-{name}": "" for name in preflight.LAUNCH_VARIABLES},
             **(overrides or {}),
         }
 
     def run(self, name, argv, **kwargs):
+        parse = kwargs.pop("parse", None)
         self.events.append({"name": name, "argv": argv, **kwargs})
-        return self.answers[name]
+        answer = self.answers[name]
+        return parse(answer) if parse and answer is not None else answer
 
 
 class SessionPreflightTests(unittest.TestCase):
@@ -40,13 +73,31 @@ class SessionPreflightTests(unittest.TestCase):
                     "ImageOS": "macos15", "ImageVersion": "20260907.0337.1"}
         self.account = types.SimpleNamespace(pw_dir="/Users/runner", pw_name="runner")
 
-    def collect(self, overrides=None, *, profile_exists=False):
-        probes = FakeProbes(overrides)
+    def collect(self, overrides=None, *, profile_exists=False, probes=None):
+        probes = probes or FakeProbes(overrides)
         with patch.object(preflight.sys, "platform", "darwin"), \
              patch.object(preflight.os, "getuid", return_value=501), \
              patch.object(preflight.pwd, "getpwuid", return_value=self.account), \
              patch.object(Path, "exists", return_value=profile_exists):
             return preflight.collect(self.env, probes)
+
+    @patch.object(preflight.subprocess, "Popen")
+    def test_console_uid_after_512_characters_survives_real_probe_transport(self, popen):
+        self.assertGreater(LONG_CONSOLE_USER.index("  UID : 501"), 512)
+        outputs = ["Darwin", "15.7.9", "24G830", "arm64", "501",
+                   LONG_CONSOLE_USER, None, "155"] + [""] * 7
+        processes = []
+        for index, output in enumerate(outputs):
+            process = Mock(pid=1200 + index, returncode=0)
+            process.communicate.return_value = (output, None)
+            processes.append(process)
+        popen.side_effect = processes
+        result = self.collect(probes=preflight.Probes(self.env))
+        self.assertEqual("501", result["console"]["login_uid"])
+        self.assertEqual("runner", result["console"]["login_name"])
+        self.assertEqual("observed", result["session_prerequisites"])
+        self.assertEqual("blocked", result["status"])
+        self.assertNotIn("kCGSSession", json.dumps(result))
 
     def test_all_positive_prerequisites_never_mean_gui_or_updater_pass(self):
         result = self.collect()
@@ -94,6 +145,44 @@ class SessionPreflightTests(unittest.TestCase):
         self.assertFalse(self.collect(profile_exists=True)["prerequisites"]["default_profile_absent"])
         self.env["HOME"] = "/tmp/override"
         self.assertFalse(self.collect()["prerequisites"]["default_home_unchanged"])
+
+    def test_console_parser_ignores_nested_names_and_uids(self):
+        nested = "<dictionary> {\n  SessionInfo : <array> {\n    0 : <dictionary> {\n      Name : other\n      UID : 999\n    }\n  }\n"
+        result = self.collect({"console-login": nested + "  Name : runner\n  UID : 501\n}"})
+        self.assertIs(True, result["prerequisites"]["console_login_matches_runner"])
+        result = self.collect({"console-login": nested + "}"})
+        self.assertIsNone(result["prerequisites"]["console_login_matches_runner"])
+        self.assertEqual("missing-fields", result["console"]["login_evidence"])
+        self.assertIsNone(result["console"]["login_uid"])
+        self.assertIsNone(result["console"]["login_name"])
+
+    def test_console_parser_distinguishes_unknown_from_observed_mismatch(self):
+        unknown = [None, "", LONG_CONSOLE_USER[:512],
+                   LONG_CONSOLE_USER.replace("  UID : 501\n", ""),
+                   LONG_CONSOLE_USER.replace("  UID : 501", "  UID : malformed"),
+                   LONG_CONSOLE_USER.replace("  UID : 501", "  UID : 501\n  UID : 502"),
+                   LONG_CONSOLE_USER.replace("    }\n", "", 1),
+                   LONG_CONSOLE_USER + "\n<dictionary> {\n  UID : 501\n}",
+                   "x" * 65537]
+        for output in unknown:
+            with self.subTest(output_length=len(output or "")):
+                result = self.collect({"console-login": output})
+                self.assertIsNone(result["prerequisites"]["console_login_matches_runner"])
+                self.assertIn("Unknown prerequisite: console_login_matches_runner", result["blockers"])
+                self.assertEqual("incomplete", result["session_prerequisites"])
+                self.assertEqual("blocked", result["status"])
+        for output in [LONG_CONSOLE_USER.replace("  UID : 501\n", "  UID : 502\n"),
+                       LONG_CONSOLE_USER.replace("  Name : runner\n", "  Name : other\n")]:
+            result = self.collect({"console-login": output})
+            self.assertIs(False, result["prerequisites"]["console_login_matches_runner"])
+            self.assertEqual("parsed", result["console"]["login_evidence"])
+
+    def test_console_parser_limits_fields_and_does_not_retain_full_output(self):
+        parsed = preflight.parse_console_user(LONG_CONSOLE_USER)
+        self.assertEqual({"name": "runner", "uid": "501", "evidence": "parsed"}, parsed)
+        self.assertEqual("oversize-output", preflight.parse_console_user("x" * 65537)["evidence"])
+        self.assertEqual("invalid-output", preflight.parse_console_user(
+            LONG_CONSOLE_USER.replace("Name : runner", "Name : " + "x" * 129))["evidence"])
 
     @patch.object(preflight.subprocess, "Popen")
     def test_cli_retains_blocked_report_without_running_native_probes_locally(self, popen):

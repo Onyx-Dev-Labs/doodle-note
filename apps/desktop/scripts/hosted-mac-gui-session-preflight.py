@@ -25,6 +25,47 @@ LAUNCH_VARIABLES = (
 )
 
 
+def parse_console_user(stdout):
+    """Project SCPrint's root dictionary before truncation; never retain sessions.
+
+    Apple SCPrint indents each dictionary/array level by two spaces. Root Name
+    and UID are authoritative; nested session IDs/names must not substitute.
+    """
+    result = {"name": None, "uid": None, "evidence": "invalid-output"}
+    if len(stdout) > 65536:
+        return {**result, "evidence": "oversize-output"}
+    lines = stdout.strip().splitlines()
+    if not lines or lines[0] != "<dictionary> {" or lines[-1] != "}":
+        return result
+    depth = 1
+    fields = {}
+    for index, line in enumerate(lines[1:], start=1):
+        if line == " " * (2 * (depth - 1)) + "}":
+            depth -= 1
+            if depth == 0 and index != len(lines) - 1:
+                return result
+            continue
+        if depth < 1 or not line.startswith(" " * (2 * depth)):
+            return result
+        if depth == 1:
+            match = re.fullmatch(r"  (Name|UID) : (.*)", line)
+            if match:
+                if match[1] in fields:
+                    return result
+                fields[match[1]] = match[2]
+        if re.fullmatch(r" +\S+ : <(?:dictionary|array)> \{", line):
+            depth += 1
+    if depth != 0:
+        return result
+    name, uid = fields.get("Name"), fields.get("UID")
+    if name is not None and not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name):
+        return result
+    if uid is not None and (not re.fullmatch(r"[0-9]{1,10}", uid) or int(uid) > 4294967295):
+        return result
+    return {"name": name, "uid": uid,
+            "evidence": "parsed" if name is not None and uid is not None else "missing-fields"}
+
+
 class Probes:
     def __init__(self, env):
         self.events = []
@@ -32,7 +73,7 @@ class Probes:
         self.env = {key: env[key] for key in ("HOME", "TMPDIR") if key in env}
         self.env.update(PATH="/usr/bin:/bin:/usr/sbin:/sbin", LANG="C", LC_ALL="C")
 
-    def run(self, name, argv, *, stdin=None, discard=False):
+    def run(self, name, argv, *, stdin=None, discard=False, parse=None):
         event = {"name": name, "argv": argv, "pid": None, "exit_code": None,
                  "timed_out": False, "reaped": False}
         self.events.append(event)
@@ -54,7 +95,11 @@ class Probes:
                     event["error"] = "ProbeCouldNotBeReaped"
                     return None  # Job timeout is the outer bound; never wait indefinitely.
             event.update(exit_code=process.returncode, reaped=True)
-            return (stdout or "").strip()[:512] if event["exit_code"] == 0 and not event["timed_out"] else None
+            if event["exit_code"] != 0 or event["timed_out"]:
+                return None
+            # ConsoleUser needs its complete root fields, which can follow long
+            # SessionInfo arrays. Project to bounded fields before returning.
+            return parse(stdout or "") if parse else (stdout or "").strip()[:512]
         except OSError as error:
             event["error"] = type(error).__name__
             return None
@@ -64,7 +109,7 @@ class Probes:
 
 def collect(env, probes):
     report = {
-        "schema_version": 1, "scope": "hosted-session-prerequisites-only",
+        "schema_version": 2, "scope": "hosted-session-prerequisites-only",
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "status": "blocked", "exit_code": BLOCKED,
         "gui_availability": "unestablished", "actual_app": "unperformed",
@@ -97,18 +142,20 @@ def collect(env, probes):
                                 and bool(actual["build"]))
     uid = os.getuid()
     console_uid = probes.run("console-owner", ["/usr/bin/stat", "-f", "%u", "/dev/console"])
-    console = probes.run("console-login", ["/usr/sbin/scutil"], stdin="show State:/Users/ConsoleUser\n") or ""
-    login_uid = re.search(r"^\s*UID\s*:\s*(\d+)\s*$", console, re.MULTILINE)
-    login_name = re.search(r"^\s*Name\s*:\s*(\S+)\s*$", console, re.MULTILINE)
+    console = probes.run("console-login", ["/usr/sbin/scutil"],
+                         stdin="show State:/Users/ConsoleUser\n", parse=parse_console_user)
+    console = console or {"name": None, "uid": None, "evidence": "probe-failed"}
+    login_uid, login_name = console["uid"], console["name"]
     account = pwd.getpwuid(uid)
     report["console"] = {"probe_uid": uid, "owner_uid": console_uid,
-                         "login_uid": login_uid[1] if login_uid else None,
-                         "login_name": login_name[1] if login_name else None}
-    checks["console_login_matches_runner"] = (
-        uid > 0 and console_uid == str(uid) and login_uid is not None and login_uid[1] == str(uid)
-        and login_name is not None and login_name[1] == account.pw_name
-        and login_name[1] not in ("root", "loginwindow", "_mbsetupuser")
-    )
+                         "login_uid": login_uid, "login_name": login_name,
+                         "login_evidence": console["evidence"]}
+    checks["console_login_matches_runner"] = None  # Unknown is not an observed mismatch.
+    if console["evidence"] == "parsed" and re.fullmatch(r"[0-9]+", console_uid or ""):
+        checks["console_login_matches_runner"] = (
+            uid > 0 and console_uid == str(uid) and login_uid == str(uid)
+            and login_name == account.pw_name and login_name not in ("root", "loginwindow", "_mbsetupuser")
+        )
     # The domain dump can contain environment values. Never capture or retain it.
     checks["gui_bootstrap_exists"] = probes.run(
         "gui-bootstrap", ["/bin/launchctl", "print", f"gui/{uid}"], discard=True
@@ -135,7 +182,10 @@ def collect(env, probes):
     checks["default_home_unchanged"] = env.get("HOME") == str(home)
     checks["default_profile_absent"] = not report["default_profile"]["exists"]
     report["session_prerequisites"] = "observed" if all(checks.values()) else "incomplete"
-    report["blockers"].extend(f"Missing prerequisite: {name}" for name, passed in checks.items() if not passed)
+    report["blockers"].extend(
+        f"{'Unknown' if passed is None else 'Missing'} prerequisite: {name}"
+        for name, passed in checks.items() if not passed
+    )
     return report
 
 
