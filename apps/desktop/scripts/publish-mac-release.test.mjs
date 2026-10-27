@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { BLOB_BASE, PUBLIC_BASE, publishMacRelease } from './publish-mac-release.mjs'
 
 const version = '0.4.35'
@@ -414,7 +415,7 @@ test('CLI dry run needs no token, preserves candidate bytes, and rejects ambiguo
   const script = new URL('./publish-release.mjs', import.meta.url)
   const env = { PATH: process.env.PATH, HOME: f.dir }
   const run = (args) =>
-    spawnSync(process.execPath, [script.pathname, ...args], { env, encoding: 'utf8' })
+    spawnSync(process.execPath, [fileURLToPath(script), ...args], { env, encoding: 'utf8' })
   const result = run(['--mac', '--source-sha', sourceSha, '--release-dir', f.dir, '--dry-run'])
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stdout, /Local validation only/)
@@ -653,7 +654,7 @@ for (const mode of ['active', 'retry-delay']) {
     const result = spawnSync(
       process.execPath,
       [
-        new URL('./publish-blob-deadline-probe.mjs', import.meta.url).pathname,
+        fileURLToPath(new URL('./publish-blob-deadline-probe.mjs', import.meta.url)),
         mode,
         path.join(f.dir, zip)
       ],
