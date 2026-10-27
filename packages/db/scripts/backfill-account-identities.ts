@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createRemoteJWKSet,
   decodeJwt,
@@ -6,7 +8,7 @@ import {
   type JWTPayload,
 } from "jose";
 
-import { account, eq, getDb } from "../src/index";
+import { account, eq, getDb, sql, type Db } from "../src/index";
 import {
   googleIdentityFromClaims,
   microsoftIdentityFromClaims,
@@ -15,9 +17,11 @@ import {
 } from "../src/account-identity";
 
 /**
- * Better Auth 1.7 account-identity backfill.
+ * HISTORICAL Better Auth 1.7.0–1.7.2 account-identity backfill.
+ * Not the 1.7.7 provider/account duplicate preflight. See
+ * apps/web/docs/better-auth-upgrade.md before any historical use.
  *
- * Run without flags first. `--apply` writes only after every account verifies
+ * On the historical required-issuer schema only, run without flags first. `--apply` writes only after every account verifies
  * and the complete future identity set is collision-free. The legacy
  * provenance flag is intentionally opt-in for ID tokens whose signing keys
  * have retired: it still requires the stored token's algorithm, audience,
@@ -143,8 +147,16 @@ async function verifiedIdentity(
   throw new Error(`Unsupported OAuth provider: ${providerId}`);
 }
 
-async function main() {
-  const db = getDb();
+export async function backfillAccountIdentities(db: Db = getDb()) {
+  // Read-only schema gate BEFORE account reads, provider verification or writes.
+  // Null issuer is normal after 0017, not evidence that identities need repair.
+  const schema = await db.execute(sql`
+    SELECT is_nullable FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'account' AND column_name = 'issuer'
+  `);
+  if (schema.rows.length !== 1 || schema.rows[0]?.is_nullable !== "NO") {
+    throw new Error("Historical issuer backfill is disabled on this schema; follow the Better Auth upgrade runbook");
+  }
   const rows = await db
     .select({
       id: account.id,
@@ -217,9 +229,11 @@ async function main() {
   );
 }
 
-main().catch((error: unknown) => {
-  console.error(
-    error instanceof Error ? error.message : "Identity backfill failed",
-  );
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  backfillAccountIdentities().catch((error: unknown) => {
+    console.error(
+      error instanceof Error ? error.message : "Identity backfill failed",
+    );
+    process.exitCode = 1;
+  });
+}

@@ -65,7 +65,8 @@ export const account = pgTable(
     accessTokenExpiresAt: timestamp("access_token_expires_at"),
     refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
     scope: text("scope"),
-    issuer: text("issuer").notNull(),
+    // Retained legacy data from Better Auth 1.7.0–1.7.2; 1.7.7 never writes it.
+    issuer: text("issuer"),
     password: text("password"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
@@ -74,10 +75,6 @@ export const account = pgTable(
   },
   (table) => [
     index("account_userId_idx").on(table.userId),
-    uniqueIndex("account_issuer_accountId_uidx").on(
-      table.issuer,
-      table.accountId,
-    ),
   ],
 );
 

@@ -12,10 +12,12 @@
 
 // Must be set before lib/create-auth is imported (hence the dynamic imports
 // in main) so the smoke run doesn't trip the dev-only-secret warning.
-process.env.BETTER_AUTH_SECRET ??= "gV3qLZ0e8kXnR5tYwB7uJ2mCa9PdF4hSiK6oQ1rTxE0="; // smoke-only
-process.env.BETTER_AUTH_URL ??= "http://localhost:4040";
-process.env.RESEND_API_KEY ??= "re_smoke_only";
-process.env.AUTH_FROM_EMAIL ??= "DoodleNote <no-reply@doodlenote.ai>";
+process.env.BETTER_AUTH_SECRET = "gV3qLZ0e8kXnR5tYwB7uJ2mCa9PdF4hSiK6oQ1rTxE0="; // smoke-only
+process.env.BETTER_AUTH_URL = "http://localhost:4040";
+process.env.RESEND_API_KEY = "re_smoke_only";
+process.env.AUTH_FROM_EMAIL = "DoodleNote <no-reply@doodlenote.ai>";
+
+for (const name of ["DATABASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET", "VERCEL_URL"]) delete process.env[name];
 
 let verificationUrl: string | null = null;
 let verificationHtml: string | null = null;
@@ -35,7 +37,7 @@ globalThis.fetch = async (input, init) => {
       typeof payload.html === "string" ? payload.html : null;
     return Response.json({ id: "smoke-email" });
   }
-  return realFetch(input, init);
+  throw new Error("Unexpected outbound request denied by auth smoke");
 };
 
 function assert(condition: unknown, message: string): asserts condition {
