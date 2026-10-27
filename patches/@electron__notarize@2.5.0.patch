@@ -1,0 +1,54 @@
+diff --git a/lib/index.js b/lib/index.js
+index 53ba7b5f31ce3d4a5569212083ae1e4fd773192f..a2b73c2b1d65f0f881f3a09d697e8e8a5c065f84 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -25,7 +25,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.notarize = exports.validateAuthorizationArgs = void 0;
+ const debug_1 = __importDefault(require("debug"));
+-const promise_retry_1 = __importDefault(require("promise-retry"));
+ const check_signature_1 = require("./check-signature");
+ const notarytool_1 = require("./notarytool");
+ const staple_1 = require("./staple");
+@@ -44,9 +43,8 @@ function notarize(_a) {
+             throw new Error('notarytool is not available, you must be on at least Xcode 13 or provide notarytoolPath');
+         }
+         yield (0, notarytool_1.notarizeAndWaitForNotaryTool)(Object.assign({ appPath }, otherOptions));
+-        yield (0, promise_retry_1.default)(() => (0, staple_1.stapleApp)({ appPath }), {
+-            retries: 3,
+-        });
++        // stapleApp owns the bounded retry; never repeat notarization submission.
++        yield (0, staple_1.stapleApp)({ appPath });
+     });
+ }
+ exports.notarize = notarize;
+diff --git a/lib/staple.js b/lib/staple.js
+index 47dbd85b2fc279d999b57f47fb8171e1cc674436..935e0db45fb25c450aa8b659769434f7d21ae9e2 100644
+--- a/lib/staple.js
++++ b/lib/staple.js
+@@ -38,16 +38,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.stapleApp = void 0;
+ const debug_1 = __importDefault(require("debug"));
+ const path = __importStar(require("path"));
+-const spawn_1 = require("./spawn");
+ const d = (0, debug_1.default)('electron-notarize:staple');
+ function stapleApp(opts) {
+     return __awaiter(this, void 0, void 0, function* () {
+-        d('attempting to staple app:', opts.appPath);
+-        const result = yield (0, spawn_1.spawn)('xcrun', ['stapler', 'staple', '-v', path.basename(opts.appPath)], {
+-            cwd: path.dirname(opts.appPath),
+-        });
++        // Repository-owned retry policy. Missing configuration must never fall back
++        // to an unbounded or differently classified subprocess implementation.
++        const helper = process.env.DOODLENOTE_STAPLER_HELPER;
++        if (!helper || !path.isAbsolute(helper)) {
++            throw new Error('DOODLENOTE_STAPLER_HELPER must name an absolute helper path');
++        }
++        const { runStapler } = require(helper);
++        const result = yield runStapler({ action: 'staple', role: 'package-app', artifact: path.resolve(opts.appPath) });
+         if (result.code !== 0) {
+-            throw new Error(`Failed to staple your application with code: ${result.code}\n\n${result.output}`);
++            throw new Error(`Application staple failed: ${result.reason}`);
+         }
+         d('staple succeeded');
+         return;

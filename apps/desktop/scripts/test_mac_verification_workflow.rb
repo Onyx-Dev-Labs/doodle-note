@@ -45,3 +45,52 @@ class MacVerificationWorkflowTest < Minitest::Test
     assert_equal 14, upload.fetch('with').fetch('retention-days')
   end
 end
+
+class CandidateStaplerWorkflowTest < Minitest::Test
+  def setup
+    @workflow = YAML.safe_load(File.read(File.expand_path('../../../.github/workflows/mac-release.yml', __dir__)))
+    @release = @workflow.fetch('jobs').fetch('release')
+    @steps = @release.fetch('steps')
+  end
+
+  def test_candidate_evidence_is_always_bounded_and_success_artifacts_still_gated
+    collect = @steps.find { |s| s['id'] == 'diagnostics' }
+    refute_nil collect
+    assert_equal 'always()', collect.fetch('if')
+    upload = @steps.find { |s| s['name'] == 'Retain candidate diagnostics' }
+    assert_equal 'always()', upload.fetch('if')
+    assert_equal 3, upload.fetch('with').fetch('retention-days')
+    paths = upload.fetch('with').fetch('path').lines.map(&:strip)
+    assert_equal ['${{ runner.temp }}/mac-release-diagnostics/summary.json',
+                  '${{ runner.temp }}/mac-release-diagnostics/notary-dmg.json',
+                  '${{ runner.temp }}/mac-release-diagnostics/staple-*.json',
+                  '${{ runner.temp }}/mac-release-diagnostics/validate-*.json'], paths
+    candidate = @steps.find { |s| s.dig('with', 'name') == 'doodlenote-mac-${{ github.sha }}' }
+    assert_equal 'success()', candidate.fetch('if')
+    assert_operator @steps.index(candidate), :>, @steps.index(@steps.find { |s| s['id'] == 'verify' })
+    refute_match(/continue-on-error/, @release.to_s)
+    %w[tooling credentials node pnpm dependencies swift whisper brand package dmg verify candidate].each do |id|
+      assert @steps.any? { |s| s['id'] == id }, id
+      assert_includes collect.fetch('env').to_s, "steps.#{id}.outcome"
+    end
+  end
+
+  def test_all_stapler_sites_use_one_helper_after_submission_and_before_receipt
+    assert_includes @release.fetch('env').fetch('DOODLENOTE_STAPLER_HELPER'), '/apps/desktop/scripts/stapler.cjs'
+    dmg = @steps.find { |s| s['id'] == 'dmg' }.fetch('run')
+    assert_includes dmg, 'set -euo pipefail'
+    assert_operator dmg.index('notarytool submit'), :<, dmg.index('stapler.cjs')
+    assert_includes dmg, 'mac-release-diagnostics.cjs accepted'
+    refute_match(/xcrun stapler/, @release.to_s)
+    verifier = File.read(File.join(__dir__, 'verify-mac-release.sh'))
+    refute_match(/xcrun stapler/, verifier)
+    assert_includes verifier, 'stapler.cjs" validate "$2" "$bundle"'
+    assert_includes verifier, 'stapler.cjs" validate dmg "$dmg"'
+    %w[build-app zip-app dmg-app].each { |role| assert_includes verifier, role }
+    assert_operator verifier.index('mac-release-manifest.rb'), :<, verifier.index('> "$release_dir/release-receipt.txt"')
+    assert_equal 2, verifier.scan('diff -qr').length
+    assert_includes verifier, 'codesign --verify --deep --strict'
+    assert_includes verifier, 'spctl --assess --type execute'
+    assert_includes verifier, 'TeamIdentifier=$expected_team'
+  end
+end

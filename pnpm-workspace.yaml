@@ -54,3 +54,6 @@ supportedArchitectures:
     - darwin
     - win32
     - linux
+
+patchedDependencies:
+  "@electron/notarize@2.5.0": patches/@electron__notarize@2.5.0.patch
