@@ -1,6 +1,6 @@
 # Releasing DoodleNote
 
-This guide records the current release process without changing it. It is a
+This guide records the current release process. It is a
 maintainer checklist, not proof that any particular release has completed.
 Publishing a release, uploading artifacts, changing a production updater feed,
 or making any other production mutation requires explicit authorization for
@@ -109,19 +109,19 @@ and retain the exact candidate artifacts before retention expires; use those
 same bytes for publication after QA. Rebuilding produces a new candidate that
 must be verified again.
 
-The local maintainer command below also packages and publishes. Do not run it
-without explicit release authorization and the required signing and publication
-credentials:
+Use [receipt-bound Mac publication](qa/mac-publisher.md) to promote the retained
+candidate. Start with `publish-release.mjs --mac --source-sha <candidate SHA>
+--release-dir <payload directory> --dry-run`. Authorized live execution without
+`--dry-run` uploads/verifies immutable payloads only. Explicit `--activate
+--rollback-dir <evidence directory>` gates Blob manifest activation and local
+static-manifest staging on payload verification. Review/deploy the staged web
+manifest separately. The candidate workflow does not require a Blob upload token.
 
-```sh
-cd apps/desktop
-pnpm release
-```
-
-The local `pnpm release` command rebuilds artifacts and is not a promotion
-command for an already tested Actions candidate. Publication of that candidate
-must upload its retained artifacts, then stage the matching manifest through
-normal review. The candidate workflow does not require a Blob upload token.
+The old `pnpm release` rebuild-and-publish shortcut is no longer supported: its
+publisher invocation lacks the required receipt source SHA. Do not use it for
+promotion. Local packaging must complete notarization, stapling and
+`verify-mac-release.sh`, then follow the same receipt-bound process. See the
+publication guide for CLI migration, recovery and the unchanged Windows path.
 
 ### macOS checklist
 

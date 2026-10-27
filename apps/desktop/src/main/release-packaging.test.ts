@@ -74,7 +74,7 @@ test('macOS builds a DMG for website installs while retaining the ZIP updater', 
     /artifactName:\s*\$\{productName\}-\$\{version\}-\$\{arch\}\.\$\{ext\}/
   )
   assert.match(builderConfig, /path:\s*\/Applications/)
-  assert.match(publishScript, /name\.endsWith\('\.dmg'\)/)
+  assert.match(publishScript, /publishMacRelease/)
   assert.match(publishScript, /flags\.includes\('--dmg-only'\)/)
 })
 
