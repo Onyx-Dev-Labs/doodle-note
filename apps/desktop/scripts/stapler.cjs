@@ -13,7 +13,9 @@ const POLICY = Object.freeze({
   attempts: 3,
   delaysMs: Object.freeze([10000, 30000]),
   timeoutMs: 60000,
-  totalMs: 219000
+  // Stop at 219s; independent cleanup gets 500ms, leaving 500ms to finalize.
+  totalMs: 219000,
+  cleanupMs: 500
 })
 
 function evidence(output) {
@@ -52,11 +54,12 @@ function classify(result) {
 }
 
 function killGroup(child) {
-  if (!child?.pid) return
+  if (!child?.pid) return 'not-started'
   try {
     process.kill(-child.pid, 'SIGKILL')
+    return 'sent'
   } catch (error) {
-    if (error.code !== 'ESRCH') throw error
+    return error.code === 'ESRCH' ? 'not-found' : 'failed'
   }
 }
 
@@ -77,6 +80,7 @@ async function runStapler(
   const delaysMs = testing.delaysMs ?? POLICY.delaysMs
   const timeoutMs = testing.timeoutMs ?? POLICY.timeoutMs
   const totalMs = testing.totalMs ?? POLICY.totalMs
+  const cleanupMs = testing.cleanupMs ?? POLICY.cleanupMs
   if (
     delaysMs.length !== 2 ||
     delaysMs.some((n, i) => !Number.isFinite(n) || n < 0 || n > POLICY.delaysMs[i]) ||
@@ -85,7 +89,10 @@ async function runStapler(
     timeoutMs > POLICY.timeoutMs ||
     !Number.isFinite(totalMs) ||
     totalMs <= 0 ||
-    totalMs > POLICY.totalMs
+    totalMs > POLICY.totalMs ||
+    !Number.isFinite(cleanupMs) ||
+    cleanupMs <= 0 ||
+    cleanupMs > POLICY.cleanupMs
   ) {
     throw new Error('Invalid stapler timing configuration')
   }
@@ -116,9 +123,10 @@ async function runStapler(
   let child
   let stopReason
   let wake
+  let stopAttempt
   const stop = (reason) => {
     stopReason ??= reason
-    killGroup(child)
+    stopAttempt?.(reason)
     wake?.()
   }
   const listeners = ['SIGINT', 'SIGTERM', 'SIGHUP'].map((signal) => {
@@ -135,49 +143,117 @@ async function runStapler(
         const chunks = []
         let bytes = 0
         let reason
-        let timer
-        child = spawn(testing.executable ?? 'xcrun', ['stapler', action, '-v', artifact], {
-          detached: true,
-          stdio: ['ignore', 'pipe', 'pipe']
-        })
+        let firstFailure
+        let cleanupTimer
+        let groupSignal
+        let settled = false
+        let childExitObserved = false
+        let exitCode = null
+        let exitSignal = null
+        const ownedChild = spawn(
+          testing.executable ?? 'xcrun',
+          ['stapler', action, '-v', artifact],
+          {
+            detached: true,
+            stdio: ['ignore', 'pipe', 'pipe']
+          }
+        )
+        child = ownedChild
+        const finalize = (forced = false) => {
+          if (settled) return
+          // Read EOF facts before destroying streams: a resulting close event is
+          // not evidence of natural drainage or of an escaped descendant's exit.
+          const stdoutDrained = ownedChild.stdout.readableEnded
+          const stderrDrained = ownedChild.stderr.readableEnded
+          const unconfirmed =
+            forced ||
+            groupSignal === 'failed' ||
+            (Boolean(ownedChild.pid) && (!childExitObserved || !stdoutDrained || !stderrDrained))
+          settled = true
+          clearTimeout(timer)
+          clearTimeout(cleanupTimer)
+          stopAttempt = undefined
+          ownedChild.stdout.removeListener('data', capture)
+          ownedChild.stderr.removeListener('data', capture)
+          ownedChild.removeListener('exit', onExit)
+          ownedChild.removeListener('close', onClose)
+          if (unconfirmed) {
+            ownedChild.stdout.destroy()
+            ownedChild.stderr.destroy()
+            ownedChild.unref()
+          }
+          child = undefined
+          const output = Buffer.concat(chunks).toString('utf8')
+          const diagnostics = evidence(output)
+          const failureReason =
+            firstFailure === 'child-exit'
+              ? classify({ code: exitCode, signal: exitSignal, diagnostics })
+              : (firstFailure ?? null)
+          chunks.length = 0
+          resolve({
+            code: exitCode,
+            signal: exitSignal,
+            reason: unconfirmed ? 'cleanup-unconfirmed' : reason,
+            failureReason: unconfirmed ? failureReason : null,
+            cleanup: {
+              groupSignal,
+              childExitObserved,
+              stdoutDrained,
+              stderrDrained,
+              forcedReadClose: unconfirmed
+            },
+            diagnostics,
+            capturedBytes: Math.min(bytes, OUTPUT_LIMIT)
+          })
+        }
+        const beginCleanup = (cause) => {
+          if (settled) return
+          // Preserve the first meaningful failure even if a later deadline fires.
+          reason ??= cause
+          firstFailure ??= cause
+          // One exact-group SIGKILL attempt; repeated signals after exit can
+          // race group teardown. A signal error is evidence, never confirmation.
+          groupSignal ??= killGroup(ownedChild)
+          cleanupTimer ??= setTimeout(() => finalize(true), cleanupMs)
+        }
+        stopAttempt = beginCleanup
         const capture = (chunk) => {
           const available = OUTPUT_LIMIT - bytes
           chunks.push(chunk.subarray(0, Math.max(0, available)))
           bytes += chunk.length
           if (bytes > OUTPUT_LIMIT) {
-            reason = 'output-limit'
             // Stop collecting immediately; no unbounded array of empty chunks.
-            child.stdout.removeListener('data', capture)
-            child.stderr.removeListener('data', capture)
-            child.stdout.resume()
-            child.stderr.resume()
-            killGroup(child)
+            ownedChild.stdout.removeListener('data', capture)
+            ownedChild.stderr.removeListener('data', capture)
+            ownedChild.stdout.resume()
+            ownedChild.stderr.resume()
+            beginCleanup('output-limit')
           }
         }
-        child.stdout.on('data', capture)
-        child.stderr.on('data', capture)
-        child.once('error', () => {
-          reason = 'spawn-error'
-        })
-        // A child may exit while a descendant still owns its pipes. Kill the group
-        // on exit as well as on timeout/cancel, and wait for close to drain pipes.
-        child.once('exit', () => killGroup(child))
-        timer = setTimeout(() => {
-          reason = 'timeout'
-          killGroup(child)
-        }, timeoutMs)
-        child.once('close', (code, signal) => {
+        const onExit = (code, signal) => {
+          childExitObserved = true
+          exitCode = code
+          exitSignal = signal
           clearTimeout(timer)
-          child = undefined
-          const output = Buffer.concat(chunks).toString('utf8')
-          resolve({
-            code,
-            signal,
-            reason: stopReason ?? reason,
-            diagnostics: evidence(output),
-            capturedBytes: Math.min(bytes, OUTPUT_LIMIT)
-          })
+          // Classify output only after drainage; exit may precede buffered data.
+          if (code !== 0) firstFailure ??= 'child-exit'
+          beginCleanup(undefined)
+        }
+        const onClose = (code, signal) => {
+          exitCode = code
+          exitSignal = signal
+          finalize()
+        }
+        ownedChild.stdout.on('data', capture)
+        ownedChild.stderr.on('data', capture)
+        // Keep an inert error listener after forced completion so a late spawn
+        // error cannot become uncaught; it cannot mutate a completed result.
+        ownedChild.on('error', () => {
+          if (!settled) beginCleanup('spawn-error')
         })
+        ownedChild.once('exit', onExit)
+        ownedChild.once('close', onClose)
+        const timer = setTimeout(() => beginCleanup('timeout'), timeoutMs)
       })
       const reason = classify(result)
       const retry = reason === 'ticket-connection-lost' && attempt < POLICY.attempts && !stopReason
@@ -190,6 +266,8 @@ async function runStapler(
         exit: result.code,
         signal: result.signal,
         reason,
+        failureReason: result.failureReason,
+        cleanup: result.cleanup,
         retry,
         delayMs: retry ? delaysMs[attempt - 1] : 0,
         capturedBytes: result.capturedBytes,
