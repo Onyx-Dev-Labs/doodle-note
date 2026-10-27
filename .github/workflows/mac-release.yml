@@ -44,14 +44,15 @@ jobs:
     timeout-minutes: 90
     env:
       DOODLENOTE_STAPLER_HELPER: ${{ github.workspace }}/apps/desktop/scripts/stapler.cjs
-      DOODLENOTE_STAPLER_DIAGNOSTICS: ${{ runner.temp }}/mac-release-diagnostics
     steps:
       - id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Test release tooling
+      - name: Initialize diagnostics and test release tooling
         id: tooling
         run: |
+          set -euo pipefail
+          printf 'DOODLENOTE_STAPLER_DIAGNOSTICS=%s/mac-release-diagnostics\n' "${RUNNER_TEMP:?}" >> "${GITHUB_ENV:?}"
           python3 -m unittest discover -s apps/desktop/scripts -p 'test_mac_release_secrets.py'
           ruby apps/desktop/scripts/test_mac_release_manifest.rb
           ruby apps/desktop/scripts/test_mac_verification_workflow.rb
