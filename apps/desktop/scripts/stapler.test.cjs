@@ -5,25 +5,41 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const childSource = path.join(__dirname, 'fixtures/stapler-child.cjs')
+const harnessSource = path.join(__dirname, 'fixtures/stapler-harness.cjs')
 
 const transient =
   'Response is (null)\nerror is Error Domain=NSURLErrorDomain Code=-1005 "The network connection was lost." UserInfo={NSErrorFailingURLStringKey=https://api.apple-cloudkit.com/database/1/com.apple.gk.ticket-delivery/production/public/records/lookup}\n'
-function fixture(t, responses) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stapler-test-'))
+function fixture(t, responses, prefix = 'stapler-test-') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const calls = path.join(dir, 'calls.jsonl')
   const executable = path.join(dir, 'xcrun')
+  // The only generated line selects this running Node executable for the native
+  // shebang. No test data is inserted into the static JavaScript body.
   fs.writeFileSync(
     executable,
-    `#!${process.execPath}\nconst fs=require('node:fs');\nconst file=${JSON.stringify(calls)};\nconst n=fs.existsSync(file)?fs.readFileSync(file,'utf8').trim().split('\\n').length:0;\nfs.appendFileSync(file,JSON.stringify(process.argv.slice(2))+'\\n');\nconst r=${JSON.stringify(responses)}[n] || {code:99};\nprocess.stdout.write(r.output || '',()=>process.exit(r.code));\n`,
-    { mode: 0o755 }
+    '#!' + process.execPath + '\n' + fs.readFileSync(childSource, 'utf8'),
+    {
+      mode: 0o755
+    }
   )
+  const configure = (config) =>
+    fs.writeFileSync(path.join(dir, 'fixture.json'), JSON.stringify({ calls, ...config }))
+  configure({ kind: 'responses', responses })
   return {
     dir,
     calls,
     executable,
+    configure,
     invocations: () =>
-      fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse) : []
+      fs.existsSync(calls)
+        ? fs
+            .readFileSync(calls, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line))
+        : []
   }
 }
 
@@ -144,10 +160,7 @@ for (const mode of ['timeout', 'cancelled', 'signal', 'total-timeout']) {
   test(mode + ' drains and kills owned subprocess descendants without retry', async (t) => {
     const f = fixture(t, [])
     const pidFile = path.join(f.dir, 'pid')
-    fs.writeFileSync(
-      f.executable,
-      `#!${process.execPath}\nconst {spawn}=require('node:child_process');\nconst fs=require('node:fs');\nconst child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});\nfs.writeFileSync(${JSON.stringify(pidFile)},String(child.pid));\nprocess.stdout.write(${JSON.stringify(transient)});\n${mode === 'signal' ? "setTimeout(()=>process.kill(process.pid,'SIGTERM'),30);" : 'setInterval(()=>{},1000);'}\n`
-    )
+    f.configure({ kind: 'same-group', mode, pidFile, output: transient })
     let cancellation
     if (mode === 'cancelled')
       cancellation = setInterval(() => {
@@ -211,7 +224,7 @@ for (const interruption of ['cancelled', 'total-timeout']) {
     interruption + ' during backoff releases timers without touching an unrelated process',
     async (t) => {
       const { spawn } = require('node:child_process')
-      const sentinel = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      const sentinel = spawn(process.execPath, [childSource, '--idle'], {
         stdio: 'ignore'
       })
       t.after(async () => {
@@ -236,7 +249,7 @@ for (const interruption of ['cancelled', 'total-timeout']) {
       assert.equal(f.invocations().length, 1)
       assert.equal(result.attempts[0].reason, 'ticket-connection-lost')
       assert.equal(
-        JSON.parse(fs.readFileSync(path.join(f.dir, 'staple-dmg-result.json'))).reason,
+        JSON.parse(fs.readFileSync(path.join(f.dir, 'staple-dmg-result.json'), 'utf8')).reason,
         interruption
       )
       assert.doesNotThrow(() => process.kill(sentinel.pid, 0))
@@ -254,39 +267,25 @@ for (const mode of [
 ]) {
   test('escaped retained pipes finalize as cleanup-unconfirmed: ' + mode, async (t) => {
     const { spawnSync } = require('node:child_process')
-    const f = fixture(t, [])
+    // Quotes, backticks, a JS-shaped fragment and a Unicode line separator
+    // remain literal path data through both JSON and argv subprocess seams.
+    const f = fixture(t, [], 'stapler-test-\'"` ;process.exit(77); \u2028-')
     const pidFile = path.join(f.dir, 'escaped.pid')
     const resultFile = path.join(f.dir, 'result.json')
-    fs.writeFileSync(
-      f.executable,
-      `#!${process.execPath}
-const {spawn}=require('node:child_process'),fs=require('node:fs');
-fs.appendFileSync(${JSON.stringify(f.calls)},JSON.stringify(process.argv.slice(2))+'\\n');
-const escaped=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore',process.stdout,process.stderr]});
-fs.writeFileSync(${JSON.stringify(pidFile)},String(escaped.pid));
-escaped.unref();
-${mode === 'transient-exit' ? `process.stdout.write(${JSON.stringify(transient)},()=>process.exit(68));` : mode === 'exit-zero' ? 'process.exit(0);' : 'setInterval(()=>{},1000);'}
-`
-    )
+    f.configure({ kind: 'escaped', mode, pidFile, output: transient })
     // An independent harness timeout makes a regression fail without hanging the
     // suite. Only the test knows/cleans this escaped PID; the helper must not.
     let escapedPid
     try {
-      const script = `
-const fs=require('node:fs');
-const {runStapler}=require(${JSON.stringify(path.join(__dirname, 'stapler.cjs'))});
-const start=performance.now();
-let cancellation;
-if (${JSON.stringify(mode)} === 'cancelled') cancellation=setInterval(()=>{if(fs.existsSync(${JSON.stringify(pidFile)})){clearInterval(cancellation);process.kill(process.pid,'SIGTERM');}},5);
-runStapler({action:'validate',role:'dmg',artifact:'/same.dmg',diagnosticsDir:${JSON.stringify(f.dir)}},
-{executable:${JSON.stringify(f.executable)},timeoutMs:${['timeout', 'timeout-before-total'].includes(mode) ? 800 : 5000},totalMs:${mode === 'total-timeout' ? 800 : mode === 'timeout-before-total' ? 850 : 6000},cleanupMs:150,delaysMs:[1,1],log(){}})
-.then(result=>{clearInterval(cancellation);fs.writeFileSync(${JSON.stringify(resultFile)},JSON.stringify({result,elapsedMs:performance.now()-start}));});
-`
-      const harness = spawnSync(process.execPath, ['-e', script], {
-        encoding: 'utf8',
-        timeout: 2500,
-        killSignal: 'SIGKILL'
-      })
+      const harness = spawnSync(
+        process.execPath,
+        [harnessSource, mode, pidFile, f.dir, f.executable, resultFile],
+        {
+          encoding: 'utf8',
+          timeout: 2500,
+          killSignal: 'SIGKILL'
+        }
+      )
       escapedPid = Number(fs.readFileSync(pidFile, 'utf8'))
       assert.equal(
         harness.error,
@@ -294,7 +293,7 @@ runStapler({action:'validate',role:'dmg',artifact:'/same.dmg',diagnosticsDir:${J
         'helper must release timers/handles and exit before harness timeout'
       )
       assert.equal(harness.status, 0, harness.stderr)
-      const { result, elapsedMs } = JSON.parse(fs.readFileSync(resultFile))
+      const { result, elapsedMs } = JSON.parse(fs.readFileSync(resultFile, 'utf8'))
       assert.equal(result.code, 1)
       assert.equal(result.reason, 'cleanup-unconfirmed')
       assert.equal(result.attempts.length, 1)
@@ -318,7 +317,7 @@ runStapler({action:'validate',role:'dmg',artifact:'/same.dmg',diagnosticsDir:${J
       if (mode === 'exit-zero') assert.equal(record.exit, 0)
       assert.ok(elapsedMs < 1600, `short-clock completion took ${elapsedMs}ms`)
       assert.equal(
-        JSON.parse(fs.readFileSync(path.join(f.dir, 'validate-dmg-result.json'))).reason,
+        JSON.parse(fs.readFileSync(path.join(f.dir, 'validate-dmg-result.json'), 'utf8')).reason,
         'cleanup-unconfirmed'
       )
       assert.doesNotThrow(
