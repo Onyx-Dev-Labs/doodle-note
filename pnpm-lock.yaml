@@ -42,7 +42,7 @@ importers:
         version: 7.1.0
       '@electron-toolkit/utils':
         specifier: ^4.0.0
-        version: 4.0.0(electron@44.0.0)
+        version: 4.0.0(electron@44.10.0)
       '@repo/agent-contract':
         specifier: workspace:*
         version: link:../../packages/agent-contract
@@ -108,8 +108,8 @@ importers:
         specifier: ^5.1.1
         version: 5.2.0(vite@7.3.6(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.0))
       electron:
-        specifier: ^44.0.0
-        version: 44.0.0
+        specifier: 44.10.0
+        version: 44.10.0
       electron-builder:
         specifier: ^26.0.0
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
@@ -2951,8 +2951,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@44.0.0:
-    resolution: {integrity: sha512-FkTqPrFPZYljdPI5b7KORGsJTd6FgUQDefl5MrU3Xz9R87pAj9JLreIjDqcRN8hJIkFHIou0o8kKzvcpT9qiRQ==}
+  electron@44.10.0:
+    resolution: {integrity: sha512-ss4pCfrQKV4TWkuVYtWB4HmeysPZgB96cSYNKYZv1UVCRP4vQMGNW5oopFbvx6Bbfce1XtP5pm5RDuKehp0svQ==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -5624,9 +5624,9 @@ snapshots:
     dependencies:
       '@types/node': 22.20.0
 
-  '@electron-toolkit/utils@4.0.0(electron@44.0.0)':
+  '@electron-toolkit/utils@4.0.0(electron@44.10.0)':
     dependencies:
-      electron: 44.0.0
+      electron: 44.10.0
 
   '@electron/asar@3.4.1':
     dependencies:
@@ -7684,7 +7684,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@44.0.0:
+  electron@44.10.0:
     dependencies:
       '@electron-internal/extract-zip': 1.0.4
       '@electron/get': 5.0.0
