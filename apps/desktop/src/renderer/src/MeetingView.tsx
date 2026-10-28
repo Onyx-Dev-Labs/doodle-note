@@ -1,4 +1,5 @@
 import RecipePanel from './RecipePanel'
+import { watchMeetingAudio } from './lib/meeting-audio'
 import { invalidateRecipeRun } from './lib/recipe-run'
 import { TranscriptSplit } from './TranscriptSplit'
 import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
@@ -738,32 +739,18 @@ export default function MeetingView({
 
   /* ---- saved audio (local recordings; playback + transcript seek) ---- */
 
-  useEffect(() => {
-    let cancelled = false
-    const refresh = (): void => {
-      window.audio
-        .list(meetingId)
-        .then((parts) => {
-          if (cancelled) return
-          setAudioParts(parts)
-          // Freshly (re)opened meeting: align the meeting clock with what's
-          // already recorded, so a Resume continues rather than restarts.
-          if (!ACTIVE_PHASES.includes(stateRef.current.phase)) {
-            elapsedBaseRef.current = parts.reduce((sum, p) => sum + p.durationMs, 0) / 1000
-          }
-        })
-        .catch(() => {})
-    }
-    refresh()
-    // The engine reports "audio" once a stopped session's recording merged.
-    const unsubscribe = window.engine.onEvent((ev) => {
-      if (ev.event === 'audio') refresh()
-    })
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [meetingId])
+  useEffect(
+    () =>
+      watchMeetingAudio(meetingId, window.audio, window.engine, (parts) => {
+        setAudioParts(parts)
+        // Freshly (re)opened meeting: align the meeting clock with what's
+        // already recorded, so a Resume continues rather than restarts.
+        if (!ACTIVE_PHASES.includes(stateRef.current.phase)) {
+          elapsedBaseRef.current = parts.reduce((sum, p) => sum + p.durationMs, 0) / 1000
+        }
+      }),
+    [meetingId]
+  )
 
   // Load the active part into a blob URL (see playerSrc for why). Bytes
   // arrive over IPC — custom-protocol fetch is CORS-blocked from the app

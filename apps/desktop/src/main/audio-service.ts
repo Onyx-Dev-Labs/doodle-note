@@ -14,6 +14,7 @@ import {
 import { join } from 'node:path'
 import { protocol } from 'electron'
 import {
+  AUDIO_CHANGED_CHANNEL,
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
   AUDIO_LIST_CHANNEL,
@@ -66,7 +67,8 @@ export class AudioService {
   constructor(
     private readonly baseDirSource: LibraryPath,
     private readonly engineBinary: string,
-    private readonly assertAvailable: () => void = () => {}
+    private readonly assertAvailable: () => void = () => {},
+    private readonly broadcast: (channel: string, payload: unknown) => void = () => {}
   ) {}
 
   registerIpc(): void {
@@ -323,10 +325,11 @@ export class AudioService {
    */
   async recoverOrphans(): Promise<void> {
     this.assertAvailable()
-    const orphans: string[] = []
+    const baseDir = this.baseDir
+    const orphans: Array<{ dir: string; meetingId: string }> = []
     let meetings: string[]
     try {
-      meetings = readdirSync(this.baseDir)
+      meetings = readdirSync(baseDir)
     } catch {
       return // no audio dir yet
     }
@@ -334,13 +337,13 @@ export class AudioService {
       if (!SAFE_MEETING_ID.test(meeting)) continue
       let sessions: string[]
       try {
-        sessions = readdirSync(join(this.baseDir, meeting))
+        sessions = readdirSync(join(baseDir, meeting))
       } catch {
         continue
       }
       for (const session of sessions) {
         if (!SAFE_SESSION_DIR.test(session)) continue
-        const dir = join(this.baseDir, meeting, session)
+        const dir = join(baseDir, meeting, session)
         // The delayed startup scan can run after the user begins recording.
         // Its open checkpoints belong to the live host, not crash recovery.
         if (dir === this.activeSessionDir) continue
@@ -359,10 +362,12 @@ export class AudioService {
           rmSync(dir, { recursive: true, force: true })
           continue
         }
-        orphans.push(dir)
+        orphans.push({ dir, meetingId: meeting })
       }
     }
-    for (const dir of orphans) {
+    for (const { dir, meetingId } of orphans) {
+      this.assertAvailable()
+      if (this.baseDir !== baseDir) return
       if (dir === this.activeSessionDir) continue
       console.log('[audio] recovering crashed session:', dir)
       // Windows sessions checkpoint raw PCM (merged in-process); macOS
@@ -373,7 +378,13 @@ export class AudioService {
           ? await this.mergeWithEngine(dir)
           : null
       if (saved) {
-        this.writePartMeta(dir, saved.startEpochMs ?? 0, saved.durationMs)
+        // Startup runs inside libraryActivity, so relocation waits for recovery.
+        // Still fail closed if storage disappears or the owner changes mid-merge.
+        this.assertAvailable()
+        if (this.baseDir !== baseDir) return
+        if (audioFileIn(dir) === null) continue
+        if (!this.writePartMeta(dir, saved.startEpochMs ?? 0, saved.durationMs)) continue
+        this.broadcast(AUDIO_CHANGED_CHANNEL, { meetingId })
         console.log('[audio] recovered', `${Math.round(saved.durationMs / 1000)}s`, 'of audio')
       }
     }
@@ -438,13 +449,15 @@ export class AudioService {
     startEpochMs: number,
     durationMs: number,
     channels: 'mixed' | 'split' = 'split'
-  ): void {
+  ): boolean {
     try {
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'part.json'), JSON.stringify({ startEpochMs, durationMs, channels }))
+      return true
     } catch (err) {
       console.error('[audio] failed to write part metadata:', err)
       if (channels === 'mixed') throw err
+      return false
     }
   }
 }

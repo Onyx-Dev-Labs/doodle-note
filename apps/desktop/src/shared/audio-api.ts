@@ -28,6 +28,12 @@ export const AUDIO_DELETE_CHANNEL = 'audio:delete'
 export const AUDIO_CLEAR_ALL_CHANNEL = 'audio:clear-all'
 /** renderer → main (invoke): total bytes across all recordings (Settings). */
 export const AUDIO_USAGE_CHANNEL = 'audio:usage'
+/** main → renderer: re-list this meeting after background recovery commits. */
+export const AUDIO_CHANGED_CHANNEL = 'audio:changed'
+
+export interface AudioChanged {
+  meetingId: string
+}
 
 /** One saved recording session of a meeting. */
 export interface AudioPart {
@@ -53,6 +59,7 @@ export interface AudioFileData {
 /** API surface exposed on `window.audio` by the preload script. */
 export interface AudioApi {
   list(meetingId: string): Promise<AudioPart[]>
+  onChanged(cb: (change: AudioChanged) => void): () => void
   /** Read a part (by its doodle-audio:// url) for playback; null = gone. */
   read(url: string): Promise<AudioFileData | null>
   deleteFor(meetingId: string): Promise<void>

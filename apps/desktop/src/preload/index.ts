@@ -62,6 +62,7 @@ import {
   type EngineStartRequest
 } from '../shared/engine-events'
 import {
+  AUDIO_CHANGED_CHANNEL,
   AUDIO_CLEAR_ALL_CHANNEL,
   AUDIO_DELETE_CHANNEL,
   AUDIO_LIST_CHANNEL,
@@ -675,6 +676,7 @@ const wizardApi: WizardApi = {
 }
 
 const audioApi: AudioApi = {
+  onChanged: (cb) => subscribe(AUDIO_CHANGED_CHANNEL, cb),
   list(meetingId: string): Promise<AudioPart[]> {
     return ipcRenderer.invoke(AUDIO_LIST_CHANNEL, meetingId) as Promise<AudioPart[]>
   },

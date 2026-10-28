@@ -433,7 +433,8 @@ app.whenReady().then(async () => {
   const audioService = new AudioService(
     () => join(libraryRoot(), 'audio'),
     resolveEngineBinary(),
-    assertLibrary
+    assertLibrary,
+    broadcast
   )
   audioService.registerIpc()
   audioService.registerProtocol()
