@@ -130,6 +130,8 @@ jobs:
           $env:DOODLE_PLAYWRIGHT_MODULE = Join-Path $qaDirectory "node_modules/playwright"
           node apps/desktop/scripts/test-single-instance.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
           if ($LASTEXITCODE -ne 0) { throw "Single-instance Windows smoke failed" }
+          node apps/desktop/scripts/test-windows-asr-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Windows ASR initialization failed" }
 
       - name: Smoke packaged Windows native modules
         shell: pwsh

@@ -24,14 +24,15 @@
   "dependencies": {
     "@azure/msal-node": "7.1.0",
     "@electron-toolkit/utils": "^4.0.0",
+    "@repo/agent-contract": "workspace:*",
     "@repo/ai": "workspace:*",
+    "@repo/cloud-reader": "workspace:*",
     "@repo/meetings-store": "workspace:*",
     "@tiptap/extension-image": "^3.30.5",
     "electron-updater": "^6.8.9",
+    "koffi": "3.3.5",
     "node-llama-cpp": "^3.20.0",
-    "sherpa-onnx-node": "^1.13.4",
-    "@repo/cloud-reader": "workspace:*",
-    "@repo/agent-contract": "workspace:*"
+    "sherpa-onnx-node": "^1.13.4"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
