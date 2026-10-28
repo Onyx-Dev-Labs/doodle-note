@@ -8,7 +8,8 @@ export function persistCaptureTranscript(
   base: MeetingRecord['segments'],
   baseEcho: number,
   segments: TranscriptSegment[],
-  ended: boolean
+  ended: boolean,
+  savedAudioFailures: MeetingRecord['savedAudioFailures'] = {}
 ): void {
   const current = meetings.get(meetingId)
   if (!current || current.trashedAt) return
@@ -16,6 +17,7 @@ export function persistCaptureTranscript(
     id: meetingId,
     segments: [...base, ...segments.filter((segment) => !segment.echo)],
     echoSuppressed: baseEcho + segments.filter((segment) => segment.echo).length,
+    savedAudioFailures: { ...current.savedAudioFailures, ...savedAudioFailures },
     ...(ended ? { endedAt: new Date().toISOString() } : {})
   })
 }

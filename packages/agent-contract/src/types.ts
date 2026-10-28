@@ -47,6 +47,8 @@ export interface AgentMeetingNotes {
 }
 
 export interface AgentTranscriptSegment {
+  /** Stable original segment id when available (additive for legacy/hosted readers). */
+  segment_id?: string;
   /** Display label: a real name when known, else "You" / "Them". */
   speaker: string;
   text: string;

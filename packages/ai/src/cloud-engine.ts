@@ -1,13 +1,12 @@
+import { assertRequestFits } from './bounded-request'
+import { withGenerationDeadline } from './generation-control'
+import { hostedGlobalAskBudget, ollamaGlobalAskBudget } from './global-ask-model-budget'
 import { requireCompleteOutput } from './generation-control'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { buildAskSystemPrompt, buildAskUserMessage } from './ask-prompt'
-import {
-  buildGlobalAskUserMessage,
-  GLOBAL_ASK_SYSTEM_PROMPT,
-  type GlobalAskInput
-} from './global-ask-prompt'
+import { buildGlobalAskPrompt, type GlobalAskInput } from './global-ask-prompt'
 import { generateMeetingNotes } from './map-reduce'
 import type {
   GenerationControl,
@@ -102,15 +101,49 @@ export class CloudNotesEngine implements NotesEngine {
     input: GlobalAskInput,
     onToken?: (text: string) => void
   ): Promise<AskAnswer> {
-    return this.runRaw(GLOBAL_ASK_SYSTEM_PROMPT, buildGlobalAskUserMessage(input), onToken)
+    this.assertDataPolicy()
+    const model =
+      this.options.model?.trim() || CLOUD_PROVIDER_PRESETS[this.options.provider].defaultModel
+    const budget =
+      this.options.provider === 'ollama'
+        ? await ollamaGlobalAskBudget(model)
+        : hostedGlobalAskBudget(this.options.provider, model)
+    const prompt = buildGlobalAskPrompt(input, budget)
+    const result = await this.runRaw(
+      prompt.system,
+      prompt.user,
+      onToken,
+      undefined,
+      budget.outputReserveTokens
+    )
+    return { ...result, coverage: prompt.coverage }
+  }
+
+  async runBounded(system: string, prompt: string, control?: GenerationControl): Promise<MergedNotes> {
+    this.assertDataPolicy()
+    return withGenerationDeadline(control?.signal, 'writing', async (signal) => {
+      const model = this.options.model?.trim() || CLOUD_PROVIDER_PRESETS[this.options.provider].defaultModel
+      const budget = this.options.provider === 'ollama'
+        ? await ollamaGlobalAskBudget(model)
+        : hostedGlobalAskBudget(this.options.provider, model)
+      signal.throwIfAborted()
+      assertRequestFits(system, prompt, budget)
+      return this.runRaw(system, prompt, undefined, { ...control, signal }, budget.outputReserveTokens)
+    })
   }
 
   async runRaw(
     system: string,
     prompt: string,
     onToken?: (text: string) => void,
-    control?: GenerationControl
+    control?: GenerationControl,
+    maxOutputTokens?: number
   ): Promise<MergedNotes> {
+    this.assertDataPolicy()
+    return this.generateRaw(system, prompt, onToken, control, maxOutputTokens)
+  }
+
+  private assertDataPolicy(): void {
     if (!Object.hasOwn(CLOUD_PROVIDER_PRESETS, this.options.provider)) {
       throw new Error(
         'This AI provider is retired. Select a supported provider and enter its own API key in Settings.'
@@ -121,6 +154,15 @@ export class CloudNotesEngine implements NotesEngine {
         'Confirm the AI data-use requirements in Settings before sending meeting content. Gemini requires a billing-enabled API project.'
       )
     }
+  }
+
+  private async generateRaw(
+    system: string,
+    prompt: string,
+    onToken?: (text: string) => void,
+    control?: GenerationControl,
+    maxOutputTokens?: number
+  ): Promise<MergedNotes> {
     const started = Date.now()
     const preset = CLOUD_PROVIDER_PRESETS[this.options.provider]
     const modelId = this.options.model?.trim() || preset.defaultModel
@@ -144,6 +186,7 @@ export class CloudNotesEngine implements NotesEngine {
       system,
       prompt,
       temperature: 0.3,
+      ...(maxOutputTokens ? { maxOutputTokens } : {}),
       ...(this.options.provider === 'openai'
         ? { providerOptions: { openai: { store: false } } }
         : {})

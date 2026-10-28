@@ -1,0 +1,89 @@
+import {
+  AGENT_SCHEMA_VERSION,
+  AgentToolError,
+  type AgentToolDef,
+} from "@repo/agent-contract";
+import type { SourceAnchor } from "@repo/meetings-store/source-contract";
+import { LocalMeetingSource } from "./local-source";
+
+/** Local-only additive tools. Cloud tool registration and policy are unchanged. */
+export const LOCAL_SOURCE_TOOLS: AgentToolDef[] = [
+  {
+    name: "search_meeting_sources",
+    description:
+      "Search full eligible local history offline. Returns original passage anchors, exact matched counts, coverage and truncation. Does not require a summary or the desktop to be running. Terms are case/diacritic-insensitive literal substrings within a passage; all terms must match.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", maxLength: 4096 },
+        limit: { type: "integer", minimum: 1, maximum: 1000, default: 50 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    async run(source, args) {
+      if (!(source instanceof LocalMeetingSource))
+        throw new AgentToolError("Local source retrieval unavailable");
+      if (typeof args.query !== "string" || args.query.length > 4096)
+        throw new AgentToolError(
+          "query must be a string of at most 4096 characters",
+        );
+      const limit = args.limit ?? 50;
+      if (
+        typeof limit !== "number" ||
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 1000
+      )
+        throw new AgentToolError("limit must be between 1 and 1000");
+      return {
+        schema_version: AGENT_SCHEMA_VERSION,
+        ...(await source.retrieveSources(args.query, limit)),
+      };
+    },
+  },
+  {
+    name: "resolve_meeting_source",
+    description:
+      "Reread an original passage by the exact anchor returned from search_meeting_sources. Explicitly reports resolved, stale, missing, unauthorized or unavailable; never substitutes a different revision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        anchor: {
+          type: "object",
+          properties: {
+            version: { const: 1 },
+            libraryId: { type: "string" },
+            accountId: { type: ["string", "null"] },
+            workspaceId: { type: ["string", "null"] },
+            meetingId: { type: "string" },
+            revisionId: { type: "string" },
+            sourceId: { type: "string" },
+            kind: { enum: ["title", "personal", "transcript", "summary"] },
+          },
+          required: [
+            "version",
+            "libraryId",
+            "accountId",
+            "workspaceId",
+            "meetingId",
+            "revisionId",
+            "sourceId",
+            "kind",
+          ],
+        },
+      },
+      required: ["anchor"],
+    },
+    async run(source, args) {
+      if (!(source instanceof LocalMeetingSource))
+        throw new AgentToolError("Local source retrieval unavailable");
+      if (!args.anchor || typeof args.anchor !== "object")
+        throw new AgentToolError("anchor must be an original source anchor");
+      return {
+        schema_version: AGENT_SCHEMA_VERSION,
+        ...(await source.resolveSource(args.anchor as SourceAnchor)),
+      };
+    },
+  },
+];
