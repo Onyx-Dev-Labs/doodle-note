@@ -46,7 +46,7 @@
     "@types/react-dom": "^19.2.3",
     "@vercel/blob": "^2.8.0",
     "@vitejs/plugin-react": "^5.1.1",
-    "electron": "^44.0.0",
+    "electron": "^44.9.1",
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
