@@ -11,6 +11,7 @@ review; it does not replace the license files shipped by each dependency.
 | ---------------------------- | --------------------------- | ------------------------------------------------------ |
 | FluidAudio                   | Apple Silicon speech engine | Apache License 2.0                                     |
 | sherpa-onnx                  | Windows speech engine       | Apache License 2.0                                     |
+| Koffi                        | Explicit Windows speech DLL loading | MIT and bundled notices                         |
 | node-llama-cpp and llama.cpp | Local GGUF inference        | Upstream MIT terms and bundled notices                 |
 | Electron and Chromium        | Desktop runtime             | Upstream MIT, BSD, and component notices               |
 | sharp / libvips binaries     | Image processing            | The package reports LGPL and bundled third-party terms |

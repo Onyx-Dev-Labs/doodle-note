@@ -24,6 +24,7 @@ import {
   finishOnlineStream
 } from './engine-win-finalize'
 import { ensureWindowsWhisperModel, splitWhisperWindows } from './windows-whisper-model'
+import { loadWindowsAsrRuntime } from './windows-asr-runtime'
 
 const MODEL_NAME = 'sherpa-onnx-streaming-zipformer-en-2023-06-26'
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
@@ -272,6 +273,7 @@ async function init(modelsDir: string, requestedQuality: 'live' | 'final' = 'liv
           )
         : await ensureModel(modelsDir)
     emit({ event: 'status', stage: 'serve_loading_models' })
+    loadWindowsAsrRuntime()
     // Deferred require: the native addon must not load before it's needed.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const sherpa = require('sherpa-onnx-node') as SherpaModule
