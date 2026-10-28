@@ -9,6 +9,25 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.35",
+    date: "October 28, 2026",
+    highlights: [
+      "Mac: add Fetches, reusable prompts for summaries, checklists, and email drafts from a single meeting",
+      "Save versions of Fetches and their results, choose which notes and transcript to use, and export results without replacing originals",
+      "Preserve corrected summaries, speaker names, attachments, and other meeting details when saving notes or running a Fetch",
+      "Keep warnings when microphone or system-audio recording cannot be saved, including after reopening a meeting",
+      "Finish saving active recordings before quitting and prevent delayed recorder shutdown from affecting a later session",
+      "Show recovered recording parts in open meetings without restarting, while preserving the selected recording and playback position",
+      "Keep local source search responsive with a background index, recognize corrected speaker labels, and reject citations when their source changes",
+      "Improve search cancellation and library relocation so operations finish against the correct library",
+      "Fit library-wide Ask requests within the selected model context and make partial coverage clearer",
+      "Preserve system instructions with Gemma-based local models and give clearer feedback when local computation is unavailable",
+      "Restore saved Google Calendar account reconnection; new Google connections remain unavailable pending verification",
+      "Update Microsoft calendar sign-in and reconnect handling while preserving cancellation and account isolation",
+      "Improve macOS 14 audio import and recovery compatibility, and update Electron and affected dependencies",
+    ],
+  },
+  {
     version: "0.4.33",
     date: "October 6, 2026",
     highlights: [
