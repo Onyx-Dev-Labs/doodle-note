@@ -50,7 +50,13 @@ function receiptHashes(text, version, sourceSha, names) {
 }
 
 function checkLocation(blob, name) {
-  if (blob.pathname !== `updates/${name}` || blob.url !== `${BLOB_BASE}/${name}`) {
+  // DNS hostnames are case-insensitive; the SDK preserves the store ID's casing.
+  // Only normalize the authority, leaving the exact path/query/fragment checks intact.
+  const canonicalUrl =
+    typeof blob.url === 'string'
+      ? blob.url.replace(/^https:\/\/[^/]+/, (authority) => authority.toLowerCase())
+      : null
+  if (blob.pathname !== `updates/${name}` || canonicalUrl !== `${BLOB_BASE}/${name}`) {
     throw new Error(`Unexpected Blob store/path for ${name}; check the upload token's store`)
   }
 }
