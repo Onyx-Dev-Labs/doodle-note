@@ -6,7 +6,7 @@ export const metadata = { title: "Privacy policy | DoodleNote" };
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy policy" updated="September 12, 2026">
+    <LegalPage title="Privacy policy" updated="October 29, 2026">
       <p>
         DoodleNote is operated by Onyx Dev Labs. This policy explains how the
         DoodleNote apps, website, and optional hosted Sync service handle
@@ -32,6 +32,13 @@ export default function PrivacyPage() {
           <li>
             Contact-form details such as your name, email address, optional
             company and phone number, and the message you send us.
+          </li>
+          <li>
+            Website download details: the email address you enter before
+            downloading the app, the platform you chose, when you asked for
+            the download, and whether you agreed to receive DoodleNote emails,
+            with the wording you agreed to and when. A download request does
+            not tell us whether you installed the app.
           </li>
           <li>
             Workspace membership, invitations, linked devices, and security
@@ -63,13 +70,22 @@ export default function PrivacyPage() {
           reliability. We do not sell personal information or use meeting
           content for advertising.
         </p>
+        <p>
+          If you agree when downloading the app, we email you setup tips,
+          product updates, and offers for optional Cloud Sync. Every email has
+          an unsubscribe link, and downloading again does not resubscribe you
+          after you unsubscribe. If you connect your download email to your
+          DoodleNote account, we link the two so those emails match your
+          account.
+        </p>
       </LegalSection>
 
       <LegalSection title="Optional providers">
         <p>
           Hosted features may use Vercel for application and object hosting,
           Neon for PostgreSQL, Stripe for billing, Resend for account,
-          invitation, billing, and contact-form email, Twilio for optional voice
+          invitation, billing, and contact-form email, MailCheap and n8n for
+          the product emails you agree to when downloading, Twilio for optional voice
           features, and Microsoft or Google for sign-in and calendar access. If
           you choose an external AI provider, the content you submit is sent to
           that provider under its terms. Local AI and Ollama do not require

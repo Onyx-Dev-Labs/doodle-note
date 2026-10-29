@@ -4,13 +4,15 @@ import Link from "next/link";
 import { AppleLogo, GitHubLogo, WindowsLogo } from "./logos";
 
 /**
- * Version-independent: /download/<platform> reads the live platform download
- * manifest and redirects to the current installer, so these can never go stale.
- * The Windows website manifest remains separate from its production updater.
+ * Every website download goes through the /download email form, which keeps
+ * the chosen platform and then sends the visitor to /download/<platform>. That
+ * route reads the live platform manifest and redirects to the current
+ * installer, so these can never go stale. The Windows website manifest
+ * remains separate from its production updater.
  */
 export const DOWNLOADS = {
-  mac: "/download/mac",
-  win: "/download/win",
+  mac: "/download?platform=mac",
+  win: "/download?platform=win",
 };
 
 export const GITHUB_REPO = "https://github.com/Onyx-Dev-Labs/doodle-note";
