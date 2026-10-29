@@ -58,7 +58,7 @@
     "react-dom": "^19.2.7",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
-    "vite": "^7.2.6"
+    "vite": "^7.3.7"
   },
   "optionalDependencies": {
     "@node-llama-cpp/win-x64": "3.19.0"
