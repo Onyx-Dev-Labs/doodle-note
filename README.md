@@ -154,7 +154,7 @@ pnpm --filter web typecheck
 pnpm --filter web test
 pnpm --filter web build
 pnpm lint
-pnpm audit --prod --audit-level=low
+pnpm audit --audit-level=low
 pnpm engine:build
 ```
 
