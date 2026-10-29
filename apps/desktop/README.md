@@ -212,7 +212,12 @@ restart to retry. An interrupted transfer can also recover on the next launch.
 Hidden `.doodlenote-transfer-*` folders may remain after failures; these are
 transaction staging, not active libraries. Retry only removes its own verified
 staging folder. Force-quitting or disconnecting a drive can interrupt a transfer.
-Normal quit/window-close is blocked while the transfer holds the library lock.
+Normal quit/window-close is blocked while the transfer holds the library lock. Once quit
+begins, new library transfers and pending folder selections cannot start a move.
+On macOS, the host waits for its recorder and microphone-monitor helpers to exit
+before completing ordinary quit. If shutdown cannot confirm their exit, the app stays
+open and Quit can be retried. Forced termination does not guarantee recording
+finalization or recovery.
 
 Keep external drives connected. A missing/replaced active root stops capture and
 blocks library operations with Retry/Quit, without silently creating an empty

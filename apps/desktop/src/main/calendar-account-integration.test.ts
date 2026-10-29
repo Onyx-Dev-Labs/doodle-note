@@ -4,7 +4,15 @@ import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AccountInfo, ICachePlugin } from '@azure/msal-node'
+import {
+  CryptoProvider,
+  ResponseMode,
+  type AccountInfo,
+  type ICachePlugin,
+  type AuthorizationUrlRequest
+} from '@azure/msal-node'
+import { get, Server } from 'node:http'
+import { once } from 'node:events'
 import type {
   CalendarState,
   CalendarStartMeetingEvent,
@@ -28,6 +36,7 @@ const msAccount = {
 } as AccountInfo
 let authorize: () => Promise<void> = async () => {}
 let selectedAccount = msAccount
+let refresh: () => Promise<void> = async () => {}
 class FakeMSAL {
   records: AccountInfo[] = []
   constructor(private options: { cache?: { cachePlugin: ICachePlugin } }) {}
@@ -62,12 +71,24 @@ class FakeMSAL {
   }
   async acquireTokenSilent(): Promise<{ accessToken: string }> {
     await this.before()
+    await refresh()
+    await this.options.cache?.cachePlugin.afterCacheAccess({
+      tokenCache: this.cache(),
+      cacheHasChanged: true
+    } as never)
     return { accessToken: 'synthetic-ms-access' }
   }
-  async acquireTokenInteractive(): Promise<{ accessToken: string; account: AccountInfo }> {
+  async getAuthCodeUrl(request: AuthorizationUrlRequest): Promise<string> {
+    const url = new URL(request.redirectUri)
+    url.searchParams.set('state', request.state!)
+    url.searchParams.set('code', 'synthetic-code')
+    return url.href
+  }
+  async acquireTokenByCode(): Promise<{ accessToken: string; account: AccountInfo }> {
+    const account = selectedAccount
     await authorize()
-    this.records = [selectedAccount]
-    return { accessToken: 'synthetic-ms-access', account: selectedAccount }
+    this.records = [account]
+    return { accessToken: 'synthetic-ms-access', account }
   }
 }
 const rawCalendar = {
@@ -126,6 +147,25 @@ class FakeGoogle {
     this.accountId = undefined
   }
 }
+const fakeShell = {
+  openExternal: async (url: string): Promise<void> => {
+    await new Promise<void>((resolve, reject) => {
+      get(url.replace('localhost', '127.0.0.1'), (response) => {
+        response.resume()
+        response.once('end', resolve)
+      }).once('error', reject)
+    })
+  }
+}
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+const turn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
+
 const require = createRequire(import.meta.url)
 const loader = require('node:module') as { _load: (id: string, ...args: unknown[]) => unknown }
 const original = loader._load
@@ -134,10 +174,10 @@ loader._load = (id, ...args) =>
     ? {
         safeStorage: codec,
         BrowserWindow: { getAllWindows: () => [] },
-        shell: { openExternal: async () => {} }
+        shell: fakeShell
       }
     : id === '@azure/msal-node'
-      ? { PublicClientApplication: FakeMSAL }
+      ? { PublicClientApplication: FakeMSAL, CryptoProvider, ResponseMode }
       : id === './google-calendar'
         ? { GoogleCalendarClient: FakeGoogle }
         : original(id, ...args)
@@ -324,27 +364,70 @@ test('disconnect during a pending refresh cannot restore Microsoft or stop the r
   assert.equal(access(service).state().events.length, 1)
 })
 
-test('late interactive sign-in after timeout cannot commit or resurrect an account', async (t) => {
-  const { dir, service } = setup(t, [], false)
-  await idle(service)
-  let complete: () => void = () => {}
-  authorize = () =>
-    new Promise<void>((resolve) => {
-      complete = resolve
+for (const stage of ['discovery', 'browser', 'token'] as const) {
+  for (const stop of ['cancel', 'timeout'] as const) {
+    test(`${stop} during Microsoft ${stage} closes callback and fences delayed completion`, async (t) => {
+      const { dir, service } = setup(t, [], false)
+      await idle(service)
+      const entered = deferred<string>()
+      const release = deferred()
+      const finished = deferred()
+      let exchanges = 0
+      const getUrl = FakeMSAL.prototype.getAuthCodeUrl
+      const exchange = FakeMSAL.prototype.acquireTokenByCode
+      let callbackUrl = ''
+      t.mock.method(
+        FakeMSAL.prototype,
+        'getAuthCodeUrl',
+        async function (this: FakeMSAL, request: AuthorizationUrlRequest) {
+          callbackUrl = request.redirectUri.replace('localhost', '127.0.0.1')
+          if (stage === 'discovery') {
+            entered.resolve(callbackUrl)
+            await release.promise
+            finished.resolve()
+          }
+          return getUrl.call(this, request)
+        }
+      )
+      const browser = fakeShell.openExternal
+      t.mock.method(fakeShell, 'openExternal', async (url: string) => {
+        if (stage === 'browser') {
+          entered.resolve(callbackUrl)
+          await release.promise
+          finished.resolve()
+          // A native browser-open promise can settle after the listener was cancelled.
+          return
+        }
+        await browser(url)
+      })
+      t.mock.method(FakeMSAL.prototype, 'acquireTokenByCode', async function (this: FakeMSAL) {
+        exchanges++
+        entered.resolve(callbackUrl)
+        await release.promise
+        const result = await exchange.call(this)
+        finished.resolve()
+        return result
+      })
+      if (stop === 'timeout') t.mock.timers.enable({ apis: ['setTimeout'] })
+      const pending = access(service).connect()
+      const url = await entered.promise
+      if (stop === 'timeout') t.mock.timers.tick(5 * 60_000)
+      else access(service).cancelAuth()
+      const state = await pending
+      if (stop === 'timeout') assert.match(state.error!, /timed out/)
+      await assert.rejects(
+        new Promise((resolve, reject) => get(url, resolve).once('error', reject))
+      )
+      release.resolve()
+      await finished.promise
+      await turn()
+      assert.equal(exchanges, stage === 'token' ? 1 : 0)
+      assert.equal(new CalendarAccountStore(dir, codec).entries().length, 0)
+      assert.equal(access(service).state().msSignedIn, false)
+      assert.equal(access(service).state().connecting, undefined)
     })
-  t.after(() => {
-    authorize = async () => {}
-  })
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  const pending = access(service).connect()
-  t.mock.timers.tick(5 * 60_000)
-  assert.match((await pending).error!, /timed out/)
-  complete()
-  await Promise.resolve()
-  await Promise.resolve()
-  assert.equal(new CalendarAccountStore(dir, codec).entries().length, 0)
-  assert.equal(access(service).state().msSignedIn, false)
-})
+  }
+}
 
 test('selection writes survive restart and a failed sync save cannot claim a newer persisted sync', async (t) => {
   const { dir, service } = setup(t)
@@ -486,4 +569,149 @@ test('record-and-join resolves the owning event link and rejects renderer-suppli
   assert.equal(service.resolveStart({ ...request, eventId: 'missing' }), null)
   owned.joinUrl = 'javascript:alert(1)'
   assert.equal(service.resolveStart(request)?.joinUrl, undefined)
+})
+
+test('late token success after removal cannot resurrect the account or interfere with a new reconnect', async (t) => {
+  const { dir, service } = setup(t, [msAccount], false)
+  await idle(service)
+  const id = access(service).state().connections![0]!.id
+  const oldEntered = deferred()
+  const oldRelease = deferred()
+  authorize = async () => {
+    oldEntered.resolve()
+    await oldRelease.promise
+  }
+  t.after(() => {
+    authorize = async () => {}
+    selectedAccount = msAccount
+  })
+  const old = access(service).connectAccount('microsoft', id)
+  await oldEntered.promise
+  await access(service).removeAccount(id)
+  await old
+  assert.equal(new CalendarAccountStore(dir, codec).entries().length, 0)
+  const newEntered = deferred()
+  const newRelease = deferred()
+  selectedAccount = { ...msAccount, name: 'Reconnected fixture' }
+  authorize = async () => {
+    newEntered.resolve()
+    await newRelease.promise
+  }
+  const fresh = access(service).connectAccount('microsoft')
+  await newEntered.promise
+  oldRelease.resolve()
+  await turn()
+  assert.equal(access(service).state().connecting?.provider, 'microsoft')
+  assert.equal(access(service).state().msSignedIn, false)
+  assert.equal(new CalendarAccountStore(dir, codec).entries().length, 0)
+  newRelease.resolve()
+  const state = await fresh
+  assert.equal(state.connections?.length, 1)
+  assert.equal(state.connections?.[0]?.id, id)
+  assert.equal(state.connections?.[0]?.name, 'Reconnected fixture')
+  assert.equal(new CalendarAccountStore(dir, codec).get(id)?.view.name, 'Reconnected fixture')
+})
+
+test('a late silent cache write after reconnect cannot overwrite the new account credential', async (t) => {
+  const { dir, service } = setup(t, [msAccount], false)
+  await idle(service)
+  const id = access(service).state().connections![0]!.id
+  const entered = deferred()
+  const release = deferred()
+  refresh = async () => {
+    entered.resolve()
+    await release.promise
+  }
+  t.after(() => {
+    refresh = async () => {}
+    selectedAccount = msAccount
+  })
+  const oldRefresh = access(service).refreshEvents()
+  await entered.promise
+  refresh = async () => {}
+  selectedAccount = { ...msAccount, name: 'New credential fixture' }
+  const reconnect = access(service).connectAccount('microsoft', id)
+  // Authentication commits before waiting for the previous refresh coordinator to drain.
+  for (let i = 0; i < 100 && access(service).state().connecting; i++) await turn()
+  assert.equal(access(service).state().connecting, undefined)
+  const persisted = new CalendarAccountStore(dir, codec).get(id)!
+  assert.equal(persisted.view.name, 'New credential fixture')
+  release.resolve()
+  await oldRefresh
+  await reconnect
+  assert.equal(new CalendarAccountStore(dir, codec).get(id)?.credential, persisted.credential)
+  assert.equal(access(service).state().connections?.[0]?.name, 'New credential fixture')
+})
+
+for (const stop of ['cancel', 'timeout'] as const) {
+  test(`${stop} while Microsoft callback is binding prevents discovery and closes a late listener`, async (t) => {
+    const { dir, service } = setup(t, [], false)
+    await idle(service)
+    const listen = Server.prototype.listen
+    const servers: Server[] = []
+    let start!: () => void
+    t.mock.method(
+      Server.prototype,
+      'listen',
+      function (this: Server, ...args: Parameters<Server['listen']>) {
+        servers.push(this)
+        start = () => {
+          listen.apply(this, args)
+        }
+        return this
+      }
+    )
+    const discovery = t.mock.method(FakeMSAL.prototype, 'getAuthCodeUrl')
+    const browser = t.mock.method(fakeShell, 'openExternal')
+    if (stop === 'timeout') t.mock.timers.enable({ apis: ['setTimeout'] })
+    const pending = access(service).connect()
+    if (stop === 'timeout') t.mock.timers.tick(5 * 60_000)
+    else access(service).cancelAuth()
+    const state = await pending
+    if (stop === 'timeout') assert.match(state.error!, /timed out/)
+    const server = servers[0]!
+    const listening = once(server, 'listening')
+    start()
+    await listening
+    await turn()
+    assert.equal(server.listening, false)
+    assert.equal(server.address(), null)
+    assert.equal(discovery.mock.callCount(), 0)
+    assert.equal(browser.mock.callCount(), 0)
+    assert.equal(new CalendarAccountStore(dir, codec).entries().length, 0)
+  })
+}
+
+test('callback bind failure reaches calendar state without opening the browser or persisting an account', async (t) => {
+  const { dir, service } = setup(t, [], false)
+  await idle(service)
+  t.mock.method(Server.prototype, 'listen', function (this: Server) {
+    queueMicrotask(() => this.emit('error', new Error('synthetic bind error')))
+    return this
+  })
+  const browser = t.mock.method(fakeShell, 'openExternal')
+  const state = await access(service).connect()
+  assert.match(state.error!, /could not open its local callback/)
+  assert.equal(state.connecting, undefined)
+  assert.equal(browser.mock.callCount(), 0)
+  assert.equal(new CalendarAccountStore(dir, codec).entries().length, 0)
+})
+
+test('browser-open failure closes the callback and preserves existing account credentials', async (t) => {
+  const { dir, service } = setup(t, [msAccount], false)
+  await idle(service)
+  const before = readFileSync(join(dir, 'calendar-accounts-v2'))
+  let callbackUrl = ''
+  t.mock.method(fakeShell, 'openExternal', async (url: string) => {
+    callbackUrl = url.replace('localhost', '127.0.0.1')
+    throw new Error('Synthetic browser could not open')
+  })
+  const state = await access(service).connect()
+  assert.match(state.error!, /Synthetic browser could not open/)
+  assert.equal(state.connecting, undefined)
+  assert.equal(state.connections?.length, 1)
+  await assert.rejects(
+    new Promise((resolve, reject) => get(callbackUrl, resolve).once('error', reject))
+  )
+  assert.deepEqual(readFileSync(join(dir, 'calendar-accounts-v2')), before)
 })

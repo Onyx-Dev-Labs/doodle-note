@@ -1,3 +1,4 @@
+import { ChildShutdown } from './child-shutdown'
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { appendFileSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -54,6 +55,9 @@ export class MicWatcher {
   private debounceTimer: NodeJS.Timeout | null = null
   private restartTimer: NodeJS.Timeout | null = null
   private stopping = false
+  private disposal: Promise<void> | null = null
+  private readonly shutdown: ChildShutdown
+  private readonly retireTimers = new Map<ChildProcessWithoutNullStreams, NodeJS.Timeout>()
 
   /** Friendly name of the meeting app behind the current busy stretch. */
   private currentAppLabel: string | null = null
@@ -79,8 +83,12 @@ export class MicWatcher {
     userDataDir: string,
     private readonly onMeetingDetected: (appLabel: string | null, detectionId?: string) => void,
     /** The meeting app left the mic mid-capture — stop the recording. */
-    private readonly onMeetingEnded: () => void
+    private readonly onMeetingEnded: () => void,
+    private readonly shutdownGraceMs = 2_000,
+    terminationGraceMs = 2_000,
+    exitObservationMs = 2_000
   ) {
+    this.shutdown = new ChildShutdown(terminationGraceMs, exitObservationMs)
     this.configPath = join(userDataDir, 'mic-watch.json')
     this.logPath = join(userDataDir, 'mic-watch.log')
     this.config = this.readConfig()
@@ -124,6 +132,37 @@ export class MicWatcher {
   stop(): void {
     this.stopping = true
     this.killChild()
+  }
+
+  /** Final app shutdown, distinct from ordinary monitor enable/disable. */
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal
+    this.stopping = true
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    this.restartTimer = null
+    this.clearDebounce()
+    this.resetEndWatch()
+    for (const timer of this.retireTimers.values()) clearTimeout(timer)
+    this.retireTimers.clear()
+    this.disposal = Promise.resolve()
+      .then(async () => {
+        const results = await Promise.allSettled(
+          [...this.shutdown.children].map((child) =>
+            this.shutdown.terminate(child, this.shutdownGraceMs)
+          )
+        )
+        const failures = results.filter((result) => result.status === 'rejected')
+        if (failures.length)
+          throw new AggregateError(
+            failures.map((result) => result.reason),
+            'Microphone monitor shutdown failed'
+          )
+      })
+      .catch((error: unknown) => {
+        this.disposal = null
+        throw error
+      })
+    return this.disposal
   }
 
   setEnabled(enabled: boolean): void {
@@ -202,11 +241,13 @@ export class MicWatcher {
       console.error('[micwatch] spawn failed:', error)
       return
     }
+    this.shutdown.own(child)
     this.child = child
 
     let buffer = ''
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => {
+      if (this.child !== child || this.stopping) return
       buffer += chunk
       let newline = buffer.indexOf('\n')
       while (newline >= 0) {
@@ -254,6 +295,7 @@ export class MicWatcher {
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', () => {})
     child.on('exit', () => {
+      if (this.child !== child) return
       this.child = null
       this.clearDebounce()
       // Monitor downtime is not evidence that a call ended. Re-debounce fresh
@@ -285,9 +327,17 @@ export class MicWatcher {
         // already gone
       }
       const child = this.child
-      setTimeout(() => {
-        if (!child.killed) child.kill()
-      }, 2_000).unref()
+      const timer = setTimeout(() => {
+        this.retireTimers.delete(child)
+        if (child.exitCode === null && child.signalCode === null && child.kill('SIGTERM'))
+          this.shutdown.markTermSent(child)
+      }, 2_000)
+      timer.unref()
+      this.retireTimers.set(child, timer)
+      child.once('close', () => {
+        clearTimeout(timer)
+        this.retireTimers.delete(child)
+      })
       this.child = null
     }
   }

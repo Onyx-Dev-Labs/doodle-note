@@ -88,6 +88,12 @@ signed webhook entitlement and device linking, then cancels the subscription
 and verifies access is removed. Keep `.env.local` and generated secret files
 out of Git.
 
+## Better Auth upgrades
+
+The 1.7.7 update requires a forward account migration and coordinated auth-node
+cutover. Follow [the upgrade runbook](docs/better-auth-upgrade.md) before deploying;
+do not rerun the historical issuer backfill.
+
 ## Commands
 
 ```sh

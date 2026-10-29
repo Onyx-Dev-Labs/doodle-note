@@ -42,16 +42,23 @@ jobs:
     if: github.repository == 'Onyx-Dev-Labs/doodle-note' && (inputs.operation == 'candidate' || inputs.operation == '')
     runs-on: macos-15
     timeout-minutes: 90
+    env:
+      DOODLENOTE_STAPLER_HELPER: ${{ github.workspace }}/apps/desktop/scripts/stapler.cjs
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Test release tooling
+      - name: Initialize diagnostics and test release tooling
+        id: tooling
         run: |
+          set -euo pipefail
+          printf 'DOODLENOTE_STAPLER_DIAGNOSTICS=%s/mac-release-diagnostics\n' "${RUNNER_TEMP:?}" >> "${GITHUB_ENV:?}"
           python3 -m unittest discover -s apps/desktop/scripts -p 'test_mac_release_secrets.py'
           ruby apps/desktop/scripts/test_mac_release_manifest.rb
           ruby apps/desktop/scripts/test_mac_verification_workflow.rb
 
       - name: Check required release credentials
+        id: credentials
         env:
           DOODLENOTE_GOOGLE_CLIENT_SECRET: ${{ secrets.DOODLENOTE_GOOGLE_CLIENT_SECRET }}
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -63,26 +70,35 @@ jobs:
           python3 apps/desktop/scripts/configure-mac-release-secrets.py --check-env
           test "$(uname -m)" = arm64
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - id: node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
       - name: Install pnpm
+        id: pnpm
         run: npm install --global pnpm@10.33.2
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        id: dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          node --test apps/desktop/scripts/stapler.test.cjs apps/desktop/scripts/notarize-stapler.test.cjs apps/desktop/scripts/mac-release-diagnostics.test.cjs apps/desktop/scripts/verify-mac-release.test.cjs
 
       - name: Build Swift transcription engine
+        id: swift
         run: swift build -c release --package-path engine
 
       - name: Build pinned Whisper batch engine
+        id: whisper
         run: pnpm whisper:build
 
       - name: Build brand assets
+        id: brand
         run: pnpm --filter desktop brand:build
 
       - name: Package Mac app (signed + notarized)
+        id: package
         run: |
           node apps/desktop/scripts/check-google-oauth.mjs
           pnpm --filter doodle-note-mcp build
@@ -97,23 +113,28 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Notarize and staple the signed DMG
+        id: dmg
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           version="$(node -p 'require("./apps/desktop/package.json").version')"
           dmg="apps/desktop/release/DoodleNote-${version}-arm64.dmg"
-          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --timeout 20m
-          xcrun stapler staple "$dmg"
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --timeout 20m --output-format json | node apps/desktop/scripts/mac-release-diagnostics.cjs accepted
+          node apps/desktop/scripts/stapler.cjs staple dmg "$dmg"
           ruby apps/desktop/scripts/mac-release-manifest.rb apps/desktop/release "$version" --refresh-dmg
 
       - name: Verify signed and notarized distributables
+        id: verify
         env:
           EXPECTED_TEAM_ID: VTZW6K32K4
         run: bash apps/desktop/scripts/verify-mac-release.sh
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - id: candidate
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: doodlenote-mac-${{ github.sha }}
           path: |
@@ -123,6 +144,33 @@ jobs:
             apps/desktop/release/release-receipt.txt
           retention-days: 14
           if-no-files-found: error
+
+      - name: Collect candidate diagnostics
+        id: diagnostics
+        if: always()
+        env:
+          RELEASE_STAGE_OUTCOMES: >-
+            {"checkout":"${{ steps.checkout.outcome }}","tooling":"${{ steps.tooling.outcome }}",
+             "credentials":"${{ steps.credentials.outcome }}","node":"${{ steps.node.outcome }}",
+             "pnpm":"${{ steps.pnpm.outcome }}","dependencies":"${{ steps.dependencies.outcome }}",
+             "swift":"${{ steps.swift.outcome }}","whisper":"${{ steps.whisper.outcome }}",
+             "brand":"${{ steps.brand.outcome }}","package":"${{ steps.package.outcome }}",
+             "dmg":"${{ steps.dmg.outcome }}","verify":"${{ steps.verify.outcome }}",
+             "candidate":"${{ steps.candidate.outcome }}"}
+        run: node apps/desktop/scripts/mac-release-diagnostics.cjs collect
+
+      - name: Retain candidate diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mac-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mac-release-diagnostics/summary.json
+            ${{ runner.temp }}/mac-release-diagnostics/notary-dmg.json
+            ${{ runner.temp }}/mac-release-diagnostics/staple-*.json
+            ${{ runner.temp }}/mac-release-diagnostics/validate-*.json
+          retention-days: 3
+          if-no-files-found: warn
 
   verify-existing:
     if: github.repository == 'Onyx-Dev-Labs/doodle-note' && inputs.operation == 'verify-existing' && github.ref != 'refs/heads/main'

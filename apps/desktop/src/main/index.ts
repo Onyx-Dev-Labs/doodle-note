@@ -1,3 +1,4 @@
+import { createBeforeQuitHandler } from './engine-quit'
 import { SourceIndexService } from './source-index-service'
 import { RecipeRunner } from './recipe-runner'
 import { registerRecipes } from './recipe-service'
@@ -432,7 +433,8 @@ app.whenReady().then(async () => {
   const audioService = new AudioService(
     () => join(libraryRoot(), 'audio'),
     resolveEngineBinary(),
-    assertLibrary
+    assertLibrary,
+    broadcast
   )
   audioService.registerIpc()
   audioService.registerProtocol()
@@ -767,27 +769,33 @@ app.whenReady().then(async () => {
     await notesService?.dispose()
   })
 
-  // node-llama-cpp's async workers SIGABRT if they complete during Electron's
-  // teardown (ThrowAsJavaScriptException on a dead env → ggml terminate) —
-  // macOS then shows "DoodleNote quit unexpectedly" on the next launch. All
-  // app state is written synchronously as it changes, and child processes
-  // (transcription engine, micmon) exit on their own via stdin-close
-  // watchdogs, so skipping native teardown loses nothing.
-  app.on('before-quit', (event) => {
-    if (libraryActivity.moving) {
-      event.preventDefault()
-      return
-    }
-    quitting = true
-    recordingTray?.dispose()
-    calendarService?.dispose()
-    engine.dispose()
-    micWatcher.stop()
-    // A quit driven by Restart-to-update must proceed normally so Squirrel
-    // can hand off to the installer; the hard exit is only for regular quits
-    // (the llama-addon teardown SIGABRT workaround).
-    if (!isQuittingForUpdate()) process.exit(0)
-  })
+  // Keep the host alive while the engine exits. Only then bypass llama addon
+  // teardown on ordinary quit; updater quits must resume Electron's hand-off.
+  app.on(
+    'before-quit',
+    createBeforeQuitHandler({
+      acquire: () => libraryActivity.tryBeginShutdown(),
+      cleanup: async () => {
+        quitting = true
+        recordingTray?.dispose()
+        calendarService?.dispose()
+        const results = await Promise.allSettled([engine.dispose(), micWatcher.dispose()])
+        const failures = results.filter((result) => result.status === 'rejected')
+        if (failures.length)
+          throw new AggregateError(
+            failures.map((result) => result.reason),
+            'Recorder shutdown failed'
+          )
+      },
+      isUpdate: isQuittingForUpdate,
+      quit: () => app.quit(),
+      hardExit: () => process.exit(0),
+      failed: (error) => {
+        quitting = false
+        console.error('[quit] Recorder shutdown failed; host retained:', error)
+      }
+    })
+  )
 
   // The renderer mirrors its theme pref here so nativeTheme (and with it the
   // floating prompt panel + native chrome) matches the in-app appearance.
@@ -882,9 +890,8 @@ function focusMainWindow(): void {
   }
 }
 
-// Make sure the sidecar never outlives the app.
+// Engine shutdown is awaited by before-quit; release remaining services here.
 app.on('will-quit', () => {
-  engine.dispose()
   void recipeRunner?.stop().then(() => notesService?.dispose())
   calendarService?.dispose()
   winBatchTranscriber?.dispose()

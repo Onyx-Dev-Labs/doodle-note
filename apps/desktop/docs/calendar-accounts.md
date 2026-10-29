@@ -27,6 +27,8 @@ Use an approved whole-profile backup for manual recovery, with the app stopped a
 
 Downgrades are limited: older apps ignore the vault and may use retained, stale legacy credentials/selections. Canonical note references remain readable but older code cannot associate them with raw provider IDs. Reverting source does not undo reference migration. Prefer a forward fix; do not promise that a downgrade restores current calendar state.
 
+See [Microsoft calendar authorization](microsoft-calendar-auth.md) for the MSAL 7.1 API migration, callback binding, cancellation and required native requalification.
+
 ## Automated evidence
 
 From repository root:

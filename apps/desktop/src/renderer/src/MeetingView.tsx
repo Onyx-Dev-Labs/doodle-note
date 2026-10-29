@@ -1,4 +1,6 @@
 import RecipePanel from './RecipePanel'
+import { watchMeetingAudio } from './lib/meeting-audio'
+import { useMeetingAudioPlayer } from './lib/use-meeting-audio-player'
 import { invalidateRecipeRun } from './lib/recipe-run'
 import { TranscriptSplit } from './TranscriptSplit'
 import { mergeTranscriptSegments, reconcileTranscriptSegments } from './lib/transcript-segments'
@@ -16,11 +18,7 @@ import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetin
 import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
 import { applyCaptureStatus } from './lib/capture-status'
-import {
-  AUDIO_PERSIST_STORAGE_KEY,
-  SYSTEM_BACKEND_STORAGE_KEY,
-  type AudioPart
-} from '../../shared/audio-api'
+import { AUDIO_PERSIST_STORAGE_KEY, SYSTEM_BACKEND_STORAGE_KEY } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
 import { meetingPrimaryAction } from '../../shared/meeting-recovery'
@@ -320,16 +318,17 @@ export default function MeetingView({
   const [folders, setFolders] = useState<FolderRecord[]>([])
   const [folderId, setFolderId] = useState<string | null>(null)
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
-  const [audioParts, setAudioParts] = useState<AudioPart[]>([])
-  const [activePart, setActivePart] = useState(0)
-  /**
-   * The <audio> src is a BLOB of the recording, not the doodle-audio:// URL.
-   * Chromium's media loader through Electron custom protocols failed three
-   * different ways (CSP, resumed-load corruption, moov-at-end tail requests
-   * on large imports); fetching once into a fully random-access blob removes
-   * that entire machinery. Local files make the fetch near-instant.
-   */
-  const [playerSrc, setPlayerSrc] = useState<string | null>(null)
+  const {
+    audioParts,
+    setAudioParts,
+    activePart,
+    playerSrc,
+    audioRef,
+    selectPart,
+    seekToSegment,
+    onLoadedMetadata,
+    advance
+  } = useMeetingAudioPlayer(window.audio)
   const [playingSegId, setPlayingSegId] = useState<string | null>(null)
   const [retranscribing, setRetranscribing] = useState(false)
   const [inputDevices, setInputDevices] = useState<EngineInputDevice[]>([])
@@ -380,9 +379,6 @@ export default function MeetingView({
   const elapsedBaseRef = useRef(0)
   const contentLoadedRef = useRef(false)
   const feedRef = useRef<HTMLDivElement>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
-  /** Seek (seconds) to apply once a newly selected part's metadata loads. */
-  const pendingSeekSecRef = useRef<number | null>(null)
   /** Mirrors chatThread so an in-flight ask reads the freshest history. */
   const chatThreadRef = useRef<MeetingChatEntry[]>([])
   const chatFeedRef = useRef<HTMLDivElement>(null)
@@ -738,64 +734,18 @@ export default function MeetingView({
 
   /* ---- saved audio (local recordings; playback + transcript seek) ---- */
 
-  useEffect(() => {
-    let cancelled = false
-    const refresh = (): void => {
-      window.audio
-        .list(meetingId)
-        .then((parts) => {
-          if (cancelled) return
-          setAudioParts(parts)
-          // Freshly (re)opened meeting: align the meeting clock with what's
-          // already recorded, so a Resume continues rather than restarts.
-          if (!ACTIVE_PHASES.includes(stateRef.current.phase)) {
-            elapsedBaseRef.current = parts.reduce((sum, p) => sum + p.durationMs, 0) / 1000
-          }
-        })
-        .catch(() => {})
-    }
-    refresh()
-    // The engine reports "audio" once a stopped session's recording merged.
-    const unsubscribe = window.engine.onEvent((ev) => {
-      if (ev.event === 'audio') refresh()
-    })
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [meetingId])
-
-  // Load the active part into a blob URL (see playerSrc for why). Bytes
-  // arrive over IPC — custom-protocol fetch is CORS-blocked from the app
-  // origin, and the media loader's own protocol path proved unreliable.
-  useEffect(() => {
-    const url = audioParts[Math.min(activePart, audioParts.length - 1)]?.url
-    if (!url) {
-      // Resetting derived media state is the purpose of this synchronization.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPlayerSrc(null)
-      return
-    }
-    let objectUrl: string | null = null
-    let cancelled = false
-    window.audio
-      .read(url)
-      .then((data) => {
-        if (cancelled || !data) {
-          if (!cancelled) setPlayerSrc(null)
-          return
+  useEffect(
+    () =>
+      watchMeetingAudio(meetingId, window.audio, window.engine, (parts) => {
+        setAudioParts(parts)
+        // Freshly (re)opened meeting: align the meeting clock with what's
+        // already recorded, so a Resume continues rather than restarts.
+        if (!ACTIVE_PHASES.includes(stateRef.current.phase)) {
+          elapsedBaseRef.current = parts.reduce((sum, p) => sum + p.durationMs, 0) / 1000
         }
-        objectUrl = URL.createObjectURL(new Blob([data.bytes as BlobPart], { type: data.mime }))
-        setPlayerSrc(objectUrl)
-      })
-      .catch(() => {
-        if (!cancelled) setPlayerSrc(null)
-      })
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [audioParts, activePart])
+      }),
+    [meetingId, setAudioParts]
+  )
 
   /* ---- models / settings meta (drives the Enhance chip) ---- */
 
@@ -1079,40 +1029,6 @@ export default function MeetingView({
   }
 
   /* ---- playback: transcript ↔ audio sync ---- */
-
-  // Map a segment's wall-clock time onto (recording part, offset): the part
-  // is the latest one that started at or before the segment; the offset is
-  // the distance from that part's first frame.
-  //
-  // absoluteStartMs survives local recording but is STRIPPED by today's sync
-  // schema (no column), so any meeting that round-tripped through the cloud
-  // loses it. Fallback: a segment's channel-relative startMs is within the
-  // capture-start gap (≈1s) of its file position in the current part.
-  const seekToSegment = (segment: TranscriptSegment): void => {
-    if (segment.source === 'text') return
-    if (audioParts.length === 0) return
-    let partIndex = Math.min(activePart, audioParts.length - 1)
-    let offsetSec = Math.max(0, segment.startMs / 1000)
-    const abs = segment.absoluteStartMs
-    if (typeof abs === 'number') {
-      partIndex = 0
-      for (let i = audioParts.length - 1; i >= 0; i--) {
-        if (audioParts[i]!.startEpochMs <= abs) {
-          partIndex = i
-          break
-        }
-      }
-      offsetSec = Math.max(0, (abs - audioParts[partIndex]!.startEpochMs) / 1000)
-    }
-    const el = audioRef.current
-    if (partIndex !== activePart || !el) {
-      pendingSeekSecRef.current = offsetSec
-      setActivePart(partIndex)
-      return
-    }
-    el.currentTime = offsetSec
-    void el.play()
-  }
 
   // Rebuild the transcript from the saved recording with the current model.
   // Notes are untouched; the segment list is replaced wholesale.
@@ -1816,24 +1732,11 @@ export default function MeetingView({
                   controls
                   preload="auto"
                   src={playerSrc ?? undefined}
-                  onLoadedMetadata={() => {
-                    const sec = pendingSeekSecRef.current
-                    const el = audioRef.current
-                    if (sec !== null && el) {
-                      pendingSeekSecRef.current = null
-                      el.currentTime = sec
-                      void el.play()
-                    }
-                  }}
+                  onLoadedMetadata={onLoadedMetadata}
                   onTimeUpdate={onPlayheadMoved}
                   onEnded={() => {
                     // Multi-part meetings (record → stop → record) play through.
-                    if (activePart < audioParts.length - 1) {
-                      pendingSeekSecRef.current = 0
-                      setActivePart(activePart + 1)
-                    } else {
-                      setPlayingSegId(null)
-                    }
+                    if (!advance()) setPlayingSegId(null)
                   }}
                 />
                 {audioParts.length > 1 && (
@@ -1841,16 +1744,14 @@ export default function MeetingView({
                     Recording part
                     <select
                       aria-label="Recording part"
-                      value={Math.min(activePart, audioParts.length - 1)}
+                      value={audioParts[activePart]?.url ?? ''}
                       onChange={(event) => {
-                        audioRef.current?.pause()
-                        pendingSeekSecRef.current = 0
                         setPlayingSegId(null)
-                        setActivePart(Number(event.target.value))
+                        selectPart(event.target.value)
                       }}
                     >
                       {audioParts.map((part, index) => (
-                        <option key={part.url} value={index}>
+                        <option key={part.url} value={part.url}>
                           Part {index + 1} of {audioParts.length}
                         </option>
                       ))}

@@ -1,0 +1,336 @@
+{
+  "provenance": "Actual Better Auth 1.7.1/createAuth at 58fd; synthetic HTTP signup/verify/session/org/invitation/state. Google/Microsoft accounts created by actual SDK redirect/code exchange against synthetic signed token responses; expiry extended only for fixtures.",
+  "cookie": "better-auth.session_token=ZxWLpg3vjmS0LDlCppoVpXLQiUK2fKPI.X%2F1JbG5RmcsBeHp0SY%2FJlzqV4EqtYmF4sLAnvNM2Wh0%3D",
+  "users": {
+    "owner": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L",
+    "google": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+    "microsoft": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+    "unverified": "5ZCZlVvOjYQm1Cfzv4WKoEJblSMHMhbN"
+  },
+  "orgId": "MoL2IuyhrwvRQgRZrnENGTv3d167A3JM",
+  "states": {
+    "google": {
+      "state": "yX4wTMR3g2t6znJExlNi2JAH-cPMvOrC",
+      "cookie": "better-auth.state=yX4wTMR3g2t6znJExlNi2JAH-cPMvOrC.ACAhuOCEI0EWRW1559klJZboryWzyw%2BtQxbbeEhDqtk%3D"
+    },
+    "microsoft": {
+      "state": "0otwC30n6lgiKwn4JdZUNEHqGRsgsTih",
+      "cookie": "better-auth.state=0otwC30n6lgiKwn4JdZUNEHqGRsgsTih.V4JY8D6Rv%2BxSslDePm1DmzdGOm%2FmcCAqqzAjTJv4dhE%3D"
+    }
+  },
+  "pendingEmailToken": "eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6InVudmVyaWZpZWRAZXhhbXBsZS50ZXN0IiwiaWF0IjoxNzkzMTI0MzM3LCJleHAiOjQ5NDY3MjQzMzd9.Y0Yucip3CrWMBxqeG0uqq8wXKXGJBrzwtFBkuIpTlm4",
+  "tables": {
+    "user": [
+      {
+        "id": "5ZCZlVvOjYQm1Cfzv4WKoEJblSMHMhbN",
+        "name": "unverified",
+        "email": "unverified@example.test",
+        "email_verified": false,
+        "image": null,
+        "created_at": "2026-10-27T23:05:37.569Z",
+        "updated_at": "2026-10-27T23:05:37.569Z"
+      },
+      {
+        "id": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+        "name": "microsoft",
+        "email": "microsoft@example.test",
+        "email_verified": true,
+        "image": null,
+        "created_at": "2026-10-27T23:05:37.522Z",
+        "updated_at": "2026-10-27T23:05:37.525Z"
+      },
+      {
+        "id": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L",
+        "name": "owner",
+        "email": "owner@example.test",
+        "email_verified": true,
+        "image": null,
+        "created_at": "2026-10-27T23:05:37.413Z",
+        "updated_at": "2026-10-27T23:05:37.422Z"
+      },
+      {
+        "id": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+        "name": "google",
+        "email": "google@example.test",
+        "email_verified": true,
+        "image": null,
+        "created_at": "2026-10-27T23:05:37.472Z",
+        "updated_at": "2026-10-27T23:05:37.477Z"
+      }
+    ],
+    "account": [
+      {
+        "id": "4BuHiknfIL05jjhK4ZHhLSrv5D3rhd5N",
+        "account_id": "legacy-microsoft-subject",
+        "provider_id": "microsoft",
+        "user_id": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+        "access_token": "synthetic-access",
+        "refresh_token": "synthetic-refresh",
+        "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6InN5bnRoZXRpYy11cGdyYWRlLWtleSJ9.eyJzdWIiOiJwYWlyd2lzZS1zdWItbXVzdC1ub3QtYmUtYWNjb3VudC1pZCIsInRpZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsIm9pZCI6ImxlZ2FjeS1taWNyb3NvZnQtc3ViamVjdCIsImlzcyI6Imh0dHBzOi8vbG9naW4ubWljcm9zb2Z0b25saW5lLmNvbS8xMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEvdjIuMCIsImF1ZCI6InN5bnRoZXRpYy1taWNyb3NvZnQiLCJuYW1lIjoiU3ludGhldGljIHByb3ZpZGVyIHVzZXIiLCJlbWFpbCI6Im1pY3Jvc29mdEBleGFtcGxlLnRlc3QiLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiaWF0IjoxNzkzMTI0MzM3LCJleHAiOjE3OTMxMjc5Mzd9.ZELO_We654-9M2HFAdXptlX5G3hOaQxVR6aQIgdh40YG9rdAkfgcCWAVW1-YetLzUMKjffpW8QSFy3CXAJ3HG7OvqZerDSRVuZ9LpgA1gjCzlcCx_wSxWtSnVQg1e1B2S89Btt58xVvZKGh3gKnkKvzxdRK9gmeRvnv9TCA1dDgewyYeC3G4DXejTCh1Pr3VU2TVBWq6MopAemhZZp_wlMH-Sv_O1jDwB9N_tnDodgGc7c_sZzH0tWa4YGCbpA0mGKn3IpFmJwOZ9UwJnKFWDx58ktgtrPA7zxeg_5uX2at5QQf2f8S2ciKSqYK09zq3M6dlZqNTvuCDm3S_Md6idA",
+        "access_token_expires_at": "2026-10-28T00:05:37.607Z",
+        "refresh_token_expires_at": null,
+        "scope": "openid,email,profile",
+        "password": null,
+        "created_at": "2026-10-27T23:05:37.608Z",
+        "updated_at": "2026-10-27T23:05:37.608Z",
+        "issuer": "https://login.microsoftonline.com/11111111-1111-4111-8111-111111111111/v2.0"
+      },
+      {
+        "id": "5iQ0yWgLLRbKsX1YLWSrRCW0YXDM8VT8",
+        "account_id": "legacy-google-subject",
+        "provider_id": "google",
+        "user_id": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+        "access_token": "synthetic-access",
+        "refresh_token": "synthetic-refresh",
+        "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6InN5bnRoZXRpYy11cGdyYWRlLWtleSJ9.eyJzdWIiOiJsZWdhY3ktZ29vZ2xlLXN1YmplY3QiLCJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20iLCJhdWQiOiJzeW50aGV0aWMtZ29vZ2xlIiwibmFtZSI6IlN5bnRoZXRpYyBwcm92aWRlciB1c2VyIiwiZW1haWwiOiJnb29nbGVAZXhhbXBsZS50ZXN0IiwiZW1haWxfdmVyaWZpZWQiOnRydWUsImlhdCI6MTc5MzEyNDMzNywiZXhwIjoxNzkzMTI3OTM3fQ.mUGUrNPrzgWPrlgU68mm3SwqkV_nc7clUK3QSc-7aAlFQjAiXf6_setxFacy9Df3TVLK4W1LZB55s7ymL2LO_rMaz529UYHmZo3ZxTWU_1UNt12XHipk5wQauhDkQpiH-z7Zg_xkqbHbOA7GfAxNNFiTRD7o7CQLAX2_mzb8qAmVsbQjEE5wtxn-jXz1agEvNDisb8WHzKsOBZsZNL39mE_9WYc7zjuHEkcicnXtUb-ffEckX_ClQDE9nc-oO9etzvFtNBEHlDDBak4U7ZBwyjw-ySXM21fASgNTiW7B2pcARlSk6bE6QzPc9_lPEycaLV_lBZFryWhdojVZk7CbQg",
+        "access_token_expires_at": "2026-10-28T00:05:37.596Z",
+        "refresh_token_expires_at": null,
+        "scope": "openid,email,profile",
+        "password": null,
+        "created_at": "2026-10-27T23:05:37.597Z",
+        "updated_at": "2026-10-27T23:05:37.597Z",
+        "issuer": "https://accounts.google.com"
+      },
+      {
+        "id": "DSLXcpzub4AQTRrwtPKEs3VvVZHJ9M5i",
+        "account_id": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L",
+        "provider_id": "credential",
+        "user_id": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L",
+        "access_token": null,
+        "refresh_token": null,
+        "id_token": null,
+        "access_token_expires_at": null,
+        "refresh_token_expires_at": null,
+        "scope": null,
+        "password": "2ca984231c8b0a72f469226197ec10e7:9b62eeaaf937fe5e84de564b5ed85b0f6e1c3a03e676247f4e7ad5555737746e4f5e45166f1c13351b7d8d3d5328d2daa1d9e31e5e1bcfe90f84f924f20480de",
+        "created_at": "2026-10-27T23:05:37.415Z",
+        "updated_at": "2026-10-27T23:05:37.415Z",
+        "issuer": "local:credential"
+      },
+      {
+        "id": "QKgtlKDcXkBgskbV1fifa1k6w74HMhCA",
+        "account_id": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+        "provider_id": "credential",
+        "user_id": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+        "access_token": null,
+        "refresh_token": null,
+        "id_token": null,
+        "access_token_expires_at": null,
+        "refresh_token_expires_at": null,
+        "scope": null,
+        "password": "4b2c98df34e9f6830b62dfefd2adae58:230c148879051e68b839426dc4dede31d67a3668a1079cc2b76a839d74b2550c889d81b5a6608f7171f67aa3e2bb6b5bb19277b7a630a7cc2153db47ab911959",
+        "created_at": "2026-10-27T23:05:37.474Z",
+        "updated_at": "2026-10-27T23:05:37.474Z",
+        "issuer": "local:credential"
+      },
+      {
+        "id": "TrDMmDucYOZjwx7pwPDzeHeW6rqBpBrm",
+        "account_id": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+        "provider_id": "credential",
+        "user_id": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+        "access_token": null,
+        "refresh_token": null,
+        "id_token": null,
+        "access_token_expires_at": null,
+        "refresh_token_expires_at": null,
+        "scope": null,
+        "password": "39e6310ed1ac27dabc172cc85d906164:720e7cc02107a7905a128aece01dff6e82c3636bb5f9dfedd78db375c897a8ab8f3ee3f796b20acdcb1e8fd0b38ddfaa04b31ec01c70346842d69c8a4a3e8389",
+        "created_at": "2026-10-27T23:05:37.523Z",
+        "updated_at": "2026-10-27T23:05:37.523Z",
+        "issuer": "local:credential"
+      },
+      {
+        "id": "hfCXd9U2eVMPrA9LRXQ2kgFa9mVsTjFN",
+        "account_id": "5ZCZlVvOjYQm1Cfzv4WKoEJblSMHMhbN",
+        "provider_id": "credential",
+        "user_id": "5ZCZlVvOjYQm1Cfzv4WKoEJblSMHMhbN",
+        "access_token": null,
+        "refresh_token": null,
+        "id_token": null,
+        "access_token_expires_at": null,
+        "refresh_token_expires_at": null,
+        "scope": null,
+        "password": "4646c8ff074e647c1d4f12b9be74678e:3f7ee171675da0a6d980865acf049f922be4b3abce9b04ea87eb46fbaa403cb6481c3a4d1ef85ff459660ebe89a244cc0773c1529482985b3351b9f73d248cd4",
+        "created_at": "2026-10-27T23:05:37.570Z",
+        "updated_at": "2026-10-27T23:05:37.570Z",
+        "issuer": "local:credential"
+      }
+    ],
+    "session": [
+      {
+        "id": "7J4HfgR3GSeAtTVDStaxCVuLJMlDHiXM",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "token": "5rZrlS2a8iUK0aNyQbR6ccGylt7RiP3Q",
+        "created_at": "2026-10-27T23:05:37.526Z",
+        "updated_at": "2026-10-27T23:05:37.526Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "",
+        "user_id": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+        "active_organization_id": null
+      },
+      {
+        "id": "ErNrsCW6TIF9HNbwd8lihZnGF5VIYJdb",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "token": "ZxWLpg3vjmS0LDlCppoVpXLQiUK2fKPI",
+        "created_at": "2026-10-27T23:05:37.424Z",
+        "updated_at": "2026-10-27T23:05:37.581Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "",
+        "user_id": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L",
+        "active_organization_id": "MoL2IuyhrwvRQgRZrnENGTv3d167A3JM"
+      },
+      {
+        "id": "Hcf5jNRgmF7noqTuNdec0WMt24WNIlsg",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "token": "L8FJmtQt8s2y32ZZuUuLL0ykHb1sXFW2",
+        "created_at": "2026-10-27T23:05:37.598Z",
+        "updated_at": "2026-10-27T23:05:37.598Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "",
+        "user_id": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+        "active_organization_id": null
+      },
+      {
+        "id": "YLcBO4cYIguHnLgRVJ9GmIQCoEnHbYNS",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "token": "h96wOalUWKKJDIbahK86gUeqhVfjBn2c",
+        "created_at": "2026-10-27T23:05:37.609Z",
+        "updated_at": "2026-10-27T23:05:37.609Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "",
+        "user_id": "8faZ6Q7xVYiK8LBVWUPJg1S0ZloEG1Mn",
+        "active_organization_id": null
+      },
+      {
+        "id": "iY4rgx9qc2k2lLzIZj8gyZmpxsuHMpQi",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "token": "gsk0zlgsKsb3Jql8iklGEZnIIhXDwiYr",
+        "created_at": "2026-10-27T23:05:37.478Z",
+        "updated_at": "2026-10-27T23:05:37.478Z",
+        "ip_address": "127.0.0.1",
+        "user_agent": "",
+        "user_id": "w93EnnOLFnlL04mPpkAOsGrWd5JBc7bn",
+        "active_organization_id": null
+      }
+    ],
+    "organization": [
+      {
+        "id": "MoL2IuyhrwvRQgRZrnENGTv3d167A3JM",
+        "name": "Synthetic team",
+        "slug": "synthetic-team",
+        "logo": null,
+        "created_at": "2026-10-27T23:05:37.576Z",
+        "metadata": null
+      }
+    ],
+    "member": [
+      {
+        "id": "qohnVJAAwgCTGQtJMWLtMe2Uy1txKOib",
+        "organization_id": "MoL2IuyhrwvRQgRZrnENGTv3d167A3JM",
+        "user_id": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L",
+        "role": "owner",
+        "created_at": "2026-10-27T23:05:37.576Z"
+      }
+    ],
+    "invitation": [
+      {
+        "id": "aS5kemZsGdBZkk9kUHaCyZDQm4YTu2M3",
+        "organization_id": "MoL2IuyhrwvRQgRZrnENGTv3d167A3JM",
+        "email": "invitee@example.test",
+        "role": "member",
+        "status": "pending",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "created_at": "2026-10-27T23:05:37.586Z",
+        "inviter_id": "cHOziInaL5jnxwT6qcasicIsFuTYbY2L"
+      }
+    ],
+    "verification": [
+      {
+        "id": "1OJ7MCNqB9KQjqmMse8PuNFiPR2l2Tar",
+        "identifier": "0otwC30n6lgiKwn4JdZUNEHqGRsgsTih",
+        "value": "{\"expiresAt\": 4070908800000, \"oauthState\": \"0otwC30n6lgiKwn4JdZUNEHqGRsgsTih\", \"callbackURL\": \"http://localhost:4040/workspace\", \"codeVerifier\": \"-0Ad_D3lU_kp7jrbT0JwAsZuK-FrNACTmDF9ie_MpVkZN_zaCmNyVdNps9xth6yZoEN--uj4bpuFm62tfafYQD4vhNb7Mfy5v9c9zG6cnMR1ZxhJlVcS14AgHQoFJ-cw\"}",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "created_at": "2026-10-27T23:05:37.611Z",
+        "updated_at": "2026-10-27T23:05:37.611Z"
+      },
+      {
+        "id": "S8ssH2PUBdhfb01PCghsmNK7jFPcAIxg",
+        "identifier": "yX4wTMR3g2t6znJExlNi2JAH-cPMvOrC",
+        "value": "{\"expiresAt\": 4070908800000, \"oauthState\": \"yX4wTMR3g2t6znJExlNi2JAH-cPMvOrC\", \"callbackURL\": \"http://localhost:4040/workspace\", \"codeVerifier\": \"F8OvIzfgULGV4lS-0Yl9jZZ-tXcTQFaYii-joGWALCFnhlf-RLuPVnepDgG4Ci6xSU6TafrMv3GOCLkc5Zzl8fdNhykyY3PMQHNjc-tTTaFCZEvFqtnw6NcS5pmy4fUX\"}",
+        "expires_at": "2099-01-01T06:00:00.000Z",
+        "created_at": "2026-10-27T23:05:37.602Z",
+        "updated_at": "2026-10-27T23:05:37.602Z"
+      }
+    ]
+  },
+  "journal": [
+    {
+      "hash": "931651b5ad9dfe83d8e180a08c24f1e9c18271704d03aed7d7dd1dee9187b640",
+      "created_at": 1783189485029
+    },
+    {
+      "hash": "0da21a26621d5e05f3a6b3b151505e29b87625217c2b56fd3761f886e7e4951e",
+      "created_at": 1783191220034
+    },
+    {
+      "hash": "c4477203845d3f1b0c785e300453c9ccf4f2b6f6dd14a7e2961b594f228d482d",
+      "created_at": 1783352942989
+    },
+    {
+      "hash": "b719b7b2b07b9ccb1e7754716cf968c1724e452c5950b03515225ec0537282b1",
+      "created_at": 1783370735905
+    },
+    {
+      "hash": "0fc750e607fce5a0bffba787b64ea525e33a3b11e7489c24e93ec4dfe3eb0657",
+      "created_at": 1783449744306
+    },
+    {
+      "hash": "62211d7bc6559129ee2ccd8c36aa4cec758b9a45410345b99bac83fed9866f48",
+      "created_at": 1783460990611
+    },
+    {
+      "hash": "a6258eb634660ec78cc2044cd44e3db7d59513ae61ef331b5e7a276d7db85a4d",
+      "created_at": 1783516366575
+    },
+    {
+      "hash": "4aecf7141d2ce3ef8fed55a96a6fe349a91df80cc3d7028661eef7fb38a20ee0",
+      "created_at": 1783624711777
+    },
+    {
+      "hash": "58650b6b35bf4d5089ec9ebba37420a0a69db6c67fb17d50675ac02c1b178679",
+      "created_at": 1783820602525
+    },
+    {
+      "hash": "bf1f789f82eb822d6d0c7a8ad74f2301da7c252efe6ee98427eaeed1695b97d3",
+      "created_at": 1785692066283
+    },
+    {
+      "hash": "58efdf7fabc344680bbfabb97e444c7cb7eae17df20ab877e60756223449a790",
+      "created_at": 1787759196463
+    },
+    {
+      "hash": "0a52b93630f7e2710087c0e9b724ba174d859a496c0cb463db4b6a56cdbc82b7",
+      "created_at": 1787847414555
+    },
+    {
+      "hash": "33fcaa8e44d4a1c3c1d2f686ca1e64f75c36369d003a1f80002fc4a1f5cf2c04",
+      "created_at": 1788184190594
+    },
+    {
+      "hash": "2c82f8a666eaeb1548e02915e52c6c115f74df56c734dc19a1ca3c7c277fa1e3",
+      "created_at": 1788733073040
+    },
+    {
+      "hash": "14b54c3c1ea4660d6b4a3fe9030e52003b4d2c7375a179afbe64d929459c19dc",
+      "created_at": 1788741254610
+    },
+    {
+      "hash": "449f0a673132af970bcec08f8fd7067c0e94a568c19c3965346babc13796eba0",
+      "created_at": 1788744785745
+    },
+    {
+      "hash": "a7bc7ba68f95080d71c9ca6ce267b968bc7a13bc27940a1c287c6304737d9e31",
+      "created_at": 1788798450498
+    }
+  ]
+}

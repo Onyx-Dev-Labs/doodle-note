@@ -1,4 +1,5 @@
 import { CalendarAuthLoopback } from './calendar-auth-loopback'
+import { acquireCalendarMicrosoftToken } from './calendar-microsoft-auth'
 import { calendarPages, CalendarRequestError, mapCalendarTasks } from './calendar-http'
 import { BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -143,7 +144,7 @@ export type CalendarBroadcast = (channel: string, payload: unknown) => void
  * Owns calendar integration in the main process:
  *
  * - MSAL public-client auth (auth-code + PKCE against a loopback redirect via
- *   acquireTokenInteractive; the system browser is opened with
+ *   getAuthCodeUrl/acquireTokenByCode; the system browser is opened with
  *   shell.openExternal). Microsoft and Google credentials, snapshots,
  *   selections and prompt history persist per account in the safeStorage
  *   encrypted calendar-accounts-v2 vault. Interactive auth runs only on Connect.
@@ -741,19 +742,18 @@ export class CalendarService {
         const cancelled = new Promise<'cancelled'>((resolve) => {
           this.cancelMicrosoftWait = () => resolve('cancelled')
         })
-        const flow = client.acquireTokenInteractive({
-          loopbackClient: loopback,
-          state: loopback.state,
-          scopes: SCOPES,
-          prompt: 'select_account',
-          openBrowser: async (url) => {
+        const flow = acquireCalendarMicrosoftToken(
+          client,
+          loopback,
+          SCOPES,
+          (url) => shell.openExternal(url),
+          () => {
             if (generation !== this.authGeneration || this.disposed)
               throw new Error('Sign-in cancelled.')
-            await shell.openExternal(url)
           },
-          successTemplate: SUCCESS_TEMPLATE,
-          errorTemplate: ERROR_TEMPLATE
-        })
+          SUCCESS_TEMPLATE,
+          ERROR_TEMPLATE
+        )
         const result = await withTimeout(Promise.race([flow, cancelled]), CONNECT_TIMEOUT_MS)
         loopback.closeServer()
         if (this.pendingMicrosoft === loopback) {

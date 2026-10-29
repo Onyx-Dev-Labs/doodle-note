@@ -120,6 +120,13 @@
       "when": 1788798450498,
       "tag": "0016_explicit_legacy_adoption",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793123877075,
+      "tag": "0017_account_provider_key",
+      "breakpoints": true
     }
   ]
 }

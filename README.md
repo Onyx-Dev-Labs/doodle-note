@@ -112,7 +112,7 @@ packages/
 
 ### Prerequisites
 
-- Node.js 22 or later
+- Node.js 22.12.0 or later
 - pnpm 10.33.2 (Corepack is recommended)
 - macOS 14+ on Apple Silicon and Xcode/Swift for the native transcription engine
 - XcodeGen and Xcode 26 for iOS work
