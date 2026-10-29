@@ -111,6 +111,59 @@ test('uploads only exact payloads, verifies public bytes, and leaves feeds untou
   )
 })
 
+test('accepts SDK hostname capitalization for existing objects, uploads and feed activation', async (t) => {
+  const f = await fixture(t)
+  const transport = fakeTransport()
+  transport.objects.set(`updates/${zip}`, { bytes: f.files[zip], etag: 'existing-zip' })
+  transport.objects.set(`updates/${feed}`, { bytes: Buffer.from('old feed'), etag: 'old-feed' })
+  const mixedHost = (blob) => ({
+    ...blob,
+    url: blob.url.replace('z4d0oe5bcxlyzvar', 'Z4d0oe5BcXLyZvAr')
+  })
+  const get = transport.get.bind(transport)
+  const put = transport.put.bind(transport)
+  transport.get = async (key) => {
+    const result = await get(key)
+    return result ? { ...result, blob: mixedHost(result.blob) } : null
+  }
+  transport.put = async (...args) => mixedHost(await put(...args))
+  const webUpdatesDir = path.join(f.dir, 'web')
+  await mkdir(webUpdatesDir)
+  const result = await publishMacRelease({
+    ...f.options,
+    transport,
+    activate: true,
+    rollbackDir: path.join(f.dir, 'rollback'),
+    webUpdatesDir
+  })
+  assert.equal(result.activated, true)
+  assert.deepEqual(await readFile(result.stagedManifest), f.files[feed])
+  assert.deepEqual(transport.objects.get(`updates/${zip}`).bytes, f.files[zip])
+  assert.deepEqual(transport.objects.get(`updates/${dmg}`).bytes, f.files[dmg])
+})
+
+for (const badUrl of [
+  `https://other-store.public.blob.vercel-storage.com/updates/${zip}`,
+  `https://z4d0oe5bcxlyzvar.public.blob.vercel-storage.com/Updates/${zip}`,
+  `${BLOB_BASE}/${zip}?different=1`,
+  `${BLOB_BASE}/${zip}#fragment`,
+  `${BLOB_BASE}/${zip}`.replace('https://', 'https://user@'),
+  `${BLOB_BASE}/${zip}`.replace('https://', 'http://')
+]) {
+  test(`rejects a different Blob location: ${badUrl}`, async (t) => {
+    const f = await fixture(t)
+    const transport = fakeTransport()
+    transport.objects.set(`updates/${zip}`, { bytes: f.files[zip], etag: 'existing' })
+    const get = transport.get.bind(transport)
+    transport.get = async (key) => {
+      const result = await get(key)
+      return result ? { ...result, blob: { ...result.blob, url: badUrl } } : null
+    }
+    await assert.rejects(publishMacRelease({ ...f.options, transport }), /Unexpected Blob store\/path/)
+    assert.equal(transport.events.some(([event]) => event === 'put'), false)
+  })
+}
+
 test('activation is last and conditional, with prior manifests saved and a separate static proposal', async (t) => {
   const f = await fixture(t)
   const transport = fakeTransport()
