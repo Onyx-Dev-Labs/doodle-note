@@ -108,8 +108,10 @@ not apply to this stdio entrypoint. A clean audit does not prove exploitability
 before the patch or establish the safety of future HTTP integration.
 
 A full macOS package was not built: this checkout lacks the Swift/Whisper build
-artifacts and the host has no CMake on PATH. Native capture, signed/notarized Mac
-artifacts, native Windows installer execution, publication and installed-user
+artifacts and the host has no CMake on PATH. A production desktop GUI launch was
+not exercised; renderer HMR and CLI/worker execution do not establish that check.
+Production GUI launch, native capture, signed/notarized Mac artifacts, native
+Windows installer execution, publication and installed-user
 verification remain release gates in `docs/RELEASING.md`. No release version,
 updater feed, signing setup, production data, or publication state was changed.
 Already-installed apps require a rebuilt release to receive the bundled fixes.
