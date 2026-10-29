@@ -82,7 +82,7 @@ test("forward DDL is one loaded statement, preserves every account byte, and ret
     await retry.run();
     assert.equal(retry.statements.filter(s => s === forward.sql[0]).length, 1);
     const complete = await constraints(client);
-    assert.equal(complete.journal.length, 18);
+    assert.equal(complete.journal.length, migrations.length);
     assert.deepEqual(complete.journal[17], { hash: forward.hash, created_at: forward.folderMillis });
     const noop = httpRunner(client);
     await noop.run();
