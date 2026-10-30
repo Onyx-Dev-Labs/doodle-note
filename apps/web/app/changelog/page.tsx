@@ -10,7 +10,7 @@ const RELEASES: Array<{
 }> = [
   {
     version: "0.4.35.1",
-    date: "Pending release",
+    date: "October 30, 2026",
     highlights: [
       "Mac security maintenance: update dependencies in the app and bundled local MCP server to address known vulnerabilities",
       "Shown as version 0.4.36 in the app and automatic updater",

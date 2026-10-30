@@ -49,6 +49,35 @@ reported 0.4.36 and the isolated library path. The app quit normally and its
 deep/strict code-signature verification passed afterward. This establishes GUI
 launch/navigation, not recording, inference or installed-updater acceptance.
 
+## Publication evidence
+
+The receipt-bound publisher uploaded both immutable payloads and verified their
+complete sizes and SHA-256 hashes through the raw Blob URLs and the installed
+client routes on `www.doodlenote.ai`. The packaged MCP CLI hash is
+`79160258a7aac4ba8a679df34d6868ff7b3e96ef2afea3480a69b9ed2785be78`, matching the
+previously verified Node 18/Electron bundle; its manifest pins SDK 1.32.0.
+
+The first activation wrote the Blob feed but failed immediate read-back with
+`Payload exceeds expected size`, before creating a static proposal. Independent
+public inspection then returned the correct 510-byte 0.4.36 feed, SHA-256
+`1748f6919592f278ab12829de4f15ea0d46b8756c0912912bb9b020e236b4856`, ETag
+`"5b94abba839761d6bcdfa80583efe6f8"`. The website still served the prior 514-byte
+0.4.35 feed. After inspecting both surfaces, activation was deliberately retried
+to obtain a verified proposal; the original rollback records remain preserved.
+The retry completed successfully with `activated: true`, saving a separate
+proposal in `mac-activation-mE3YB4/web-proposal-latest-mac.yml`. This PR copies
+that exact verified proposal to the static web feed; its SHA-256 matches the
+receipt above. The public release date is October 30, 2026.
+
+The original Blob/static feed SHA-256 is
+`f8599c690172c79f113973a20c381124acd08cc1abbd1c919f46344022face62`, original ETag
+`"4174fe14fae051373957aae1a16db9d6"`. Rollback evidence and the signing/verification
+receipts are retained locally under
+`~/.local/share/doodlenote-release-evidence/mac-0.4.35.1/`.
+The prior production deployment is `dpl_DzJaE4HjBTMioCUsEYmfCMR7uB6D`, source
+`3c08e2c809b8294b85f9236af84ae6cba6b6f578`. Rollback requires reading the current
+ETag and coordinating both feed surfaces; it cannot undo already-installed updates.
+
 ## Windows readiness
 
 The approved CI built `DoodleNote-0.4.36-setup.exe`, its blockmap and `latest.yml`.
