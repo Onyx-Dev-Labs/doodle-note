@@ -2,12 +2,19 @@ import { SiteFooter, SiteHeader } from "../ui";
 
 export const metadata = { title: "What's new — DoodleNote" };
 
-/** One entry per released desktop version, newest first. */
+/** One entry per desktop version, newest first; unreleased entries are labeled. */
 const RELEASES: Array<{
   version: string;
   date: string;
   highlights: string[];
 }> = [
+  {
+    version: "0.4.36",
+    date: "Pending release",
+    highlights: [
+      "Mac security maintenance: update dependencies in the app and bundled local MCP server to address known vulnerabilities",
+    ],
+  },
   {
     version: "0.4.35",
     date: "October 28, 2026",
