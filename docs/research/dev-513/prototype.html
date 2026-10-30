@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>DEV-513 · Synthetic screen evidence probe</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--fg:#192334;--panel:#fff;--line:#bac3ce;--accent:#174fa8;--soft:#e9f0fc}
+@media(prefers-color-scheme:dark){:root{--bg:#131921;--fg:#edf1f8;--panel:#202a36;--line:#768598;--accent:#a8c9ff;--soft:#2d405b}}
+*{box-sizing:border-box}body{margin:0;padding:24px;font:16px/1.5 system-ui;background:var(--bg);color:var(--fg)}main{max-width:1080px;margin:auto}h1{font-size:28px;line-height:1.2}h2{font-size:20px;margin-top:0}p{margin:10px 0}.tag{font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--accent)}section,article,dialog{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin:16px 0}dialog{color:var(--fg);max-width:min(560px,95vw);margin:auto}dialog::backdrop{background:#0008}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}button,input,select{font:inherit;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg)}button{cursor:pointer}button.primary{background:var(--soft);font-weight:650}button:disabled{opacity:.5;cursor:default}:focus-visible{outline:3px solid var(--accent);outline-offset:3px}label{display:block;margin:10px 0}input{width:160px}select{max-width:100%;width:100%}img,canvas{width:100%;height:auto;border-radius:6px}code,pre{overflow-wrap:anywhere;white-space:pre-wrap;font-size:12px}#status{padding:12px;background:var(--soft);border-radius:6px}small{display:block}.missing{font-weight:700;border:2px dashed var(--line);padding:16px}.muted{font-size:14px}.steps{padding-left:22px}@media(max-width:650px){body{padding:16px}.grid{grid-template-columns:1fr}h1{font-size:24px}section,article{padding:16px}}
+</style>
+<main id="app">
+<p class="tag">DEV-513 / DISPOSABLE RESEARCH</p>
+<h1>Keep the slide. Keep the moment.</h1>
+<p>Can one deliberate selection retain original visual evidence and distinct meeting moments locally, while failing closed?</p>
+<p><strong>Synthetic pipeline only.</strong> Images are rendered from this file’s known fixture, never captured from a native window. The picker and permission outcomes below are simulations. No microphone, screen API, OCR, upload or model runs.</p>
+<div class="grid">
+<section aria-labelledby="controls"><h2 id="controls">1. Select one source</h2>
+<p id="selected">Selected: none</p>
+<div class="row"><button id="choose">Choose synthetic source</button><button id="cancel">Cancel selection / pending capture</button></div>
+<label for="offset">Synthetic meeting time (seconds)</label><input id="offset" type="number" min="0" max="86400" step="1" value="42">
+<p class="muted">Meeting: <strong>fixture-meeting</strong>. This editable offset is a test clock, not an audio timestamp. UTC action time is also retained.</p>
+<button id="capture" class="primary" disabled>Capture selected fixture once</button>
+<p id="status" role="status" aria-live="polite">Nothing captured. Choose a fixture to begin.</p>
+<p class="muted">Storage: local browser profile, key <code>DEV513_PROTOTYPE_WIPE_ME_v1</code>. Open one controller tab. Browser clearing/eviction can remove it; this is not production durability or encryption.</p>
+</section>
+<section><h2>2. Inspect the source fixture</h2><canvas id="slide" width="960" height="540" aria-label="Synthetic slide: Project Atlas, launch date proposed, no spoken commitment"></canvas>
+<p class="muted">Allowlisted source: <code>fixture-slide-v1</code>. Separate excluded source: <code>fixture-sensitive-v1</code>.</p>
+<div class="row"><button id="open-slide">Open slide window</button><button id="open-excluded">Open excluded window</button></div>
+<p class="muted">These buttons open only this file’s synthetic fixtures. Their pixels are not read back by the probe.</p></section>
+</div>
+<section><h2>3. Inspect retained evidence</h2><p id="counts"></p><div id="evidence"></div></section>
+<section><h2>Guided fixture matrix</h2>
+<ol class="steps"><li>Choose the slide → capture at 42 seconds → inspect its original and provenance.</li><li>Capture unchanged slide at 60 seconds → two occurrences, one original.</li><li>Cancel or simulate permission denied in the picker → no new artifact. Choose excluded source → capture rejected.</li><li>Reload → original and both timestamps remain. The selection does not survive restart.</li><li>Remove original bytes → every referencing occurrence says “Missing original”. No recreated image or OCR substitute.</li><li>Delete an occurrence → the other remains. Delete the last occurrence → its unreferenced original is removed.</li><li>Open this downloaded file without a connection → repeat the steps. No external resources are needed.</li></ol>
+<div class="row"><button id="restart">Restart probe (reload)</button><button id="reset">Erase this prototype’s evidence</button></div>
+<p class="muted">No citation identity is minted. Occurrence counters belong only to this scratch probe. Future production work must reuse DEV-506’s accepted library identity, add a reviewed image-source contract, and obtain separate export consent.</p>
+</section>
+<dialog id="picker" aria-labelledby="picker-title"><h2 id="picker-title">Simulated source picker</h2><p>One source only; no screen-wide choice.</p><label for="source">Synthetic source</label><select id="source"><option value="fixture-slide-v1">Project Atlas · synthetic slide</option><option value="fixture-sensitive-v1">Excluded · synthetic private window</option></select><div class="row"><button id="confirm">Use selected source</button><button id="deny">Simulate permission denied</button><button id="dismiss">Cancel picker</button></div></dialog>
+</main>
+<script id="probe-core">
+// Disposable scratch model. No production imports, library identity, network or OS capture.
+const Probe = (() => {
+  const KEY = 'DEV513_PROTOTYPE_WIPE_ME_v1';
+  const SOURCE = 'fixture-slide-v1';
+  const empty = () => ({version:1,next:1,originals:{},occurrences:[]});
+  const copy = value => JSON.parse(JSON.stringify(value));
+  async function hash(dataURL) {
+    if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataURL)) throw Error('Invalid original PNG');
+    const bytes = Uint8Array.from(atob(dataURL.split(',')[1]), c => c.charCodeAt(0));
+    if (bytes.length > 1024 * 1024) throw Error('Fixture exceeds 1 MiB bound');
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)), b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  class Store {
+    constructor(storage) {
+      this.storage=storage; this.generation=0; this.selected=null; this.busy=false; this.blocked=false;
+      const raw=storage.getItem(KEY);
+      this.state=raw===null?empty():JSON.parse(raw);
+      const s=this.state;
+      if(s.version!==1 || !Number.isSafeInteger(s.next) || s.next<1 || !s.originals || typeof s.originals!=='object' || Array.isArray(s.originals) || !Array.isArray(s.occurrences)) throw Error('Unreadable scratch store; preserved without overwrite');
+      if(s.occurrences.some(o=>!Number.isSafeInteger(o.id)||o.id<1||o.id>=s.next||o.source!==SOURCE||o.meeting!=='fixture-meeting'||!Number.isFinite(o.meetingMs)||o.meetingMs<0||o.meetingMs>86400000||!Number.isFinite(Date.parse(o.actionUTC))||!/^[a-f0-9]{64}$/.test(o.imageHash)||o.provenance!=='synthetic-render-v1'||o.derivedOCR!==null) || new Set(s.occurrences.map(o=>o.id)).size!==s.occurrences.length) throw Error('Unreadable occurrences; preserved without overwrite');
+    }
+    commit(next) {
+      if(this.blocked) throw Error('Another tab changed this scratch store. Reload before editing.');
+      this.storage.setItem(KEY,JSON.stringify(next)); // publish memory only after storage succeeds
+      this.state=next;
+    }
+    cancel(){this.generation++;this.selected=null;}
+    select(source){this.cancel();this.selected=source;}
+    async capture({meetingMs,actionUTC,dataURL}) {
+      if(this.busy) throw Error('A capture is already pending');
+      if(this.selected!==SOURCE) throw Error('No allowed source selected; no artifact saved');
+      if(!Number.isFinite(meetingMs)||meetingMs<0||meetingMs>86400000||!Number.isFinite(Date.parse(actionUTC))) throw Error('Invalid timestamp; no artifact saved');
+      const generation=this.generation;this.busy=true;
+      try {
+        const imageHash=await hash(dataURL);
+        if(generation!==this.generation) return {cancelled:true};
+        const next=copy(this.state), duplicate=Boolean(next.originals[imageHash]);
+        // Missing content is never silently restored by an old occurrence: a new explicit capture is required.
+        next.originals[imageHash]=dataURL;
+        const occurrence={id:next.next++,meeting:'fixture-meeting',meetingMs,actionUTC,source:SOURCE,imageHash,provenance:'synthetic-render-v1',derivedOCR:null};
+        next.occurrences.push(occurrence);this.commit(next);return {occurrence,duplicate};
+      } finally {this.busy=false;}
+    }
+    remove(id) {
+      this.cancel();const next=copy(this.state);next.occurrences=next.occurrences.filter(o=>o.id!==id);
+      for(const h of Object.keys(next.originals)) if(!next.occurrences.some(o=>o.imageHash===h)) delete next.originals[h];
+      this.commit(next);
+    }
+    loseOriginal(hash){this.cancel();const next=copy(this.state);delete next.originals[hash];this.commit(next);}
+    async resolve(occurrence) {
+      const data=this.state.originals[occurrence.imageHash];
+      if(!data) return {status:'missing'};
+      try {return await hash(data)===occurrence.imageHash?{status:'available',data}:{status:'corrupt'};}
+      catch {return {status:'corrupt'};}
+    }
+    erase(){this.cancel();this.commit(empty());}
+  }
+  return {KEY,SOURCE,Store,hash};
+})();
+globalThis.Probe=Probe;
+</script>
+<script>
+const $=id=>document.getElementById(id);
+function draw(canvas, excluded=false) {
+  const ctx=canvas.getContext('2d');ctx.fillStyle=excluded?'#6f1834':'#16345b';ctx.fillRect(0,0,960,540);
+  ctx.fillStyle='#fff';ctx.font='bold 52px system-ui';ctx.fillText(excluded?'EXCLUDED SYNTHETIC WINDOW':'Project Atlas',48,110);
+  ctx.font='32px system-ui';ctx.fillText(excluded?'SYNTHETIC-SECRET-513':'Launch date: proposed 1 November',48,220);
+  ctx.fillText(excluded?'Never eligible for this probe':'Decision: pending review',48,295);
+  ctx.font='24px system-ui';ctx.fillText('Fixture text only · no spoken commitment',48,440);
+}
+const fixture=new URLSearchParams(location.search).get('fixture');
+if(fixture) {
+  $('app').replaceChildren();const h=document.createElement('h1');h.textContent=fixture==='excluded'?'Excluded synthetic window':'Synthetic slide window';
+  const c=document.createElement('canvas');c.width=960;c.height=540;
+  const p=document.createElement('p');p.textContent='Generated fixture. This window is not captured by the controller.';
+  $('app').append(h,p,c);draw(c,fixture==='excluded');
+} else {
+  draw($('slide'));let store,renderGeneration=0;
+  const say=text=>$('status').textContent=text;
+  function selected(){ $('selected').textContent='Selected: '+(store?.selected||'none');$('capture').disabled=!store?.selected||store.busy||store.blocked; }
+  async function render(){
+    const gen=++renderGeneration;selected();if(!store)return;
+    $('counts').textContent=`${store.state.occurrences.length} occurrences · ${Object.keys(store.state.originals).length} local original PNGs · OCR not evaluated`;
+    const cards=await Promise.all(store.state.occurrences.map(async o=>{
+      const a=document.createElement('article'),h=document.createElement('h3');h.textContent=`Moment ${o.id} · ${(o.meetingMs/1000).toFixed(1)}s · ${o.source}`;a.append(h);
+      const resolved=await store.resolve(o);
+      if(resolved.status==='available'){const img=document.createElement('img');img.src=resolved.data;img.alt='Retained original synthetic slide for moment '+o.id;a.append(img);}
+      else {const p=document.createElement('p');p.className='missing';p.textContent=resolved.status==='missing'?'Missing original — no substitute':'Corrupt original — evidence unavailable';a.append(p);}
+      const info=document.createElement('pre');info.textContent=JSON.stringify(o,null,2);a.append(info);
+      const row=document.createElement('div');row.className='row';
+      for(const [label,fn] of [[`Delete moment ${o.id}`,()=>store.remove(o.id)],[`Remove original bytes for moment ${o.id}`,()=>store.loseOriginal(o.imageHash)]]){
+        const b=document.createElement('button');b.textContent=label;b.onclick=()=>{try{fn();say(label+' completed.');render();$('choose').focus();}catch(e){say(e.message);}};row.append(b);
+      }a.append(row);return a;
+    }));if(gen===renderGeneration)$('evidence').replaceChildren(...cards);
+  }
+  try{store=new Probe.Store(localStorage);if(store.state.occurrences.length)say(`Restored ${store.state.occurrences.length} saved moments. Choose a source again before capturing.`);render();}catch(e){say('Storage unavailable: '+e.message);$('choose').disabled=true;$('reset').disabled=true;}
+  $('choose').onclick=()=>{$('picker').showModal();$('source').focus();};
+  function close(message){store.cancel();$('picker').close();say(message);selected();$('choose').focus();}
+  $('confirm').onclick=()=>{store.select($('source').value);$('picker').close();say('Selection shown. Capture requires another deliberate action.');selected();$('capture').focus();};
+  $('deny').onclick=()=>close('Permission denied (simulated). No new content saved.');
+  $('dismiss').onclick=()=>close('Picker cancelled. No new content saved.');
+  $('picker').addEventListener('cancel',event=>{event.preventDefault();close('Picker cancelled. No new content saved.');});
+  $('cancel').onclick=()=>{store?.cancel();say('Selection and pending capture cancelled. No new content saved.');selected();};
+  $('capture').onclick=async()=>{
+    try {const task=store.capture({meetingMs:$('offset').valueAsNumber*1000,actionUTC:new Date().toISOString(),dataURL:$('slide').toDataURL('image/png')});selected();
+      const result=await task;say(result.cancelled?'Capture cancelled. No new content saved.':`Saved moment ${result.occurrence.id}. ${result.duplicate?'Identical bytes reused; distinct occurrence retained.':'Original synthetic PNG retained locally.'}`);
+    }catch(e){say('Capture failed: '+e.message);}finally{render();}
+  };
+  for(const kind of ['slide','excluded'])$('open-'+kind).onclick=()=>{const u=new URL(location.href);u.search='?fixture='+kind;window.open(u.href,'DEV513-'+kind,'popup,width=1000,height=720');};
+  $('restart').onclick=()=>location.reload();
+  $('reset').onclick=()=>{try{store.erase();say('Only this prototype’s evidence erased.');render();}catch(e){say(e.message);}};
+  addEventListener('storage',e=>{if(e.key===Probe.KEY||e.key===null){store?.cancel();if(store)store.blocked=true;say('Another tab changed storage. Reload before editing.');selected();}});
+  // Read-only state for reproducible browser verification; actions use the UI.
+  globalThis.probeState=()=>JSON.parse(JSON.stringify(store?.state));
+}
+</script>
+</html>
