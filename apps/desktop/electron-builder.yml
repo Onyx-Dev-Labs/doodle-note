@@ -20,6 +20,8 @@ asarUnpack:
   - "**/node_modules/@node-llama-cpp/**"
   - "**/node_modules/sherpa-onnx-node/**"
   - "**/node_modules/sherpa-onnx-win-x64/**"
+  - "**/node_modules/koffi/**"
+  - "**/node_modules/@koromix/koffi-win32-x64/**"
 mac:
   # The Swift transcription engine ships beside the app code, outside the
   # asar, so it stays a directly-executable binary. macOS-only — Windows

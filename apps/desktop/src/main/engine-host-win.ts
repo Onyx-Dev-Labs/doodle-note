@@ -96,10 +96,18 @@ export class WinEngineHost {
       if (data.t !== 'event' || !data.event) return
       this.handleEngineEvent(data.event)
     })
-    child.on('exit', () => {
+    child.on('exit', (code) => {
       if (this.child !== child) return
+      const failedDuringWarmup = !this.ready && !this.sessionActive
       this.child = null
       this.ready = false
+      if (failedDuringWarmup && !this.disposed) {
+        const message = `The Windows transcription engine exited during setup (${code}). Restart DoodleNote to retry.`
+        this.finishWarmup(
+          { ok: false, micGranted: false, screenGranted: false, error: message },
+          { stage: 'error', message }
+        )
+      }
       if (this.sessionActive) {
         const sessionId = this.activeSessionId
         this.sessionActive = false
@@ -118,7 +126,7 @@ export class WinEngineHost {
         this.removeEphemeralAudio()
         this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
       }
-      if (!this.disposed) {
+      if (!this.disposed && !failedDuringWarmup) {
         this.restartTimer = setTimeout(() => this.startServe(), RESTART_DELAY_MS)
         this.restartTimer.unref()
       }
