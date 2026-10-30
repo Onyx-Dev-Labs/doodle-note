@@ -24,6 +24,7 @@ import {
 } from './icons'
 import { markdownToHtml } from './lib/markdown'
 import mascotUrl from './assets/mascot-square.png'
+import './assets/home-redesign.css'
 
 /** Which meetings the Home list shows; lives in App next to `search`. */
 export type HomeFilter = { kind: 'all' } | { kind: 'trash' } | { kind: 'folder'; id: string }
@@ -747,10 +748,23 @@ export default function HomeView({
   const noneInView = isLoaded && visible.length === 0
   const noMatches =
     isLoaded && search.trim().length > 0 && visible.length > 0 && filtered.length === 0
+  const isOverview = filter.kind === 'all' && search.trim().length === 0
+  const viewTitle = inTrash
+    ? 'Trash'
+    : (folderName ?? (search.trim() ? 'Search notes' : 'Overview'))
 
   return (
-    <div className={askVisible ? 'home has-ask' : 'home'}>
+    <div
+      className={`home home-redesign${askVisible ? ' has-ask' : ''}${isOverview ? ' is-overview' : ''}`}
+    >
       <div className="home-topbar drag">
+        <div className="home-breadcrumb">
+          <span>Your desk</span>
+          <span className="home-breadcrumb-divider" aria-hidden="true">
+            /
+          </span>
+          <strong>{viewTitle}</strong>
+        </div>
         {inTrash && trashedCount > 0 && (
           <button type="button" className="pill-btn pill-danger no-drag" onClick={emptyTrash}>
             Empty trash
@@ -872,224 +886,288 @@ export default function HomeView({
 
       <div className="home-scroll">
         <div className="home-col">
+          {isOverview && (
+            <header className="home-desk-heading">
+              <p className="home-eyebrow">
+                {new Date().toLocaleDateString(undefined, {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </p>
+              <h1>A little clarity.</h1>
+              <p>Your latest thoughts, and a few things to keep moving.</p>
+            </header>
+          )}
           {filter.kind === 'all' && (
             // The "Coming up" heading + controls render inside (outside the
             // white card, above it) so paging state stays local.
-            <ComingUpCard
-              calendar={calendar}
-              onStart={onStartCalendarMeeting}
-              onOpenSettings={onOpenSettings}
-            />
+            <section className="home-calendar" aria-label="Upcoming meetings">
+              <ComingUpCard
+                calendar={calendar}
+                onStart={onStartCalendarMeeting}
+                onOpenSettings={onOpenSettings}
+              />
+            </section>
           )}
-          {filter.kind === 'folder' && (
-            <h2 className="home-heading">
-              <FolderIcon size={17} /> {folderName}
-            </h2>
-          )}
-          {inTrash && (
-            <h2 className="home-heading">
-              <TrashIcon size={17} /> Trash
-            </h2>
-          )}
-
-          <div className={filter.kind === 'all' ? 'meetings-list' : 'meetings-list flush'}>
-            {noneInView && filter.kind === 'all' && (
-              <div className="home-empty">
-                <span className="home-empty-mark">
-                  <img src={mascotUrl} alt="" className="home-empty-mascot" />
-                  <span className="home-empty-wordmark">
-                    <span className="wm-doodle">Doodle</span>
-                    <span className="wm-note">Note</span>
-                  </span>
-                </span>
-                <p>No meetings yet — choose New → New meeting</p>
-              </div>
-            )}
-            {noneInView && filter.kind === 'folder' && (
-              <div className="home-empty-line">No meetings in this folder yet</div>
-            )}
-            {noneInView && inTrash && <div className="home-empty-line">Trash is empty</div>}
-            {noMatches && <div className="home-empty-line">No meetings match “{search}”</div>}
-            {filter.kind === 'all' && search.trim().length === 0 && !noneInView && (
-              <div className="history-heading">
-                <h2>Recent notes</h2>
-                <span>Last 7 days</span>
-              </div>
-            )}
-            {filter.kind === 'all' &&
-              search.trim().length === 0 &&
-              history.displayed.length === 0 &&
-              history.totalOlder > 0 && (
-                <div className="home-empty-line">Nothing saved in the last 7 days</div>
+          <div className={isOverview ? 'home-desk-grid' : 'home-library-layout'}>
+            <section
+              className="home-notes-column"
+              aria-label={inTrash ? 'Trashed notes' : 'Your notes'}
+            >
+              {isOverview && (
+                <header className="home-recent-heading">
+                  <div>
+                    <h2>Recent notes</h2>
+                    <span>{history.shownOlder > 0 ? 'Your notebook' : 'Last 7 days'}</span>
+                  </div>
+                  <p>Pick up where you left off</p>
+                </header>
               )}
-            {groups.map((group) => (
-              <section key={group.label} className={group.older ? 'day-group older' : 'day-group'}>
-                <div className="day-label">{group.label}</div>
-                {group.items.map((m) => {
-                  const menuOpen = menuFor === m.id
-                  const pickerOpen = pickerFor === m.id
-                  return (
-                    <div
-                      key={m.id}
-                      role="button"
-                      tabIndex={0}
-                      className={
-                        menuOpen || pickerOpen ? 'meeting-row actions-open' : 'meeting-row'
-                      }
-                      onClick={() => onOpenMeeting(m.id)}
-                      onKeyDown={(e) => {
-                        // Only the row itself — Enter on an inner button must
-                        // not also open the meeting.
-                        if (e.target !== e.currentTarget) return
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          onOpenMeeting(m.id)
-                        }
-                      }}
-                    >
-                      <span className="row-icon">
-                        {m.kind === 'note' ? <PencilIcon size={14} /> : <DocIcon size={14} />}
+              {filter.kind === 'all' && search.trim().length > 0 && (
+                <h2 className="home-heading">Search results</h2>
+              )}
+              {filter.kind === 'folder' && (
+                <h2 className="home-heading">
+                  <FolderIcon size={17} /> {folderName}
+                </h2>
+              )}
+              {inTrash && (
+                <h2 className="home-heading">
+                  <TrashIcon size={17} /> Trash
+                </h2>
+              )}
+
+              <div className={filter.kind === 'all' ? 'meetings-list' : 'meetings-list flush'}>
+                {noneInView && filter.kind === 'all' && (
+                  <div className="home-empty">
+                    <span className="home-empty-mark">
+                      <img src={mascotUrl} alt="" className="home-empty-mascot" />
+                      <span className="home-empty-wordmark">
+                        <span className="wm-doodle">Doodle</span>
+                        <span className="wm-note">Note</span>
                       </span>
-                      <span className="row-main">
-                        <span className="row-title">
-                          {isGenericDraftTitle(m.title)
-                            ? m.kind === 'note'
-                              ? 'New note'
-                              : 'New meeting'
-                            : m.title.trim()}
-                        </span>
-                        <span className="row-sub">
-                          {m.kind === 'note' ? 'Note' : 'Me'}
-                          {m.durationMin !== undefined ? ` · ${m.durationMin} min` : ''}
-                          {search.trim().length > 0 &&
-                            (searchHits?.get(m.id) === 'transcript'
-                              ? ' · matches transcript'
-                              : searchHits?.get(m.id) === 'notes'
-                                ? ' · matches notes'
-                                : '')}
-                        </span>
-                      </span>
-                      <span className="row-time">{timeLabel(m.createdAt)}</span>
-                      {inTrash ? (
-                        <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="row-restore"
-                            title="Move back to My notes"
-                            onClick={() => restore(m.id)}
-                          >
-                            Restore
-                          </button>
-                          <button
-                            type="button"
-                            className="row-delete"
-                            title="Permanently delete this meeting"
-                            onClick={() => deleteForever(m.id)}
-                          >
-                            Delete forever
-                          </button>
-                        </span>
-                      ) : (
-                        <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="row-menu-btn"
-                            title="More actions"
-                            aria-label="More actions"
-                            onClick={() => {
-                              setPickerFor(null)
-                              setMenuFor(menuOpen ? null : m.id)
-                            }}
-                          >
-                            ⋯
-                          </button>
-                        </span>
-                      )}
-                      {menuOpen && (
-                        <div className="row-menu" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            title="Copy a public link to this meeting's notes"
-                            onClick={() => void copyShareLink(m.id)}
-                          >
-                            Copy share link
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMenuFor(null)
-                              setPickerFor(m.id)
-                            }}
-                          >
-                            Add to folder
-                          </button>
-                          <button
-                            type="button"
-                            title="Notes + transcript as one portable Markdown file"
-                            onClick={() => void exportMeeting(m.id, 'md')}
-                          >
-                            Export Markdown
-                          </button>
-                          <button
-                            type="button"
-                            title="Notes + transcript as a print-ready PDF"
-                            onClick={() => void exportMeeting(m.id, 'pdf')}
-                          >
-                            Export PDF
-                          </button>
-                          <div className="row-menu-sep" />
-                          <button
-                            type="button"
-                            className="danger"
-                            onClick={() => moveToTrash(m.id)}
-                          >
-                            Move to trash
-                          </button>
-                        </div>
-                      )}
-                      {pickerOpen && (
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <FolderPicker
-                            align="right"
-                            currentFolderId={m.folderId ?? null}
-                            onAssign={(fid) => assignFolder(m.id, fid)}
-                            onClose={() => setPickerFor(null)}
-                          />
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-              </section>
-            ))}
-            {filter.kind === 'all' && search.trim().length === 0 && history.totalOlder > 0 && (
-              <div className="history-controls">
-                {history.hiddenOlder > 0 && (
-                  <button
-                    type="button"
-                    className="history-more"
-                    onClick={() =>
-                      setOlderHistory({
-                        scope: historyScope,
-                        count: olderVisibleCount + OLDER_HISTORY_BATCH
-                      })
-                    }
-                  >
-                    {history.shownOlder === 0
-                      ? `Show older notes (${history.hiddenOlder})`
-                      : `Load more (${history.hiddenOlder} remaining)`}
-                  </button>
+                    </span>
+                    <p>No meetings yet — choose New → New meeting</p>
+                  </div>
                 )}
-                {history.shownOlder > 0 && (
-                  <button
-                    type="button"
-                    className="history-recent"
-                    onClick={() => setOlderHistory({ scope: historyScope, count: 0 })}
+                {noneInView && filter.kind === 'folder' && (
+                  <div className="home-empty-line">No meetings in this folder yet</div>
+                )}
+                {noneInView && inTrash && <div className="home-empty-line">Trash is empty</div>}
+                {noMatches && <div className="home-empty-line">No meetings match “{search}”</div>}
+                {filter.kind === 'all' &&
+                  search.trim().length === 0 &&
+                  history.displayed.length === 0 &&
+                  history.totalOlder > 0 && (
+                    <div className="home-empty-line">Nothing saved in the last 7 days</div>
+                  )}
+                {groups.map((group) => (
+                  <section
+                    key={group.label}
+                    className={group.older ? 'day-group older' : 'day-group'}
                   >
-                    Show recent only
-                  </button>
+                    <div className="day-label">{group.label}</div>
+                    {group.items.map((m) => {
+                      const menuOpen = menuFor === m.id
+                      const pickerOpen = pickerFor === m.id
+                      const meetingFolder = folders.find((folder) => folder.id === m.folderId)
+                      return (
+                        <div
+                          key={m.id}
+                          role="button"
+                          tabIndex={0}
+                          className={
+                            menuOpen || pickerOpen ? 'meeting-row actions-open' : 'meeting-row'
+                          }
+                          onClick={() => onOpenMeeting(m.id)}
+                          onKeyDown={(e) => {
+                            // Only the row itself — Enter on an inner button must
+                            // not also open the meeting.
+                            if (e.target !== e.currentTarget) return
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onOpenMeeting(m.id)
+                            }
+                          }}
+                        >
+                          <span
+                            className={m.kind === 'note' ? 'row-icon row-icon-note' : 'row-icon'}
+                          >
+                            {m.kind === 'note' ? <PencilIcon size={14} /> : <DocIcon size={14} />}
+                          </span>
+                          <span className="row-main">
+                            <span className="row-title">
+                              {isGenericDraftTitle(m.title)
+                                ? m.kind === 'note'
+                                  ? 'New note'
+                                  : 'New meeting'
+                                : m.title.trim()}
+                            </span>
+                            <span className="row-sub">
+                              {m.kind === 'note' ? 'Quick note' : 'Meeting'}
+                              {meetingFolder ? ` · ${meetingFolder.name}` : ''}
+                              {m.durationMin !== undefined ? ` · ${m.durationMin} min` : ''}
+                              {search.trim().length > 0 &&
+                                (searchHits?.get(m.id) === 'transcript'
+                                  ? ' · matches transcript'
+                                  : searchHits?.get(m.id) === 'notes'
+                                    ? ' · matches notes'
+                                    : '')}
+                            </span>
+                          </span>
+                          <span className="row-time">{timeLabel(m.createdAt)}</span>
+                          {inTrash ? (
+                            <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="row-restore"
+                                title="Move back to My notes"
+                                onClick={() => restore(m.id)}
+                              >
+                                Restore
+                              </button>
+                              <button
+                                type="button"
+                                className="row-delete"
+                                title="Permanently delete this meeting"
+                                onClick={() => deleteForever(m.id)}
+                              >
+                                Delete forever
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="row-menu-btn"
+                                title="More actions"
+                                aria-label="More actions"
+                                onClick={() => {
+                                  setPickerFor(null)
+                                  setMenuFor(menuOpen ? null : m.id)
+                                }}
+                              >
+                                ⋯
+                              </button>
+                            </span>
+                          )}
+                          {menuOpen && (
+                            <div className="row-menu" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                title="Copy a public link to this meeting's notes"
+                                onClick={() => void copyShareLink(m.id)}
+                              >
+                                Copy share link
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMenuFor(null)
+                                  setPickerFor(m.id)
+                                }}
+                              >
+                                Add to folder
+                              </button>
+                              <button
+                                type="button"
+                                title="Notes + transcript as one portable Markdown file"
+                                onClick={() => void exportMeeting(m.id, 'md')}
+                              >
+                                Export Markdown
+                              </button>
+                              <button
+                                type="button"
+                                title="Notes + transcript as a print-ready PDF"
+                                onClick={() => void exportMeeting(m.id, 'pdf')}
+                              >
+                                Export PDF
+                              </button>
+                              <div className="row-menu-sep" />
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => moveToTrash(m.id)}
+                              >
+                                Move to trash
+                              </button>
+                            </div>
+                          )}
+                          {pickerOpen && (
+                            <span onClick={(e) => e.stopPropagation()}>
+                              <FolderPicker
+                                align="right"
+                                currentFolderId={m.folderId ?? null}
+                                onAssign={(fid) => assignFolder(m.id, fid)}
+                                onClose={() => setPickerFor(null)}
+                              />
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </section>
+                ))}
+                {filter.kind === 'all' && search.trim().length === 0 && history.totalOlder > 0 && (
+                  <div className="history-controls">
+                    {history.hiddenOlder > 0 && (
+                      <button
+                        type="button"
+                        className="history-more"
+                        onClick={() =>
+                          setOlderHistory({
+                            scope: historyScope,
+                            count: olderVisibleCount + OLDER_HISTORY_BATCH
+                          })
+                        }
+                      >
+                        {history.shownOlder === 0
+                          ? `Show older notes (${history.hiddenOlder})`
+                          : `Load more (${history.hiddenOlder} remaining)`}
+                      </button>
+                    )}
+                    {history.shownOlder > 0 && (
+                      <button
+                        type="button"
+                        className="history-recent"
+                        onClick={() => setOlderHistory({ scope: historyScope, count: 0 })}
+                      >
+                        Show recent only
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
+            </section>
+            {isOverview && (
+              <aside className="home-sticky-rail" aria-label="Suggested next steps">
+                <section className="home-followup-sticky">
+                  <p className="home-eyebrow">A LITTLE NUDGE</p>
+                  <h2>A few next steps.</h2>
+                  <p className="home-sticky-copy">
+                    Find the loose ends in your recent meetings, with the original notes close by.
+                  </p>
+                  <button
+                    type="button"
+                    className="home-followup-action"
+                    onClick={() => void submitAsk(RECENT_TODOS_QUESTION)}
+                    disabled={askPending !== null || !isLoaded || visible.length === 0}
+                  >
+                    <CheckSquareIcon size={16} />
+                    {askPending !== null ? 'Answer in progress…' : 'Find my next steps'}
+                  </button>
+                  <p className="home-sticky-footnote">
+                    {isLoaded && visible.length === 0
+                      ? 'Save a meeting first. We’ll help you pick up the thread.'
+                      : 'Suggestions from your notes. Review before you act.'}
+                  </p>
+                </section>
+                <div className="home-desk-mascot" aria-hidden="true">
+                  <img src={mascotUrl} alt="" />
+                  <span>one thing at a time.</span>
+                </div>
+              </aside>
             )}
           </div>
         </div>

@@ -10,6 +10,9 @@ files:
 # no Node install or repo checkout needed. Built by the package scripts
 # before electron-builder runs.
 extraResources:
+  - from: src/renderer/src/assets/fonts
+    to: licenses/fonts
+    filter: ["*-OFL.txt"]
   - from: ../../packages/doodle-note-mcp/dist/cli.js
     to: mcp/cli.js
   - from: ../../packages/doodle-note-mcp/package.json

@@ -16,6 +16,7 @@ import MeetingView from './MeetingView'
 import ModelsView, { type SettingsSection } from './ModelsView'
 import OnboardingTour from './OnboardingTour'
 import mascotUrl from './assets/mascot-square.png'
+import './assets/sidebar-redesign.css'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
 import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
@@ -28,6 +29,7 @@ import {
   LockIcon,
   MicIcon,
   PencilIcon,
+  PlusIcon,
   TrashIcon
 } from './icons'
 
@@ -423,24 +425,40 @@ function App(): React.JSX.Element {
   const onHome = view === 'home'
 
   return (
-    <div className="shell">
+    <div className="shell redesigned-shell">
       <div className={chromeVisible ? 'chrome' : 'chrome hidden'}>
         <aside className="sidebar">
           <div className="sidebar-top drag">
-            <div className="wordmark no-drag" onClick={goHome} role="button" tabIndex={0}>
+            <button
+              type="button"
+              className="wordmark no-drag"
+              onClick={goHome}
+              aria-label="DoodleNote home"
+            >
               <img className="mascot-img" src={mascotUrl} alt="" draggable={false} />
               <span className="wordmark-text">
                 <span className="wm-doodle">Doodle</span>
                 <span className="wm-note">Note</span>
               </span>
-            </div>
+            </button>
+            <p className="sidebar-caption">Your space for a clearer head.</p>
           </div>
+
+          <button
+            type="button"
+            className="sidebar-new-note"
+            onClick={() => void newMeeting({ kind: 'note' })}
+          >
+            <PlusIcon size={17} />
+            <span>New note</span>
+          </button>
 
           <div className="sidebar-search">
             <input
               ref={searchRef}
               type="text"
-              placeholder="Search"
+              placeholder="Find a thought…"
+              aria-label="Search notes"
               spellCheck={false}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -448,7 +466,8 @@ function App(): React.JSX.Element {
             <span className="kbd">⌘K</span>
           </div>
 
-          <nav className="sidebar-nav">
+          <div className="sidebar-section">Your desk</div>
+          <nav className="sidebar-nav" aria-label="App navigation">
             <button
               type="button"
               className={onHome && filter.kind === 'all' ? 'nav-item on' : 'nav-item'}
@@ -457,18 +476,16 @@ function App(): React.JSX.Element {
               <span className="nav-icon">
                 <HomeIcon size={14} />
               </span>{' '}
-              Home
+              Overview
             </button>
           </nav>
 
           <div className="sidebar-section">Spaces</div>
-          <nav className="sidebar-nav">
+          <nav className="sidebar-nav" aria-label="Notes and folders">
             <div
               role="button"
               tabIndex={0}
-              className={
-                onHome && filter.kind === 'all' ? 'nav-item space-item on' : 'nav-item space-item'
-              }
+              className="nav-item space-item"
               onClick={() => selectFilter({ kind: 'all' })}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return
@@ -492,7 +509,7 @@ function App(): React.JSX.Element {
                   setCreatingFolder(true)
                 }}
               >
-                ＋
+                <PlusIcon size={15} />
               </button>
             </div>
             {folders.map((f) =>
@@ -604,7 +621,7 @@ function App(): React.JSX.Element {
             )}
           </nav>
 
-          <nav className="sidebar-nav sidebar-trash">
+          <nav className="sidebar-nav sidebar-trash" aria-label="Deleted notes">
             <button
               type="button"
               className={onHome && filter.kind === 'trash' ? 'nav-item on' : 'nav-item'}
