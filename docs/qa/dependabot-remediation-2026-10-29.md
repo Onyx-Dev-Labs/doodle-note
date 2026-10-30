@@ -130,3 +130,13 @@ The full integration CI and signed Mac candidate workflow must run against the
 new source commit. Earlier passing results above remain evidence for their
 original source, not proof of the new candidate. Production activation, signed
 artifact qualification, and installed-user QA are tracked separately.
+
+CI on `5c00e67` exposed a publisher test fixture pinned to 0.4.35 while the
+real CLI reads the current desktop package version. Both Linux and Windows
+failed the same receipt-identity assertion. The focused CLI dry-run test
+reproduced this locally on Node 22. The fixture now reads the package version
+and preserves the near-match artifact case dynamically; production publisher
+validation is unchanged. The fixture uses synchronous reading because the
+desktop test wrapper also loads it through tsx's CommonJS transform.
+The full desktop suite then passed locally on Node 22: 558 passed, 8 skipped,
+zero failures. Hosted Linux and Windows checks must confirm the final commit.
