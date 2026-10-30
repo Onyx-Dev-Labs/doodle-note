@@ -1007,7 +1007,7 @@
   line-height: 1.6;
   margin: 0 0 18px;
 }
-.marketing .teaser-followup a {
+.marketing .teaser-followup .teaser-recap {
   font-size: 8px;
   color: #817344;
   font-weight: 550;
@@ -1028,7 +1028,7 @@
   font-size: 19px;
   color: #7e9368;
 }
-.marketing .teaser-ask a {
+.marketing .teaser-ask .teaser-send {
   display: grid;
   place-items: center;
   background: #4c6843;
@@ -1495,7 +1495,7 @@
   .marketing .teaser-followup p {
     font-size: 10px;
   }
-  .marketing .teaser-followup a {
+  .marketing .teaser-followup .teaser-recap {
     font-size: 9px;
   }
   .marketing .section-heading h2 {
@@ -1812,7 +1812,7 @@
     margin: 9px 0 8px;
     font-size: 9px;
   }
-  .marketing .teaser-followup a {
+  .marketing .teaser-followup .teaser-recap {
     font-size: 9px;
     align-self: start;
   }
@@ -2234,14 +2234,14 @@
   border-color: #a6b296;
 }
 
-.marketing .teaser-ask a {
+.marketing .teaser-ask .teaser-send {
   display: grid;
   place-items: center;
   padding: 0;
   line-height: 1;
 }
 
-.marketing .teaser-ask a svg {
+.marketing .teaser-ask .teaser-send svg {
   display: block;
   width: 15px;
   height: 15px;
@@ -2451,20 +2451,16 @@
   border-radius: 4px;
   line-height: 1;
 }
-.marketing .hero-demo-links {
+.marketing .hero-secondary-links {
   display: flex;
   align-items: center;
   gap: 17px;
   margin-top: 19px;
   color: #c5d2bc;
 }
-.marketing .hero-demo-links > .text-link {
+.marketing .hero-secondary-links > .text-link {
   font-size: 11px;
   line-height: 1.4;
-}
-.marketing .hero-demo-links > .text-link:first-child {
-  text-decoration: underline;
-  text-underline-offset: 4px;
 }
 .marketing .hero-footnote {
   margin-top: 20px;
@@ -2783,11 +2779,11 @@
     min-width: 200px;
     justify-content: center;
   }
-  .marketing .hero-demo-links {
+  .marketing .hero-secondary-links {
     gap: 10px;
     flex-wrap: wrap;
   }
-  .marketing .hero-demo-links > .text-link {
+  .marketing .hero-secondary-links > .text-link {
     font-size: 10px;
   }
   .marketing .plan-downloads {
@@ -2890,11 +2886,11 @@
     font-size: 7px;
     padding: 2px 4px;
   }
-  .marketing .hero-demo-links {
+  .marketing .hero-secondary-links {
     margin-top: 16px;
     gap: 13px;
   }
-  .marketing .hero-demo-links > .text-link {
+  .marketing .hero-secondary-links > .text-link {
     font-size: 11px;
   }
   .marketing .closing-downloads {
