@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { siteMetadata } from "@/lib/site-metadata";
 import {
   Bricolage_Grotesque,
   Caveat,
@@ -27,11 +28,7 @@ const caveat = Caveat({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "DoodleNote",
-  description: "AI meeting notes without the bot",
-  icons: { icon: "/mascot.png" },
-};
+export const metadata: Metadata = siteMetadata;
 
 export default function RootLayout({
   children,
