@@ -112,6 +112,21 @@ artifacts and the host has no CMake on PATH. A production desktop GUI launch was
 not exercised; renderer HMR and CLI/worker execution do not establish that check.
 Production GUI launch, native capture, signed/notarized Mac artifacts, native
 Windows installer execution, publication and installed-user
-verification remain release gates in `docs/RELEASING.md`. No release version,
-updater feed, signing setup, production data, or publication state was changed.
+verification remained release gates at verification commit `098289c`.
+That commit did not change the release version, updater feed, signing setup,
+production data, or publication state.
 Already-installed apps require a rebuilt release to receive the bundled fixes.
+
+## Production rollout preparation — 2026-10-30
+
+The user authorized merging and deploying the web and Mac fixes, with Windows
+prepared but not published pending its Microsoft signing certificate. The branch
+now incorporates main `14c99c9` (download email gate), and desktop version **0.4.36**
+identifies the fresh security release candidate. Windows packaging also uses this
+version; its official feed remains unchanged. Public Mac feeds and changelog stay
+on the released version until receipt-bound candidate qualification/publication.
+
+The full integration CI and signed Mac candidate workflow must run against the
+new source commit. Earlier passing results above remain evidence for their
+original source, not proof of the new candidate. Production activation, signed
+artifact qualification, and installed-user QA are tracked separately.
