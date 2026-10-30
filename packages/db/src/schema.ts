@@ -364,3 +364,103 @@ export const inkCleanup = pgTable('ink_cleanup', {
   attempts: integer('attempts').notNull().default(0),
   deletedAt: timestamp('deleted_at',{withTimezone:true}),
 });
+
+/**
+ * People who asked the website for the free desktop app. A lead is neither an
+ * account nor a customer: it has no user ID, and later accounts and Stripe
+ * customers are matched to it only by the normalized email address. A request
+ * is recorded, never an install.
+ */
+export const downloadLeads = pgTable(
+  "download_leads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Trimmed and lowercased, the same key Better Auth stores. */
+    email: text("email").notNull(),
+    source: text("source").notNull().default("website_download"),
+    firstPlatform: text("first_platform", { enum: ["mac", "win"] }).notNull(),
+    latestPlatform: text("latest_platform", { enum: ["mac", "win"] }).notNull(),
+    firstRequestedAt: timestamp("first_requested_at", { withTimezone: true }).notNull(),
+    latestRequestedAt: timestamp("latest_requested_at", { withTimezone: true }).notNull(),
+    requestCount: integer("request_count").notNull().default(1),
+    /** Granted once with its wording and version; withdrawn only by unsubscribing in MailCheap. */
+    marketingConsent: boolean("marketing_consent").notNull().default(false),
+    marketingConsentAt: timestamp("marketing_consent_at", { withTimezone: true }),
+    marketingConsentVersion: text("marketing_consent_version"),
+    marketingConsentText: text("marketing_consent_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("download_leads_email_uidx").on(table.email)],
+);
+
+/**
+ * Outbox of download requests for the n8n MailCheap sync. Written in the same
+ * statement as the lead, so a request the website accepted is never lost to an
+ * n8n or MailCheap outage. claim_token fences acknowledgements to the worker
+ * that holds the lease; an expired lease is claimed again.
+ */
+export const downloadLeadEvents = pgTable(
+  "download_lead_events",
+  {
+    /** The event ID n8n receives and acknowledges. */
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** One event per lead, platform, UTC day and consent state: retries and double submits collapse. */
+    dedupeKey: text("dedupe_key").notNull(),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => downloadLeads.id, { onDelete: "cascade" }),
+    eventType: text("event_type", {
+      enum: ["free_download_requested", "download_lead_linked"],
+    }).notNull(),
+    /** Set for free_download_requested; null for download_lead_linked. */
+    platform: text("platform", { enum: ["mac", "win"] }),
+    requestedAt: timestamp("requested_at", { withTimezone: true }),
+    /** Leads without marketing permission are recorded but never sent to MailCheap. */
+    syncStatus: text("sync_status", { enum: ["pending", "synced", "skipped"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    claimToken: uuid("claim_token"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    syncOutcome: text("sync_outcome"),
+    mailcheapContactId: text("mailcheap_contact_id"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("download_lead_events_dedupe_key_uidx").on(table.dedupeKey),
+    index("download_lead_events_pending_idx").on(table.syncStatus, table.nextAttemptAt),
+    index("download_lead_events_lead_idx").on(table.leadId),
+  ],
+);
+
+/**
+ * A verified link from a download lead to the DoodleNote account that owns it.
+ * Created only when one person proves both identities: a signed link that was
+ * delivered to the download address, opened while signed in to the account,
+ * and confirmed. A session alone never links an address. One account per
+ * lead; the first confirmed link wins. It records identity, never payment.
+ */
+export const downloadLeadLinks = pgTable(
+  "download_lead_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => downloadLeads.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    method: text("method", { enum: ["email_confirmation"] }).notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("download_lead_links_lead_uidx").on(table.leadId),
+    index("download_lead_links_user_idx").on(table.userId),
+  ],
+);

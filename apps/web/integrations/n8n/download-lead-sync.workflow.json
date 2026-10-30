@@ -1,0 +1,622 @@
+{
+  "name": "DoodleNote · Sync website download leads to MailCheap",
+  "nodes": [
+    {
+      "id": "download-lead-sync-1",
+      "name": "When called by the 15-minute run",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "download-lead-sync-2",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "download-lead-sync-3",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Site, MailCheap host, newsletter slug, and field keys. No secrets here:\n// both HTTP credentials are n8n Header Auth credentials.\nreturn [{ json: {\n  \"doodlenoteBaseUrl\": \"https://www.doodlenote.ai\",\n  \"mailcheapBaseUrl\": \"https://mailcheap.ai\",\n  \"newsletter\": \"doodlenote\",\n  \"lifecycleField\": \"doodlenote_lifecycle\",\n  \"firstDownloadField\": \"doodlenote_first_download\",\n  \"platformField\": \"doodlenote_download_platform\",\n  \"sourceTag\": \"website-download\",\n  \"claimLimit\": 25\n} }];"
+      }
+    },
+    {
+      "id": "download-lead-sync-4",
+      "name": "Claim download events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "DoodleNote download lead sync"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.doodlenoteBaseUrl }}/api/integrations/download-leads/claim",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ limit: $json.claimLimit, eventTypes: [\"free_download_requested\"] }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-5",
+      "name": "Split events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ],
+      "parameters": {
+        "jsCode": "function readMailcheapResponse(response) {\n  if (!response || typeof response !== \"object\") {\n    return { status: null, body: null, error: \"no response\" };\n  }\n  if (response.error) {\n    const error = response.error;\n    const message =\n      typeof error === \"string\" ? error : error.message || error.description || \"request failed\";\n    return { status: null, body: null, error: String(message).slice(0, 300) };\n  }\n  const status = typeof response.statusCode === \"number\" ? response.statusCode : null;\n  let body = response.body ?? null;\n  if (typeof body === \"string\") {\n    try {\n      body = JSON.parse(body);\n    } catch {\n      body = null;\n    }\n  }\n  if (status === null) return { status: null, body, error: \"response had no status\" };\n  const message = body && body.error && typeof body.error.message === \"string\" ? body.error.message : null;\n  return {\n    status,\n    body,\n    error: status >= 200 && status < 300 ? null : `MailCheap answered ${status}${message ? `: ${message}` : \"\"}`.slice(0, 300),\n  };\n}\n\nfunction desiredDownloadDetails(event, config) {\n  const tags = [config.sourceTag, `download-${event.platform}`];\n  const fields = {};\n  if (config.firstDownloadField) fields[config.firstDownloadField] = event.firstRequestedAt.slice(0, 10);\n  if (config.platformField) fields[config.platformField] = event.platform;\n  return { tags, fields };\n}\n\nfunction planMailcheapChange({ event, lookup, config }) {\n  const ack = (result, details) => ({\n    action: result === \"synced\" ? \"done\" : result === \"skipped\" ? \"skip\" : \"retry\",\n    event,\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n  if (!event.marketingConsent || event.marketingConsent.granted !== true) {\n    return ack(\"skipped\", { outcome: \"no_marketing_permission\" });\n  }\n\n  const found = readMailcheapResponse(lookup);\n  if (found.status === null || (found.status !== 200 && found.status !== 404)) {\n    return ack(\"retry\", { error: `Contact lookup failed: ${found.error}` });\n  }\n  const desired = desiredDownloadDetails(event, config);\n  const lifecycle = config.lifecycleField;\n\n  if (found.status === 404) {\n    const fields = { ...desired.fields };\n    if (event.freeDownloadLifecycleEligible === true) fields[lifecycle] = \"free_download\";\n    return {\n      action: \"create\",\n      event,\n      expected: { fields, tags: desired.tags, previousStatus: null },\n      createBody: {\n        newsletter: config.newsletter,\n        email: event.email,\n        source: event.source,\n        tags: desired.tags,\n        fields,\n      },\n    };\n  }\n\n  const contact = found.body || {};\n  if (typeof contact.id !== \"string\" || String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact lookup returned a different or malformed contact\" });\n  }\n  const current = contact.fields || {};\n  const fields = {};\n  for (const [key, value] of Object.entries(desired.fields)) {\n    if (current[key] === undefined || current[key] === null || current[key] === \"\") fields[key] = value;\n  }\n  // Only a download-only lead whose contact has no lifecycle yet becomes\n  // free_download. A trial, customer, or any other stage is never replaced,\n  // and stopped contacts (unsubscribed, bounced, complained, dormant) are not\n  // put into a sequence.\n  const hasLifecycle = current[lifecycle] !== undefined && current[lifecycle] !== null && current[lifecycle] !== \"\";\n  if (\n    event.freeDownloadLifecycleEligible === true &&\n    !hasLifecycle &&\n    (contact.status === \"active\" || contact.status === \"pending\")\n  ) {\n    fields[lifecycle] = \"free_download\";\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTags = desired.tags.filter((tag) => !tags.includes(tag));\n  if (Object.keys(fields).length === 0 && missingTags.length === 0) {\n    return ack(\"synced\", { outcome: \"unchanged\", mailcheapContactId: contact.id });\n  }\n  return {\n    action: \"update\",\n    event,\n    contactId: contact.id,\n    expected: { fields, tags: desired.tags, previousStatus: contact.status },\n    fieldsBody: { newsletter: config.newsletter, fields },\n    tagsBody: { newsletter: config.newsletter, contacts: [contact.id], tags: desired.tags },\n  };\n}\n\nfunction checkMailcheapResult({ plan, writes, verify }) {\n  const event = plan.event;\n  const ack = (result, details) => ({\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n\n  for (const write of writes) {\n    const answer = readMailcheapResponse(write);\n    if (answer.status !== null && answer.status >= 200 && answer.status < 300) continue;\n    const message = answer.body && answer.body.error ? String(answer.body.error.message || \"\") : \"\";\n    // A create refused for the address itself (a typo domain, spam trap, or an\n    // address MailCheap knows can't receive email) never succeeds on retry.\n    // Field and tag problems are configuration, so the event waits for a fix.\n    if (\n      plan.action === \"create\" &&\n      answer.status === 400 &&\n      answer.body &&\n      answer.body.error &&\n      answer.body.error.code === \"validation_failed\" &&\n      !/^(fields|tags|newsletter)\\b/.test(message)\n    ) {\n      return ack(\"skipped\", { outcome: \"mailcheap_rejected_address\", error: answer.error });\n    }\n    return ack(\"retry\", { error: `MailCheap write failed: ${answer.error}` });\n  }\n\n  const read = readMailcheapResponse(verify);\n  if (read.status !== 200 || !read.body || typeof read.body.id !== \"string\") {\n    return ack(\"retry\", { error: `Contact check failed: ${read.error || \"contact missing\"}` });\n  }\n  const contact = read.body;\n  if (String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact check returned a different contact\" });\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTag = plan.expected.tags.find((tag) => !tags.includes(tag));\n  if (missingTag) return ack(\"retry\", { error: `Contact check: tag ${missingTag} missing` });\n  const fields = contact.fields || {};\n  const wrong = Object.entries(plan.expected.fields).find(([key, value]) => fields[key] !== value);\n  if (wrong) {\n    // POST /contacts fills only empty fields on a contact that appeared since\n    // the lookup; a value someone else set first is kept and is not a failure.\n    const created = readMailcheapResponse(writes[0]);\n    const raced = plan.action === \"create\" && created.body && created.body.created === false;\n    if (!raced) return ack(\"retry\", { error: `Contact check: ${wrong[0]} not saved` });\n  }\n\n  const lifecycleSet = Object.values(plan.expected.fields).includes(\"free_download\") && !wrong;\n  let outcome;\n  if (plan.action === \"create\") {\n    const created = readMailcheapResponse(writes[0]).body;\n    if (created && created.created === false) outcome = \"existing_contact\";\n    else if ([\"unsubscribed\", \"bounced\", \"complained\"].includes(contact.status)) outcome = \"created_suppressed\";\n    else outcome = lifecycleSet ? \"created_free_download\" : \"created_without_lifecycle\";\n  } else {\n    outcome = lifecycleSet ? \"updated_free_download\" : \"updated_download_details\";\n  }\n  return ack(\"synced\", { outcome, mailcheapContactId: contact.id });\n}\n\nconst claim = readMailcheapResponse($input.first().json);\nif (claim.status !== 200) {\n  // Fails this sub-workflow without touching any event; leases expire and the\n  // next run claims them again. The caller continues on error.\n  throw new Error(`Claiming download events failed: ${claim.error || claim.status}`);\n}\nconst events = Array.isArray(claim.body && claim.body.events) ? claim.body.events : [];\nreturn events.map((event) => ({ json: event }));"
+      }
+    },
+    {
+      "id": "download-lead-sync-6",
+      "name": "Find MailCheap contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "MailCheap API"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.mailcheapBaseUrl }}/api/v1/contacts/{{ encodeURIComponent($json.email) }}?newsletter={{ encodeURIComponent($('Config').first().json.newsletter) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-7",
+      "name": "Plan MailCheap change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function readMailcheapResponse(response) {\n  if (!response || typeof response !== \"object\") {\n    return { status: null, body: null, error: \"no response\" };\n  }\n  if (response.error) {\n    const error = response.error;\n    const message =\n      typeof error === \"string\" ? error : error.message || error.description || \"request failed\";\n    return { status: null, body: null, error: String(message).slice(0, 300) };\n  }\n  const status = typeof response.statusCode === \"number\" ? response.statusCode : null;\n  let body = response.body ?? null;\n  if (typeof body === \"string\") {\n    try {\n      body = JSON.parse(body);\n    } catch {\n      body = null;\n    }\n  }\n  if (status === null) return { status: null, body, error: \"response had no status\" };\n  const message = body && body.error && typeof body.error.message === \"string\" ? body.error.message : null;\n  return {\n    status,\n    body,\n    error: status >= 200 && status < 300 ? null : `MailCheap answered ${status}${message ? `: ${message}` : \"\"}`.slice(0, 300),\n  };\n}\n\nfunction desiredDownloadDetails(event, config) {\n  const tags = [config.sourceTag, `download-${event.platform}`];\n  const fields = {};\n  if (config.firstDownloadField) fields[config.firstDownloadField] = event.firstRequestedAt.slice(0, 10);\n  if (config.platformField) fields[config.platformField] = event.platform;\n  return { tags, fields };\n}\n\nfunction planMailcheapChange({ event, lookup, config }) {\n  const ack = (result, details) => ({\n    action: result === \"synced\" ? \"done\" : result === \"skipped\" ? \"skip\" : \"retry\",\n    event,\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n  if (!event.marketingConsent || event.marketingConsent.granted !== true) {\n    return ack(\"skipped\", { outcome: \"no_marketing_permission\" });\n  }\n\n  const found = readMailcheapResponse(lookup);\n  if (found.status === null || (found.status !== 200 && found.status !== 404)) {\n    return ack(\"retry\", { error: `Contact lookup failed: ${found.error}` });\n  }\n  const desired = desiredDownloadDetails(event, config);\n  const lifecycle = config.lifecycleField;\n\n  if (found.status === 404) {\n    const fields = { ...desired.fields };\n    if (event.freeDownloadLifecycleEligible === true) fields[lifecycle] = \"free_download\";\n    return {\n      action: \"create\",\n      event,\n      expected: { fields, tags: desired.tags, previousStatus: null },\n      createBody: {\n        newsletter: config.newsletter,\n        email: event.email,\n        source: event.source,\n        tags: desired.tags,\n        fields,\n      },\n    };\n  }\n\n  const contact = found.body || {};\n  if (typeof contact.id !== \"string\" || String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact lookup returned a different or malformed contact\" });\n  }\n  const current = contact.fields || {};\n  const fields = {};\n  for (const [key, value] of Object.entries(desired.fields)) {\n    if (current[key] === undefined || current[key] === null || current[key] === \"\") fields[key] = value;\n  }\n  // Only a download-only lead whose contact has no lifecycle yet becomes\n  // free_download. A trial, customer, or any other stage is never replaced,\n  // and stopped contacts (unsubscribed, bounced, complained, dormant) are not\n  // put into a sequence.\n  const hasLifecycle = current[lifecycle] !== undefined && current[lifecycle] !== null && current[lifecycle] !== \"\";\n  if (\n    event.freeDownloadLifecycleEligible === true &&\n    !hasLifecycle &&\n    (contact.status === \"active\" || contact.status === \"pending\")\n  ) {\n    fields[lifecycle] = \"free_download\";\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTags = desired.tags.filter((tag) => !tags.includes(tag));\n  if (Object.keys(fields).length === 0 && missingTags.length === 0) {\n    return ack(\"synced\", { outcome: \"unchanged\", mailcheapContactId: contact.id });\n  }\n  return {\n    action: \"update\",\n    event,\n    contactId: contact.id,\n    expected: { fields, tags: desired.tags, previousStatus: contact.status },\n    fieldsBody: { newsletter: config.newsletter, fields },\n    tagsBody: { newsletter: config.newsletter, contacts: [contact.id], tags: desired.tags },\n  };\n}\n\nfunction checkMailcheapResult({ plan, writes, verify }) {\n  const event = plan.event;\n  const ack = (result, details) => ({\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n\n  for (const write of writes) {\n    const answer = readMailcheapResponse(write);\n    if (answer.status !== null && answer.status >= 200 && answer.status < 300) continue;\n    const message = answer.body && answer.body.error ? String(answer.body.error.message || \"\") : \"\";\n    // A create refused for the address itself (a typo domain, spam trap, or an\n    // address MailCheap knows can't receive email) never succeeds on retry.\n    // Field and tag problems are configuration, so the event waits for a fix.\n    if (\n      plan.action === \"create\" &&\n      answer.status === 400 &&\n      answer.body &&\n      answer.body.error &&\n      answer.body.error.code === \"validation_failed\" &&\n      !/^(fields|tags|newsletter)\\b/.test(message)\n    ) {\n      return ack(\"skipped\", { outcome: \"mailcheap_rejected_address\", error: answer.error });\n    }\n    return ack(\"retry\", { error: `MailCheap write failed: ${answer.error}` });\n  }\n\n  const read = readMailcheapResponse(verify);\n  if (read.status !== 200 || !read.body || typeof read.body.id !== \"string\") {\n    return ack(\"retry\", { error: `Contact check failed: ${read.error || \"contact missing\"}` });\n  }\n  const contact = read.body;\n  if (String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact check returned a different contact\" });\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTag = plan.expected.tags.find((tag) => !tags.includes(tag));\n  if (missingTag) return ack(\"retry\", { error: `Contact check: tag ${missingTag} missing` });\n  const fields = contact.fields || {};\n  const wrong = Object.entries(plan.expected.fields).find(([key, value]) => fields[key] !== value);\n  if (wrong) {\n    // POST /contacts fills only empty fields on a contact that appeared since\n    // the lookup; a value someone else set first is kept and is not a failure.\n    const created = readMailcheapResponse(writes[0]);\n    const raced = plan.action === \"create\" && created.body && created.body.created === false;\n    if (!raced) return ack(\"retry\", { error: `Contact check: ${wrong[0]} not saved` });\n  }\n\n  const lifecycleSet = Object.values(plan.expected.fields).includes(\"free_download\") && !wrong;\n  let outcome;\n  if (plan.action === \"create\") {\n    const created = readMailcheapResponse(writes[0]).body;\n    if (created && created.created === false) outcome = \"existing_contact\";\n    else if ([\"unsubscribed\", \"bounced\", \"complained\"].includes(contact.status)) outcome = \"created_suppressed\";\n    else outcome = lifecycleSet ? \"created_free_download\" : \"created_without_lifecycle\";\n  } else {\n    outcome = lifecycleSet ? \"updated_free_download\" : \"updated_download_details\";\n  }\n  return ack(\"synced\", { outcome, mailcheapContactId: contact.id });\n}\n\nreturn { json: planMailcheapChange({\n  event: $('Split events').item.json,\n  lookup: $json,\n  config: $('Config').first().json,\n}) };"
+      }
+    },
+    {
+      "id": "download-lead-sync-8",
+      "name": "Route by plan",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1320,
+        100
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-create",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "create",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "route-update",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "update"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "finished"
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-9",
+      "name": "Create MailCheap contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "MailCheap API"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.mailcheapBaseUrl }}/api/v1/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.createBody) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-10",
+      "name": "Verify created contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "MailCheap API"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.mailcheapBaseUrl }}/api/v1/contacts/{{ encodeURIComponent($('Plan MailCheap change').item.json.event.email) }}?newsletter={{ encodeURIComponent($('Config').first().json.newsletter) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-11",
+      "name": "Check created contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function readMailcheapResponse(response) {\n  if (!response || typeof response !== \"object\") {\n    return { status: null, body: null, error: \"no response\" };\n  }\n  if (response.error) {\n    const error = response.error;\n    const message =\n      typeof error === \"string\" ? error : error.message || error.description || \"request failed\";\n    return { status: null, body: null, error: String(message).slice(0, 300) };\n  }\n  const status = typeof response.statusCode === \"number\" ? response.statusCode : null;\n  let body = response.body ?? null;\n  if (typeof body === \"string\") {\n    try {\n      body = JSON.parse(body);\n    } catch {\n      body = null;\n    }\n  }\n  if (status === null) return { status: null, body, error: \"response had no status\" };\n  const message = body && body.error && typeof body.error.message === \"string\" ? body.error.message : null;\n  return {\n    status,\n    body,\n    error: status >= 200 && status < 300 ? null : `MailCheap answered ${status}${message ? `: ${message}` : \"\"}`.slice(0, 300),\n  };\n}\n\nfunction desiredDownloadDetails(event, config) {\n  const tags = [config.sourceTag, `download-${event.platform}`];\n  const fields = {};\n  if (config.firstDownloadField) fields[config.firstDownloadField] = event.firstRequestedAt.slice(0, 10);\n  if (config.platformField) fields[config.platformField] = event.platform;\n  return { tags, fields };\n}\n\nfunction planMailcheapChange({ event, lookup, config }) {\n  const ack = (result, details) => ({\n    action: result === \"synced\" ? \"done\" : result === \"skipped\" ? \"skip\" : \"retry\",\n    event,\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n  if (!event.marketingConsent || event.marketingConsent.granted !== true) {\n    return ack(\"skipped\", { outcome: \"no_marketing_permission\" });\n  }\n\n  const found = readMailcheapResponse(lookup);\n  if (found.status === null || (found.status !== 200 && found.status !== 404)) {\n    return ack(\"retry\", { error: `Contact lookup failed: ${found.error}` });\n  }\n  const desired = desiredDownloadDetails(event, config);\n  const lifecycle = config.lifecycleField;\n\n  if (found.status === 404) {\n    const fields = { ...desired.fields };\n    if (event.freeDownloadLifecycleEligible === true) fields[lifecycle] = \"free_download\";\n    return {\n      action: \"create\",\n      event,\n      expected: { fields, tags: desired.tags, previousStatus: null },\n      createBody: {\n        newsletter: config.newsletter,\n        email: event.email,\n        source: event.source,\n        tags: desired.tags,\n        fields,\n      },\n    };\n  }\n\n  const contact = found.body || {};\n  if (typeof contact.id !== \"string\" || String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact lookup returned a different or malformed contact\" });\n  }\n  const current = contact.fields || {};\n  const fields = {};\n  for (const [key, value] of Object.entries(desired.fields)) {\n    if (current[key] === undefined || current[key] === null || current[key] === \"\") fields[key] = value;\n  }\n  // Only a download-only lead whose contact has no lifecycle yet becomes\n  // free_download. A trial, customer, or any other stage is never replaced,\n  // and stopped contacts (unsubscribed, bounced, complained, dormant) are not\n  // put into a sequence.\n  const hasLifecycle = current[lifecycle] !== undefined && current[lifecycle] !== null && current[lifecycle] !== \"\";\n  if (\n    event.freeDownloadLifecycleEligible === true &&\n    !hasLifecycle &&\n    (contact.status === \"active\" || contact.status === \"pending\")\n  ) {\n    fields[lifecycle] = \"free_download\";\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTags = desired.tags.filter((tag) => !tags.includes(tag));\n  if (Object.keys(fields).length === 0 && missingTags.length === 0) {\n    return ack(\"synced\", { outcome: \"unchanged\", mailcheapContactId: contact.id });\n  }\n  return {\n    action: \"update\",\n    event,\n    contactId: contact.id,\n    expected: { fields, tags: desired.tags, previousStatus: contact.status },\n    fieldsBody: { newsletter: config.newsletter, fields },\n    tagsBody: { newsletter: config.newsletter, contacts: [contact.id], tags: desired.tags },\n  };\n}\n\nfunction checkMailcheapResult({ plan, writes, verify }) {\n  const event = plan.event;\n  const ack = (result, details) => ({\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n\n  for (const write of writes) {\n    const answer = readMailcheapResponse(write);\n    if (answer.status !== null && answer.status >= 200 && answer.status < 300) continue;\n    const message = answer.body && answer.body.error ? String(answer.body.error.message || \"\") : \"\";\n    // A create refused for the address itself (a typo domain, spam trap, or an\n    // address MailCheap knows can't receive email) never succeeds on retry.\n    // Field and tag problems are configuration, so the event waits for a fix.\n    if (\n      plan.action === \"create\" &&\n      answer.status === 400 &&\n      answer.body &&\n      answer.body.error &&\n      answer.body.error.code === \"validation_failed\" &&\n      !/^(fields|tags|newsletter)\\b/.test(message)\n    ) {\n      return ack(\"skipped\", { outcome: \"mailcheap_rejected_address\", error: answer.error });\n    }\n    return ack(\"retry\", { error: `MailCheap write failed: ${answer.error}` });\n  }\n\n  const read = readMailcheapResponse(verify);\n  if (read.status !== 200 || !read.body || typeof read.body.id !== \"string\") {\n    return ack(\"retry\", { error: `Contact check failed: ${read.error || \"contact missing\"}` });\n  }\n  const contact = read.body;\n  if (String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact check returned a different contact\" });\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTag = plan.expected.tags.find((tag) => !tags.includes(tag));\n  if (missingTag) return ack(\"retry\", { error: `Contact check: tag ${missingTag} missing` });\n  const fields = contact.fields || {};\n  const wrong = Object.entries(plan.expected.fields).find(([key, value]) => fields[key] !== value);\n  if (wrong) {\n    // POST /contacts fills only empty fields on a contact that appeared since\n    // the lookup; a value someone else set first is kept and is not a failure.\n    const created = readMailcheapResponse(writes[0]);\n    const raced = plan.action === \"create\" && created.body && created.body.created === false;\n    if (!raced) return ack(\"retry\", { error: `Contact check: ${wrong[0]} not saved` });\n  }\n\n  const lifecycleSet = Object.values(plan.expected.fields).includes(\"free_download\") && !wrong;\n  let outcome;\n  if (plan.action === \"create\") {\n    const created = readMailcheapResponse(writes[0]).body;\n    if (created && created.created === false) outcome = \"existing_contact\";\n    else if ([\"unsubscribed\", \"bounced\", \"complained\"].includes(contact.status)) outcome = \"created_suppressed\";\n    else outcome = lifecycleSet ? \"created_free_download\" : \"created_without_lifecycle\";\n  } else {\n    outcome = lifecycleSet ? \"updated_free_download\" : \"updated_download_details\";\n  }\n  return ack(\"synced\", { outcome, mailcheapContactId: contact.id });\n}\n\nreturn { json: checkMailcheapResult({\n  plan: $('Plan MailCheap change').item.json,\n  writes: [$('Create MailCheap contact').item.json],\n  verify: $json,\n}) };"
+      }
+    },
+    {
+      "id": "download-lead-sync-12",
+      "name": "Update MailCheap fields",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "MailCheap API"
+        }
+      },
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $('Config').first().json.mailcheapBaseUrl }}/api/v1/contacts/{{ $json.contactId }}/details",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.fieldsBody) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-13",
+      "name": "Tag MailCheap contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "MailCheap API"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.mailcheapBaseUrl }}/api/v1/contacts/tag",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Plan MailCheap change').item.json.tagsBody) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-14",
+      "name": "Verify updated contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "MailCheap API"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.mailcheapBaseUrl }}/api/v1/contacts/{{ encodeURIComponent($('Plan MailCheap change').item.json.event.email) }}?newsletter={{ encodeURIComponent($('Config').first().json.newsletter) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "download-lead-sync-15",
+      "name": "Check updated contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        100
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function readMailcheapResponse(response) {\n  if (!response || typeof response !== \"object\") {\n    return { status: null, body: null, error: \"no response\" };\n  }\n  if (response.error) {\n    const error = response.error;\n    const message =\n      typeof error === \"string\" ? error : error.message || error.description || \"request failed\";\n    return { status: null, body: null, error: String(message).slice(0, 300) };\n  }\n  const status = typeof response.statusCode === \"number\" ? response.statusCode : null;\n  let body = response.body ?? null;\n  if (typeof body === \"string\") {\n    try {\n      body = JSON.parse(body);\n    } catch {\n      body = null;\n    }\n  }\n  if (status === null) return { status: null, body, error: \"response had no status\" };\n  const message = body && body.error && typeof body.error.message === \"string\" ? body.error.message : null;\n  return {\n    status,\n    body,\n    error: status >= 200 && status < 300 ? null : `MailCheap answered ${status}${message ? `: ${message}` : \"\"}`.slice(0, 300),\n  };\n}\n\nfunction desiredDownloadDetails(event, config) {\n  const tags = [config.sourceTag, `download-${event.platform}`];\n  const fields = {};\n  if (config.firstDownloadField) fields[config.firstDownloadField] = event.firstRequestedAt.slice(0, 10);\n  if (config.platformField) fields[config.platformField] = event.platform;\n  return { tags, fields };\n}\n\nfunction planMailcheapChange({ event, lookup, config }) {\n  const ack = (result, details) => ({\n    action: result === \"synced\" ? \"done\" : result === \"skipped\" ? \"skip\" : \"retry\",\n    event,\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n  if (!event.marketingConsent || event.marketingConsent.granted !== true) {\n    return ack(\"skipped\", { outcome: \"no_marketing_permission\" });\n  }\n\n  const found = readMailcheapResponse(lookup);\n  if (found.status === null || (found.status !== 200 && found.status !== 404)) {\n    return ack(\"retry\", { error: `Contact lookup failed: ${found.error}` });\n  }\n  const desired = desiredDownloadDetails(event, config);\n  const lifecycle = config.lifecycleField;\n\n  if (found.status === 404) {\n    const fields = { ...desired.fields };\n    if (event.freeDownloadLifecycleEligible === true) fields[lifecycle] = \"free_download\";\n    return {\n      action: \"create\",\n      event,\n      expected: { fields, tags: desired.tags, previousStatus: null },\n      createBody: {\n        newsletter: config.newsletter,\n        email: event.email,\n        source: event.source,\n        tags: desired.tags,\n        fields,\n      },\n    };\n  }\n\n  const contact = found.body || {};\n  if (typeof contact.id !== \"string\" || String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact lookup returned a different or malformed contact\" });\n  }\n  const current = contact.fields || {};\n  const fields = {};\n  for (const [key, value] of Object.entries(desired.fields)) {\n    if (current[key] === undefined || current[key] === null || current[key] === \"\") fields[key] = value;\n  }\n  // Only a download-only lead whose contact has no lifecycle yet becomes\n  // free_download. A trial, customer, or any other stage is never replaced,\n  // and stopped contacts (unsubscribed, bounced, complained, dormant) are not\n  // put into a sequence.\n  const hasLifecycle = current[lifecycle] !== undefined && current[lifecycle] !== null && current[lifecycle] !== \"\";\n  if (\n    event.freeDownloadLifecycleEligible === true &&\n    !hasLifecycle &&\n    (contact.status === \"active\" || contact.status === \"pending\")\n  ) {\n    fields[lifecycle] = \"free_download\";\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTags = desired.tags.filter((tag) => !tags.includes(tag));\n  if (Object.keys(fields).length === 0 && missingTags.length === 0) {\n    return ack(\"synced\", { outcome: \"unchanged\", mailcheapContactId: contact.id });\n  }\n  return {\n    action: \"update\",\n    event,\n    contactId: contact.id,\n    expected: { fields, tags: desired.tags, previousStatus: contact.status },\n    fieldsBody: { newsletter: config.newsletter, fields },\n    tagsBody: { newsletter: config.newsletter, contacts: [contact.id], tags: desired.tags },\n  };\n}\n\nfunction checkMailcheapResult({ plan, writes, verify }) {\n  const event = plan.event;\n  const ack = (result, details) => ({\n    ack: { eventId: event.eventId, claimToken: event.claimToken, result, ...details },\n  });\n\n  for (const write of writes) {\n    const answer = readMailcheapResponse(write);\n    if (answer.status !== null && answer.status >= 200 && answer.status < 300) continue;\n    const message = answer.body && answer.body.error ? String(answer.body.error.message || \"\") : \"\";\n    // A create refused for the address itself (a typo domain, spam trap, or an\n    // address MailCheap knows can't receive email) never succeeds on retry.\n    // Field and tag problems are configuration, so the event waits for a fix.\n    if (\n      plan.action === \"create\" &&\n      answer.status === 400 &&\n      answer.body &&\n      answer.body.error &&\n      answer.body.error.code === \"validation_failed\" &&\n      !/^(fields|tags|newsletter)\\b/.test(message)\n    ) {\n      return ack(\"skipped\", { outcome: \"mailcheap_rejected_address\", error: answer.error });\n    }\n    return ack(\"retry\", { error: `MailCheap write failed: ${answer.error}` });\n  }\n\n  const read = readMailcheapResponse(verify);\n  if (read.status !== 200 || !read.body || typeof read.body.id !== \"string\") {\n    return ack(\"retry\", { error: `Contact check failed: ${read.error || \"contact missing\"}` });\n  }\n  const contact = read.body;\n  if (String(contact.email).toLowerCase() !== event.email) {\n    return ack(\"retry\", { error: \"Contact check returned a different contact\" });\n  }\n  const tags = Array.isArray(contact.tags) ? contact.tags : [];\n  const missingTag = plan.expected.tags.find((tag) => !tags.includes(tag));\n  if (missingTag) return ack(\"retry\", { error: `Contact check: tag ${missingTag} missing` });\n  const fields = contact.fields || {};\n  const wrong = Object.entries(plan.expected.fields).find(([key, value]) => fields[key] !== value);\n  if (wrong) {\n    // POST /contacts fills only empty fields on a contact that appeared since\n    // the lookup; a value someone else set first is kept and is not a failure.\n    const created = readMailcheapResponse(writes[0]);\n    const raced = plan.action === \"create\" && created.body && created.body.created === false;\n    if (!raced) return ack(\"retry\", { error: `Contact check: ${wrong[0]} not saved` });\n  }\n\n  const lifecycleSet = Object.values(plan.expected.fields).includes(\"free_download\") && !wrong;\n  let outcome;\n  if (plan.action === \"create\") {\n    const created = readMailcheapResponse(writes[0]).body;\n    if (created && created.created === false) outcome = \"existing_contact\";\n    else if ([\"unsubscribed\", \"bounced\", \"complained\"].includes(contact.status)) outcome = \"created_suppressed\";\n    else outcome = lifecycleSet ? \"created_free_download\" : \"created_without_lifecycle\";\n  } else {\n    outcome = lifecycleSet ? \"updated_free_download\" : \"updated_download_details\";\n  }\n  return ack(\"synced\", { outcome, mailcheapContactId: contact.id });\n}\n\nreturn { json: checkMailcheapResult({\n  plan: $('Plan MailCheap change').item.json,\n  writes: [$('Update MailCheap fields').item.json, $('Tag MailCheap contact').item.json],\n  verify: $json,\n}) };"
+      }
+    },
+    {
+      "id": "download-lead-sync-16",
+      "name": "Report result to DoodleNote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "DoodleNote download lead sync"
+        }
+      },
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.doodlenoteBaseUrl }}/api/integrations/download-leads/ack",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ results: [$json.ack] }) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When called by the 15-minute run": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Claim download events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim download events": {
+      "main": [
+        [
+          {
+            "node": "Split events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split events": {
+      "main": [
+        [
+          {
+            "node": "Find MailCheap contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find MailCheap contact": {
+      "main": [
+        [
+          {
+            "node": "Plan MailCheap change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan MailCheap change": {
+      "main": [
+        [
+          {
+            "node": "Route by plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by plan": {
+      "main": [
+        [
+          {
+            "node": "Create MailCheap contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update MailCheap fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report result to DoodleNote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create MailCheap contact": {
+      "main": [
+        [
+          {
+            "node": "Verify created contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify created contact": {
+      "main": [
+        [
+          {
+            "node": "Check created contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check created contact": {
+      "main": [
+        [
+          {
+            "node": "Report result to DoodleNote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update MailCheap fields": {
+      "main": [
+        [
+          {
+            "node": "Tag MailCheap contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag MailCheap contact": {
+      "main": [
+        [
+          {
+            "node": "Verify updated contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify updated contact": {
+      "main": [
+        [
+          {
+            "node": "Check updated contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check updated contact": {
+      "main": [
+        [
+          {
+            "node": "Report result to DoodleNote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {}
+}

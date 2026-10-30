@@ -141,7 +141,9 @@ publication guide for CLI migration, recovery and the unchanged Windows path.
 - [ ] Authorized GitHub Release and website changelog are public.
 - [ ] `/updates/latest-mac.yml` reports `<VERSION>` and every referenced
   artifact is reachable.
-- [ ] `/download/mac` resolves to the `<VERSION>` DMG.
+- [ ] `/download/mac` without a download grant redirects to the
+  `/download?platform=mac` email form, and after submitting the form it
+  resolves to the `<VERSION>` DMG.
 - [ ] A clean install reports `<VERSION>` and launches normally.
 - [ ] An existing supported install discovers, downloads, restarts into, and
   reports `<VERSION>`.
@@ -197,7 +199,9 @@ commands mutate production storage and require explicit authorization.
 - [ ] Explicit publication authorization is recorded.
 - [ ] Authorized artifacts and the intended manifest are uploaded.
 - [ ] Authorized GitHub Release and website changelog are public when applicable.
-- [ ] `/download/win` resolves to the intended beta installer.
+- [ ] `/download/win` without a download grant redirects to the
+  `/download?platform=win` email form, and after submitting the form it
+  resolves to the intended beta installer.
 - [ ] The production `/updates/latest.yml` changes only for an authorized signed
   production release.
 - [ ] A clean Windows 10/11 x64 install reports `<VERSION>` and launches.
