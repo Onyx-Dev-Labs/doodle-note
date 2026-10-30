@@ -9,5 +9,5 @@ export function assertRequestFits(system: string, user: string, budget: GlobalAs
     contextWindowTokens <= 0 || outputReserveTokens <= 0 || safetyMarginTokens < 0 || input < 0
   ) throw new Error('The selected model has no supported request budget. Choose another model.')
   if (input + outputReserveTokens + safetyMarginTokens > contextWindowTokens)
-    throw new Error('This recipe and its selected meeting inputs exceed the model context. Select fewer inputs, shorten the prompt, or choose a larger supported model. Nothing was generated.')
+    throw new Error('This fetch and its selected meeting inputs exceed the model context. Select fewer inputs, shorten the instructions, or choose a larger supported model. Nothing was generated.')
 }

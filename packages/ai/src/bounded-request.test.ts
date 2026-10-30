@@ -7,7 +7,8 @@ import { utf8TokenUpperBound } from './global-ask-prompt'
 test('complete recipe request fits exact boundary and rejects Unicode overflow without truncation', () => {
   const budget = { contextWindowTokens: 100, outputReserveTokens: 20, safetyMarginTokens: 10, accounting: 'utf8-upper-bound' as const, countInputTokens: (s: string, u: string) => utf8TokenUpperBound(s + u) }
   assert.doesNotThrow(() => assertRequestFits('s'.repeat(10), '界'.repeat(20), budget))
-  assert.throws(() => assertRequestFits('s'.repeat(11), '界'.repeat(20), budget), /exceed/)
+  assert.throws(() => assertRequestFits('s'.repeat(11), '界'.repeat(20), budget), (err: Error) =>
+    /^This fetch .*exceed/.test(err.message) && !/recipe/i.test(err.message))
   assert.throws(() => assertRequestFits('', '', { ...budget, contextWindowTokens: NaN }), /supported request budget/)
 })
 
