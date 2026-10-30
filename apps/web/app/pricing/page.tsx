@@ -1,18 +1,7 @@
-import Link from "next/link";
-
+import { MarketingLayout, MarketingDownloadButtons } from "../marketing";
 import { CheckoutButton } from "./checkout-button";
-import {
-  DoodleStroke,
-  DownloadButtons,
-  GitHubNavLink,
-  navLinkClass,
-  navPillClass,
-  SiteFooter,
-  SiteHeader,
-} from "../ui";
-
+import "../marketing.css";
 export const metadata = { title: "Pricing — DoodleNote" };
-
 const FREE_FEATURES = [
   "Unlimited meetings and recording — no caps, ever",
   "No-bot capture of mic + system audio on Mac and PC",
@@ -62,127 +51,92 @@ const FAQ = [
 
 function FeatureList({ items }: { items: string[] }) {
   return (
-    <ul className="mt-4">
+    <ul className="plan-features">
       {items.map((item) => (
-        <li
-          key={item}
-          className="flex gap-3 border-b border-sand py-3 text-sm leading-relaxed text-bark last:border-b-0"
-        >
-          <span className="mt-0.5 shrink-0 text-sage" aria-hidden="true">
-            ✓
-          </span>
-          {item}
+        <li key={item}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 12l4 4L19 6" />
+          </svg>
+          <span>{item}</span>
         </li>
       ))}
     </ul>
   );
 }
-
 export default async function PricingPage({
   searchParams,
 }: {
   searchParams: Promise<{ checkout?: string }>;
 }) {
   const { checkout } = await searchParams;
-
   return (
-    <div className="flex flex-1 flex-col bg-cream text-bark">
-      <SiteHeader
-        nav={
-          <>
-            <Link href="/changelog" className={navLinkClass}>
-              What&rsquo;s new
-            </Link>
-            <GitHubNavLink />
-            <Link href="/login" className={navPillClass}>
-              Sign in
-            </Link>
-          </>
-        }
-      />
-
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-24 pt-10 sm:pt-16">
-        <div className="text-center">
-          <h1 className="font-display text-4xl font-semibold tracking-tight text-ink">
-            <span className="relative inline-block whitespace-nowrap text-sage-deep">
-              Free
-              <DoodleStroke />
-            </span>{" "}
-            forever. Pay only for sync.
+    <MarketingLayout className="pricing-page">
+      <main id="main" className="pricing-main wrap">
+        <section className="pricing-intro">
+          <div className="eyebrow">A LITTLE CLARITY ON PRICING</div>
+          <h1>
+            Free on your device.
+            <br />
+            <span className="handwritten">Pay only for sync.</span>
           </h1>
-          <p className="mx-auto mt-5 max-w-xl text-lg leading-relaxed text-bark">
-            Everything that runs on your device — recording, transcription, AI
-            notes — is free with no meeting caps. Sync is for when you want
-            your notes everywhere.
+          <p>
+            Capture the conversation. Keep your thoughts together.
+            <br /> Add Sync when you want your notes everywhere.
           </p>
-        </div>
-
-        {/* Free */}
-        <section className="mt-16">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
-              Free
-            </h2>
-            <p className="font-display text-2xl font-semibold tracking-tight text-ink">
-              $0{" "}
-              <span className="text-sm font-normal text-stone">forever</span>
-            </p>
-          </div>
-          <p className="mt-1 text-sm text-stone">
-            The whole notepad, on your device — no account required
-          </p>
-          <FeatureList items={FREE_FEATURES} />
-          <div className="mt-7 flex justify-center sm:justify-start">
-            <DownloadButtons small />
-          </div>
         </section>
-
-        {/* Sync */}
-        <section className="mt-16">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
-              Sync
-            </h2>
-            <p className="font-display text-2xl font-semibold tracking-tight text-ink">
-              $10{" "}
-              <span className="text-sm font-normal text-stone">
-                / user / month
-              </span>
-            </p>
-          </div>
-          <p className="mt-1 text-sm text-stone">
-            Your meetings on every device
-          </p>
-          <FeatureList items={SYNC_FEATURES} />
-          <div className="mt-7">
-            <CheckoutButton autoCheckout={checkout === "1"} />
-          </div>
-        </section>
-
-        {/* FAQ */}
-        <section className="mt-20">
-          <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
-            Questions, answered
-          </h2>
-          <dl className="mt-2">
-            {FAQ.map((item) => (
-              <div
-                key={item.q}
-                className="border-b border-sand py-6 last:border-b-0"
-              >
-                <dt className="font-display text-base font-semibold text-ink">
-                  {item.q}
-                </dt>
-                <dd className="mt-2 text-sm leading-relaxed text-bark">
-                  {item.a}
-                </dd>
+        <section className="plans" aria-label="DoodleNote plans">
+          <article className="plan-card">
+            <div className="plan-kicker">YOUR OWN LITTLE NOTEBOOK</div>
+            <div className="plan-heading">
+              <h2>Free</h2>
+              <div>
+                <strong>$0</strong>
+                <span>forever</span>
               </div>
+            </div>
+            <p className="plan-description">
+              No account required. No meeting caps.
+            </p>
+            <FeatureList items={FREE_FEATURES} />
+            <MarketingDownloadButtons className="plan-downloads" />
+            <p className="plan-footnote">
+              Email signup required · macOS and Windows beta
+            </p>
+          </article>
+          <article className="plan-card sync-plan">
+            <div className="plan-kicker">A NOTEBOOK THAT COMES WITH YOU</div>
+            <div className="plan-heading">
+              <h2>Sync</h2>
+              <div>
+                <strong>$10</strong>
+                <span>per user / month</span>
+              </div>
+            </div>
+            <p className="plan-description">
+              Your thoughts, wherever you pick up next.
+            </p>
+            <FeatureList items={SYNC_FEATURES} />
+            <div className="marketing-checkout">
+              <CheckoutButton autoCheckout={checkout === "1"} />
+            </div>
+          </article>
+        </section>
+        <section className="pricing-faq">
+          <div>
+            <p className="eyebrow">GOOD TO KNOW</p>
+            <h2>A few small details.</h2>
+            <span className="handwritten">your notes stay yours.</span>
+          </div>
+          <div className="faq-list">
+            {FAQ.map((item) => (
+              <details key={item.q}>
+                <summary>{item.q}</summary>
+                <p>{item.a}</p>
+              </details>
             ))}
-          </dl>
+          </div>
         </section>
       </main>
-
-      <SiteFooter />
-    </div>
+    </MarketingLayout>
   );
 }
