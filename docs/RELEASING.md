@@ -57,7 +57,7 @@ pnpm --filter web test
 pnpm --filter web auth-smoke
 pnpm --filter web build
 pnpm lint
-pnpm audit --prod --audit-level=low
+pnpm audit --audit-level=low
 ```
 
 On a Mac with a supported Xcode and Swift environment, also run:

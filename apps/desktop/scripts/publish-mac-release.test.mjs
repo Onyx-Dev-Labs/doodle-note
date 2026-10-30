@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -8,7 +9,8 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { BLOB_BASE, PUBLIC_BASE, publishMacRelease } from './publish-mac-release.mjs'
 
-const version = '0.4.35'
+// The CLI reads the real package version; its synthetic candidate must match.
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const sourceSha = '89e28173363fa1263156096d42df8a9baeac7bea'
 const zip = `DoodleNote-${version}-arm64-mac.zip`
 const dmg = `DoodleNote-${version}-arm64.dmg`
@@ -96,7 +98,7 @@ function fakeTransport() {
 
 test('uploads only exact payloads, verifies public bytes, and leaves feeds untouched by default', async (t) => {
   const f = await fixture(t)
-  await writeFile(path.join(f.dir, 'DoodleNote-0.4.350-arm64.dmg'), 'wrong version')
+  await writeFile(path.join(f.dir, `DoodleNote-${version}0-arm64.dmg`), 'wrong version')
   await writeFile(path.join(f.dir, 'latest.yml'), 'Windows feed')
   const transport = fakeTransport()
   const result = await publishMacRelease({ ...f.options, transport })
