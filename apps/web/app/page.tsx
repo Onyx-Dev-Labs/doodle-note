@@ -41,14 +41,7 @@ export default function HomePage() {
               do. Give it all a home that feels a little more you.
             </p>
             <MarketingDownloadButtons />
-            <div className="hero-demo-links">
-              <a
-                className="text-link"
-                href="https://doodlenote-design-preview.vercel.app/app.html"
-              >
-                Try the app demo
-              </a>
-              <span>·</span>
+            <div className="hero-secondary-links">
               <a className="text-link" href="#how-it-works">
                 <span className="play" aria-hidden="true">
                   <svg viewBox="0 0 24 24">
@@ -152,7 +145,7 @@ export default function HomePage() {
                 Turn this catch-up into
                 <br />a thoughtful follow-up.
               </p>
-              <a href="https://doodlenote-design-preview.vercel.app/app.html#followups">
+              <a href="#your-space">
                 See what’s next <span aria-hidden="true">→</span>
               </a>
             </div>
@@ -280,10 +273,9 @@ export default function HomePage() {
                 </div>
                 <h3>A little nudge forward.</h3>
                 <p>
-                  Our proposed follow-up space turns loose ends into small,
-                  clear next steps you can act on.
+                  Turn loose ends into small, clear next steps with Ask in your
+                  notebook.
                 </p>
-                <span className="concept-label">NEW DESIGN CONCEPT</span>
               </article>
             </div>
           </section>
@@ -300,21 +292,19 @@ export default function HomePage() {
                 <span className="handwritten">left off.</span>
               </h2>
               <p>
-                A look at what’s next: your latest notes up front and next steps
-                close by. Try our interactive concept for a quieter home base.
+                Your latest notes up front, with next steps close by. A quieter
+                home base for what’s on your mind.
               </p>
-              <a
-                className="button button-dark"
-                href="https://doodlenote-design-preview.vercel.app/app.html"
-              >
-                Preview the app concept <span aria-hidden="true">→</span>
-              </a>
               <span className="handwritten space-annotation">
                 A little organized.
                 <br />A little doodly. All yours.
               </span>
             </div>
-            <div className="dashboard-teaser">
+            <div
+              className="dashboard-teaser"
+              role="img"
+              aria-label="Illustration of notes and suggested follow-ups in DoodleNote"
+            >
               <div className="teaser-top">
                 <span className="teaser-dots">
                   <i></i>
@@ -340,39 +330,30 @@ export default function HomePage() {
                       <b>Fresh from your notebook</b>
                       <span>View all →</span>
                     </div>
-                    <a
-                      className="teaser-note"
-                      href="https://doodlenote-design-preview.vercel.app/app.html"
-                    >
+                    <div className="teaser-note">
                       <span className="teaser-note-icon sage">▤</span>
                       <div>
                         <b>Brand &amp; website catch-up</b>
                         <span>Today · 32 min · The Studio</span>
                       </div>
                       <span>→</span>
-                    </a>
-                    <a
-                      className="teaser-note"
-                      href="https://doodlenote-design-preview.vercel.app/app.html"
-                    >
+                    </div>
+                    <div className="teaser-note">
                       <span className="teaser-note-icon peach">☷</span>
                       <div>
                         <b>Ideas for a slower Friday</b>
                         <span>Yesterday · Personal</span>
                       </div>
                       <span>→</span>
-                    </a>
-                    <a
-                      className="teaser-note"
-                      href="https://doodlenote-design-preview.vercel.app/app.html"
-                    >
+                    </div>
+                    <div className="teaser-note">
                       <span className="teaser-note-icon yellow">▤</span>
                       <div>
                         <b>Weekly team huddle</b>
                         <span>Yesterday · 24 min · Team</span>
                       </div>
                       <span>→</span>
-                    </a>
+                    </div>
                   </div>
                   <div className="teaser-followup">
                     <span className="handwritten">
@@ -384,22 +365,17 @@ export default function HomePage() {
                       the good stuff.
                     </h4>
                     <p>Your website catch-up has a few ideas ready to share.</p>
-                    <a href="https://doodlenote-design-preview.vercel.app/app.html#followups">
-                      Draft a recap →
-                    </a>
+                    <span className="teaser-recap">Draft a recap →</span>
                   </div>
                 </div>
                 <div className="teaser-ask">
                   <span aria-hidden="true">✳</span>
                   <span>What’s on your mind?</span>
-                  <a
-                    href="https://doodlenote-design-preview.vercel.app/app.html#ask"
-                    aria-label="Try asking your notes"
-                  >
+                  <span className="teaser-send" aria-hidden="true">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 18V6M7 11L12 6L17 11"></path>
                     </svg>
-                  </a>
+                  </span>
                 </div>
               </div>
             </div>

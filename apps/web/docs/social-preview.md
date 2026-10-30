@@ -59,3 +59,24 @@ Fetch the deployed image without authentication and verify HTTP 200,
 Verify production separately after deployment; a successful build or merge
 alone does not establish that the image is live. Messaging services may cache
 previous previews, and plain text without a URL cannot request an OG preview.
+
+## Favicons and compact link previews
+
+`app/favicon.ico` packages the existing DoodleNote desktop artwork as
+16, 32, 48, and 256 pixel RGBA icons.
+The former starter icon was a white triangle and was still being served at
+`/favicon.ico`, even though the PNG icon metadata already pointed to the mascot.
+Compact link previews could therefore display the wrong brand.
+
+The PNG icon uses the existing 249 × 249 mascot. The 180 × 180 Apple touch
+icon is resized from `apps/desktop/resources/icon.png`, exposed at the
+conventional `/apple-touch-icon.png` fallback path, and explicitly linked
+in the initial HTML. Only encoding and sizes change; the artwork is retained.
+Keep these assets consistent when changing the brand artwork. The `.ico`
+file convention supplies a content-versioned favicon link automatically.
+
+Verify `/favicon.ico`, `/mascot.png`, and `/apple-touch-icon.png` all return
+HTTP 200 with the expected image types and exact checked-in bytes. Confirm
+all icon links in the initial HTML reference DoodleNote assets. Existing
+Messages previews may retain an older icon; server verification does not
+prove that a previously sent message has refreshed its cached preview.

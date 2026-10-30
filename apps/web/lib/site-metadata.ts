@@ -16,7 +16,10 @@ export const siteMetadata: Metadata = {
   metadataBase: new URL("https://www.doodlenote.ai"),
   title,
   description,
-  icons: { icon: "/mascot.png" },
+  icons: {
+    icon: { url: "/mascot.png", type: "image/png", sizes: "249x249" },
+    apple: { url: "/apple-touch-icon.png", sizes: "180x180" },
+  },
   openGraph: {
     type: "website",
     siteName: title,
