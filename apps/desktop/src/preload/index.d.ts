@@ -1,4 +1,5 @@
 import type { SourcesApi } from '../shared/source-api'
+import type { DictationApi } from '../shared/dictation-api'
 import type { RecipesApi } from '../shared/recipes-api'
 import type { TextImporterApi } from '../shared/text-import-api'
 import type { StorageApi } from '../shared/storage-api'
@@ -22,6 +23,7 @@ import type { UpdateApi } from '../shared/update-api'
 declare global {
   interface Window {
     storage: StorageApi
+    dictation: DictationApi
     recording: RecordingApi
     engine: EngineApi
     notes: NotesApi

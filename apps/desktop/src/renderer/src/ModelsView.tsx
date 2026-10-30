@@ -29,6 +29,7 @@ import {
   type NotesSettingsView
 } from '../../shared/notes-api'
 import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
+import { DictationSettings } from './DictationSettings'
 import mascotUrl from './assets/mascot-square.png'
 
 function lastSyncLabel(iso: string): string {
@@ -137,7 +138,7 @@ function PeopleIcon(): React.JSX.Element {
 }
 
 /** Light-theme switch (sage when on), used by the calendar display prefs. */
-function Toggle({
+export function Toggle({
   checked,
   onChange,
   disabled = false,
@@ -167,13 +168,15 @@ function Toggle({
   )
 }
 
-export type SettingsSection = 'general' | 'calendar' | 'sync' | 'model' | 'integrations'
+export type SettingsSection =
+  'general' | 'calendar' | 'sync' | 'model' | 'dictation' | 'integrations'
 
 const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label: string }> = [
   { key: 'general', icon: <GearIcon size={15} />, label: 'General' },
   { key: 'calendar', icon: <CalendarIcon size={15} />, label: 'Calendar' },
   { key: 'sync', icon: <CloudIcon size={15} />, label: 'Cloud sync' },
   { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' },
+  { key: 'dictation', icon: <SparkleIcon size={15} />, label: 'Dictation' },
   { key: 'integrations', icon: <UsersIcon size={15} />, label: 'Integrations' }
 ]
 
@@ -672,6 +675,7 @@ export default function ModelsView({
         </nav>
 
         <div className="settings-content">
+          {section === 'dictation' && <DictationSettings />}
           {section === 'model' && (
             <section className="keys-section">
               <h3>Active notes model</h3>

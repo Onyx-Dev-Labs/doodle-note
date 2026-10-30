@@ -100,6 +100,19 @@ interface StoredSettings {
 
 export type NotesBroadcast = (channel: string, payload: unknown) => void
 
+export type DictationCleanupFailure = 'busy' | 'no-model' | 'no-provider' | 'no-consent' | 'failed'
+
+/** Why dictation cleanup did not run; the raw transcript is kept in every case. */
+export class DictationCleanupError extends Error {
+  constructor(
+    readonly code: DictationCleanupFailure,
+    message: string
+  ) {
+    super(message)
+    this.name = 'DictationCleanupError'
+  }
+}
+
 /**
  * Owns notes settings + the notes engines (packages/ai) in the main process.
  *
@@ -673,6 +686,104 @@ export class NotesService {
       return { ...result, modelRevision }
     } finally {
       this.askBusy = false
+    }
+  }
+
+  /**
+   * Dictation cleanup entry. It takes the same lease as notes, Ask and recipes
+   * (`askBusy`), so it can never overlap a generation or a model swap, and it
+   * refuses rather than interrupting one. It reads settings but never writes
+   * them, never falls back from the chosen mode, and never exposes a key.
+   * `consent` is the dictation-specific approval for sending dictated TEXT to
+   * the configured provider; the meeting-notes data-policy flag is not reused.
+   */
+  async runDictationCleanup(
+    mode: 'local' | 'byok',
+    system: string,
+    prompt: string,
+    signal: AbortSignal,
+    consent: { provider: string; model: string } | null
+  ): Promise<{ markdown: string; engineId: string }> {
+    if (this.askBusy || this.enhanceBusy || this.activateBusy)
+      throw new DictationCleanupError('busy', 'The notes model is busy with another task.')
+    this.askBusy = true
+    try {
+      const settingsBefore = JSON.stringify(this.settings)
+      const engine = await this.pickDictationEngine(mode, consent)
+      signal.throwIfAborted()
+      const result = engine.runBounded
+        ? await engine.runBounded(system, prompt, { signal, phase: 'writing' })
+        : await engine.runRaw(system, prompt, undefined, { signal, phase: 'writing' })
+      signal.throwIfAborted()
+      if (settingsBefore !== JSON.stringify(this.settings))
+        throw new DictationCleanupError('failed', 'Model settings changed during cleanup.')
+      return { markdown: result.markdown, engineId: engine.id }
+    } catch (error) {
+      if (error instanceof DictationCleanupError || signal.aborted) throw error
+      throw new DictationCleanupError(
+        'failed',
+        error instanceof Error ? error.message : String(error)
+      )
+    } finally {
+      this.askBusy = false
+    }
+  }
+
+  private async pickDictationEngine(
+    mode: 'local' | 'byok',
+    consent: { provider: string; model: string } | null
+  ): Promise<NotesEngine> {
+    if (mode === 'byok') {
+      const { engineChoice, cloud } = this.settings
+      if (engineChoice !== 'cloud' || !cloud)
+        throw new DictationCleanupError(
+          'no-provider',
+          'No hosted provider is selected in Settings.'
+        )
+      if (cloud.provider === 'groq' || cloud.provider === 'openrouter')
+        throw new DictationCleanupError('no-provider', 'The selected provider is retired.')
+      const model = cloud.model?.trim() ?? ''
+      if (!consent || consent.provider !== cloud.provider || consent.model !== model)
+        throw new DictationCleanupError(
+          'no-consent',
+          'Approve sending dictated text to this provider in Dictation settings.'
+        )
+      const apiKey = cloud.apiKeyEncrypted ? this.decryptApiKey(cloud.apiKeyEncrypted) : ''
+      if (!apiKey && cloud.provider !== 'ollama')
+        throw new DictationCleanupError('no-provider', 'The provider key is unavailable.')
+      return new CloudNotesEngine({
+        provider: cloud.provider,
+        dataPolicyConfirmed: true,
+        apiKey: apiKey ?? '',
+        ...(model ? { model } : {})
+      })
+    }
+    const selected = LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId)
+    for (const spec of selected ? [selected] : LOCAL_MODELS) {
+      if (spec.minRamGB > totalRamGB()) continue
+      const modelPath = await this.modelStore.find(spec)
+      if (modelPath) return this.obtainLocalEngine(spec, modelPath)
+    }
+    throw new DictationCleanupError('no-model', 'No local notes model is installed.')
+  }
+
+  /** Cheap, settings-only view for the Dictation panel; touches no model file. */
+  dictationCleanupOptions(): {
+    localModelLabel: string | null
+    byok: { provider: string; model: string; hasKey: boolean } | null
+  } {
+    const { activeLocalModelId, engineChoice, cloud } = this.settings
+    const local = LOCAL_MODELS.find((m) => m.id === activeLocalModelId)
+    return {
+      localModelLabel: local?.label ?? null,
+      byok:
+        engineChoice === 'cloud' && cloud
+          ? {
+              provider: cloud.provider,
+              model: cloud.model?.trim() ?? '',
+              hasKey: Boolean(cloud.apiKeyEncrypted) || cloud.provider === 'ollama'
+            }
+          : null
     }
   }
 

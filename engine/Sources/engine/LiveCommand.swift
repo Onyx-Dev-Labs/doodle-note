@@ -21,6 +21,7 @@ enum LiveCommand {
         // warm-up, meant an early Stop click threw the whole session away.
         let stopper = Stopper()
         StopController.shared.arm()
+        LevelReporter.shared.setEnabled(options.flags.contains("levels"))
         Task {
             await StopController.shared.wait(timeoutSeconds: nil)
             stopper.stop()
@@ -445,6 +446,7 @@ final class ChannelPipeline {
             peakValue = max(peakValue, bufferPeak)
             peakLock.unlock()
         }
+        if channel == "mic" { LevelReporter.shared.report(bufferPeak) }
 
         // Both consumers only read: ASR via the stream, persistence on the
         // recorder's own serial queue.
@@ -913,5 +915,35 @@ final class CaptureRegistry: @unchecked Sendable {
         stops.removeAll()
         lock.unlock()
         pending.forEach { $0() }
+    }
+}
+
+
+// MARK: - Optional microphone level reporting
+
+/// Throttled `level` events for hosts that draw a meter (dictation). Off unless
+/// the host asked for it at session start, so meeting sessions are unchanged.
+final class LevelReporter: @unchecked Sendable {
+    static let shared = LevelReporter()
+    private let lock = NSLock()
+    private var enabled = false
+    private var last = Date.distantPast
+
+    func setEnabled(_ value: Bool) {
+        lock.lock()
+        enabled = value
+        last = .distantPast
+        lock.unlock()
+    }
+
+    func report(_ peak: Float) {
+        lock.lock()
+        guard enabled, Date().timeIntervalSince(last) >= 0.08 else {
+            lock.unlock()
+            return
+        }
+        last = Date()
+        lock.unlock()
+        Events.emit(["event": "level", "channel": "mic", "peak": Double(peak)])
     }
 }

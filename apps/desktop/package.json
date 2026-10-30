@@ -7,6 +7,9 @@
   "scripts": {
     "brand:build": "./scripts/build-brand-assets.sh",
     "dev": "electron-vite dev",
+    "dev:dictation": "DOODLENOTE_CHANNEL=dev electron-vite dev",
+    "package:dev": "bash scripts/package-dev.sh",
+    "verify:dev-app": "bash scripts/verify-dev-app.sh",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

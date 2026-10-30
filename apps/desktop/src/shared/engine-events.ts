@@ -92,6 +92,8 @@ export interface EngineStartOptions {
   audioDir?: string
   /** live only (macOS): system-audio capture backend; default 'sck'. */
   systemBackend?: 'sck' | 'tap'
+  /** live only: stream throttled microphone `level` events (dictation's meter). */
+  levels?: boolean
 }
 
 export interface EngineStartRequest {
@@ -189,6 +191,13 @@ export interface EngineAudioEvent {
   startEpochMs?: number
 }
 
+/** Live, opt-in (`levels`): microphone peak 0..1 for a level meter. */
+export interface EngineLevelEvent {
+  event: 'level'
+  channel: EngineChannel
+  peak: number
+}
+
 /** Live: wall-clock anchor for a channel's token timeline (first audio buffer). */
 export interface EngineChannelStartEvent {
   event: 'channel_start'
@@ -208,6 +217,7 @@ export type EngineSidecarEvent =
   | EngineDoneEvent
   | EngineChannelStartEvent
   | EngineAudioEvent
+  | EngineLevelEvent
 
 /* ---- Lifecycle events synthesized by the main process ---- */
 

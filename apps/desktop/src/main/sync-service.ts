@@ -86,10 +86,12 @@ export class SyncService {
     private readonly meetings: MeetingsService,
     private readonly folders: FoldersService,
     private readonly broadcast: (channel: string, payload: unknown) => void,
-    private readonly libraryRoot: LibraryPath = userDataDir
+    private readonly libraryRoot: LibraryPath = userDataDir,
+    /** Where sync goes when DOODLE_SYNC_URL is unset. A dev build passes an unroutable address. */
+    defaultBaseUrl: string = DEFAULT_BASE_URL
   ) {
     this.configPath = join(userDataDir, 'sync.json')
-    this.baseUrl = process.env.DOODLE_SYNC_URL || DEFAULT_BASE_URL
+    this.baseUrl = process.env.DOODLE_SYNC_URL || defaultBaseUrl
     this.config = this.readConfig()
   }
 

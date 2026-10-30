@@ -18,6 +18,16 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
+        ),
+        // Original macOS delivery helper for system-wide dictation: target
+        // identity, validated text insertion and hold-key detection. Kept out of
+        // the `engine` target so it carries no speech models and starts instantly.
+        .executableTarget(
+            name: "dictation-helper",
+            path: "Sources/dictation-helper",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         )
     ]
 )

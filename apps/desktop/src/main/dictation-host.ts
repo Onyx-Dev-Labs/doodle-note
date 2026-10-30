@@ -1,0 +1,176 @@
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { clipboard, globalShortcut, ipcMain, shell, systemPreferences } from 'electron'
+import type { WebContents } from 'electron'
+import type { AppChannel } from '../shared/app-channel'
+import {
+  DICTATION_CANCEL_CHANNEL,
+  DICTATION_COPY_RECOVERY_CHANNEL,
+  DICTATION_DISMISS_RECOVERY_CHANNEL,
+  DICTATION_GET_STATUS_CHANNEL,
+  DICTATION_OPEN_PRIVACY_CHANNEL,
+  DICTATION_SET_SETTINGS_CHANNEL,
+  DICTATION_STATUS_EVENT_CHANNEL,
+  DICTATION_TOGGLE_CHANNEL,
+  type DictationSettingsUpdate,
+  type MicrophoneAccess
+} from '../shared/dictation-api'
+import { CaptureOwnership } from './capture-ownership'
+import { DictationHelperClient } from './dictation-helper-client'
+import { DictationOverlay } from './dictation-overlay'
+import { DictationService, type EngineLike } from './dictation-service'
+import { DictationSettingsStore } from './dictation-settings'
+import type { NotesService } from './notes-service'
+
+export interface DictationHostOptions {
+  channel: AppChannel
+  userData: string
+  logsDir: string
+  helperPath: string
+  /** The macOS sidecar host; dictation is unavailable without it. */
+  engine: EngineLike | null
+  notes: () => NotesService | null
+  /** The meeting recorder, when it holds or is about to hold the microphone. */
+  meetingBusy: () => boolean
+  setMicHeld: (held: boolean) => void
+  isTrustedSender: (sender: WebContents) => boolean
+  broadcast: (channel: string, payload: unknown) => void
+}
+
+const PRIVACY_PANES = {
+  microphone: 'Privacy_Microphone',
+  accessibility: 'Privacy_Accessibility',
+  'input-monitoring': 'Privacy_ListenEvent'
+} as const
+
+function microphoneAccess(): MicrophoneAccess {
+  try {
+    return systemPreferences.getMediaAccessStatus('microphone')
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** Builds the real service from Electron pieces and registers its IPC. */
+export function createDictationHost(options: DictationHostOptions): {
+  service: DictationService
+  ownership: CaptureOwnership
+} {
+  const ownership = new CaptureOwnership()
+  const settings = new DictationSettingsStore(options.userData)
+  const helper = new DictationHelperClient({ command: options.helperPath })
+
+  // The overlay callback fires only after construction, so the forward reference is safe.
+  // The overlay is built before the service it reports to; actions arrive only after both exist.
+  const route: { service: DictationService | null } = { service: null }
+  const overlay = new DictationOverlay((action, gen) => route.service?.onOverlayAction(action, gen))
+
+  const logFile = join(options.logsDir, 'dictation.log')
+  const metricsFile = join(options.userData, 'dictation-metrics.jsonl')
+  try {
+    mkdirSync(options.logsDir, { recursive: true })
+  } catch {
+    // Logging is best-effort.
+  }
+  const engine: EngineLike =
+    options.engine ??
+    ({
+      tryStartLive: () => ({
+        started: false,
+        reason: 'Dictation is not available on this platform.'
+      }),
+      stop: () => {},
+      running: false,
+      warm: false
+    } as EngineLike)
+
+  const service = new DictationService({
+    channel: options.channel,
+    supported: options.engine !== null,
+    settings,
+    // The meeting recorder holds the microphone before the sidecar session
+    // exists; treat that handshake as busy too.
+    engine: {
+      tryStartLive: (opts) => engine.tryStartLive(opts),
+      stop: () => engine.stop(),
+      get running() {
+        return engine.running || options.meetingBusy()
+      },
+      get warm() {
+        return engine.warm
+      }
+    },
+    ownership,
+    helper,
+    shortcuts: {
+      register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+      unregister: (accelerator) => globalShortcut.unregister(accelerator)
+    },
+    overlay,
+    cleanup: async (mode, request, signal, consent) => {
+      const notes = options.notes()
+      if (!notes) throw new Error('The notes model is not ready yet.')
+      const result = await notes.runDictationCleanup(
+        mode,
+        request.system,
+        request.prompt,
+        signal,
+        consent
+      )
+      return result.markdown
+    },
+    cleanupOptions: () =>
+      options.notes()?.dictationCleanupOptions() ?? { localModelLabel: null, byok: null },
+    microphoneAccess,
+    writeClipboard: (text) => clipboard.writeText(text),
+    broadcast: (status) => options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status),
+    onMicHeld: options.setMicHeld,
+    now: () => Date.now(),
+    // Event names and counts only. Transcript text never reaches a log.
+    log: (line) => {
+      try {
+        appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`)
+      } catch {
+        // Best-effort.
+      }
+    },
+    recordMetrics: (record) => {
+      if (options.channel !== 'dev') return
+      try {
+        appendFileSync(metricsFile, `${JSON.stringify(record)}\n`)
+      } catch {
+        // Best-effort.
+      }
+    }
+  })
+
+  route.service = service
+  const trusted = (event: { sender: WebContents }): boolean => options.isTrustedSender(event.sender)
+  ipcMain.handle(DICTATION_GET_STATUS_CHANNEL, (event) =>
+    trusted(event) ? service.status() : null
+  )
+  ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
+    trusted(event) ? service.setSettings(update ?? {}) : null
+  )
+  ipcMain.handle(DICTATION_TOGGLE_CHANNEL, (event) => {
+    if (trusted(event)) service.toggle()
+  })
+  ipcMain.handle(DICTATION_CANCEL_CHANNEL, (event) => {
+    if (trusted(event)) service.cancel()
+  })
+  ipcMain.handle(DICTATION_COPY_RECOVERY_CHANNEL, (event, gen: unknown) =>
+    trusted(event) && typeof gen === 'number' ? service.copyRecovery(gen) : false
+  )
+  ipcMain.handle(DICTATION_DISMISS_RECOVERY_CHANNEL, (event, gen: unknown) => {
+    if (trusted(event) && typeof gen === 'number') service.dismissRecovery(gen)
+  })
+  ipcMain.handle(DICTATION_OPEN_PRIVACY_CHANNEL, (event, pane: unknown) => {
+    if (trusted(event) && typeof pane === 'string' && pane in PRIVACY_PANES) {
+      void shell.openExternal(
+        `x-apple.systempreferences:com.apple.preference.security?${PRIVACY_PANES[pane as keyof typeof PRIVACY_PANES]}`
+      )
+    }
+  })
+
+  return { service, ownership }
+}
