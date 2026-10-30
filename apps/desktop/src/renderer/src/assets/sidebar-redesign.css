@@ -1,0 +1,181 @@
+/* The real app shell retains its navigation, profile data, and theme preference. */
+.redesigned-shell .sidebar {
+  width: 232px;
+  padding: 0 16px 16px;
+  background: color-mix(in srgb, var(--bg) 82%, var(--sage-fill));
+  font-family: var(--redesign-body);
+  border-right-color: color-mix(in srgb, var(--border) 75%, var(--accent));
+}
+.redesigned-shell .sidebar-top {
+  padding: 43px 0 24px;
+}
+.redesigned-shell .wordmark {
+  width: 100%;
+  gap: 10px;
+  padding: 7px 0;
+  text-align: left;
+}
+.redesigned-shell .wordmark .mascot-img {
+  width: 35px;
+  height: 35px;
+  border-radius: 9px;
+}
+.redesigned-shell .wordmark-text {
+  font-family: var(--redesign-display);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+}
+.redesigned-shell .sidebar-caption {
+  margin: 7px 0 0 2px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.redesigned-shell .sidebar-new-note {
+  min-height: 39px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 12px;
+  margin-bottom: 17px;
+  border-radius: 9px;
+  background: #324d3d;
+  color: #fffaf0;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.redesigned-shell .sidebar-new-note:hover {
+  background: #42634c;
+}
+.redesigned-shell .sidebar-search {
+  margin: 0 0 4px;
+}
+.redesigned-shell .sidebar-search input {
+  min-height: 35px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--card) 48%, transparent);
+  font-size: 11px;
+  padding: 9px 32px 9px 11px;
+}
+.redesigned-shell .sidebar-search input:focus {
+  border-color: var(--accent);
+}
+.redesigned-shell .sidebar-search input::placeholder,
+.redesigned-shell .sidebar-search .kbd {
+  color: var(--muted);
+}
+.redesigned-shell .sidebar-search .kbd {
+  font-size: 10px;
+}
+.redesigned-shell .sidebar-section {
+  margin: 23px 10px 9px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.redesigned-shell .sidebar .nav-item {
+  min-height: 38px;
+  padding: 9px 10px;
+  gap: 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.redesigned-shell .sidebar .nav-item.on {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--sage-fill) 78%, var(--accent) 22%);
+  font-weight: 600;
+}
+.redesigned-shell .sidebar .nav-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.redesigned-shell .sidebar .nav-icon svg,
+.redesigned-shell .sidebar-new-note svg,
+.redesigned-shell .folder-add svg {
+  display: block;
+}
+.redesigned-shell .sidebar .nav-label {
+  min-width: 0;
+}
+.redesigned-shell .sidebar .nav-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--muted);
+}
+.redesigned-shell .sidebar .nav-sub {
+  margin-left: 0;
+  width: 100%;
+}
+.redesigned-shell .sidebar .folder-row {
+  padding-left: 12px;
+}
+.redesigned-shell .sidebar .folder-add,
+.redesigned-shell .sidebar .folder-menu-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: 0 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.redesigned-shell .sidebar .folder-menu-btn {
+  line-height: 1;
+}
+.redesigned-shell .sidebar-trash {
+  margin-top: 14px;
+}
+.redesigned-shell .sidebar-bottom {
+  border-top: 1px solid var(--border);
+  padding-top: 13px;
+  gap: 9px;
+}
+.redesigned-shell .privacy-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font-size: 10px;
+}
+.redesigned-shell .sidebar button:focus-visible,
+.redesigned-shell .sidebar [role='button']:focus-visible {
+  outline: 2px solid var(--accent-deep);
+  outline-offset: 2px;
+}
+html[data-theme='dark'] .redesigned-shell .sidebar-new-note {
+  background: #b3c59c;
+  color: #1e3023;
+}
+html[data-theme='dark'] .redesigned-shell .sidebar-new-note:hover {
+  background: #c5d6af;
+}
+@media (max-width: 1050px) {
+  .redesigned-shell .sidebar {
+    width: 208px;
+    padding-right: 13px;
+    padding-left: 13px;
+  }
+  .redesigned-shell .wordmark-text {
+    font-size: 19px;
+  }
+}

@@ -1,0 +1,27 @@
+/* Bundled fonts: no remote requests or network requirement in the desktop app. */
+@font-face {
+  font-family: 'Doodle Bricolage';
+  src: url('./fonts/bricolage.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Doodle Caveat';
+  src: url('./fonts/caveat.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Doodle Geist';
+  src: url('./fonts/geist.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+:root {
+  --redesign-display: 'Doodle Bricolage', var(--sans);
+  --redesign-hand: 'Doodle Caveat', cursive;
+  --redesign-body: 'Doodle Geist', var(--sans);
+}
