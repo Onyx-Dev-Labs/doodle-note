@@ -5,8 +5,6 @@ import type { ReactNode } from "react";
 import { AppleLogo, GitHubLogo, WindowsLogo } from "./logos";
 import { DOWNLOADS, GITHUB_REPO, ONYX_URL } from "./ui";
 
-const APP_DEMO = "https://doodlenote-design-preview.vercel.app/app.html";
-
 function MarketingBrand() {
   return (
     <div className="brand-lockup">
@@ -49,7 +47,6 @@ export function MarketingHeader() {
       <nav className="desktop-nav" aria-label="Main navigation">
         <Link href="/#how-it-works">How it works</Link>
         <Link href="/pricing">Pricing</Link>
-        <a href={APP_DEMO}>App demo</a>
       </nav>
       <div className="header-actions">
         <GitHubLink />
