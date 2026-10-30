@@ -3060,64 +3060,285 @@
   text-align: center;
   line-height: 1.6;
 }
-.marketing .download-main {
-  max-width: 1080px;
-  padding: 65px 0 85px;
+/* Download page: the same paper, ink, and small doodles as the homepage. */
+.marketing.download-page .download-main {
+  max-width: 1160px;
+  padding: 64px 0 72px;
 }
-.marketing .download-grid {
+.marketing.download-page .download-grid {
   display: grid;
-  grid-template-columns: 0.9fr 1.1fr;
-  gap: 65px;
-  align-items: start;
+  grid-template-columns: 0.95fr 1.05fr;
+  gap: 72px;
+  align-items: center;
 }
-.marketing .download-intro {
-  padding-top: 18px;
+.marketing.download-page .download-intro {
+  padding: 12px 0;
 }
-.marketing .download-intro h1 {
+.marketing.download-page .download-intro .eyebrow {
+  color: #e9d58b;
+  font-size: 10px;
+  letter-spacing: 2px;
+  margin: 0 0 24px;
+}
+.marketing.download-page .download-intro h1 {
   color: #f8f2e2;
   font-family: var(--display);
-  font-size: 52px;
+  font-size: clamp(40px, 4.4vw, 62px);
+  font-weight: 600;
+  letter-spacing: -2px;
+  line-height: 1.05;
+  margin: 0;
+}
+.marketing.download-page .download-handwritten {
+  display: inline-block;
+  color: #e9d58b;
+  font-family: var(--hand);
+  font-size: 1.2em;
+  font-weight: 500;
+  letter-spacing: -1.5px;
+  transform: rotate(-3deg);
+  margin: 5px 0 10px;
+}
+.marketing.download-page .download-description {
+  max-width: 420px;
+  color: #d0d8c9;
+  font-size: 16px;
+  line-height: 1.8;
+  margin: 24px 0;
+}
+.marketing.download-page .download-promises {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  color: #d0d8c9;
+  font-size: 12px;
+}
+.marketing.download-page .download-promises li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.marketing.download-page .download-promises svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  fill: none;
+  stroke: #b9c6a5;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.marketing.download-page .download-keepsake {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin: 40px 0 30px 8px;
+}
+.marketing.download-page .download-sticky {
+  position: relative;
+  width: 210px;
+  padding: 26px 23px 19px;
+  background: #ead58b;
+  color: #34432e;
+  border-radius: 2px 3px 22px 3px;
+  box-shadow: 3px 10px 18px #12291e40;
+  transform: rotate(-5deg);
+}
+.marketing.download-page .download-sticky::before {
+  content: "";
+  position: absolute;
+  width: 70px;
+  height: 20px;
+  left: calc(50% - 35px);
+  top: -10px;
+  background: #d4d3a980;
+  transform: rotate(4deg);
+}
+.marketing.download-page .download-sticky-kicker {
+  font-size: 8px;
+  letter-spacing: 1.4px;
+}
+.marketing.download-page .download-sticky p {
+  font-family: var(--hand);
+  font-size: 29px;
   line-height: 1.1;
+  margin: 12px 0 0;
 }
-.marketing .download-intro > p,
-.marketing .download-intro > div {
-  color: #c8d5bf;
+.marketing.download-page .download-sticky > svg {
+  width: 90px;
+  height: 24px;
+  fill: none;
+  stroke: #7e8651;
+  stroke-width: 1.4;
+  stroke-linecap: round;
 }
-.marketing .download-intro > p:first-child {
-  color: #ead48a;
+.marketing.download-page .download-mascot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  transform: rotate(5deg);
 }
-.marketing .download-intro a {
-  color: #ead48a;
-}
-.marketing .download-intro > div {
-  border-color: #b6bd88;
-}
-.marketing .download-form-shell {
-  color: #283c2f;
-}
-.marketing .download-form-shell > form,
-.marketing .download-form-shell > div {
-  background: #f6f0e2;
-  border: 1px solid #e3d9c3;
+.marketing.download-page .download-mascot img {
+  width: 100px;
+  height: 100px;
+  object-fit: contain;
+  background: #b7c4a5;
+  padding: 7px;
   border-radius: 16px;
-  padding: 30px;
-  box-shadow: 0 18px 38px #071c1730;
 }
-.marketing .download-form-shell input[type="email"] {
-  min-height: 44px;
+.marketing.download-page .download-mascot span {
+  font-size: 21px;
+  color: #c4d1b7;
 }
-.marketing .download-form-shell button {
-  min-height: 46px;
+.marketing.download-page .download-sync-note {
+  color: #aebbab;
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 0;
+}
+.marketing.download-page .download-sync-note a {
+  color: #ead58b;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.marketing.download-page .download-card {
+  position: relative;
+  isolation: isolate;
+  color: #283c2f;
+  background: #f8f3e7;
+  border: 1px solid #e4ddca;
+  border-radius: 15px;
+  box-shadow: 0 25px 60px #10271f55;
+}
+.marketing.download-page .download-card::before {
+  content: "";
+  position: absolute;
+  inset: 8px -9px -8px 9px;
+  background: #b5c2a4;
+  border-radius: 15px;
+  transform: rotate(2deg);
+  z-index: -2;
+}
+.marketing.download-page .download-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #f8f3e7;
+  border-radius: inherit;
+  z-index: -1;
+}
+.marketing.download-page .download-card-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 30px;
+  border-bottom: 1px solid #dedacb;
+  color: #6b765f;
+  font-size: 9px;
+  letter-spacing: 1.6px;
+}
+.marketing.download-page .download-card-heading {
+  padding: 28px 30px 0;
+}
+.marketing.download-page .download-card-heading h2 {
+  font-family: var(--display);
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: -0.9px;
+  line-height: 1.15;
+  margin: 0;
+}
+.marketing.download-page .download-card-heading p {
+  color: #69725e;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 10px 0 0;
+}
+.marketing.download-page .download-form-shell > form,
+.marketing.download-page .download-form-shell > div {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 26px 30px 30px;
+  box-shadow: none;
+}
+.marketing.download-page .download-form-shell fieldset label {
+  min-height: 72px;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 9px;
+  background: #fffdf6;
+}
+.marketing.download-page
+  .download-form-shell
+  fieldset
+  label:has(input:checked) {
+  background: #e8eddd;
+  border-color: #748c61;
+  box-shadow: inset 0 0 0 1px #748c6133;
+}
+.marketing.download-page .download-form-shell fieldset label > svg {
+  flex-shrink: 0;
+}
+.marketing.download-page .download-form-shell input[type="email"] {
+  min-height: 48px;
+  background: #fffdf6;
+  border-color: #d6d5c3;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.marketing.download-page .download-form-shell input[type="checkbox"] {
+  appearance: auto;
+  accent-color: #314d39;
+}
+.marketing.download-page .download-form-shell button,
+.marketing.download-page .download-form-shell a:has(svg) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 49px;
+  border-radius: 9px;
+  background: #2d4939;
+  color: #fffaeb;
+  font-weight: 500;
   cursor: pointer;
 }
-.marketing .download-form-shell input[type="checkbox"] {
-  appearance: auto;
+.marketing.download-page .download-form-shell button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }
-.marketing .download-form-shell p[role="alert"] {
+.marketing.download-page .download-form-shell p[role="alert"] {
   color: #9c2828;
 }
-.marketing .download-page .footer {
+.marketing.download-page .footer {
   border-top: 1px solid #4a5f4c;
+}
+@media (max-width: 1000px) {
+  .marketing.download-page .download-grid {
+    gap: 36px;
+  }
+  .marketing.download-page .download-keepsake {
+    gap: 20px;
+  }
+  .marketing.download-page .download-sticky {
+    width: 185px;
+    padding: 24px 18px 16px;
+  }
+  .marketing.download-page .download-mascot img {
+    width: 80px;
+    height: 80px;
+  }
+  .marketing.download-page .download-card-heading h2 {
+    font-size: 26px;
+  }
 }
 @media (max-width: 900px) {
   .marketing .footer {
@@ -3126,8 +3347,51 @@
   .marketing .footer-nav {
     gap: 15px;
   }
-  .marketing .download-grid {
+  .marketing.download-page .download-card-topline {
+    padding: 18px 22px;
+  }
+  .marketing.download-page .download-card-heading {
+    padding: 24px 22px 0;
+  }
+  .marketing.download-page .download-form-shell > form,
+  .marketing.download-page .download-form-shell > div {
+    padding: 24px 22px;
+  }
+  .marketing.download-page .download-mascot {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .marketing.download-page .download-main {
+    max-width: 540px;
+    padding: 28px 0 48px;
+  }
+  .marketing.download-page .download-grid {
+    grid-template-columns: 1fr;
     gap: 30px;
+  }
+  .marketing.download-page .download-intro {
+    padding: 0;
+  }
+  .marketing.download-page .download-intro h1 {
+    font-size: 48px;
+  }
+  .marketing.download-page .download-intro .eyebrow {
+    margin-bottom: 18px;
+  }
+  .marketing.download-page .download-description {
+    margin: 18px 0;
+    font-size: 14px;
+  }
+  .marketing.download-page .download-keepsake {
+    display: none;
+  }
+  .marketing.download-page .download-sync-note {
+    margin-top: 20px;
+  }
+  .marketing.download-page .download-card::before {
+    inset: 8px -3px -7px 5px;
+    transform: rotate(1deg);
   }
 }
 @media (max-width: 650px) {
@@ -3137,18 +3401,12 @@
   .marketing .footer > span {
     max-width: none;
   }
-  .marketing .download-main {
-    padding: 20px 0 45px;
+}
+@media (max-width: 400px) {
+  .marketing.download-page .download-intro h1 {
+    font-size: 43px;
   }
-  .marketing .download-grid {
-    grid-template-columns: 1fr;
-    gap: 30px;
-  }
-  .marketing .download-intro h1 {
-    font-size: 40px;
-  }
-  .marketing .download-form-shell > form,
-  .marketing .download-form-shell > div {
-    padding: 22px;
+  .marketing.download-page .download-card-heading h2 {
+    font-size: 25px;
   }
 }
