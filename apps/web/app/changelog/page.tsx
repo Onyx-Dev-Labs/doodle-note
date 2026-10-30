@@ -9,6 +9,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.37",
+    date: "October 30, 2026",
+    highlights: [
+      "Mac: a quieter home screen with recent notes, their folders, and a calendar overview",
+      "A handwritten “Pick up where you left off” heading and a sticky-note shortcut for finding next steps in your notes",
+      "A clearer sidebar, quick note creation, and refined light and dark themes",
+      "Existing recording, transcription, editing, search, folders, calendar connections, and Ask workflows remain available",
+    ],
+  },
+  {
     version: "0.4.35.1",
     date: "October 30, 2026",
     highlights: [
