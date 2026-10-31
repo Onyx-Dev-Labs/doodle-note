@@ -19,6 +19,14 @@
   padding: 0 14px 14px;
   font-size: 13px;
 }
+/* Shown as a note tab: the card already frames it. */
+.recipe-panel.embedded {
+  margin: 0;
+  border: 0;
+}
+.recipe-panel.embedded .recipe-body {
+  padding: 0;
+}
 .recipe-body label {
   display: flex;
   flex-direction: column;
