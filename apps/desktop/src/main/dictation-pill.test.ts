@@ -7,9 +7,13 @@ import {
   coerceEdge,
   describeDoubleTap,
   describeFnKey,
+  describeStopStages,
   dockedBounds,
   hideExpiry,
+  isMessageShown,
   isPillHidden,
+  messageVisibility,
+  OVERLAY_MESSAGE_KINDS,
   msUntilPillReturns,
   resolveMicrophone,
   shortcutsCollide,
@@ -123,12 +127,14 @@ test('resolveMicrophone: an empty listing is not proof the device is gone', () =
   assert.deepEqual(resolveMicrophone('usb-1', []), { uid: 'usb-1', fellBack: false })
 })
 
-test('the menu lists the six actions in order, with the default microphone ticked', () => {
+test('the menu lists the actions in order, with the default microphone ticked', () => {
   const menu = buildPillMenu({
     showAlways: true,
     devices: [builtin, usb],
     selectedUid: null,
-    hasLastTranscript: true
+    hasLastTranscript: true,
+    showLiveText: true,
+    showStatusMessages: true
   })
   assert.deepEqual(
     menu.map((item) => item.label ?? '---'),
@@ -139,7 +145,9 @@ test('the menu lists the six actions in order, with the default microphone ticke
       'Copy the last transcript',
       '---',
       'Open dictation settings',
-      'Keep the pill on screen'
+      'Keep the pill on screen',
+      "Show what I'm saying",
+      'Show status messages'
     ]
   )
   const mics = menu[1]!.submenu!
@@ -161,7 +169,9 @@ test('the menu ticks the saved microphone, or the default when it is unplugged',
       showAlways: false,
       devices: [builtin, usb],
       selectedUid,
-      hasLastTranscript: false
+      hasLastTranscript: false,
+      showLiveText: true,
+      showStatusMessages: true
     })[1]!
       .submenu!.filter((item) => item.checked)
       .map((item) => item.label)
@@ -174,7 +184,9 @@ test('paste-last is disabled until there is a transcript; the toggle reflects th
     showAlways: false,
     devices: [],
     selectedUid: null,
-    hasLastTranscript: false
+    hasLastTranscript: false,
+    showLiveText: true,
+    showStatusMessages: true
   })
   assert.equal(menu[2]!.enabled, false)
   assert.equal(menu[3]!.enabled, false)
@@ -188,7 +200,9 @@ test('toMenuTemplate reports the command of the item that was clicked', () => {
       showAlways: true,
       devices: [usb],
       selectedUid: null,
-      hasLastTranscript: true
+      hasLastTranscript: true,
+      showLiveText: true,
+      showStatusMessages: true
     }),
     (command) => void picked.push(command)
   )
@@ -277,4 +291,85 @@ test('the Fn note names what macOS does with the Globe key and the external-keyb
   }
   for (const action of [1, 2, 3]) assert.match(describeFnKey(action)!, /Do Nothing/)
   assert.match(describeFnKey(null)!, /If a macOS popup appears/, 'unknown setting still hints')
+})
+
+test('describeStopStages reads out every stage and flags a skipped accessibility attempt', () => {
+  const line = describeStopStages({
+    stopToFinalMs: 80,
+    engineDrainMs: 5,
+    engineFinishMs: 40,
+    finalToDeliverMs: 1,
+    targetWaitMs: 0,
+    helperRoundTripMs: 44,
+    helper: { validateMs: 1, insertMs: 2, confirmMs: 38, settleMs: 0, skippedAx: true },
+    stopToDoneMs: 130
+  })
+  assert.match(line, /^Stop to done 130 ms/)
+  assert.match(line, /speech 80 ms \(queue 5 ms, final flush 40 ms\)/)
+  assert.match(line, /confirm 38 ms/)
+  assert.match(line, /accessibility skipped/)
+  const bare = describeStopStages({
+    stopToFinalMs: null,
+    engineDrainMs: null,
+    engineFinishMs: null,
+    finalToDeliverMs: null,
+    targetWaitMs: null,
+    helperRoundTripMs: null,
+    helper: null,
+    stopToDoneMs: null
+  })
+  assert.match(bare, /Stop to done n\/a/)
+  assert.ok(!/accessibility skipped/.test(bare))
+})
+
+/* ---- quiet mode ---- */
+
+const everything = { showLiveText: true, showStatusMessages: true }
+const quiet = { showLiveText: false, showStatusMessages: false }
+
+test('every message kind is classified, and only narration is suppressible', () => {
+  const suppressible = OVERLAY_MESSAGE_KINDS.filter((k) => messageVisibility(k) === 'suppressible')
+  assert.deepEqual(suppressible.sort(), ['cleanup-note', 'live-text', 'status', 'success'])
+  const always = OVERLAY_MESSAGE_KINDS.filter((k) => messageVisibility(k) === 'always')
+  assert.deepEqual(always.sort(), [
+    'accessibility-hint',
+    'error',
+    'info',
+    'limit-warning',
+    'mic-fallback',
+    'mic-muted',
+    'recovery',
+    'shortcut-conflict'
+  ])
+  assert.equal(OVERLAY_MESSAGE_KINDS.length, 12)
+})
+
+test('failures, recovery and warnings stay visible with everything switched off', () => {
+  for (const kind of [
+    'error',
+    'recovery',
+    'accessibility-hint',
+    'mic-muted',
+    'mic-fallback',
+    'limit-warning',
+    'shortcut-conflict',
+    'info'
+  ] as const) {
+    for (const prefs of [everything, quiet, { showLiveText: false, showStatusMessages: true }]) {
+      assert.equal(isMessageShown(kind, prefs), true, `${kind} must always show`)
+    }
+  }
+})
+
+test('the two settings are independent and govern their own kinds', () => {
+  const words = { showLiveText: false, showStatusMessages: true }
+  assert.equal(isMessageShown('live-text', words), false)
+  assert.equal(isMessageShown('status', words), true)
+  assert.equal(isMessageShown('success', words), true)
+  const captions = { showLiveText: true, showStatusMessages: false }
+  assert.equal(isMessageShown('live-text', captions), true)
+  assert.equal(isMessageShown('status', captions), false)
+  assert.equal(isMessageShown('cleanup-note', captions), false)
+  assert.equal(isMessageShown('success', captions), false)
+  for (const kind of OVERLAY_MESSAGE_KINDS) assert.equal(isMessageShown(kind, everything), true)
 })

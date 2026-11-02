@@ -24,6 +24,8 @@ test('an old settings file gains the pill defaults and keeps what it had', () =>
   assert.equal(settings.handsFreeDoubleTap, true)
   assert.equal(settings.pasteLastShortcut, DEFAULT_DICTATION_SETTINGS.pasteLastShortcut)
   assert.equal(settings.copyLastShortcut, 'Control+Alt+Shift+C')
+  assert.equal(settings.showLiveText, true)
+  assert.equal(settings.showStatusMessages, true)
 })
 
 test('the default shortcuts do not collide with each other', () => {
@@ -54,6 +56,8 @@ test('garbage values fall back; explicit false and empty values are kept', () =>
     handsFreeDoubleTap: false,
     pasteLastShortcut: '',
     copyLastShortcut: '',
+    showLiveText: false,
+    showStatusMessages: false,
     microphoneUid: '',
     pillHiddenUntil: Number.NaN
   })
@@ -62,6 +66,8 @@ test('garbage values fall back; explicit false and empty values are kept', () =>
   assert.equal(off.handsFreeDoubleTap, false)
   assert.equal(off.pasteLastShortcut, '', 'empty disables the shortcut')
   assert.equal(off.copyLastShortcut, '')
+  assert.equal(off.showLiveText, false)
+  assert.equal(off.showStatusMessages, false)
   assert.equal(off.microphoneUid, null)
   assert.equal(off.pillHiddenUntil, null)
 })

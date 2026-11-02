@@ -161,6 +161,10 @@ export interface EngineFinalEvent {
   speedup?: number
   /** live mode: wall-clock length of the capture session */
   sessionSeconds?: number
+  /** live mode: audio still queued for the recognizer when capture stopped, ms. */
+  drainMs?: number
+  /** The recognizer's final flush, ms. */
+  finishMs?: number
   tokens?: EngineTokenTiming[]
 }
 

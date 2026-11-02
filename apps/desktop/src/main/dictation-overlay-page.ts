@@ -135,7 +135,9 @@ export function overlayHtml(): string {
     if (next.mode === 'session') {
       $('cancel').hidden = !next.controls.cancel
       $('stop').hidden = !next.controls.stop
-      const plain = next.tone === 'active' && next.title === 'Listening'
+      // The caption is hidden for a plain "Listening" and in quiet mode; the
+      // live region below still announces every title.
+      const plain = (next.tone === 'active' && next.title === 'Listening') || !next.showStatus
       $('state').textContent = plain ? '' : next.title
       $('state').hidden = plain
       $('midSvg').setAttribute('width', plain ? '120' : '40')

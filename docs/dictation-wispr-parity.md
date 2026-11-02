@@ -141,6 +141,9 @@ Built on `feat/system-dictation` (see `docs/dictation-dev-app.md` for behaviour,
 - [x] Settings page controls for all of the above
 - [x] Mic-muted warning (helper reads the input's mute switch and volume)
 
+- [x] Quiet mode: two settings (and menu items) hide the live words and the status captions; failures, kept text and warnings always show
+- [x] Stop-to-text speed pass: stages measured and shown; Chromium and Electron targets no longer wait out a no-op accessibility attempt (about 0.55 s down to about 0.05 s)
+
 Still to see with a human at the Mac: the look on real displays, dragging with a real pointer, the native right-click menu, live dictation through every path, and the tones through speakers.
 
 ## Our own look

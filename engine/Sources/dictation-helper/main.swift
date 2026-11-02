@@ -11,6 +11,9 @@ let snapshots = SnapshotStore()
 // Accessibility calls can block on an unresponsive app; keep them off the main
 // run loop, which services the hold-key event tap.
 let workQueue = DispatchQueue(label: "dictation.work", qos: .userInitiated)
+// CoreAudio reads must never queue behind a slow accessibility call, or the
+// other way round.
+let audioQueue = DispatchQueue(label: "dictation.audio", qos: .utility)
 
 func handle(_ request: [String: Any]) {
     guard let op = request["op"] as? String, let id = request["id"] as? String else { return }
@@ -29,7 +32,7 @@ func handle(_ request: [String: Any]) {
         }
     case "input-state":
         let uid = request["uid"] as? String
-        workQueue.async {
+        audioQueue.async {
             guard let device = Microphone.device(uid: uid) else {
                 Wire.reply(id, ok: false, ["reason": "no-input-device"])
                 return

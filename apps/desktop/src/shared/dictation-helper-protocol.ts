@@ -29,6 +29,20 @@ export interface TargetDescription {
 
 export type HelperDeliveryOutcome = 'delivered' | 'uncertain' | 'refused' | 'failed'
 
+/** Where the helper's time went for one insertion, whole milliseconds. Numbers only. */
+export interface HelperDeliveryTimings {
+  /** Re-validating the target right before touching it. */
+  validateMs: number
+  /** The insertion call itself. */
+  insertMs: number
+  /** Polling the control to see the text arrive. */
+  confirmMs: number
+  /** A fixed wait before restoring the clipboard when arrival cannot be seen. */
+  settleMs: number
+  /** Accessibility insertion was skipped because this app ignores it. */
+  skippedAx: boolean
+}
+
 export interface HelperDelivery {
   outcome: HelperDeliveryOutcome
   reason?: string
@@ -36,6 +50,7 @@ export interface HelperDelivery {
   verified: boolean
   /** untouched | restored | user-changed | partial */
   clipboard: string
+  timings?: HelperDeliveryTimings
 }
 
 export type HoldFailure = 'input-monitoring-denied' | 'unknown-key' | 'helper-unavailable'

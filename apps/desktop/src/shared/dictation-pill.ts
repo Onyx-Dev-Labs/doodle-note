@@ -123,6 +123,78 @@ export function resolveMicrophone(
     : { uid: null, fellBack: true }
 }
 
+/* ---- quiet mode: which overlay messages may be switched off ---- */
+
+/**
+ * Every kind of text the overlay can show. The ones that may be turned off are
+ * the ones that only narrate; anything that explains a failure, a refusal or
+ * a risk of losing text is always shown, whatever the quiet settings say.
+ */
+export type OverlayMessageKind =
+  /** The words being recognised, while speaking or finishing. */
+  | 'live-text'
+  /** "Starting microphone", "Transcribing", "Cleaning up", "Inserting". */
+  | 'status'
+  /** The note that cleanup was skipped or timed out and the raw words were used. */
+  | 'cleanup-note'
+  /** "Inserted.", "Pasted.", "Copied.": the action worked. */
+  | 'success'
+  /** A refusal or an empty result: no speech, nothing to paste, still finishing. */
+  | 'info'
+  /** A failure: microphone denied or lost, helper missing, engine error. */
+  | 'error'
+  /** Text that could not be inserted and is kept for copying. */
+  | 'recovery'
+  /** Accessibility is off, so text will be kept instead of typed. */
+  | 'accessibility-hint'
+  | 'mic-muted'
+  | 'mic-fallback'
+  /** One minute left in a hands-free session. */
+  | 'limit-warning'
+  /** A shortcut that another app or action already owns (shown on the settings page). */
+  | 'shortcut-conflict'
+
+export type MessageVisibility = 'always' | 'suppressible'
+
+export interface QuietPrefs {
+  showLiveText: boolean
+  showStatusMessages: boolean
+}
+
+/** Which setting, if any, can hide each kind. */
+const MESSAGE_GOVERNOR: Record<OverlayMessageKind, 'liveText' | 'status' | 'always'> = {
+  'live-text': 'liveText',
+  status: 'status',
+  'cleanup-note': 'status',
+  success: 'status',
+  info: 'always',
+  error: 'always',
+  recovery: 'always',
+  'accessibility-hint': 'always',
+  'mic-muted': 'always',
+  'mic-fallback': 'always',
+  'limit-warning': 'always',
+  'shortcut-conflict': 'always'
+}
+
+export const OVERLAY_MESSAGE_KINDS = Object.keys(MESSAGE_GOVERNOR) as OverlayMessageKind[]
+
+export function messageVisibility(kind: OverlayMessageKind): MessageVisibility {
+  return MESSAGE_GOVERNOR[kind] === 'always' ? 'always' : 'suppressible'
+}
+
+/** Whether a message is shown under the user's quiet settings. 'always' kinds never depend on them. */
+export function isMessageShown(kind: OverlayMessageKind, prefs: QuietPrefs): boolean {
+  switch (MESSAGE_GOVERNOR[kind]) {
+    case 'liveText':
+      return prefs.showLiveText
+    case 'status':
+      return prefs.showStatusMessages
+    default:
+      return true
+  }
+}
+
 /* ---- right-click menu ---- */
 
 export type PillMenuCommand =
@@ -132,6 +204,8 @@ export type PillMenuCommand =
   | { kind: 'copy-last' }
   | { kind: 'settings' }
   | { kind: 'toggle-always' }
+  | { kind: 'toggle-live-text' }
+  | { kind: 'toggle-status' }
 
 export interface PillMenuItem {
   label?: string
@@ -148,6 +222,8 @@ export interface PillMenuModel {
   /** The saved microphone choice; null = system default. */
   selectedUid: string | null
   hasLastTranscript: boolean
+  showLiveText: boolean
+  showStatusMessages: boolean
 }
 
 /** What the pill's right-click menu shows. Wording is our own. */
@@ -191,6 +267,18 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
       label: 'Keep the pill on screen',
       checked: model.showAlways,
       command: { kind: 'toggle-always' }
+    },
+    {
+      type: 'checkbox',
+      label: "Show what I'm saying",
+      checked: model.showLiveText,
+      command: { kind: 'toggle-live-text' }
+    },
+    {
+      type: 'checkbox',
+      label: 'Show status messages',
+      checked: model.showStatusMessages,
+      command: { kind: 'toggle-status' }
     }
   ]
 }
@@ -301,6 +389,44 @@ export function describeFnKey(action: number | null): string | null {
     default:
       return `If a macOS popup appears when you tap the Globe key, set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
   }
+}
+
+/* ---- where the time between Stop and text went ---- */
+
+const ms = (value: number | null): string => (value === null ? 'n/a' : `${Math.round(value)} ms`)
+
+/**
+ * One readable line for the settings page: each stage of the wait between Stop
+ * and the text appearing. Durations only; the input never contains text.
+ */
+export function describeStopStages(stages: {
+  stopToFinalMs: number | null
+  engineDrainMs: number | null
+  engineFinishMs: number | null
+  finalToDeliverMs: number | null
+  targetWaitMs: number | null
+  helperRoundTripMs: number | null
+  helper: {
+    validateMs: number
+    insertMs: number
+    confirmMs: number
+    settleMs: number
+    skippedAx: boolean
+  } | null
+  stopToDoneMs: number | null
+}): string {
+  const parts = [
+    `speech ${ms(stages.stopToFinalMs)} (queue ${ms(stages.engineDrainMs)}, final flush ${ms(stages.engineFinishMs)})`,
+    `hand-off ${ms(stages.finalToDeliverMs)}`,
+    `target ${ms(stages.targetWaitMs)}`
+  ]
+  const helper = stages.helper
+  parts.push(
+    helper
+      ? `helper ${ms(stages.helperRoundTripMs)} (check ${ms(helper.validateMs)}, insert ${ms(helper.insertMs)}, confirm ${ms(helper.confirmMs)}, clipboard wait ${ms(helper.settleMs)}${helper.skippedAx ? ', accessibility skipped for this app' : ''})`
+      : `helper ${ms(stages.helperRoundTripMs)}`
+  )
+  return `Stop to done ${ms(stages.stopToDoneMs)}: ${parts.join(' · ')}`
 }
 
 /* ---- shortcuts ---- */

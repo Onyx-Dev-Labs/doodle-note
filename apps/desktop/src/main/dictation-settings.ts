@@ -55,7 +55,13 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
     copyLastShortcut:
       typeof raw.copyLastShortcut === 'string' && raw.copyLastShortcut.length <= 64
         ? raw.copyLastShortcut.trim()
-        : defaults.copyLastShortcut
+        : defaults.copyLastShortcut,
+    showLiveText:
+      raw.showLiveText === undefined ? defaults.showLiveText : raw.showLiveText === true,
+    showStatusMessages:
+      raw.showStatusMessages === undefined
+        ? defaults.showStatusMessages
+        : raw.showStatusMessages === true
   }
 }
 

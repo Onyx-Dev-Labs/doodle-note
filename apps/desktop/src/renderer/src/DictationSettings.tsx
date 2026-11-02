@@ -4,7 +4,12 @@ import type {
   DictationStatus,
   ShortcutState
 } from '../../shared/dictation-api'
-import { PILL_EDGES, describeDoubleTap, describeFnKey } from '../../shared/dictation-pill'
+import {
+  PILL_EDGES,
+  describeDoubleTap,
+  describeFnKey,
+  describeStopStages
+} from '../../shared/dictation-pill'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -426,6 +431,35 @@ export function DictationSettings(): React.JSX.Element {
           </div>
           <div className="cal-row">
             <span className="cal-row-main">
+              <span className="cal-row-label">Show what I&apos;m saying</span>
+              <span className="cal-row-sub">
+                The words being recognised appear on the pill while you speak. Off keeps it to the
+                squiggle.
+              </span>
+            </span>
+            <Toggle
+              checked={settings.showLiveText}
+              label="Show the words being recognised on the pill"
+              onChange={() => void update({ showLiveText: !settings.showLiveText })}
+            />
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Show status messages</span>
+              <span className="cal-row-sub">
+                Captions such as Transcribing and Inserting, and the Inserted confirmation. Off
+                leaves just the pill. Problems, kept text, a muted microphone and the one-minute
+                warning always show.
+              </span>
+            </span>
+            <Toggle
+              checked={settings.showStatusMessages}
+              label="Show status messages on the pill"
+              onChange={() => void update({ showStatusMessages: !settings.showStatusMessages })}
+            />
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
               <span className="cal-row-label">Start and stop tones</span>
               <span className="cal-row-sub">
                 A short two-note chime when recording begins and ends.
@@ -547,6 +581,9 @@ export function DictationSettings(): React.JSX.Element {
                   ? `start ${seconds(status.lastLatency.startMs)} · stop→text ${seconds(status.lastLatency.stopToFinalMs)} · cleanup ${seconds(status.lastLatency.cleanupMs)} · insert ${seconds(status.lastLatency.insertMs)} · ${status.lastLatency.warm ? 'warm' : 'cold'}`
                   : 'No dictation yet.'}
               </span>
+              {status.lastLatency && (
+                <span className="cal-row-sub">{describeStopStages(status.lastLatency.stages)}</span>
+              )}
             </span>
           </div>
         </div>

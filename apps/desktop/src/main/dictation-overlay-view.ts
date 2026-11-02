@@ -1,4 +1,4 @@
-import type { PillEdge, Size } from '../shared/dictation-pill'
+import { isMessageShown, type PillEdge, type Size } from '../shared/dictation-pill'
 import type { RecoveryReason, SessionState } from '../shared/dictation-session'
 
 /** rest: the small idle pill. session: the live pill. message: a notice or kept text. */
@@ -11,6 +11,11 @@ export interface OverlayView {
   edge: PillEdge
   /** A short heads-up under the pill: mic muted, time almost up. */
   warning: string | null
+  /**
+   * The status caption (`title`) may be drawn. Off in quiet mode; the title is
+   * still announced to screen readers, and failures never go through here.
+   */
+  showStatus: boolean
   tone: 'active' | 'busy' | 'ok' | 'warn' | 'error'
   title: string
   /** Live partial text while recording; recovery text when something was kept. */
@@ -30,6 +35,10 @@ export interface OverlayContext {
   /** Show the resting pill while nothing is running. */
   pillVisible: boolean
   edge: PillEdge
+  /** Quiet mode: show the words being recognised. */
+  showLiveText: boolean
+  /** Quiet mode: show status captions and success confirmations. */
+  showStatusMessages: boolean
 }
 
 const NONE = { stop: false, cancel: false, copy: false, dismiss: false }
@@ -83,6 +92,9 @@ export function overlaySize(view: OverlayView): Size {
 export function overlayView(state: SessionState, ctx: OverlayContext): OverlayView {
   const active = state.active
   const gen = active?.gen ?? (state.resting?.kind === 'recovery' ? state.resting.gen : null)
+  const prefs = { showLiveText: ctx.showLiveText, showStatusMessages: ctx.showStatusMessages }
+  // Transcript text on the pill (partials, raw words) is the 'live-text' kind.
+  const liveText = (text: string): string => (isMessageShown('live-text', prefs) ? text : '')
   const view = (
     mode: OverlayMode,
     fields: Pick<OverlayView, 'tone' | 'title' | 'detail' | 'level' | 'controls'> &
@@ -92,6 +104,7 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
     mode,
     edge: ctx.edge,
     warning: null,
+    showStatus: isMessageShown('status', prefs),
     gen,
     ...fields
   })
@@ -124,8 +137,9 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
         // The microphone can be open while the speech model is still loading:
         // audio is buffered, nothing is lost, and the label says which it is.
         title: warming ? 'Listening · speech model warming up' : 'Listening',
+        // The accessibility hint is a failure notice: quiet mode never hides it.
         detail:
-          active?.partial ||
+          liveText(active?.partial ?? '') ||
           (ctx.insertionUnavailable
             ? 'Accessibility is off. Your text will be kept for copying.'
             : ''),
@@ -144,7 +158,7 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
       return view('session', {
         tone: 'busy',
         title: 'Transcribing…',
-        detail: active?.partial ?? '',
+        detail: liveText(active?.partial ?? ''),
         level: null,
         controls: { ...NONE, cancel: true }
       })
@@ -152,7 +166,7 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
       return view('session', {
         tone: 'busy',
         title: active?.cleanupMode === 'byok' ? 'Cleaning up (your provider)…' : 'Cleaning up…',
-        detail: active?.rawText ?? '',
+        detail: liveText(active?.rawText ?? ''),
         level: null,
         controls: { ...NONE, cancel: true }
       })
@@ -178,6 +192,18 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
     case 'notice': {
       const resting = state.resting
       if (resting?.kind !== 'notice') return hidden()
+      // "Inserted." and its kin only confirm success; quiet mode skips them.
+      if (resting.level === 'success' && !isMessageShown('success', prefs)) {
+        return ctx.pillVisible
+          ? view('rest', {
+              tone: 'ok',
+              title: 'Start dictating',
+              detail: '',
+              level: null,
+              controls: NONE
+            })
+          : hidden()
+      }
       return view('message', {
         tone: resting.level === 'error' ? 'error' : resting.level === 'success' ? 'ok' : 'warn',
         title: resting.message,

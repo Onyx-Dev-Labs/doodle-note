@@ -9,6 +9,60 @@ enum DeliveryOutcome: String {
     case delivered, uncertain, refused, failed
 }
 
+/// Where the time of one delivery went, in whole milliseconds. Numbers only.
+struct DeliveryTimings {
+    /// Re-validating the target (focus, secure, editable) before touching it.
+    var validateMs = 0
+    /// The insertion call itself (accessibility set, or clipboard write and keystroke).
+    var insertMs = 0
+    /// Polling the control to see the text arrived.
+    var confirmMs = 0
+    /// A fixed wait before restoring the clipboard, when arrival cannot be seen.
+    var settleMs = 0
+    /// Accessibility insertion was skipped because this app ignored it before.
+    var skippedAx = false
+
+    var fields: [String: Any] {
+        [
+            "validateMs": validateMs, "insertMs": insertMs, "confirmMs": confirmMs,
+            "settleMs": settleMs, "skippedAx": skippedAx,
+        ]
+    }
+}
+
+private func elapsedMs(since start: UInt64) -> Int {
+    Int((DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+}
+
+/// Apps whose accessibility text insertion reported success but changed nothing.
+/// The clipboard path is used for them straight away next time, instead of
+/// waiting out the confirmation window first. Forgotten after a while, so an
+/// app update that fixes accessibility is noticed.
+final class AxNoOpMemory: @unchecked Sendable {
+    static let shared = AxNoOpMemory()
+    private let lock = NSLock()
+    private var seen: [String: Date] = [:]
+    private let lifetime: TimeInterval = 30 * 60
+
+    func remember(_ bundleId: String) {
+        guard !bundleId.isEmpty else { return }
+        lock.lock()
+        seen[bundleId] = Date()
+        lock.unlock()
+    }
+
+    func knows(_ bundleId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let at = seen[bundleId] else { return false }
+        if Date().timeIntervalSince(at) > lifetime {
+            seen[bundleId] = nil
+            return false
+        }
+        return true
+    }
+}
+
 struct DeliveryResult {
     var outcome: DeliveryOutcome
     var reason: String?
@@ -16,11 +70,13 @@ struct DeliveryResult {
     var verified = false
     /// untouched | restored | user-changed | partial
     var clipboard = "untouched"
+    var timings: DeliveryTimings?
 
     var fields: [String: Any] {
         var out: [String: Any] = ["outcome": outcome.rawValue, "verified": verified, "clipboard": clipboard]
         if let reason { out["reason"] = reason }
         if let method { out["method"] = method }
+        if let timings { out["timings"] = timings.fields }
         return out
     }
 }
@@ -44,6 +100,16 @@ private struct ControlState: Equatable {
 enum Delivery {
     /// Validate the target immediately before inserting, then insert once.
     static func deliver(_ snapshot: TargetSnapshot, text: String) -> DeliveryResult {
+        var timings = DeliveryTimings()
+        var result = deliver(snapshot, text: text, timings: &timings)
+        result.timings = timings
+        return result
+    }
+
+    private static func deliver(
+        _ snapshot: TargetSnapshot, text: String, timings: inout DeliveryTimings
+    ) -> DeliveryResult {
+        let began = DispatchTime.now().uptimeNanoseconds
         guard AX.trusted else {
             return DeliveryResult(outcome: .refused, reason: "accessibility-denied")
         }
@@ -62,15 +128,22 @@ enum Delivery {
         if !now.editable { return DeliveryResult(outcome: .refused, reason: "not-editable") }
 
         let before = ControlState(current)
+        timings.validateMs = elapsedMs(since: began)
 
         // Preferred: replace the selection (the caret, when nothing is selected)
         // through accessibility. No keystrokes, no clipboard.
         // DICTATION_HELPER_STRATEGY=paste is a test switch that exercises the
         // clipboard fallback on targets where accessibility insertion works.
         let forcePaste = ProcessInfo.processInfo.environment["DICTATION_HELPER_STRATEGY"] == "paste"
-        if !forcePaste, AX.settable(current, kAXSelectedTextAttribute as String) {
+        let knownNoOp = snapshot.chromiumBased || AxNoOpMemory.shared.knows(snapshot.bundleId)
+        timings.skippedAx = knownNoOp && !forcePaste
+        if !forcePaste, !knownNoOp, AX.settable(current, kAXSelectedTextAttribute as String) {
+            let insertStarted = DispatchTime.now().uptimeNanoseconds
             let error = AXUIElementSetAttributeValue(
                 current, kAXSelectedTextAttribute as CFString, text as CFString)
+            timings.insertMs = elapsedMs(since: insertStarted)
+            let confirmStarted = DispatchTime.now().uptimeNanoseconds
+            defer { timings.confirmMs = elapsedMs(since: confirmStarted) }
             if error == .success {
                 if before.observable {
                     if changed(current, from: before, within: 0.4) {
@@ -78,7 +151,9 @@ enum Delivery {
                     }
                     // Success was reported yet nothing changed: a known no-op in
                     // some web views. It is safe to fall back, because the
-                    // control demonstrably did not take the text.
+                    // control demonstrably did not take the text. Remember the
+                    // app, so the next dictation skips straight to the fallback.
+                    AxNoOpMemory.shared.remember(snapshot.bundleId)
                 } else {
                     return DeliveryResult(outcome: .uncertain, reason: "insertion-unverifiable", method: "ax")
                 }
@@ -86,17 +161,19 @@ enum Delivery {
                 return DeliveryResult(outcome: .delivered, method: "ax", verified: true)
             }
         }
-        return paste(text, into: current, snapshot: snapshot, before: before)
+        return paste(text, into: current, snapshot: snapshot, before: before, timings: &timings)
     }
 
     private static func paste(
-        _ text: String, into element: AXUIElement, snapshot: TargetSnapshot, before: ControlState
+        _ text: String, into element: AXUIElement, snapshot: TargetSnapshot, before: ControlState,
+        timings: inout DeliveryTimings
     ) -> DeliveryResult {
         // Synthetic keystrokes are blocked, and unsafe, while a password field
         // anywhere has secure event input.
         if IsSecureEventInputEnabled() {
             return DeliveryResult(outcome: .refused, reason: "secure-field")
         }
+        let insertStarted = DispatchTime.now().uptimeNanoseconds
         let pasteboard = NSPasteboard.general
         let saved = SavedPasteboard(pasteboard)
         pasteboard.clearContents()
@@ -115,11 +192,19 @@ enum Delivery {
             return DeliveryResult(outcome: .failed, reason: "keystroke-unavailable", method: "paste", clipboard: restored)
         }
 
+        timings.insertMs += elapsedMs(since: insertStarted)
+
         var verified = false
+        let confirmStarted = DispatchTime.now().uptimeNanoseconds
         if before.observable { verified = changed(element, from: before, within: 0.8) }
+        timings.confirmMs += elapsedMs(since: confirmStarted)
         // The target reads the clipboard asynchronously after the keystroke.
         // Restoring too early would paste the user's old clipboard instead.
-        if !verified { Thread.sleep(forTimeInterval: 0.6) }
+        if !verified {
+            let settleStarted = DispatchTime.now().uptimeNanoseconds
+            Thread.sleep(forTimeInterval: 0.6)
+            timings.settleMs = elapsedMs(since: settleStarted)
+        }
         let clipboard = saved.restore(to: pasteboard, expecting: ours)
 
         if verified {
@@ -146,7 +231,7 @@ enum Delivery {
         let deadline = Date().addingTimeInterval(seconds)
         repeat {
             if ControlState(element) != before { return true }
-            Thread.sleep(forTimeInterval: 0.03)
+            Thread.sleep(forTimeInterval: 0.008)
         } while Date() < deadline
         return ControlState(element) != before
     }

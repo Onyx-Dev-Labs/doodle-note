@@ -1124,3 +1124,93 @@ test('a failing clipboard is reported, and the transcript is not lost', async ()
   assert.match(lastView(h).title, /could not copy/i)
   assert.equal((await h.service.status()).hasLastTranscript, true)
 })
+
+test('the stop-to-text stages are measured and carry durations only', async () => {
+  const h = harness()
+  h.helper.delivery = {
+    outcome: 'delivered',
+    method: 'paste',
+    verified: true,
+    clipboard: 'restored',
+    timings: { validateMs: 2, insertMs: 3, confirmMs: 30, settleMs: 0, skippedAx: true }
+  }
+  h.service.toggle()
+  await ready(h)
+  h.clock.now += 2_000
+  h.service.toggle()
+  h.clock.now += 90
+  h.emit({ event: 'final', channel: 'mic', text: 'private words', drainMs: 12, finishMs: 41 })
+  await tick()
+  const stages = (await h.service.status()).lastLatency!.stages
+  assert.equal(stages.stopToFinalMs, 90)
+  assert.equal(stages.engineDrainMs, 12)
+  assert.equal(stages.engineFinishMs, 41)
+  assert.equal(stages.finalToDeliverMs, 0)
+  assert.equal(stages.targetWaitMs, 0)
+  assert.equal(stages.helperRoundTripMs, 0)
+  assert.deepEqual(stages.helper, {
+    validateMs: 2,
+    insertMs: 3,
+    confirmMs: 30,
+    settleMs: 0,
+    skippedAx: true
+  })
+  assert.equal(stages.stopToDoneMs, 90)
+  const record = h.metrics.at(-1)!
+  assert.equal(record.helperConfirmMs, 30)
+  assert.equal(record.helperSkippedAx, true)
+  assert.ok(!JSON.stringify(record).includes('private words'), 'metrics never contain text')
+})
+
+test('quiet settings change what the pill shows, from the menu or the settings page', async () => {
+  const h = harness()
+  await h.service.start()
+  h.service.toggle()
+  await ready(h)
+  h.emit({ event: 'partial', channel: 'mic', text: 'spoken words' })
+  assert.equal(lastView(h).detail, 'spoken words')
+  h.service.cancel()
+  finish(h)
+  h.clock.now += 1_000
+
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  const items = h.menus[0]!.items
+  assert.deepEqual(
+    items.slice(-2).map((item) => [item.label, item.checked]),
+    [
+      ["Show what I'm saying", true],
+      ['Show status messages', true]
+    ]
+  )
+  h.menus[0]!.pick({ kind: 'toggle-live-text' })
+  await tick()
+  assert.equal(h.settings.showLiveText, false)
+  assert.equal(h.settings.showStatusMessages, true)
+  h.menus[0]!.pick({ kind: 'toggle-status' })
+  await tick()
+  assert.equal(h.settings.showStatusMessages, false)
+
+  const quietFrom = h.overlay.length
+  h.service.toggle()
+  await ready(h)
+  h.emit({ event: 'partial', channel: 'mic', text: 'spoken words' })
+  assert.equal(lastView(h).detail, '')
+  assert.equal(lastView(h).showStatus, false)
+  assert.ok(
+    !h.overlay.slice(quietFrom).some((view) => JSON.stringify(view).includes('spoken words')),
+    'hidden words never reach the overlay'
+  )
+})
+
+test('with everything quiet, a missing microphone permission is still shown', async () => {
+  const h = harness({
+    access: 'denied',
+    settings: { showLiveText: false, showStatusMessages: false }
+  })
+  await h.service.start()
+  h.service.toggle()
+  await tick()
+  assert.equal(lastView(h).visible, true)
+  assert.match(lastView(h).title, /Microphone access is off/)
+})

@@ -10,6 +10,8 @@ const ctx = (over: Partial<OverlayContext> = {}): OverlayContext => ({
   insertionUnavailable: false,
   pillVisible: true,
   edge: 'bottom',
+  showLiveText: true,
+  showStatusMessages: true,
   ...over
 })
 
@@ -91,4 +93,108 @@ test('window size follows the layout: along the edge, with room for the warning 
   assert.ok(warned.height > plain.height)
   assert.ok(talking.height > plain.height)
   assert.equal(plain.width, warned.width)
+})
+
+/* ---- quiet mode ---- */
+
+const quietCtx = (over: Partial<OverlayContext> = {}): OverlayContext =>
+  ctx({ showLiveText: false, showStatusMessages: false, ...over })
+
+test('quiet mode hides the words and the captions but keeps the controls and the level', () => {
+  const talking = live([{ type: 'partial', gen: 1, text: 'private words' }])
+  const loud = overlayView(talking, ctx())
+  assert.equal(loud.detail, 'private words')
+  assert.equal(loud.showStatus, true)
+  const hushed = overlayView(talking, quietCtx())
+  assert.equal(hushed.detail, '')
+  assert.equal(hushed.showStatus, false)
+  assert.equal(hushed.title, 'Listening', 'the title stays for screen readers')
+  assert.equal(hushed.level, 0.4)
+  assert.equal(hushed.controls.stop, true)
+  assert.equal(hushed.controls.cancel, true)
+  assert.ok(!JSON.stringify(hushed).includes('private words'), 'no transcript reaches the page')
+})
+
+test('the two quiet settings work independently', () => {
+  const talking = live([{ type: 'partial', gen: 1, text: 'private words' }])
+  const noWords = overlayView(talking, ctx({ showLiveText: false }))
+  assert.equal(noWords.detail, '')
+  assert.equal(noWords.showStatus, true)
+  const noCaptions = overlayView(talking, ctx({ showStatusMessages: false }))
+  assert.equal(noCaptions.detail, 'private words')
+  assert.equal(noCaptions.showStatus, false)
+})
+
+test('quiet mode also hides the raw words shown while finishing and cleaning up', () => {
+  const finishing = live([
+    { type: 'partial', gen: 1, text: 'half said' },
+    { type: 'stop', source: 'toggle', nowMs: 900 }
+  ])
+  assert.equal(overlayView(finishing, ctx()).detail, 'half said')
+  assert.equal(overlayView(finishing, quietCtx()).detail, '')
+  const cleanState = after([
+    { type: 'start', trigger: 'toggle', cleanupMode: 'local', nowMs: 0 },
+    { type: 'capture-ready', gen: 1 },
+    { type: 'stop', source: 'toggle', nowMs: 900 },
+    { type: 'final', gen: 1, text: 'raw words here' }
+  ])
+  assert.equal(cleanState.phase, 'cleaning')
+  assert.equal(overlayView(cleanState, ctx()).detail, 'raw words here')
+  assert.equal(overlayView(cleanState, quietCtx()).detail, '')
+})
+
+test('quiet mode never hides failures, warnings or kept text', () => {
+  const hushed = quietCtx()
+  const muted = overlayView(live([{ type: 'mic-state', gen: 1, muted: true }]), hushed)
+  assert.equal(muted.warning, WARNINGS.muted)
+  const limit = overlayView(live([{ type: 'limit-warning', gen: 1 }]), hushed)
+  assert.equal(limit.warning, WARNINGS.limit)
+  const fell = overlayView(live([{ type: 'mic-fallback', gen: 1 }]), hushed)
+  assert.equal(fell.warning, WARNINGS.fellBack)
+  const noAccess = overlayView(live(), quietCtx({ insertionUnavailable: true }))
+  assert.match(noAccess.detail, /Accessibility is off/)
+  for (const level of ['error', 'info'] as const) {
+    const notice = overlayView(
+      reduce(initialSessionState(), { type: 'notice', level, message: 'Something to read.' }).state,
+      hushed
+    )
+    assert.equal(notice.visible, true)
+    assert.equal(notice.mode, 'message')
+    assert.equal(notice.title, 'Something to read.')
+  }
+  const kept = after([
+    { type: 'start', trigger: 'toggle', cleanupMode: 'raw', nowMs: 0 },
+    { type: 'capture-ready', gen: 1 },
+    { type: 'stop', source: 'toggle', nowMs: 900 },
+    { type: 'final', gen: 1, text: 'kept words' },
+    { type: 'delivery-done', gen: 1, outcome: { kind: 'recover', reason: 'focus-changed' } }
+  ])
+  const card = overlayView(kept, hushed)
+  assert.equal(card.mode, 'message')
+  assert.equal(card.detail, 'kept words')
+  assert.equal(card.controls.copy, true)
+})
+
+test('quiet mode drops only the success confirmation and returns to the resting pill', () => {
+  const inserted = after([
+    { type: 'start', trigger: 'toggle', cleanupMode: 'raw', nowMs: 0 },
+    { type: 'capture-ready', gen: 1 },
+    { type: 'stop', source: 'toggle', nowMs: 900 },
+    { type: 'final', gen: 1, text: 'done' },
+    { type: 'delivery-done', gen: 1, outcome: { kind: 'delivered' } }
+  ])
+  assert.equal(overlayView(inserted, ctx()).mode, 'message')
+  assert.equal(overlayView(inserted, ctx()).title, 'Inserted.')
+  const hushed = overlayView(inserted, quietCtx())
+  assert.equal(hushed.mode, 'rest')
+  assert.equal(hushed.visible, true)
+  assert.equal(overlayView(inserted, quietCtx({ pillVisible: false })).visible, false)
+})
+
+test('the window shrinks to just the pill when the words are hidden', () => {
+  const talking = live([{ type: 'partial', gen: 1, text: 'a longer sentence being said' }])
+  const loud = overlaySize(overlayView(talking, ctx()))
+  const hushed = overlaySize(overlayView(talking, quietCtx()))
+  assert.ok(hushed.height < loud.height)
+  assert.equal(hushed.height, overlaySize(overlayView(live(), ctx())).height, 'pill only')
 })

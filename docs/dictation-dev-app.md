@@ -42,6 +42,15 @@ The look is DoodleNote's own: a paper-toned pill with an offset ink outline, a h
 - **The menu's Settings item** brings the main window forward and opens Settings, Dictation.
 - **The idle overlay is only shown while dictation is enabled.** Turning dictation off removes the pill and releases every shortcut.
 
+### Quiet mode
+
+Two independent settings under "Pill and microphone", also in the pill's right-click menu:
+
+- **Show what I'm saying** (default on): the words being recognised on the pill, including the raw words shown while cleanup runs. Off leaves the squiggle.
+- **Show status messages** (default on): captions such as "Starting microphone", "Transcribing", "Cleaning up", "Inserting", and the "Inserted." / "Pasted." / "Copied." confirmations. Off leaves the pill with its squiggle, Cancel and Finish; after a successful insertion it goes straight back to the resting pill. The title is still announced to screen readers.
+
+What may be switched off is decided in one place, `isMessageShown` in `src/shared/dictation-pill.ts`, where every kind of overlay text is classified. Only narration is suppressible (`live-text`, `status`, `cleanup-note`, `success`). These are **always shown**, whatever the settings: failures and refusals (`error`, `info`: microphone denied or lost, helper missing, engine errors, "no speech", "nothing to paste"), kept text with its Copy button (`recovery`), the Accessibility-is-off hint, "your microphone looks muted", the missing-microphone fallback, the one-minute limit warning, and shortcut conflicts (which show on the settings page). The overlay window shrinks to the bare pill when the words are hidden. Hidden words are never sent to the overlay page at all.
+
 ### Fn / Globe key
 
 The Fn key reaches the helper as a flags-changed event (key code 63, the secondary-Fn flag), exactly like the other hold keys, so double tap works with it through the same path. Things specific to Fn:
@@ -126,7 +135,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 721 desktop tests (719 pass, 2 skipped) with typecheck and lint clean, plus 17 Swift tests for the hold-key logic (`cd engine && swift test --filter HoldMachineTests`). The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (22: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (5), settings normalization and persistence (4), service orchestration (56: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last and copy last, shortcut collisions, Fn double tap, mute polling), helper client (7), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 734 desktop tests (732 pass, 2 skipped) with typecheck and lint clean, plus 22 Swift tests for the hold-key logic and delivery helpers (`cd engine && swift test`). The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (22: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (5), settings normalization and persistence (4), service orchestration (56: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last and copy last, shortcut collisions, Fn double tap, mute polling), helper client (7), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.
@@ -151,6 +160,41 @@ Measured (single machine, no repeats, not a benchmark):
 | Batch speech decode, 4.8 s phrase, models cached | 0.08–0.11 s (43–58x real time), whole process ~0.3 s |
 
 The batch figure is **not** the live streaming path. The Settings panel and `dictation-metrics.jsonl` (numbers only, dev profile) record real start / stop-to-text / cleanup / insert timings once you dictate.
+
+## Speed: where the time between Stop and text goes
+
+The wait has three parts: the recogniser finishing (engine), our hand-off (main process), and the helper putting the text into the target. `Last dictation` in Settings now shows each stage, and `dictation-metrics.jsonl` records the same numbers (durations only, no text): `stopToFinalMs`, `engineDrainMs`, `engineFinishMs`, `finalToDeliverMs`, `targetWaitMs`, `helperRoundTripMs`, `helperValidateMs`, `helperInsertMs`, `helperConfirmMs`, `helperSettleMs`, `helperSkippedAx`, `stopToDoneMs`.
+
+Measured on this Mac (single machine, a handful of runs, not a benchmark). Speech is a synthetic 4.75 s phrase from `say`; the helper and service ran for real against TextEdit and a Chrome textarea in a throwaway profile. Stop to done in the service, scripted engine:
+
+| Stage | Before | After |
+|---|---|---|
+| Recogniser final flush (`engine stream`, warm models, 5 runs) | not separated | 28 to 49 ms; unchanged, it is the model's own flush |
+| Microphone teardown and queued-audio drain, then the IPC hop | not measured | **not measurable here** (the engine has no microphone permission in this session); now reported as `engineDrainMs` and, with `finishMs`, the rest of `stopToFinalMs` |
+| Main-process hand-off (final to request written, includes reducer, overlay render, status broadcast) | 0 to 1 ms | 0 to 1 ms (nothing to parallelise) |
+| Target snapshot wait | 0 to 1 ms | 0 to 1 ms |
+| Helper re-validation of the target | 1 to 4 ms (one 17 ms outlier) | same |
+| TextEdit, accessibility insert and confirm, helper round trip | 4 to 10 ms | 7 to 9 ms |
+| TextEdit, clipboard path, helper round trip | 43 to 112 ms | 18 to 57 ms |
+| **Chrome textarea, whole stop to done, first dictation** | 526 to 601 ms | **24 to 73 ms** |
+| **Chrome textarea, later dictations** | 526 to 601 ms | **43 to 46 ms** |
+
+What took the time and what changed:
+
+1. **Chromium and Electron apps accept accessibility insertion as a silent no-op.** The helper tried it, waited the full 400 ms confirmation window to learn that nothing changed, and only then pasted. It now recognises Chromium-based apps up front (an `icudtl.dat` inside a bundled framework: Chrome, Edge, Brave, Electron apps) and goes straight to the verified clipboard path, and it remembers any other app whose accessibility insertion did nothing for 30 minutes. This is where almost all of the wait was.
+2. **Confirmation polling every 30 ms became every 8 ms.** Saves up to 22 ms on every verified insertion.
+3. **The helper's Chromium wait in the target snapshot polls every 30 ms instead of 100 ms** (still bounded at 1.2 s), so a short dictation does not queue behind it, and the microphone-state poll runs on its own queue so it can never wait behind an accessibility call.
+4. **Instrumentation:** stage timings in the helper's reply, in the service marks, in the Settings readout and in the engine's `final` event.
+
+Kept on purpose (safety over speed):
+- **Re-validation right before inserting** stays in the helper's `deliver`. Doing it in parallel with the recogniser's flush was considered and dropped: validation costs 1 to 4 ms, and a check made earlier would not be a check "right before inserting".
+- **The 400 ms accessibility confirmation** stays for an app the helper has not classified. Shortening it risks a late accessibility insertion followed by a second, pasted copy.
+- **Skipping the confirmation after an accessibility success** was not done: a reported success with no change is exactly the Chrome failure, and skipping would lose text silently.
+- **The 0.6 s wait before restoring the clipboard** remains for targets whose content cannot be read. It delays only the helper's reply, not the text appearing, but it keeps a late paste from receiving your old clipboard.
+- **Overlay animation** is not on the critical path: the request to the helper is queued before the overlay is touched, and the overlay never waits for or blocks insertion.
+- **Cleanup (Local or Your provider)** is by far the largest cost when on; its time is `cleanupMs`. It cannot be shortened without changing what it does. Raw mode has none. No notes model is installed on this Mac, so cleanup latency was not measured.
+
+Not measured: the live microphone path (microphone teardown, queued audio, and the IPC from the engine to the app). Open Settings, Dictation after one dictation and read the line under "Last dictation": `speech` is `stopToFinalMs` with its two engine parts, and the remainder is capture teardown plus the pipe.
 
 ## Not verified, and known gaps
 

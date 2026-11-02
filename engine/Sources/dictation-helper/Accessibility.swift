@@ -112,15 +112,60 @@ final class TargetSnapshot {
     let appName: String
     let element: AXUIElement?
     let facts: ElementFacts?
+    /// The app is built on Chromium (browsers, Electron apps). Their text
+    /// controls take accessibility insertion as a silent no-op, so delivery goes
+    /// straight to the verified clipboard path instead of waiting to find out.
+    let chromiumBased: Bool
     let taken = Date()
 
-    init(id: String, pid: pid_t, bundleId: String, appName: String, element: AXUIElement?) {
+    init(
+        id: String, pid: pid_t, bundleId: String, appName: String, element: AXUIElement?,
+        chromiumBased: Bool = false
+    ) {
         self.id = id
         self.pid = pid
         self.bundleId = bundleId
         self.appName = appName
         self.element = element
         self.facts = element.map(ElementFacts.init)
+        self.chromiumBased = chromiumBased
+    }
+}
+
+/// Recognizes Chromium-based apps by the engine they ship: a framework inside
+/// the app bundle that carries Chromium's ICU data file (Chrome, Edge, Brave
+/// and Electron apps all do). Answers are cached per bundle.
+enum WebEngine {
+    private static let lock = NSLock()
+    private static var cache: [String: Bool] = [:]
+
+    static func isChromiumBased(_ app: NSRunningApplication) -> Bool {
+        let key = app.bundleIdentifier ?? ""
+        if !key.isEmpty {
+            lock.lock()
+            let known = cache[key]
+            lock.unlock()
+            if let known { return known }
+        }
+        let result = detect(app.bundleURL)
+        if !key.isEmpty {
+            lock.lock()
+            cache[key] = result
+            lock.unlock()
+        }
+        return result
+    }
+
+    static func detect(_ bundle: URL?) -> Bool {
+        guard let frameworks = bundle?.appendingPathComponent("Contents/Frameworks"),
+            let names = try? FileManager.default.contentsOfDirectory(atPath: frameworks.path)
+        else { return false }
+        return names.contains { name in
+            name.hasSuffix(".framework")
+                && FileManager.default.fileExists(
+                    atPath: frameworks.appendingPathComponent(name)
+                        .appendingPathComponent("Resources/icudtl.dat").path)
+        }
     }
 }
 
@@ -171,8 +216,8 @@ enum Target {
                 // (the user is still speaking); the delivery check re-validates
                 // the element anyway.
                 AX.requestWebAccessibility(pid: pid)
-                for _ in 0..<12 {
-                    Thread.sleep(forTimeInterval: 0.1)
+                for _ in 0..<40 {
+                    Thread.sleep(forTimeInterval: 0.03)
                     if let found = AX.focusedElement(pid: pid), ElementFacts(found).role != "AXWebArea" {
                         element = found
                         break
@@ -182,7 +227,8 @@ enum Target {
         }
         return TargetSnapshot(
             id: id, pid: pid, bundleId: app.bundleIdentifier ?? "",
-            appName: app.localizedName ?? "", element: element)
+            appName: app.localizedName ?? "", element: element,
+            chromiumBased: WebEngine.isChromiumBased(app))
     }
 
     static func describe(_ snapshot: TargetSnapshot) -> [String: Any] {

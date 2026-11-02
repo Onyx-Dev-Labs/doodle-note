@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import type { Readable, Writable } from 'node:stream'
 import type {
   HelperDelivery,
+  HelperDeliveryTimings,
   HelperStatus,
   HoldFailure,
   HoldKey,
@@ -156,7 +157,8 @@ export class DictationHelperClient {
       ...(typeof reply.reason === 'string' ? { reason: reply.reason } : {}),
       ...(reply.method === 'ax' || reply.method === 'paste' ? { method: reply.method } : {}),
       verified: reply.verified === true,
-      clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched'
+      clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
+      ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
     }
   }
 
@@ -325,6 +327,16 @@ export class DictationHelperClient {
     }
     this.pending.clear()
   }
+}
+
+function isTimings(value: unknown): value is HelperDeliveryTimings {
+  const v = value as Record<string, unknown> | null
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    ['validateMs', 'insertMs', 'confirmMs', 'settleMs'].every((k) => typeof v[k] === 'number') &&
+    typeof v.skippedAx === 'boolean'
+  )
 }
 
 export interface HoldEvent {

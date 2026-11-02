@@ -12,6 +12,7 @@ import {
 } from '../shared/dictation-api'
 import type {
   HelperDelivery,
+  HelperDeliveryTimings,
   HelperStatus,
   HoldFailure,
   HoldKey,
@@ -148,7 +149,15 @@ interface SessionContext {
     cleanupStart?: number
     cleanupEnd?: number
     deliverStart?: number
+    /** The target snapshot was in hand and the helper request was about to go out. */
+    helperSent?: number
     deliverEnd?: number
+  }
+  /** Durations reported by the engine's final event and by the helper's reply. */
+  detail: {
+    engineDrainMs?: number
+    engineFinishMs?: number
+    helper?: HelperDeliveryTimings
   }
 }
 
@@ -398,7 +407,9 @@ export class DictationService {
         showAlways: settings.showPill,
         devices: this.devices,
         selectedUid: settings.microphoneUid,
-        hasLastTranscript: this.lastTranscript !== null
+        hasLastTranscript: this.lastTranscript !== null,
+        showLiveText: settings.showLiveText,
+        showStatusMessages: settings.showStatusMessages
       }),
       (command) => this.onMenuCommand(command)
     )
@@ -420,6 +431,12 @@ export class DictationService {
         break
       case 'settings':
         this.deps.openSettings()
+        break
+      case 'toggle-live-text':
+        void this.patch({ showLiveText: !this.deps.settings.get().showLiveText })
+        break
+      case 'toggle-status':
+        void this.patch({ showStatusMessages: !this.deps.settings.get().showStatusMessages })
         break
       case 'toggle-always':
         void this.patch({ showPill: !this.deps.settings.get().showPill })
@@ -636,7 +653,8 @@ export class DictationService {
       micUid: microphone.uid,
       consent: settings.byokConsent,
       warmAtStart: this.deps.engine.warm,
-      marks: { start: now }
+      marks: { start: now },
+      detail: {}
     }
     this.sessions.set(gen, context)
     this.capture = { gen, lease: claim.lease }
@@ -687,6 +705,9 @@ export class DictationService {
       case 'final':
         if (event.channel === undefined || event.channel === 'mic') {
           this.mark(gen, 'final')
+          const detail = this.sessions.get(gen)?.detail
+          if (detail && typeof event.drainMs === 'number') detail.engineDrainMs = event.drainMs
+          if (detail && typeof event.finishMs === 'number') detail.engineFinishMs = event.finishMs
           this.dispatch({ type: 'final', gen, text: event.text })
         }
         break
@@ -888,7 +909,9 @@ export class DictationService {
       level: this.level,
       insertionUnavailable: this.helperStatus !== null && !this.helperStatus.accessibility,
       pillVisible: this.pillVisible(),
-      edge: this.deps.settings.get().pillEdge
+      edge: this.deps.settings.get().pillEdge,
+      showLiveText: this.deps.settings.get().showLiveText,
+      showStatusMessages: this.deps.settings.get().showStatusMessages
     }
     this.deps.overlay.render(overlayView(this.state, context))
   }
@@ -1036,8 +1059,11 @@ export class DictationService {
     this.mark(gen, 'deliverStart')
     // Kept only in memory so "paste last" can type it again; never logged or written.
     this.lastTranscript = text
-    const outcome = await this.deliver(context, text)
+    const outcome = await this.deliver(context, text, (stage) => {
+      if (stage === 'sent') this.mark(gen, 'helperSent')
+    })
     this.mark(gen, 'deliverEnd')
+    if (context?.detail && outcome.helper) context.detail.helper = outcome.helper
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })
@@ -1045,23 +1071,27 @@ export class DictationService {
 
   private async deliver(
     context: Pick<SessionContext, 'snapshotId' | 'target'> | undefined,
-    text: string
-  ): Promise<DeliveryOutcome> {
+    text: string,
+    onStage?: (stage: 'sent') => void
+  ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings }> {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
     if (!target) return { kind: 'recover', reason: 'helper-unavailable' }
     if (!target.accessibility) return { kind: 'recover', reason: 'accessibility-denied' }
     if (!target.hasElement) return { kind: 'recover', reason: 'no-target' }
     if (target.secure) return { kind: 'recover', reason: 'secure-field' }
+    onStage?.('sent')
     const result = await this.deps.helper.deliver(context.snapshotId, text)
     this.deps.log(
       `delivery ${result.outcome}${result.reason ? ` (${result.reason})` : ''} via ${result.method ?? 'none'}, clipboard ${result.clipboard}`
     )
-    if (result.outcome === 'delivered') return { kind: 'delivered' }
-    if (result.outcome === 'uncertain') return { kind: 'recover', reason: 'insertion-uncertain' }
+    const helper = result.timings ? { helper: result.timings } : {}
+    if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }
+    if (result.outcome === 'uncertain')
+      return { kind: 'recover', reason: 'insertion-uncertain', ...helper }
     if (result.outcome === 'refused')
-      return { kind: 'recover', reason: refusalReason(result.reason) }
-    return { kind: 'recover', reason: 'insertion-failed' }
+      return { kind: 'recover', reason: refusalReason(result.reason), ...helper }
+    return { kind: 'recover', reason: 'insertion-failed', ...helper }
   }
 
   /**
@@ -1135,15 +1165,42 @@ export class DictationService {
     const m = context.marks
     const diff = (a?: number, b?: number): number | null =>
       a !== undefined && b !== undefined ? b - a : null
+    const helper = context.detail.helper ?? null
     this.lastLatency = {
       startMs: diff(m.start, m.micOpen),
       stopToFinalMs: diff(m.stop, m.final),
       cleanupMs: diff(m.cleanupStart, m.cleanupEnd),
       insertMs: diff(m.deliverStart, m.deliverEnd),
       recordedMs: diff(m.micOpen, m.stop),
-      warm: context.warmAtStart
+      warm: context.warmAtStart,
+      stages: {
+        stopToFinalMs: diff(m.stop, m.final),
+        engineDrainMs: context.detail.engineDrainMs ?? null,
+        engineFinishMs: context.detail.engineFinishMs ?? null,
+        finalToDeliverMs: diff(m.final, m.deliverStart),
+        targetWaitMs: diff(m.deliverStart, m.helperSent),
+        helperRoundTripMs: diff(m.helperSent, m.deliverEnd),
+        helper,
+        stopToDoneMs: diff(m.stop, m.deliverEnd)
+      }
     }
-    this.deps.recordMetrics({ at: this.deps.now(), ...this.lastLatency })
+    const { stages, ...top } = this.lastLatency
+    const { helper: helperTimings, ...stageNumbers } = stages
+    // Numbers and booleans only; never text.
+    this.deps.recordMetrics({
+      at: this.deps.now(),
+      ...top,
+      ...stageNumbers,
+      ...(helperTimings
+        ? {
+            helperValidateMs: helperTimings.validateMs,
+            helperInsertMs: helperTimings.insertMs,
+            helperConfirmMs: helperTimings.confirmMs,
+            helperSettleMs: helperTimings.settleMs,
+            helperSkippedAx: helperTimings.skippedAx
+          }
+        : {})
+    })
   }
 
   /* ---- status ---- */

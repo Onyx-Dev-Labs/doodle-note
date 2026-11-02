@@ -1,5 +1,5 @@
 import type { AppChannel } from './app-channel'
-import type { HoldKey } from './dictation-helper-protocol'
+import type { HelperDeliveryTimings, HoldKey } from './dictation-helper-protocol'
 import type { InputDevice, PillEdge } from './dictation-pill'
 import type { CleanupMode, Phase, RecoveryReason } from './dictation-session'
 
@@ -46,6 +46,10 @@ export interface DictationSettings {
   pasteLastShortcut: string
   /** Electron accelerator that puts the last transcript on the clipboard; empty disables it. */
   copyLastShortcut: string
+  /** Show the words being recognised on the pill while speaking. Off keeps the pill quiet. */
+  showLiveText: boolean
+  /** Show status captions ("Transcribing", "Inserting") and success confirmations. */
+  showStatusMessages: boolean
 }
 
 export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
@@ -61,7 +65,9 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   startSound: true,
   handsFreeDoubleTap: true,
   pasteLastShortcut: 'Control+Alt+Shift+V',
-  copyLastShortcut: 'Control+Alt+Shift+C'
+  copyLastShortcut: 'Control+Alt+Shift+C',
+  showLiveText: true,
+  showStatusMessages: true
 }
 
 export type DictationSettingsUpdate = Partial<DictationSettings>
@@ -129,6 +135,29 @@ export interface DictationLatency {
   insertMs: number | null
   recordedMs: number | null
   warm: boolean
+  /**
+   * Stop to the end of delivery, split by stage. Every field is a duration in
+   * ms (never text); null when that stage did not run.
+   */
+  stages: DictationStopStages
+}
+
+export interface DictationStopStages {
+  /** Stop request to the recognizer's final result (all of it, engine included). */
+  stopToFinalMs: number | null
+  /** Of that, audio still queued when capture stopped. */
+  engineDrainMs: number | null
+  /** Of that, the recognizer's final flush. */
+  engineFinishMs: number | null
+  /** Final result to delivery starting: the reducer hand-off, plus cleanup when it is on. */
+  finalToDeliverMs: number | null
+  /** Waiting for the start-of-session target snapshot (normally 0). */
+  targetWaitMs: number | null
+  /** The helper request from our side: helper work plus pipe and queue time. */
+  helperRoundTripMs: number | null
+  helper: HelperDeliveryTimings | null
+  /** Stop to the end of delivery, everything included. */
+  stopToDoneMs: number | null
 }
 
 export interface DictationApi {
