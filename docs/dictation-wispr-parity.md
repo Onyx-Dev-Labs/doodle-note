@@ -111,15 +111,16 @@ Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) open
 | Dictation reminder coach | yes | no | **Talk** |
 | Block dictation in chosen apps/URLs | yes | no | **P2** |
 | Hide bar during screen share | yes | no | **P2** (content-protection flag) |
-| Custom dictionary + auto-add | yes | no | **P2** |
-| Snippets | yes | no | **P2** |
-| Styles (tone per app type) | yes | cleanup modes Raw/Local/BYOK only | **Talk** |
-| Transforms / Polish / voice profile | yes | no | **Talk** |
+| Custom dictionary + auto-add | yes | no | **Talk** (not built; Lowercase quick has a hook for it) |
+| Snippets | yes | no | **Talk** (not built) |
+| Styles (tone per app type) | yes | yes: four app categories, Proper / Relaxed / Lowercase quick, per-app mapping you can edit, English only, deterministic | done |
+| Transforms / Polish / voice profile | yes | transforms yes (five of our own, your own, hotkeys, auto-apply, view and undo, on a selection or the last dictation); voice profile no | done (needs a model; stub-tested) |
 | Command Mode (edit selected text by voice) | yes, hosted | no | **Talk** |
 | Instruct Mode (screen-context replies) | yes, hosted | no | **Talk**: needs screen reading, against our current privacy line |
 | History with retry | yes, audio kept 14 days | none by design | **Talk** |
 | Press Enter by voice | experimental | never, by design | keep out; revisit only as explicit opt-in |
 | Mouse side-button triggers | yes | yes: one optional button (middle, back, forward, extras; never left or right), click to start and click to stop by default or hold to talk (same hold, tap and double-tap behaviour as the key), swallowed from other apps by default | done (physical mouse still to try) |
+| Spoken brain dump made sensible (filler, corrections, lists) | yes, hosted | Off / Light (instant, local, no model) / Full (local model or your consented provider) | done |
 | Cloud speech | yes | local only by design | keep local |
 
 ### P1 status
@@ -145,6 +146,8 @@ Built on `feat/system-dictation` (see `docs/dictation-dev-app.md` for behaviour,
 - [x] Stop-to-text speed pass: stages measured and shown; Chromium and Electron targets no longer wait out a no-op accessibility attempt (about 0.55 s down to about 0.05 s)
 
 - [x] Optional mouse-button trigger (click to start and stop by default, or hold to talk), with capture, swallowing and a warning about remapping software
+
+- [x] Tidy-up levels, per-app styles and transforms with view and undo (see `docs/dictation-dev-app.md`); Dictionary and Snippets stay out
 
 Still to see with a human at the Mac: the look on real displays, dragging with a real pointer, the native right-click menu, live dictation through every path, and the tones through speakers.
 

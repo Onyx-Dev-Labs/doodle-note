@@ -13,7 +13,8 @@ import {
 import { overlaySize, type OverlayView } from './dictation-overlay-view'
 import { overlayHtml } from './dictation-overlay-page'
 
-export type OverlayAction = 'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu'
+export type OverlayAction =
+  'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu' | 'view' | 'undo'
 
 const DRAG_TICK_MS = 16
 /** A drag whose release never arrived (pointer lost) ends by itself. */
@@ -237,6 +238,8 @@ export class DictationOverlay {
       case 'dismiss':
       case 'pill':
       case 'menu':
+      case 'view':
+      case 'undo':
         this.onAction(name, this.lastView?.gen ?? null)
         break
     }

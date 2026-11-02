@@ -13,6 +13,9 @@ import {
   DICTATION_OPEN_PRIVACY_CHANNEL,
   DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
   DICTATION_PASTE_LAST_CHANNEL,
+  DICTATION_RUN_TRANSFORM_CHANNEL,
+  DICTATION_UNDO_CHANGE_CHANNEL,
+  DICTATION_VIEW_CHANGE_CHANNEL,
   DICTATION_REQUEST_PERMISSION_CHANNEL,
   DICTATION_SET_SETTINGS_CHANNEL,
   DICTATION_STATUS_EVENT_CHANNEL,
@@ -192,6 +195,15 @@ export function createDictationHost(options: DictationHostOptions): {
   })
   ipcMain.handle(DICTATION_PASTE_LAST_CHANNEL, async (event) => {
     if (trusted(event)) await service.pasteLast()
+  })
+  ipcMain.handle(DICTATION_RUN_TRANSFORM_CHANNEL, async (event, id: unknown) => {
+    if (trusted(event) && typeof id === 'string') await service.runTransform(id)
+  })
+  ipcMain.handle(DICTATION_VIEW_CHANGE_CHANNEL, (event) => {
+    if (trusted(event)) service.viewLastChange()
+  })
+  ipcMain.handle(DICTATION_UNDO_CHANGE_CHANNEL, async (event) => {
+    if (trusted(event)) await service.undoLastChange()
   })
   ipcMain.handle(DICTATION_REQUEST_PERMISSION_CHANNEL, (event, pane: unknown) =>
     trusted(event) && isPermissionPane(pane) ? service.requestPermission(pane) : 'unavailable'

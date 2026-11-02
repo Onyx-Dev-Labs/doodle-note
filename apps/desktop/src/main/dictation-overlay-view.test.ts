@@ -2,7 +2,13 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { initialSessionState, reduce, type SessionEvent } from '../shared/dictation-session'
 import type { SessionState } from '../shared/dictation-session'
-import { WARNINGS, overlaySize, overlayView, type OverlayContext } from './dictation-overlay-view'
+import {
+  WARNINGS,
+  overlaySize,
+  overlayView,
+  panelView,
+  type OverlayContext
+} from './dictation-overlay-view'
 
 const ctx = (over: Partial<OverlayContext> = {}): OverlayContext => ({
   micOpen: true,
@@ -32,7 +38,14 @@ test('idle shows the resting pill only when the pill is wanted', () => {
   const shown = overlayView(initialSessionState(), ctx())
   assert.equal(shown.visible, true)
   assert.equal(shown.mode, 'rest')
-  assert.deepEqual(shown.controls, { stop: false, cancel: false, copy: false, dismiss: false })
+  assert.deepEqual(shown.controls, {
+    stop: false,
+    cancel: false,
+    copy: false,
+    dismiss: false,
+    view: false,
+    undo: false
+  })
   const hidden = overlayView(initialSessionState(), ctx({ pillVisible: false }))
   assert.equal(hidden.visible, false)
 })
@@ -197,4 +210,48 @@ test('the window shrinks to just the pill when the words are hidden', () => {
   const hushed = overlaySize(overlayView(talking, quietCtx()))
   assert.ok(hushed.height < loud.height)
   assert.equal(hushed.height, overlaySize(overlayView(live(), ctx())).height, 'pill only')
+})
+
+/* ---- panels after a transform ---- */
+
+test('the changed panel offers View and Undo; the diff panel carries the words and Undo', () => {
+  const base = overlayView(initialSessionState(), ctx())
+  const changed = panelView({ kind: 'changed', name: 'Polish' }, base)
+  assert.equal(changed.mode, 'message')
+  assert.equal(changed.title, 'Changed by Polish.')
+  assert.equal(changed.controls.view, true)
+  assert.equal(changed.controls.undo, true)
+  assert.equal(changed.controls.dismiss, true)
+  assert.equal(changed.diff, null)
+  const segments = [
+    { op: 'del' as const, text: 'um ' },
+    { op: 'same' as const, text: 'hello' }
+  ]
+  const diff = panelView({ kind: 'diff', name: 'Polish', segments }, base)
+  assert.deepEqual(diff.diff, segments)
+  assert.equal(diff.controls.view, false, 'already viewing')
+  assert.equal(diff.controls.undo, true)
+  assert.ok(overlaySize(diff).width > overlaySize(changed).width, 'the diff panel is larger')
+  assert.ok(overlaySize(diff).height >= overlaySize(changed).height)
+  const long = panelView(
+    { kind: 'diff', name: 'Polish', segments: [{ op: 'same', text: 'word '.repeat(80) }] },
+    base
+  )
+  assert.ok(overlaySize(long).height > overlaySize(diff).height, 'more words, more room')
+  assert.ok(overlaySize(long).height <= 300, 'but never beyond the cap')
+})
+
+test('the working panel is a caption only and follows the dock edge', () => {
+  const base = overlayView(initialSessionState(), ctx({ edge: 'left' }))
+  const working = panelView({ kind: 'working', name: 'Polish' }, base)
+  assert.equal(working.title, 'Polish…')
+  assert.equal(working.edge, 'left')
+  assert.deepEqual(working.controls, {
+    stop: false,
+    cancel: false,
+    copy: false,
+    dismiss: false,
+    view: false,
+    undo: false
+  })
 })

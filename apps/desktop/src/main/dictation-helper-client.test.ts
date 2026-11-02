@@ -22,7 +22,12 @@ process.stdin.on('data', (d) => {
     const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
     if (req.op === 'status') send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: false, secureInput: false, conflicts: ['Wispr Flow'], holdActive: false, mouseActive: true, inputMonitoringAccess: mode === 'not-asked' ? 'not-determined' : 'granted', fnKeyAction: 2 })
     else if (req.op === 'snapshot') send({ event: 'reply', id: req.id, ok: true, snapshotId: req.snapshotId, pid: 42, bundleId: 'com.apple.TextEdit', appName: 'TextEdit', hasElement: true, accessibility: true, role: 'AXTextArea', secure: false, editable: true })
-    else if (req.op === 'deliver') {
+    else if (req.op === 'selection') {
+      if (mode === 'secure') send({ event: 'reply', id: req.id, ok: false, reason: 'secure-field' })
+      else send({ event: 'reply', id: req.id, ok: true, text: 'picked words' })
+    } else if (req.op === 'deliver') {
+      if (req.replace === 'gone') { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'text-changed', verified: false, clipboard: 'untouched' }); return }
+      if (req.expectSelection === 'stale') { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'selection-changed', verified: false, clipboard: 'untouched' }); return }
       if (mode === 'hang') return
       if (mode === 'crash') process.exit(1)
       send({ event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'ax', verified: true, clipboard: 'untouched' })
@@ -282,6 +287,38 @@ test('click events from the mouse trigger reach the listener, and the mode is se
     assert.deepEqual(await client.setMouseButton(3, true, 'click'), { ok: true, swallowing: true })
     await new Promise((r) => setTimeout(r, 100))
     assert.equal(clicks, 2)
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('the selection comes back as text, or as the reason it could not be read', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    assert.deepEqual(await client.selection('s-1'), { ok: true, text: 'picked words' })
+  } finally {
+    await client.dispose()
+  }
+  const secure = new DictationHelperClient(fakeHelper('secure'), fast)
+  try {
+    assert.deepEqual(await secure.selection('s-1'), { ok: false, reason: 'secure-field' })
+  } finally {
+    await secure.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.deepEqual(await missing.selection('s-1'), { ok: false, reason: 'unavailable' })
+})
+
+test('delivery guards travel with the request and a refusal says why', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    const stale = await client.deliver('s-1', 'new text', { expectSelection: 'stale' })
+    assert.equal(stale.outcome, 'refused')
+    assert.equal(stale.reason, 'selection-changed')
+    const gone = await client.deliver('s-1', 'old text', { replace: 'gone' })
+    assert.equal(gone.reason, 'text-changed')
+    const fine = await client.deliver('s-1', 'text', { replace: 'present' })
+    assert.equal(fine.outcome, 'delivered')
   } finally {
     await client.dispose()
   }

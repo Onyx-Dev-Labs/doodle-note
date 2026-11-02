@@ -70,6 +70,9 @@ func handle(_ request: [String: Any]) {
     case "deliver":
         let snapshotId = request["snapshotId"] as? String ?? ""
         let text = request["text"] as? String ?? ""
+        let guards = DeliveryGuards(
+            expectSelection: request["expectSelection"] as? String,
+            replace: request["replace"] as? String)
         workQueue.async {
             guard !text.isEmpty else {
                 Wire.reply(id, DeliveryResult(outcome: .failed, reason: "empty-text").fields)
@@ -79,10 +82,35 @@ func handle(_ request: [String: Any]) {
                 Wire.reply(id, DeliveryResult(outcome: .refused, reason: "no-target").fields)
                 return
             }
-            let result = Delivery.deliver(snapshot, text: text)
+            let result = Delivery.deliver(snapshot, text: text, guards: guards)
             // A snapshot is single-use: a second deliver can never re-insert.
             snapshots.drop(snapshotId)
             Wire.reply(id, result.fields)
+        }
+    case "selection":
+        // The text currently selected in the field the snapshot was taken from, so a
+        // transform can work on it. Never read from a secure field.
+        let snapshotId = request["snapshotId"] as? String ?? ""
+        workQueue.async {
+            guard let snapshot = snapshots.get(snapshotId), let expected = snapshot.element,
+                AX.trusted
+            else {
+                Wire.reply(id, ok: false, ["reason": "no-target"])
+                return
+            }
+            guard AX.frontmostPid() == snapshot.pid,
+                let current = AX.focusedElement(pid: snapshot.pid), CFEqual(current, expected)
+            else {
+                Wire.reply(id, ok: false, ["reason": "focus-changed"])
+                return
+            }
+            let facts = ElementFacts(current)
+            if facts.secure || (snapshot.facts?.secure ?? false) {
+                Wire.reply(id, ok: false, ["reason": "secure-field"])
+                return
+            }
+            let selected = AX.string(current, kAXSelectedTextAttribute as String) ?? ""
+            Wire.reply(id, ["text": selected])
         }
     case "release":
         if let snapshotId = request["snapshotId"] as? String { snapshots.drop(snapshotId) }

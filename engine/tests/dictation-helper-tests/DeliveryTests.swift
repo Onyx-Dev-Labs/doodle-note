@@ -47,3 +47,30 @@ final class DeliveryTests: XCTestCase {
             ["validateMs", "insertMs", "confirmMs", "settleMs", "skippedAx"])
     }
 }
+
+final class TextLocatorTests: XCTestCase {
+    func testAUniqueMatchIsFoundInUTF16Units() {
+        let range = TextLocator.uniqueRange(of: "world", in: "hello world")
+        XCTAssertEqual(range, NSRange(location: 6, length: 5))
+    }
+
+    func testNoMatchOrSeveralMatchesFindNothing() {
+        XCTAssertNil(TextLocator.uniqueRange(of: "xyz", in: "hello world"))
+        XCTAssertNil(TextLocator.uniqueRange(of: "o", in: "hello world"), "two copies: ambiguous")
+        XCTAssertNil(TextLocator.uniqueRange(of: "", in: "hello"))
+        XCTAssertNil(TextLocator.uniqueRange(of: "aa", in: "aaa"), "overlapping copies are still two")
+    }
+
+    func testEmojiAndAccentsUseTheLengthAccessibilityUses() {
+        let haystack = "caf\u{e9} \u{1F600} tea"
+        let range = TextLocator.uniqueRange(of: "tea", in: haystack)
+        // "caf\u{e9}" is 4 units, a space, the emoji is 2 units, a space: tea starts at 8.
+        XCTAssertEqual(range, NSRange(location: 8, length: 3))
+    }
+
+    func testTheGuardsAreOptionalAndDefaultToNone() {
+        let guards = DeliveryGuards()
+        XCTAssertNil(guards.expectSelection)
+        XCTAssertNil(guards.replace)
+    }
+}

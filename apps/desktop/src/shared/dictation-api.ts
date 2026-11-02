@@ -2,6 +2,13 @@ import type { AppChannel } from './app-channel'
 import type { HelperDeliveryTimings, HoldKey, MouseMode } from './dictation-helper-protocol'
 import type { PermissionOutcome, PermissionPane } from './dictation-permissions'
 import type { InputDevice, PillEdge } from './dictation-pill'
+import {
+  DEFAULT_STYLES,
+  EMPTY_STYLE_APPS,
+  type StyleApps,
+  type StyleChoices
+} from './dictation-style'
+import { DEFAULT_TRANSFORM_SETTINGS, type TransformSettings } from './dictation-transforms'
 import type { CleanupMode, Phase, RecoveryReason } from './dictation-session'
 
 export const DICTATION_GET_STATUS_CHANNEL = 'dictation:get-status'
@@ -16,8 +23,15 @@ export const DICTATION_STATUS_EVENT_CHANNEL = 'dictation:status-event'
 export const DICTATION_OPEN_SETTINGS_EVENT_CHANNEL = 'dictation:open-settings'
 export const DICTATION_PASTE_LAST_CHANNEL = 'dictation:paste-last'
 export const DICTATION_COPY_LAST_CHANNEL = 'dictation:copy-last'
+export const DICTATION_RUN_TRANSFORM_CHANNEL = 'dictation:run-transform'
+export const DICTATION_VIEW_CHANGE_CHANNEL = 'dictation:view-change'
+export const DICTATION_UNDO_CHANGE_CHANNEL = 'dictation:undo-change'
 export const DICTATION_REQUEST_PERMISSION_CHANNEL = 'dictation:request-permission'
 export const DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL = 'dictation:capture-mouse-button'
+
+/** Off keeps the raw words, Light is instant and local, Full also uses a model. */
+export const TIDY_LEVELS = ['off', 'light', 'full'] as const
+export type TidyLevel = (typeof TIDY_LEVELS)[number]
 
 export interface DictationSettings {
   /** Master switch. Off means no shortcut, no helper and no microphone use. */
@@ -26,8 +40,19 @@ export interface DictationSettings {
   toggleShortcut: string
   /** Modifier held on its own for hold-to-talk. */
   holdKey: HoldKey
-  /** Recognition is always local; this only chooses what happens to the text. */
+  /**
+   * Kept so older settings still load. It only says which model a Full tidy-up
+   * and transforms prefer (byok = the user's provider); the page no longer shows it.
+   */
   cleanupMode: CleanupMode
+  /** How much a brain dump is tidied before it is inserted. */
+  tidyLevel: TidyLevel
+  /** The tone per app category, applied after tidy-up. */
+  styles: StyleChoices
+  /** Apps the user placed in a category, over the built-in list. */
+  styleApps: StyleApps
+  /** Named rewrite prompts, run on a selection or the last dictation. */
+  transforms: TransformSettings
   /**
    * Approval to send dictated TEXT to one provider/model. Bound to that pair:
    * changing either invalidates it. Never covers audio.
@@ -73,6 +98,10 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   toggleShortcut: 'Control+Alt+D',
   holdKey: 'off',
   cleanupMode: 'raw',
+  tidyLevel: 'light',
+  styles: DEFAULT_STYLES,
+  styleApps: EMPTY_STYLE_APPS,
+  transforms: DEFAULT_TRANSFORM_SETTINGS,
   byokConsent: null,
   showPill: true,
   pillEdge: 'bottom',
@@ -121,6 +150,14 @@ export interface DictationStatus {
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState
+  /** Shortcut state per transform id; a transform without a shortcut is absent. */
+  transformShortcuts: Record<string, ShortcutState>
+  /** Which model a Full tidy-up or a transform would use right now. */
+  model: ModelAvailability
+  /** The last few apps dictation went into, newest first; names only, for placing them in a style. */
+  recentApps: Array<{ bundleId: string; name: string }>
+  /** A transform's before and after text is held in memory, so Undo and View work. */
+  hasLastChange: boolean
   /** What macOS does on a Fn/Globe press (0 nothing, 1 input source, 2 emoji, 3 dictation); null = unknown. */
   fnKeyAction: number | null
   /** Input devices last seen by the engine; empty until the first listing returns. */
@@ -175,6 +212,10 @@ export interface DictationStopStages {
   engineFinishMs: number | null
   /** Final result to delivery starting: the reducer hand-off, plus cleanup when it is on. */
   finalToDeliverMs: number | null
+  /** Of that, the model's Full tidy-up, when it ran. */
+  tidyMs: number | null
+  /** Of that, an auto-applied transform, when it ran. */
+  transformMs: number | null
   /** Waiting for the start-of-session target snapshot (normally 0). */
   targetWaitMs: number | null
   /** The helper request from our side: helper work plus pipe and queue time. */
@@ -185,6 +226,16 @@ export interface DictationStopStages {
 }
 
 export type MouseCaptureOutcome = { ok: true; button: number } | { ok: false; message: string }
+
+/**
+ * local: the notes model on this Mac. byok: the user's provider, with consent.
+ * needs-consent: a provider is set up but the user has not allowed sending text.
+ * none: nothing available, so Full and transforms cannot run (Light and styles still do).
+ */
+export interface ModelAvailability {
+  path: 'local' | 'byok' | 'needs-consent' | 'none'
+  label: string | null
+}
 
 export interface DictationApi {
   getStatus(): Promise<DictationStatus>
@@ -204,6 +255,12 @@ export interface DictationApi {
    * will not ask again and System Settings must be opened.
    */
   requestPermission(pane: PermissionPane): Promise<PermissionOutcome>
+  /** Run a transform now, on the selection in the focused app or else the last dictation. */
+  runTransform(id: string): Promise<void>
+  /** Show the before and after of the last transform. */
+  viewLastChange(): Promise<void>
+  /** Put the text from before the last transform back. */
+  undoLastChange(): Promise<void>
   copyRecovery(gen: number): Promise<boolean>
   dismissRecovery(gen: number): Promise<void>
   openPrivacySettings(pane: 'microphone' | 'accessibility' | 'input-monitoring'): Promise<void>

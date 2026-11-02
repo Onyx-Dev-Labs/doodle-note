@@ -6,9 +6,48 @@ import {
   type DictationSettingsUpdate
 } from '../shared/dictation-api'
 import { HOLD_KEYS, MOUSE_MODES, isAllowedMouseButton } from '../shared/dictation-helper-protocol'
+import { TIDY_LEVELS } from '../shared/dictation-api'
 import { coerceEdge } from '../shared/dictation-pill'
+import {
+  DEFAULT_STYLES,
+  STYLE_CATEGORIES,
+  STYLE_TONES,
+  type StyleApps,
+  type StyleChoices
+} from '../shared/dictation-style'
+import { normalizeTransformSettings } from '../shared/dictation-transforms'
 
 const CLEANUP_MODES = ['raw', 'local', 'byok'] as const
+
+function normalizeStyles(input: unknown): StyleChoices {
+  const raw = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const out = { ...DEFAULT_STYLES }
+  for (const category of STYLE_CATEGORIES) {
+    if ((STYLE_TONES as readonly unknown[]).includes(raw[category])) {
+      out[category] = raw[category] as StyleChoices[typeof category]
+    }
+  }
+  return out
+}
+
+function normalizeStyleApps(input: unknown): StyleApps {
+  const raw = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const out: StyleApps = { personal: [], work: [], email: [], other: [] }
+  const seen = new Set<string>()
+  for (const category of STYLE_CATEGORIES) {
+    const list = Array.isArray(raw[category]) ? (raw[category] as unknown[]) : []
+    for (const id of list) {
+      if (typeof id !== 'string') continue
+      const trimmed = id.trim()
+      const key = trimmed.toLowerCase()
+      // One home per app, and no unbounded lists.
+      if (!trimmed || trimmed.length > 200 || seen.has(key) || out[category].length >= 50) continue
+      seen.add(key)
+      out[category].push(trimmed)
+    }
+  }
+  return out
+}
 
 /** Coerce arbitrary JSON into valid settings; anything unrecognized falls back to the default. */
 export function normalizeDictationSettings(input: unknown): DictationSettings {
@@ -27,6 +66,15 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
     cleanupMode: (CLEANUP_MODES as readonly unknown[]).includes(raw.cleanupMode)
       ? (raw.cleanupMode as DictationSettings['cleanupMode'])
       : defaults.cleanupMode,
+    // Older files only knew the cleanup mode: a model choice there meant "use the model".
+    tidyLevel: (TIDY_LEVELS as readonly unknown[]).includes(raw.tidyLevel)
+      ? (raw.tidyLevel as DictationSettings['tidyLevel'])
+      : raw.cleanupMode === 'local' || raw.cleanupMode === 'byok'
+        ? 'full'
+        : defaults.tidyLevel,
+    styles: normalizeStyles(raw.styles),
+    styleApps: normalizeStyleApps(raw.styleApps),
+    transforms: normalizeTransformSettings(raw.transforms),
     byokConsent:
       consent && typeof consent.provider === 'string' && typeof consent.model === 'string'
         ? { provider: consent.provider, model: consent.model }

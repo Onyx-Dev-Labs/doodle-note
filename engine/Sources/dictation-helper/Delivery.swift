@@ -97,17 +97,45 @@ private struct ControlState: Equatable {
     var observable: Bool { value != nil || location != nil }
 }
 
+/// Finding text in a field. A replacement may only go where its target text is
+/// the one and only match, so an edit can never land on the wrong copy.
+enum TextLocator {
+    /// The UTF-16 range (what accessibility uses) of `needle` in `haystack`, only when
+    /// it occurs exactly once. Nothing for an empty needle, no match, or several.
+    static func uniqueRange(of needle: String, in haystack: String) -> NSRange? {
+        guard !needle.isEmpty else { return nil }
+        let text = haystack as NSString
+        let first = text.range(of: needle)
+        guard first.location != NSNotFound else { return nil }
+        // Search from the next unit, so overlapping copies count as two.
+        let next = first.location + 1
+        let rest = NSRange(location: next, length: text.length - next)
+        return text.range(of: needle, options: [], range: rest).location == NSNotFound ? first : nil
+    }
+}
+
+/// Optional guards on a delivery that edits text already in the field.
+struct DeliveryGuards {
+    /// The selection must be exactly this text, or the insertion is refused.
+    var expectSelection: String?
+    /// This text must occur exactly once in the field; it is selected and replaced.
+    var replace: String?
+}
+
 enum Delivery {
     /// Validate the target immediately before inserting, then insert once.
-    static func deliver(_ snapshot: TargetSnapshot, text: String) -> DeliveryResult {
+    static func deliver(
+        _ snapshot: TargetSnapshot, text: String, guards: DeliveryGuards = DeliveryGuards()
+    ) -> DeliveryResult {
         var timings = DeliveryTimings()
-        var result = deliver(snapshot, text: text, timings: &timings)
+        var result = deliver(snapshot, text: text, guards: guards, timings: &timings)
         result.timings = timings
         return result
     }
 
     private static func deliver(
-        _ snapshot: TargetSnapshot, text: String, timings: inout DeliveryTimings
+        _ snapshot: TargetSnapshot, text: String, guards: DeliveryGuards,
+        timings: inout DeliveryTimings
     ) -> DeliveryResult {
         let began = DispatchTime.now().uptimeNanoseconds
         guard AX.trusted else {
@@ -127,6 +155,29 @@ enum Delivery {
         if facts.secure || now.secure { return DeliveryResult(outcome: .refused, reason: "secure-field") }
         if !now.editable { return DeliveryResult(outcome: .refused, reason: "not-editable") }
 
+        if let expected = guards.expectSelection,
+            AX.string(current, kAXSelectedTextAttribute as String) != expected
+        {
+            return DeliveryResult(outcome: .refused, reason: "selection-changed")
+        }
+        if let target = guards.replace {
+            // Undo and the like: find the one copy of the old text, select it, and let
+            // the normal insertion below replace it.
+            guard let value = AX.string(current, kAXValueAttribute as String),
+                let range = TextLocator.uniqueRange(of: target, in: value),
+                AX.settable(current, kAXSelectedTextRangeAttribute as String)
+            else {
+                return DeliveryResult(outcome: .refused, reason: "text-changed")
+            }
+            var cfRange = CFRange(location: range.location, length: range.length)
+            guard let wrapped = AXValueCreate(.cfRange, &cfRange),
+                AXUIElementSetAttributeValue(
+                    current, kAXSelectedTextRangeAttribute as CFString, wrapped) == .success,
+                AX.string(current, kAXSelectedTextAttribute as String) == target
+            else {
+                return DeliveryResult(outcome: .refused, reason: "text-changed")
+            }
+        }
         let before = ControlState(current)
         timings.validateMs = elapsedMs(since: began)
 

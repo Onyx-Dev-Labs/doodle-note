@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/dictation-api'
+import { BUILTIN_TRANSFORMS } from '../shared/dictation-transforms'
 import type {
   HelperDelivery,
   HelperStatus,
   HoldKey,
+  DeliveryGuards,
   InputState,
+  SelectionResult,
   MouseCaptureResult,
   MouseStartResult,
   TargetDescription
@@ -39,6 +42,9 @@ interface Harness {
     delivery: HelperDelivery
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
+    deliverGuards: DeliveryGuards[]
+    deliveryFor: ((text: string, guards: DeliveryGuards) => HelperDelivery) | null
+    selection: SelectionResult
     mouseCalls: Array<{ button: number | null; swallow: boolean; mode: string }>
     clickListener: (() => void) | null
     restarts: number[]
@@ -72,11 +78,17 @@ function harness(
     cleanup?: CleanupRunner
     access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
+    modelOptions?: {
+      localModelLabel: string | null
+      byok: { provider: string; model: string; hasKey: boolean } | null
+    }
   } = {}
 ): Harness {
   const settings: DictationSettings = {
     ...DEFAULT_DICTATION_SETTINGS,
     enabled: true,
+    // The older tests are about raw words moving through; tidy-up has its own tests.
+    tidyLevel: 'off',
     ...options.settings
   }
   const clock = { now: 1_000_000 }
@@ -114,6 +126,9 @@ function harness(
     delivery: { outcome: 'delivered', method: 'ax', verified: true, clipboard: 'untouched' },
     holdListener: null,
     tapListener: null,
+    deliverGuards: [],
+    deliveryFor: null,
+    selection: { ok: true, text: '' },
     mouseCalls: [],
     clickListener: null,
     restarts: [],
@@ -167,10 +182,12 @@ function harness(
         fnKeyAction: helper.fnKeyAction
       }),
       snapshot: async () => helper.target,
-      deliver: async (_id, text) => {
+      deliver: async (_id, text, guards) => {
         delivered.push(text)
-        return helper.delivery
+        helper.deliverGuards.push(guards ?? {})
+        return helper.deliveryFor?.(text, guards ?? {}) ?? helper.delivery
       },
+      selection: async () => helper.selection,
       release: () => {},
       setHoldKey: async (key) => {
         helper.holdKeys.push(key)
@@ -228,7 +245,7 @@ function harness(
         cleanupCalls.push({ mode, consent, signal })
         return 'Cleaned.'
       }),
-    cleanupOptions: () => ({ localModelLabel: 'Test model', byok: null }),
+    cleanupOptions: () => options.modelOptions ?? { localModelLabel: 'Test model', byok: null },
     microphoneAccess: () => perms.mic,
     requestMicrophone: async () => {
       perms.micAsked += 1
@@ -377,7 +394,7 @@ test('stop during startup drains once the microphone opens', async () => {
 })
 
 test('local cleanup replaces the text; the mode is the one chosen at start', async () => {
-  const h = harness({ settings: { cleanupMode: 'local' } })
+  const h = harness({ settings: { cleanupMode: 'local', tidyLevel: 'full' } })
   h.service.toggle()
   await tick()
   h.settings.cleanupMode = 'raw' // changing settings mid-session applies next time
@@ -393,24 +410,28 @@ test('local cleanup replaces the text; the mode is the one chosen at start', asy
 
 test('cleanup output that changes a number is rejected and the raw text is inserted', async () => {
   const h = harness({
-    settings: { cleanupMode: 'local' },
+    settings: { cleanupMode: 'local', tidyLevel: 'full' },
     cleanup: async () => 'Send 250 dollars.'
   })
   await speak(h, 'send 2500 dollars')
   await tick()
-  assert.deepEqual(h.delivered, ['send 2500 dollars'])
+  assert.deepEqual(
+    h.delivered,
+    ['Send 2500 dollars.'],
+    'the raw words, with only the style applied'
+  )
 })
 
 test('cleanup failure keeps the raw transcript and says why', async () => {
   const h = harness({
-    settings: { cleanupMode: 'local' },
+    settings: { cleanupMode: 'local', tidyLevel: 'full' },
     cleanup: async () => {
       throw new Error('The notes model is busy with another task.')
     }
   })
   await speak(h, 'raw words here')
   await tick()
-  assert.deepEqual(h.delivered, ['raw words here'])
+  assert.deepEqual(h.delivered, ['Raw words here.'])
   assert.ok(
     h.overlay.some((v) => /busy/.test(v.title)),
     'the outcome is shown, not silent'
@@ -420,7 +441,7 @@ test('cleanup failure keeps the raw transcript and says why', async () => {
 test('cancel during cleanup aborts the request and delivers nothing', async () => {
   const hold: { release?: () => void } = {}
   const h = harness({
-    settings: { cleanupMode: 'local' },
+    settings: { cleanupMode: 'local', tidyLevel: 'full' },
     cleanup: (_mode, _request, signal) =>
       new Promise<string>((resolve, reject) => {
         signal.addEventListener('abort', () => reject(new Error('aborted')))
@@ -442,13 +463,17 @@ test('a provider key alone never triggers cleanup; consent is passed through una
   await speak(raw, 'plain words')
   assert.equal(raw.cleanupCalls.length, 0, 'raw mode never calls any model or provider')
 
-  const noConsent = harness({ settings: { cleanupMode: 'byok', byokConsent: null } })
+  const noConsent = harness({
+    settings: { cleanupMode: 'byok', tidyLevel: 'full', byokConsent: null }
+  })
   await speak(noConsent, 'plain words')
   await tick()
   assert.equal(noConsent.cleanupCalls[0]?.consent, null, 'absent consent is handed to the gate')
 
   const consent = { provider: 'openai', model: 'gpt-x' }
-  const withConsent = harness({ settings: { cleanupMode: 'byok', byokConsent: consent } })
+  const withConsent = harness({
+    settings: { cleanupMode: 'byok', tidyLevel: 'full', byokConsent: consent }
+  })
   await speak(withConsent, 'plain words')
   await tick()
   assert.deepEqual(withConsent.cleanupCalls[0]?.consent, consent)
@@ -1610,4 +1635,437 @@ test('with no permission yet the mouse trigger is retried once it is granted, th
   await stubborn.service.status()
   await new Promise((resolve) => setTimeout(resolve, 800))
   assert.equal(stubborn.helper.restarts.length, 1)
+})
+
+/* ---- tidy-up, styles and transforms ---- */
+
+const allTransforms = (
+  autoApplyId: string | null,
+  overrides: Partial<DictationSettings['transforms']> = {}
+): DictationSettings['transforms'] => ({
+  enabled: true,
+  autoApply: autoApplyId !== null,
+  autoApplyId,
+  items: BUILTIN_TRANSFORMS.map((item) => ({ ...item })),
+  ...overrides
+})
+
+test('Light tidy-up is the default: a brain dump is typed clean, instantly, with no model', async () => {
+  const h = harness({ settings: { tidyLevel: 'light' } })
+  await speak(h, 'um so i think we should uh go on tuesday')
+  assert.deepEqual(h.delivered, ['So I think we should go on tuesday.'])
+  assert.equal(h.cleanupCalls.length, 0, 'nothing leaves the process')
+  assert.equal(h.service.phase, 'notice')
+})
+
+test('Off types exactly what was recognised', async () => {
+  const h = harness({ settings: { tidyLevel: 'off' } })
+  await speak(h, 'um so i think')
+  assert.deepEqual(h.delivered, ['um so i think'])
+})
+
+test('the style follows the focused app: relaxed in a chat app, proper elsewhere', async () => {
+  const chat = harness({ settings: { tidyLevel: 'light' } })
+  chat.helper.target = { ...chat.helper.target!, bundleId: 'com.hnc.Discord', appName: 'Discord' }
+  await speak(chat, 'sounds good see you there')
+  assert.deepEqual(
+    chat.delivered,
+    ['Sounds good see you there'],
+    'personal messages: no closing full stop'
+  )
+
+  const mail = harness({ settings: { tidyLevel: 'light' } })
+  mail.helper.target = { ...mail.helper.target!, bundleId: 'com.apple.mail' }
+  await speak(mail, 'sounds good see you there')
+  assert.deepEqual(mail.delivered, ['Sounds good see you there.'])
+
+  const lower = harness({
+    settings: {
+      tidyLevel: 'light',
+      styles: { personal: 'lowercase', work: 'proper', email: 'proper', other: 'proper' }
+    }
+  })
+  lower.helper.target = { ...lower.helper.target!, bundleId: 'com.apple.MobileSMS' }
+  await speak(lower, 'Sounds Good, see you there')
+  assert.deepEqual(lower.delivered, ['sounds good, see you there'])
+})
+
+test('an app the user moved gets its new category, and recent apps are offered for placing', async () => {
+  const h = harness({
+    settings: {
+      tidyLevel: 'light',
+      styleApps: { personal: ['com.apple.TextEdit'], work: [], email: [], other: [] }
+    }
+  })
+  await speak(h, 'see you soon')
+  assert.deepEqual(h.delivered, ['See you soon'])
+  const status = await h.service.status()
+  assert.deepEqual(status.recentApps, [{ bundleId: 'com.apple.TextEdit', name: 'TextEdit' }])
+})
+
+test('Full tidy-up uses the model, then the style; the model call is bounded and counted', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'full' },
+    cleanup: async () => 'we should go on Tuesday'
+  })
+  await speak(h, 'um we should uh go on Tuesday')
+  await tick()
+  assert.deepEqual(h.delivered, ['We should go on Tuesday.'])
+  assert.equal(h.cleanupCalls.length, 1)
+  assert.equal(h.cleanupCalls[0]?.mode, 'local')
+  const stages = (await h.service.status()).lastLatency!.stages
+  assert.equal(typeof stages.tidyMs, 'number')
+  assert.equal(stages.transformMs, null)
+})
+
+test('Full tidy-up with no model available quietly uses Light and never calls anything', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'full' },
+    modelOptions: { localModelLabel: null, byok: null }
+  })
+  await speak(h, 'um so i think so')
+  assert.deepEqual(h.delivered, ['So I think so.'])
+  assert.equal(h.cleanupCalls.length, 0)
+  assert.equal((await h.service.status()).model.path, 'none')
+})
+
+test('a provider without consent is not used; with consent it is, and the consent is passed on', async () => {
+  const provider = { provider: 'openai', model: 'gpt-x', hasKey: true }
+  const without = harness({
+    settings: { tidyLevel: 'full' },
+    modelOptions: { localModelLabel: null, byok: provider }
+  })
+  await speak(without, 'plain words here')
+  assert.equal(without.cleanupCalls.length, 0)
+  assert.equal((await without.service.status()).model.path, 'needs-consent')
+  const consent = { provider: 'openai', model: 'gpt-x' }
+  const withConsent = harness({
+    settings: { tidyLevel: 'full', byokConsent: consent },
+    modelOptions: { localModelLabel: null, byok: provider },
+    cleanup: async () => 'Plain words here.'
+  })
+  await speak(withConsent, 'plain words here')
+  await tick()
+  assert.equal(withConsent.cleanupCalls[0]?.mode, 'byok')
+  assert.deepEqual(withConsent.cleanupCalls[0]?.consent, consent)
+  assert.deepEqual(withConsent.delivered, ['Plain words here.'])
+})
+
+test('auto-apply runs a transform after tidy-up and style, and offers View and Undo', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'light', transforms: allTransforms('shorter') },
+    cleanup: async () => 'We should go.'
+  })
+  await speak(h, 'um we should really go there soon')
+  await tick()
+  await tick()
+  assert.deepEqual(h.delivered, ['We should go.'])
+  assert.match(h.cleanupCalls[0]?.mode ?? '', /local/)
+  assert.equal(lastView(h).title, 'Changed by Make it shorter.')
+  assert.equal(lastView(h).controls.view, true)
+  assert.equal(lastView(h).controls.undo, true)
+  assert.equal((await h.service.status()).hasLastChange, true)
+  const stages = (await h.service.status()).lastLatency!.stages
+  assert.equal(typeof stages.transformMs, 'number', 'counted in the timing metrics')
+  assert.ok(h.metrics.some((record) => typeof record.transformMs === 'number'))
+})
+
+test('a failing auto-applied transform inserts the text before it and says so', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'light', transforms: allTransforms('polish') },
+    cleanup: async () => {
+      throw new Error('The notes model is busy with another task.')
+    }
+  })
+  await speak(h, 'send it on friday')
+  await tick()
+  await tick()
+  assert.deepEqual(h.delivered, ['Send it on friday.'])
+  assert.equal((await h.service.status()).hasLastChange, false)
+  assert.ok(h.overlay.some((v) => /Polish: The notes model is busy/.test(v.title)))
+})
+
+test('View shows the words that changed; Dismiss and starting to dictate clear the panel', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'light', transforms: allTransforms('shorter') },
+    cleanup: async () => 'We should go.'
+  })
+  await speak(h, 'we should really go there soon')
+  await tick()
+  await tick()
+  h.service.onOverlayAction('view', null)
+  const view = lastView(h)
+  assert.equal(view.title, 'Make it shorter: before and after')
+  assert.ok(view.diff && view.diff.some((part) => part.op === 'del'))
+  assert.ok(view.diff?.some((part) => part.op === 'same'))
+  h.service.onOverlayAction('dismiss', null)
+  assert.notEqual(lastView(h).title, 'Make it shorter: before and after')
+  h.service.onOverlayAction('view', null)
+  finish(h)
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  assert.equal(lastView(h).mode, 'session', 'a new dictation takes the pill back')
+})
+
+test('Undo puts the old text back through the verified insertion, and keeps it when the field changed', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'light', transforms: allTransforms('shorter') },
+    cleanup: async () => 'We should go.'
+  })
+  await speak(h, 'we should really go there soon')
+  await tick()
+  await tick()
+  finish(h)
+  h.helper.deliverGuards.length = 0
+  h.delivered.length = 0
+  await h.service.undoLastChange()
+  assert.deepEqual(h.delivered, ['We should really go there soon.'])
+  assert.deepEqual(
+    h.helper.deliverGuards,
+    [{ replace: 'We should go.' }],
+    'it replaces the one copy of the new text'
+  )
+  assert.equal(lastView(h).title, 'Put back.')
+  assert.equal((await h.service.status()).hasLastChange, false)
+
+  const changed = harness({
+    settings: { tidyLevel: 'light', transforms: allTransforms('shorter') },
+    cleanup: async () => 'We should go.'
+  })
+  await speak(changed, 'we should really go there soon')
+  await tick()
+  await tick()
+  finish(changed)
+  changed.helper.deliveryFor = () => ({
+    outcome: 'refused',
+    reason: 'text-changed',
+    verified: false,
+    clipboard: 'untouched'
+  })
+  await changed.service.undoLastChange()
+  assert.equal(changed.service.phase, 'recovery', 'never forced in, never lost')
+  const kept = (await changed.service.status()).recoveries[0]
+  assert.equal(kept?.text, 'We should really go there soon.')
+  assert.equal(kept?.reason, 'text-changed')
+})
+
+test('a transform hotkey rewrites the selection and replaces exactly that selection', async () => {
+  const items = BUILTIN_TRANSFORMS.map((item) =>
+    item.id === 'polish' ? { ...item, hotkey: 'Control+Alt+1' } : { ...item }
+  )
+  const h = harness({
+    settings: { transforms: allTransforms(null, { items }) },
+    cleanup: async () => 'This text is clearer now.'
+  })
+  h.helper.selection = { ok: true, text: 'this text is kinda unclear' }
+  await h.service.start()
+  assert.ok(h.shortcuts.has('Control+Alt+1'))
+  assert.equal((await h.service.status()).transformShortcuts.polish, 'registered')
+  h.shortcuts.get('Control+Alt+1')?.()
+  await tick()
+  await tick()
+  assert.deepEqual(h.delivered, ['This text is clearer now.'])
+  assert.deepEqual(h.helper.deliverGuards.at(-1), { expectSelection: 'this text is kinda unclear' })
+  assert.equal(lastView(h).title, 'Changed by Polish.')
+  assert.match(h.cleanupCalls[0]?.mode ?? '', /local/)
+})
+
+test('with no selection a transform works on the last dictation and types the result', async () => {
+  const h = harness({
+    settings: { transforms: allTransforms(null) },
+    cleanup: async () => 'Clearer words.'
+  })
+  await h.service.start()
+  await speak(h, 'some rough words')
+  finish(h)
+  h.clock.now += 5_000
+  await h.service.runTransform('polish')
+  assert.deepEqual(h.delivered.at(-1), 'Clearer words.')
+  assert.deepEqual(h.helper.deliverGuards.at(-1), {})
+  assert.equal(h.cleanupCalls.length, 1)
+  h.shortcuts.get(DEFAULT_DICTATION_SETTINGS.pasteLastShortcut)?.()
+  await tick()
+  await tick()
+  assert.equal(h.delivered.at(-1), 'Clearer words.', 'paste last now holds the rewrite')
+})
+
+test('a transform with nothing to work on says so and calls no model', async () => {
+  const h = harness({ settings: { transforms: allTransforms(null) } })
+  await h.service.start()
+  await h.service.runTransform('polish')
+  assert.match(lastView(h).title, /Select some text first/)
+  assert.equal(h.cleanupCalls.length, 0)
+})
+
+test('a selection in a secure field is never read', async () => {
+  const h = harness({
+    settings: { transforms: allTransforms(null) },
+    cleanup: async () => 'Safe.'
+  })
+  h.helper.target = { ...h.helper.target!, secure: true }
+  h.helper.selection = { ok: true, text: 'a password' }
+  await h.service.start()
+  await h.service.runTransform('polish')
+  assert.equal(h.cleanupCalls.length, 0, 'the secret never goes to a model')
+})
+
+test('if the selection changed while the model worked, the result is kept, not typed over something else', async () => {
+  const h = harness({
+    settings: { transforms: allTransforms(null) },
+    cleanup: async () => 'Rewritten text.'
+  })
+  h.helper.selection = { ok: true, text: 'original words' }
+  h.helper.deliveryFor = () => ({
+    outcome: 'refused',
+    reason: 'selection-changed',
+    verified: false,
+    clipboard: 'untouched'
+  })
+  await h.service.start()
+  await h.service.runTransform('polish')
+  assert.equal(h.service.phase, 'recovery')
+  assert.equal((await h.service.status()).recoveries[0]?.text, 'Rewritten text.')
+  assert.equal((await h.service.status()).hasLastChange, false)
+})
+
+test('a doubtful rewrite changes nothing and says why', async () => {
+  const h = harness({
+    settings: { transforms: allTransforms(null) },
+    cleanup: async () => 'We meet at 6 pm.'
+  })
+  h.helper.selection = { ok: true, text: 'we meet at 5 pm' }
+  await h.service.start()
+  await h.service.runTransform('polish')
+  assert.deepEqual(h.delivered, [])
+  assert.match(lastView(h).title, /Polish: The rewrite changed a number\. Nothing was changed\./)
+})
+
+test('transforms need a model, and say which step is missing', async () => {
+  const none = harness({
+    settings: { transforms: allTransforms(null) },
+    modelOptions: { localModelLabel: null, byok: null }
+  })
+  await none.service.start()
+  await none.service.runTransform('polish')
+  assert.match(lastView(none).title, /notes model on this Mac or your own provider/)
+  const provider = harness({
+    settings: { transforms: allTransforms(null) },
+    modelOptions: {
+      localModelLabel: null,
+      byok: { provider: 'openai', model: 'gpt-x', hasKey: true }
+    }
+  })
+  await provider.service.start()
+  await provider.service.runTransform('polish')
+  assert.match(lastView(provider).title, /Allow sending text to openai/)
+  assert.equal(provider.cleanupCalls.length, 0)
+})
+
+test('transforms are opt-in: off means no hotkeys and no runs', async () => {
+  const items = BUILTIN_TRANSFORMS.map((item) => ({ ...item, hotkey: 'Control+Alt+2' }))
+  const h = harness({ settings: { transforms: allTransforms(null, { enabled: false, items }) } })
+  h.helper.selection = { ok: true, text: 'something' }
+  await h.service.start()
+  assert.ok(!h.shortcuts.has('Control+Alt+2'))
+  await h.service.runTransform('polish')
+  assert.equal(h.cleanupCalls.length, 0)
+  await h.service.setSettings({ transforms: allTransforms(null, { items: items.slice(0, 1) }) })
+  assert.ok(h.shortcuts.has('Control+Alt+2'), 'turning it on registers the hotkeys')
+  await h.service.setSettings({ transforms: allTransforms(null, { enabled: false, items }) })
+  assert.ok(!h.shortcuts.has('Control+Alt+2'), 'and turning it off releases them')
+})
+
+test('transform hotkeys cannot shadow the other shortcuts or each other', async () => {
+  const items = [
+    { ...BUILTIN_TRANSFORMS[0]!, hotkey: 'Control+Alt+D' },
+    { ...BUILTIN_TRANSFORMS[1]!, hotkey: 'Control+Alt+Shift+V' },
+    { ...BUILTIN_TRANSFORMS[2]!, hotkey: 'Control+Alt+3' },
+    { ...BUILTIN_TRANSFORMS[3]!, hotkey: 'control+alt+3' },
+    { ...BUILTIN_TRANSFORMS[4]!, hotkey: 'Control+Alt+4' }
+  ]
+  const h = harness({ settings: { transforms: allTransforms(null, { items }) } })
+  await h.service.start()
+  const status = await h.service.status()
+  assert.equal(
+    status.transformShortcuts.polish,
+    'conflict',
+    'the toggle shortcut keeps its combination'
+  )
+  assert.equal(status.transformShortcuts.shorter, 'conflict')
+  assert.equal(
+    status.pasteLastShortcut,
+    'conflict',
+    'a clash blocks every member of it, paste last included'
+  )
+  assert.equal(status.transformShortcuts['friendly-email'], 'conflict')
+  assert.equal(status.transformShortcuts.bullets, 'conflict')
+  assert.equal(status.transformShortcuts['ai-prompt'], 'registered')
+  assert.ok(!h.shortcuts.has('Control+Alt+3'))
+  assert.ok(h.shortcuts.has('Control+Alt+4'))
+})
+
+test('the pill menu lists the transforms and the last change; picking one runs it', async () => {
+  const h = harness({
+    settings: { transforms: allTransforms(null) },
+    cleanup: async () => 'Better words.'
+  })
+  h.helper.selection = { ok: true, text: 'some words' }
+  await h.service.start()
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  const labels = h.menus[0]!.items.map((item) => item.label)
+  assert.ok(labels.includes('Rewrite the selection or last dictation'))
+  assert.ok(!labels.includes('Undo the last change'), 'nothing to undo yet')
+  const rewrite = h.menus[0]!.items.find((item) => item.label?.startsWith('Rewrite'))!
+  assert.deepEqual(
+    rewrite.submenu!.map((item) => item.label),
+    BUILTIN_TRANSFORMS.map((item) => item.name)
+  )
+  h.menus[0]!.pick({ kind: 'transform', id: 'polish' })
+  await tick()
+  await tick()
+  assert.deepEqual(h.delivered, ['Better words.'])
+  h.service.onOverlayAction('dismiss', null)
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  const later = h.menus[1]!.items.map((item) => item.label)
+  assert.ok(later.includes('View the last change'))
+  assert.ok(later.includes('Undo the last change'))
+})
+
+test('quiet mode hides the "Changed" offer but never an error, and Undo stays in the menu', async () => {
+  const quietSettings = { showStatusMessages: false, tidyLevel: 'light' as const }
+  const h = harness({
+    settings: { ...quietSettings, transforms: allTransforms('shorter') },
+    cleanup: async () => 'We should go.'
+  })
+  await speak(h, 'we should really go there soon')
+  await tick()
+  await tick()
+  assert.deepEqual(h.delivered, ['We should go.'])
+  assert.ok(!h.overlay.some((view) => view.title.startsWith('Changed by')), 'no offer on the pill')
+  assert.equal((await h.service.status()).hasLastChange, true, 'but Undo is still there')
+
+  const failing = harness({
+    settings: { ...quietSettings, transforms: allTransforms(null) },
+    cleanup: async () => 'We meet at 6 pm.'
+  })
+  failing.helper.selection = { ok: true, text: 'we meet at 5 pm' }
+  await failing.service.start()
+  await failing.service.runTransform('polish')
+  assert.match(lastView(failing).title, /Nothing was changed/, 'errors are always shown')
+})
+
+test('what a transform held is forgotten when dictation shuts down', async () => {
+  const h = harness({
+    settings: { tidyLevel: 'light', transforms: allTransforms('shorter') },
+    cleanup: async () => 'We should go.'
+  })
+  await speak(h, 'we should really go there soon')
+  await tick()
+  await tick()
+  assert.equal((await h.service.status()).hasLastChange, true)
+  await h.service.dispose()
+  assert.ok(!JSON.stringify(await h.service.status()).includes('We should go'), 'no text in status')
 })

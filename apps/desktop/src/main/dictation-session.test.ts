@@ -551,3 +551,91 @@ test('a click does not disturb the quick-tap memory or a resting message', () =>
   // A session may start from a resting screen through the normal start event.
   assert.equal(run([start('raw', 'click', 0)], noticed).state.phase, 'preparing')
 })
+
+/* ---- model work with a fallback, and kept text ---- */
+
+test('a fallback and a step count ride on the final: the timer scales, failures use the fallback', () => {
+  const r = run([
+    start('local'),
+    { type: 'capture-ready', gen: 1 },
+    { type: 'stop', source: 'toggle', nowMs: 900 },
+    { type: 'final', gen: 1, text: 'raw words', fallback: 'Raw words.', steps: 2 }
+  ])
+  assert.equal(r.state.phase, 'cleaning')
+  const cleaning = r.effects.filter((e) => e.type === 'timers-set' && e.stage === 'cleaning')
+  assert.equal(cleaning[0]?.type === 'timers-set' && cleaning[0].ms, 40_000, 'twice the 20 s limit')
+  const kept = reduce(r.state, {
+    type: 'cleanup-done',
+    gen: 1,
+    outcome: { kind: 'kept-raw', reason: 'The cleanup changed a number.' }
+  })
+  assert.deepEqual(
+    kept.effects.find((e) => e.type === 'deliver'),
+    { type: 'deliver', gen: 1, text: 'Raw words.' }
+  )
+  assert.equal(kept.state.active?.cleanupNote, 'The cleanup changed a number.')
+  const timedOut = reduce(r.state, { type: 'timeout', gen: 1, stage: 'cleaning' })
+  assert.deepEqual(
+    timedOut.effects.find((e) => e.type === 'deliver'),
+    { type: 'deliver', gen: 1, text: 'Raw words.' }
+  )
+})
+
+test('without a fallback the raw words are what falls back, as before', () => {
+  const r = run([
+    start('byok'),
+    { type: 'capture-ready', gen: 1 },
+    { type: 'stop', source: 'toggle', nowMs: 900 },
+    { type: 'final', gen: 1, text: 'raw words' }
+  ])
+  const cleaning = r.effects.filter((e) => e.type === 'timers-set' && e.stage === 'cleaning')
+  assert.equal(cleaning[0]?.type === 'timers-set' && cleaning[0].ms, 15_000)
+  const kept = reduce(r.state, {
+    type: 'cleanup-done',
+    gen: 1,
+    outcome: { kind: 'kept-raw', reason: 'x' }
+  })
+  assert.deepEqual(
+    kept.effects.find((e) => e.type === 'deliver'),
+    { type: 'deliver', gen: 1, text: 'raw words' }
+  )
+})
+
+test('a cleaned outcome can carry a note for a skipped step', () => {
+  const r = run([
+    start('local'),
+    { type: 'capture-ready', gen: 1 },
+    { type: 'stop', source: 'toggle', nowMs: 900 },
+    { type: 'final', gen: 1, text: 'raw words' }
+  ])
+  const done = reduce(r.state, {
+    type: 'cleanup-done',
+    gen: 1,
+    outcome: {
+      kind: 'cleaned',
+      text: 'Raw words.',
+      note: 'Polish: timed out. The text before it was used.'
+    }
+  })
+  assert.equal(done.state.active?.cleanupNote, 'Polish: timed out. The text before it was used.')
+  assert.deepEqual(
+    done.effects.find((e) => e.type === 'deliver'),
+    { type: 'deliver', gen: 1, text: 'Raw words.' }
+  )
+})
+
+test('keep puts text that must not be lost on the recovery card, but never over a live session', () => {
+  const kept = reduce(initialSessionState(), {
+    type: 'keep',
+    text: 'earlier words',
+    reason: 'text-changed'
+  })
+  assert.equal(kept.state.phase, 'recovery')
+  assert.equal(kept.state.resting?.kind, 'recovery')
+  assert.equal(kept.state.resting?.kind === 'recovery' && kept.state.resting.text, 'earlier words')
+  assert.equal(kept.state.nextGen, 2, 'it consumes a generation, so the card has an id')
+  const live = run([start(), { type: 'capture-ready', gen: 1 }]).state
+  assert.equal(reduce(live, { type: 'keep', text: 'x', reason: 'text-changed' }).state, live)
+  // A new session may start from the card.
+  assert.equal(run([start('raw', 'toggle', 0)], kept.state).state.phase, 'preparing')
+})

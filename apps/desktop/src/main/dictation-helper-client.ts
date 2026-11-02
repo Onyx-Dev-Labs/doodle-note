@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import type { Readable, Writable } from 'node:stream'
 import type {
+  DeliveryGuards,
   HelperDelivery,
   HelperDeliveryTimings,
   HelperStatus,
@@ -12,6 +13,7 @@ import type {
   MouseCaptureResult,
   MouseMode,
   MouseStartResult,
+  SelectionResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 
@@ -154,7 +156,11 @@ export class DictationHelperClient {
    * `uncertain`, never a silent failure: the text may already be in the target,
    * so the caller keeps it and must not resend.
    */
-  async deliver(snapshotId: string, text: string): Promise<HelperDelivery> {
+  async deliver(
+    snapshotId: string,
+    text: string,
+    guards: DeliveryGuards = {}
+  ): Promise<HelperDelivery> {
     if (!(await this.ensureRunning())) {
       return {
         outcome: 'refused',
@@ -163,7 +169,19 @@ export class DictationHelperClient {
         clipboard: 'untouched'
       }
     }
-    const reply = await this.request('deliver', { snapshotId, text }, this.timeouts.deliver, false)
+    const reply = await this.request(
+      'deliver',
+      {
+        snapshotId,
+        text,
+        ...(guards.expectSelection !== undefined
+          ? { expectSelection: guards.expectSelection }
+          : {}),
+        ...(guards.replace !== undefined ? { replace: guards.replace } : {})
+      },
+      this.timeouts.deliver,
+      false
+    )
     if (!reply) {
       return {
         outcome: 'uncertain',
@@ -183,6 +201,21 @@ export class DictationHelperClient {
       verified: reply.verified === true,
       clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
       ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
+    }
+  }
+
+  /** The text selected in the field the snapshot was taken from; refused for a secure field. */
+  async selection(snapshotId: string): Promise<SelectionResult> {
+    const reply = await this.request('selection', { snapshotId }, this.timeouts.snapshot)
+    if (!reply) return { ok: false, reason: 'unavailable' }
+    if (reply.ok && typeof reply.text === 'string') return { ok: true, text: reply.text }
+    const reason = reply.reason
+    return {
+      ok: false,
+      reason:
+        reason === 'no-target' || reason === 'focus-changed' || reason === 'secure-field'
+          ? reason
+          : 'unavailable'
     }
   }
 

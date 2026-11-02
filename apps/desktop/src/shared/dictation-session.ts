@@ -38,12 +38,17 @@ export type RecoveryReason =
   | 'insertion-uncertain'
   | 'insertion-failed'
   | 'helper-unavailable'
+  /** A transform's result: the selection it was made from changed while the model worked. */
+  | 'selection-changed'
+  /** Undo: the field no longer holds the text that was inserted. */
+  | 'text-changed'
 
 export type DeliveryOutcome =
   { kind: 'delivered' } | { kind: 'recover'; reason: RecoveryReason; detail?: string }
 
 export type CleanupOutcome =
-  { kind: 'cleaned'; text: string } | { kind: 'kept-raw'; reason: string }
+  /** `note` says that part of the work was skipped (a transform failed, so the earlier text stands). */
+  { kind: 'cleaned'; text: string; note?: string } | { kind: 'kept-raw'; reason: string }
 
 /** A hold shorter than this was an accidental tap, not an utterance. */
 export const MIN_HOLD_MS = 350
@@ -96,6 +101,13 @@ export interface ActiveSession {
   /** Exactly what delivery was asked to insert; recovery keeps this string. */
   deliverText: string | null
   cleanupNote: string | null
+  /**
+   * What is inserted if the model work fails, times out or is doubted: the raw
+   * words with the deterministic steps (style) applied. Defaults to the raw words.
+   */
+  fallbackText: string | null
+  /** Model calls the cleaning phase may make in a row (tidy-up, then a transform). */
+  cleanupSteps: number
   /** The hands-free limit is a minute away; the pill says so. */
   limitWarning: boolean
   /** The chosen input reports muted or zero volume while recording. */
@@ -163,7 +175,17 @@ export type SessionEvent =
       nowMs: number
     }
   | { type: 'cancel'; gen?: number }
-  | { type: 'final'; gen: number; text: string }
+  | {
+      type: 'final'
+      gen: number
+      text: string
+      /** What to insert instead if the model work fails; defaults to `text`. */
+      fallback?: string
+      /** How many model calls the cleaning phase makes; scales its time limit. */
+      steps?: number
+    }
+  /** Text that must not be lost has nowhere to go: keep it for copying. Never interrupts a live session. */
+  | { type: 'keep'; text: string; reason: RecoveryReason }
   | { type: 'engine-failed'; gen: number; message: string }
   | { type: 'engine-ended'; gen: number }
   | { type: 'cleanup-done'; gen: number; outcome: CleanupOutcome }
@@ -256,6 +278,8 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         rawText: null,
         deliverText: null,
         cleanupNote: null,
+        fallbackText: null,
+        cleanupSteps: 1,
         limitWarning: false,
         micMuted: false,
         micFellBack: event.micFellBack === true
@@ -382,7 +406,12 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       const text = event.text.trim()
       const clear: SessionEffect = { type: 'timers-clear', gen: active.gen }
       if (!text) return toIdle(state, notice('info', 'No speech detected.'), [clear])
-      const withRaw = { ...active, rawText: text }
+      const withRaw = {
+        ...active,
+        rawText: text,
+        fallbackText: event.fallback ?? text,
+        cleanupSteps: Math.max(1, event.steps ?? 1)
+      }
       if (active.cleanupMode === 'raw') {
         return {
           state: { ...state, phase: 'delivering', active: { ...withRaw, deliverText: text } },
@@ -398,7 +427,7 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
             type: 'timers-set',
             gen: active.gen,
             stage: 'cleaning',
-            ms: CLEANUP_TIMEOUT_MS[active.cleanupMode]
+            ms: CLEANUP_TIMEOUT_MS[active.cleanupMode] * withRaw.cleanupSteps
           }
         ]
       }
@@ -406,10 +435,13 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
 
     case 'cleanup-done': {
       if (!active || active.gen !== event.gen || state.phase !== 'cleaning') return ignore
-      const raw = active.rawText ?? ''
+      const fallback = active.fallbackText ?? active.rawText ?? ''
       const text =
-        event.outcome.kind === 'cleaned' && event.outcome.text.trim() ? event.outcome.text : raw
-      const note = event.outcome.kind === 'kept-raw' ? event.outcome.reason : null
+        event.outcome.kind === 'cleaned' && event.outcome.text.trim()
+          ? event.outcome.text
+          : fallback
+      const note =
+        event.outcome.kind === 'kept-raw' ? event.outcome.reason : (event.outcome.note ?? null)
       return {
         state: {
           ...state,
@@ -474,17 +506,37 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
             phase: 'delivering',
             active: {
               ...active,
-              deliverText: active.rawText ?? '',
+              deliverText: active.fallbackText ?? active.rawText ?? '',
               cleanupNote: 'Cleanup timed out; the raw transcript was used.'
             }
           },
           effects: [
             { type: 'cleanup-abort', gen: active.gen },
-            { type: 'deliver', gen: active.gen, text: active.rawText ?? '' }
+            { type: 'deliver', gen: active.gen, text: active.fallbackText ?? active.rawText ?? '' }
           ]
         }
       }
       return ignore
+    }
+
+    case 'keep': {
+      if (isBusy(state)) return ignore
+      const gen = state.nextGen
+      return {
+        state: {
+          ...state,
+          phase: 'recovery',
+          nextGen: gen + 1,
+          resting: {
+            kind: 'recovery',
+            gen,
+            text: event.text,
+            rawText: event.text,
+            reason: event.reason
+          }
+        },
+        effects: []
+      }
     }
 
     case 'limit-warning': {

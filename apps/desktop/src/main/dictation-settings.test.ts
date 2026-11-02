@@ -131,3 +131,85 @@ test('the mouse trigger persists, clears, and coexists with the hold key and the
   assert.equal(new DictationSettingsStore(dir).get().holdMouseButton, null)
   assert.equal(new DictationSettingsStore(dir).get().holdKey, 'fn')
 })
+
+/* ---- tidy-up, styles, transforms ---- */
+
+test('a new install tidies lightly, with the default tones and the shipped transforms off', () => {
+  const settings = normalizeDictationSettings({})
+  assert.equal(settings.tidyLevel, 'light')
+  assert.deepEqual(settings.styles, {
+    personal: 'relaxed',
+    work: 'proper',
+    email: 'proper',
+    other: 'proper'
+  })
+  assert.deepEqual(settings.styleApps, { personal: [], work: [], email: [], other: [] })
+  assert.equal(settings.transforms.enabled, false)
+  assert.equal(settings.transforms.items.length, 5)
+})
+
+test('older files keep their meaning: a model cleanup mode becomes Full, raw becomes Light', () => {
+  assert.equal(normalizeDictationSettings({ cleanupMode: 'local' }).tidyLevel, 'full')
+  assert.equal(normalizeDictationSettings({ cleanupMode: 'byok' }).tidyLevel, 'full')
+  assert.equal(normalizeDictationSettings({ cleanupMode: 'raw' }).tidyLevel, 'light')
+  assert.equal(
+    normalizeDictationSettings({ cleanupMode: 'local', tidyLevel: 'off' }).tidyLevel,
+    'off'
+  )
+  assert.equal(
+    normalizeDictationSettings({ cleanupMode: 'local' }).cleanupMode,
+    'local',
+    'still stored'
+  )
+  assert.equal(normalizeDictationSettings({ tidyLevel: 'extreme' }).tidyLevel, 'light')
+})
+
+test('style tones and app lists are validated and bounded', () => {
+  const settings = normalizeDictationSettings({
+    styles: { personal: 'lowercase', work: 'shouty', email: 7 },
+    styleApps: {
+      work: ['com.a.App', ' com.b.App ', 'com.a.app', 5, ''],
+      personal: ['COM.A.APP', 'com.c.App'],
+      other: 'nope'
+    }
+  })
+  assert.deepEqual(settings.styles, {
+    personal: 'lowercase',
+    work: 'proper',
+    email: 'proper',
+    other: 'proper'
+  })
+  assert.deepEqual(settings.styleApps.work, ['com.b.App'])
+  assert.deepEqual(settings.styleApps.personal, ['COM.A.APP', 'com.c.App'], 'an app has one home')
+  assert.deepEqual(settings.styleApps.other, [])
+  const crowded = normalizeDictationSettings({
+    styleApps: { work: Array.from({ length: 80 }, (_, i) => `com.x.App${i}`) }
+  })
+  assert.equal(crowded.styleApps.work.length, 50)
+})
+
+test('transforms persist with their prompts and shortcuts, and never hold dictated text', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-transforms-'))
+  const store = new DictationSettingsStore(dir)
+  store.update({
+    tidyLevel: 'full',
+    transforms: {
+      enabled: true,
+      autoApply: true,
+      autoApplyId: 'mine',
+      items: [
+        {
+          id: 'mine',
+          name: 'Mine',
+          prompt: 'Rewrite kindly.',
+          hotkey: 'Control+Alt+9',
+          keepFacts: false
+        }
+      ]
+    }
+  })
+  const reloaded = new DictationSettingsStore(dir).get()
+  assert.equal(reloaded.tidyLevel, 'full')
+  assert.equal(reloaded.transforms.autoApplyId, 'mine')
+  assert.equal(reloaded.transforms.items[0]!.hotkey, 'Control+Alt+9')
+})

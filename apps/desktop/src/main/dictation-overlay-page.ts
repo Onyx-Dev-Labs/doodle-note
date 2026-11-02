@@ -46,6 +46,9 @@ export function overlayHtml(): string {
   .card .title{font-weight:700;font-size:14px;line-height:1.3}
   .card.warn{border-color:var(--warn)}.card.error{border-color:var(--err)}
   .card .detail{flex:1;min-height:0;color:var(--mute);font:12px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
+  .diff{flex:1;min-height:0;overflow:hidden;font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word;-webkit-user-select:text;user-select:text;background:var(--wash);border-radius:8px;padding:6px 8px}
+  .diff ins{text-decoration:none;color:var(--ok);background:rgba(79,122,74,.16);border-radius:3px}
+  .diff del{color:var(--err);background:rgba(179,65,47,.14);border-radius:3px;text-decoration:line-through}
   .btns{display:flex;gap:6px;justify-content:flex-end}
   .btn{color:var(--ink);background:var(--wash);border:1.4px solid var(--ink);padding:1px 10px;border-radius:9px;text-decoration:none;font-size:13px}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--ink)}
@@ -73,7 +76,10 @@ export function overlayHtml(): string {
   <div class="card" id="card" hidden>
     <div class="title" id="title"></div>
     <div class="detail" id="cardDetail"></div>
+    <div class="diff" id="diff" hidden aria-label="Changes: removed words are struck through, added words are highlighted"></div>
     <div class="btns">
+      <a class="btn" id="view" href="doodle-dictation://view" role="button" hidden>View</a>
+      <a class="btn primary" id="undo" href="doodle-dictation://undo" role="button" hidden>Undo</a>
       <a class="btn primary" id="copy" href="doodle-dictation://copy" role="button" hidden>Copy text</a>
       <a class="btn" id="dismiss" href="doodle-dictation://dismiss" role="button" hidden>Dismiss</a>
     </div>
@@ -156,7 +162,19 @@ export function overlayHtml(): string {
       $('cardDetail').textContent = next.detail
       $('cardDetail').hidden = !next.detail
       $('copy').hidden = !next.controls.copy
+      $('view').hidden = !next.controls.view
+      $('undo').hidden = !next.controls.undo
       $('dismiss').hidden = !next.controls.dismiss
+      const diff = $('diff')
+      diff.hidden = !next.diff
+      diff.textContent = ''
+      if (next.diff) {
+        for (const part of next.diff) {
+          const node = document.createElement(part.op === 'add' ? 'ins' : part.op === 'del' ? 'del' : 'span')
+          node.textContent = part.text
+          diff.appendChild(node)
+        }
+      }
     }
     // Spoken once per change, never on every level update.
     if (!was || was.title !== next.title || was.mode !== next.mode || was.warning !== next.warning) {

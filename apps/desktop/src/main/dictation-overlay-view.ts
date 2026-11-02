@@ -1,4 +1,5 @@
 import { isMessageShown, type PillEdge, type Size } from '../shared/dictation-pill'
+import type { DiffSegment } from '../shared/dictation-transforms'
 import type { RecoveryReason, SessionState } from '../shared/dictation-session'
 
 /** rest: the small idle pill. session: the live pill. message: a notice or kept text. */
@@ -22,7 +23,18 @@ export interface OverlayView {
   detail: string
   /** 0..1 microphone level; null hides the meter. */
   level: number | null
-  controls: { stop: boolean; cancel: boolean; copy: boolean; dismiss: boolean }
+  controls: {
+    stop: boolean
+    cancel: boolean
+    copy: boolean
+    dismiss: boolean
+    /** Show the before and after of a transform. */
+    view: boolean
+    /** Put the text from before the transform back. */
+    undo: boolean
+  }
+  /** Before and after words, shown as a diff in a message card; null otherwise. */
+  diff: DiffSegment[] | null
   gen: number | null
 }
 
@@ -41,7 +53,7 @@ export interface OverlayContext {
   showStatusMessages: boolean
 }
 
-const NONE = { stop: false, cancel: false, copy: false, dismiss: false }
+const NONE = { stop: false, cancel: false, copy: false, dismiss: false, view: false, undo: false }
 
 export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'focus-changed': 'You moved to another field, so nothing was typed.',
@@ -51,7 +63,10 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'accessibility-denied': 'Accessibility access is off, so nothing was typed.',
   'insertion-uncertain': 'Could not confirm the text was inserted. Check before pasting again.',
   'insertion-failed': 'Insertion failed, so nothing was typed.',
-  'helper-unavailable': 'The insertion helper is unavailable, so nothing was typed.'
+  'helper-unavailable': 'The insertion helper is unavailable, so nothing was typed.',
+  'selection-changed':
+    'The selection changed while the text was being rewritten, so nothing was replaced.',
+  'text-changed': 'The text there has changed since, so it was not put back.'
 }
 
 /** Copy for the heads-up line under the live pill. */
@@ -68,11 +83,21 @@ const WINDOW = {
   sessionBase: 56,
   warningLine: 26,
   detailBlock: 64,
-  message: { width: 380, height: 132 }
+  message: { width: 380, height: 132 },
+  diff: { width: 480, height: 300 }
 } as const
 
 /** Window size the page needs for a view; the overlay docks a window of this size. */
 export function overlaySize(view: OverlayView): Size {
+  if (view.mode === 'message' && view.diff) {
+    // Room for the words, about 55 to a line, up to a fixed height.
+    const chars = view.diff.reduce((total, part) => total + part.text.length, 0)
+    const lines = Math.ceil(chars / 55)
+    return {
+      width: WINDOW.diff.width,
+      height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
+    }
+  }
   if (view.mode === 'message') return { ...WINDOW.message }
   if (view.mode === 'session') {
     return {
@@ -105,6 +130,7 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
     edge: ctx.edge,
     warning: null,
     showStatus: isMessageShown('status', prefs),
+    diff: null,
     gen,
     ...fields
   })
@@ -212,5 +238,45 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
         controls: { ...NONE, dismiss: resting.level !== 'success' }
       })
     }
+  }
+}
+
+/** A small panel the service shows after a transform, over the resting pill. */
+export type OverlayPanel =
+  | { kind: 'working'; name: string }
+  | { kind: 'changed'; name: string }
+  | { kind: 'diff'; name: string; segments: DiffSegment[] }
+
+/** The view for a panel; `base` supplies the edge and the quiet settings. */
+export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
+  const common = {
+    visible: true,
+    mode: 'message' as const,
+    edge: base.edge,
+    warning: null,
+    showStatus: base.showStatus,
+    gen: null,
+    level: null,
+    detail: ''
+  }
+  switch (panel.kind) {
+    case 'working':
+      return { ...common, tone: 'busy', title: `${panel.name}…`, controls: NONE, diff: null }
+    case 'changed':
+      return {
+        ...common,
+        tone: 'ok',
+        title: `Changed by ${panel.name}.`,
+        controls: { ...NONE, view: true, undo: true, dismiss: true },
+        diff: null
+      }
+    case 'diff':
+      return {
+        ...common,
+        tone: 'ok',
+        title: `${panel.name}: before and after`,
+        controls: { ...NONE, undo: true, dismiss: true },
+        diff: panel.segments
+      }
   }
 }

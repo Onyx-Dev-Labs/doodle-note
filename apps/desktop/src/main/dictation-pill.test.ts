@@ -348,7 +348,14 @@ const quiet = { showLiveText: false, showStatusMessages: false }
 
 test('every message kind is classified, and only narration is suppressible', () => {
   const suppressible = OVERLAY_MESSAGE_KINDS.filter((k) => messageVisibility(k) === 'suppressible')
-  assert.deepEqual(suppressible.sort(), ['cleanup-note', 'live-text', 'status', 'success'])
+  assert.deepEqual(suppressible.sort(), [
+    'change',
+    'cleanup-note',
+    'live-text',
+    'status',
+    'success',
+    'working'
+  ])
   const always = OVERLAY_MESSAGE_KINDS.filter((k) => messageVisibility(k) === 'always')
   assert.deepEqual(always.sort(), [
     'accessibility-hint',
@@ -360,7 +367,7 @@ test('every message kind is classified, and only narration is suppressible', () 
     'recovery',
     'shortcut-conflict'
   ])
-  assert.equal(OVERLAY_MESSAGE_KINDS.length, 12)
+  assert.equal(OVERLAY_MESSAGE_KINDS.length, 14)
 })
 
 test('failures, recovery and warnings stay visible with everything switched off', () => {
@@ -453,4 +460,47 @@ test('the two mouse modes are named and explained plainly', () => {
   assert.match(describeMouseMode('hold'), /Hold the button while you speak/)
   assert.match(describeMouseMode('hold'), /Two quick clicks keep recording/)
   assert.ok(!/Two quick clicks/.test(describeMouseMode('hold', false)))
+})
+
+test('the menu offers the transforms and the last change only when they exist', () => {
+  const model = {
+    showAlways: true,
+    devices: [],
+    selectedUid: null,
+    hasLastTranscript: true,
+    showLiveText: true,
+    showStatusMessages: true,
+    mouseButton: null,
+    mouseMode: 'click' as const
+  }
+  const plain = buildPillMenu(model).map((item) => item.label)
+  assert.ok(!plain.some((label) => label?.startsWith('Rewrite')))
+  assert.ok(!plain.includes('Undo the last change'))
+  const rich = buildPillMenu({
+    ...model,
+    transforms: [
+      { id: 'polish', name: 'Polish' },
+      { id: 'mine', name: 'Mine' }
+    ],
+    hasLastChange: true
+  })
+  const labels = rich.map((item) => item.label)
+  assert.deepEqual(labels.slice(2, 7), [
+    'Paste the last transcript',
+    'Copy the last transcript',
+    'Rewrite the selection or last dictation',
+    'View the last change',
+    'Undo the last change'
+  ])
+  const rewrite = rich.find((item) => item.label?.startsWith('Rewrite'))!
+  assert.deepEqual(
+    rewrite.submenu!.map((item) => item.command),
+    [
+      { kind: 'transform', id: 'polish' },
+      { kind: 'transform', id: 'mine' }
+    ]
+  )
+  assert.deepEqual(rich.find((item) => item.label === 'Undo the last change')!.command, {
+    kind: 'undo-change'
+  })
 })

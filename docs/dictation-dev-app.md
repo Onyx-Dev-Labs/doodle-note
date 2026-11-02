@@ -11,7 +11,7 @@ Press a shortcut in any macOS app, speak, and the recognized text is typed into 
 - **The pill:** a small paper-toned doodle pill that stays at a screen edge while dictation is on, and grows into the live pill (Cancel, a squiggle that follows your voice, Finish) during a session. See "The pill" below. Partial text stays in the overlay; the final text is inserted once.
 - **Delivery:** a native helper snapshots the focused app and control at start, re-validates immediately before inserting, and inserts through Accessibility, falling back to a clipboard paste that preserves every pasteboard representation and never overwrites a clipboard change you made meanwhile. It never presses Return.
 - **Recovery:** if focus moved, the field is secure or unsupported, Accessibility is off, or the insertion cannot be confirmed, the text is kept (overlay + Settings → Dictation) for you to copy. It is never retried blindly and the old app is never re-activated.
-- **Cleanup (optional, separate from recognition):** Raw (default), Local cleanup (the installed notes model) or Your provider (BYOK, text only, after explicit consent bound to that provider+model). Busy, failing, timed-out or doubtful cleanup falls back to the raw text and says so.
+- **Tidy-up, styles and transforms (separate from recognition):** Off, Light (default) or Full tidy-up, a tone per kind of app, and optional rewrite transforms. See "Tidy-up, styles and transforms" below. Busy, failing, timed-out or doubtful model output falls back to the words as you said them and says so.
 
 ## The pill
 
@@ -87,6 +87,55 @@ The Fn key reaches the helper as a flags-changed event (key code 63, the seconda
 ### Settings added
 
 Settings, Dictation: Show the pill at all times (with "Show it now" while hidden); Pill position (bottom, left, right); Microphone; Start and stop tones; Keep recording with a double tap; Type the last transcript again and Copy the last transcript (shortcuts: change or turn off). All are saved in `dictation.json`: booleans, the edge, the hide expiry time, a device UID and an accelerator string. No audio, text or history.
+
+## Tidy-up, styles and transforms
+
+Speech recognition is always local. What happens to the words afterwards is three separate, independent steps, in this order: **tidy-up**, then the **style** for the app you are typing into, then an optional auto-applied **transform**. Settings, Dictation has a section for each.
+
+### Tidy-up
+
+| Level | What it does | Where it runs |
+|---|---|---|
+| Off | Types the words exactly as recognised. Styles are skipped too. | nowhere |
+| Light (default for new installs) | Removes um, uh and similar, "you know" and "like" when set off by commas, stutters and repeated words ("the the", "I think I think"); applies spoken corrections ("meet at three, no, I mean four" becomes "meet at four"; "send it to John, I mean Jane"; "scratch that" drops the sentence before it); turns "first, milk. second, eggs." or "one, ... two, ..." into a bulleted list; capitalises sentences and "I"; adds the closing full stop. Pure functions, instant, on this Mac, no model, no network. | `src/shared/dictation-tidy.ts` |
+| Full | A model rewrites a rambling brain dump into clear sentences, paragraphs or bullets, resolving false starts and self-corrections, keeping your meaning, voice and language, adding no facts, names or numbers. The result must pass the existing checks (numbers, negations and names preserved, no added text, not an answer instead of an edit) or the words as you said them are typed. | the notes model on this Mac if one is installed, otherwise your provider after you allowed sending text to that provider and model |
+
+Light is deliberately cautious. A correction is only applied when a number replaces a number or a name replaces a name; anything else (for example "it was great, I mean really great") is left as spoken. "like" is only removed when commas frame it, so "I like pizza" and "looks like rain" are untouched. URLs, e-mail addresses, file names and code identifiers (`main.swift`, `getUserName`, `max_retries`, text in backticks) are never recapitalised or altered. Text that does not look English (non-Latin scripts, accented words with no English in them, clear function words of Spanish, French, German, Portuguese or Italian) passes through with only its spacing normalised. Language detection is a heuristic: very short text with no evidence either way is treated as English.
+
+If Full is chosen but no model is available (nothing installed, or a provider without consent), Light is used and the Settings page says so; nothing is sent anywhere. Old settings files keep their meaning: a stored model cleanup mode becomes Full, the old default becomes Light.
+
+### Style
+
+Four categories (Personal messages, Work messages, Email, Everything else), each with a tone and a card showing a live before and after:
+
+- **Proper**: capitals and full punctuation.
+- **Relaxed**: capitals, no closing full stop; question and exclamation marks stay.
+- **Lowercase quick**: no capitals except "I", acronyms and words with capitals inside (iPhone), and no closing full stop. URLs, e-mail and code are left as spoken. A personal dictionary will plug in here (`knownTerms` in `applyStyle`); none exists yet, so names are lowercased too.
+
+The category comes from the focused app's bundle id, read by the helper when the session starts. A built-in list covers Messages, WhatsApp, Telegram, Discord and Signal (personal), Slack, Teams, Zoom and Webex (work), and Mail, Outlook, Spark, MailMate, Airmail and Superhuman (email). Everything else, including Notes and every browser, is Everything else: Gmail in a browser cannot be told from any other page, so it is not pretended. The page lets you move any app between categories, add one from the apps you dictated into lately or by bundle id, and remove your additions; your choice beats the built-in list. Defaults: Relaxed for personal, Proper elsewhere. Styles only change capitals and punctuation, apply to English only, and need tidy-up to be Light or Full.
+
+A "Cheerful" tone was not built: it would mean swapping a full stop for an exclamation mark or adding emoji, which turns "my dog died." into "my dog died!". A tone shift needs understanding of meaning, so it belongs in a transform (see Friendly email), not in a deterministic rule.
+
+### Transforms
+
+Named rewrite prompts, opt-in (Settings, Dictation, Transforms, "Turn on transforms"). Built in, with our own prompts: Polish, Make it shorter, Friendly email, Bullet summary, and Turn it into a prompt for an AI assistant. You can edit any of them, delete them, create your own (a name and your own prompt, up to 20 transforms), give each an optional global shortcut, and reset to the defaults. Your prompts and shortcuts are stored in `dictation.json`, which never holds dictated text.
+
+- **Running one** (its shortcut, the pill's menu "Rewrite the selection or last dictation", or Try on its card): it takes the text selected in the focused app if the helper can read it, otherwise your last dictation (held in memory only), sends it to the model as data inside tags with our safety rules ahead of your prompt, checks the answer, and puts the result in. For a selection, the helper replaces exactly that selection, and it is told what the selection was: if the selection changed while the model worked, the insertion is refused and the result waits on the kept-text card. For the last dictation the result is typed at the cursor.
+- **Checks on the result:** not empty, not an answer or a refusal instead of a rewrite, not wildly longer than the text; Polish additionally has to keep every number, negation and name. A doubtful result changes nothing and the pill says why.
+- **Secure fields:** the selection is never read from a password or other secure field.
+- **Auto apply after dictation:** pick one transform and turn the toggle on. It runs after tidy-up and style on every dictation. If it fails or looks doubtful, the text before it is typed and the pill says so. Its time is counted in the timing metrics (`transformMs`), next to the model tidy-up (`tidyMs`).
+- **View changes and Undo:** after a transform changed the text the pill shows "Changed by Polish. View, Undo" for 8 seconds, and View and Undo stay in the pill's menu and Settings. View opens a word-level before and after (removed words struck through, added words highlighted). Undo asks the helper to find the one copy of the new text in the focused field, select it and put the old text back through the same verified insertion. If the field no longer holds it exactly once, nothing is forced: the old text waits on the kept-text card. The text before a transform is held in memory only and forgotten on quit.
+- **Model access:** the notes model on this Mac if one is installed, otherwise your provider with the existing consent (bound to provider and model; the Tidy-up section holds the toggle, and a transform run without consent tells you where to give it). With neither, the page says so plainly; Light and styles keep working.
+- **Quiet mode:** "Changed by..." and the "working" caption are suppressible by "Show status messages". Errors, kept text and warnings never are. Undo and View remain in the menu.
+
+### Privacy and limits
+
+- No dictated text or selection is written to disk or logged; metrics hold durations only.
+- Only the model steps send anything off the audio path, and only to the notes model on this Mac or to your consented provider: the text being tidied or rewritten, never audio. Consent covers dictated text and text you ask a transform to rewrite.
+- A selection longer than 6,000 characters is refused, and a model call longer than 40 seconds (local) or 25 (provider) is cut off with nothing changed.
+- Bullets use real newlines, which some single-line fields and chat apps treat as "send" or as a line break; turn tidy-up to Off or relaxed to avoid them there.
+- Transforms in apps whose accessibility tree does not expose the selection (some web views) fall back to the last dictation, and Undo there may keep the text on the card instead of replacing it.
+- A local model is not installed on the development Mac: the model path was tested with stubs only.
 
 ## Isolation from the production app
 
@@ -174,7 +223,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 785 desktop tests (783 pass, 2 skipped) with typecheck and lint clean, plus 41 Swift tests for the hold-key and mouse logic and delivery helpers (`cd engine && swift test`). The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (31: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (11), settings normalization and persistence (7), service orchestration (66: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last and copy last, shortcut collisions, Fn double tap, mute polling, quiet mode, the mouse trigger, stage timings), helper client (10), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 874 desktop tests (872 pass, 2 skipped) with typecheck and lint clean, plus 45 Swift tests for the hold-key and mouse logic, delivery helpers and the text locator (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (15), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.
@@ -236,6 +285,8 @@ Kept on purpose (safety over speed):
 Not measured: the live microphone path (microphone teardown, queued audio, and the IPC from the engine to the app). Open Settings, Dictation after one dictation and read the line under "Last dictation": `speech` is `stopToFinalMs` with its two engine parts, and the remainder is capture teardown plus the pipe.
 
 ## Not verified, and known gaps
+
+- **Tidy-up, styles and transforms, needs a person and a model:** no notes model is installed on the development Mac and no provider key was used, so Full tidy-up and every transform were tested with stub models. Not exercised against real model output: the prompts' quality, the validators on real rewrites, timing of the local model. Not driven in a real app: reading a selection and replacing it through accessibility in TextEdit, Notes or a browser, Undo's search in real fields, the View and Undo pill on screen with a pointer, and the settings sections (they type-check and the components share the existing page patterns, but were not opened).
 
 - **Mouse button, needs a physical multi-button mouse:** the packaged helper was driven with synthetic events on an unused button (number 7, which no app acts on) through the real event taps and the real service: in click mode a single click starts a session at once, a long press does not end it, a double click 80 ms apart does not end it, a click about a second later stops it and inserts, and swallowing neither eats the second click nor lets either through (turned off, both pass through); hold mode behaves as before; the capture records the same number the tap sees. Not checked with real hardware: back and forward in a real browser, a remapping tool in the way, the lost-release poll with a physical release, a key and a button held together (covered by the arbiter's unit tests only), the primary-button refusal (left and right clicks cannot be synthesised safely), and an active tap's behaviour if Accessibility is revoked while running.
 - **Fn, needs a person:** see "Fn / Globe key" above.

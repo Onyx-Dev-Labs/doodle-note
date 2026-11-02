@@ -12,6 +12,7 @@ import {
   type ShortcutState
 } from '../shared/dictation-api'
 import type {
+  DeliveryGuards,
   HelperDelivery,
   HelperDeliveryTimings,
   HelperStatus,
@@ -21,17 +22,18 @@ import type {
   MouseCaptureResult,
   MouseMode,
   MouseStartResult,
+  SelectionResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 import { micLooksMuted } from '../shared/dictation-helper-protocol'
 import {
   buildPillMenu,
+  isMessageShown,
   describeMouseCaptureFailure,
   hideExpiry,
   isPillHidden,
   msUntilPillReturns,
   resolveMicrophone,
-  shortcutsCollide,
   soundForTransition,
   type InputDevice,
   type PillEdge,
@@ -55,13 +57,25 @@ import {
 import type { EngineEvent, EngineStartOptions } from '../shared/engine-events'
 import type { PermissionOutcome, PermissionPane } from '../shared/dictation-permissions'
 import type { CaptureLease, CaptureOwnership } from './capture-ownership'
-import { MAX_CLEANUP_CHARS, buildCleanupRequest, validateCleanup } from './dictation-cleanup'
+import { MAX_CLEANUP_CHARS, buildTransformRequest, validateTransform } from './dictation-cleanup'
 import {
   RECOVERY_MESSAGES,
   overlayView,
+  panelView,
   type OverlayContext,
+  type OverlayPanel,
   type OverlayView
 } from './dictation-overlay-view'
+import {
+  deterministicText,
+  fallbackText,
+  planDictation,
+  resolveModel,
+  runModelSteps,
+  type DictationPlan,
+  type TransformChange
+} from './dictation-pipeline'
+import { conflictingShortcuts, diffWords } from '../shared/dictation-transforms'
 import type { OverlayAction } from './dictation-overlay'
 
 export interface EngineLike {
@@ -77,7 +91,9 @@ export interface HelperLike {
   readonly available: boolean
   status(): Promise<HelperStatus | null>
   snapshot(snapshotId: string): Promise<TargetDescription | null>
-  deliver(snapshotId: string, text: string): Promise<HelperDelivery>
+  deliver(snapshotId: string, text: string, guards?: DeliveryGuards): Promise<HelperDelivery>
+  /** The text selected in the snapshot's field; refused for secure fields. */
+  selection(snapshotId: string): Promise<SelectionResult>
   release(snapshotId: string): void
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
   /** Arm or disarm the optional mouse-button trigger. Null result means it was switched off. */
@@ -165,6 +181,13 @@ interface SessionContext {
   /** CoreAudio UID this session records from; null = system default. */
   micUid: string | null
   warmAtStart: boolean
+  /** Settings and model availability as they were when the session began; later changes apply to the next one. */
+  settings: DictationSettings
+  modelOptions: DictationStatus['cleanup']
+  /** Decided when the speech ends, once the focused app is known. */
+  plan: DictationPlan | null
+  /** The auto-applied transform's before and after, once it has run. */
+  change: TransformChange | null
   marks: {
     start: number
     micOpen?: number
@@ -182,6 +205,8 @@ interface SessionContext {
     engineDrainMs?: number
     engineFinishMs?: number
     helper?: HelperDeliveryTimings
+    tidyMs?: number
+    transformMs?: number
   }
 }
 
@@ -191,6 +216,11 @@ const NOTICE_MS = 6_000
 const ESCAPE = 'Escape'
 /** How often the chosen input is checked for a mute or zero volume while recording. */
 const MIC_POLL_MS = 2_000
+/** "Changed by Polish. View / Undo" stays this long. */
+const CHANGE_PANEL_MS = 8_000
+const DIFF_PANEL_MS = 60_000
+/** A transform run by hand gives up after this long. */
+const TRANSFORM_TIMEOUT_MS = { local: 40_000, byok: 25_000 } as const
 /** The device list is re-read at most this often unless the menu asks. */
 const DEVICE_REFRESH_MS = 3_000
 /** The menu waits this long for a fresh device list before it shows what it has. */
@@ -243,6 +273,21 @@ export class DictationService {
   private mouseState: DictationStatus['mouseButton'] = 'off'
   private mouseSwallowing = false
   private askingMicrophone = false
+  /** What the last transform changed, for View and Undo. Memory only, forgotten on quit. */
+  private lastChange: {
+    name: string
+    before: string
+    after: string
+  } | null = null
+  private panel: OverlayPanel | null = null
+  private panelTimer: NodeJS.Timeout | null = null
+  private transforming: AbortController | null = null
+  private readonly transformKeys = new Map<
+    string,
+    { accelerator: string | null; state: ShortcutState }
+  >()
+  /** The apps dictation went into lately, newest first, so one can be placed in a style. */
+  private recentApps: Array<{ bundleId: string; name: string }> = []
   private rearming = false
   private restartedForPermission = false
   private escapeRegistered = false
@@ -275,11 +320,15 @@ export class DictationService {
     this.unregisterEscape()
     if (this.toggleAccelerator) this.deps.shortcuts.unregister(this.toggleAccelerator)
     this.toggleAccelerator = null
-    for (const key of Object.values(this.actionKeys)) {
+    for (const key of [...Object.values(this.actionKeys), ...this.transformKeys.values()]) {
       if (key.accelerator) this.deps.shortcuts.unregister(key.accelerator)
       key.accelerator = null
     }
+    this.transformKeys.clear()
+    this.transforming?.abort()
+    this.setPanel(null)
     this.lastTranscript = null
+    this.lastChange = null
     for (const stop of this.unsubscribe) stop()
     this.deps.overlay.dispose()
     await this.deps.helper.dispose()
@@ -305,8 +354,12 @@ export class DictationService {
     if (!this.deps.supported || !settings.enabled) {
       this.dispatch({ type: 'cancel' })
       this.setToggleShortcut('')
-      this.setActionShortcut('paste', '')
-      this.setActionShortcut('copy', '')
+      this.setActionShortcut('paste', '', new Set())
+      this.setActionShortcut('copy', '', new Set())
+      this.applyTransformShortcuts(
+        { ...settings, transforms: { ...settings.transforms, enabled: false } },
+        new Set()
+      )
       this.holdState = 'off'
       this.mouseState = 'off'
       this.mouseSwallowing = false
@@ -317,8 +370,10 @@ export class DictationService {
       return
     }
     this.setToggleShortcut(settings.toggleShortcut)
-    this.setActionShortcut('paste', settings.pasteLastShortcut)
-    this.setActionShortcut('copy', settings.copyLastShortcut)
+    const clashes = this.shortcutClashes(settings)
+    this.setActionShortcut('paste', settings.pasteLastShortcut, clashes)
+    this.setActionShortcut('copy', settings.copyLastShortcut, clashes)
+    this.applyTransformShortcuts(settings, clashes)
     this.refreshPillTimer()
     this.render()
     if (settings.holdKey === 'off') {
@@ -389,13 +444,14 @@ export class DictationService {
   }
 
   /** Register (or clear) the paste-last or copy-last shortcut. */
-  private setActionShortcut(slot: 'paste' | 'copy', accelerator: string): void {
+  private setActionShortcut(
+    slot: 'paste' | 'copy',
+    accelerator: string,
+    blocked: ReadonlySet<string>
+  ): void {
     const key = this.actionKeys[slot]
-    const settings = this.deps.settings.get()
-    const other = slot === 'paste' ? settings.copyLastShortcut : settings.pasteLastShortcut
-    // Two actions on one combination would shadow each other; flag both.
-    const collides =
-      shortcutsCollide(accelerator, settings.toggleShortcut) || shortcutsCollide(accelerator, other)
+    // Two actions on one combination would shadow each other; both are flagged.
+    const collides = blocked.has(slot)
     if (!collides && key.accelerator === accelerator && key.state === 'registered') return
     if (key.accelerator) this.deps.shortcuts.unregister(key.accelerator)
     key.accelerator = null
@@ -479,6 +535,10 @@ export class DictationService {
         devices: this.devices,
         selectedUid: settings.microphoneUid,
         hasLastTranscript: this.lastTranscript !== null,
+        transforms: settings.transforms.enabled
+          ? settings.transforms.items.map((item) => ({ id: item.id, name: item.name }))
+          : [],
+        hasLastChange: this.lastChange !== null,
         mouseButton: settings.holdMouseButton,
         mouseMode: settings.holdMouseMode,
         showLiveText: settings.showLiveText,
@@ -504,6 +564,15 @@ export class DictationService {
         break
       case 'settings':
         this.deps.openSettings()
+        break
+      case 'transform':
+        void this.runTransform(command.id)
+        break
+      case 'view-change':
+        this.viewLastChange()
+        break
+      case 'undo-change':
+        void this.undoLastChange()
         break
       case 'toggle-live-text':
         void this.patch({ showLiveText: !this.deps.settings.get().showLiveText })
@@ -653,7 +722,14 @@ export class DictationService {
         if (gen !== null) void this.copyRecovery(gen)
         break
       case 'dismiss':
-        this.dispatch({ type: 'dismiss' })
+        if (this.panel) this.setPanel(null)
+        else this.dispatch({ type: 'dismiss' })
+        break
+      case 'view':
+        this.viewLastChange()
+        break
+      case 'undo':
+        void this.undoLastChange()
         break
     }
   }
@@ -744,6 +820,7 @@ export class DictationService {
     this.deferredStart = null
     this.lastStartAt = now
     this.showHiddenPill()
+    this.setPanel(null)
     const context: SessionContext = {
       gen,
       snapshotId,
@@ -752,6 +829,10 @@ export class DictationService {
       micUid: microphone.uid,
       consent: settings.byokConsent,
       warmAtStart: this.deps.engine.warm,
+      settings: structuredClone(settings),
+      modelOptions: this.deps.cleanupOptions(),
+      plan: null,
+      change: null,
       marks: { start: now },
       detail: {}
     }
@@ -763,7 +844,8 @@ export class DictationService {
     this.dispatch({
       type: 'start',
       trigger,
-      cleanupMode: settings.cleanupMode,
+      // Only the model steps need the engine path; the rest is instant and runs in place.
+      cleanupMode: modelEngineFor(context),
       nowMs: now,
       doubleTap: settings.handsFreeDoubleTap,
       micFellBack: microphone.fellBack,
@@ -891,7 +973,7 @@ export class DictationService {
           const detail = this.sessions.get(gen)?.detail
           if (detail && typeof event.drainMs === 'number') detail.engineDrainMs = event.drainMs
           if (detail && typeof event.finishMs === 'number') detail.engineFinishMs = event.finishMs
-          this.dispatch({ type: 'final', gen, text: event.text })
+          this.finishSpeech(gen, event.text)
         }
         break
       case 'error':
@@ -913,6 +995,38 @@ export class DictationService {
         break
     }
     return true
+  }
+
+  /**
+   * The speech has ended. Run the instant steps (tidy-up, style) in place and hand
+   * the reducer the finished text, or, when a model step is planned, the raw words
+   * with the text to fall back on. The focused app, known since the session began,
+   * decides the style.
+   */
+  private finishSpeech(gen: number, text: string): void {
+    const context = this.sessions.get(gen)
+    if (!context) {
+      this.dispatch({ type: 'final', gen, text })
+      return
+    }
+    const trimmed = text.trim()
+    const plan = planDictation(
+      context.settings,
+      context.modelOptions,
+      context.targetDescription?.bundleId
+    )
+    context.plan = plan
+    if (!trimmed || plan.steps === 0) {
+      this.dispatch({ type: 'final', gen, text: trimmed ? deterministicText(trimmed, plan) : text })
+      return
+    }
+    this.dispatch({
+      type: 'final',
+      gen,
+      text: trimmed,
+      fallback: fallbackText(trimmed, plan),
+      steps: plan.steps
+    })
   }
 
   /** Whether a sidecar event stream is currently owned by dictation. */
@@ -1096,7 +1210,26 @@ export class DictationService {
       showLiveText: this.deps.settings.get().showLiveText,
       showStatusMessages: this.deps.settings.get().showStatusMessages
     }
-    this.deps.overlay.render(overlayView(this.state, context))
+    const base = overlayView(this.state, context)
+    this.deps.overlay.render(this.panel && this.panelFits() ? panelView(this.panel, base) : base)
+  }
+
+  /** A panel sits over the resting pill; it never covers a live session, kept text or an error. */
+  private panelFits(): boolean {
+    if (isBusy(this.state) || this.state.phase === 'recovery') return false
+    const resting = this.state.resting
+    return !(resting?.kind === 'notice' && resting.level !== 'success')
+  }
+
+  private setPanel(panel: OverlayPanel | null, ms = 0): void {
+    if (this.panelTimer) clearTimeout(this.panelTimer)
+    this.panelTimer = null
+    this.panel = panel
+    if (panel && ms > 0) {
+      this.panelTimer = setTimeout(() => this.setPanel(null), ms)
+      this.panelTimer.unref?.()
+    }
+    this.render()
   }
 
   private mark(gen: number, key: keyof SessionContext['marks']): void {
@@ -1128,6 +1261,7 @@ export class DictationService {
     if (!context) return
     context.target = this.deps.helper.snapshot(context.snapshotId).then((description) => {
       context.targetDescription = description
+      if (description?.bundleId) this.noteRecentApp(description.bundleId, description.appName)
       if (description && this.helperStatus)
         this.helperStatus.accessibility = description.accessibility
       if (description && !this.helperStatus) {
@@ -1209,27 +1343,33 @@ export class DictationService {
       this.dispatch({ type: 'cleanup-done', gen, outcome })
     }
     this.mark(gen, 'cleanupStart')
-    if (raw.length > MAX_CLEANUP_CHARS) {
-      finish({ kind: 'kept-raw', reason: 'Too long to clean up; the raw transcript was used.' })
+    const plan = context?.plan
+    if (!context || !plan) {
+      finish({ kind: 'kept-raw', reason: 'The cleanup had no plan; the raw transcript was used.' })
       return
     }
     const controller = new AbortController()
     this.cleanupAbort = { gen, controller }
     try {
-      const output = await this.deps.cleanup(
-        mode,
-        buildCleanupRequest(raw),
+      const outcome = await runModelSteps(
+        raw,
+        plan,
+        (request, signal) => this.deps.cleanup(mode, request, signal, context.consent),
         controller.signal,
-        context?.consent ?? null
+        this.deps.now
       )
       // Cancelled, timed out, or superseded while the model was working.
       if (controller.signal.aborted || this.state.active?.gen !== gen) return
-      const verdict = validateCleanup(raw, output)
-      finish(
-        verdict.ok
-          ? { kind: 'cleaned', text: verdict.text }
-          : { kind: 'kept-raw', reason: verdict.reason }
-      )
+      if (outcome.timings.tidyMs !== null) context.detail.tidyMs = outcome.timings.tidyMs
+      if (outcome.timings.transformMs !== null) {
+        context.detail.transformMs = outcome.timings.transformMs
+      }
+      context.change = outcome.change
+      finish({
+        kind: 'cleaned',
+        text: outcome.text,
+        ...(outcome.note ? { note: outcome.note } : {})
+      })
     } catch (error) {
       if (controller.signal.aborted || this.state.active?.gen !== gen) return
       const message = error instanceof Error ? error.message : 'Cleanup failed.'
@@ -1249,6 +1389,10 @@ export class DictationService {
     })
     this.mark(gen, 'deliverEnd')
     if (context?.detail && outcome.helper) context.detail.helper = outcome.helper
+    // A transform that changed the text: remember before and after, for View and Undo.
+    if (outcome.kind === 'delivered' && context?.change) {
+      this.recordChange(context.change)
+    }
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })
@@ -1257,7 +1401,8 @@ export class DictationService {
   private async deliver(
     context: Pick<SessionContext, 'snapshotId' | 'target'> | undefined,
     text: string,
-    onStage?: (stage: 'sent') => void
+    onStage?: (stage: 'sent') => void,
+    guards?: DeliveryGuards
   ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings }> {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
@@ -1266,7 +1411,7 @@ export class DictationService {
     if (!target.hasElement) return { kind: 'recover', reason: 'no-target' }
     if (target.secure) return { kind: 'recover', reason: 'secure-field' }
     onStage?.('sent')
-    const result = await this.deps.helper.deliver(context.snapshotId, text)
+    const result = await this.deps.helper.deliver(context.snapshotId, text, guards)
     this.deps.log(
       `delivery ${result.outcome}${result.reason ? ` (${result.reason})` : ''} via ${result.method ?? 'none'}, clipboard ${result.clipboard}`
     )
@@ -1363,6 +1508,8 @@ export class DictationService {
         engineDrainMs: context.detail.engineDrainMs ?? null,
         engineFinishMs: context.detail.engineFinishMs ?? null,
         finalToDeliverMs: diff(m.final, m.deliverStart),
+        tidyMs: context.detail.tidyMs ?? null,
+        transformMs: context.detail.transformMs ?? null,
         targetWaitMs: diff(m.deliverStart, m.helperSent),
         helperRoundTripMs: diff(m.helperSent, m.deliverEnd),
         helper,
@@ -1386,6 +1533,257 @@ export class DictationService {
           }
         : {})
     })
+  }
+
+  /* ---- transforms ---- */
+
+  private noteRecentApp(bundleId: string, name: string): void {
+    this.recentApps = [
+      { bundleId, name: name || bundleId },
+      ...this.recentApps.filter((app) => app.bundleId !== bundleId)
+    ].slice(0, 8)
+  }
+
+  /** Remember what a transform changed, and offer View and Undo on the pill. */
+  private recordChange(change: TransformChange): void {
+    this.lastChange = { name: change.name, before: change.before, after: change.after }
+    // Quiet mode may hide the offer; View and Undo stay in the pill's menu.
+    if (isMessageShown('change', this.quiet()))
+      this.setPanel({ kind: 'changed', name: change.name }, CHANGE_PANEL_MS)
+    else this.render()
+    this.broadcast()
+  }
+
+  private quiet(): { showLiveText: boolean; showStatusMessages: boolean } {
+    const settings = this.deps.settings.get()
+    return { showLiveText: settings.showLiveText, showStatusMessages: settings.showStatusMessages }
+  }
+
+  /** Show the before and after of the last transform. */
+  viewLastChange(): void {
+    if (!this.lastChange || this.disposed) return
+    this.setPanel(
+      {
+        kind: 'diff',
+        name: this.lastChange.name,
+        segments: diffWords(this.lastChange.before, this.lastChange.after)
+      },
+      DIFF_PANEL_MS
+    )
+  }
+
+  /**
+   * Put the text from before the last transform back, through the same verified
+   * insertion: the helper finds the one copy of the new text in the focused field,
+   * selects it and replaces it. If the field no longer holds it, the old text is
+   * kept on the recovery card instead of being forced in.
+   */
+  async undoLastChange(): Promise<void> {
+    const change = this.lastChange
+    if (!change || this.disposed || isBusy(this.state)) return
+    this.setPanel(null)
+    this.lastChange = null
+    const snapshotId = `dn-undo-${this.deps.now()}`
+    try {
+      const target = this.deps.helper.snapshot(snapshotId)
+      const outcome = await this.deliver({ snapshotId, target }, change.before, undefined, {
+        replace: change.after
+      })
+      if (outcome.kind === 'delivered') {
+        this.lastTranscript = change.before
+        this.dispatch({ type: 'notice', level: 'success', message: 'Put back.' })
+      } else {
+        this.dispatch({ type: 'keep', text: change.before, reason: outcome.reason })
+      }
+    } finally {
+      this.deps.helper.release(snapshotId)
+      this.broadcast()
+    }
+  }
+
+  /**
+   * Run one transform now. It works on the text selected in the focused app when
+   * that can be read, and replaces exactly that selection; otherwise on the last
+   * dictation, inserted at the cursor. Whatever the model returns is checked, and
+   * if it is doubtful or the field changed meanwhile, nothing is touched and the
+   * result is kept for copying.
+   */
+  async runTransform(id: string): Promise<void> {
+    const settings = this.deps.settings.get()
+    if (this.disposed || !this.deps.supported || !settings.enabled) return
+    if (!settings.transforms.enabled || this.transforming || isBusy(this.state)) return
+    const def = settings.transforms.items.find((item) => item.id === id)
+    if (!def) return
+    const model = resolveModel(this.deps.cleanupOptions(), settings)
+    if (!model.engine) {
+      this.dispatch({
+        type: 'notice',
+        level: 'error',
+        message:
+          model.path === 'needs-consent'
+            ? `Allow sending text to ${model.label} in Settings, Dictation, Tidy-up, then try ${def.name} again.`
+            : 'Transforms need a notes model on this Mac or your own provider. Set one up under Notes model.'
+      })
+      return
+    }
+    if (!this.deps.helper.available) {
+      this.dispatch({
+        type: 'notice',
+        level: 'error',
+        message: 'The dictation helper is missing from this build.'
+      })
+      return
+    }
+    const controller = new AbortController()
+    this.transforming = controller
+    const snapshotId = `dn-tf-${this.deps.now()}`
+    const timeout = setTimeout(
+      () => controller.abort(),
+      model.engine === 'local' ? TRANSFORM_TIMEOUT_MS.local : TRANSFORM_TIMEOUT_MS.byok
+    )
+    timeout.unref?.()
+    try {
+      const target = await this.deps.helper.snapshot(snapshotId)
+      let source: string | null = null
+      let guards: DeliveryGuards = {}
+      let how: 'selection' | 'insert' = 'insert'
+      if (target?.accessibility && target.hasElement && target.secure !== true) {
+        const selection = await this.deps.helper.selection(snapshotId)
+        if (selection.ok && selection.text.trim()) {
+          source = selection.text
+          guards = { expectSelection: selection.text }
+          how = 'selection'
+        }
+      }
+      if (source === null) {
+        source = this.lastTranscript
+        how = 'insert'
+      }
+      if (!source) {
+        this.dispatch({
+          type: 'notice',
+          level: 'info',
+          message: 'Select some text first, or dictate something to rewrite.'
+        })
+        return
+      }
+      if (source.length > MAX_CLEANUP_CHARS) {
+        this.dispatch({
+          type: 'notice',
+          level: 'error',
+          message: `That is too long for ${def.name}. Select a shorter piece.`
+        })
+        return
+      }
+      if (isMessageShown('working', this.quiet()))
+        this.setPanel({ kind: 'working', name: def.name })
+      const started = this.deps.now()
+      let output: string
+      try {
+        output = await this.deps.cleanup(
+          model.engine,
+          buildTransformRequest(def, source),
+          controller.signal,
+          settings.byokConsent
+        )
+      } catch (error) {
+        this.setPanel(null)
+        this.dispatch({
+          type: 'notice',
+          level: 'error',
+          message: controller.signal.aborted
+            ? `${def.name} took too long. Nothing was changed.`
+            : `${def.name}: ${error instanceof Error ? error.message.slice(0, 120) : 'the model failed'}. Nothing was changed.`
+        })
+        return
+      }
+      this.setPanel(null)
+      const verdict = validateTransform(source, output, def.keepFacts)
+      if (!verdict.ok) {
+        this.dispatch({
+          type: 'notice',
+          level: 'error',
+          message: `${def.name}: ${verdict.reason} Nothing was changed.`
+        })
+        return
+      }
+      if (verdict.text === source) {
+        this.dispatch({ type: 'notice', level: 'info', message: 'Nothing to change.' })
+        return
+      }
+      this.deps.recordMetrics({ at: this.deps.now(), transformMs: this.deps.now() - started })
+      const outcome = await this.deliver(
+        { snapshotId, target: Promise.resolve(target) },
+        verdict.text,
+        undefined,
+        guards
+      )
+      if (outcome.kind === 'delivered') {
+        if (how === 'insert') this.lastTranscript = verdict.text
+        this.recordChange({ name: def.name, before: source, after: verdict.text })
+      } else {
+        // Never lose the rewrite: it waits on the card for copying.
+        this.dispatch({ type: 'keep', text: verdict.text, reason: outcome.reason })
+      }
+    } finally {
+      clearTimeout(timeout)
+      if (this.transforming === controller) this.transforming = null
+      this.deps.helper.release(snapshotId)
+      if (this.panel?.kind === 'working') this.setPanel(null)
+      this.broadcast()
+    }
+  }
+
+  /** Each transform's global shortcut, registered while transforms are on. */
+  private applyTransformShortcuts(settings: DictationSettings, blocked: ReadonlySet<string>): void {
+    const wanted = new Map<string, string>()
+    if (settings.transforms.enabled) {
+      for (const item of settings.transforms.items)
+        if (item.hotkey) wanted.set(item.id, item.hotkey)
+    }
+    for (const [id, key] of this.transformKeys) {
+      if (
+        wanted.get(id) === key.accelerator &&
+        key.state === 'registered' &&
+        !blocked.has(`transform:${id}`)
+      )
+        continue
+      if (key.accelerator) this.deps.shortcuts.unregister(key.accelerator)
+      this.transformKeys.delete(id)
+    }
+    for (const [id, accelerator] of wanted) {
+      if (this.transformKeys.has(id)) continue
+      if (blocked.has(`transform:${id}`)) {
+        this.transformKeys.set(id, { accelerator: null, state: 'conflict' })
+        continue
+      }
+      try {
+        const ok = this.deps.shortcuts.register(accelerator, () => void this.runTransform(id))
+        this.transformKeys.set(id, {
+          accelerator: ok ? accelerator : null,
+          state: ok ? 'registered' : 'conflict'
+        })
+      } catch {
+        this.transformKeys.set(id, { accelerator: null, state: 'invalid' })
+      }
+    }
+  }
+
+  /** Shortcut ids that share a combination with another action. The toggle shortcut always wins. */
+  private shortcutClashes(settings: DictationSettings): Set<string> {
+    const clash = conflictingShortcuts([
+      { id: 'toggle', accelerator: settings.toggleShortcut },
+      { id: 'paste', accelerator: settings.pasteLastShortcut },
+      { id: 'copy', accelerator: settings.copyLastShortcut },
+      ...(settings.transforms.enabled
+        ? settings.transforms.items.map((item) => ({
+            id: `transform:${item.id}`,
+            accelerator: item.hotkey
+          }))
+        : [])
+    ])
+    clash.delete('toggle')
+    return clash
   }
 
   /* ---- status ---- */
@@ -1461,6 +1859,14 @@ export class DictationService {
         !this.devices.some((device) => device.uid === settings.microphoneUid),
       pillHidden: isPillHidden(settings.pillHiddenUntil, this.deps.now()),
       hasLastTranscript: this.lastTranscript !== null,
+      hasLastChange: this.lastChange !== null,
+      transformShortcuts: Object.fromEntries(
+        [...this.transformKeys].map(([id, key]) => [id, key.state])
+      ),
+      model: (({ path, label }) => ({ path, label }))(
+        resolveModel(this.deps.cleanupOptions(), settings)
+      ),
+      recentApps: this.recentApps,
       holdKey: this.holdState,
       mouseButton: this.mouseState,
       mouseSwallowing: this.mouseSwallowing,
@@ -1482,6 +1888,12 @@ export class DictationService {
   }
 }
 
+/** The engine path the reducer should expect: only when the plan makes a model call. */
+function modelEngineFor(context: SessionContext): CleanupMode {
+  const plan = planDictation(context.settings, context.modelOptions, null)
+  return plan.steps > 0 && plan.engine ? plan.engine : 'raw'
+}
+
 function refusalReason(reason: string | undefined): RecoveryReason {
   switch (reason) {
     case 'focus-changed':
@@ -1489,6 +1901,8 @@ function refusalReason(reason: string | undefined): RecoveryReason {
     case 'no-target':
     case 'not-editable':
     case 'accessibility-denied':
+    case 'selection-changed':
+    case 'text-changed':
       return reason
     case 'helper-unavailable':
       return 'helper-unavailable'

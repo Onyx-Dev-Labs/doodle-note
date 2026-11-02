@@ -139,6 +139,10 @@ export type OverlayMessageKind =
   | 'cleanup-note'
   /** "Inserted.", "Pasted.", "Copied.": the action worked. */
   | 'success'
+  /** "Changed by Polish. View / Undo" after a transform. Undo also lives in the pill menu. */
+  | 'change'
+  /** "Polish..." while a transform runs. */
+  | 'working'
   /** A refusal or an empty result: no speech, nothing to paste, still finishing. */
   | 'info'
   /** A failure: microphone denied or lost, helper missing, engine error. */
@@ -167,6 +171,8 @@ const MESSAGE_GOVERNOR: Record<OverlayMessageKind, 'liveText' | 'status' | 'alwa
   status: 'status',
   'cleanup-note': 'status',
   success: 'status',
+  change: 'status',
+  working: 'status',
   info: 'always',
   error: 'always',
   recovery: 'always',
@@ -202,6 +208,9 @@ export type PillMenuCommand =
   | { kind: 'microphone'; uid: string | null }
   | { kind: 'paste-last' }
   | { kind: 'copy-last' }
+  | { kind: 'transform'; id: string }
+  | { kind: 'view-change' }
+  | { kind: 'undo-change' }
   | { kind: 'settings' }
   | { kind: 'toggle-always' }
   | { kind: 'toggle-live-text' }
@@ -226,6 +235,10 @@ export interface PillMenuModel {
   hasLastTranscript: boolean
   showLiveText: boolean
   showStatusMessages: boolean
+  /** The transforms the menu offers; empty when transforms are off. */
+  transforms?: ReadonlyArray<{ id: string; name: string }>
+  /** A transform's before and after is held, so View and Undo make sense. */
+  hasLastChange?: boolean
   /** The mouse button for dictation, if one is set, and how it behaves. */
   mouseButton: number | null
   mouseMode: 'click' | 'hold'
@@ -265,6 +278,33 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
       enabled: model.hasLastTranscript,
       command: { kind: 'copy-last' }
     },
+    ...(model.transforms && model.transforms.length > 0
+      ? [
+          {
+            type: 'normal' as const,
+            label: 'Rewrite the selection or last dictation',
+            submenu: model.transforms.map((item): PillMenuItem => ({
+              type: 'normal',
+              label: item.name,
+              command: { kind: 'transform', id: item.id }
+            }))
+          }
+        ]
+      : []),
+    ...(model.hasLastChange
+      ? [
+          {
+            type: 'normal' as const,
+            label: 'View the last change',
+            command: { kind: 'view-change' as const }
+          },
+          {
+            type: 'normal' as const,
+            label: 'Undo the last change',
+            command: { kind: 'undo-change' as const }
+          }
+        ]
+      : []),
     { type: 'separator' },
     { type: 'normal', label: 'Open dictation settings', command: { kind: 'settings' } },
     {
@@ -465,6 +505,8 @@ export function describeStopStages(stages: {
   engineDrainMs: number | null
   engineFinishMs: number | null
   finalToDeliverMs: number | null
+  tidyMs?: number | null
+  transformMs?: number | null
   targetWaitMs: number | null
   helperRoundTripMs: number | null
   helper: {
@@ -478,7 +520,7 @@ export function describeStopStages(stages: {
 }): string {
   const parts = [
     `speech ${ms(stages.stopToFinalMs)} (queue ${ms(stages.engineDrainMs)}, final flush ${ms(stages.engineFinishMs)})`,
-    `hand-off ${ms(stages.finalToDeliverMs)}`,
+    `hand-off ${ms(stages.finalToDeliverMs)}${stages.tidyMs != null ? ` (model tidy-up ${ms(stages.tidyMs)}` : ''}${stages.transformMs != null ? `${stages.tidyMs != null ? ',' : ' ('} transform ${ms(stages.transformMs)}` : ''}${stages.tidyMs != null || stages.transformMs != null ? ')' : ''}`,
     `target ${ms(stages.targetWaitMs)}`
   ]
   const helper = stages.helper

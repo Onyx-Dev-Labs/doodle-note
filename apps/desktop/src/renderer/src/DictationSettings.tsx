@@ -24,6 +24,12 @@ import {
   type PermissionPane,
   type PermissionState
 } from '../../shared/dictation-permissions'
+import { acceleratorFrom } from './dictation-accelerator'
+import {
+  DictationStyleSettings,
+  DictationTidySettings,
+  DictationTransformSettings
+} from './DictationTidySettings'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -33,23 +39,6 @@ const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label
   { value: 'rightCommand', label: 'Right Command (⌘)' },
   { value: 'fn', label: 'Fn / Globe' }
 ]
-
-/** Translate a keydown into an Electron accelerator, or null if it is not a valid combo yet. */
-function acceleratorFrom(event: React.KeyboardEvent): string | null {
-  const modifiers: string[] = []
-  if (event.ctrlKey) modifiers.push('Control')
-  if (event.altKey) modifiers.push('Alt')
-  if (event.shiftKey) modifiers.push('Shift')
-  if (event.metaKey) modifiers.push('Command')
-  const code = event.code
-  let key: string | null = null
-  if (/^Key[A-Z]$/.test(code)) key = code.slice(3)
-  else if (/^Digit[0-9]$/.test(code)) key = code.slice(5)
-  else if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) key = code
-  else if (code === 'Space') key = 'Space'
-  if (!key || modifiers.length === 0) return null
-  return [...modifiers, key].join('+')
-}
 
 function shortcutNote(state: ShortcutState): string {
   switch (state) {
@@ -131,7 +120,7 @@ export function DictationSettings(): React.JSX.Element {
     )
   }
 
-  const { settings, permissions, cleanup } = status
+  const { settings, permissions } = status
   const askFor = async (pane: PermissionPane): Promise<void> => {
     setAsking(pane)
     try {
@@ -223,11 +212,6 @@ export function DictationSettings(): React.JSX.Element {
       )
     }
   }
-  const byok = cleanup.byok
-  const consented =
-    byok !== null &&
-    settings.byokConsent?.provider === byok.provider &&
-    settings.byokConsent?.model === byok.model
 
   return (
     <>
@@ -620,82 +604,9 @@ export function DictationSettings(): React.JSX.Element {
         </div>
       </section>
 
-      <section className="keys-section">
-        <h3>Text cleanup</h3>
-        <p className="models-sub">
-          Recognition is always local. This only chooses what happens to the finished text. If
-          cleanup is busy or fails, your raw words are inserted instead.
-        </p>
-        <div className="cal-subcard">
-          <label className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">Raw</span>
-              <span className="cal-row-sub">Insert exactly what was recognized.</span>
-            </span>
-            <input
-              type="radio"
-              name="cleanup"
-              checked={settings.cleanupMode === 'raw'}
-              onChange={() => void update({ cleanupMode: 'raw' })}
-            />
-          </label>
-          <label className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">Local cleanup</span>
-              <span className="cal-row-sub">
-                {cleanup.localModelLabel
-                  ? `Uses ${cleanup.localModelLabel} on this Mac.`
-                  : 'Needs a notes model. Install one under Notes model.'}
-              </span>
-            </span>
-            <input
-              type="radio"
-              name="cleanup"
-              checked={settings.cleanupMode === 'local'}
-              onChange={() => void update({ cleanupMode: 'local' })}
-            />
-          </label>
-          <label className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">Your provider</span>
-              <span className="cal-row-sub">
-                {byok
-                  ? `${byok.provider}${byok.model ? ` · ${byok.model}` : ''}. Sends only the finished text, never audio.`
-                  : 'Choose a provider and key under Notes model first.'}
-              </span>
-            </span>
-            <input
-              type="radio"
-              name="cleanup"
-              disabled={!byok}
-              checked={settings.cleanupMode === 'byok'}
-              onChange={() => void update({ cleanupMode: 'byok' })}
-            />
-          </label>
-          {byok && (
-            <div className="cal-row">
-              <span className="cal-row-main">
-                <span className="cal-row-label">
-                  Allow sending dictated text to {byok.provider}
-                </span>
-                <span className="cal-row-sub">
-                  Required before cleanup runs with your provider. Selecting a key alone never sends
-                  anything. Changing provider or model asks again.
-                </span>
-              </span>
-              <Toggle
-                checked={consented}
-                label="Allow sending dictated text to the provider"
-                onChange={() =>
-                  void update({
-                    byokConsent: consented ? null : { provider: byok.provider, model: byok.model }
-                  })
-                }
-              />
-            </div>
-          )}
-        </div>
-      </section>
+      <DictationTidySettings status={status} update={update} />
+      <DictationStyleSettings status={status} update={update} />
+      <DictationTransformSettings status={status} update={update} />
 
       <section className="keys-section">
         <h3>Try it</h3>

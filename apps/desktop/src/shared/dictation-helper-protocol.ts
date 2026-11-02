@@ -30,6 +30,18 @@ export interface TargetDescription {
   editable?: boolean
 }
 
+/** Guards for a delivery that edits text already in the field. */
+export interface DeliveryGuards {
+  /** Refuse unless the selection is exactly this text. */
+  expectSelection?: string
+  /** Select the one copy of this text in the field and replace it; refuse if it is not there once. */
+  replace?: string
+}
+
+export type SelectionResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: 'no-target' | 'focus-changed' | 'secure-field' | 'unavailable' }
+
 export type HelperDeliveryOutcome = 'delivered' | 'uncertain' | 'refused' | 'failed'
 
 /** Where the helper's time went for one insertion, whole milliseconds. Numbers only. */
