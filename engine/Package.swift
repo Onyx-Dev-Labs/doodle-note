@@ -34,7 +34,7 @@ let package = Package(
         .testTarget(
             name: "dictation-helper-tests",
             dependencies: ["dictation-helper"],
-            path: "Tests/dictation-helper-tests",
+            path: "tests/dictation-helper-tests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
