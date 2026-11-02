@@ -4,6 +4,7 @@ import type {
   DictationStatus,
   ShortcutState
 } from '../../shared/dictation-api'
+import { PILL_EDGES, describeDoubleTap } from '../../shared/dictation-pill'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -48,13 +49,19 @@ function shortcutNote(state: ShortcutState): string {
   }
 }
 
+const EDGE_LABELS: Record<(typeof PILL_EDGES)[number], string> = {
+  bottom: 'Bottom of the screen',
+  left: 'Left edge',
+  right: 'Right edge'
+}
+
 function seconds(ms: number | null): string {
   return ms === null ? '—' : `${(ms / 1000).toFixed(2)} s`
 }
 
 export function DictationSettings(): React.JSX.Element {
   const [status, setStatus] = useState<DictationStatus | null>(null)
-  const [recording, setRecording] = useState(false)
+  const [recording, setRecording] = useState<'toggle' | 'pasteLast' | null>(null)
   const [error, setError] = useState('')
 
   const refresh = useCallback(() => {
@@ -106,6 +113,19 @@ export function DictationSettings(): React.JSX.Element {
   }
 
   const { settings, permissions, cleanup } = status
+  const hiddenNow = status.pillHidden
+  const capture = (which: 'toggle' | 'pasteLast', event: React.KeyboardEvent): void => {
+    if (recording !== which) return
+    event.preventDefault()
+    if (event.key === 'Escape') return setRecording(null)
+    const accelerator = acceleratorFrom(event)
+    if (accelerator) {
+      setRecording(null)
+      void update(
+        which === 'toggle' ? { toggleShortcut: accelerator } : { pasteLastShortcut: accelerator }
+      )
+    }
+  }
   const byok = cleanup.byok
   const consented =
     byok !== null &&
@@ -213,20 +233,11 @@ export function DictationSettings(): React.JSX.Element {
             <button
               type="button"
               className="pill-btn"
-              onKeyDown={(event) => {
-                if (!recording) return
-                event.preventDefault()
-                if (event.key === 'Escape') return setRecording(false)
-                const accelerator = acceleratorFrom(event)
-                if (accelerator) {
-                  setRecording(false)
-                  void update({ toggleShortcut: accelerator })
-                }
-              }}
-              onBlur={() => setRecording(false)}
-              onClick={() => setRecording(true)}
+              onKeyDown={(event) => capture('toggle', event)}
+              onBlur={() => setRecording(null)}
+              onClick={() => setRecording('toggle')}
             >
-              {recording ? 'Press the new shortcut…' : 'Change'}
+              {recording === 'toggle' ? 'Press the new shortcut…' : 'Change'}
             </button>
           </div>
           <div className="cal-row">
@@ -254,6 +265,140 @@ export function DictationSettings(): React.JSX.Element {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Keep recording with a double tap</span>
+              <span className="cal-row-sub">
+                {describeDoubleTap(settings.handsFreeDoubleTap, settings.holdKey)}
+              </span>
+            </span>
+            <Toggle
+              checked={settings.handsFreeDoubleTap}
+              label="Keep recording with a double tap of the hold key"
+              onChange={() => void update({ handsFreeDoubleTap: !settings.handsFreeDoubleTap })}
+            />
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Type the last transcript again</span>
+              <span className="cal-row-sub">
+                {settings.pasteLastShortcut || 'None'} · {shortcutNote(status.pasteLastShortcut)}{' '}
+                The last transcript is kept in memory only and is forgotten when you quit.
+              </span>
+            </span>
+            <button
+              type="button"
+              className="pill-btn"
+              onKeyDown={(event) => capture('pasteLast', event)}
+              onBlur={() => setRecording(null)}
+              onClick={() => setRecording('pasteLast')}
+            >
+              {recording === 'pasteLast' ? 'Press the new shortcut…' : 'Change'}
+            </button>
+            {settings.pasteLastShortcut && (
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => void update({ pasteLastShortcut: '' })}
+              >
+                Turn off
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="keys-section">
+        <h3>Pill and microphone</h3>
+        <p className="models-sub">
+          The pill is a small doodle at the edge of your screen. Click it to start dictating, click
+          Finish to insert, right-click it for a menu, or drag it to another edge.
+        </p>
+        <div className="cal-subcard">
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Show the pill at all times</span>
+              <span className="cal-row-sub">
+                {hiddenNow
+                  ? `Hidden until ${new Date(settings.pillHiddenUntil as number).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Starting dictation from the keyboard brings it back.`
+                  : 'Off shows it only while you dictate.'}
+              </span>
+            </span>
+            {hiddenNow && (
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => void update({ pillHiddenUntil: null })}
+              >
+                Show it now
+              </button>
+            )}
+            <Toggle
+              checked={settings.showPill}
+              label="Show the pill at all times"
+              onChange={() => void update({ showPill: !settings.showPill })}
+            />
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Pill position</span>
+              <span className="cal-row-sub">
+                It follows the screen your pointer is on. Dragging it also changes this.
+              </span>
+            </span>
+            <select
+              aria-label="Pill position"
+              value={settings.pillEdge}
+              onChange={(event) =>
+                void update({ pillEdge: event.target.value as typeof settings.pillEdge })
+              }
+            >
+              {PILL_EDGES.map((edge) => (
+                <option key={edge} value={edge}>
+                  {EDGE_LABELS[edge]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Microphone</span>
+              <span className="cal-row-sub">
+                {status.microphoneMissing
+                  ? 'The saved microphone is not connected, so the system default is used.'
+                  : 'Used for dictation only. Meetings choose their own.'}
+              </span>
+            </span>
+            <select
+              aria-label="Dictation microphone"
+              value={settings.microphoneUid ?? ''}
+              onChange={(event) => void update({ microphoneUid: event.target.value || null })}
+            >
+              <option value="">System default</option>
+              {settings.microphoneUid &&
+                !status.microphones.some((mic) => mic.uid === settings.microphoneUid) && (
+                  <option value={settings.microphoneUid}>Saved microphone (not connected)</option>
+                )}
+              {status.microphones.map((mic) => (
+                <option key={mic.uid} value={mic.uid}>
+                  {mic.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Start and stop tones</span>
+              <span className="cal-row-sub">
+                A short two-note chime when recording begins and ends.
+              </span>
+            </span>
+            <Toggle
+              checked={settings.startSound}
+              label="Play start and stop tones"
+              onChange={() => void update({ startSound: !settings.startSound })}
+            />
           </div>
         </div>
       </section>

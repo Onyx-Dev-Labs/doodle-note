@@ -7,7 +7,12 @@
  */
 
 export type CleanupMode = 'raw' | 'local' | 'byok'
-export type DictationTrigger = 'toggle' | 'hold' | 'menu'
+/**
+ * toggle: the global shortcut. hold: a modifier held while speaking.
+ * handsfree: two quick taps of the hold key latched recording on.
+ * pill: a click on the resting pill (also hands-free). menu: any other menu item.
+ */
+export type DictationTrigger = 'toggle' | 'hold' | 'handsfree' | 'pill' | 'menu'
 
 export type Phase =
   | 'idle'
@@ -41,9 +46,34 @@ export type CleanupOutcome =
 
 /** A hold shorter than this was an accidental tap, not an utterance. */
 export const MIN_HOLD_MS = 350
-export const MAX_RECORDING_MS = 180_000
+/**
+ * Two quick taps of the hold key latch hands-free when the second lands within
+ * this long of the first. Measured between the two moments the helper reports:
+ * a tap's release, or a longer press's announcement.
+ */
+export const DOUBLE_TAP_WINDOW_MS = 450
+/** Hold-to-talk is bounded by the key; this only covers a missed key-up. */
+export const HOLD_MAX_RECORDING_MS = 180_000
+/** Hands-free sessions (shortcut, pill click, double tap) stop on their own after this. */
+export const HANDS_FREE_MAX_RECORDING_MS = 20 * 60_000
+/** The visible warning appears this long before the hands-free limit. */
+export const HANDS_FREE_WARNING_LEAD_MS = 60_000
 export const FINALIZE_TIMEOUT_MS = 30_000
 export const CLEANUP_TIMEOUT_MS = { local: 20_000, byok: 15_000 } as const
+
+/** True for sessions that keep recording without a held key. */
+export function isHandsFree(trigger: DictationTrigger): boolean {
+  return trigger !== 'hold'
+}
+
+export function recordingLimitMs(trigger: DictationTrigger): number {
+  return isHandsFree(trigger) ? HANDS_FREE_MAX_RECORDING_MS : HOLD_MAX_RECORDING_MS
+}
+
+/** Whether a tap at `nowMs` completes a double tap that began at `lastTapAtMs`. */
+export function isDoubleTap(lastTapAtMs: number | null, nowMs: number): boolean {
+  return lastTapAtMs !== null && nowMs >= lastTapAtMs && nowMs - lastTapAtMs <= DOUBLE_TAP_WINDOW_MS
+}
 
 export interface ActiveSession {
   gen: number
@@ -60,6 +90,12 @@ export interface ActiveSession {
   /** Exactly what delivery was asked to insert; recovery keeps this string. */
   deliverText: string | null
   cleanupNote: string | null
+  /** The hands-free limit is a minute away; the pill says so. */
+  limitWarning: boolean
+  /** The chosen input reports muted or zero volume while recording. */
+  micMuted: boolean
+  /** The saved microphone was missing, so the system default is in use. */
+  micFellBack: boolean
 }
 
 export type Resting =
@@ -78,13 +114,16 @@ export interface SessionState {
   nextGen: number
   active: ActiveSession | null
   resting: Resting | null
+  /** When the last unpaired quick tap of the hold key happened; the first half of a double tap. */
+  lastTapAtMs: number | null
 }
 
 export const initialSessionState = (): SessionState => ({
   phase: 'idle',
   nextGen: 1,
   active: null,
-  resting: null
+  resting: null,
+  lastTapAtMs: null
 })
 
 export type SessionEvent =
@@ -94,13 +133,19 @@ export type SessionEvent =
       holdId?: number
       cleanupMode: CleanupMode
       nowMs: number
+      /** Hands-free by double tap is on: a hold right after a tap latches instead. */
+      doubleTap?: boolean
+      /** The saved microphone was missing at start. */
+      micFellBack?: boolean
     }
+  /** A quick press-and-release of the hold key that never became a hold. */
+  | { type: 'tap'; nowMs: number }
   | { type: 'capture-ready'; gen: number }
   | { type: 'asr-ready'; gen: number }
   | { type: 'partial'; gen: number; text: string }
   | {
       type: 'stop'
-      source: 'toggle' | 'release' | 'button' | 'limit'
+      source: 'toggle' | 'release' | 'button' | 'limit' | 'tap'
       gen?: number
       holdId?: number
       nowMs: number
@@ -112,6 +157,10 @@ export type SessionEvent =
   | { type: 'cleanup-done'; gen: number; outcome: CleanupOutcome }
   | { type: 'delivery-done'; gen: number; outcome: DeliveryOutcome }
   | { type: 'timeout'; gen: number; stage: 'finalizing' | 'cleaning' }
+  | { type: 'limit-warning'; gen: number }
+  | { type: 'mic-state'; gen: number; muted: boolean }
+  /** The engine could not find the saved microphone and used the system default. */
+  | { type: 'mic-fallback'; gen: number }
   | { type: 'dismiss' }
   /** A message with no session behind it, e.g. a refused start. Never interrupts a live session. */
   | { type: 'notice'; level: NoticeLevel; message: string }
@@ -126,7 +175,12 @@ export type SessionEffect =
   | { type: 'cleanup-start'; gen: number; mode: Exclude<CleanupMode, 'raw'>; raw: string }
   | { type: 'cleanup-abort'; gen: number }
   | { type: 'deliver'; gen: number; text: string }
-  | { type: 'timers-set'; gen: number; stage: 'recording' | 'finalizing' | 'cleaning'; ms: number }
+  | {
+      type: 'timers-set'
+      gen: number
+      stage: 'recording' | 'warning' | 'finalizing' | 'cleaning'
+      ms: number
+    }
   | { type: 'timers-clear'; gen: number }
   | { type: 'escape-register' }
   | { type: 'escape-unregister' }
@@ -172,9 +226,15 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
     case 'start': {
       if (isBusy(state)) return { state, effects: [], refused: 'Dictation is already running.' }
       const gen = state.nextGen
+      // A hold that follows a quick tap is the second half of a double tap.
+      const latched =
+        event.trigger === 'hold' &&
+        event.doubleTap === true &&
+        isDoubleTap(state.lastTapAtMs, event.nowMs)
+      const trigger: DictationTrigger = latched ? 'handsfree' : event.trigger
       const session: ActiveSession = {
         gen,
-        trigger: event.trigger,
+        trigger,
         holdId: event.holdId ?? null,
         cleanupMode: event.cleanupMode,
         startedAtMs: event.nowMs,
@@ -183,17 +243,52 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         partial: '',
         rawText: null,
         deliverText: null,
-        cleanupNote: null
+        cleanupNote: null,
+        limitWarning: false,
+        micMuted: false,
+        micFellBack: event.micFellBack === true
       }
+      const limitMs = recordingLimitMs(trigger)
       return {
-        state: { phase: 'preparing', nextGen: gen + 1, active: session, resting: null },
+        state: {
+          phase: 'preparing',
+          nextGen: gen + 1,
+          active: session,
+          resting: null,
+          lastTapAtMs: null
+        },
         effects: [
           { type: 'escape-register' },
           { type: 'snapshot-target', gen },
           { type: 'capture-start', gen },
-          { type: 'timers-set', gen, stage: 'recording', ms: MAX_RECORDING_MS }
+          { type: 'timers-set', gen, stage: 'recording', ms: limitMs },
+          ...(isHandsFree(trigger)
+            ? [
+                {
+                  type: 'timers-set',
+                  gen,
+                  stage: 'warning',
+                  ms: limitMs - HANDS_FREE_WARNING_LEAD_MS
+                } as const
+              ]
+            : [])
         ]
       }
+    }
+
+    case 'tap': {
+      if (active) {
+        // The tap that ends a latched hands-free session. Any other session ignores it.
+        if (
+          active.trigger === 'handsfree' &&
+          (state.phase === 'preparing' || state.phase === 'recording')
+        ) {
+          return reduce(state, { type: 'stop', source: 'tap', gen: active.gen, nowMs: event.nowMs })
+        }
+        return ignore
+      }
+      if (isBusy(state)) return ignore
+      return { state: { ...state, lastTapAtMs: event.nowMs }, effects: [] }
     }
 
     case 'capture-ready': {
@@ -220,14 +315,18 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         // Only the key-up that pairs with this session's key-down may stop it.
         if (active.trigger !== 'hold' || event.holdId !== active.holdId) return ignore
       }
+      // A tap only ever ends the session a double tap latched.
+      if (event.source === 'tap' && active.trigger !== 'handsfree') return ignore
       if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
       const heldMs = event.nowMs - active.startedAtMs
       if (event.source === 'release' && heldMs < MIN_HOLD_MS) {
-        // An accidental tap: discard instead of transcribing nothing.
-        return toIdle(state, null, [
+        // An accidental tap: discard instead of transcribing nothing. It may be
+        // the first half of a double tap, so remember when it happened.
+        const discarded = toIdle(state, null, [
           { type: 'timers-clear', gen: active.gen },
           { type: 'capture-cancel', gen: active.gen }
         ])
+        return { ...discarded, state: { ...discarded.state, lastTapAtMs: event.nowMs } }
       }
       if (state.phase === 'preparing') {
         // The microphone is not open yet. Remember the intent; drain on ready.
@@ -363,6 +462,25 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         }
       }
       return ignore
+    }
+
+    case 'limit-warning': {
+      if (!active || active.gen !== event.gen) return ignore
+      if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
+      if (active.limitWarning) return ignore
+      return { state: { ...state, active: { ...active, limitWarning: true } }, effects: [] }
+    }
+
+    case 'mic-state': {
+      if (!active || active.gen !== event.gen || state.phase !== 'recording') return ignore
+      if (active.micMuted === event.muted) return ignore
+      return { state: { ...state, active: { ...active, micMuted: event.muted } }, effects: [] }
+    }
+
+    case 'mic-fallback': {
+      if (!active || active.gen !== event.gen || active.micFellBack) return ignore
+      if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
+      return { state: { ...state, active: { ...active, micFellBack: true } }, effects: [] }
     }
 
     case 'dismiss': {

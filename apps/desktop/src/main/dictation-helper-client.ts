@@ -7,6 +7,7 @@ import type {
   HelperStatus,
   HoldFailure,
   HoldKey,
+  InputState,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 
@@ -48,6 +49,7 @@ export class DictationHelperClient {
   >()
   private holdKey: HoldKey = 'off'
   private readonly holdListeners = new Set<(event: HoldEvent) => void>()
+  private readonly tapListeners = new Set<() => void>()
   private readonly exitListeners = new Set<() => void>()
   private lastExitAt = 0
 
@@ -63,6 +65,12 @@ export class DictationHelperClient {
   onHold(listener: (event: HoldEvent) => void): () => void {
     this.holdListeners.add(listener)
     return () => this.holdListeners.delete(listener)
+  }
+
+  /** A quick press and release of the hold key that never became a hold. */
+  onTap(listener: () => void): () => void {
+    this.tapListeners.add(listener)
+    return () => this.tapListeners.delete(listener)
   }
 
   /** Fires whenever the helper process ends, expectedly or not. */
@@ -82,6 +90,19 @@ export class DictationHelperClient {
         ? reply.conflicts.filter((c): c is string => typeof c === 'string')
         : [],
       holdActive: reply.holdActive === true
+    }
+  }
+
+  /**
+   * Mute and volume of the chosen microphone (null uid = the system default
+   * input). Null when the helper is down or the device exposes neither.
+   */
+  async inputState(uid: string | null): Promise<InputState | null> {
+    const reply = await this.request('input-state', uid ? { uid } : {}, this.timeouts.status)
+    if (!reply?.ok) return null
+    return {
+      muted: typeof reply.muted === 'boolean' ? reply.muted : null,
+      volume: typeof reply.volume === 'number' ? reply.volume : null
     }
   }
 
@@ -253,6 +274,10 @@ export class DictationHelperClient {
       if (phase && Number.isInteger(holdId)) {
         for (const listener of this.holdListeners) listener({ phase, holdId })
       }
+      return false
+    }
+    if (parsed.event === 'tap') {
+      for (const listener of this.tapListeners) listener()
       return false
     }
     if (parsed.event === 'reply' && typeof parsed.id === 'string') {

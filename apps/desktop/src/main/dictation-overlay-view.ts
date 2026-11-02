@@ -1,7 +1,16 @@
+import type { PillEdge, Size } from '../shared/dictation-pill'
 import type { RecoveryReason, SessionState } from '../shared/dictation-session'
+
+/** rest: the small idle pill. session: the live pill. message: a notice or kept text. */
+export type OverlayMode = 'rest' | 'session' | 'message'
 
 export interface OverlayView {
   visible: boolean
+  mode: OverlayMode
+  /** The dock edge, so the page can lay the resting pill out along it. */
+  edge: PillEdge
+  /** A short heads-up under the pill: mic muted, time almost up. */
+  warning: string | null
   tone: 'active' | 'busy' | 'ok' | 'warn' | 'error'
   title: string
   /** Live partial text while recording; recovery text when something was kept. */
@@ -18,6 +27,9 @@ export interface OverlayContext {
   level: number
   /** Accessibility is off, so delivery will land in recovery. */
   insertionUnavailable: boolean
+  /** Show the resting pill while nothing is running. */
+  pillVisible: boolean
+  edge: PillEdge
 }
 
 const NONE = { stop: false, cancel: false, copy: false, dismiss: false }
@@ -33,26 +45,81 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'helper-unavailable': 'The insertion helper is unavailable, so nothing was typed.'
 }
 
+/** Copy for the heads-up line under the live pill. */
+export const WARNINGS = {
+  limit: 'One minute left. Then it finishes.',
+  muted: 'Your microphone looks muted.',
+  fellBack: 'Microphone not found. Using the default.'
+} as const
+
+const WINDOW = {
+  restLong: 92,
+  restShort: 40,
+  sessionWidth: 320,
+  sessionBase: 56,
+  warningLine: 26,
+  detailBlock: 64,
+  message: { width: 380, height: 132 }
+} as const
+
+/** Window size the page needs for a view; the overlay docks a window of this size. */
+export function overlaySize(view: OverlayView): Size {
+  if (view.mode === 'message') return { ...WINDOW.message }
+  if (view.mode === 'session') {
+    return {
+      width: WINDOW.sessionWidth,
+      height:
+        WINDOW.sessionBase +
+        (view.warning ? WINDOW.warningLine : 0) +
+        (view.detail ? WINDOW.detailBlock : 0)
+    }
+  }
+  // The resting pill lies along the edge it docks to.
+  return view.edge === 'bottom'
+    ? { width: WINDOW.restLong, height: WINDOW.restShort }
+    : { width: WINDOW.restShort, height: WINDOW.restLong }
+}
+
 export function overlayView(state: SessionState, ctx: OverlayContext): OverlayView {
   const active = state.active
   const gen = active?.gen ?? (state.resting?.kind === 'recovery' ? state.resting.gen : null)
+  const view = (
+    mode: OverlayMode,
+    fields: Pick<OverlayView, 'tone' | 'title' | 'detail' | 'level' | 'controls'> &
+      Partial<Pick<OverlayView, 'warning'>>
+  ): OverlayView => ({
+    visible: true,
+    mode,
+    edge: ctx.edge,
+    warning: null,
+    gen,
+    ...fields
+  })
+  const hidden = (): OverlayView => ({
+    ...view('rest', { tone: 'ok', title: '', detail: '', level: null, controls: NONE }),
+    visible: false
+  })
   switch (state.phase) {
     case 'idle':
-      return { visible: false, tone: 'ok', title: '', detail: '', level: null, controls: NONE, gen }
+      if (!ctx.pillVisible) return hidden()
+      return view('rest', {
+        tone: 'ok',
+        title: 'Start dictating',
+        detail: '',
+        level: null,
+        controls: NONE
+      })
     case 'preparing':
-      return {
-        visible: true,
+      return view('session', {
         tone: 'busy',
         title: active?.stopRequested ? 'Finishing…' : 'Starting microphone…',
         detail: '',
         level: null,
-        controls: { ...NONE, cancel: true },
-        gen
-      }
+        controls: { ...NONE, cancel: true }
+      })
     case 'recording': {
       const warming = !active?.asrReady
-      return {
-        visible: true,
+      return view('session', {
         tone: 'active',
         // The microphone can be open while the speech model is still loading:
         // audio is buffered, nothing is lost, and the label says which it is.
@@ -64,84 +131,60 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
             : ''),
         level: ctx.micOpen ? ctx.level : null,
         controls: { ...NONE, stop: true, cancel: true },
-        gen
-      }
+        warning: active?.micMuted
+          ? WARNINGS.muted
+          : active?.limitWarning
+            ? WARNINGS.limit
+            : active?.micFellBack
+              ? WARNINGS.fellBack
+              : null
+      })
     }
     case 'finalizing':
-      return {
-        visible: true,
+      return view('session', {
         tone: 'busy',
         title: 'Transcribing…',
         detail: active?.partial ?? '',
         level: null,
-        controls: { ...NONE, cancel: true },
-        gen
-      }
+        controls: { ...NONE, cancel: true }
+      })
     case 'cleaning':
-      return {
-        visible: true,
+      return view('session', {
         tone: 'busy',
         title: active?.cleanupMode === 'byok' ? 'Cleaning up (your provider)…' : 'Cleaning up…',
         detail: active?.rawText ?? '',
         level: null,
-        controls: { ...NONE, cancel: true },
-        gen
-      }
+        controls: { ...NONE, cancel: true }
+      })
     case 'delivering':
-      return {
-        visible: true,
+      return view('session', {
         tone: 'busy',
         title: active?.cleanupNote ? `Inserting · ${active.cleanupNote}` : 'Inserting…',
         detail: '',
         level: null,
-        controls: NONE,
-        gen
-      }
+        controls: NONE
+      })
     case 'recovery': {
       const resting = state.resting
-      if (resting?.kind !== 'recovery') {
-        return {
-          visible: false,
-          tone: 'ok',
-          title: '',
-          detail: '',
-          level: null,
-          controls: NONE,
-          gen
-        }
-      }
-      return {
-        visible: true,
+      if (resting?.kind !== 'recovery') return hidden()
+      return view('message', {
         tone: 'warn',
         title: RECOVERY_MESSAGES[resting.reason],
         detail: resting.text,
         level: null,
-        controls: { ...NONE, copy: true, dismiss: true },
-        gen
-      }
+        controls: { ...NONE, copy: true, dismiss: true }
+      })
     }
     case 'notice': {
       const resting = state.resting
-      if (resting?.kind !== 'notice') {
-        return {
-          visible: false,
-          tone: 'ok',
-          title: '',
-          detail: '',
-          level: null,
-          controls: NONE,
-          gen
-        }
-      }
-      return {
-        visible: true,
+      if (resting?.kind !== 'notice') return hidden()
+      return view('message', {
         tone: resting.level === 'error' ? 'error' : resting.level === 'success' ? 'ok' : 'warn',
         title: resting.message,
         detail: '',
         level: null,
-        controls: { ...NONE, dismiss: resting.level !== 'success' },
-        gen
-      }
+        controls: { ...NONE, dismiss: resting.level !== 'success' }
+      })
     }
   }
 }

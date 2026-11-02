@@ -97,7 +97,13 @@ final class HoldWatcher {
                 } else if !pressed && keyIsDown {
                     keyIsDown = false
                     pending?.cancel()
-                    endHoldIfNeeded(reason: "released")
+                    if announced {
+                        endHoldIfNeeded(reason: "released")
+                    } else if !tainted {
+                        // Released before it counted as a hold: a tap, the raw
+                        // material of a double tap.
+                        Wire.send(["event": "tap"])
+                    }
                 }
             } else if keyIsDown && !announced {
                 tainted = true  // another modifier joined: this is a chord

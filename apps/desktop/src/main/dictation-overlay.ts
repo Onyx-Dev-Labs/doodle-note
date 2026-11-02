@@ -1,52 +1,185 @@
-import { BrowserWindow, nativeTheme, screen } from 'electron'
-import type { OverlayView } from './dictation-overlay-view'
+import { BrowserWindow, Menu, nativeTheme, screen, type Display } from 'electron'
+import {
+  dockedBounds,
+  snapEdge,
+  soundTones,
+  toMenuTemplate,
+  type PillEdge,
+  type PillMenuCommand,
+  type PillMenuItem,
+  type Rect,
+  type SoundKind
+} from '../shared/dictation-pill'
+import { overlaySize, type OverlayView } from './dictation-overlay-view'
+import { overlayHtml } from './dictation-overlay-page'
 
-export type OverlayAction = 'stop' | 'cancel' | 'copy' | 'dismiss'
+export type OverlayAction = 'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu'
 
-const WIDTH = 380
-const HEIGHT = 132
-const BOTTOM_MARGIN = 28
+const DRAG_TICK_MS = 16
+/** A drag whose release never arrived (pointer lost) ends by itself. */
+const DRAG_MAX_MS = 20_000
+const FOLLOW_DISPLAY_MS = 1_000
+
+const sameRect = (a: Rect, b: Rect): boolean =>
+  a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 
 /**
- * Status overlay for dictation. It must never take focus: the field the user
- * is dictating into has to stay the key window, so the panel is non-focusable
- * and shown with showInactive(). It has no preload and no IPC surface; the
- * main process pushes a view model in and buttons navigate to a private scheme
- * that will-navigate intercepts, so the page can never reach keys or settings.
+ * Status overlay and resting pill for dictation. It must never take focus: the
+ * field the user is dictating into has to stay the key window, so the panel is
+ * non-focusable and shown with showInactive(). The window is cut to the pill's
+ * own size, so clicks anywhere else on screen reach the apps underneath. It has
+ * no preload and no IPC surface; the main process pushes a view model in and
+ * the page navigates to a private scheme that will-navigate intercepts, so the
+ * page can never reach keys or settings.
  */
 export class DictationOverlay {
   private window: BrowserWindow | null = null
   private loaded = false
   private lastView: OverlayView | null = null
+  private lastBounds: Rect | null = null
+  /** The display a live session stays on, so it does not hop with the cursor. */
+  private pinned: Display | null = null
+  private follow: NodeJS.Timeout | null = null
+  private drag: {
+    cursor: { x: number; y: number }
+    origin: { x: number; y: number }
+    tick: NodeJS.Timeout
+    guard: NodeJS.Timeout
+  } | null = null
 
-  constructor(private readonly onAction: (action: OverlayAction, gen: number | null) => void) {}
+  constructor(
+    private readonly onAction: (action: OverlayAction, gen: number | null) => void,
+    /** The pill was dropped near this edge. */
+    private readonly onEdge: (edge: PillEdge) => void
+  ) {}
 
   render(view: OverlayView): void {
     this.lastView = view
     if (!view.visible) {
+      this.pinned = null
+      this.stopFollowing()
       this.hide()
       return
     }
     const window = this.ensureWindow()
-    this.position(window)
+    if (!this.drag) this.position(window, view)
     this.push(window, view)
     if (!window.isVisible()) window.showInactive()
+    if (view.mode === 'rest') this.startFollowing()
+    else this.stopFollowing()
   }
 
   hide(): void {
+    this.endDrag(false)
     if (this.window && !this.window.isDestroyed() && this.window.isVisible()) this.window.hide()
   }
 
   dispose(): void {
+    this.endDrag(false)
+    this.stopFollowing()
     if (this.window && !this.window.isDestroyed()) this.window.destroy()
     this.window = null
   }
 
+  /** A short tone, synthesized by the page. A hidden or unloaded window stays silent. */
+  playSound(kind: SoundKind): void {
+    const window = this.window
+    if (!window || window.isDestroyed() || !this.loaded) return
+    void window.webContents
+      .executeJavaScript(`window.playTones(${JSON.stringify(soundTones(kind))})`)
+      .catch(() => {})
+  }
+
+  /** Pop the right-click menu at the pointer. The chosen command comes back through onPick. */
+  popupMenu(items: PillMenuItem[], onPick: (command: PillMenuCommand) => void): void {
+    const window = this.window && !this.window.isDestroyed() ? this.window : undefined
+    Menu.buildFromTemplate(toMenuTemplate(items, onPick)).popup(window ? { window } : undefined)
+  }
+
+  /* ---- placement ---- */
+
+  private displayFor(view: OverlayView): Display {
+    const underCursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    if (view.mode === 'rest') {
+      this.pinned = null
+      return underCursor
+    }
+    if (!this.pinned) this.pinned = underCursor
+    const id = this.pinned.id
+    return screen.getAllDisplays().find((display) => display.id === id) ?? underCursor
+  }
+
+  private position(window: BrowserWindow, view: OverlayView): void {
+    const bounds = dockedBounds(view.edge, overlaySize(view), this.displayFor(view).workArea)
+    if (this.lastBounds && sameRect(this.lastBounds, bounds)) return
+    this.lastBounds = bounds
+    window.setBounds(bounds)
+  }
+
+  /** The resting pill goes to whichever screen the pointer is on. */
+  private startFollowing(): void {
+    if (this.follow) return
+    this.follow = setInterval(() => {
+      const window = this.window
+      const view = this.lastView
+      if (this.drag || !window || window.isDestroyed() || !view || view.mode !== 'rest') return
+      this.position(window, view)
+    }, FOLLOW_DISPLAY_MS)
+    this.follow.unref?.()
+  }
+
+  private stopFollowing(): void {
+    if (this.follow) clearInterval(this.follow)
+    this.follow = null
+  }
+
+  /* ---- dragging ---- */
+
+  private beginDrag(): void {
+    const window = this.window
+    if (this.drag || !window || window.isDestroyed() || this.lastView?.mode !== 'rest') return
+    const [x, y] = window.getPosition()
+    const cursor = screen.getCursorScreenPoint()
+    const tick = setInterval(() => {
+      if (!this.drag || !this.window || this.window.isDestroyed()) return
+      const now = screen.getCursorScreenPoint()
+      const next = {
+        x: Math.round(this.drag.origin.x + now.x - this.drag.cursor.x),
+        y: Math.round(this.drag.origin.y + now.y - this.drag.cursor.y)
+      }
+      this.window.setPosition(next.x, next.y)
+    }, DRAG_TICK_MS)
+    const guard = setTimeout(() => this.endDrag(true), DRAG_MAX_MS)
+    tick.unref?.()
+    guard.unref?.()
+    this.drag = { cursor, origin: { x, y }, tick, guard }
+  }
+
+  /** Stop following the pointer; when dropped, dock to the nearest edge of that display. */
+  private endDrag(drop: boolean): void {
+    const drag = this.drag
+    if (!drag) return
+    clearInterval(drag.tick)
+    clearTimeout(drag.guard)
+    this.drag = null
+    this.lastBounds = null
+    if (!drop) return
+    const point = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(point)
+    this.onEdge(snapEdge(point, display.workArea))
+    // The edge may be unchanged, in which case no render follows; settle anyway.
+    if (this.window && !this.window.isDestroyed() && this.lastView?.visible) {
+      this.position(this.window, this.lastView)
+    }
+  }
+
+  /* ---- window ---- */
+
   private ensureWindow(): BrowserWindow {
     if (this.window && !this.window.isDestroyed()) return this.window
     const window = new BrowserWindow({
-      width: WIDTH,
-      height: HEIGHT,
+      width: 92,
+      height: 40,
       ...(process.platform === 'darwin' ? { type: 'panel' as const, acceptFirstMouse: true } : {}),
       frame: false,
       transparent: true,
@@ -60,17 +193,24 @@ export class DictationOverlay {
       show: false,
       hasShadow: false,
       alwaysOnTop: true,
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        // The start and stop tones play without a click in this window.
+        autoplayPolicy: 'no-user-gesture-required'
+      }
     })
     window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event, url) => {
       event.preventDefault()
-      const match = /^doodle-dictation:\/\/(stop|cancel|copy|dismiss)$/.exec(url)
-      if (match) this.onAction(match[1] as OverlayAction, this.lastView?.gen ?? null)
+      const match = /^doodle-dictation:\/\/([a-z-]+)$/.exec(url)
+      if (match) this.handle(match[1] as string)
     })
     this.loaded = false
+    this.lastBounds = null
     window.webContents.once('did-finish-load', () => {
       this.loaded = true
       if (this.lastView?.visible) this.push(window, this.lastView)
@@ -83,6 +223,25 @@ export class DictationOverlay {
     return window
   }
 
+  private handle(name: string): void {
+    switch (name) {
+      case 'drag-start':
+        this.beginDrag()
+        break
+      case 'drag-end':
+        this.endDrag(true)
+        break
+      case 'stop':
+      case 'cancel':
+      case 'copy':
+      case 'dismiss':
+      case 'pill':
+      case 'menu':
+        this.onAction(name, this.lastView?.gen ?? null)
+        break
+    }
+  }
+
   private push(window: BrowserWindow, view: OverlayView): void {
     if (!this.loaded) return
     void window.webContents
@@ -91,65 +250,4 @@ export class DictationOverlay {
       )
       .catch(() => {})
   }
-
-  private position(window: BrowserWindow): void {
-    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-    const area = display.workArea
-    window.setBounds({
-      x: Math.round(area.x + (area.width - WIDTH) / 2),
-      y: Math.round(area.y + area.height - HEIGHT - BOTTOM_MARGIN),
-      width: WIDTH,
-      height: HEIGHT
-    })
-  }
-}
-
-function overlayHtml(): string {
-  return `<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<style>
-  :root{--bg:rgba(250,248,242,.96);--fg:#25271f;--mute:#6c6f62;--line:rgba(0,0,0,.1);--btn:#e9e6da;--accent:#4f7a4a;--warn:#a8741a;--err:#b3412f}
-  .dark{--bg:rgba(36,38,31,.96);--fg:#efede3;--mute:#a4a79a;--line:rgba(255,255,255,.12);--btn:#3a3d33;--accent:#8fbf86;--warn:#e0b45a;--err:#e8806d}
-  html,body{margin:0;background:transparent;font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--fg);-webkit-user-select:none;user-select:none;overflow:hidden}
-  .card{box-sizing:border-box;margin:6px;height:calc(100vh - 12px);padding:12px 14px;border-radius:14px;background:var(--bg);border:1px solid var(--line);box-shadow:0 8px 28px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:6px}
-  .row{display:flex;align-items:center;gap:8px;min-height:20px}
-  .dot{width:9px;height:9px;border-radius:50%;background:var(--mute);flex:none}
-  .active .dot{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
-  .busy .dot{background:var(--mute);animation:pulse 1.4s ease-in-out infinite}
-  .ok .dot{background:var(--accent)} .warn .dot{background:var(--warn)} .error .dot{background:var(--err)}
-  @keyframes pulse{50%{opacity:.35;transform:scale(.8)}}
-  .title{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .meter{height:3px;border-radius:2px;background:var(--line);overflow:hidden;flex:none}
-  .meter>i{display:block;height:100%;width:0;background:var(--accent);transition:width .08s linear}
-  .detail{flex:1;min-height:0;color:var(--mute);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
-  .warn .detail{-webkit-line-clamp:2}
-  .btns{display:flex;gap:6px;justify-content:flex-end;flex:none}
-  a{font:inherit;font-size:12px;color:var(--fg);background:var(--btn);padding:3px 10px;border-radius:7px;text-decoration:none;cursor:default}
-  a.primary{background:var(--accent);color:#fff}
-  [hidden]{display:none!important}
-</style></head><body>
-<div class="card" id="card">
-  <div class="row"><span class="dot"></span><span class="title" id="title"></span></div>
-  <div class="meter" id="meter" hidden><i id="level"></i></div>
-  <div class="detail" id="detail"></div>
-  <div class="btns">
-    <a id="copy" class="primary" href="doodle-dictation://copy" hidden>Copy text</a>
-    <a id="stop" class="primary" href="doodle-dictation://stop" hidden>Stop</a>
-    <a id="cancel" href="doodle-dictation://cancel" hidden>Cancel</a>
-    <a id="dismiss" href="doodle-dictation://dismiss" hidden>Dismiss</a>
-  </div>
-</div>
-<script>
-  const $ = (id) => document.getElementById(id)
-  window.render = (view, dark) => {
-    document.documentElement.className = dark ? 'dark' : ''
-    $('card').className = 'card ' + view.tone
-    $('title').textContent = view.title
-    $('detail').textContent = view.detail
-    $('detail').hidden = !view.detail
-    $('meter').hidden = view.level === null
-    if (view.level !== null) $('level').style.width = Math.round(Math.min(1, view.level) * 100) + '%'
-    for (const name of ['stop','cancel','copy','dismiss']) $(name).hidden = !view.controls[name]
-  }
-</script></body></html>`
 }

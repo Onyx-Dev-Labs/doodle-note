@@ -27,6 +27,19 @@ func handle(_ request: [String: Any]) {
                     "holdActive": HoldWatcher.shared.active,
                 ])
         }
+    case "input-state":
+        let uid = request["uid"] as? String
+        workQueue.async {
+            guard let device = Microphone.device(uid: uid) else {
+                Wire.reply(id, ok: false, ["reason": "no-input-device"])
+                return
+            }
+            let state = Microphone.state(of: device)
+            var fields: [String: Any] = [:]
+            if let muted = state.muted { fields["muted"] = muted }
+            if let volume = state.volume { fields["volume"] = Double(volume) }
+            Wire.reply(id, fields)
+        }
     case "snapshot":
         let snapshotId = request["snapshotId"] as? String ?? id
         workQueue.async {

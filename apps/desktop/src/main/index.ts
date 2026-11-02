@@ -689,6 +689,7 @@ app.whenReady().then(async () => {
       if (held) micWatcher.setSuppressed(true)
       else if (!recording.busy) micWatcher.setSuppressed(false)
     },
+    showMainWindow: focusMainWindow,
     isTrustedSender: (sender) => sender === mainWindow?.webContents,
     broadcast
   }).service

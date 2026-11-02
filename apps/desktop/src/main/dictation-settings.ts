@@ -6,6 +6,7 @@ import {
   type DictationSettingsUpdate
 } from '../shared/dictation-api'
 import { HOLD_KEYS } from '../shared/dictation-helper-protocol'
+import { coerceEdge } from '../shared/dictation-pill'
 
 const CLEANUP_MODES = ['raw', 'local', 'byok'] as const
 
@@ -29,7 +30,28 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
     byokConsent:
       consent && typeof consent.provider === 'string' && typeof consent.model === 'string'
         ? { provider: consent.provider, model: consent.model }
-        : null
+        : null,
+    showPill: raw.showPill === undefined ? defaults.showPill : raw.showPill === true,
+    pillEdge: coerceEdge(raw.pillEdge),
+    pillHiddenUntil:
+      typeof raw.pillHiddenUntil === 'number' && Number.isFinite(raw.pillHiddenUntil)
+        ? raw.pillHiddenUntil
+        : null,
+    microphoneUid:
+      typeof raw.microphoneUid === 'string' &&
+      raw.microphoneUid.length > 0 &&
+      raw.microphoneUid.length <= 256
+        ? raw.microphoneUid
+        : null,
+    startSound: raw.startSound === undefined ? defaults.startSound : raw.startSound === true,
+    handsFreeDoubleTap:
+      raw.handsFreeDoubleTap === undefined
+        ? defaults.handsFreeDoubleTap
+        : raw.handsFreeDoubleTap === true,
+    pasteLastShortcut:
+      typeof raw.pasteLastShortcut === 'string' && raw.pasteLastShortcut.length <= 64
+        ? raw.pasteLastShortcut.trim()
+        : defaults.pasteLastShortcut
   }
 }
 

@@ -9,6 +9,8 @@ import {
   DICTATION_DISMISS_RECOVERY_CHANNEL,
   DICTATION_GET_STATUS_CHANNEL,
   DICTATION_OPEN_PRIVACY_CHANNEL,
+  DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
+  DICTATION_PASTE_LAST_CHANNEL,
   DICTATION_SET_SETTINGS_CHANNEL,
   DICTATION_STATUS_EVENT_CHANNEL,
   DICTATION_TOGGLE_CHANNEL,
@@ -33,6 +35,8 @@ export interface DictationHostOptions {
   /** The meeting recorder, when it holds or is about to hold the microphone. */
   meetingBusy: () => boolean
   setMicHeld: (held: boolean) => void
+  /** Bring the main window forward so the dictation settings page can show. */
+  showMainWindow: () => void
   isTrustedSender: (sender: WebContents) => boolean
   broadcast: (channel: string, payload: unknown) => void
 }
@@ -63,7 +67,10 @@ export function createDictationHost(options: DictationHostOptions): {
   // The overlay callback fires only after construction, so the forward reference is safe.
   // The overlay is built before the service it reports to; actions arrive only after both exist.
   const route: { service: DictationService | null } = { service: null }
-  const overlay = new DictationOverlay((action, gen) => route.service?.onOverlayAction(action, gen))
+  const overlay = new DictationOverlay(
+    (action, gen) => route.service?.onOverlayAction(action, gen),
+    (edge) => route.service?.onPillEdge(edge)
+  )
 
   const logFile = join(options.logsDir, 'dictation.log')
   const metricsFile = join(options.userData, 'dictation-metrics.jsonl')
@@ -98,7 +105,8 @@ export function createDictationHost(options: DictationHostOptions): {
       },
       get warm() {
         return engine.warm
-      }
+      },
+      listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([])
     },
     ownership,
     helper,
@@ -125,6 +133,15 @@ export function createDictationHost(options: DictationHostOptions): {
     writeClipboard: (text) => clipboard.writeText(text),
     broadcast: (status) => options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status),
     onMicHeld: options.setMicHeld,
+    openSettings: () => {
+      options.showMainWindow()
+      // A window that had to be recreated needs a moment before it can listen.
+      const timer = setTimeout(
+        () => options.broadcast(DICTATION_OPEN_SETTINGS_EVENT_CHANNEL, null),
+        250
+      )
+      timer.unref?.()
+    },
     now: () => Date.now(),
     // Event names and counts only. Transcript text never reaches a log.
     log: (line) => {
@@ -157,6 +174,9 @@ export function createDictationHost(options: DictationHostOptions): {
   })
   ipcMain.handle(DICTATION_CANCEL_CHANNEL, (event) => {
     if (trusted(event)) service.cancel()
+  })
+  ipcMain.handle(DICTATION_PASTE_LAST_CHANNEL, async (event) => {
+    if (trusted(event)) await service.pasteLast()
   })
   ipcMain.handle(DICTATION_COPY_RECOVERY_CHANNEL, (event, gen: unknown) =>
     trusted(event) && typeof gen === 'number' ? service.copyRecovery(gen) : false

@@ -1,16 +1,23 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { mock, test } from 'node:test'
 import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/dictation-api'
 import type {
   HelperDelivery,
   HelperStatus,
   HoldKey,
+  InputState,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 import type { EngineEvent } from '../shared/engine-events'
 import { CaptureOwnership } from './capture-ownership'
 import { DictationService, type CleanupRunner, type DictationDeps } from './dictation-service'
 import type { OverlayView } from './dictation-overlay-view'
+import type {
+  InputDevice,
+  PillMenuCommand,
+  PillMenuItem,
+  SoundKind
+} from '../shared/dictation-pill'
 
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
 
@@ -29,10 +36,18 @@ interface Harness {
     target: TargetDescription | null
     delivery: HelperDelivery
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
+    tapListener: (() => void) | null
+    input: InputState | null
     exitListener: (() => void) | null
     holdKeys: HoldKey[]
   }
   setEngineBusy: (busy: boolean) => void
+  startOpts: Array<Record<string, unknown>>
+  devices: { list: InputDevice[] }
+  sounds: SoundKind[]
+  menus: Array<{ items: PillMenuItem[]; pick: (command: PillMenuCommand) => void }>
+  shortcuts: Map<string, () => void>
+  settingsOpened: number[]
   settings: DictationSettings
   cleanupCalls: Array<{ mode: string; consent: unknown; signal: AbortSignal }>
 }
@@ -57,6 +72,12 @@ function harness(
   const micHeld: boolean[] = []
   const metrics: Array<Record<string, unknown>> = []
   const cleanupCalls: Harness['cleanupCalls'] = []
+  const startOpts: Harness['startOpts'] = []
+  const devices: Harness['devices'] = { list: [] }
+  const sounds: SoundKind[] = []
+  const menus: Harness['menus'] = []
+  const shortcuts = new Map<string, () => void>()
+  const settingsOpened: number[] = []
   let engineBusy = false
   const helper: Harness['helper'] = {
     target: {
@@ -72,6 +93,8 @@ function harness(
     },
     delivery: { outcome: 'delivered', method: 'ax', verified: true, clipboard: 'untouched' },
     holdListener: null,
+    tapListener: null,
+    input: { muted: false, volume: 0.5 },
     exitListener: null,
     holdKeys: []
   }
@@ -85,7 +108,8 @@ function harness(
       update: (patch) => Object.assign(settings, patch)
     },
     engine: {
-      tryStartLive: () => {
+      tryStartLive: (opts) => {
+        startOpts.push({ ...opts })
         if (engineBusy) return { started: false, reason: 'busy' }
         engineCalls.push('start')
         engineBusy = true
@@ -95,7 +119,8 @@ function harness(
       get running() {
         return engineBusy
       },
-      warm: true
+      warm: true,
+      listInputDevices: async () => devices.list
     },
     ownership,
     helper: {
@@ -121,14 +146,30 @@ function harness(
         helper.holdListener = cb
         return () => {}
       },
+      onTap: (cb) => {
+        helper.tapListener = cb
+        return () => {}
+      },
+      inputState: async () => helper.input,
       onExit: (cb) => {
         helper.exitListener = cb
         return () => {}
       },
       dispose: async () => {}
     },
-    shortcuts: { register: () => true, unregister: () => {} },
-    overlay: { render: (view) => void overlay.push(view), dispose: () => {} },
+    shortcuts: {
+      register: (accelerator, callback) => {
+        shortcuts.set(accelerator, callback)
+        return true
+      },
+      unregister: (accelerator) => void shortcuts.delete(accelerator)
+    },
+    overlay: {
+      render: (view) => void overlay.push(view),
+      dispose: () => {},
+      playSound: (kind) => void sounds.push(kind),
+      popupMenu: (items, pick) => void menus.push({ items, pick })
+    },
     cleanup:
       options.cleanup ??
       (async (mode, _request, signal, consent) => {
@@ -140,6 +181,7 @@ function harness(
     writeClipboard: (text) => void clipboard.push(text),
     broadcast: () => {},
     onMicHeld: (held) => void micHeld.push(held),
+    openSettings: () => void settingsOpened.push(1),
     now: () => clock.now,
     log: () => {},
     recordMetrics: (record) => void metrics.push(record)
@@ -173,6 +215,12 @@ function harness(
     setEngineBusy: (busy) => {
       engineBusy = busy
     },
+    startOpts,
+    devices,
+    sounds,
+    menus,
+    shortcuts,
+    settingsOpened,
     settings,
     cleanupCalls
   }
@@ -495,4 +543,463 @@ test('quitting mid-session cancels it and delivers nothing', async () => {
   h.emit({ event: 'final', channel: 'mic', text: 'after quit' })
   await tick()
   assert.deepEqual(h.delivered, [])
+})
+
+/* ---- the pill, hands-free, microphones, paste last ---- */
+
+const builtin = { uid: 'builtin', name: 'MacBook Pro Microphone', isDefault: true }
+const usb = { uid: 'usb-1', name: 'USB Mic', isDefault: false }
+const tap = (h: Harness): void => h.helper.tapListener?.()
+const lastView = (h: Harness): OverlayView => h.overlay.at(-1)!
+const HOUR = 3_600_000
+
+async function ready(h: Harness): Promise<void> {
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.emit({ event: 'status', stage: 'transcribing' })
+}
+
+test('with dictation on, the resting pill is shown; off or hidden-by-setting, it is not', async () => {
+  const on = harness()
+  await on.service.start()
+  assert.equal(lastView(on).visible, true)
+  assert.equal(lastView(on).mode, 'rest')
+
+  const noPill = harness({ settings: { showPill: false } })
+  await noPill.service.start()
+  assert.equal(lastView(noPill).visible, false)
+
+  const disabled = harness({ settings: { enabled: false } })
+  await disabled.service.start()
+  assert.equal(lastView(disabled).visible, false)
+})
+
+test('turning the pill setting off hides it and a session still shows its own overlay', async () => {
+  const h = harness()
+  await h.service.start()
+  await h.service.setSettings({ showPill: false })
+  assert.equal(lastView(h).visible, false)
+  h.service.toggle()
+  await tick()
+  assert.equal(lastView(h).mode, 'session')
+  assert.equal(lastView(h).visible, true)
+})
+
+test('clicking the pill starts a hands-free session; Finish stops it and it types once', async () => {
+  const h = harness()
+  await h.service.start()
+  h.service.onOverlayAction('pill', null)
+  assert.equal(h.service.phase, 'preparing')
+  await ready(h)
+  assert.equal(h.service.phase, 'recording')
+  h.clock.now += 1_000
+  h.service.onOverlayAction('stop', 1)
+  assert.equal(h.service.phase, 'finalizing')
+  h.emit({ event: 'final', channel: 'mic', text: 'from the pill' })
+  await tick()
+  assert.deepEqual(h.delivered, ['from the pill'])
+})
+
+test('a second click right after the first does not stop the session it just started', async () => {
+  const h = harness()
+  await h.service.start()
+  h.service.onOverlayAction('pill', null)
+  await ready(h)
+  h.clock.now += 100
+  h.service.onOverlayAction('stop', 1)
+  assert.equal(h.service.phase, 'recording')
+  h.clock.now += 500
+  h.service.onOverlayAction('stop', 1)
+  assert.equal(h.service.phase, 'finalizing')
+})
+
+test('start and stop tones follow the session, and the setting turns them off', async () => {
+  const h = harness()
+  await h.service.start()
+  await speak(h, 'hello')
+  assert.deepEqual(h.sounds, ['start', 'stop'])
+
+  const quiet = harness({ settings: { startSound: false } })
+  await quiet.service.start()
+  await speak(quiet, 'hello')
+  assert.deepEqual(quiet.sounds, [])
+
+  const cancelled = harness()
+  cancelled.service.toggle()
+  await tick()
+  cancelled.service.cancel()
+  assert.deepEqual(cancelled.sounds, ['start'], 'cancel makes no stop tone')
+})
+
+test('two quick taps of the hold key latch hands-free; a third tap stops and types', async () => {
+  const h = harness({ settings: { holdKey: 'rightOption' } })
+  await h.service.start()
+  tap(h)
+  assert.equal(h.service.phase, 'idle', 'one tap alone starts nothing')
+  h.clock.now += 200
+  tap(h)
+  assert.equal(h.service.phase, 'preparing')
+  assert.equal(lastView(h).controls.cancel, true)
+  await ready(h)
+  h.clock.now += 5_000
+  assert.equal(h.service.phase, 'recording', 'no key is held, yet it keeps recording')
+  tap(h)
+  assert.equal(h.service.phase, 'finalizing')
+  h.emit({ event: 'final', channel: 'mic', text: 'hands free' })
+  await tick()
+  assert.deepEqual(h.delivered, ['hands free'])
+})
+
+test('taps too far apart, or with the double tap off, start nothing', async () => {
+  const slow = harness()
+  await slow.service.start()
+  tap(slow)
+  slow.clock.now += 2_000
+  tap(slow)
+  assert.equal(slow.service.phase, 'idle')
+
+  const off = harness({ settings: { handsFreeDoubleTap: false } })
+  await off.service.start()
+  tap(off)
+  off.clock.now += 100
+  tap(off)
+  assert.equal(off.service.phase, 'idle')
+  assert.deepEqual(off.engineCalls, [])
+})
+
+test('a hold pressed right after a tap latches; plain hold-to-talk still works after a pause', async () => {
+  const h = harness({ settings: { holdKey: 'rightOption' } })
+  await h.service.start()
+  tap(h)
+  h.clock.now += 250
+  h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+  await ready(h)
+  h.clock.now += 3_000
+  h.helper.holdListener?.({ phase: 'up', holdId: 1 })
+  assert.equal(h.service.phase, 'recording', 'releasing the latching press does not stop it')
+  h.clock.now += 2_000
+  h.helper.holdListener?.({ phase: 'down', holdId: 2 })
+  assert.equal(h.service.phase, 'finalizing', 'a later press ends it')
+  h.emit({ event: 'final', channel: 'mic', text: 'latched' })
+  await tick()
+  finish(h)
+  assert.deepEqual(h.delivered, ['latched'])
+
+  // Well after the last tap, a hold is an ordinary hold-to-talk.
+  h.clock.now += 10_000
+  h.helper.holdListener?.({ phase: 'down', holdId: 3 })
+  await ready(h)
+  h.clock.now += 2_000
+  h.helper.holdListener?.({ phase: 'up', holdId: 3 })
+  assert.equal(h.service.phase, 'finalizing')
+})
+
+test('a tap while the previous brief hold is still draining waits for the engine, then starts', async () => {
+  const h = harness({ settings: { holdKey: 'rightOption' } })
+  await h.service.start()
+  h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+  await ready(h)
+  h.clock.now += 100
+  h.helper.holdListener?.({ phase: 'up', holdId: 1 })
+  assert.equal(h.service.phase, 'idle', 'a short hold is discarded')
+  h.clock.now += 150
+  tap(h)
+  assert.equal(h.engineCalls.filter((c) => c === 'start').length, 1, 'engine still draining')
+  assert.equal(h.service.phase, 'idle')
+  h.setEngineBusy(false)
+  h.emit({ event: 'exit', code: 0, signal: null })
+  assert.equal(h.service.phase, 'preparing')
+  assert.equal(h.engineCalls.filter((c) => c === 'start').length, 2)
+})
+
+test('hands-free stops itself at 20 minutes and warns at 19', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  try {
+    const h = harness()
+    await h.service.start()
+    h.service.toggle()
+    await ready(h)
+    mock.timers.tick(18 * 60_000 + 59_000)
+    assert.equal(lastView(h).warning, null)
+    mock.timers.tick(1_000)
+    assert.match(lastView(h).warning ?? '', /one minute/i)
+    assert.equal(h.service.phase, 'recording')
+    mock.timers.tick(59_000)
+    assert.equal(h.service.phase, 'recording')
+    mock.timers.tick(1_000)
+    assert.equal(h.service.phase, 'finalizing', 'the limit finishes the dictation')
+    h.emit({ event: 'final', channel: 'mic', text: 'a very long talk' })
+    await tick()
+    assert.deepEqual(h.delivered, ['a very long talk'])
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('hold-to-talk keeps its three-minute bound and never warns', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  try {
+    const h = harness({ settings: { holdKey: 'rightOption' } })
+    await h.service.start()
+    h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+    await ready(h)
+    mock.timers.tick(179_000)
+    assert.equal(h.service.phase, 'recording')
+    assert.equal(lastView(h).warning, null)
+    mock.timers.tick(1_000)
+    assert.equal(h.service.phase, 'finalizing')
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('hide for an hour: gone at once, back at the expiry, and persisted meanwhile', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const h = harness()
+    await h.service.start()
+    const start = h.clock.now
+    await h.service.setSettings({ pillHiddenUntil: start + HOUR })
+    assert.equal(lastView(h).visible, false)
+    assert.equal(h.settings.pillHiddenUntil, start + HOUR)
+    h.clock.now += HOUR - 1
+    mock.timers.tick(HOUR - 1)
+    assert.equal(lastView(h).visible, false)
+    h.clock.now += 1
+    mock.timers.tick(1)
+    assert.equal(lastView(h).visible, true)
+    assert.equal(h.settings.pillHiddenUntil, null)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('the menu item hides the pill for exactly an hour', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const h = harness()
+    await h.service.start()
+    h.service.onOverlayAction('menu', null)
+    await tick()
+    h.menus[0]!.pick({ kind: 'hide-hour' })
+    await tick()
+    assert.equal(h.settings.pillHiddenUntil, h.clock.now + HOUR)
+    assert.equal(lastView(h).visible, false)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('a hidden pill returns when dictation starts from the hotkey', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const h = harness()
+    await h.service.start()
+    await h.service.setSettings({ pillHiddenUntil: h.clock.now + HOUR })
+    h.service.toggle()
+    await ready(h)
+    assert.equal(h.settings.pillHiddenUntil, null)
+    h.clock.now += 1_000
+    h.service.toggle()
+    h.emit({ event: 'final', channel: 'mic', text: 'back' })
+    await tick()
+    h.clock.now += 5_000
+    mock.timers.tick(2_000)
+    assert.equal(lastView(h).mode, 'rest')
+    assert.equal(lastView(h).visible, true)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('a saved hide survives a restart, and an expired one is dropped on launch', async () => {
+  const stillHidden = harness({ settings: { pillHiddenUntil: 1_000_000 + 60_000 } })
+  await stillHidden.service.start()
+  assert.equal(lastView(stillHidden).visible, false)
+
+  const expired = harness({ settings: { pillHiddenUntil: 1_000_000 - 1 } })
+  await expired.service.start()
+  assert.equal(lastView(expired).visible, true)
+  assert.equal(expired.settings.pillHiddenUntil, null)
+})
+
+test('dropping the pill near an edge docks and remembers it', async () => {
+  const h = harness()
+  await h.service.start()
+  h.service.onPillEdge('left')
+  await tick()
+  assert.equal(h.settings.pillEdge, 'left')
+  assert.equal(lastView(h).edge, 'left')
+  h.service.onPillEdge('left')
+  await tick()
+  assert.equal(h.settings.pillEdge, 'left')
+})
+
+test('the chosen microphone is passed to the recorder', async () => {
+  const h = harness({ settings: { microphoneUid: 'usb-1' } })
+  h.devices.list = [builtin, usb]
+  await h.service.start()
+  await tick()
+  h.service.toggle()
+  await ready(h)
+  assert.equal(h.startOpts[0]?.inputDevice, 'usb-1')
+  assert.equal(lastView(h).warning, null)
+})
+
+test('an unplugged microphone falls back to the default, says so, and keeps the choice', async () => {
+  const h = harness({ settings: { microphoneUid: 'usb-1' } })
+  h.devices.list = [builtin, usb]
+  await h.service.start()
+  await tick()
+  h.devices.list = [builtin]
+  h.clock.now += 10_000
+  const status = await h.service.status()
+  await tick()
+  assert.equal(status.microphoneMissing, false, 'the first answer still has the old list')
+  h.service.toggle()
+  await ready(h)
+  assert.equal('inputDevice' in (h.startOpts[0] ?? {}), false, 'recorded from the default')
+  assert.match(lastView(h).warning ?? '', /not found/i)
+  assert.equal(h.settings.microphoneUid, 'usb-1', 'the choice returns with the device')
+  assert.equal((await h.service.status()).microphoneMissing, true)
+})
+
+test('when the engine itself cannot find the device, the pill says so', async () => {
+  const h = harness({ settings: { microphoneUid: 'usb-1' } })
+  await h.service.start()
+  h.service.toggle()
+  await ready(h)
+  assert.equal(
+    h.startOpts[0]?.inputDevice,
+    'usb-1',
+    'no device list yet, so the choice is passed on'
+  )
+  h.emit({ event: 'status', stage: 'input_default_fallback' })
+  assert.match(lastView(h).warning ?? '', /default/i)
+})
+
+test('the menu offers the listed microphones and remembers the pick', async () => {
+  const h = harness()
+  h.devices.list = [builtin, usb]
+  await h.service.start()
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  const mic = h.menus[0]!.items.find((item) => item.label === 'Microphone')!
+  assert.deepEqual(
+    mic.submenu!.map((item) => item.label),
+    ['System default', 'MacBook Pro Microphone', 'USB Mic']
+  )
+  h.menus[0]!.pick({ kind: 'microphone', uid: 'usb-1' })
+  await tick()
+  assert.equal(h.settings.microphoneUid, 'usb-1')
+  h.menus[0]!.pick({ kind: 'microphone', uid: null })
+  await tick()
+  assert.equal(h.settings.microphoneUid, null)
+})
+
+test('the menu toggles the pill and opens the settings page', async () => {
+  const h = harness()
+  await h.service.start()
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  h.menus[0]!.pick({ kind: 'toggle-always' })
+  await tick()
+  assert.equal(h.settings.showPill, false)
+  assert.equal(lastView(h).visible, false)
+  h.menus[0]!.pick({ kind: 'settings' })
+  assert.equal(h.settingsOpened.length, 1)
+})
+
+test('paste last types the previous transcript again through the same delivery path', async () => {
+  const h = harness()
+  await h.service.start()
+  await speak(h, 'first words')
+  finish(h)
+  h.clock.now += 5_000
+  h.shortcuts.get(DEFAULT_DICTATION_SETTINGS.pasteLastShortcut)?.()
+  await tick()
+  await tick()
+  assert.deepEqual(h.delivered, ['first words', 'first words'])
+  assert.equal(lastView(h).title, 'Pasted.')
+  assert.equal(h.engineCalls.filter((c) => c === 'start').length, 1, 'no recording involved')
+})
+
+test('paste last with nothing to paste, or into a secure field, types nothing', async () => {
+  const empty = harness()
+  await empty.service.start()
+  await empty.service.pasteLast()
+  assert.deepEqual(empty.delivered, [])
+  assert.match(lastView(empty).title, /no transcript/i)
+
+  const secure = harness()
+  await secure.service.start()
+  await speak(secure, 'secret words')
+  finish(secure)
+  secure.helper.target = { ...secure.helper.target!, secure: true }
+  secure.clock.now += 5_000
+  await secure.service.pasteLast()
+  assert.deepEqual(secure.delivered, ['secret words'], 'only the original delivery')
+  assert.match(lastView(secure).title, /secure field/i)
+})
+
+test('paste last waits while a dictation is running, and the text never reaches status', async () => {
+  const h = harness()
+  await h.service.start()
+  await speak(h, 'remember me')
+  finish(h)
+  h.clock.now += 5_000
+  h.service.toggle()
+  await ready(h)
+  await h.service.pasteLast()
+  assert.deepEqual(h.delivered, ['remember me'])
+  const status = await h.service.status()
+  assert.equal(status.hasLastTranscript, true)
+  assert.ok(!JSON.stringify(status).includes('remember me'))
+})
+
+test('the paste-last shortcut is registered, can be turned off, and cannot shadow the toggle', async () => {
+  const h = harness()
+  await h.service.start()
+  assert.ok(h.shortcuts.has('Control+Alt+Shift+V'))
+  assert.equal((await h.service.status()).pasteLastShortcut, 'registered')
+  await h.service.setSettings({ pasteLastShortcut: '' })
+  assert.ok(!h.shortcuts.has('Control+Alt+Shift+V'))
+  assert.equal((await h.service.status()).pasteLastShortcut, 'off')
+
+  const clash = harness({ settings: { pasteLastShortcut: 'control+alt+d' } })
+  await clash.service.start()
+  assert.equal((await clash.service.status()).pasteLastShortcut, 'conflict')
+})
+
+test('a muted microphone shows a notice while recording and clears when unmuted', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  try {
+    const h = harness()
+    await h.service.start()
+    h.helper.input = { muted: true, volume: 0.4 }
+    h.service.toggle()
+    await ready(h)
+    await tick()
+    assert.match(lastView(h).warning ?? '', /muted/i)
+    h.helper.input = { muted: false, volume: 0.4 }
+    mock.timers.tick(2_000)
+    await tick()
+    assert.equal(lastView(h).warning, null)
+    h.helper.input = { muted: false, volume: 0 }
+    mock.timers.tick(2_000)
+    await tick()
+    assert.match(lastView(h).warning ?? '', /muted/i)
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('an unreadable input never raises a muted notice', async () => {
+  const h = harness()
+  await h.service.start()
+  h.helper.input = null
+  h.service.toggle()
+  await ready(h)
+  await tick()
+  assert.equal(lastView(h).warning, null)
 })

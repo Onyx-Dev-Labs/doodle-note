@@ -15,10 +15,28 @@ import type {
   HelperStatus,
   HoldFailure,
   HoldKey,
+  InputState,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
+import { micLooksMuted } from '../shared/dictation-helper-protocol'
+import {
+  buildPillMenu,
+  hideExpiry,
+  isPillHidden,
+  msUntilPillReturns,
+  resolveMicrophone,
+  shortcutsCollide,
+  soundForTransition,
+  type InputDevice,
+  type PillEdge,
+  type PillMenuCommand,
+  type PillMenuItem,
+  type SoundKind
+} from '../shared/dictation-pill'
 import {
   initialSessionState,
+  isBusy,
+  isDoubleTap,
   reduce,
   type CleanupMode,
   type CleanupOutcome,
@@ -31,7 +49,12 @@ import {
 import type { EngineEvent, EngineStartOptions } from '../shared/engine-events'
 import type { CaptureLease, CaptureOwnership } from './capture-ownership'
 import { MAX_CLEANUP_CHARS, buildCleanupRequest, validateCleanup } from './dictation-cleanup'
-import { overlayView, type OverlayContext, type OverlayView } from './dictation-overlay-view'
+import {
+  RECOVERY_MESSAGES,
+  overlayView,
+  type OverlayContext,
+  type OverlayView
+} from './dictation-overlay-view'
 import type { OverlayAction } from './dictation-overlay'
 
 export interface EngineLike {
@@ -39,6 +62,8 @@ export interface EngineLike {
   stop(): void
   readonly running: boolean
   readonly warm: boolean
+  /** Audio inputs, for the microphone picker. Resolves [] when listing fails. */
+  listInputDevices?(): Promise<InputDevice[]>
 }
 
 export interface HelperLike {
@@ -49,6 +74,10 @@ export interface HelperLike {
   release(snapshotId: string): void
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
   onHold(listener: (event: { phase: 'down' | 'up'; holdId: number }) => void): () => void
+  /** A quick press and release of the hold key that was too short to count as a hold. */
+  onTap(listener: () => void): () => void
+  /** Mute and volume of the input a session records from; null when unreadable. */
+  inputState(uid: string | null): Promise<InputState | null>
   onExit(listener: () => void): () => void
   dispose(): Promise<void>
 }
@@ -62,6 +91,8 @@ export interface ShortcutsLike {
 export interface OverlayLike {
   render(view: OverlayView): void
   dispose(): void
+  playSound(kind: SoundKind): void
+  popupMenu(items: PillMenuItem[], onPick: (command: PillMenuCommand) => void): void
 }
 
 /** Runs one cleanup request and returns the model's text. Throws with a user-readable message. */
@@ -92,6 +123,8 @@ export interface DictationDeps {
   broadcast(status: DictationStatus): void
   /** The microphone is held (true) or free (false); lets the host quiet meeting detection. */
   onMicHeld(held: boolean): void
+  /** Bring the app's dictation settings page forward. */
+  openSettings(): void
   now(): number
   log(line: string): void
   /** Numbers-only latency record; never receives transcript text. */
@@ -104,6 +137,8 @@ interface SessionContext {
   target: Promise<TargetDescription | null>
   targetDescription: TargetDescription | null
   consent: { provider: string; model: string } | null
+  /** CoreAudio UID this session records from; null = system default. */
+  micUid: string | null
   warmAtStart: boolean
   marks: {
     start: number
@@ -121,6 +156,16 @@ const MAX_RECOVERIES = 5
 const SUCCESS_NOTICE_MS = 1_200
 const NOTICE_MS = 6_000
 const ESCAPE = 'Escape'
+/** How often the chosen input is checked for a mute or zero volume while recording. */
+const MIC_POLL_MS = 2_000
+/** The device list is re-read at most this often unless the menu asks. */
+const DEVICE_REFRESH_MS = 3_000
+/** The menu waits this long for a fresh device list before it shows what it has. */
+const MENU_DEVICE_WAIT_MS = 400
+/** A double tap that lands while the engine drains the last session waits this long for it. */
+const DEFERRED_START_MS = 2_000
+/** A Finish click this soon after a start is a stray second click, not a real stop. */
+const STRAY_STOP_MS = 400
 
 /**
  * Orchestrates one dictation at a time: shortcut and hold events in, engine
@@ -144,6 +189,18 @@ export class DictationService {
   private helperStatus: HelperStatus | null = null
   private toggleAccelerator: string | null = null
   private toggleState: ShortcutState = 'off'
+  private pasteLastAccelerator: string | null = null
+  private pasteLastState: ShortcutState = 'off'
+  /** The most recent transcript, in memory only, for "paste last". Never written anywhere. */
+  private lastTranscript: string | null = null
+  private pasting = false
+  private devices: InputDevice[] = []
+  private devicesAt = 0
+  private devicesPending: Promise<void> | null = null
+  private hideTimer: NodeJS.Timeout | null = null
+  private micPoll: NodeJS.Timeout | null = null
+  private deferredStart: { until: number } | null = null
+  private lastStartAt = 0
   private holdState: DictationStatus['holdKey'] = 'off'
   private escapeRegistered = false
   private disposed = false
@@ -153,6 +210,7 @@ export class DictationService {
   constructor(private readonly deps: DictationDeps) {
     this.unsubscribe.push(
       deps.helper.onHold((event) => this.onHold(event)),
+      deps.helper.onTap(() => this.onTap()),
       deps.helper.onExit(() => this.onHelperExit())
     )
   }
@@ -162,15 +220,20 @@ export class DictationService {
   /** Apply persisted settings: register shortcuts, arm hold-to-talk. */
   async start(): Promise<void> {
     await this.applySettings()
+    void this.refreshDevices()
   }
 
   async dispose(): Promise<void> {
     this.disposed = true
     this.dispatch({ type: 'cancel' })
     this.clearAllTimers()
+    this.stopMicPoll()
     this.unregisterEscape()
     if (this.toggleAccelerator) this.deps.shortcuts.unregister(this.toggleAccelerator)
     this.toggleAccelerator = null
+    if (this.pasteLastAccelerator) this.deps.shortcuts.unregister(this.pasteLastAccelerator)
+    this.pasteLastAccelerator = null
+    this.lastTranscript = null
     for (const stop of this.unsubscribe) stop()
     this.deps.overlay.dispose()
     await this.deps.helper.dispose()
@@ -196,11 +259,17 @@ export class DictationService {
     if (!this.deps.supported || !settings.enabled) {
       this.dispatch({ type: 'cancel' })
       this.setToggleShortcut('')
+      this.setPasteLastShortcut('')
       this.holdState = 'off'
       void this.deps.helper.setHoldKey('off')
+      this.refreshPillTimer()
+      this.render()
       return
     }
     this.setToggleShortcut(settings.toggleShortcut)
+    this.setPasteLastShortcut(settings.pasteLastShortcut)
+    this.refreshPillTimer()
+    this.render()
     if (settings.holdKey === 'off') {
       this.holdState = 'off'
       await this.deps.helper.setHoldKey('off')
@@ -232,6 +301,142 @@ export class DictationService {
     }
   }
 
+  private setPasteLastShortcut(accelerator: string): void {
+    if (this.pasteLastAccelerator === accelerator && this.pasteLastState === 'registered') return
+    if (this.pasteLastAccelerator) this.deps.shortcuts.unregister(this.pasteLastAccelerator)
+    this.pasteLastAccelerator = null
+    if (!accelerator) {
+      this.pasteLastState = 'off'
+      return
+    }
+    // Two actions on one combination would shadow each other.
+    if (shortcutsCollide(accelerator, this.deps.settings.get().toggleShortcut)) {
+      this.pasteLastState = 'conflict'
+      return
+    }
+    try {
+      const ok = this.deps.shortcuts.register(accelerator, () => void this.pasteLast())
+      this.pasteLastState = ok ? 'registered' : 'conflict'
+      if (ok) this.pasteLastAccelerator = accelerator
+    } catch {
+      this.pasteLastState = 'invalid'
+    }
+  }
+
+  /* ---- the resting pill ---- */
+
+  private pillVisible(): boolean {
+    const settings = this.deps.settings.get()
+    return (
+      this.deps.supported &&
+      settings.enabled &&
+      settings.showPill &&
+      !isPillHidden(settings.pillHiddenUntil, this.deps.now())
+    )
+  }
+
+  /** Keep the pill's "hide for an hour" honest: drop an expired one, time a running one. */
+  private refreshPillTimer(): void {
+    if (this.hideTimer) clearTimeout(this.hideTimer)
+    this.hideTimer = null
+    const until = this.deps.settings.get().pillHiddenUntil
+    if (until === null) return
+    const remaining = msUntilPillReturns(until, this.deps.now())
+    if (remaining === null) {
+      this.deps.settings.update({ pillHiddenUntil: null })
+      return
+    }
+    this.hideTimer = setTimeout(() => {
+      this.hideTimer = null
+      this.deps.settings.update({ pillHiddenUntil: null })
+      this.render()
+      this.broadcast()
+    }, remaining)
+    this.hideTimer.unref?.()
+  }
+
+  /** Hotkey dictation brings a hidden pill back. */
+  private showHiddenPill(): void {
+    if (this.deps.settings.get().pillHiddenUntil === null) return
+    this.deps.settings.update({ pillHiddenUntil: null })
+    this.refreshPillTimer()
+  }
+
+  /** Apply a settings change that came from the pill itself, then tell the settings page. */
+  private async patch(update: DictationSettingsUpdate): Promise<void> {
+    await this.setSettings(update)
+    this.broadcast()
+  }
+
+  private async openMenu(): Promise<void> {
+    // Show the list we already have if a fresh one is slow.
+    await Promise.race([
+      this.refreshDevices(true),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, MENU_DEVICE_WAIT_MS)
+        timer.unref?.()
+      })
+    ])
+    if (this.disposed) return
+    const settings = this.deps.settings.get()
+    this.deps.overlay.popupMenu(
+      buildPillMenu({
+        showAlways: settings.showPill,
+        devices: this.devices,
+        selectedUid: settings.microphoneUid,
+        hasLastTranscript: this.lastTranscript !== null
+      }),
+      (command) => this.onMenuCommand(command)
+    )
+  }
+
+  onMenuCommand(command: PillMenuCommand): void {
+    switch (command.kind) {
+      case 'hide-hour':
+        void this.patch({ pillHiddenUntil: hideExpiry(this.deps.now()) })
+        break
+      case 'microphone':
+        void this.patch({ microphoneUid: command.uid })
+        break
+      case 'paste-last':
+        void this.pasteLast()
+        break
+      case 'settings':
+        this.deps.openSettings()
+        break
+      case 'toggle-always':
+        void this.patch({ showPill: !this.deps.settings.get().showPill })
+        break
+    }
+  }
+
+  /** The pill was dropped near a screen edge. */
+  onPillEdge(edge: PillEdge): void {
+    if (edge !== this.deps.settings.get().pillEdge) void this.patch({ pillEdge: edge })
+  }
+
+  /* ---- microphones ---- */
+
+  private refreshDevices(force = false): Promise<void> {
+    const list = this.deps.engine.listInputDevices
+    if (!list) return Promise.resolve()
+    if (this.devicesPending) return this.devicesPending
+    if (!force && this.deps.now() - this.devicesAt < DEVICE_REFRESH_MS) return Promise.resolve()
+    this.devicesAt = this.deps.now()
+    this.devicesPending = list
+      .call(this.deps.engine)
+      .then((devices) => {
+        const changed = JSON.stringify(devices) !== JSON.stringify(this.devices)
+        this.devices = devices
+        if (changed && !this.disposed) this.broadcast()
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.devicesPending = null
+      })
+    return this.devicesPending
+  }
+
   /* ---- user actions ---- */
 
   /** The shortcut, tray item and settings button all land here. */
@@ -249,12 +454,18 @@ export class DictationService {
   }
 
   cancel(): void {
+    this.deferredStart = null
     this.dispatch({ type: 'cancel' })
   }
 
   private onHold(event: { phase: 'down' | 'up'; holdId: number }): void {
     if (this.disposed) return
     if (event.phase === 'down') {
+      // A press while a double tap has the microphone latched on ends it.
+      if (this.state.active?.trigger === 'handsfree') {
+        this.dispatch({ type: 'tap', nowMs: this.deps.now() })
+        return
+      }
       this.begin('hold', event.holdId)
     } else {
       this.dispatch({
@@ -264,6 +475,23 @@ export class DictationService {
         nowMs: this.deps.now()
       })
     }
+  }
+
+  /**
+   * A quick tap of the hold key. The second of two taps latches hands-free; a
+   * tap during a latched session ends it. With the double tap off, taps do nothing.
+   */
+  private onTap(): void {
+    const settings = this.deps.settings.get()
+    if (this.disposed || !this.deps.supported || !settings.enabled) return
+    const now = this.deps.now()
+    if (this.state.active?.trigger === 'handsfree') {
+      this.dispatch({ type: 'tap', nowMs: now })
+      return
+    }
+    if (!settings.handsFreeDoubleTap || isBusy(this.state)) return
+    if (isDoubleTap(this.state.lastTapAtMs, now)) this.begin('handsfree')
+    else this.dispatch({ type: 'tap', nowMs: now })
   }
 
   /** The helper died. A hold can no longer see its key-up, so finish what was said. */
@@ -278,7 +506,15 @@ export class DictationService {
 
   onOverlayAction(action: OverlayAction, gen: number | null): void {
     switch (action) {
+      case 'pill':
+        this.begin('pill')
+        break
+      case 'menu':
+        void this.openMenu()
+        break
       case 'stop':
+        // The pill grows under the pointer; a second click of a double click lands on Finish.
+        if (this.deps.now() - this.lastStartAt < STRAY_STOP_MS) break
         this.dispatch({
           type: 'stop',
           source: 'button',
@@ -320,7 +556,7 @@ export class DictationService {
 
   /* ---- starting a session ---- */
 
-  private begin(trigger: 'toggle' | 'hold', holdId?: number): void {
+  private begin(trigger: 'toggle' | 'hold' | 'handsfree' | 'pill', holdId?: number): void {
     const settings = this.deps.settings.get()
     if (!this.deps.supported || !settings.enabled) return
     if (
@@ -351,6 +587,12 @@ export class DictationService {
     const claim = this.deps.ownership.claim('dictation', this.deps.engine.running)
     if (!claim.ok) {
       const finishing = claim.heldBy === 'dictation'
+      if (trigger === 'handsfree' && finishing) {
+        // The first tap of the double tap opened and discarded a session; the
+        // engine is still draining it. Start as soon as it lets go.
+        this.deferredStart = { until: this.deps.now() + DEFERRED_START_MS }
+        return
+      }
       this.dispatch({
         type: 'notice',
         level: 'info',
@@ -364,11 +606,17 @@ export class DictationService {
     const now = this.deps.now()
     const gen = this.state.nextGen
     const snapshotId = `dn-${gen}-${now}`
+    const microphone = resolveMicrophone(settings.microphoneUid, this.devices)
+    void this.refreshDevices()
+    this.deferredStart = null
+    this.lastStartAt = now
+    this.showHiddenPill()
     const context: SessionContext = {
       gen,
       snapshotId,
       target: Promise.resolve(null),
       targetDescription: null,
+      micUid: microphone.uid,
       consent: settings.byokConsent,
       warmAtStart: this.deps.engine.warm,
       marks: { start: now }
@@ -383,6 +631,8 @@ export class DictationService {
       trigger,
       cleanupMode: settings.cleanupMode,
       nowMs: now,
+      doubleTap: settings.handsFreeDoubleTap,
+      micFellBack: microphone.fellBack,
       ...(holdId !== undefined ? { holdId } : {})
     })
   }
@@ -397,6 +647,9 @@ export class DictationService {
     switch (event.event) {
       case 'status':
         if (event.stage === 'transcribing') this.dispatch({ type: 'asr-ready', gen })
+        if (event.stage === 'input_default_fallback') {
+          this.dispatch({ type: 'mic-fallback', gen })
+        }
         if (event.stage === 'input_default_fallback' || event.stage === 'mic_restarting') {
           this.deps.log(`engine ${event.stage}`)
         }
@@ -479,6 +732,9 @@ export class DictationService {
     this.micOpen = false
     this.deps.ownership.release(capture.lease)
     this.deps.onMicHeld(false)
+    const deferred = this.deferredStart
+    this.deferredStart = null
+    if (deferred && this.deps.now() <= deferred.until) this.begin('handsfree')
   }
 
   /* ---- reducer plumbing ---- */
@@ -549,9 +805,40 @@ export class DictationService {
       }
     }
     if (previous.active && !state.active) this.finishSession(previous.active.gen)
+    if (state.phase === 'recording' && previous.phase !== 'recording' && state.active) {
+      this.startMicPoll(state.active.gen)
+    } else if (previous.phase === 'recording' && state.phase !== 'recording') {
+      this.stopMicPoll()
+    }
     this.scheduleRestingDismiss()
     this.render()
     this.broadcast()
+    const sound = soundForTransition(
+      previous.phase,
+      state.phase,
+      (state.active ?? previous.active)?.trigger ?? null,
+      this.deps.settings.get().startSound
+    )
+    if (sound) this.deps.overlay.playSound(sound)
+  }
+
+  /** While recording, watch the chosen input for a mute or a volume of zero. */
+  private startMicPoll(gen: number): void {
+    this.stopMicPoll()
+    const check = (): void => {
+      const uid = this.sessions.get(gen)?.micUid ?? null
+      void this.deps.helper.inputState(uid).then((input) => {
+        if (input) this.dispatch({ type: 'mic-state', gen, muted: micLooksMuted(input) })
+      })
+    }
+    check()
+    this.micPoll = setInterval(check, MIC_POLL_MS)
+    this.micPoll.unref?.()
+  }
+
+  private stopMicPoll(): void {
+    if (this.micPoll) clearInterval(this.micPoll)
+    this.micPoll = null
   }
 
   private scheduleRestingDismiss(): void {
@@ -582,7 +869,9 @@ export class DictationService {
     const context: OverlayContext = {
       micOpen: this.micOpen,
       level: this.level,
-      insertionUnavailable: this.helperStatus !== null && !this.helperStatus.accessibility
+      insertionUnavailable: this.helperStatus !== null && !this.helperStatus.accessibility,
+      pillVisible: this.pillVisible(),
+      edge: this.deps.settings.get().pillEdge
     }
     this.deps.overlay.render(overlayView(this.state, context))
   }
@@ -633,14 +922,23 @@ export class DictationService {
   }
 
   private startCapture(gen: number): void {
-    const started = this.deps.engine.tryStartLive({ source: 'mic', levels: true })
+    const micUid = this.sessions.get(gen)?.micUid ?? null
+    const started = this.deps.engine.tryStartLive({
+      source: 'mic',
+      levels: true,
+      ...(micUid ? { inputDevice: micUid } : {})
+    })
     if (started.started) return
     this.deps.log(`capture refused: ${started.reason}`)
     this.dispatch({ type: 'engine-failed', gen, message: started.reason })
     this.releaseCapture()
   }
 
-  private setTimer(gen: number, stage: 'recording' | 'finalizing' | 'cleaning', ms: number): void {
+  private setTimer(
+    gen: number,
+    stage: 'recording' | 'warning' | 'finalizing' | 'cleaning',
+    ms: number
+  ): void {
     const key = `${gen}:${stage}`
     const existing = this.timers.get(key)
     if (existing) clearTimeout(existing)
@@ -648,6 +946,8 @@ export class DictationService {
       this.timers.delete(key)
       if (stage === 'recording') {
         this.dispatch({ type: 'stop', source: 'limit', gen, nowMs: this.deps.now() })
+      } else if (stage === 'warning') {
+        this.dispatch({ type: 'limit-warning', gen })
       } else {
         this.dispatch({ type: 'timeout', gen, stage })
       }
@@ -716,6 +1016,8 @@ export class DictationService {
   private async runDelivery(gen: number, text: string): Promise<void> {
     const context = this.sessions.get(gen)
     this.mark(gen, 'deliverStart')
+    // Kept only in memory so "paste last" can type it again; never logged or written.
+    this.lastTranscript = text
     const outcome = await this.deliver(context, text)
     this.mark(gen, 'deliverEnd')
     if (context) this.recordLatency(context)
@@ -724,7 +1026,7 @@ export class DictationService {
   }
 
   private async deliver(
-    context: SessionContext | undefined,
+    context: Pick<SessionContext, 'snapshotId' | 'target'> | undefined,
     text: string
   ): Promise<DeliveryOutcome> {
     if (!context) return { kind: 'recover', reason: 'no-target' }
@@ -742,6 +1044,49 @@ export class DictationService {
     if (result.outcome === 'refused')
       return { kind: 'recover', reason: refusalReason(result.reason) }
     return { kind: 'recover', reason: 'insertion-failed' }
+  }
+
+  /**
+   * Type the last transcript into whatever field has focus now, through the same
+   * snapshot, validation and insertion path as a live dictation.
+   */
+  async pasteLast(): Promise<void> {
+    const settings = this.deps.settings.get()
+    if (this.disposed || !this.deps.supported || !settings.enabled || this.pasting) return
+    if (isBusy(this.state)) return
+    const text = this.lastTranscript
+    if (!text) {
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: 'There is no transcript to paste yet.'
+      })
+      return
+    }
+    if (!this.deps.helper.available) {
+      this.dispatch({
+        type: 'notice',
+        level: 'error',
+        message: 'The dictation helper is missing from this build.'
+      })
+      return
+    }
+    this.pasting = true
+    const snapshotId = `dn-paste-${this.deps.now()}`
+    try {
+      const outcome = await this.deliver(
+        { snapshotId, target: this.deps.helper.snapshot(snapshotId) },
+        text
+      )
+      this.dispatch(
+        outcome.kind === 'delivered'
+          ? { type: 'notice', level: 'success', message: 'Pasted.' }
+          : { type: 'notice', level: 'error', message: RECOVERY_MESSAGES[outcome.reason] }
+      )
+    } finally {
+      this.deps.helper.release(snapshotId)
+      this.pasting = false
+    }
   }
 
   private recordLatency(context: SessionContext): void {
@@ -764,11 +1109,13 @@ export class DictationService {
   async status(): Promise<DictationStatus> {
     const helper = await this.deps.helper.status()
     if (helper) this.helperStatus = helper
+    void this.refreshDevices()
     return this.snapshotStatus()
   }
 
   private snapshotStatus(): DictationStatus {
     const helper = this.helperStatus
+    const settings = this.deps.settings.get() ?? DEFAULT_DICTATION_SETTINGS
     const permissions: DictationPermissions = {
       microphone: this.deps.microphoneAccess(),
       accessibility: helper ? helper.accessibility : null,
@@ -777,11 +1124,19 @@ export class DictationService {
     return {
       channel: this.deps.channel,
       supported: this.deps.supported,
-      settings: this.deps.settings.get() ?? DEFAULT_DICTATION_SETTINGS,
+      settings,
       phase: this.state.phase,
       permissions,
       helper: this.deps.helper.available ? 'ready' : 'unavailable',
       toggleShortcut: this.toggleState,
+      pasteLastShortcut: this.pasteLastState,
+      microphones: this.devices,
+      microphoneMissing:
+        settings.microphoneUid !== null &&
+        this.devices.length > 0 &&
+        !this.devices.some((device) => device.uid === settings.microphoneUid),
+      pillHidden: isPillHidden(settings.pillHiddenUntil, this.deps.now()),
+      hasLastTranscript: this.lastTranscript !== null,
       holdKey: this.holdState,
       conflicts: helper?.conflicts ?? [],
       speech: this.deps.engine.warm ? 'warm' : 'cold',

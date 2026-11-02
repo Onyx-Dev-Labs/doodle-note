@@ -5,6 +5,8 @@ import {
   DICTATION_DISMISS_RECOVERY_CHANNEL,
   DICTATION_GET_STATUS_CHANNEL,
   DICTATION_OPEN_PRIVACY_CHANNEL,
+  DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
+  DICTATION_PASTE_LAST_CHANNEL,
   DICTATION_SET_SETTINGS_CHANNEL,
   DICTATION_STATUS_EVENT_CHANNEL,
   DICTATION_TOGGLE_CHANNEL,
@@ -715,6 +717,7 @@ const dictationApi: DictationApi = {
   setSettings: (update) => ipcRenderer.invoke(DICTATION_SET_SETTINGS_CHANNEL, update),
   toggle: () => ipcRenderer.invoke(DICTATION_TOGGLE_CHANNEL),
   cancel: () => ipcRenderer.invoke(DICTATION_CANCEL_CHANNEL),
+  pasteLast: () => ipcRenderer.invoke(DICTATION_PASTE_LAST_CHANNEL),
   copyRecovery: (gen) => ipcRenderer.invoke(DICTATION_COPY_RECOVERY_CHANNEL, gen),
   dismissRecovery: (gen) => ipcRenderer.invoke(DICTATION_DISMISS_RECOVERY_CHANNEL, gen),
   openPrivacySettings: (pane) => ipcRenderer.invoke(DICTATION_OPEN_PRIVACY_CHANNEL, pane),
@@ -723,6 +726,13 @@ const dictationApi: DictationApi = {
     ipcRenderer.on(DICTATION_STATUS_EVENT_CHANNEL, listener)
     return () => {
       ipcRenderer.removeListener(DICTATION_STATUS_EVENT_CHANNEL, listener)
+    }
+  },
+  onOpenSettings: (callback) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(DICTATION_OPEN_SETTINGS_EVENT_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(DICTATION_OPEN_SETTINGS_EVENT_CHANNEL, listener)
     }
   }
 }

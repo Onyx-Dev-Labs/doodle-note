@@ -91,21 +91,21 @@ Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) open
 
 | Capability | Wispr | DoodleNote Dev now | Plan |
 |---|---|---|---|
-| Always-visible resting pill | yes, dockable | no overlay until a session starts | **P1** |
-| Recording state with live level | yes | yes (overlay with meter) | restyle, **P1** |
-| Cancel / Finish buttons | yes | yes (Stop, Cancel) | rename and restyle, **P1** |
-| Click the bar to start | yes | no | **P1** |
+| Always-visible resting pill | yes, dockable | yes, setting "Show the pill at all times" (default on) | **P1** done |
+| Recording state with live level | yes | yes, doodle pill with a squiggle driven by the level | **P1** done |
+| Cancel / Finish buttons | yes | yes, hand-drawn glyphs, labelled Cancel and Finish | **P1** done |
+| Click the bar to start | yes | yes (hands-free; click Finish or the squiggle to stop) | **P1** done |
 | Hold-to-talk | yes (Fn default) | yes (chosen modifier) | done |
-| Hands-free by double-tapping the hold key | yes | no (toggle shortcut only) | **P1** |
-| Hands-free limit | 20 min, warns at 19 | 3 min | **P1**, raise and add a warning |
+| Hands-free by double-tapping the hold key | yes | yes, setting on by default; needs a hold key | **P1** done |
+| Hands-free limit | 20 min, warns at 19 | 20 min, visible warning at 19 (hold-to-talk keeps 3 min) | **P1** done |
 | Esc to cancel; sub-0.5 s taps discarded | yes | yes (Esc; taps under 0.35 s ignored) | done |
-| Start sound | a ping | none | **P1** |
-| Paste last / copy last transcript shortcuts | yes | recovery text only | **P1** |
+| Start sound | a ping | generated two-note chime for start and stop, setting to turn off | **P1** done |
+| Paste last / copy last transcript shortcuts | yes | paste-last shortcut and menu item (memory only); copy-last not built | **P1** done (paste); copy stays open |
 | Undo after cancel | yes | no | **P2** |
-| Drag to left/right/bottom; remember edge | yes | fixed position | **P1** |
-| Hide for 1 hour; show at all times | yes | no | **P1** |
-| Right-click menu on the bar | yes (list above) | no | **P1** |
-| Microphone picker | yes, with virtual-device filter | system default only | **P1** |
+| Drag to left/right/bottom; remember edge | yes | yes, snaps and remembers; follows the display under the pointer | **P1** done |
+| Hide for 1 hour; show at all times | yes | yes; expiry persisted | **P1** done |
+| Right-click menu on the bar | yes (list above) | yes: hide, microphone, paste last, settings, keep on screen | **P1** done |
+| Microphone picker | yes, with virtual-device filter | yes (menu and Settings); falls back to the default; no virtual-device filter yet | **P1** done |
 | Languages picker | yes | engine default | **Talk** (depends on engines) |
 | Mute or pause music while dictating | yes | no | **P2** |
 | Dictation reminder coach | yes | no | **Talk** |
@@ -121,6 +121,26 @@ Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) open
 | Press Enter by voice | experimental | never, by design | keep out; revisit only as explicit opt-in |
 | Mouse side-button triggers | yes | no | **P2** |
 | Cloud speech | yes | local only by design | keep local |
+
+### P1 status
+
+Built on `feat/system-dictation` (see `docs/dictation-dev-app.md` for behaviour, settings and limits):
+
+- [x] Always-visible resting pill, non-activating
+- [x] Click to start, click Finish to stop
+- [x] Double-tap of the hold key latches hands-free
+- [x] 20-minute hands-free limit with a warning at 19 minutes
+- [x] Right-click menu (hide for an hour, microphone, paste last, settings, keep on screen)
+- [x] Drag to bottom, left or right; snaps and remembers the edge; follows the pointer's display
+- [x] Hide for an hour, persisted, ends on the clock or on a hotkey start
+- [x] Microphone picker through the engine's device list; falls back to the system default
+- [x] Start and stop tones, own and generated, with a setting
+- [x] Paste-last shortcut (default `Control+Alt+Shift+V`), text kept in memory only
+- [x] Doodle restyle of the overlay
+- [x] Settings page controls for all of the above
+- [x] Mic-muted warning (helper reads the input's mute switch and volume)
+
+Still to see with a human at the Mac: the look on real displays, dragging with a real pointer, the native right-click menu, live dictation through every path, and the tones through speakers.
 
 ## Our own look
 

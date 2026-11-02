@@ -26,6 +26,14 @@ process.stdin.on('data', (d) => {
       if (mode === 'hang') return
       if (mode === 'crash') process.exit(1)
       send({ event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'ax', verified: true, clipboard: 'untouched' })
+    } else if (req.op === 'input-state') {
+      if (req.uid === 'gone') send({ event: 'reply', id: req.id, ok: false, reason: 'no-input-device' })
+      else if (req.uid === 'bare') send({ event: 'reply', id: req.id, ok: true })
+      else send({ event: 'reply', id: req.id, ok: true, muted: true, volume: 0 })
+    } else if (req.op === 'hold-start' && mode === 'taps') {
+      send({ event: 'reply', id: req.id, ok: true })
+      send({ event: 'tap' })
+      send({ event: 'tap' })
     } else if (req.op === 'hold-start') {
       send({ event: 'reply', id: req.id, ok: true })
       send({ event: 'hold', phase: 'down', holdId: 1 })
@@ -116,4 +124,33 @@ test('hold events arrive paired and in order', async () => {
   } finally {
     await client.dispose()
   }
+})
+
+test('quick taps of the hold key arrive as tap events, separate from holds', async () => {
+  const client = new DictationHelperClient(fakeHelper('taps'), fast)
+  let taps = 0
+  const holds: HoldEvent[] = []
+  client.onTap(() => taps++)
+  client.onHold((e) => holds.push(e))
+  try {
+    assert.equal(await client.setHoldKey('rightOption'), null)
+    await new Promise((r) => setTimeout(r, 100))
+    assert.equal(taps, 2)
+    assert.deepEqual(holds, [])
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('input state reports mute and volume, and is null when the helper cannot say', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    assert.deepEqual(await client.inputState('usb-1'), { muted: true, volume: 0 })
+    assert.deepEqual(await client.inputState('bare'), { muted: null, volume: null })
+    assert.equal(await client.inputState('gone'), null)
+  } finally {
+    await client.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.equal(await missing.inputState(null), null)
 })
