@@ -8,6 +8,7 @@ Planning document. It records what Wispr Flow offers, what DoodleNote Dev has to
 - **Live observation:** window inventory of the running app, plus screenshots of the Flow Bar window (resting) and the Hub sidebar.
 - **Static reading:** the English UI-string table in the Hub renderer bundle, which is keyed by screen (`settings_system_*`, `settings_hotkey_*`, `hub_status_*`, `hub_notetaker_*`…). Keys reveal what options and states exist. Strings are not behavior, so anything marked *inferred* needs a live check.
 - **Public docs:** a separate docs pass (hands-free, Flow Bar docking, Command Mode, Dictionary, Snippets).
+- **Native helper:** decompiled and string-read in Hopper (see Native helper findings).
 - **Not captured:** the Flow Bar while recording or processing, and the content pane of the Hub (the window did not render while off-screen). REA's `observe_native_ui` refused the Wispr windows ("window-mismatch"), so screenshots came from `screencapture`. Recording-state visuals need a live session; see the open questions.
 - **Reference data location:** `/tmp/dn-dict-wispr/` (outside the repo, not committed).
 
@@ -48,6 +49,41 @@ A separate Swift helper app handles native input, as in the first REA pass.
 - **History and data:** transcript history with retry and report; local storage choices (store, auto-delete after 24 h, never store); cloud sync toggle; data-sharing toggle; context awareness; erase by category.
 - **Experimental:** Command Mode; Focus Mode (blocked apps/URLs); learn-from-email style via Gmail; bulk import.
 - **Insights:** words, streaks, speed, leaderboard. Out of scope here.
+
+## Native helper findings (Hopper pass)
+
+Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) opened in Hopper through REA, plus its string table. Behaviour below is read from class names, log strings and one decompiled provider. It is evidence of what the helper does, not a spec to copy.
+
+**Text delivery**
+- Tries a direct Accessibility value set first. If the value does not stick, falls back to a clipboard paste. If no element can be focused it activates the app and pastes anyway ("last resort").
+- Clipboard path saves the user's pasteboard types, writes the text, posts the paste, then restores the clipboard about 500 ms later. A setting turns restore off.
+- Uses *delayed rendering*: the pasteboard holds a promise and the text is supplied only when the target app asks for it. A timer detects "no app requested the data", which means the paste failed, and raises a failed-paste notice.
+- Marks clipboard writes with the concealed-type flag so clipboard managers skip them.
+- Special cases: Shift+Insert for some apps, a "remote viewer" path for remote-desktop windows, Slack rich-text handling, a block list that reports "paste blocked", and a check for held keys before pasting.
+- After pasting it watches the field to learn from user edits (the "auto-add corrected words" feature).
+
+**Mic and audio**
+- Watches which processes hold the microphone (Core Audio process list), the default input device, mute state, and input volume dropping to zero or being restored. This feeds a "your mic is muted" warning and meeting detection.
+- A volume manager lowers or mutes output while dictating and restores it afterwards, with a rule to decline if another device is owed a restore. A now-playing cache and media-transport control pause music.
+- Bluetooth LE manager for a paired hardware "ring" device (pairing, scan, audio characteristic). Out of scope for us.
+- Notes an external non-Apple keyboard means no Fn key.
+
+**Meetings**
+- Window and tab monitors for Zoom, Google Meet and Slack Huddle; a conference end-state reader and a "browser leave proof" that confirms the user really left the call before stopping.
+- Active-speaker polling through Accessibility for Zoom and Meet, which drives live speaker names.
+- A consent message posted into the meeting chat (Accessibility value set, clipboard fallback).
+- A dictation gate that stops dictation colliding with a running Notetaker.
+
+**Other**
+- Focus Mode: blocks activating or cold-launching chosen apps and navigating to chosen URLs, checking the browser's address bar through Accessibility.
+- Floating web panel host for in-app web content; secure-input monitor; keystroke tracing for edit capture.
+
+**Ideas this gives us (not in the matrix above)**
+1. Delayed-render clipboard with a failed-paste detector, concealed flag and 500 ms restore. Our paste fallback is simpler.
+2. Mic-muted warning while recording.
+3. Pause or lower music while dictating, restoring afterwards.
+4. Meeting end detection by proving the user left, not just the window closing.
+5. Posting a recording-consent line into the meeting chat (opt-in).
 
 ## Parity matrix: dictation
 
