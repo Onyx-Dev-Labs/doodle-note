@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
+import IOKit.hid
 
 // DoodleNote dictation helper: reads one JSON request per stdin line, answers on
 // stdout. Exits when stdin closes, so it can never outlive the app.
@@ -28,8 +29,20 @@ func handle(_ request: [String: Any]) {
                 "holdActive": HoldWatcher.shared.active,
                 "mouseActive": HoldWatcher.shared.mouseActive,
             ]
+            fields["inputMonitoringAccess"] = Permissions.inputMonitoringState
             if let action = HoldKeySpec.fnKeyAction { fields["fnKeyAction"] = action }
             Wire.reply(id, fields)
+        }
+    case "request-accessibility":
+        // Asks macOS for the Accessibility permission from this process, the one that
+        // actually inserts text, so the entry macOS lists is the one that matters.
+        DispatchQueue.main.async {
+            Wire.reply(id, ["trusted": Permissions.requestAccessibility()])
+        }
+    case "request-input-monitoring":
+        DispatchQueue.main.async {
+            let granted = Permissions.requestInputMonitoring()
+            Wire.reply(id, ["granted": granted, "state": Permissions.inputMonitoringState])
         }
     case "input-state":
         let uid = request["uid"] as? String

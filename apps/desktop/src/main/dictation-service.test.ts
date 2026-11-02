@@ -44,10 +44,15 @@ interface Harness {
     captureResult: MouseCaptureResult
     input: InputState | null
     fnKeyAction: number | null
+    inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
+    accessibilityGrantedAfterAsk: boolean | null
+    inputMonitoringGrantedAfterAsk: boolean | null
+    permissionAsks: string[]
     exitListener: (() => void) | null
     holdKeys: HoldKey[]
   }
   setEngineBusy: (busy: boolean) => void
+  perms: { mic: 'granted' | 'denied' | 'not-determined'; micAnswer: boolean; micAsked: number }
   startOpts: Array<Record<string, unknown>>
   devices: { list: InputDevice[] }
   sounds: SoundKind[]
@@ -62,7 +67,7 @@ function harness(
   options: {
     settings?: Partial<DictationSettings>
     cleanup?: CleanupRunner
-    access?: 'granted' | 'denied'
+    access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
   } = {}
 ): Harness {
@@ -85,6 +90,11 @@ function harness(
   const menus: Harness['menus'] = []
   const shortcuts = new Map<string, () => void>()
   const settingsOpened: number[] = []
+  const perms: Harness['perms'] = {
+    mic: options.access ?? 'granted',
+    micAnswer: true,
+    micAsked: 0
+  }
   let engineBusy = false
   const helper: Harness['helper'] = {
     target: {
@@ -106,6 +116,10 @@ function harness(
     captureResult: { ok: true, button: 3 },
     input: { muted: false, volume: 0.5 },
     fnKeyAction: null,
+    inputMonitoringAccess: 'granted',
+    accessibilityGrantedAfterAsk: false,
+    inputMonitoringGrantedAfterAsk: false,
+    permissionAsks: [],
     exitListener: null,
     holdKeys: []
   }
@@ -143,6 +157,7 @@ function harness(
         conflicts: [],
         holdActive: false,
         mouseActive: false,
+        inputMonitoringAccess: helper.inputMonitoringAccess,
         fnKeyAction: helper.fnKeyAction
       }),
       snapshot: async () => helper.target,
@@ -164,6 +179,14 @@ function harness(
         return button === null ? null : (helper.mouseResult ?? { ok: true, swallowing: swallow })
       },
       captureMouseButton: async () => helper.captureResult,
+      requestAccessibility: async () => {
+        helper.permissionAsks.push('accessibility')
+        return helper.accessibilityGrantedAfterAsk
+      },
+      requestInputMonitoring: async () => {
+        helper.permissionAsks.push('input-monitoring')
+        return helper.inputMonitoringGrantedAfterAsk
+      },
       onTap: (cb) => {
         helper.tapListener = cb
         return () => {}
@@ -195,7 +218,13 @@ function harness(
         return 'Cleaned.'
       }),
     cleanupOptions: () => ({ localModelLabel: 'Test model', byok: null }),
-    microphoneAccess: () => options.access ?? 'granted',
+    microphoneAccess: () => perms.mic,
+    requestMicrophone: async () => {
+      perms.micAsked += 1
+      if (perms.micAnswer) perms.mic = 'granted'
+      else if (perms.mic === 'not-determined') perms.mic = 'denied'
+      return perms.micAnswer
+    },
     writeClipboard: (text) => {
       if (options.clipboardFails) throw new Error('clipboard unavailable')
       clipboard.push(text)
@@ -236,6 +265,7 @@ function harness(
     setEngineBusy: (busy) => {
       engineBusy = busy
     },
+    perms,
     startOpts,
     devices,
     sounds,
@@ -1328,4 +1358,110 @@ test('capturing a mouse button reports the button, or a plain explanation', asyn
   h.helper.captureResult = { ok: false, failure: 'timeout' }
   const timedOut = await h.service.captureMouseButton()
   assert.match(timedOut.ok ? '' : timedOut.message, /No button was pressed/)
+})
+
+/* ---- asking macOS for permissions ---- */
+
+test('the microphone is asked for from the pill the first time, then the session starts', async () => {
+  const h = harness({ access: 'not-determined' })
+  await h.service.start()
+  h.service.onOverlayAction('pill', null)
+  assert.equal(h.perms.micAsked, 1, 'macOS is asked straight away')
+  assert.match(lastView(h).title, /Choose Allow/)
+  await tick()
+  await tick()
+  assert.equal(h.service.phase, 'preparing', 'allowed, so the session the user asked for begins')
+  assert.deepEqual(h.engineCalls, ['start'])
+})
+
+test('a refused microphone prompt explains where to turn it on and starts nothing', async () => {
+  const h = harness({ access: 'not-determined' })
+  h.perms.micAnswer = false
+  await h.service.start()
+  h.service.toggle()
+  await tick()
+  await tick()
+  assert.deepEqual(h.engineCalls, [])
+  assert.match(lastView(h).title, /Microphone access is off/)
+  // Answered once: later starts do not ask again.
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  assert.equal(h.perms.micAsked, 1)
+})
+
+test('a hold key released during the first microphone prompt does not record', async () => {
+  const h = harness({ access: 'not-determined', settings: { holdKey: 'rightOption' } })
+  await h.service.start()
+  h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+  await tick()
+  await tick()
+  assert.deepEqual(h.engineCalls, [])
+  assert.match(lastView(h).title, /Hold the key again/)
+})
+
+test('requestPermission: microphone asks once, then points to System Settings', async () => {
+  const h = harness({ access: 'not-determined' })
+  await h.service.start()
+  assert.equal(await h.service.requestPermission('microphone'), 'granted')
+  assert.equal(h.perms.micAsked, 1)
+  assert.equal(await h.service.requestPermission('microphone'), 'granted', 'already allowed')
+  assert.equal(h.perms.micAsked, 1, 'no second prompt')
+
+  const denied = harness({ access: 'denied' })
+  await denied.service.start()
+  assert.equal(await denied.service.requestPermission('microphone'), 'open-settings')
+  assert.equal(denied.perms.micAsked, 0)
+
+  const refused = harness({ access: 'not-determined' })
+  refused.perms.micAnswer = false
+  await refused.service.start()
+  assert.equal(await refused.service.requestPermission('microphone'), 'denied')
+})
+
+test('requestPermission: Accessibility and Input Monitoring are asked for through the helper', async () => {
+  const h = harness()
+  await h.service.start()
+  assert.equal(await h.service.requestPermission('accessibility'), 'prompted')
+  h.helper.accessibilityGrantedAfterAsk = true
+  assert.equal(await h.service.requestPermission('accessibility'), 'granted')
+
+  h.helper.inputMonitoringAccess = 'not-determined'
+  assert.equal(await h.service.requestPermission('input-monitoring'), 'prompted')
+  h.helper.inputMonitoringGrantedAfterAsk = true
+  assert.equal(await h.service.requestPermission('input-monitoring'), 'granted')
+  assert.deepEqual(h.helper.permissionAsks, [
+    'accessibility',
+    'accessibility',
+    'input-monitoring',
+    'input-monitoring'
+  ])
+})
+
+test('Input Monitoring that was already answered opens System Settings instead of asking again', async () => {
+  const denied = harness()
+  denied.helper.inputMonitoringAccess = 'denied'
+  await denied.service.start()
+  assert.equal(await denied.service.requestPermission('input-monitoring'), 'open-settings')
+  const granted = harness()
+  granted.helper.inputMonitoringAccess = 'granted'
+  await granted.service.start()
+  assert.equal(await granted.service.requestPermission('input-monitoring'), 'granted')
+  assert.deepEqual([...denied.helper.permissionAsks, ...granted.helper.permissionAsks], [])
+})
+
+test('after a request the status is re-read and broadcast, and carries the helper answer', async () => {
+  const h = harness()
+  await h.service.start()
+  h.helper.inputMonitoringAccess = 'not-determined'
+  await h.service.requestPermission('input-monitoring')
+  const status = await h.service.status()
+  assert.equal(status.permissions.inputMonitoringAccess, 'not-determined')
+  assert.equal(status.permissions.accessibility, true)
+})
+
+test('permissions cannot be requested once dictation is shut down', async () => {
+  const h = harness()
+  await h.service.dispose()
+  assert.equal(await h.service.requestPermission('accessibility'), 'unavailable')
 })

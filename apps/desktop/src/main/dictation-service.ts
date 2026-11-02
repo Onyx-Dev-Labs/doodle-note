@@ -52,6 +52,7 @@ import {
   type SessionState
 } from '../shared/dictation-session'
 import type { EngineEvent, EngineStartOptions } from '../shared/engine-events'
+import type { PermissionOutcome, PermissionPane } from '../shared/dictation-permissions'
 import type { CaptureLease, CaptureOwnership } from './capture-ownership'
 import { MAX_CLEANUP_CHARS, buildCleanupRequest, validateCleanup } from './dictation-cleanup'
 import {
@@ -80,6 +81,10 @@ export interface HelperLike {
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
   /** Arm or disarm the optional mouse-button trigger. Null result means it was switched off. */
   setMouseButton(button: number | null, swallow: boolean): Promise<MouseStartResult | null>
+  /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
+  requestAccessibility(): Promise<boolean | null>
+  /** Ask macOS for Input Monitoring from the helper. Returns whether it is granted now. */
+  requestInputMonitoring(): Promise<boolean | null>
   /** Wait for the next mouse button the user presses. */
   captureMouseButton(): Promise<MouseCaptureResult>
   onHold(listener: (event: { phase: 'down' | 'up'; holdId: number }) => void): () => void
@@ -127,6 +132,8 @@ export interface DictationDeps {
   cleanup: CleanupRunner
   cleanupOptions(): DictationStatus['cleanup']
   microphoneAccess(): MicrophoneAccess
+  /** Show macOS's microphone dialog (which also lists the app). Resolves true when allowed. */
+  requestMicrophone(): Promise<boolean>
   /** Electron's clipboard API is asynchronous; resolve only once the text is on it. */
   writeClipboard(text: string): Promise<void> | void
   broadcast(status: DictationStatus): void
@@ -224,6 +231,7 @@ export class DictationService {
   private holdState: DictationStatus['holdKey'] = 'off'
   private mouseState: DictationStatus['mouseButton'] = 'off'
   private mouseSwallowing = false
+  private askingMicrophone = false
   private escapeRegistered = false
   private disposed = false
   private lastToggleAt = 0
@@ -658,6 +666,12 @@ export class DictationService {
       return
     }
     const access = this.deps.microphoneAccess()
+    if (access === 'not-determined') {
+      // macOS has never been asked: show its dialog from here, so it appears from
+      // the pill and the app gets listed, instead of failing deeper in the engine.
+      void this.askMicrophoneThenStart(trigger, holdId)
+      return
+    }
     if (access === 'denied' || access === 'restricted') {
       this.dispatch({
         type: 'notice',
@@ -719,6 +733,90 @@ export class DictationService {
       micFellBack: microphone.fellBack,
       ...(holdId !== undefined ? { holdId } : {})
     })
+  }
+
+  /**
+   * First use: ask for the microphone, then start the session the user asked for.
+   * A hold key may have been released while the dialog was up, so a hold only
+   * reports the result and waits for the next press.
+   */
+  private async askMicrophoneThenStart(
+    trigger: 'toggle' | 'hold' | 'handsfree' | 'pill',
+    holdId?: number
+  ): Promise<void> {
+    if (this.askingMicrophone) return
+    this.askingMicrophone = true
+    this.dispatch({
+      type: 'notice',
+      level: 'info',
+      message: 'Choose Allow in the macOS dialog to let DoodleNote Dev use the microphone.'
+    })
+    let allowed = false
+    try {
+      allowed = await this.deps.requestMicrophone()
+    } finally {
+      this.askingMicrophone = false
+    }
+    if (this.disposed) return
+    this.broadcast()
+    if (!allowed) {
+      this.dispatch({
+        type: 'notice',
+        level: 'error',
+        message:
+          'Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone.'
+      })
+      return
+    }
+    if (trigger === 'hold') {
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: 'Microphone allowed. Hold the key again to dictate.'
+      })
+      return
+    }
+    this.dispatch({ type: 'dismiss' })
+    this.begin(trigger, holdId)
+  }
+
+  /**
+   * Ask macOS for one of the permissions from the process that needs it: the
+   * microphone from the app, Accessibility and Input Monitoring from the helper.
+   * Returns how it ended; the settings page refreshes from the status broadcast.
+   */
+  async requestPermission(pane: PermissionPane): Promise<PermissionOutcome> {
+    if (this.disposed || !this.deps.supported) return 'unavailable'
+    let outcome: PermissionOutcome
+    switch (pane) {
+      case 'microphone': {
+        const access = this.deps.microphoneAccess()
+        if (access === 'granted') outcome = 'granted'
+        else if (access === 'not-determined')
+          outcome = (await this.deps.requestMicrophone()) ? 'granted' : 'denied'
+        else outcome = 'open-settings'
+        break
+      }
+      case 'accessibility': {
+        const trusted = await this.deps.helper.requestAccessibility()
+        outcome = trusted === null ? 'unavailable' : trusted ? 'granted' : 'prompted'
+        break
+      }
+      case 'input-monitoring': {
+        const state = (await this.deps.helper.status())?.inputMonitoringAccess ?? null
+        if (state === 'granted') outcome = 'granted'
+        else if (state === 'denied') outcome = 'open-settings'
+        else {
+          const granted = await this.deps.helper.requestInputMonitoring()
+          outcome = granted === null ? 'unavailable' : granted ? 'granted' : 'prompted'
+        }
+        break
+      }
+    }
+    // Pick up whatever changed, without a restart where macOS allows it.
+    await this.status()
+    this.broadcast()
+    return outcome
   }
 
   /* ---- engine events (routed here by the host while dictation owns capture) ---- */
@@ -1000,6 +1098,7 @@ export class DictationService {
         this.helperStatus = {
           accessibility: description.accessibility,
           inputMonitoring: false,
+          inputMonitoringAccess: null,
           secureInput: false,
           conflicts: [],
           holdActive: false,
@@ -1268,7 +1367,8 @@ export class DictationService {
     const permissions: DictationPermissions = {
       microphone: this.deps.microphoneAccess(),
       accessibility: helper ? helper.accessibility : null,
-      inputMonitoring: helper ? helper.inputMonitoring : null
+      inputMonitoring: helper ? helper.inputMonitoring : null,
+      inputMonitoringAccess: helper ? helper.inputMonitoringAccess : null
     }
     return {
       channel: this.deps.channel,

@@ -13,12 +13,14 @@ import {
   DICTATION_OPEN_PRIVACY_CHANNEL,
   DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
   DICTATION_PASTE_LAST_CHANNEL,
+  DICTATION_REQUEST_PERMISSION_CHANNEL,
   DICTATION_SET_SETTINGS_CHANNEL,
   DICTATION_STATUS_EVENT_CHANNEL,
   DICTATION_TOGGLE_CHANNEL,
   type DictationSettingsUpdate,
   type MicrophoneAccess
 } from '../shared/dictation-api'
+import type { PermissionPane } from '../shared/dictation-permissions'
 import { CaptureOwnership } from './capture-ownership'
 import { DictationHelperClient } from './dictation-helper-client'
 import { DictationOverlay } from './dictation-overlay'
@@ -48,6 +50,10 @@ const PRIVACY_PANES = {
   accessibility: 'Privacy_Accessibility',
   'input-monitoring': 'Privacy_ListenEvent'
 } as const
+
+function isPermissionPane(value: unknown): value is PermissionPane {
+  return value === 'microphone' || value === 'accessibility' || value === 'input-monitoring'
+}
 
 function microphoneAccess(): MicrophoneAccess {
   try {
@@ -132,6 +138,13 @@ export function createDictationHost(options: DictationHostOptions): {
     cleanupOptions: () =>
       options.notes()?.dictationCleanupOptions() ?? { localModelLabel: null, byok: null },
     microphoneAccess,
+    requestMicrophone: async () => {
+      try {
+        return await systemPreferences.askForMediaAccess('microphone')
+      } catch {
+        return false
+      }
+    },
     writeClipboard: (text) => clipboard.writeText(text),
     broadcast: (status) => options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status),
     onMicHeld: options.setMicHeld,
@@ -180,6 +193,9 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_PASTE_LAST_CHANNEL, async (event) => {
     if (trusted(event)) await service.pasteLast()
   })
+  ipcMain.handle(DICTATION_REQUEST_PERMISSION_CHANNEL, (event, pane: unknown) =>
+    trusted(event) && isPermissionPane(pane) ? service.requestPermission(pane) : 'unavailable'
+  )
   ipcMain.handle(DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL, (event) =>
     trusted(event)
       ? service.captureMouseButton()

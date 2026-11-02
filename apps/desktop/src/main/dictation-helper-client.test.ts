@@ -20,7 +20,7 @@ process.stdin.on('data', (d) => {
   buf += d
   for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
     const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
-    if (req.op === 'status') send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: false, secureInput: false, conflicts: ['Wispr Flow'], holdActive: false, mouseActive: true, fnKeyAction: 2 })
+    if (req.op === 'status') send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: false, secureInput: false, conflicts: ['Wispr Flow'], holdActive: false, mouseActive: true, inputMonitoringAccess: mode === 'not-asked' ? 'not-determined' : 'granted', fnKeyAction: 2 })
     else if (req.op === 'snapshot') send({ event: 'reply', id: req.id, ok: true, snapshotId: req.snapshotId, pid: 42, bundleId: 'com.apple.TextEdit', appName: 'TextEdit', hasElement: true, accessibility: true, role: 'AXTextArea', secure: false, editable: true })
     else if (req.op === 'deliver') {
       if (mode === 'hang') return
@@ -30,6 +30,10 @@ process.stdin.on('data', (d) => {
       if (req.uid === 'gone') send({ event: 'reply', id: req.id, ok: false, reason: 'no-input-device' })
       else if (req.uid === 'bare') send({ event: 'reply', id: req.id, ok: true })
       else send({ event: 'reply', id: req.id, ok: true, muted: true, volume: 0 })
+    } else if (req.op === 'request-accessibility') {
+      send({ event: 'reply', id: req.id, ok: true, trusted: mode === 'grant' })
+    } else if (req.op === 'request-input-monitoring') {
+      send({ event: 'reply', id: req.id, ok: true, granted: mode === 'grant', state: 'not-determined' })
     } else if (req.op === 'mouse-start') {
       // Replies prove the fields arrived as encoded: only button 3 with swallow true swallows.
       if (!Number.isInteger(req.button) || req.button < 2) send({ event: 'reply', id: req.id, ok: false, reason: 'invalid-button' })
@@ -60,7 +64,14 @@ process.stdin.on('end', () => process.exit(0))
   return { command: process.execPath, args: [script, behavior] }
 }
 
-const fast = { status: 500, snapshot: 500, deliver: 300, hold: 500, capture: 1_500 }
+const fast = {
+  status: 500,
+  snapshot: 500,
+  deliver: 300,
+  hold: 500,
+  capture: 1_500,
+  permission: 800
+}
 
 test('status, snapshot and deliver round-trip with typed fields', async () => {
   const client = new DictationHelperClient(fakeHelper('ok'), fast)
@@ -222,6 +233,40 @@ test('capturing a mouse button returns the number, or says why not', async () =>
     const client = new DictationHelperClient(fakeHelper(mode), fast)
     try {
       assert.deepEqual(await client.captureMouseButton(), { ok: false, failure })
+    } finally {
+      await client.dispose()
+    }
+  }
+})
+
+test('permission requests go to the helper and report whether the grant already happened', async () => {
+  const prompted = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    assert.equal(await prompted.requestAccessibility(), false)
+    assert.equal(await prompted.requestInputMonitoring(), false)
+  } finally {
+    await prompted.dispose()
+  }
+  const granted = new DictationHelperClient(fakeHelper('grant'), fast)
+  try {
+    assert.equal(await granted.requestAccessibility(), true)
+    assert.equal(await granted.requestInputMonitoring(), true)
+  } finally {
+    await granted.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.equal(await missing.requestAccessibility(), null)
+  assert.equal(await missing.requestInputMonitoring(), null)
+})
+
+test('the helper status carries Input Monitoring as three states', async () => {
+  for (const [mode, expected] of [
+    ['ok', 'granted'],
+    ['not-asked', 'not-determined']
+  ] as const) {
+    const client = new DictationHelperClient(fakeHelper(mode), fast)
+    try {
+      assert.equal((await client.status())?.inputMonitoringAccess, expected)
     } finally {
       await client.dispose()
     }

@@ -12,6 +12,16 @@ import {
   describeMouseButton,
   describeStopStages
 } from '../../shared/dictation-pill'
+import {
+  accessibilityState,
+  permissionAction,
+  permissionButtonLabel,
+  permissionLabel,
+  relaunchHint,
+  type PermissionOutcome,
+  type PermissionPane,
+  type PermissionState
+} from '../../shared/dictation-permissions'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -37,10 +47,6 @@ function acceleratorFrom(event: React.KeyboardEvent): string | null {
   else if (code === 'Space') key = 'Space'
   if (!key || modifiers.length === 0) return null
   return [...modifiers, key].join('+')
-}
-
-function permissionLabel(value: boolean | null): string {
-  return value === null ? 'Checking…' : value ? 'Allowed' : 'Not allowed'
 }
 
 function shortcutNote(state: ShortcutState): string {
@@ -70,6 +76,8 @@ export function DictationSettings(): React.JSX.Element {
   const [status, setStatus] = useState<DictationStatus | null>(null)
   const [recording, setRecording] = useState<'toggle' | 'pasteLast' | 'copyLast' | null>(null)
   const [error, setError] = useState('')
+  const [asking, setAsking] = useState<PermissionPane | null>(null)
+  const [requested, setRequested] = useState<Partial<Record<PermissionPane, PermissionOutcome>>>({})
   const [capturing, setCapturing] = useState(false)
   const [captureMessage, setCaptureMessage] = useState('')
 
@@ -122,6 +130,64 @@ export function DictationSettings(): React.JSX.Element {
   }
 
   const { settings, permissions, cleanup } = status
+  const askFor = async (pane: PermissionPane): Promise<void> => {
+    setAsking(pane)
+    try {
+      const outcome = await window.dictation.requestPermission(pane)
+      setRequested((previous) => ({ ...previous, [pane]: outcome }))
+      // macOS will not prompt again: take the user to the switch.
+      if (outcome === 'open-settings') void window.dictation.openPrivacySettings(pane)
+      refresh()
+    } catch {
+      setError('Could not ask for that permission.')
+    } finally {
+      setAsking(null)
+    }
+  }
+  const permissionRow = (
+    pane: PermissionPane,
+    title: string,
+    why: string,
+    state: PermissionState | null
+  ): React.JSX.Element => {
+    const action = permissionAction(pane, state)
+    const label = permissionButtonLabel(action)
+    const hint = relaunchHint(pane, requested[pane] ?? null)
+    return (
+      <div className="cal-row">
+        <span className="cal-row-main">
+          <span className="cal-row-label">{title}</span>
+          <span className="cal-row-sub">
+            {permissionLabel(state)} · {why}
+          </span>
+          {hint && state !== 'granted' && <span className="cal-row-sub">{hint}</span>}
+        </span>
+        {label && (
+          <button
+            type="button"
+            className="pill-btn"
+            disabled={asking === pane}
+            onClick={() =>
+              action === 'allow'
+                ? void askFor(pane)
+                : void window.dictation.openPrivacySettings(pane)
+            }
+          >
+            {asking === pane ? 'Asking…' : label}
+          </button>
+        )}
+        {state === 'granted' && (
+          <button
+            type="button"
+            className="pill-btn"
+            onClick={() => void window.dictation.openPrivacySettings(pane)}
+          >
+            Open System Settings
+          </button>
+        )}
+      </div>
+    )
+  }
   const hiddenNow = status.pillHidden
   const captureMouse = async (): Promise<void> => {
     setCapturing(true)
@@ -194,51 +260,30 @@ export function DictationSettings(): React.JSX.Element {
 
       <section className="keys-section">
         <h3>Permissions</h3>
+        <p className="models-sub">
+          Allow asks macOS directly, which also lists DoodleNote Dev under Privacy &amp; Security.
+          Once you have answered, macOS will not ask again and the button opens System Settings
+          instead.
+        </p>
         <div className="cal-subcard">
-          <div className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">Microphone</span>
-              <span className="cal-row-sub">{permissions.microphone.replace('-', ' ')}</span>
-            </span>
-            <button
-              type="button"
-              className="pill-btn"
-              onClick={() => void window.dictation.openPrivacySettings('microphone')}
-            >
-              Open System Settings
-            </button>
-          </div>
-          <div className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">Accessibility</span>
-              <span className="cal-row-sub">
-                {permissionLabel(permissions.accessibility)} · needed to type into other apps.
-                Without it your text is kept for copying.
-              </span>
-            </span>
-            <button
-              type="button"
-              className="pill-btn"
-              onClick={() => void window.dictation.openPrivacySettings('accessibility')}
-            >
-              Open System Settings
-            </button>
-          </div>
-          <div className="cal-row">
-            <span className="cal-row-main">
-              <span className="cal-row-label">Input Monitoring</span>
-              <span className="cal-row-sub">
-                {permissionLabel(permissions.inputMonitoring)} · only for hold-to-talk.
-              </span>
-            </span>
-            <button
-              type="button"
-              className="pill-btn"
-              onClick={() => void window.dictation.openPrivacySettings('input-monitoring')}
-            >
-              Open System Settings
-            </button>
-          </div>
+          {permissionRow(
+            'microphone',
+            'Microphone',
+            'Needed to hear you.',
+            permissions.microphone === 'unknown' ? 'unknown' : permissions.microphone
+          )}
+          {permissionRow(
+            'accessibility',
+            'Accessibility',
+            'Needed to type into other apps. Without it your text is kept for copying.',
+            accessibilityState(permissions.accessibility)
+          )}
+          {permissionRow(
+            'input-monitoring',
+            'Input Monitoring',
+            'Only for hold-to-talk and the mouse button.',
+            permissions.inputMonitoringAccess ?? accessibilityState(permissions.inputMonitoring)
+          )}
         </div>
       </section>
 

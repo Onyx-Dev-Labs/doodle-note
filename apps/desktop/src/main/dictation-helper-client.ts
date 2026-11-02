@@ -29,6 +29,8 @@ export interface HelperTimeouts {
   hold: number
   /** How long a "press a mouse button" capture waits for the button. */
   capture: number
+  /** A permission request returns once macOS has shown its dialog, not when it is answered. */
+  permission: number
 }
 
 export const DEFAULT_HELPER_TIMEOUTS: HelperTimeouts = {
@@ -36,7 +38,8 @@ export const DEFAULT_HELPER_TIMEOUTS: HelperTimeouts = {
   snapshot: 1_500,
   deliver: 4_000,
   hold: 2_000,
-  capture: 12_000
+  capture: 12_000,
+  permission: 5_000
 }
 
 /**
@@ -98,6 +101,12 @@ export class DictationHelperClient {
         : [],
       holdActive: reply.holdActive === true,
       mouseActive: reply.mouseActive === true,
+      inputMonitoringAccess:
+        reply.inputMonitoringAccess === 'granted' ||
+        reply.inputMonitoringAccess === 'denied' ||
+        reply.inputMonitoringAccess === 'not-determined'
+          ? reply.inputMonitoringAccess
+          : null,
       fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null
     }
   }
@@ -220,6 +229,21 @@ export class DictationHelperClient {
             ? 'unknown-key'
             : 'input-monitoring-denied'
     }
+  }
+
+  /**
+   * Ask macOS for Accessibility from this process (the one that inserts text).
+   * Returns whether it is granted now; null when the helper cannot be reached.
+   */
+  async requestAccessibility(): Promise<boolean | null> {
+    const reply = await this.request('request-accessibility', {}, this.timeouts.permission)
+    return reply?.ok ? reply.trusted === true : null
+  }
+
+  /** Ask macOS for Input Monitoring. Returns whether it is granted now; null when unreachable. */
+  async requestInputMonitoring(): Promise<boolean | null> {
+    const reply = await this.request('request-input-monitoring', {}, this.timeouts.permission)
+    return reply?.ok ? reply.granted === true : null
   }
 
   /** Wait for the user to press a mouse button, for the settings page. */

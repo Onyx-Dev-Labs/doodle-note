@@ -114,13 +114,29 @@ The first signing may ask for Keychain access to that key. The script refuses a 
 
 For an unpackaged run from source: `pnpm dev:dictation` (also the dev lineage and profile). Whisper batch transcription is not bundled in the dev app (it needs a whisper.cpp build); Parakeet, the default, is.
 
-## Permissions (you grant these once; the app never changes them)
+## Permissions
 
-1. **Microphone:** macOS asks on the first dictation.
-2. **Accessibility:** System Settings → Privacy & Security → Accessibility → add DoodleNote Dev. Needed to see the focused field and type. Without it dictation still works and the text is kept for copying.
-3. **Input Monitoring:** only for hold-to-talk and its double tap.
+The app never changes a permission itself: it asks macOS, which shows its own dialog, and you answer. Settings, Dictation, Permissions has one row per permission:
 
-Settings → Dictation shows each state and opens the right System Settings pane.
+| Permission | What "Allow..." does | Asked from |
+|---|---|---|
+| Microphone | `systemPreferences.askForMediaAccess('microphone')`, only while the state is "Not asked yet" | the app (main process) |
+| Accessibility | `AXIsProcessTrustedWithOptions` with the prompt option: macOS's "would like to control this computer" dialog, which also adds the app to the Accessibility list | the dictation helper (op `request-accessibility`) |
+| Input Monitoring | `CGRequestListenEventAccess`, only while the state is "Not asked yet" | the dictation helper (op `request-input-monitoring`) |
+
+Once macOS has been answered (allowed or denied), it never prompts again for the microphone or Input Monitoring, so the button becomes "Open System Settings". Accessibility can be asked again, so its button stays "Allow..." until it is granted. A granted row keeps a small "Open System Settings" button. The rows are re-read from the helper after every request and whenever the window gains focus; if macOS still reports "Not allowed" after you turn it on, the row says to quit and reopen the app (Accessibility and Input Monitoring grants are often only seen by a freshly started process; the microphone applies at once).
+
+The microphone is also requested automatically the first time a session starts while it is "Not asked yet": the macOS dialog appears from the pill, and the session you asked for then begins. A hold key that was released while the dialog was up does not record; the pill says to hold it again.
+
+**Which process owns the Accessibility grant.** macOS attributes a permission request to the app that launched the asking process (its "responsible process"), not to the child itself. Checked here with `responsibility_get_pid_responsible_for_pid`: a process started from a Python child of a GUI app reports that GUI app, not its immediate parent or itself. So the dictation helper, a child of the Electron main process inside `DoodleNote Dev.app`, is attributed to **DoodleNote Dev** (`com.doodlenote.desktop.dev`) when the app is opened normally, and the helper's `AXIsProcessTrusted` answer is the one the Settings row shows. Asking from the helper rather than the main process puts the entry macOS lists next to the code that really needs it and makes the row reflect the helper's real answer. The same rule means that a dev run started from a terminal (`pnpm dev:dictation`) is attributed to that terminal instead; grant it there, or use the packaged app. The attribution under the packaged app was inferred from this rule, not exercised: doing so raises real prompts.
+
+**Ad-hoc signing and resets.** The default build is signed ad-hoc, and macOS ties a grant to the code signature, so every rebuild is a new identity: grants disappear (the app may still be listed, switched off) and macOS asks again. A signing identity from `DOODLENOTE_DEV_IDENTITY` keeps grants across rebuilds. To start from nothing, for example when the app is missing from a list:
+
+```sh
+tccutil reset All com.doodlenote.desktop.dev
+```
+
+then quit DoodleNote Dev, reopen it, and use Allow... on each row (or start a dictation, which asks for the microphone itself). The app only appears under Privacy & Security after it has asked, which is what Allow... does.
 
 ## Manual test runbook (needs a human at the Mac)
 
@@ -148,7 +164,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 752 desktop tests (750 pass, 2 skipped) with typecheck and lint clean, plus 35 Swift tests for the hold-key and mouse logic and delivery helpers (`cd engine && swift test`). The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (31: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (11), settings normalization and persistence (7), service orchestration (66: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last and copy last, shortcut collisions, Fn double tap, mute polling, quiet mode, the mouse trigger, stage timings), helper client (10), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 768 desktop tests (766 pass, 2 skipped) with typecheck and lint clean, plus 35 Swift tests for the hold-key and mouse logic and delivery helpers (`cd engine && swift test`). The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (31: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (11), settings normalization and persistence (7), service orchestration (66: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last and copy last, shortcut collisions, Fn double tap, mute polling, quiet mode, the mouse trigger, stage timings), helper client (10), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.

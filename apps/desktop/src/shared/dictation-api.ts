@@ -1,5 +1,6 @@
 import type { AppChannel } from './app-channel'
 import type { HelperDeliveryTimings, HoldKey } from './dictation-helper-protocol'
+import type { PermissionOutcome, PermissionPane } from './dictation-permissions'
 import type { InputDevice, PillEdge } from './dictation-pill'
 import type { CleanupMode, Phase, RecoveryReason } from './dictation-session'
 
@@ -15,6 +16,7 @@ export const DICTATION_STATUS_EVENT_CHANNEL = 'dictation:status-event'
 export const DICTATION_OPEN_SETTINGS_EVENT_CHANNEL = 'dictation:open-settings'
 export const DICTATION_PASTE_LAST_CHANNEL = 'dictation:paste-last'
 export const DICTATION_COPY_LAST_CHANNEL = 'dictation:copy-last'
+export const DICTATION_REQUEST_PERMISSION_CHANNEL = 'dictation:request-permission'
 export const DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL = 'dictation:capture-mouse-button'
 
 export interface DictationSettings {
@@ -92,6 +94,8 @@ export interface DictationPermissions {
   accessibility: boolean | null
   /** Needed only for hold-to-talk. */
   inputMonitoring: boolean | null
+  /** Input Monitoring as macOS reports it, so the page knows whether a prompt is still possible. */
+  inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
 }
 
 export interface RecoveryItem {
@@ -188,6 +192,12 @@ export interface DictationApi {
   copyLast(): Promise<void>
   /** Wait for the next mouse button press and say which button it was (or why it cannot be used). */
   captureMouseButton(): Promise<MouseCaptureOutcome>
+  /**
+   * Ask macOS for a permission (its own dialog, which also lists the app in System
+   * Settings). The outcome says whether it was granted, is being decided, or macOS
+   * will not ask again and System Settings must be opened.
+   */
+  requestPermission(pane: PermissionPane): Promise<PermissionOutcome>
   copyRecovery(gen: number): Promise<boolean>
   dismissRecovery(gen: number): Promise<void>
   openPrivacySettings(pane: 'microphone' | 'accessibility' | 'input-monitoring'): Promise<void>

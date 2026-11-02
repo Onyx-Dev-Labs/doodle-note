@@ -8,6 +8,8 @@ export interface HelperStatus {
   conflicts: string[]
   holdActive: boolean
   mouseActive: boolean
+  /** Input Monitoring as macOS reports it; null when the helper does not say. */
+  inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
   /**
    * What macOS does on its own when the Fn/Globe key is pressed: 0 nothing,
    * 1 change input source, 2 emoji and symbols, 3 start dictation. Null when
