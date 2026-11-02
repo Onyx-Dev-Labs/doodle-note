@@ -6,6 +6,7 @@ import {
   type DictationSettings,
   type DictationSettingsUpdate,
   type DictationStatus,
+  type MouseCaptureOutcome,
   type MicrophoneAccess,
   type RecoveryItem,
   type ShortcutState
@@ -17,11 +18,14 @@ import type {
   HoldFailure,
   HoldKey,
   InputState,
+  MouseCaptureResult,
+  MouseStartResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 import { micLooksMuted } from '../shared/dictation-helper-protocol'
 import {
   buildPillMenu,
+  describeMouseCaptureFailure,
   hideExpiry,
   isPillHidden,
   msUntilPillReturns,
@@ -74,6 +78,10 @@ export interface HelperLike {
   deliver(snapshotId: string, text: string): Promise<HelperDelivery>
   release(snapshotId: string): void
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
+  /** Arm or disarm the optional mouse-button trigger. Null result means it was switched off. */
+  setMouseButton(button: number | null, swallow: boolean): Promise<MouseStartResult | null>
+  /** Wait for the next mouse button the user presses. */
+  captureMouseButton(): Promise<MouseCaptureResult>
   onHold(listener: (event: { phase: 'down' | 'up'; holdId: number }) => void): () => void
   /** A quick press and release of the hold key that was too short to count as a hold. */
   onTap(listener: () => void): () => void
@@ -214,6 +222,8 @@ export class DictationService {
   private deferredStart: { until: number } | null = null
   private lastStartAt = 0
   private holdState: DictationStatus['holdKey'] = 'off'
+  private mouseState: DictationStatus['mouseButton'] = 'off'
+  private mouseSwallowing = false
   private escapeRegistered = false
   private disposed = false
   private lastToggleAt = 0
@@ -276,7 +286,10 @@ export class DictationService {
       this.setActionShortcut('paste', '')
       this.setActionShortcut('copy', '')
       this.holdState = 'off'
+      this.mouseState = 'off'
+      this.mouseSwallowing = false
       void this.deps.helper.setHoldKey('off')
+      void this.deps.helper.setMouseButton(null, false)
       this.refreshPillTimer()
       this.render()
       return
@@ -298,6 +311,41 @@ export class DictationService {
             ? 'needs-permission'
             : 'unavailable'
     }
+    await this.applyMouseButton(settings)
+  }
+
+  /** The optional mouse-button trigger, independent of the hold key. */
+  private async applyMouseButton(settings: DictationSettings): Promise<void> {
+    if (settings.holdMouseButton === null) {
+      this.mouseState = 'off'
+      this.mouseSwallowing = false
+      await this.deps.helper.setMouseButton(null, false)
+      return
+    }
+    const result = await this.deps.helper.setMouseButton(
+      settings.holdMouseButton,
+      settings.holdMouseSwallow
+    )
+    this.mouseState = result?.ok
+      ? 'active'
+      : result?.failure === 'input-monitoring-denied'
+        ? 'needs-permission'
+        : 'unavailable'
+    this.mouseSwallowing = result?.ok === true && result.swallowing
+  }
+
+  /**
+   * Wait for the user to press a mouse button, for the settings page. Left and
+   * right click are refused with an explanation, never stored.
+   */
+  async captureMouseButton(): Promise<MouseCaptureOutcome> {
+    if (this.disposed || !this.deps.supported) {
+      return { ok: false, message: describeMouseCaptureFailure('helper-unavailable') }
+    }
+    const result = await this.deps.helper.captureMouseButton()
+    return result.ok
+      ? { ok: true, button: result.button }
+      : { ok: false, message: describeMouseCaptureFailure(result.failure) }
   }
 
   private setToggleShortcut(accelerator: string): void {
@@ -408,6 +456,7 @@ export class DictationService {
         devices: this.devices,
         selectedUid: settings.microphoneUid,
         hasLastTranscript: this.lastTranscript !== null,
+        mouseButton: settings.holdMouseButton,
         showLiveText: settings.showLiveText,
         showStatusMessages: settings.showStatusMessages
       }),
@@ -954,6 +1003,7 @@ export class DictationService {
           secureInput: false,
           conflicts: [],
           holdActive: false,
+          mouseActive: false,
           fnKeyAction: null
         }
       }
@@ -1239,6 +1289,8 @@ export class DictationService {
       pillHidden: isPillHidden(settings.pillHiddenUntil, this.deps.now()),
       hasLastTranscript: this.lastTranscript !== null,
       holdKey: this.holdState,
+      mouseButton: this.mouseState,
+      mouseSwallowing: this.mouseSwallowing,
       conflicts: helper?.conflicts ?? [],
       speech: this.deps.engine.warm ? 'warm' : 'cold',
       cleanup: this.deps.cleanupOptions(),

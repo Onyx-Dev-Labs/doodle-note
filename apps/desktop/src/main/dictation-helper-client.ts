@@ -9,6 +9,8 @@ import type {
   HoldFailure,
   HoldKey,
   InputState,
+  MouseCaptureResult,
+  MouseStartResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 
@@ -25,13 +27,16 @@ export interface HelperTimeouts {
   snapshot: number
   deliver: number
   hold: number
+  /** How long a "press a mouse button" capture waits for the button. */
+  capture: number
 }
 
 export const DEFAULT_HELPER_TIMEOUTS: HelperTimeouts = {
   status: 2_000,
   snapshot: 1_500,
   deliver: 4_000,
-  hold: 2_000
+  hold: 2_000,
+  capture: 12_000
 }
 
 /**
@@ -49,6 +54,7 @@ export class DictationHelperClient {
     { resolve: (reply: Reply | null) => void; timer: NodeJS.Timeout }
   >()
   private holdKey: HoldKey = 'off'
+  private mouse: { button: number; swallow: boolean } | null = null
   private readonly holdListeners = new Set<(event: HoldEvent) => void>()
   private readonly tapListeners = new Set<() => void>()
   private readonly exitListeners = new Set<() => void>()
@@ -91,6 +97,7 @@ export class DictationHelperClient {
         ? reply.conflicts.filter((c): c is string => typeof c === 'string')
         : [],
       holdActive: reply.holdActive === true,
+      mouseActive: reply.mouseActive === true,
       fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null
     }
   }
@@ -184,9 +191,59 @@ export class DictationHelperClient {
     return reply.reason === 'unknown-key' ? 'unknown-key' : 'input-monitoring-denied'
   }
 
+  /**
+   * Watch one non-primary mouse button as a second hold-to-talk trigger, or
+   * stop with null. Remembered so a restarted helper re-arms it.
+   */
+  async setMouseButton(button: number | null, swallow: boolean): Promise<MouseStartResult | null> {
+    if (button === null) {
+      this.mouse = null
+      if (this.child) await this.request('mouse-stop', {}, this.timeouts.hold, false)
+      return null
+    }
+    const running = await this.ensureRunning()
+    this.mouse = { button, swallow }
+    if (!running) return { ok: false, failure: 'helper-unavailable' }
+    const reply = await this.request(
+      'mouse-start',
+      { button, swallow, minHoldMs: 150 },
+      this.timeouts.hold
+    )
+    if (!reply) return { ok: false, failure: 'helper-unavailable' }
+    if (reply.ok) return { ok: true, swallowing: reply.swallowing === true }
+    return {
+      ok: false,
+      failure:
+        reply.reason === 'invalid-button'
+          ? 'invalid-button'
+          : reply.reason === 'unknown-key'
+            ? 'unknown-key'
+            : 'input-monitoring-denied'
+    }
+  }
+
+  /** Wait for the user to press a mouse button, for the settings page. */
+  async captureMouseButton(): Promise<MouseCaptureResult> {
+    const seconds = Math.round(this.timeouts.capture / 1000) - 1
+    const reply = await this.request('mouse-capture', { seconds }, this.timeouts.capture)
+    if (!reply) return { ok: false, failure: 'helper-unavailable' }
+    if (reply.ok && typeof reply.button === 'number') return { ok: true, button: reply.button }
+    const failure = reply.reason
+    return {
+      ok: false,
+      failure:
+        failure === 'primary-button' ||
+        failure === 'timeout' ||
+        failure === 'input-monitoring-denied'
+          ? failure
+          : 'failed'
+    }
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     this.holdKey = 'off'
+    this.mouse = null
     this.failAll()
     const child = this.child
     this.child = null
@@ -246,8 +303,16 @@ export class DictationHelperClient {
         for (const listener of this.exitListeners) listener()
       })
     })
-    // Re-arm the hold watch on the fresh process.
+    // Re-arm the mouse button and the hold watch on the fresh process.
     void this.ready.then((ok) => {
+      if (ok && this.mouse && this.child === child) {
+        void this.request(
+          'mouse-start',
+          { ...this.mouse, minHoldMs: 150 },
+          this.timeouts.hold,
+          false
+        )
+      }
       if (ok && this.holdKey !== 'off' && this.child === child) {
         void this.request(
           'hold-start',

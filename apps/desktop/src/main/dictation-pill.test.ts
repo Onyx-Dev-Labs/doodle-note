@@ -7,6 +7,9 @@ import {
   coerceEdge,
   describeDoubleTap,
   describeFnKey,
+  describeMouseButton,
+  describeMouseCaptureFailure,
+  MOUSE_SOFTWARE_NOTE,
   describeStopStages,
   dockedBounds,
   hideExpiry,
@@ -24,7 +27,7 @@ import {
   type InputDevice,
   type PillMenuCommand
 } from '../shared/dictation-pill'
-import { micLooksMuted } from '../shared/dictation-helper-protocol'
+import { isAllowedMouseButton, micLooksMuted } from '../shared/dictation-helper-protocol'
 
 const area = { x: 0, y: 25, width: 1440, height: 875 }
 const second = { x: 1440, y: 0, width: 1920, height: 1080 }
@@ -134,7 +137,8 @@ test('the menu lists the actions in order, with the default microphone ticked', 
     selectedUid: null,
     hasLastTranscript: true,
     showLiveText: true,
-    showStatusMessages: true
+    showStatusMessages: true,
+    mouseButton: null
   })
   assert.deepEqual(
     menu.map((item) => item.label ?? '---'),
@@ -145,6 +149,7 @@ test('the menu lists the actions in order, with the default microphone ticked', 
       'Copy the last transcript',
       '---',
       'Open dictation settings',
+      'Mouse button to hold and talk: none',
       'Keep the pill on screen',
       "Show what I'm saying",
       'Show status messages'
@@ -159,8 +164,8 @@ test('the menu lists the actions in order, with the default microphone ticked', 
       ['USB Mic', false]
     ]
   )
-  assert.equal(menu[6]!.type, 'checkbox')
-  assert.equal(menu[6]!.checked, true)
+  assert.equal(menu[7]!.type, 'checkbox')
+  assert.equal(menu[7]!.checked, true)
 })
 
 test('the menu ticks the saved microphone, or the default when it is unplugged', () => {
@@ -171,7 +176,8 @@ test('the menu ticks the saved microphone, or the default when it is unplugged',
       selectedUid,
       hasLastTranscript: false,
       showLiveText: true,
-      showStatusMessages: true
+      showStatusMessages: true,
+      mouseButton: null
     })[1]!
       .submenu!.filter((item) => item.checked)
       .map((item) => item.label)
@@ -186,11 +192,12 @@ test('paste-last is disabled until there is a transcript; the toggle reflects th
     selectedUid: null,
     hasLastTranscript: false,
     showLiveText: true,
-    showStatusMessages: true
+    showStatusMessages: true,
+    mouseButton: null
   })
   assert.equal(menu[2]!.enabled, false)
   assert.equal(menu[3]!.enabled, false)
-  assert.equal(menu[6]!.checked, false)
+  assert.equal(menu[7]!.checked, false)
 })
 
 test('toMenuTemplate reports the command of the item that was clicked', () => {
@@ -202,7 +209,8 @@ test('toMenuTemplate reports the command of the item that was clicked', () => {
       selectedUid: null,
       hasLastTranscript: true,
       showLiveText: true,
-      showStatusMessages: true
+      showStatusMessages: true,
+      mouseButton: null
     }),
     (command) => void picked.push(command)
   )
@@ -211,7 +219,7 @@ test('toMenuTemplate reports the command of the item that was clicked', () => {
   template[2]!.click?.()
   template[3]!.click?.()
   template[5]!.click?.()
-  template[6]!.click?.()
+  template[7]!.click?.()
   assert.equal(template[4]!.click, undefined, 'separators do nothing')
   assert.deepEqual(picked, [
     { kind: 'hide-hour' },
@@ -324,7 +332,7 @@ test('describeStopStages reads out every stage and flags a skipped accessibility
 
 /* ---- quiet mode ---- */
 
-const everything = { showLiveText: true, showStatusMessages: true }
+const everything = { showLiveText: true, showStatusMessages: true, mouseButton: null }
 const quiet = { showLiveText: false, showStatusMessages: false }
 
 test('every message kind is classified, and only narration is suppressible', () => {
@@ -372,4 +380,54 @@ test('the two settings are independent and govern their own kinds', () => {
   assert.equal(isMessageShown('cleanup-note', captions), false)
   assert.equal(isMessageShown('success', captions), false)
   for (const kind of OVERLAY_MESSAGE_KINDS) assert.equal(isMessageShown(kind, everything), true)
+})
+
+/* ---- mouse button trigger ---- */
+
+test('only middle, back, forward and extra buttons may be a trigger', () => {
+  for (const button of [0, 1, -1, 32, 1.5, Number.NaN, Infinity]) {
+    assert.equal(isAllowedMouseButton(button), false, `${button} must be refused`)
+  }
+  for (const button of [2, 3, 4, 5, 31]) assert.equal(isAllowedMouseButton(button), true)
+  for (const junk of ['3', null, undefined, {}, true]) {
+    assert.equal(isAllowedMouseButton(junk), false)
+  }
+})
+
+test('buttons are named the way people count them', () => {
+  assert.equal(describeMouseButton(2), 'Middle button')
+  assert.equal(describeMouseButton(3), 'Back button')
+  assert.equal(describeMouseButton(4), 'Forward button')
+  assert.equal(describeMouseButton(5), 'Button 6')
+})
+
+test('a refused capture explains itself in plain words', () => {
+  assert.match(describeMouseCaptureFailure('primary-button'), /Left and right click cannot be used/)
+  assert.match(describeMouseCaptureFailure('timeout'), /No button was pressed/)
+  assert.match(describeMouseCaptureFailure('input-monitoring-denied'), /Input Monitoring/)
+  assert.match(describeMouseCaptureFailure('whatever'), /Try again/)
+})
+
+test('the mouse software warning names the usual culprit and what to do', () => {
+  assert.match(MOUSE_SOFTWARE_NOTE, /Logitech Options\+/)
+  assert.match(MOUSE_SOFTWARE_NOTE, /default or generic action/)
+})
+
+test('the menu shows the mouse button with the warning underneath, and opens settings', () => {
+  const model = {
+    showAlways: true,
+    devices: [],
+    selectedUid: null,
+    hasLastTranscript: false,
+    showLiveText: true,
+    showStatusMessages: true
+  }
+  const unset = buildPillMenu({ ...model, mouseButton: null })[6]!
+  assert.equal(unset.label, 'Mouse button to hold and talk: none')
+  const set = buildPillMenu({ ...model, mouseButton: 3 })[6]!
+  assert.equal(set.label, 'Mouse button to hold and talk: Back button')
+  assert.equal(set.sublabel, MOUSE_SOFTWARE_NOTE)
+  assert.deepEqual(set.command, { kind: 'settings' })
+  const template = toMenuTemplate([set], () => {})
+  assert.equal(template[0]!.sublabel, MOUSE_SOFTWARE_NOTE)
 })

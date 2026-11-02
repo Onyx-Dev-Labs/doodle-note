@@ -5,9 +5,11 @@ import type {
   ShortcutState
 } from '../../shared/dictation-api'
 import {
+  MOUSE_SOFTWARE_NOTE,
   PILL_EDGES,
   describeDoubleTap,
   describeFnKey,
+  describeMouseButton,
   describeStopStages
 } from '../../shared/dictation-pill'
 import { Toggle } from './ModelsView'
@@ -68,6 +70,8 @@ export function DictationSettings(): React.JSX.Element {
   const [status, setStatus] = useState<DictationStatus | null>(null)
   const [recording, setRecording] = useState<'toggle' | 'pasteLast' | 'copyLast' | null>(null)
   const [error, setError] = useState('')
+  const [capturing, setCapturing] = useState(false)
+  const [captureMessage, setCaptureMessage] = useState('')
 
   const refresh = useCallback(() => {
     window.dictation
@@ -119,6 +123,19 @@ export function DictationSettings(): React.JSX.Element {
 
   const { settings, permissions, cleanup } = status
   const hiddenNow = status.pillHidden
+  const captureMouse = async (): Promise<void> => {
+    setCapturing(true)
+    setCaptureMessage('')
+    try {
+      const result = await window.dictation.captureMouseButton()
+      if (result.ok) await update({ holdMouseButton: result.button })
+      else setCaptureMessage(result.message)
+    } catch {
+      setCaptureMessage('Could not read a mouse button. Try again.')
+    } finally {
+      setCapturing(false)
+    }
+  }
   const capture = (
     which: 'toggle' | 'pasteLast' | 'copyLast',
     event: React.KeyboardEvent
@@ -281,6 +298,68 @@ export function DictationSettings(): React.JSX.Element {
               ))}
             </select>
           </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Hold a mouse button to talk</span>
+              <span className="cal-row-sub">
+                {capturing
+                  ? 'Press the mouse button you want to use now…'
+                  : settings.holdMouseButton === null
+                    ? 'None. Works in addition to the hold key; either one starts dictation.'
+                    : `${describeMouseButton(settings.holdMouseButton)} · ${
+                        status.mouseButton === 'active'
+                          ? 'Active.'
+                          : status.mouseButton === 'needs-permission'
+                            ? 'Allow Input Monitoring first.'
+                            : 'Not available right now.'
+                      }`}
+              </span>
+              {captureMessage && <span className="cal-row-sub">{captureMessage}</span>}
+              <span className="cal-row-sub">
+                Middle, back, forward and extra buttons only; left and right click are never used.{' '}
+                {MOUSE_SOFTWARE_NOTE}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="pill-btn"
+              disabled={capturing}
+              onClick={() => void captureMouse()}
+            >
+              {capturing ? 'Waiting for a button…' : 'Press a mouse button…'}
+            </button>
+            {settings.holdMouseButton !== null && (
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => {
+                  setCaptureMessage('')
+                  void update({ holdMouseButton: null })
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {settings.holdMouseButton !== null && (
+            <div className="cal-row">
+              <span className="cal-row-main">
+                <span className="cal-row-label">Don&apos;t send this button to other apps</span>
+                <span className="cal-row-sub">
+                  {!settings.holdMouseSwallow
+                    ? 'Off. The app under the pointer also sees the button (a back button will still go back).'
+                    : status.mouseButton === 'active' && !status.mouseSwallowing
+                      ? 'On, but macOS did not allow it, so the app under the pointer still sees the button. Allow Accessibility and Input Monitoring for this app and try again.'
+                      : 'On. Only this button is held back; every other button works as usual.'}
+                </span>
+              </span>
+              <Toggle
+                checked={settings.holdMouseSwallow}
+                label="Don't send the hold-to-talk mouse button to other apps"
+                onChange={() => void update({ holdMouseSwallow: !settings.holdMouseSwallow })}
+              />
+            </div>
+          )}
           <div className="cal-row">
             <span className="cal-row-main">
               <span className="cal-row-label">Keep recording with a double tap</span>

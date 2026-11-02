@@ -7,6 +7,7 @@ export interface HelperStatus {
   /** Running dictation apps whose shortcuts may overlap (names only). */
   conflicts: string[]
   holdActive: boolean
+  mouseActive: boolean
   /**
    * What macOS does on its own when the Fn/Globe key is pressed: 0 nothing,
    * 1 change input source, 2 emoji and symbols, 3 start dictation. Null when
@@ -54,6 +55,37 @@ export interface HelperDelivery {
 }
 
 export type HoldFailure = 'input-monitoring-denied' | 'unknown-key' | 'helper-unavailable'
+
+/**
+ * Mouse buttons are numbered from 0: 0 left, 1 right, 2 middle, 3 back, 4 forward,
+ * then the extras. Only 2 and up may be a trigger; left and right click never.
+ */
+export const MIN_MOUSE_TRIGGER_BUTTON = 2
+export const MAX_MOUSE_TRIGGER_BUTTON = 31
+
+export function isAllowedMouseButton(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_MOUSE_TRIGGER_BUTTON &&
+    value <= MAX_MOUSE_TRIGGER_BUTTON
+  )
+}
+
+export type MouseFailure = HoldFailure | 'invalid-button'
+
+export type MouseStartResult =
+  | {
+      ok: true
+      /** The helper consumes this button's events so other apps never see them. */ swallowing: boolean
+    }
+  | { ok: false; failure: MouseFailure }
+
+export type MouseCaptureFailure =
+  'primary-button' | 'timeout' | 'input-monitoring-denied' | 'helper-unavailable' | 'failed'
+
+export type MouseCaptureResult =
+  { ok: true; button: number } | { ok: false; failure: MouseCaptureFailure }
 
 export const HOLD_KEYS = ['off', 'rightOption', 'rightControl', 'rightCommand', 'fn'] as const
 export type HoldKey = (typeof HOLD_KEYS)[number]

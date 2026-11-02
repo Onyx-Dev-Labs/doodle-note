@@ -83,3 +83,39 @@ test('the pill choices persist across a restart; a damaged file falls back to de
   writeFileSync(join(dir, 'dictation.json'), '{ not json')
   assert.equal(new DictationSettingsStore(dir).get().pillEdge, 'bottom')
 })
+
+test('the mouse trigger is off by default and swallows its button when it can', () => {
+  const settings = normalizeDictationSettings({})
+  assert.equal(settings.holdMouseButton, null)
+  assert.equal(settings.holdMouseSwallow, true)
+})
+
+test('left and right click and non-buttons are never accepted as the mouse trigger', () => {
+  for (const value of [0, 1, -1, 32, 2.5, '3', Number.NaN, null, true, {}]) {
+    assert.equal(
+      normalizeDictationSettings({ holdMouseButton: value }).holdMouseButton,
+      null,
+      `${String(value)} must not stick`
+    )
+  }
+  for (const value of [2, 3, 4, 5, 31]) {
+    assert.equal(normalizeDictationSettings({ holdMouseButton: value }).holdMouseButton, value)
+  }
+})
+
+test('the mouse trigger persists, clears, and coexists with the hold key and the shortcuts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-mouse-'))
+  const store = new DictationSettingsStore(dir)
+  store.update({ holdKey: 'fn', holdMouseButton: 4, holdMouseSwallow: false })
+  const reloaded = new DictationSettingsStore(dir).get()
+  assert.equal(reloaded.holdKey, 'fn', 'the keyboard trigger is untouched')
+  assert.equal(reloaded.holdMouseButton, 4)
+  assert.equal(reloaded.holdMouseSwallow, false)
+  assert.equal(reloaded.toggleShortcut, DEFAULT_DICTATION_SETTINGS.toggleShortcut)
+  store.update({ holdMouseButton: 1 })
+  assert.equal(store.get().holdMouseButton, null, 'a left or right click is rejected on update')
+  store.update({ holdMouseButton: 3 })
+  store.update({ holdMouseButton: null })
+  assert.equal(new DictationSettingsStore(dir).get().holdMouseButton, null)
+  assert.equal(new DictationSettingsStore(dir).get().holdKey, 'fn')
+})

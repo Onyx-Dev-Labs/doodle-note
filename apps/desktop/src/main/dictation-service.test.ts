@@ -6,6 +6,8 @@ import type {
   HelperStatus,
   HoldKey,
   InputState,
+  MouseCaptureResult,
+  MouseStartResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 import type { EngineEvent } from '../shared/engine-events'
@@ -37,6 +39,9 @@ interface Harness {
     delivery: HelperDelivery
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
+    mouseCalls: Array<{ button: number | null; swallow: boolean }>
+    mouseResult: MouseStartResult | null
+    captureResult: MouseCaptureResult
     input: InputState | null
     fnKeyAction: number | null
     exitListener: (() => void) | null
@@ -96,6 +101,9 @@ function harness(
     delivery: { outcome: 'delivered', method: 'ax', verified: true, clipboard: 'untouched' },
     holdListener: null,
     tapListener: null,
+    mouseCalls: [],
+    mouseResult: null,
+    captureResult: { ok: true, button: 3 },
     input: { muted: false, volume: 0.5 },
     fnKeyAction: null,
     exitListener: null,
@@ -134,6 +142,7 @@ function harness(
         secureInput: false,
         conflicts: [],
         holdActive: false,
+        mouseActive: false,
         fnKeyAction: helper.fnKeyAction
       }),
       snapshot: async () => helper.target,
@@ -150,6 +159,11 @@ function harness(
         helper.holdListener = cb
         return () => {}
       },
+      setMouseButton: async (button, swallow) => {
+        helper.mouseCalls.push({ button, swallow })
+        return button === null ? null : (helper.mouseResult ?? { ok: true, swallowing: swallow })
+      },
+      captureMouseButton: async () => helper.captureResult,
       onTap: (cb) => {
         helper.tapListener = cb
         return () => {}
@@ -1213,4 +1227,105 @@ test('with everything quiet, a missing microphone permission is still shown', as
   await tick()
   assert.equal(lastView(h).visible, true)
   assert.match(lastView(h).title, /Microphone access is off/)
+})
+
+/* ---- mouse button trigger ---- */
+
+test('the mouse button is armed next to the hold key, each on its own', async () => {
+  const h = harness({
+    settings: { holdKey: 'rightOption', holdMouseButton: 3, holdMouseSwallow: true }
+  })
+  await h.service.start()
+  assert.deepEqual(h.helper.holdKeys, ['rightOption'])
+  assert.deepEqual(h.helper.mouseCalls, [{ button: 3, swallow: true }])
+  const status = await h.service.status()
+  assert.equal(status.holdKey, 'active')
+  assert.equal(status.mouseButton, 'active')
+  assert.equal(status.mouseSwallowing, true)
+})
+
+test('the mouse button alone works with the hold key off, and clearing it disarms it', async () => {
+  const h = harness({ settings: { holdKey: 'off', holdMouseButton: 4 } })
+  await h.service.start()
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: 4, swallow: true })
+  await h.service.setSettings({ holdMouseButton: null })
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: null, swallow: false })
+  const status = await h.service.status()
+  assert.equal(status.mouseButton, 'off')
+  assert.equal(status.mouseSwallowing, false)
+})
+
+test('a listen-only mouse trigger is reported as not swallowing, a refusal as a problem', async () => {
+  const listenOnly = harness({ settings: { holdMouseButton: 3 } })
+  listenOnly.helper.mouseResult = { ok: true, swallowing: false }
+  await listenOnly.service.start()
+  const status = await listenOnly.service.status()
+  assert.equal(status.mouseButton, 'active')
+  assert.equal(status.mouseSwallowing, false)
+
+  const denied = harness({ settings: { holdMouseButton: 3 } })
+  denied.helper.mouseResult = { ok: false, failure: 'input-monitoring-denied' }
+  await denied.service.start()
+  assert.equal((await denied.service.status()).mouseButton, 'needs-permission')
+
+  const gone = harness({ settings: { holdMouseButton: 3 } })
+  gone.helper.mouseResult = { ok: false, failure: 'helper-unavailable' }
+  await gone.service.start()
+  assert.equal((await gone.service.status()).mouseButton, 'unavailable')
+})
+
+test('turning dictation off releases the mouse button too', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  await h.service.setSettings({ enabled: false })
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: null, swallow: false })
+  assert.equal((await h.service.status()).mouseButton, 'off')
+})
+
+test('holding the mouse button dictates exactly like the hold key; a quick click is discarded', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+  await ready(h)
+  h.clock.now += 2_000
+  h.helper.holdListener?.({ phase: 'up', holdId: 1 })
+  assert.equal(h.service.phase, 'finalizing')
+  h.emit({ event: 'final', channel: 'mic', text: 'from the mouse' })
+  await tick()
+  assert.deepEqual(h.delivered, ['from the mouse'])
+  finish(h)
+
+  h.clock.now += 5_000
+  h.helper.holdListener?.({ phase: 'down', holdId: 2 })
+  await ready(h)
+  h.clock.now += 100
+  h.helper.holdListener?.({ phase: 'up', holdId: 2 })
+  assert.equal(h.service.phase, 'idle', 'under the tap threshold: nothing is transcribed')
+})
+
+test('two quick clicks of the mouse button latch hands-free, with no hold key set', async () => {
+  const h = harness({ settings: { holdKey: 'off', holdMouseButton: 3 } })
+  await h.service.start()
+  tap(h)
+  h.clock.now += 200
+  tap(h)
+  assert.equal(h.service.phase, 'preparing')
+  await ready(h)
+  h.clock.now += 3_000
+  tap(h)
+  assert.equal(h.service.phase, 'finalizing')
+})
+
+test('capturing a mouse button reports the button, or a plain explanation', async () => {
+  const h = harness()
+  await h.service.start()
+  h.helper.captureResult = { ok: true, button: 4 }
+  assert.deepEqual(await h.service.captureMouseButton(), { ok: true, button: 4 })
+  h.helper.captureResult = { ok: false, failure: 'primary-button' }
+  const refused = await h.service.captureMouseButton()
+  assert.equal(refused.ok, false)
+  assert.match(refused.ok ? '' : refused.message, /Left and right click cannot be used/)
+  h.helper.captureResult = { ok: false, failure: 'timeout' }
+  const timedOut = await h.service.captureMouseButton()
+  assert.match(timedOut.ok ? '' : timedOut.message, /No button was pressed/)
 })

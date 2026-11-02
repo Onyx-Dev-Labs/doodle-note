@@ -164,4 +164,137 @@ final class HoldMachineTests: XCTestCase {
         XCTAssertEqual(m.handle(.flagsChanged(keyCode: shiftCode, flags: fnBit | shiftBit)), [])
         XCTAssertEqual(release(&m), [.cancelAnnounce])
     }
+
+    // Mouse button
+
+    private func mouse(_ button: Int64 = 3) -> HoldMachine { HoldMachine(mouseButton: button) }
+
+    func testMouseHoldIsAnnouncedAfterTheDelayAndPairedOnRelease() {
+        var m = mouse()
+        XCTAssertEqual(m.handle(.buttonDown(button: 3)), [.cancelAnnounce, .scheduleAnnounce])
+        XCTAssertEqual(m.handle(.announceTimer), [.holdDown(id: 1)])
+        XCTAssertEqual(
+            m.handle(.buttonUp(button: 3)), [.cancelAnnounce, .holdUp(id: 1, reason: "released")])
+    }
+
+    func testMouseQuickClickIsATapAndTwoOfThemAreADoubleTap() {
+        var m = mouse()
+        var taps = 0
+        for _ in 0..<2 {
+            _ = m.handle(.buttonDown(button: 3))
+            taps += m.handle(.buttonUp(button: 3)).filter { $0 == .tap }.count
+        }
+        XCTAssertEqual(taps, 2)
+        XCTAssertEqual(m.handle(.announceTimer), [], "a cancelled delay announces nothing")
+    }
+
+    func testOnlyTheConfiguredButtonCounts() {
+        var m = mouse(3)
+        XCTAssertEqual(m.handle(.buttonDown(button: 4)), [])
+        XCTAssertEqual(m.handle(.buttonUp(button: 4)), [])
+        XCTAssertFalse(m.isDown)
+        _ = m.handle(.buttonDown(button: 3))
+        XCTAssertEqual(m.handle(.buttonUp(button: 4)), [], "another button's release is not ours")
+        XCTAssertTrue(m.isDown)
+    }
+
+    func testKeysAndModifiersNeverSpoilAMouseHold() {
+        var m = mouse()
+        _ = m.handle(.buttonDown(button: 3))
+        XCTAssertEqual(m.handle(.keyDown), [])
+        XCTAssertEqual(m.handle(.flagsChanged(keyCode: 56, flags: 0x20000)), [])
+        XCTAssertEqual(m.handle(.announceTimer), [.holdDown(id: 1)], "still a hold")
+    }
+
+    func testRepeatedButtonDownDoesNotRestartTheDelay() {
+        var m = mouse()
+        _ = m.handle(.buttonDown(button: 3))
+        XCTAssertEqual(m.handle(.buttonDown(button: 3)), [])
+    }
+
+    func testALostButtonReleaseIsNoticedFromTheLiveButtonState() {
+        var m = mouse()
+        _ = m.handle(.buttonDown(button: 3))
+        _ = m.handle(.announceTimer)
+        XCTAssertEqual(m.handle(.buttonState(down: true)), [], "still held")
+        XCTAssertEqual(
+            m.handle(.buttonState(down: false)), [.cancelAnnounce, .holdUp(id: 1, reason: "released")])
+        XCTAssertFalse(m.isDown)
+        XCTAssertEqual(m.handle(.buttonState(down: false)), [], "nothing more to end")
+    }
+
+    func testALostReleaseBeforeTheDelayIsATapNotAHold() {
+        var m = mouse()
+        _ = m.handle(.buttonDown(button: 3))
+        XCTAssertEqual(m.handle(.buttonState(down: false)), [.cancelAnnounce, .tap])
+    }
+
+    func testMouseTapDisabledAndResetEndAnAnnouncedHold() {
+        var a = mouse()
+        _ = a.handle(.buttonDown(button: 3))
+        _ = a.handle(.announceTimer)
+        XCTAssertEqual(a.handle(.tapDisabled), [.holdUp(id: 1, reason: "tap-disabled")])
+        var b = mouse()
+        _ = b.handle(.buttonDown(button: 3))
+        _ = b.handle(.announceTimer)
+        XCTAssertEqual(b.handle(.reset), [.cancelAnnounce, .holdUp(id: 1, reason: "stopped")])
+    }
+
+    func testAKeyMachineIgnoresMouseInputsAndAMouseMachineIgnoresKeyInputs() {
+        var key = option()
+        XCTAssertEqual(key.handle(.buttonDown(button: 3)), [])
+        XCTAssertFalse(key.isDown)
+        var m = mouse()
+        XCTAssertEqual(m.handle(.flagsChanged(keyCode: 61, flags: 0x40)), [])
+        XCTAssertFalse(m.isDown)
+    }
+
+    func testNoPrimaryButtonIsAllowedAsATrigger() {
+        XCTAssertFalse(HoldWatcher.allowedButton(0))
+        XCTAssertFalse(HoldWatcher.allowedButton(1))
+        XCTAssertFalse(HoldWatcher.allowedButton(-1))
+        XCTAssertTrue(HoldWatcher.allowedButton(2))
+        XCTAssertTrue(HoldWatcher.allowedButton(4))
+        XCTAssertTrue(HoldWatcher.allowedButton(31))
+        XCTAssertFalse(HoldWatcher.allowedButton(32))
+    }
+
+    // Key and mouse together
+
+    func testTheFirstSourceHeldOwnsTheSessionAndTheOtherIsIgnored() {
+        var arbiter = HoldArbiter()
+        XCTAssertTrue(arbiter.allow(.holdDown(id: 1), from: .key))
+        XCTAssertFalse(arbiter.allow(.holdDown(id: 2), from: .mouse), "second source ignored")
+        XCTAssertFalse(arbiter.allow(.tap, from: .mouse), "no tap while the other is held")
+        XCTAssertFalse(arbiter.allow(.holdUp(id: 2, reason: "released"), from: .mouse))
+        XCTAssertEqual(arbiter.owner, .key, "the owner is unaffected")
+        XCTAssertTrue(arbiter.allow(.holdUp(id: 1, reason: "released"), from: .key))
+        XCTAssertNil(arbiter.owner)
+        // Free again: either may own the next one, and taps are heard.
+        XCTAssertTrue(arbiter.allow(.tap, from: .mouse))
+        XCTAssertTrue(arbiter.allow(.holdDown(id: 3), from: .mouse))
+        XCTAssertFalse(arbiter.allow(.holdDown(id: 4), from: .key))
+        XCTAssertTrue(arbiter.allow(.holdUp(id: 3, reason: "released"), from: .mouse))
+    }
+
+    func testSchedulingOutputsAlwaysPassAndAnOrphanReleaseIsDropped() {
+        var arbiter = HoldArbiter()
+        XCTAssertTrue(arbiter.allow(.scheduleAnnounce, from: .mouse))
+        XCTAssertTrue(arbiter.allow(.cancelAnnounce, from: .key))
+        XCTAssertFalse(arbiter.allow(.holdUp(id: 9, reason: "released"), from: .key))
+        XCTAssertNil(arbiter.owner)
+    }
+
+    func testBothSourcesAreIndependentMachines() {
+        var key = option()
+        var button = mouse()
+        _ = press(&key)
+        _ = button.handle(.buttonDown(button: 3))
+        XCTAssertEqual(key.handle(.announceTimer), [.holdDown(id: 1)])
+        // The key being held does not make the button a chord.
+        XCTAssertEqual(button.handle(.announceTimer), [.holdDown(id: 1)])
+        XCTAssertEqual(
+            button.handle(.buttonUp(button: 3)), [.cancelAnnounce, .holdUp(id: 1, reason: "released")])
+        XCTAssertTrue(key.isDown, "releasing the button leaves the key held")
+    }
 }

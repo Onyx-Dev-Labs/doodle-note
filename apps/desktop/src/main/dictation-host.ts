@@ -5,6 +5,7 @@ import type { WebContents } from 'electron'
 import type { AppChannel } from '../shared/app-channel'
 import {
   DICTATION_CANCEL_CHANNEL,
+  DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL,
   DICTATION_COPY_LAST_CHANNEL,
   DICTATION_COPY_RECOVERY_CHANNEL,
   DICTATION_DISMISS_RECOVERY_CHANNEL,
@@ -179,6 +180,11 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_PASTE_LAST_CHANNEL, async (event) => {
     if (trusted(event)) await service.pasteLast()
   })
+  ipcMain.handle(DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL, (event) =>
+    trusted(event)
+      ? service.captureMouseButton()
+      : { ok: false, message: 'Not available from here.' }
+  )
   ipcMain.handle(DICTATION_COPY_LAST_CHANNEL, async (event) => {
     if (trusted(event)) await service.copyLast()
   })

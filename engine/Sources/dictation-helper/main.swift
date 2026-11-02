@@ -26,6 +26,7 @@ func handle(_ request: [String: Any]) {
                 "secureInput": IsSecureEventInputEnabled(),
                 "conflicts": Target.conflictingDictationApps,
                 "holdActive": HoldWatcher.shared.active,
+                "mouseActive": HoldWatcher.shared.mouseActive,
             ]
             if let action = HoldKeySpec.fnKeyAction { fields["fnKeyAction"] = action }
             Wire.reply(id, fields)
@@ -88,6 +89,38 @@ func handle(_ request: [String: Any]) {
             HoldWatcher.shared.stop()
             Wire.reply(id)
         }
+    case "mouse-start":
+        let button = (request["button"] as? NSNumber)?.int64Value ?? -1
+        let swallow = request["swallow"] as? Bool ?? false
+        let minHold = request["minHoldMs"] as? Int ?? 150
+        DispatchQueue.main.async {
+            if let failure = HoldWatcher.shared.startMouse(
+                button: button, swallow: swallow, minHoldMs: minHold)
+            {
+                Wire.reply(id, ok: false, ["reason": failure])
+            } else {
+                Wire.reply(id, ["swallowing": HoldWatcher.shared.mouseSwallowing])
+            }
+        }
+    case "mouse-stop":
+        DispatchQueue.main.async {
+            HoldWatcher.shared.stopMouse()
+            Wire.reply(id)
+        }
+    case "mouse-capture":
+        let seconds = (request["seconds"] as? NSNumber)?.doubleValue ?? 10
+        DispatchQueue.main.async {
+            // The watched button must not be swallowed while the user picks a new one.
+            HoldWatcher.shared.setMousePaused(true)
+            MouseCapture.shared.begin(seconds: max(1, min(seconds, 30))) { fields, reason in
+                HoldWatcher.shared.setMousePaused(false)
+                if let fields {
+                    Wire.reply(id, fields)
+                } else {
+                    Wire.reply(id, ok: false, ["reason": reason ?? "failed"])
+                }
+            }
+        }
     default:
         Wire.reply(id, ok: false, ["reason": "unknown-op"])
     }
@@ -108,7 +141,7 @@ Thread {
         }
     }
     // The app is gone. Make sure no hold stays "down" for anyone, then leave.
-    DispatchQueue.main.sync { HoldWatcher.shared.stop() }
+    DispatchQueue.main.sync { HoldWatcher.shared.stopAll() }
     exit(0)
 }.start()
 

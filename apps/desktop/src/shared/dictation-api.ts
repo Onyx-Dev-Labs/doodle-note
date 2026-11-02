@@ -15,6 +15,7 @@ export const DICTATION_STATUS_EVENT_CHANNEL = 'dictation:status-event'
 export const DICTATION_OPEN_SETTINGS_EVENT_CHANNEL = 'dictation:open-settings'
 export const DICTATION_PASTE_LAST_CHANNEL = 'dictation:paste-last'
 export const DICTATION_COPY_LAST_CHANNEL = 'dictation:copy-last'
+export const DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL = 'dictation:capture-mouse-button'
 
 export interface DictationSettings {
   /** Master switch. Off means no shortcut, no helper and no microphone use. */
@@ -50,6 +51,14 @@ export interface DictationSettings {
   showLiveText: boolean
   /** Show status captions ("Transcribing", "Inserting") and success confirmations. */
   showStatusMessages: boolean
+  /**
+   * An optional second hold-to-talk trigger: a mouse button, numbered from 0
+   * (2 middle, 3 back, 4 forward, higher extras). Left and right click (0, 1)
+   * are never allowed. Null = none. Works alongside the hold key.
+   */
+  holdMouseButton: number | null
+  /** Consume that button's events so the app under the pointer does not also act on them. */
+  holdMouseSwallow: boolean
 }
 
 export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
@@ -67,7 +76,9 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   pasteLastShortcut: 'Control+Alt+Shift+V',
   copyLastShortcut: 'Control+Alt+Shift+C',
   showLiveText: true,
-  showStatusMessages: true
+  showStatusMessages: true,
+  holdMouseButton: null,
+  holdMouseSwallow: true
 }
 
 export type DictationSettingsUpdate = Partial<DictationSettings>
@@ -111,6 +122,9 @@ export interface DictationStatus {
   /** Whether a transcript is held in memory for "paste last". The text itself is never sent. */
   hasLastTranscript: boolean
   holdKey: 'off' | 'active' | 'needs-permission' | 'unavailable'
+  mouseButton: 'off' | 'active' | 'needs-permission' | 'unavailable'
+  /** The mouse trigger consumes its button's events (an active tap was available). */
+  mouseSwallowing: boolean
   /** Names of other dictation apps detected running; shortcuts may overlap. */
   conflicts: string[]
   /** warm: models loaded in the resident engine; cold: first use loads them. */
@@ -160,6 +174,8 @@ export interface DictationStopStages {
   stopToDoneMs: number | null
 }
 
+export type MouseCaptureOutcome = { ok: true; button: number } | { ok: false; message: string }
+
 export interface DictationApi {
   getStatus(): Promise<DictationStatus>
   setSettings(update: DictationSettingsUpdate): Promise<DictationStatus>
@@ -170,6 +186,8 @@ export interface DictationApi {
   pasteLast(): Promise<void>
   /** Put the most recent transcript on the clipboard. */
   copyLast(): Promise<void>
+  /** Wait for the next mouse button press and say which button it was (or why it cannot be used). */
+  captureMouseButton(): Promise<MouseCaptureOutcome>
   copyRecovery(gen: number): Promise<boolean>
   dismissRecovery(gen: number): Promise<void>
   openPrivacySettings(pane: 'microphone' | 'accessibility' | 'input-monitoring'): Promise<void>

@@ -209,6 +209,8 @@ export type PillMenuCommand =
 
 export interface PillMenuItem {
   label?: string
+  /** A second line under the label on macOS 14.4 and later; ignored earlier. */
+  sublabel?: string
   type: 'normal' | 'separator' | 'checkbox' | 'radio'
   checked?: boolean
   enabled?: boolean
@@ -224,6 +226,8 @@ export interface PillMenuModel {
   hasLastTranscript: boolean
   showLiveText: boolean
   showStatusMessages: boolean
+  /** The hold-to-talk mouse button, if one is set. */
+  mouseButton: number | null
 }
 
 /** What the pill's right-click menu shows. Wording is our own. */
@@ -263,6 +267,12 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
     { type: 'separator' },
     { type: 'normal', label: 'Open dictation settings', command: { kind: 'settings' } },
     {
+      type: 'normal',
+      label: `Mouse button to hold and talk: ${model.mouseButton === null ? 'none' : describeMouseButton(model.mouseButton)}`,
+      sublabel: MOUSE_SOFTWARE_NOTE,
+      command: { kind: 'settings' }
+    },
+    {
       type: 'checkbox',
       label: 'Keep the pill on screen',
       checked: model.showAlways,
@@ -286,6 +296,7 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
 /** The shape Electron's Menu.buildFromTemplate accepts, kept free of Electron types. */
 export interface MenuTemplateItem {
   label?: string
+  sublabel?: string
   type: PillMenuItem['type']
   checked?: boolean
   enabled?: boolean
@@ -303,6 +314,7 @@ export function toMenuTemplate(
     return {
       type: item.type,
       ...(item.label !== undefined ? { label: item.label } : {}),
+      ...(item.sublabel !== undefined ? { sublabel: item.sublabel } : {}),
       ...(item.checked !== undefined ? { checked: item.checked } : {}),
       ...(item.enabled !== undefined ? { enabled: item.enabled } : {}),
       ...(item.submenu ? { submenu: toMenuTemplate(item.submenu, onPick) } : {}),
@@ -388,6 +400,42 @@ export function describeFnKey(action: number | null): string | null {
       return `macOS starts its own dictation on the Globe key, which collides with this one. Set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
     default:
       return `If a macOS popup appears when you tap the Globe key, set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
+  }
+}
+
+/* ---- mouse button trigger ---- */
+
+/** What to tell people whose mouse buttons do nothing: their mouse software gets there first. */
+export const MOUSE_SOFTWARE_NOTE =
+  'Mouse software such as Logitech Options+ can remap buttons before macOS sees them. If a button does nothing, set it to its default or generic action there.'
+
+/** A button as people count it (left is 1), with the common names. */
+export function describeMouseButton(button: number): string {
+  switch (button) {
+    case 2:
+      return 'Middle button'
+    case 3:
+      return 'Back button'
+    case 4:
+      return 'Forward button'
+    default:
+      return `Button ${button + 1}`
+  }
+}
+
+/** Plain words for a capture that did not produce a usable button. */
+export function describeMouseCaptureFailure(failure: string): string {
+  switch (failure) {
+    case 'primary-button':
+      return 'Left and right click cannot be used, because they are needed for everything else. Press the middle, back, forward or an extra button.'
+    case 'timeout':
+      return 'No button was pressed. Try again and press the mouse button you want within a few seconds.'
+    case 'input-monitoring-denied':
+      return 'Allow Input Monitoring for DoodleNote Dev first, then try again.'
+    case 'helper-unavailable':
+      return 'The dictation helper is not available.'
+    default:
+      return 'Could not read a mouse button. Try again.'
   }
 }
 
