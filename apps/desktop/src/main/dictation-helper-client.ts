@@ -10,6 +10,7 @@ import type {
   HoldKey,
   InputState,
   MouseCaptureResult,
+  MouseMode,
   MouseStartResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
@@ -57,9 +58,10 @@ export class DictationHelperClient {
     { resolve: (reply: Reply | null) => void; timer: NodeJS.Timeout }
   >()
   private holdKey: HoldKey = 'off'
-  private mouse: { button: number; swallow: boolean } | null = null
+  private mouse: { button: number; swallow: boolean; mode: MouseMode } | null = null
   private readonly holdListeners = new Set<(event: HoldEvent) => void>()
   private readonly tapListeners = new Set<() => void>()
+  private readonly clickListeners = new Set<() => void>()
   private readonly exitListeners = new Set<() => void>()
   private lastExitAt = 0
 
@@ -81,6 +83,12 @@ export class DictationHelperClient {
   onTap(listener: () => void): () => void {
     this.tapListeners.add(listener)
     return () => this.tapListeners.delete(listener)
+  }
+
+  /** The mouse trigger in click mode went down: one press, whatever follows. */
+  onClick(listener: () => void): () => void {
+    this.clickListeners.add(listener)
+    return () => this.clickListeners.delete(listener)
   }
 
   /** Fires whenever the helper process ends, expectedly or not. */
@@ -204,18 +212,22 @@ export class DictationHelperClient {
    * Watch one non-primary mouse button as a second hold-to-talk trigger, or
    * stop with null. Remembered so a restarted helper re-arms it.
    */
-  async setMouseButton(button: number | null, swallow: boolean): Promise<MouseStartResult | null> {
+  async setMouseButton(
+    button: number | null,
+    swallow: boolean,
+    mode: MouseMode = 'hold'
+  ): Promise<MouseStartResult | null> {
     if (button === null) {
       this.mouse = null
       if (this.child) await this.request('mouse-stop', {}, this.timeouts.hold, false)
       return null
     }
     const running = await this.ensureRunning()
-    this.mouse = { button, swallow }
+    this.mouse = { button, swallow, mode }
     if (!running) return { ok: false, failure: 'helper-unavailable' }
     const reply = await this.request(
       'mouse-start',
-      { button, swallow, minHoldMs: 150 },
+      { button, swallow, mode, minHoldMs: 150 },
       this.timeouts.hold
     )
     if (!reply) return { ok: false, failure: 'helper-unavailable' }
@@ -261,6 +273,19 @@ export class DictationHelperClient {
         failure === 'input-monitoring-denied'
           ? failure
           : 'failed'
+    }
+  }
+
+  /**
+   * End the helper process so the next request starts a fresh one, which re-arms
+   * the hold key and the mouse button. A process started before a permission was
+   * granted may not see the grant until it is replaced.
+   */
+  restart(): void {
+    const child = this.child
+    if (child && child.exitCode === null) {
+      child.stdin.end()
+      child.kill('SIGTERM')
     }
   }
 
@@ -366,6 +391,10 @@ export class DictationHelperClient {
       if (phase && Number.isInteger(holdId)) {
         for (const listener of this.holdListeners) listener({ phase, holdId })
       }
+      return false
+    }
+    if (parsed.event === 'click') {
+      for (const listener of this.clickListeners) listener()
       return false
     }
     if (parsed.event === 'tap') {

@@ -119,7 +119,7 @@ Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) open
 | Instruct Mode (screen-context replies) | yes, hosted | no | **Talk**: needs screen reading, against our current privacy line |
 | History with retry | yes, audio kept 14 days | none by design | **Talk** |
 | Press Enter by voice | experimental | never, by design | keep out; revisit only as explicit opt-in |
-| Mouse side-button triggers | yes | yes: one optional hold-to-talk button (middle, back, forward, extras; never left or right), same hold, tap and double-tap behaviour as the key, swallowed from other apps by default | done (physical mouse still to try) |
+| Mouse side-button triggers | yes | yes: one optional button (middle, back, forward, extras; never left or right), click to start and click to stop by default or hold to talk (same hold, tap and double-tap behaviour as the key), swallowed from other apps by default | done (physical mouse still to try) |
 | Cloud speech | yes | local only by design | keep local |
 
 ### P1 status
@@ -144,7 +144,7 @@ Built on `feat/system-dictation` (see `docs/dictation-dev-app.md` for behaviour,
 - [x] Quiet mode: two settings (and menu items) hide the live words and the status captions; failures, kept text and warnings always show
 - [x] Stop-to-text speed pass: stages measured and shown; Chromium and Electron targets no longer wait out a no-op accessibility attempt (about 0.55 s down to about 0.05 s)
 
-- [x] Optional mouse-button hold-to-talk trigger, with capture, swallowing and a warning about remapping software
+- [x] Optional mouse-button trigger (click to start and stop by default, or hold to talk), with capture, swallowing and a warning about remapping software
 
 Still to see with a human at the Mac: the look on real displays, dragging with a real pointer, the native right-click menu, live dictation through every path, and the tones through speakers.
 

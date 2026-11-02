@@ -38,7 +38,8 @@ process.stdin.on('data', (d) => {
       // Replies prove the fields arrived as encoded: only button 3 with swallow true swallows.
       if (!Number.isInteger(req.button) || req.button < 2) send({ event: 'reply', id: req.id, ok: false, reason: 'invalid-button' })
       else if (mode === 'no-permission') send({ event: 'reply', id: req.id, ok: false, reason: 'input-monitoring-denied' })
-      else send({ event: 'reply', id: req.id, ok: true, swallowing: req.swallow === true && req.button === 3 && req.minHoldMs === 150 })
+      else send({ event: 'reply', id: req.id, ok: true, swallowing: req.swallow === true && req.button === 3 && req.minHoldMs === 150 && (req.mode === 'click' || req.mode === 'hold') })
+      if (mode === 'clicks') { send({ event: 'click' }); send({ event: 'click' }) }
     } else if (req.op === 'mouse-stop') {
       send({ event: 'reply', id: req.id, ok: true })
       send({ event: 'stopped-marker' })
@@ -270,5 +271,18 @@ test('the helper status carries Input Monitoring as three states', async () => {
     } finally {
       await client.dispose()
     }
+  }
+})
+
+test('click events from the mouse trigger reach the listener, and the mode is sent with the button', async () => {
+  const client = new DictationHelperClient(fakeHelper('clicks'), fast)
+  let clicks = 0
+  client.onClick(() => clicks++)
+  try {
+    assert.deepEqual(await client.setMouseButton(3, true, 'click'), { ok: true, swallowing: true })
+    await new Promise((r) => setTimeout(r, 100))
+    assert.equal(clicks, 2)
+  } finally {
+    await client.dispose()
   }
 })

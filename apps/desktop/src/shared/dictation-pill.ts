@@ -226,8 +226,9 @@ export interface PillMenuModel {
   hasLastTranscript: boolean
   showLiveText: boolean
   showStatusMessages: boolean
-  /** The hold-to-talk mouse button, if one is set. */
+  /** The mouse button for dictation, if one is set, and how it behaves. */
   mouseButton: number | null
+  mouseMode: 'click' | 'hold'
 }
 
 /** What the pill's right-click menu shows. Wording is our own. */
@@ -268,7 +269,7 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
     { type: 'normal', label: 'Open dictation settings', command: { kind: 'settings' } },
     {
       type: 'normal',
-      label: `Mouse button to hold and talk: ${model.mouseButton === null ? 'none' : describeMouseButton(model.mouseButton)}`,
+      label: `Mouse button for dictation: ${model.mouseButton === null ? 'none' : `${describeMouseButton(model.mouseButton)}, ${model.mouseMode === 'click' ? 'click to start and stop' : 'hold to talk'}`}`,
       sublabel: MOUSE_SOFTWARE_NOTE,
       command: { kind: 'settings' }
     },
@@ -408,6 +409,18 @@ export function describeFnKey(action: number | null): string | null {
 /** What to tell people whose mouse buttons do nothing: their mouse software gets there first. */
 export const MOUSE_SOFTWARE_NOTE =
   'Mouse software such as Logitech Options+ can remap buttons before macOS sees them. If a button does nothing, set it to its default or generic action there.'
+
+/** The two ways the mouse button can behave, in the words the settings page uses. */
+export const MOUSE_MODE_LABELS = {
+  click: 'Click to start, click to stop',
+  hold: 'Hold to talk'
+} as const
+
+export function describeMouseMode(mode: 'click' | 'hold', quickTapsLatch = true): string {
+  return mode === 'click'
+    ? 'Press the button once to start recording and press it again to stop and insert. Esc or Cancel still cancels. Holding it down does not matter: only the presses count.'
+    : `Hold the button while you speak and let go to insert.${quickTapsLatch ? ' Two quick clicks keep recording; one more click finishes.' : ''}`
+}
 
 /** A button as people count it (left is 1), with the common names. */
 export function describeMouseButton(button: number): string {

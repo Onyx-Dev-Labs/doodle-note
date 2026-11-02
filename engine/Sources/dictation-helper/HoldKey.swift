@@ -61,6 +61,9 @@ final class HoldWatcher {
     private var mousePoll: DispatchSourceTimer?
 
     private var minHold: TimeInterval = 0.15
+    private var watchdog: DispatchSourceTimer?
+    /// The mouse tap is switched off on purpose (a new button is being captured).
+    private var mousePaused = false
     private var arbiter = HoldArbiter()
     /// Hold ids keep counting across restarts, so a late "up" never pairs with a newer hold.
     private var lastHoldId = 0
@@ -91,6 +94,7 @@ final class HoldWatcher {
         keyRunLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        keepTapsAlive()
         return nil
     }
 
@@ -109,7 +113,9 @@ final class HoldWatcher {
     /// consumes that button's events (so the app under the pointer never sees them);
     /// without the permission for that, a listen-only tap is used and events pass
     /// through. Returns nil on success, otherwise a failure reason.
-    func startMouse(button: Int64, swallow wantSwallow: Bool, minHoldMs: Int) -> String? {
+    func startMouse(button: Int64, swallow wantSwallow: Bool, minHoldMs: Int, click: Bool = false)
+        -> String?
+    {
         stopMouse()
         guard HoldWatcher.allowedButton(button) else { return "invalid-button" }
         let mask: CGEventMask =
@@ -138,12 +144,13 @@ final class HoldWatcher {
         guard let tap else { return "input-monitoring-denied" }
         mouseTap = tap
         mouseButton = button
-        mouseMachine = HoldMachine(mouseButton: button)
+        mouseMachine = HoldMachine(mouseButton: button, clickMode: click)
         minHold = holdDelay(minHoldMs)
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         mouseRunLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        keepTapsAlive()
         return nil
     }
 
@@ -158,12 +165,14 @@ final class HoldWatcher {
         mouseMachine = nil
         mouseSwallowing = false
         swallowedDown = false
+        mousePaused = false
         mouseButton = -1
     }
 
     /// Pause or resume the mouse tap (used while capturing a new button).
     func setMousePaused(_ paused: Bool) {
         guard let mouseTap else { return }
+        mousePaused = paused
         if paused { apply(.mouse, .reset) }
         CGEvent.tapEnable(tap: mouseTap, enable: !paused)
     }
@@ -171,6 +180,24 @@ final class HoldWatcher {
     func stopAll() {
         stop()
         stopMouse()
+    }
+
+    /// macOS can switch an event tap off (a slow moment, secure input) and the
+    /// "disabled" notice does not always arrive. A cheap periodic check turns a
+    /// tap that went quiet back on, so a trigger never silently stops working.
+    private func keepTapsAlive() {
+        guard watchdog == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 3, repeating: 3)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let taps = [self.keyTap, self.mousePaused ? nil : self.mouseTap]
+            for tap in taps {
+                if let tap, !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
+            }
+        }
+        watchdog = timer
+        timer.resume()
     }
 
     /// Middle, back, forward and higher. Left and right click (0, 1) are never allowed.
@@ -274,6 +301,8 @@ final class HoldWatcher {
                 Wire.send(["event": "hold", "phase": "up", "holdId": id, "reason": reason])
             case .tap:
                 Wire.send(["event": "tap"])
+            case .click:
+                Wire.send(["event": "click"])
             }
         }
     }

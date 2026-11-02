@@ -90,6 +90,18 @@ test('the mouse trigger is off by default and swallows its button when it can', 
   assert.equal(settings.holdMouseSwallow, true)
 })
 
+test('the mouse button defaults to click-to-start-and-stop and only knows two modes', () => {
+  assert.equal(normalizeDictationSettings({}).holdMouseMode, 'click')
+  assert.equal(normalizeDictationSettings({ holdMouseMode: 'hold' }).holdMouseMode, 'hold')
+  assert.equal(normalizeDictationSettings({ holdMouseMode: 'click' }).holdMouseMode, 'click')
+  for (const junk of ['toggle', 1, null, true, {}]) {
+    assert.equal(normalizeDictationSettings({ holdMouseMode: junk }).holdMouseMode, 'click')
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-mode-'))
+  new DictationSettingsStore(dir).update({ holdMouseButton: 3, holdMouseMode: 'hold' })
+  assert.equal(new DictationSettingsStore(dir).get().holdMouseMode, 'hold')
+})
+
 test('left and right click and non-buttons are never accepted as the mouse trigger', () => {
   for (const value of [0, 1, -1, 32, 2.5, '3', Number.NaN, null, true, {}]) {
     assert.equal(

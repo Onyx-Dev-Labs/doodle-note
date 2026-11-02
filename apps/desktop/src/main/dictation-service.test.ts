@@ -39,11 +39,14 @@ interface Harness {
     delivery: HelperDelivery
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
-    mouseCalls: Array<{ button: number | null; swallow: boolean }>
+    mouseCalls: Array<{ button: number | null; swallow: boolean; mode: string }>
+    clickListener: (() => void) | null
+    restarts: number[]
     mouseResult: MouseStartResult | null
     captureResult: MouseCaptureResult
     input: InputState | null
     fnKeyAction: number | null
+    inputMonitoring: boolean
     inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
     accessibilityGrantedAfterAsk: boolean | null
     inputMonitoringGrantedAfterAsk: boolean | null
@@ -112,10 +115,13 @@ function harness(
     holdListener: null,
     tapListener: null,
     mouseCalls: [],
+    clickListener: null,
+    restarts: [],
     mouseResult: null,
     captureResult: { ok: true, button: 3 },
     input: { muted: false, volume: 0.5 },
     fnKeyAction: null,
+    inputMonitoring: true,
     inputMonitoringAccess: 'granted',
     accessibilityGrantedAfterAsk: false,
     inputMonitoringGrantedAfterAsk: false,
@@ -152,7 +158,7 @@ function harness(
       available: true,
       status: async (): Promise<HelperStatus> => ({
         accessibility: true,
-        inputMonitoring: true,
+        inputMonitoring: helper.inputMonitoring,
         secureInput: false,
         conflicts: [],
         holdActive: false,
@@ -174,8 +180,13 @@ function harness(
         helper.holdListener = cb
         return () => {}
       },
-      setMouseButton: async (button, swallow) => {
-        helper.mouseCalls.push({ button, swallow })
+      onClick: (cb) => {
+        helper.clickListener = cb
+        return () => {}
+      },
+      restart: () => void helper.restarts.push(1),
+      setMouseButton: async (button, swallow, mode) => {
+        helper.mouseCalls.push({ button, swallow, mode })
         return button === null ? null : (helper.mouseResult ?? { ok: true, swallowing: swallow })
       },
       captureMouseButton: async () => helper.captureResult,
@@ -1263,11 +1274,16 @@ test('with everything quiet, a missing microphone permission is still shown', as
 
 test('the mouse button is armed next to the hold key, each on its own', async () => {
   const h = harness({
-    settings: { holdKey: 'rightOption', holdMouseButton: 3, holdMouseSwallow: true }
+    settings: {
+      holdKey: 'rightOption',
+      holdMouseButton: 3,
+      holdMouseSwallow: true,
+      holdMouseMode: 'hold'
+    }
   })
   await h.service.start()
   assert.deepEqual(h.helper.holdKeys, ['rightOption'])
-  assert.deepEqual(h.helper.mouseCalls, [{ button: 3, swallow: true }])
+  assert.deepEqual(h.helper.mouseCalls, [{ button: 3, swallow: true, mode: 'hold' }])
   const status = await h.service.status()
   assert.equal(status.holdKey, 'active')
   assert.equal(status.mouseButton, 'active')
@@ -1277,9 +1293,9 @@ test('the mouse button is armed next to the hold key, each on its own', async ()
 test('the mouse button alone works with the hold key off, and clearing it disarms it', async () => {
   const h = harness({ settings: { holdKey: 'off', holdMouseButton: 4 } })
   await h.service.start()
-  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: 4, swallow: true })
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: 4, swallow: true, mode: 'click' })
   await h.service.setSettings({ holdMouseButton: null })
-  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: null, swallow: false })
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: null, swallow: false, mode: 'hold' })
   const status = await h.service.status()
   assert.equal(status.mouseButton, 'off')
   assert.equal(status.mouseSwallowing, false)
@@ -1308,12 +1324,12 @@ test('turning dictation off releases the mouse button too', async () => {
   const h = harness({ settings: { holdMouseButton: 3 } })
   await h.service.start()
   await h.service.setSettings({ enabled: false })
-  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: null, swallow: false })
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: null, swallow: false, mode: 'hold' })
   assert.equal((await h.service.status()).mouseButton, 'off')
 })
 
 test('holding the mouse button dictates exactly like the hold key; a quick click is discarded', async () => {
-  const h = harness({ settings: { holdMouseButton: 3 } })
+  const h = harness({ settings: { holdMouseButton: 3, holdMouseMode: 'hold' } })
   await h.service.start()
   h.helper.holdListener?.({ phase: 'down', holdId: 1 })
   await ready(h)
@@ -1334,7 +1350,7 @@ test('holding the mouse button dictates exactly like the hold key; a quick click
 })
 
 test('two quick clicks of the mouse button latch hands-free, with no hold key set', async () => {
-  const h = harness({ settings: { holdKey: 'off', holdMouseButton: 3 } })
+  const h = harness({ settings: { holdKey: 'off', holdMouseButton: 3, holdMouseMode: 'hold' } })
   await h.service.start()
   tap(h)
   h.clock.now += 200
@@ -1464,4 +1480,134 @@ test('permissions cannot be requested once dictation is shut down', async () => 
   const h = harness()
   await h.service.dispose()
   assert.equal(await h.service.requestPermission('accessibility'), 'unavailable')
+})
+
+/* ---- mouse button, click to start and click to stop ---- */
+
+const click = (h: Harness): void => h.helper.clickListener?.()
+
+test('click mode is the default and is what the helper is armed with', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  assert.deepEqual(h.helper.mouseCalls.at(-1), { button: 3, swallow: true, mode: 'click' })
+})
+
+test('one click starts at once; the next click stops, inserts, and nothing is held', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  click(h)
+  assert.equal(h.service.phase, 'preparing', 'no waiting for a second tap')
+  await ready(h)
+  h.clock.now += 5_000
+  assert.equal(h.service.phase, 'recording', 'no release is needed or expected')
+  click(h)
+  assert.equal(h.service.phase, 'finalizing')
+  h.emit({ event: 'final', channel: 'mic', text: 'clicked twice' })
+  await tick()
+  assert.deepEqual(h.delivered, ['clicked twice'])
+})
+
+test('a double click does not start a session and stop it in the same breath', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  click(h)
+  h.clock.now += 120
+  click(h)
+  assert.equal(h.service.phase, 'preparing')
+  await ready(h)
+  h.clock.now += 200
+  click(h)
+  assert.equal(h.service.phase, 'recording', 'still inside the stray-click guard')
+  h.clock.now += 400
+  click(h)
+  assert.equal(h.service.phase, 'finalizing')
+})
+
+test('a click stops a session started from the pill or the shortcut, and Esc still cancels', async () => {
+  for (const start of ['pill', 'toggle'] as const) {
+    const h = harness({ settings: { holdMouseButton: 3 } })
+    await h.service.start()
+    if (start === 'pill') h.service.onOverlayAction('pill', null)
+    else h.service.toggle()
+    await ready(h)
+    h.clock.now += 2_000
+    click(h)
+    assert.equal(h.service.phase, 'finalizing', `${start}: the click ends it`)
+  }
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  click(h)
+  await ready(h)
+  h.service.cancel()
+  assert.equal(h.service.phase, 'idle')
+  assert.deepEqual(h.delivered, [])
+})
+
+test('a mouse click never ends a key hold, and a key hold is not started by a click', async () => {
+  const h = harness({
+    settings: { holdKey: 'rightOption', holdMouseButton: 3 }
+  })
+  await h.service.start()
+  h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+  await ready(h)
+  h.clock.now += 2_000
+  click(h)
+  assert.equal(h.service.phase, 'recording', 'the key owns that session')
+  h.helper.holdListener?.({ phase: 'up', holdId: 1 })
+  assert.equal(h.service.phase, 'finalizing')
+})
+
+test('a click while a session is finishing or a kept-text card is up does not disturb it', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  await h.service.start()
+  click(h)
+  await ready(h)
+  h.clock.now += 2_000
+  click(h)
+  assert.equal(h.service.phase, 'finalizing')
+  h.clock.now += 1_000
+  click(h)
+  assert.equal(h.service.phase, 'finalizing', 'a third click is not a new session')
+})
+
+test('click-started sessions have the hands-free limit and warning', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  try {
+    const h = harness({ settings: { holdMouseButton: 3 } })
+    await h.service.start()
+    click(h)
+    await ready(h)
+    mock.timers.tick(19 * 60_000)
+    assert.match(lastView(h).warning ?? '', /one minute/i)
+    mock.timers.tick(60_000)
+    assert.equal(h.service.phase, 'finalizing')
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('with no permission yet the mouse trigger is retried once it is granted, then the helper is replaced once', async () => {
+  const h = harness({ settings: { holdMouseButton: 3 } })
+  h.helper.inputMonitoring = false
+  h.helper.mouseResult = { ok: false, failure: 'input-monitoring-denied' }
+  await h.service.start()
+  assert.equal((await h.service.status()).mouseButton, 'needs-permission')
+  // Granted: the next status read re-arms without anyone touching a setting.
+  h.helper.inputMonitoring = true
+  h.helper.mouseResult = null
+  await h.service.status()
+  await tick()
+  await tick()
+  assert.equal((await h.service.status()).mouseButton, 'active')
+  assert.equal(h.helper.restarts.length, 0, 'no restart needed when the retry worked')
+
+  const stubborn = harness({ settings: { holdMouseButton: 3 } })
+  stubborn.helper.mouseResult = { ok: false, failure: 'input-monitoring-denied' }
+  await stubborn.service.start()
+  await stubborn.service.status()
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  assert.equal(stubborn.helper.restarts.length, 1, 'replaced once, never in a loop')
+  await stubborn.service.status()
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  assert.equal(stubborn.helper.restarts.length, 1)
 })

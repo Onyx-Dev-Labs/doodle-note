@@ -74,6 +74,10 @@ export function isAllowedMouseButton(value: unknown): value is number {
   )
 }
 
+/** click: every press is a click (start, then stop). hold: hold to talk, double tap for hands-free. */
+export const MOUSE_MODES = ['click', 'hold'] as const
+export type MouseMode = (typeof MOUSE_MODES)[number]
+
 export type MouseFailure = HoldFailure | 'invalid-button'
 
 export type MouseStartResult =

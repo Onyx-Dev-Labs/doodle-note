@@ -10,6 +10,8 @@ import {
   describeDoubleTap,
   describeFnKey,
   describeMouseButton,
+  describeMouseMode,
+  MOUSE_MODE_LABELS,
   describeStopStages
 } from '../../shared/dictation-pill'
 import {
@@ -345,12 +347,12 @@ export function DictationSettings(): React.JSX.Element {
           </div>
           <div className="cal-row">
             <span className="cal-row-main">
-              <span className="cal-row-label">Hold a mouse button to talk</span>
+              <span className="cal-row-label">Mouse button</span>
               <span className="cal-row-sub">
                 {capturing
                   ? 'Press the mouse button you want to use now…'
                   : settings.holdMouseButton === null
-                    ? 'None. Works in addition to the hold key; either one starts dictation.'
+                    ? 'None. A mouse button works in addition to the hold key; either one starts dictation.'
                     : `${describeMouseButton(settings.holdMouseButton)} · ${
                         status.mouseButton === 'active'
                           ? 'Active.'
@@ -389,6 +391,26 @@ export function DictationSettings(): React.JSX.Element {
           {settings.holdMouseButton !== null && (
             <div className="cal-row">
               <span className="cal-row-main">
+                <span className="cal-row-label">Mouse button behaviour</span>
+                <span className="cal-row-sub">{describeMouseMode(settings.holdMouseMode)}</span>
+              </span>
+              <select
+                aria-label="Mouse button behaviour"
+                value={settings.holdMouseMode}
+                onChange={(event) =>
+                  void update({
+                    holdMouseMode: event.target.value as typeof settings.holdMouseMode
+                  })
+                }
+              >
+                <option value="click">{MOUSE_MODE_LABELS.click}</option>
+                <option value="hold">{MOUSE_MODE_LABELS.hold}</option>
+              </select>
+            </div>
+          )}
+          {settings.holdMouseButton !== null && (
+            <div className="cal-row">
+              <span className="cal-row-main">
                 <span className="cal-row-label">Don&apos;t send this button to other apps</span>
                 <span className="cal-row-sub">
                   {!settings.holdMouseSwallow
@@ -400,7 +422,7 @@ export function DictationSettings(): React.JSX.Element {
               </span>
               <Toggle
                 checked={settings.holdMouseSwallow}
-                label="Don't send the hold-to-talk mouse button to other apps"
+                label="Don't send the dictation mouse button to other apps"
                 onChange={() => void update({ holdMouseSwallow: !settings.holdMouseSwallow })}
               />
             </div>

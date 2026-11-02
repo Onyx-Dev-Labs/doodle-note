@@ -19,6 +19,7 @@ import type {
   HoldKey,
   InputState,
   MouseCaptureResult,
+  MouseMode,
   MouseStartResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
@@ -80,7 +81,15 @@ export interface HelperLike {
   release(snapshotId: string): void
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
   /** Arm or disarm the optional mouse-button trigger. Null result means it was switched off. */
-  setMouseButton(button: number | null, swallow: boolean): Promise<MouseStartResult | null>
+  setMouseButton(
+    button: number | null,
+    swallow: boolean,
+    mode: MouseMode
+  ): Promise<MouseStartResult | null>
+  /** The mouse trigger in click mode went down. */
+  onClick(listener: () => void): () => void
+  /** Replace the helper process (it re-arms its triggers when it comes back). */
+  restart(): void
   /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
   requestAccessibility(): Promise<boolean | null>
   /** Ask macOS for Input Monitoring from the helper. Returns whether it is granted now. */
@@ -188,6 +197,8 @@ const DEVICE_REFRESH_MS = 3_000
 const MENU_DEVICE_WAIT_MS = 400
 /** A double tap that lands while the engine drains the last session waits this long for it. */
 const DEFERRED_START_MS = 2_000
+/** A fresh helper refuses requests for a moment after the old one exits. */
+const HELPER_RESTART_SETTLE_MS = 700
 /** A Finish click this soon after a start is a stray second click, not a real stop. */
 const STRAY_STOP_MS = 400
 
@@ -232,6 +243,8 @@ export class DictationService {
   private mouseState: DictationStatus['mouseButton'] = 'off'
   private mouseSwallowing = false
   private askingMicrophone = false
+  private rearming = false
+  private restartedForPermission = false
   private escapeRegistered = false
   private disposed = false
   private lastToggleAt = 0
@@ -241,6 +254,7 @@ export class DictationService {
     this.unsubscribe.push(
       deps.helper.onHold((event) => this.onHold(event)),
       deps.helper.onTap(() => this.onTap()),
+      deps.helper.onClick(() => this.onClick()),
       deps.helper.onExit(() => this.onHelperExit())
     )
   }
@@ -297,7 +311,7 @@ export class DictationService {
       this.mouseState = 'off'
       this.mouseSwallowing = false
       void this.deps.helper.setHoldKey('off')
-      void this.deps.helper.setMouseButton(null, false)
+      void this.deps.helper.setMouseButton(null, false, 'hold')
       this.refreshPillTimer()
       this.render()
       return
@@ -327,12 +341,13 @@ export class DictationService {
     if (settings.holdMouseButton === null) {
       this.mouseState = 'off'
       this.mouseSwallowing = false
-      await this.deps.helper.setMouseButton(null, false)
+      await this.deps.helper.setMouseButton(null, false, 'hold')
       return
     }
     const result = await this.deps.helper.setMouseButton(
       settings.holdMouseButton,
-      settings.holdMouseSwallow
+      settings.holdMouseSwallow,
+      settings.holdMouseMode
     )
     this.mouseState = result?.ok
       ? 'active'
@@ -465,6 +480,7 @@ export class DictationService {
         selectedUid: settings.microphoneUid,
         hasLastTranscript: this.lastTranscript !== null,
         mouseButton: settings.holdMouseButton,
+        mouseMode: settings.holdMouseMode,
         showLiveText: settings.showLiveText,
         showStatusMessages: settings.showStatusMessages
       }),
@@ -585,6 +601,23 @@ export class DictationService {
     else this.dispatch({ type: 'tap', nowMs: now })
   }
 
+  /**
+   * A press of the mouse trigger in click mode: the first starts a hands-free
+   * session, the next one (from any hands-free session, however it began) stops
+   * and inserts. It never touches a key hold, and the reducer ignores a click
+   * right after the start so a double click cannot start and stop in one go.
+   */
+  private onClick(): void {
+    const settings = this.deps.settings.get()
+    if (this.disposed || !this.deps.supported || !settings.enabled) return
+    if (this.state.active) {
+      this.dispatch({ type: 'click', nowMs: this.deps.now() })
+      return
+    }
+    if (isBusy(this.state)) return
+    this.begin('click')
+  }
+
   /** The helper died. A hold can no longer see its key-up, so finish what was said. */
   private onHelperExit(): void {
     if (this.disposed) return
@@ -647,7 +680,10 @@ export class DictationService {
 
   /* ---- starting a session ---- */
 
-  private begin(trigger: 'toggle' | 'hold' | 'handsfree' | 'pill', holdId?: number): void {
+  private begin(
+    trigger: 'toggle' | 'hold' | 'handsfree' | 'pill' | 'click',
+    holdId?: number
+  ): void {
     const settings = this.deps.settings.get()
     if (!this.deps.supported || !settings.enabled) return
     if (
@@ -741,7 +777,7 @@ export class DictationService {
    * reports the result and waits for the next press.
    */
   private async askMicrophoneThenStart(
-    trigger: 'toggle' | 'hold' | 'handsfree' | 'pill',
+    trigger: 'toggle' | 'hold' | 'handsfree' | 'pill' | 'click',
     holdId?: number
   ): Promise<void> {
     if (this.askingMicrophone) return
@@ -1357,8 +1393,45 @@ export class DictationService {
   async status(): Promise<DictationStatus> {
     const helper = await this.deps.helper.status()
     if (helper) this.helperStatus = helper
+    this.rearmAfterPermissionGrant(helper)
     void this.refreshDevices()
     return this.snapshotStatus()
+  }
+
+  /**
+   * A trigger that needed Input Monitoring is retried once the permission shows
+   * up, so granting it never needs a manual toggle. If the running helper still
+   * cannot create its event tap although macOS now says yes, it is replaced once,
+   * because a process started before the grant may not see it.
+   */
+  private rearmAfterPermissionGrant(helper: HelperStatus | null): void {
+    if (!helper) return
+    if (!helper.inputMonitoring) {
+      this.restartedForPermission = false
+      return
+    }
+    const waiting = this.holdState === 'needs-permission' || this.mouseState === 'needs-permission'
+    if (!waiting || this.rearming || !this.deps.settings.get().enabled) return
+    this.rearming = true
+    void (async () => {
+      try {
+        await this.applySettings()
+        const stillWaiting =
+          this.holdState === 'needs-permission' || this.mouseState === 'needs-permission'
+        if (stillWaiting && !this.restartedForPermission) {
+          this.restartedForPermission = true
+          this.deps.helper.restart()
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, HELPER_RESTART_SETTLE_MS)
+            timer.unref?.()
+          })
+          if (!this.disposed) await this.applySettings()
+        }
+      } finally {
+        this.rearming = false
+        if (!this.disposed) this.broadcast()
+      }
+    })()
   }
 
   private snapshotStatus(): DictationStatus {

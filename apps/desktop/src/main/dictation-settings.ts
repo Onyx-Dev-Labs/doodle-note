@@ -5,7 +5,7 @@ import {
   type DictationSettings,
   type DictationSettingsUpdate
 } from '../shared/dictation-api'
-import { HOLD_KEYS, isAllowedMouseButton } from '../shared/dictation-helper-protocol'
+import { HOLD_KEYS, MOUSE_MODES, isAllowedMouseButton } from '../shared/dictation-helper-protocol'
 import { coerceEdge } from '../shared/dictation-pill'
 
 const CLEANUP_MODES = ['raw', 'local', 'byok'] as const
@@ -65,7 +65,12 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
     // Left and right click, and anything that is not a button number, never stick.
     holdMouseButton: isAllowedMouseButton(raw.holdMouseButton) ? raw.holdMouseButton : null,
     holdMouseSwallow:
-      raw.holdMouseSwallow === undefined ? defaults.holdMouseSwallow : raw.holdMouseSwallow === true
+      raw.holdMouseSwallow === undefined
+        ? defaults.holdMouseSwallow
+        : raw.holdMouseSwallow === true,
+    holdMouseMode: (MOUSE_MODES as readonly unknown[]).includes(raw.holdMouseMode)
+      ? (raw.holdMouseMode as DictationSettings['holdMouseMode'])
+      : defaults.holdMouseMode
   }
 }
 

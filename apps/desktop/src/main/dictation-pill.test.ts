@@ -9,6 +9,8 @@ import {
   describeFnKey,
   describeMouseButton,
   describeMouseCaptureFailure,
+  describeMouseMode,
+  MOUSE_MODE_LABELS,
   MOUSE_SOFTWARE_NOTE,
   describeStopStages,
   dockedBounds,
@@ -138,7 +140,8 @@ test('the menu lists the actions in order, with the default microphone ticked', 
     hasLastTranscript: true,
     showLiveText: true,
     showStatusMessages: true,
-    mouseButton: null
+    mouseButton: null,
+    mouseMode: 'click'
   })
   assert.deepEqual(
     menu.map((item) => item.label ?? '---'),
@@ -149,7 +152,7 @@ test('the menu lists the actions in order, with the default microphone ticked', 
       'Copy the last transcript',
       '---',
       'Open dictation settings',
-      'Mouse button to hold and talk: none',
+      'Mouse button for dictation: none',
       'Keep the pill on screen',
       "Show what I'm saying",
       'Show status messages'
@@ -177,7 +180,8 @@ test('the menu ticks the saved microphone, or the default when it is unplugged',
       hasLastTranscript: false,
       showLiveText: true,
       showStatusMessages: true,
-      mouseButton: null
+      mouseButton: null,
+      mouseMode: 'click'
     })[1]!
       .submenu!.filter((item) => item.checked)
       .map((item) => item.label)
@@ -193,7 +197,8 @@ test('paste-last is disabled until there is a transcript; the toggle reflects th
     hasLastTranscript: false,
     showLiveText: true,
     showStatusMessages: true,
-    mouseButton: null
+    mouseButton: null,
+    mouseMode: 'click'
   })
   assert.equal(menu[2]!.enabled, false)
   assert.equal(menu[3]!.enabled, false)
@@ -210,7 +215,8 @@ test('toMenuTemplate reports the command of the item that was clicked', () => {
       hasLastTranscript: true,
       showLiveText: true,
       showStatusMessages: true,
-      mouseButton: null
+      mouseButton: null,
+      mouseMode: 'click'
     }),
     (command) => void picked.push(command)
   )
@@ -332,7 +338,12 @@ test('describeStopStages reads out every stage and flags a skipped accessibility
 
 /* ---- quiet mode ---- */
 
-const everything = { showLiveText: true, showStatusMessages: true, mouseButton: null }
+const everything = {
+  showLiveText: true,
+  showStatusMessages: true,
+  mouseButton: null,
+  mouseMode: 'click'
+}
 const quiet = { showLiveText: false, showStatusMessages: false }
 
 test('every message kind is classified, and only narration is suppressible', () => {
@@ -422,12 +433,24 @@ test('the menu shows the mouse button with the warning underneath, and opens set
     showLiveText: true,
     showStatusMessages: true
   }
-  const unset = buildPillMenu({ ...model, mouseButton: null })[6]!
-  assert.equal(unset.label, 'Mouse button to hold and talk: none')
-  const set = buildPillMenu({ ...model, mouseButton: 3 })[6]!
-  assert.equal(set.label, 'Mouse button to hold and talk: Back button')
+  const unset = buildPillMenu({ ...model, mouseButton: null, mouseMode: 'click' })[6]!
+  assert.equal(unset.label, 'Mouse button for dictation: none')
+  const set = buildPillMenu({ ...model, mouseButton: 3, mouseMode: 'click' })[6]!
+  assert.equal(set.label, 'Mouse button for dictation: Back button, click to start and stop')
   assert.equal(set.sublabel, MOUSE_SOFTWARE_NOTE)
+  const holding = buildPillMenu({ ...model, mouseButton: 4, mouseMode: 'hold' })[6]!
+  assert.equal(holding.label, 'Mouse button for dictation: Forward button, hold to talk')
   assert.deepEqual(set.command, { kind: 'settings' })
   const template = toMenuTemplate([set], () => {})
   assert.equal(template[0]!.sublabel, MOUSE_SOFTWARE_NOTE)
+})
+
+test('the two mouse modes are named and explained plainly', () => {
+  assert.equal(MOUSE_MODE_LABELS.click, 'Click to start, click to stop')
+  assert.equal(MOUSE_MODE_LABELS.hold, 'Hold to talk')
+  assert.match(describeMouseMode('click'), /once to start .* again to stop/)
+  assert.match(describeMouseMode('click'), /Esc or Cancel/)
+  assert.match(describeMouseMode('hold'), /Hold the button while you speak/)
+  assert.match(describeMouseMode('hold'), /Two quick clicks keep recording/)
+  assert.ok(!/Two quick clicks/.test(describeMouseMode('hold', false)))
 })

@@ -6,6 +6,7 @@ import {
   HANDS_FREE_WARNING_LEAD_MS,
   HOLD_MAX_RECORDING_MS,
   MIN_HOLD_MS,
+  STRAY_CLICK_MS,
   initialSessionState,
   isBusy,
   isDoubleTap,
@@ -487,4 +488,66 @@ test('microphone muted and fallback flags track the live session only', () => {
   )
   const fell = reduce(preparing.state, { type: 'mic-fallback', gen: 1 })
   assert.equal(fell.state.active?.micFellBack, true)
+})
+
+/* ---- mouse click mode ---- */
+
+const live = (trigger: DictationTrigger, at = 0): SessionState =>
+  run([start('raw', trigger, at, 1), { type: 'capture-ready', gen: 1 }]).state
+
+test('a click start is hands-free: 20 minutes, a warning at 19', () => {
+  assert.equal(isHandsFree('click'), true)
+  assert.equal(recordingLimitMs('click'), HANDS_FREE_MAX_RECORDING_MS)
+  const r = run([{ type: 'start', trigger: 'click', cleanupMode: 'raw', nowMs: 0 }])
+  assert.deepEqual(timersOf(r.effects), [
+    { stage: 'recording', ms: 20 * 60_000 },
+    { stage: 'warning', ms: 19 * 60_000 }
+  ])
+})
+
+test('the next click stops a hands-free session, however it began', () => {
+  for (const trigger of ['click', 'toggle', 'pill', 'handsfree', 'menu'] as const) {
+    const r = reduce(live(trigger), { type: 'click', nowMs: STRAY_CLICK_MS })
+    assert.equal(r.state.phase, 'finalizing', `${trigger} is stopped by a click`)
+    assert.ok(types(r.effects).includes('capture-stop'))
+  }
+})
+
+test('a click right after the start is a bounce or a double click and changes nothing', () => {
+  const state = live('click', 1000)
+  assert.equal(reduce(state, { type: 'click', nowMs: 1000 }).state, state)
+  assert.equal(reduce(state, { type: 'click', nowMs: 1000 + STRAY_CLICK_MS - 1 }).state, state)
+  assert.equal(
+    reduce(state, { type: 'click', nowMs: 1000 + STRAY_CLICK_MS }).state.phase,
+    'finalizing'
+  )
+})
+
+test('a click during startup is remembered and drains once the microphone opens', () => {
+  const preparing = run([start('raw', 'click', 0)]).state
+  const clicked = reduce(preparing, { type: 'click', nowMs: 900 })
+  assert.equal(clicked.state.active?.stopRequested, true)
+  assert.equal(reduce(clicked.state, { type: 'capture-ready', gen: 1 }).state.phase, 'finalizing')
+})
+
+test('a click never ends a key hold, and does nothing when idle or already finishing', () => {
+  const hold = live('hold')
+  assert.equal(reduce(hold, { type: 'click', nowMs: 9000 }).state, hold)
+  const direct = reduce(hold, { type: 'stop', source: 'click', nowMs: 9000 })
+  assert.equal(direct.state, hold, 'a click-sourced stop is ignored for a hold')
+  const idle = initialSessionState()
+  assert.equal(reduce(idle, { type: 'click', nowMs: 9000 }).state, idle)
+  const finishing = reduce(live('click'), { type: 'click', nowMs: 5000 }).state
+  assert.equal(reduce(finishing, { type: 'click', nowMs: 9000 }).state, finishing)
+})
+
+test('a click does not disturb the quick-tap memory or a resting message', () => {
+  const noticed = reduce(initialSessionState(), {
+    type: 'notice',
+    level: 'info',
+    message: 'x'
+  }).state
+  assert.equal(reduce(noticed, { type: 'click', nowMs: 5000 }).state, noticed)
+  // A session may start from a resting screen through the normal start event.
+  assert.equal(run([start('raw', 'click', 0)], noticed).state.phase, 'preparing')
 })

@@ -298,3 +298,55 @@ final class HoldMachineTests: XCTestCase {
         XCTAssertTrue(key.isDown, "releasing the button leaves the key held")
     }
 }
+
+final class ClickModeTests: XCTestCase {
+    private func clicker(_ button: Int64 = 3) -> HoldMachine {
+        HoldMachine(mouseButton: button, clickMode: true)
+    }
+
+    func testEveryPressIsOneClickAtOnceAndTheReleaseDoesNothing() {
+        var m = clicker()
+        XCTAssertEqual(m.handle(.buttonDown(button: 3)), [.click])
+        XCTAssertEqual(m.handle(.buttonUp(button: 3)), [])
+        XCTAssertEqual(m.handle(.buttonDown(button: 3)), [.click])
+        XCTAssertEqual(m.handle(.buttonUp(button: 3)), [])
+    }
+
+    func testAPressHeldForAWhileIsStillJustOneClickAndNeverAHold() {
+        var m = clicker()
+        XCTAssertEqual(m.handle(.buttonDown(button: 3)), [.click])
+        XCTAssertEqual(m.handle(.announceTimer), [], "no hold is ever announced")
+        XCTAssertEqual(m.handle(.buttonState(down: false)), [], "no lost-release handling either")
+        XCTAssertEqual(m.handle(.buttonUp(button: 3)), [])
+    }
+
+    func testOnlyTheConfiguredButtonClicks() {
+        var m = clicker(3)
+        XCTAssertEqual(m.handle(.buttonDown(button: 4)), [])
+        XCTAssertEqual(m.handle(.buttonUp(button: 4)), [])
+    }
+
+    func testKeysAndResetsDoNothingInClickMode() {
+        var m = clicker()
+        XCTAssertEqual(m.handle(.keyDown), [])
+        XCTAssertEqual(m.handle(.flagsChanged(keyCode: 61, flags: 0x40)), [])
+        XCTAssertEqual(m.handle(.tapDisabled), [])
+        XCTAssertEqual(m.handle(.reset), [.cancelAnnounce])
+    }
+
+    func testAClickIsHeardOnlyWhenTheKeyDoesNotOwnASession() {
+        var arbiter = HoldArbiter()
+        XCTAssertTrue(arbiter.allow(.click, from: .mouse))
+        XCTAssertTrue(arbiter.allow(.holdDown(id: 1), from: .key))
+        XCTAssertFalse(arbiter.allow(.click, from: .mouse), "the key's hold is not disturbed")
+        XCTAssertTrue(arbiter.allow(.holdUp(id: 1, reason: "released"), from: .key))
+        XCTAssertTrue(arbiter.allow(.click, from: .mouse))
+    }
+
+    func testClickModeAndHoldModeAreChosenAtConstruction() {
+        var hold = HoldMachine(mouseButton: 3)
+        XCTAssertEqual(hold.handle(.buttonDown(button: 3)), [.cancelAnnounce, .scheduleAnnounce])
+        XCTAssertFalse(hold.clickMode)
+        XCTAssertTrue(clicker().clickMode)
+    }
+}

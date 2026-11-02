@@ -10,9 +10,10 @@ export type CleanupMode = 'raw' | 'local' | 'byok'
 /**
  * toggle: the global shortcut. hold: a modifier held while speaking.
  * handsfree: two quick taps of the hold key latched recording on.
- * pill: a click on the resting pill (also hands-free). menu: any other menu item.
+ * pill: a click on the resting pill (also hands-free). click: a click of the mouse
+ * trigger in click mode (hands-free). menu: any other menu item.
  */
-export type DictationTrigger = 'toggle' | 'hold' | 'handsfree' | 'pill' | 'menu'
+export type DictationTrigger = 'toggle' | 'hold' | 'handsfree' | 'pill' | 'click' | 'menu'
 
 export type Phase =
   | 'idle'
@@ -52,6 +53,11 @@ export const MIN_HOLD_MS = 350
  * a tap's release, or a longer press's announcement.
  */
 export const DOUBLE_TAP_WINDOW_MS = 450
+/**
+ * A mouse click this soon after a session began is the second half of a double
+ * click (or a bounce), not a request to stop it.
+ */
+export const STRAY_CLICK_MS = 400
 /** Hold-to-talk is bounded by the key; this only covers a missed key-up. */
 export const HOLD_MAX_RECORDING_MS = 180_000
 /** Hands-free sessions (shortcut, pill click, double tap) stop on their own after this. */
@@ -140,12 +146,18 @@ export type SessionEvent =
     }
   /** A quick press-and-release of the hold key that never became a hold. */
   | { type: 'tap'; nowMs: number }
+  /**
+   * The mouse trigger (click mode) went down while a session may be running. A
+   * click with nothing running starts a session through `start`, after the
+   * service's checks; this event only ever stops one.
+   */
+  | { type: 'click'; nowMs: number }
   | { type: 'capture-ready'; gen: number }
   | { type: 'asr-ready'; gen: number }
   | { type: 'partial'; gen: number; text: string }
   | {
       type: 'stop'
-      source: 'toggle' | 'release' | 'button' | 'limit' | 'tap'
+      source: 'toggle' | 'release' | 'button' | 'limit' | 'tap' | 'click'
       gen?: number
       holdId?: number
       nowMs: number
@@ -276,6 +288,15 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       }
     }
 
+    case 'click': {
+      if (!active) return ignore
+      if (!isHandsFree(active.trigger)) return ignore
+      if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
+      // A double click must not start a session and stop it in the same breath.
+      if (event.nowMs - active.startedAtMs < STRAY_CLICK_MS) return ignore
+      return reduce(state, { type: 'stop', source: 'click', gen: active.gen, nowMs: event.nowMs })
+    }
+
     case 'tap': {
       if (active) {
         // The tap that ends a latched hands-free session. Any other session ignores it.
@@ -317,6 +338,8 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       }
       // A tap only ever ends the session a double tap latched.
       if (event.source === 'tap' && active.trigger !== 'handsfree') return ignore
+      // A click ends any hands-free session, however it began, but never a key hold.
+      if (event.source === 'click' && !isHandsFree(active.trigger)) return ignore
       if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
       const heldMs = event.nowMs - active.startedAtMs
       if (event.source === 'release' && heldMs < MIN_HOLD_MS) {

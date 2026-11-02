@@ -6,6 +6,7 @@ import Foundation
 /// Replies:   {"event":"reply","id":"…","ok":true|false, …}
 /// Unsolicited events: {"event":"hold","phase":"down|up","holdId":N,"reason":"…"}
 ///                     {"event":"tap"}  (a press-and-release too short to be a hold)
+///                     {"event":"click"}  (mouse click mode: the button went down)
 ///
 /// The helper holds no credentials and never sees provider keys. It receives
 /// only a snapshot id, the text to insert and delivery options.

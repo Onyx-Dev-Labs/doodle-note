@@ -9,6 +9,10 @@ import Foundation
 /// of the double tap. A chord, or any other key struck while it is down, is
 /// neither.
 ///
+/// A mouse button can also run in click mode (`clickMode`): every press of the
+/// button is one `click`, announced at once, and its release does nothing. The
+/// host turns clicks into start and stop, so there is no hold to track.
+///
 /// The same machine drives an optional mouse button (`init(mouseButton:)`), so
 /// hold, tap and double tap behave identically for both. A button has no chord
 /// rule (other keys and buttons do not spoil it), and its lost-release check
@@ -36,6 +40,8 @@ struct HoldMachine {
         case holdDown(id: Int)
         case holdUp(id: Int, reason: String)
         case tap
+        /// Click mode: the button went down. Start or stop, the host decides.
+        case click
     }
 
     let keyCode: Int64
@@ -43,6 +49,8 @@ struct HoldMachine {
     let deviceMask: UInt64
     /// Set for a mouse trigger; the key fields are unused then.
     let mouseButton: Int64?
+    /// Mouse only: report every press as a click instead of tracking a hold.
+    let clickMode: Bool
 
     private(set) var keyIsDown = false
     private(set) var tainted = false
@@ -54,13 +62,15 @@ struct HoldMachine {
         self.keyCode = keyCode
         self.deviceMask = deviceMask
         self.mouseButton = nil
+        self.clickMode = false
         self.holdId = holdId
     }
 
-    init(mouseButton: Int64, holdId: Int = 0) {
+    init(mouseButton: Int64, clickMode: Bool = false, holdId: Int = 0) {
         self.keyCode = -1
         self.deviceMask = 0
         self.mouseButton = mouseButton
+        self.clickMode = clickMode
         self.holdId = holdId
     }
 
@@ -85,18 +95,28 @@ struct HoldMachine {
             if keyIsDown && !announced { tainted = true }
             return []
         case .buttonDown(let button):
+            if clickMode {
+                // Every press counts, held or not; the release is ignored below.
+                guard button == mouseButton else { return [] }
+                keyIsDown = true
+                return [.click]
+            }
             guard button == mouseButton, !keyIsDown else { return [] }
             keyIsDown = true
             tainted = false
             return [.cancelAnnounce, .scheduleAnnounce]
         case .buttonUp(let button):
             guard button == mouseButton, keyIsDown else { return [] }
+            if clickMode {
+                keyIsDown = false
+                return []
+            }
             return release()
         case .buttonState(let down):
-            guard mouseButton != nil, keyIsDown, !down else { return [] }
+            guard mouseButton != nil, !clickMode, keyIsDown, !down else { return [] }
             return release()
         case .announceTimer:
-            guard keyIsDown, !tainted, !announced else { return [] }
+            guard !clickMode, keyIsDown, !tainted, !announced else { return [] }
             announced = true
             holdId += 1
             return [.holdDown(id: holdId)]
@@ -161,8 +181,8 @@ struct HoldArbiter {
             guard owner == source else { return false }
             owner = nil
             return true
-        case .tap:
-            // A tap while the other source is held would only confuse a double tap.
+        case .tap, .click:
+            // A tap or click while the other source is held would only confuse it.
             return owner == nil
         case .scheduleAnnounce, .cancelAnnounce:
             return true

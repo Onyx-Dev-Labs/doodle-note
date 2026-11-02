@@ -106,9 +106,10 @@ func handle(_ request: [String: Any]) {
         let button = (request["button"] as? NSNumber)?.int64Value ?? -1
         let swallow = request["swallow"] as? Bool ?? false
         let minHold = request["minHoldMs"] as? Int ?? 150
+        let click = (request["mode"] as? String) == "click"
         DispatchQueue.main.async {
             if let failure = HoldWatcher.shared.startMouse(
-                button: button, swallow: swallow, minHoldMs: minHold)
+                button: button, swallow: swallow, minHoldMs: minHold, click: click)
             {
                 Wire.reply(id, ok: false, ["reason": failure])
             } else {

@@ -1,5 +1,5 @@
 import type { AppChannel } from './app-channel'
-import type { HelperDeliveryTimings, HoldKey } from './dictation-helper-protocol'
+import type { HelperDeliveryTimings, HoldKey, MouseMode } from './dictation-helper-protocol'
 import type { PermissionOutcome, PermissionPane } from './dictation-permissions'
 import type { InputDevice, PillEdge } from './dictation-pill'
 import type { CleanupMode, Phase, RecoveryReason } from './dictation-session'
@@ -61,6 +61,11 @@ export interface DictationSettings {
   holdMouseButton: number | null
   /** Consume that button's events so the app under the pointer does not also act on them. */
   holdMouseSwallow: boolean
+  /**
+   * click: press once to start, press again to stop (the release is ignored).
+   * hold: hold to talk, with a quick double tap for hands-free. Keyboard hold key unaffected.
+   */
+  holdMouseMode: MouseMode
 }
 
 export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
@@ -80,7 +85,8 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   showLiveText: true,
   showStatusMessages: true,
   holdMouseButton: null,
-  holdMouseSwallow: true
+  holdMouseSwallow: true,
+  holdMouseMode: 'click'
 }
 
 export type DictationSettingsUpdate = Partial<DictationSettings>
