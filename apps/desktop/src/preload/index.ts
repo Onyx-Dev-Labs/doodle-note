@@ -1,6 +1,7 @@
 import { RECIPE_CHANNELS, type RecipesApi } from '../shared/recipes-api'
 import {
   DICTATION_CANCEL_CHANNEL,
+  DICTATION_COPY_LAST_CHANNEL,
   DICTATION_COPY_RECOVERY_CHANNEL,
   DICTATION_DISMISS_RECOVERY_CHANNEL,
   DICTATION_GET_STATUS_CHANNEL,
@@ -718,6 +719,7 @@ const dictationApi: DictationApi = {
   toggle: () => ipcRenderer.invoke(DICTATION_TOGGLE_CHANNEL),
   cancel: () => ipcRenderer.invoke(DICTATION_CANCEL_CHANNEL),
   pasteLast: () => ipcRenderer.invoke(DICTATION_PASTE_LAST_CHANNEL),
+  copyLast: () => ipcRenderer.invoke(DICTATION_COPY_LAST_CHANNEL),
   copyRecovery: (gen) => ipcRenderer.invoke(DICTATION_COPY_RECOVERY_CHANNEL, gen),
   dismissRecovery: (gen) => ipcRenderer.invoke(DICTATION_DISMISS_RECOVERY_CHANNEL, gen),
   openPrivacySettings: (pane) => ipcRenderer.invoke(DICTATION_OPEN_PRIVACY_CHANNEL, pane),

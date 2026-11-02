@@ -4,7 +4,7 @@ import type {
   DictationStatus,
   ShortcutState
 } from '../../shared/dictation-api'
-import { PILL_EDGES, describeDoubleTap } from '../../shared/dictation-pill'
+import { PILL_EDGES, describeDoubleTap, describeFnKey } from '../../shared/dictation-pill'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -61,7 +61,7 @@ function seconds(ms: number | null): string {
 
 export function DictationSettings(): React.JSX.Element {
   const [status, setStatus] = useState<DictationStatus | null>(null)
-  const [recording, setRecording] = useState<'toggle' | 'pasteLast' | null>(null)
+  const [recording, setRecording] = useState<'toggle' | 'pasteLast' | 'copyLast' | null>(null)
   const [error, setError] = useState('')
 
   const refresh = useCallback(() => {
@@ -114,7 +114,10 @@ export function DictationSettings(): React.JSX.Element {
 
   const { settings, permissions, cleanup } = status
   const hiddenNow = status.pillHidden
-  const capture = (which: 'toggle' | 'pasteLast', event: React.KeyboardEvent): void => {
+  const capture = (
+    which: 'toggle' | 'pasteLast' | 'copyLast',
+    event: React.KeyboardEvent
+  ): void => {
     if (recording !== which) return
     event.preventDefault()
     if (event.key === 'Escape') return setRecording(null)
@@ -122,7 +125,11 @@ export function DictationSettings(): React.JSX.Element {
     if (accelerator) {
       setRecording(null)
       void update(
-        which === 'toggle' ? { toggleShortcut: accelerator } : { pasteLastShortcut: accelerator }
+        which === 'toggle'
+          ? { toggleShortcut: accelerator }
+          : which === 'pasteLast'
+            ? { pasteLastShortcut: accelerator }
+            : { copyLastShortcut: accelerator }
       )
     }
   }
@@ -251,6 +258,9 @@ export function DictationSettings(): React.JSX.Element {
                     ? 'Active.'
                     : ''}
               </span>
+              {settings.holdKey === 'fn' && (
+                <span className="cal-row-sub">{describeFnKey(status.fnKeyAction)}</span>
+              )}
             </span>
             <select
               aria-label="Hold-to-talk key"
@@ -301,6 +311,33 @@ export function DictationSettings(): React.JSX.Element {
                 type="button"
                 className="pill-btn"
                 onClick={() => void update({ pasteLastShortcut: '' })}
+              >
+                Turn off
+              </button>
+            )}
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Copy the last transcript</span>
+              <span className="cal-row-sub">
+                {settings.copyLastShortcut || 'None'} · {shortcutNote(status.copyLastShortcut)} Puts
+                it on the clipboard instead of typing it. Same rule: memory only.
+              </span>
+            </span>
+            <button
+              type="button"
+              className="pill-btn"
+              onKeyDown={(event) => capture('copyLast', event)}
+              onBlur={() => setRecording(null)}
+              onClick={() => setRecording('copyLast')}
+            >
+              {recording === 'copyLast' ? 'Press the new shortcut…' : 'Change'}
+            </button>
+            {settings.copyLastShortcut && (
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => void update({ copyLastShortcut: '' })}
               >
                 Turn off
               </button>

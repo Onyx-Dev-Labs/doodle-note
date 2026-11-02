@@ -100,7 +100,7 @@ Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) open
 | Hands-free limit | 20 min, warns at 19 | 20 min, visible warning at 19 (hold-to-talk keeps 3 min) | **P1** done |
 | Esc to cancel; sub-0.5 s taps discarded | yes | yes (Esc; taps under 0.35 s ignored) | done |
 | Start sound | a ping | generated two-note chime for start and stop, setting to turn off | **P1** done |
-| Paste last / copy last transcript shortcuts | yes | paste-last shortcut and menu item (memory only); copy-last not built | **P1** done (paste); copy stays open |
+| Paste last / copy last transcript shortcuts | yes | paste-last and copy-last shortcuts and menu items (memory only) | **P1** done |
 | Undo after cancel | yes | no | **P2** |
 | Drag to left/right/bottom; remember edge | yes | yes, snaps and remembers; follows the display under the pointer | **P1** done |
 | Hide for 1 hour; show at all times | yes | yes; expiry persisted | **P1** done |
@@ -135,7 +135,8 @@ Built on `feat/system-dictation` (see `docs/dictation-dev-app.md` for behaviour,
 - [x] Hide for an hour, persisted, ends on the clock or on a hotkey start
 - [x] Microphone picker through the engine's device list; falls back to the system default
 - [x] Start and stop tones, own and generated, with a setting
-- [x] Paste-last shortcut (default `Control+Alt+Shift+V`), text kept in memory only
+- [x] Paste-last shortcut (default `Control+Alt+Shift+V`) and copy-last shortcut (`Control+Alt+Shift+C`), text kept in memory only
+- [x] Double tap also works with Fn as the hold key (macOS Globe setting is read and explained; real keyboard still to be tried)
 - [x] Doodle restyle of the overlay
 - [x] Settings page controls for all of the above
 - [x] Mic-muted warning (helper reads the input's mute switch and volume)

@@ -21,14 +21,15 @@ The look is DoodleNote's own: a paper-toned pill with an offset ink outline, a h
 |---|---|
 | Always visible | Setting "Show the pill at all times" (default on). The overlay window is cut to the pill's own size (about 92x40), so clicks anywhere else reach the apps underneath; the panel is non-activating and never takes focus. With the setting off the pill appears only during a session. |
 | Click to start | A click on the resting pill starts a hands-free session. Click Finish, or the squiggle, to stop and insert. A second click within 0.4 s of the start is ignored so a double click does not end the session it just began. Cancel discards. |
-| Double tap of the hold key | Two quick taps within `DOUBLE_TAP_WINDOW_MS` (450 ms) latch recording on; one more tap (or a press) of the hold key, the toggle shortcut or Finish ends it. Needs a hold key to be chosen. Setting "Keep recording with a double tap" (default on). |
+| Double tap of the hold key | Two quick taps within `DOUBLE_TAP_WINDOW_MS` (450 ms) latch recording on; one more tap (or a press) of the hold key, the toggle shortcut or Finish ends it. Needs a hold key to be chosen; works with Fn (see "Fn / Globe key" below). Setting "Keep recording with a double tap" (default on). |
 | Hold-to-talk | Unchanged: hold, speak, release. A hold shorter than 0.35 s is still discarded. |
 | Limits | Hands-free sessions (shortcut, pill click, double tap) stop and insert after 20 minutes; the pill warns at 19 ("One minute left. Then it finishes."). Hold-to-talk keeps its 3-minute backstop for a lost key-up. |
-| Right-click menu | Native menu: Hide the pill for an hour, Microphone (System default and each input), Paste the last transcript, Open dictation settings, Keep the pill on screen. |
+| Right-click menu | Native menu: Hide the pill for an hour, Microphone (System default and each input), Paste the last transcript, Copy the last transcript, Open dictation settings, Keep the pill on screen. |
 | Edge and display | Drag the pill (5 px threshold separates a drag from a click) and drop it near the bottom, left or right edge; it snaps there and the edge is saved. It sits on the display the pointer is on (checked once a second). On the left and right edges the resting pill is vertical. |
 | Hide for an hour | The expiry time is saved in `dictation.json`, so it survives a restart. The pill returns at the expiry, or as soon as dictation starts from the shortcut or hold key, or from "Show it now" in Settings. |
 | Microphone | The choice is a CoreAudio UID saved in `dictation.json` and passed to the recorder. Inputs come from the engine's `devices` command (the same list the meeting recorder uses), re-read at most every 3 s and whenever the menu opens. If the saved device is missing from the list the session records from the system default and the pill says so; the saved choice is kept so it returns with the device. If the list is unavailable the choice is passed through and the engine's own fallback applies, which also raises the notice. |
 | Sounds | A two-note rising chime on start and a falling one on stop, synthesized by the overlay page from sine tones (nothing sampled, no files). A hold plays the start tone only once recording really begins, so an accidental tap is silent; cancel is silent. Setting "Start and stop tones". |
+| Copy the last transcript | Global shortcut (default `Control+Alt+Shift+C`, configurable, can be cleared) and menu item. It puts the last transcript on the clipboard (plain text, nothing else is typed) and says "Copied.". Ignored while a dictation is running. Same memory-only rules as paste-last, which it shares: the text is never written to disk or logs and is forgotten on quit. |
 | Paste the last transcript | Global shortcut (default `Control+Alt+Shift+V`, configurable, can be cleared) and menu item. It re-types the last transcript into the focused field through the same snapshot, validation and insertion path as a dictation, and refuses secure fields. The text is held in the main process only: never written to disk, never in logs, never sent to the settings page (which only learns that one exists), forgotten on quit. |
 | Microphone muted | While recording, the helper reads the chosen input's mute switch and volume (CoreAudio, read-only) every 2 s; muted or zero volume shows "Your microphone looks muted." on the pill. Devices that expose neither never warn. |
 
@@ -41,9 +42,19 @@ The look is DoodleNote's own: a paper-toned pill with an offset ink outline, a h
 - **The menu's Settings item** brings the main window forward and opens Settings, Dictation.
 - **The idle overlay is only shown while dictation is enabled.** Turning dictation off removes the pill and releases every shortcut.
 
+### Fn / Globe key
+
+The Fn key reaches the helper as a flags-changed event (key code 63, the secondary-Fn flag), exactly like the other hold keys, so double tap works with it through the same path. Things specific to Fn:
+
+- **macOS may act on the key itself.** Under System Settings, Keyboard, "Press Globe key to", a tap can change input source, open Emoji and Symbols, or start macOS dictation. The helper only listens, so it cannot stop that. It reads the setting (`AppleFnUsageType`) and Settings shows what applies, with the instruction to set it to Do Nothing; when the value cannot be read, a general hint is shown. Pressing Globe twice is also macOS's own dictation shortcut by default, so Fn double tap and macOS dictation will both react unless that is turned off.
+- **External keyboards often have no Fn key.** The helper cannot tell; hold-to-talk with Fn simply never fires. Settings says so.
+- **Chords:** Fn with an arrow or function key is a chord (a key is struck while Fn is down) and never counts as a tap or a hold.
+- **A lost release.** If Fn's key-up is lost, the next modifier event from another key that no longer carries the Fn flag ends the hold, as for every hold key; the macOS event tap being paused ends it too. A hold also has the 3-minute backstop.
+- **Not verified without a physical keyboard:** that a real Globe key delivers the flags-changed sequence the tests model (including on Apple keyboards with a dedicated Globe key), and how it interacts with the macOS setting above. The decision logic was split into `HoldMachine` and is covered by 17 Swift tests that feed it the same event sequences; the event tap itself is unchanged.
+
 ### Settings added
 
-Settings, Dictation: Show the pill at all times (with "Show it now" while hidden); Pill position (bottom, left, right); Microphone; Start and stop tones; Keep recording with a double tap; Type the last transcript again (shortcut, change or turn off). All are saved in `dictation.json`: booleans, the edge, the hide expiry time, a device UID and an accelerator string. No audio, text or history.
+Settings, Dictation: Show the pill at all times (with "Show it now" while hidden); Pill position (bottom, left, right); Microphone; Start and stop tones; Keep recording with a double tap; Type the last transcript again and Copy the last transcript (shortcuts: change or turn off). All are saved in `dictation.json`: booleans, the edge, the hide expiry time, a device UID and an accelerator string. No audio, text or history.
 
 ## Isolation from the production app
 
@@ -115,7 +126,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 714 desktop tests (712 pass, 2 skipped) with typecheck and lint clean. The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (21: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (5), settings normalization and persistence (4), service orchestration (50: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last, mute polling), helper client (7), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 721 desktop tests (719 pass, 2 skipped) with typecheck and lint clean, plus 17 Swift tests for the hold-key logic (`cd engine && swift test --filter HoldMachineTests`). The dictation suites: session state machine (32, including double-tap timing, the 20-minute limit and the 19-minute warning), pill rules (22: hide expiry, edge snapping, docking, microphone fallback, menu, tones, shortcut collision, mute detection), overlay view (5), settings normalization and persistence (4), service orchestration (56: stale events, cancellation, cleanup and recovery, pill clicks, double tap with a draining engine, limits with fake timers, hide for an hour, microphone selection and fallback, paste last and copy last, shortcut collisions, Fn double tap, mute polling), helper client (7), plus capture ownership, cleanup validation, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.
@@ -143,11 +154,11 @@ The batch figure is **not** the live streaming path. The Settings panel and `dic
 
 ## Not verified, and known gaps
 
+- **Fn, needs a person:** see "Fn / Globe key" above.
 - **Pill, needs a person:** dragging with a real pointer (the drag follows the cursor from the main process and ends on pointer release; a lost release ends by itself after 20 s), the native right-click menu popping from the non-activating panel, the look and the tones on real displays and speakers, following the pointer across displays, full-screen apps and Spaces (the window uses the same screen-saver level and all-workspaces flags as before), and a physical double tap of each hold key. The paste-last shortcut was tested with a scripted helper, not a real target app.
-- **Double tap needs Input Monitoring**, like hold-to-talk. A double tap whose first press lasts past 150 ms starts and discards a session first; the pill may flicker and, with the start tone on, stay silent (a hold's tone waits for recording).
+- **Double tap needs Input Monitoring**, like hold-to-talk. A double tap whose first press lasts past 150 ms starts and discards a session first; the pill may flicker and, with the start tone on, stay silent (a hold's tone waits for recording). This flicker is accepted as is.
 - **Tones may be heard by the microphone.** A tone starts just before the microphone opens; if a speech model ever transcribes it, turn the tones off.
 - **Device list** comes from `engine devices`, which has no virtual-device filter; aggregate and loopback devices appear if CoreAudio lists them.
-- **Copy-last transcript** (a sibling of paste-last in the parity study) is not built.
 - **Mic-muted check** reads the device's mute switch and input volume only. A microphone silenced inside another app, or a hardware switch the driver does not report, is not detected.
 
 - **Live microphone dictation end to end** was not run: the microphone permission is undetermined for this session and a prompt is yours to answer. Live start latency, stop-to-text latency, streaming partials and accuracy are therefore unmeasured. One batch sample misheard "Priya" as "PRIA": raw mode inserts what the recognizer heard, and cleanup deliberately will not rewrite names.

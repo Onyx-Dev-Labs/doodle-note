@@ -14,6 +14,7 @@ export const DICTATION_STATUS_EVENT_CHANNEL = 'dictation:status-event'
 /** main → renderer: the pill's menu asked for the dictation settings page. */
 export const DICTATION_OPEN_SETTINGS_EVENT_CHANNEL = 'dictation:open-settings'
 export const DICTATION_PASTE_LAST_CHANNEL = 'dictation:paste-last'
+export const DICTATION_COPY_LAST_CHANNEL = 'dictation:copy-last'
 
 export interface DictationSettings {
   /** Master switch. Off means no shortcut, no helper and no microphone use. */
@@ -43,6 +44,8 @@ export interface DictationSettings {
   handsFreeDoubleTap: boolean
   /** Electron accelerator that types the last transcript again; empty disables it. */
   pasteLastShortcut: string
+  /** Electron accelerator that puts the last transcript on the clipboard; empty disables it. */
+  copyLastShortcut: string
 }
 
 export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
@@ -57,7 +60,8 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   microphoneUid: null,
   startSound: true,
   handsFreeDoubleTap: true,
-  pasteLastShortcut: 'Control+Alt+Shift+V'
+  pasteLastShortcut: 'Control+Alt+Shift+V',
+  copyLastShortcut: 'Control+Alt+Shift+C'
 }
 
 export type DictationSettingsUpdate = Partial<DictationSettings>
@@ -89,6 +93,9 @@ export interface DictationStatus {
   helper: 'ready' | 'unavailable'
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
+  copyLastShortcut: ShortcutState
+  /** What macOS does on a Fn/Globe press (0 nothing, 1 input source, 2 emoji, 3 dictation); null = unknown. */
+  fnKeyAction: number | null
   /** Input devices last seen by the engine; empty until the first listing returns. */
   microphones: InputDevice[]
   /** The saved microphone is not among the listed devices (the default is used). */
@@ -132,6 +139,8 @@ export interface DictationApi {
   cancel(): Promise<void>
   /** Type the most recent transcript into the focused field again. */
   pasteLast(): Promise<void>
+  /** Put the most recent transcript on the clipboard. */
+  copyLast(): Promise<void>
   copyRecovery(gen: number): Promise<boolean>
   dismissRecovery(gen: number): Promise<void>
   openPrivacySettings(pane: 'microphone' | 'accessibility' | 'input-monitoring'): Promise<void>

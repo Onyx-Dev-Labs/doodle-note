@@ -5,6 +5,7 @@ import type { WebContents } from 'electron'
 import type { AppChannel } from '../shared/app-channel'
 import {
   DICTATION_CANCEL_CHANNEL,
+  DICTATION_COPY_LAST_CHANNEL,
   DICTATION_COPY_RECOVERY_CHANNEL,
   DICTATION_DISMISS_RECOVERY_CHANNEL,
   DICTATION_GET_STATUS_CHANNEL,
@@ -177,6 +178,9 @@ export function createDictationHost(options: DictationHostOptions): {
   })
   ipcMain.handle(DICTATION_PASTE_LAST_CHANNEL, async (event) => {
     if (trusted(event)) await service.pasteLast()
+  })
+  ipcMain.handle(DICTATION_COPY_LAST_CHANNEL, async (event) => {
+    if (trusted(event)) await service.copyLast()
   })
   ipcMain.handle(DICTATION_COPY_RECOVERY_CHANNEL, (event, gen: unknown) =>
     trusted(event) && typeof gen === 'number' ? service.copyRecovery(gen) : false

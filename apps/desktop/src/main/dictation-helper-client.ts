@@ -89,7 +89,8 @@ export class DictationHelperClient {
       conflicts: Array.isArray(reply.conflicts)
         ? reply.conflicts.filter((c): c is string => typeof c === 'string')
         : [],
-      holdActive: reply.holdActive === true
+      holdActive: reply.holdActive === true,
+      fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null
     }
   }
 

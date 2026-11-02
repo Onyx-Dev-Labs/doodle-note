@@ -17,15 +17,15 @@ func handle(_ request: [String: Any]) {
     switch op {
     case "status":
         workQueue.async {
-            Wire.reply(
-                id,
-                [
-                    "accessibility": AX.trusted,
-                    "inputMonitoring": CGPreflightListenEventAccess(),
-                    "secureInput": IsSecureEventInputEnabled(),
-                    "conflicts": Target.conflictingDictationApps,
-                    "holdActive": HoldWatcher.shared.active,
-                ])
+            var fields: [String: Any] = [
+                "accessibility": AX.trusted,
+                "inputMonitoring": CGPreflightListenEventAccess(),
+                "secureInput": IsSecureEventInputEnabled(),
+                "conflicts": Target.conflictingDictationApps,
+                "holdActive": HoldWatcher.shared.active,
+            ]
+            if let action = HoldKeySpec.fnKeyAction { fields["fnKeyAction"] = action }
+            Wire.reply(id, fields)
         }
     case "input-state":
         let uid = request["uid"] as? String

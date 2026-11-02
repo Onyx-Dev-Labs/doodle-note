@@ -21,18 +21,28 @@ struct HoldKeySpec {
     }
 }
 
+extension HoldKeySpec {
+    /// What macOS itself does when the Fn/Globe key is pressed (System Settings,
+    /// Keyboard, "Press 🌐 key to"): 0 nothing, 1 change input source, 2 emoji and
+    /// symbols, 3 start dictation. nil when the setting is unreadable or unset.
+    /// The helper only listens, so it cannot stop the system acting on the key.
+    static var fnKeyAction: Int? {
+        let value = CFPreferencesCopyAppValue(
+            "AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString)
+        return (value as? NSNumber)?.intValue
+    }
+}
+
 final class HoldWatcher {
     static let shared = HoldWatcher()
 
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
-    private var spec: HoldKeySpec?
+    private var machine: HoldMachine?
     private var minHold: TimeInterval = 0.15
     private var pending: DispatchWorkItem?
-    private var keyIsDown = false
-    private var tainted = false
-    private var announced = false
-    private var holdId = 0
+    /// Hold ids keep counting across restarts, so a late "up" never pairs with a newer hold.
+    private var lastHoldId = 0
 
     var active: Bool { tap != nil }
 
@@ -53,7 +63,8 @@ final class HoldWatcher {
                 eventsOfInterest: mask, callback: callback, userInfo: nil)
         else { return "input-monitoring-denied" }
         self.tap = tap
-        self.spec = spec
+        self.machine = HoldMachine(
+            keyCode: spec.keyCode, deviceMask: spec.deviceMask, holdId: lastHoldId)
         self.minHold = TimeInterval(max(60, min(minHoldMs, 1000))) / 1000
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         self.source = source
@@ -63,71 +74,53 @@ final class HoldWatcher {
     }
 
     func stop() {
-        endHoldIfNeeded(reason: "stopped")
-        pending?.cancel()
-        pending = nil
+        apply(.reset)
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         source = nil
         tap = nil
-        spec = nil
-        keyIsDown = false
-        tainted = false
+        machine = nil
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) {
-        guard let spec else { return }
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            // The OS paused the tap; a release may have been missed.
-            endHoldIfNeeded(reason: "tap-disabled")
-            keyIsDown = false
+            apply(.tapDisabled)
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         case .keyDown:
-            // Any other key means the modifier is part of a shortcut, not a hold.
-            if keyIsDown && !announced { tainted = true }
+            apply(.keyDown)
         case .flagsChanged:
-            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            if keyCode == spec.keyCode {
-                let pressed = event.flags.rawValue & spec.deviceMask != 0
-                if pressed && !keyIsDown {
-                    keyIsDown = true
-                    tainted = false
-                    scheduleAnnounce()
-                } else if !pressed && keyIsDown {
-                    keyIsDown = false
-                    pending?.cancel()
-                    if announced {
-                        endHoldIfNeeded(reason: "released")
-                    } else if !tainted {
-                        // Released before it counted as a hold: a tap, the raw
-                        // material of a double tap.
-                        Wire.send(["event": "tap"])
-                    }
-                }
-            } else if keyIsDown && !announced {
-                tainted = true  // another modifier joined: this is a chord
-            }
+            apply(
+                .flagsChanged(
+                    keyCode: event.getIntegerValueField(.keyboardEventKeycode),
+                    flags: event.flags.rawValue))
         default:
             break
         }
     }
 
-    private func scheduleAnnounce() {
-        pending?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.keyIsDown, !self.tainted, !self.announced else { return }
-            self.announced = true
-            self.holdId += 1
-            Wire.send(["event": "hold", "phase": "down", "holdId": self.holdId])
+    /// Feed the machine and carry out what it asks for.
+    private func apply(_ input: HoldMachine.Input) {
+        guard var machine else { return }
+        let outputs = machine.handle(input)
+        lastHoldId = machine.holdId
+        self.machine = machine
+        for output in outputs {
+            switch output {
+            case .scheduleAnnounce:
+                let work = DispatchWorkItem { [weak self] in self?.apply(.announceTimer) }
+                pending = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + minHold, execute: work)
+            case .cancelAnnounce:
+                pending?.cancel()
+                pending = nil
+            case .holdDown(let id):
+                Wire.send(["event": "hold", "phase": "down", "holdId": id])
+            case .holdUp(let id, let reason):
+                Wire.send(["event": "hold", "phase": "up", "holdId": id, "reason": reason])
+            case .tap:
+                Wire.send(["event": "tap"])
+            }
         }
-        pending = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + minHold, execute: work)
-    }
-
-    private func endHoldIfNeeded(reason: String) {
-        guard announced else { return }
-        announced = false
-        Wire.send(["event": "hold", "phase": "up", "holdId": holdId, "reason": reason])
     }
 }

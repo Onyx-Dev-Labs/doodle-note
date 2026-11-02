@@ -6,6 +6,7 @@ import {
   buildPillMenu,
   coerceEdge,
   describeDoubleTap,
+  describeFnKey,
   dockedBounds,
   hideExpiry,
   isPillHidden,
@@ -122,7 +123,7 @@ test('resolveMicrophone: an empty listing is not proof the device is gone', () =
   assert.deepEqual(resolveMicrophone('usb-1', []), { uid: 'usb-1', fellBack: false })
 })
 
-test('the menu lists the five actions in order, with the default microphone ticked', () => {
+test('the menu lists the six actions in order, with the default microphone ticked', () => {
   const menu = buildPillMenu({
     showAlways: true,
     devices: [builtin, usb],
@@ -135,6 +136,7 @@ test('the menu lists the five actions in order, with the default microphone tick
       'Hide the pill for an hour',
       'Microphone',
       'Paste the last transcript',
+      'Copy the last transcript',
       '---',
       'Open dictation settings',
       'Keep the pill on screen'
@@ -149,8 +151,8 @@ test('the menu lists the five actions in order, with the default microphone tick
       ['USB Mic', false]
     ]
   )
-  assert.equal(menu[5]!.type, 'checkbox')
-  assert.equal(menu[5]!.checked, true)
+  assert.equal(menu[6]!.type, 'checkbox')
+  assert.equal(menu[6]!.checked, true)
 })
 
 test('the menu ticks the saved microphone, or the default when it is unplugged', () => {
@@ -175,7 +177,8 @@ test('paste-last is disabled until there is a transcript; the toggle reflects th
     hasLastTranscript: false
   })
   assert.equal(menu[2]!.enabled, false)
-  assert.equal(menu[5]!.checked, false)
+  assert.equal(menu[3]!.enabled, false)
+  assert.equal(menu[6]!.checked, false)
 })
 
 test('toMenuTemplate reports the command of the item that was clicked', () => {
@@ -192,13 +195,15 @@ test('toMenuTemplate reports the command of the item that was clicked', () => {
   template[0]!.click?.()
   template[1]!.submenu![1]!.click?.()
   template[2]!.click?.()
-  template[4]!.click?.()
+  template[3]!.click?.()
   template[5]!.click?.()
-  assert.equal(template[3]!.click, undefined, 'separators do nothing')
+  template[6]!.click?.()
+  assert.equal(template[4]!.click, undefined, 'separators do nothing')
   assert.deepEqual(picked, [
     { kind: 'hide-hour' },
     { kind: 'microphone', uid: 'usb-1' },
     { kind: 'paste-last' },
+    { kind: 'copy-last' },
     { kind: 'settings' },
     { kind: 'toggle-always' }
   ])
@@ -260,4 +265,16 @@ test('the double-tap note says what it needs and how it meets hold-to-talk', () 
   assert.match(describeDoubleTap(false, 'fn'), /^Off/)
   assert.match(describeDoubleTap(true, 'off'), /needs a hold-to-talk key/)
   assert.match(describeDoubleTap(true, 'rightOption'), /latches instead of acting as hold-to-talk/)
+})
+
+test('the Fn note names what macOS does with the Globe key and the external-keyboard caveat', () => {
+  assert.match(describeFnKey(0)!, /leaves the Globe key alone/)
+  assert.match(describeFnKey(1)!, /input source/)
+  assert.match(describeFnKey(2)!, /Emoji and Symbols/)
+  assert.match(describeFnKey(3)!, /starts its own dictation/)
+  for (const action of [0, 1, 2, 3, null, 9]) {
+    assert.match(describeFnKey(action)!, /External keyboards often have no Fn key/)
+  }
+  for (const action of [1, 2, 3]) assert.match(describeFnKey(action)!, /Do Nothing/)
+  assert.match(describeFnKey(null)!, /If a macOS popup appears/, 'unknown setting still hints')
 })

@@ -51,7 +51,11 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
     pasteLastShortcut:
       typeof raw.pasteLastShortcut === 'string' && raw.pasteLastShortcut.length <= 64
         ? raw.pasteLastShortcut.trim()
-        : defaults.pasteLastShortcut
+        : defaults.pasteLastShortcut,
+    copyLastShortcut:
+      typeof raw.copyLastShortcut === 'string' && raw.copyLastShortcut.length <= 64
+        ? raw.copyLastShortcut.trim()
+        : defaults.copyLastShortcut
   }
 }
 

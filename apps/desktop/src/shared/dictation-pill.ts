@@ -129,6 +129,7 @@ export type PillMenuCommand =
   | { kind: 'hide-hour' }
   | { kind: 'microphone'; uid: string | null }
   | { kind: 'paste-last' }
+  | { kind: 'copy-last' }
   | { kind: 'settings' }
   | { kind: 'toggle-always' }
 
@@ -176,6 +177,12 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
       label: 'Paste the last transcript',
       enabled: model.hasLastTranscript,
       command: { kind: 'paste-last' }
+    },
+    {
+      type: 'normal',
+      label: 'Copy the last transcript',
+      enabled: model.hasLastTranscript,
+      command: { kind: 'copy-last' }
     },
     { type: 'separator' },
     { type: 'normal', label: 'Open dictation settings', command: { kind: 'settings' } },
@@ -273,6 +280,27 @@ export function describeDoubleTap(enabled: boolean, holdKey: string): string {
   if (!enabled) return 'Off. The hold key only works while held.'
   if (holdKey === 'off') return 'On, but it needs a hold-to-talk key. Pick one above.'
   return 'Tap the key twice quickly to keep recording, then tap once to finish. A press that begins right after a tap latches instead of acting as hold-to-talk.'
+}
+
+/**
+ * Heads-up for the Fn/Globe key, which macOS can act on by itself. `action` is
+ * the system's "Press Globe key to" setting (0 nothing, 1 input source, 2 emoji
+ * and symbols, 3 dictation); null when unreadable. Null result = nothing to say.
+ */
+export function describeFnKey(action: number | null): string | null {
+  const external = ' External keyboards often have no Fn key.'
+  switch (action) {
+    case 0:
+      return `macOS leaves the Globe key alone.${external}`
+    case 1:
+      return `macOS switches input source on the Globe key, which will fire with every tap. Set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
+    case 2:
+      return `macOS opens Emoji and Symbols on a Globe tap, which will pop up with every double tap. Set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
+    case 3:
+      return `macOS starts its own dictation on the Globe key, which collides with this one. Set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
+    default:
+      return `If a macOS popup appears when you tap the Globe key, set System Settings, Keyboard, "Press Globe key to" to Do Nothing.${external}`
+  }
 }
 
 /* ---- shortcuts ---- */

@@ -20,7 +20,7 @@ process.stdin.on('data', (d) => {
   buf += d
   for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
     const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
-    if (req.op === 'status') send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: false, secureInput: false, conflicts: ['Wispr Flow'], holdActive: false })
+    if (req.op === 'status') send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: false, secureInput: false, conflicts: ['Wispr Flow'], holdActive: false, fnKeyAction: 2 })
     else if (req.op === 'snapshot') send({ event: 'reply', id: req.id, ok: true, snapshotId: req.snapshotId, pid: 42, bundleId: 'com.apple.TextEdit', appName: 'TextEdit', hasElement: true, accessibility: true, role: 'AXTextArea', secure: false, editable: true })
     else if (req.op === 'deliver') {
       if (mode === 'hang') return
@@ -56,6 +56,7 @@ test('status, snapshot and deliver round-trip with typed fields', async () => {
     assert.equal(status?.accessibility, true)
     assert.equal(status?.inputMonitoring, false)
     assert.deepEqual(status?.conflicts, ['Wispr Flow'])
+    assert.equal(status?.fnKeyAction, 2)
     const target = await client.snapshot('s-1')
     assert.equal(target?.appName, 'TextEdit')
     assert.equal(target?.editable, true)

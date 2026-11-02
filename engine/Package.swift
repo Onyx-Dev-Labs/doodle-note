@@ -28,6 +28,16 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
+        ),
+        // Hold-key decision logic (taps, holds, chords, a lost release, Fn).
+        // Run with `swift test --filter HoldMachineTests`.
+        .testTarget(
+            name: "dictation-helper-tests",
+            dependencies: ["dictation-helper"],
+            path: "Tests/dictation-helper-tests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         )
     ]
 )

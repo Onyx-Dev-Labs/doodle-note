@@ -189,8 +189,11 @@ export class DictationService {
   private helperStatus: HelperStatus | null = null
   private toggleAccelerator: string | null = null
   private toggleState: ShortcutState = 'off'
-  private pasteLastAccelerator: string | null = null
-  private pasteLastState: ShortcutState = 'off'
+  /** The paste-last and copy-last shortcuts. */
+  private readonly actionKeys = {
+    paste: { accelerator: null as string | null, state: 'off' as ShortcutState },
+    copy: { accelerator: null as string | null, state: 'off' as ShortcutState }
+  }
   /** The most recent transcript, in memory only, for "paste last". Never written anywhere. */
   private lastTranscript: string | null = null
   private pasting = false
@@ -231,8 +234,10 @@ export class DictationService {
     this.unregisterEscape()
     if (this.toggleAccelerator) this.deps.shortcuts.unregister(this.toggleAccelerator)
     this.toggleAccelerator = null
-    if (this.pasteLastAccelerator) this.deps.shortcuts.unregister(this.pasteLastAccelerator)
-    this.pasteLastAccelerator = null
+    for (const key of Object.values(this.actionKeys)) {
+      if (key.accelerator) this.deps.shortcuts.unregister(key.accelerator)
+      key.accelerator = null
+    }
     this.lastTranscript = null
     for (const stop of this.unsubscribe) stop()
     this.deps.overlay.dispose()
@@ -259,7 +264,8 @@ export class DictationService {
     if (!this.deps.supported || !settings.enabled) {
       this.dispatch({ type: 'cancel' })
       this.setToggleShortcut('')
-      this.setPasteLastShortcut('')
+      this.setActionShortcut('paste', '')
+      this.setActionShortcut('copy', '')
       this.holdState = 'off'
       void this.deps.helper.setHoldKey('off')
       this.refreshPillTimer()
@@ -267,7 +273,8 @@ export class DictationService {
       return
     }
     this.setToggleShortcut(settings.toggleShortcut)
-    this.setPasteLastShortcut(settings.pasteLastShortcut)
+    this.setActionShortcut('paste', settings.pasteLastShortcut)
+    this.setActionShortcut('copy', settings.copyLastShortcut)
     this.refreshPillTimer()
     this.render()
     if (settings.holdKey === 'off') {
@@ -301,25 +308,32 @@ export class DictationService {
     }
   }
 
-  private setPasteLastShortcut(accelerator: string): void {
-    if (this.pasteLastAccelerator === accelerator && this.pasteLastState === 'registered') return
-    if (this.pasteLastAccelerator) this.deps.shortcuts.unregister(this.pasteLastAccelerator)
-    this.pasteLastAccelerator = null
+  /** Register (or clear) the paste-last or copy-last shortcut. */
+  private setActionShortcut(slot: 'paste' | 'copy', accelerator: string): void {
+    const key = this.actionKeys[slot]
+    const settings = this.deps.settings.get()
+    const other = slot === 'paste' ? settings.copyLastShortcut : settings.pasteLastShortcut
+    // Two actions on one combination would shadow each other; flag both.
+    const collides =
+      shortcutsCollide(accelerator, settings.toggleShortcut) || shortcutsCollide(accelerator, other)
+    if (!collides && key.accelerator === accelerator && key.state === 'registered') return
+    if (key.accelerator) this.deps.shortcuts.unregister(key.accelerator)
+    key.accelerator = null
     if (!accelerator) {
-      this.pasteLastState = 'off'
+      key.state = 'off'
       return
     }
-    // Two actions on one combination would shadow each other.
-    if (shortcutsCollide(accelerator, this.deps.settings.get().toggleShortcut)) {
-      this.pasteLastState = 'conflict'
+    if (collides) {
+      key.state = 'conflict'
       return
     }
     try {
-      const ok = this.deps.shortcuts.register(accelerator, () => void this.pasteLast())
-      this.pasteLastState = ok ? 'registered' : 'conflict'
-      if (ok) this.pasteLastAccelerator = accelerator
+      const run = slot === 'paste' ? () => void this.pasteLast() : () => void this.copyLast()
+      const ok = this.deps.shortcuts.register(accelerator, run)
+      key.state = ok ? 'registered' : 'conflict'
+      if (ok) key.accelerator = accelerator
     } catch {
-      this.pasteLastState = 'invalid'
+      key.state = 'invalid'
     }
   }
 
@@ -400,6 +414,9 @@ export class DictationService {
         break
       case 'paste-last':
         void this.pasteLast()
+        break
+      case 'copy-last':
+        void this.copyLast()
         break
       case 'settings':
         this.deps.openSettings()
@@ -913,7 +930,8 @@ export class DictationService {
           inputMonitoring: false,
           secureInput: false,
           conflicts: [],
-          holdActive: false
+          holdActive: false,
+          fnKeyAction: null
         }
       }
       if (this.state.active?.gen === gen) this.render()
@@ -1089,6 +1107,30 @@ export class DictationService {
     }
   }
 
+  /**
+   * Put the last transcript on the clipboard. Same rules as paste-last: the text
+   * comes from memory only and is never logged or written anywhere else.
+   */
+  async copyLast(): Promise<void> {
+    const settings = this.deps.settings.get()
+    if (this.disposed || !this.deps.supported || !settings.enabled || isBusy(this.state)) return
+    const text = this.lastTranscript
+    if (!text) {
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: 'There is no transcript to copy yet.'
+      })
+      return
+    }
+    try {
+      await this.deps.writeClipboard(text)
+      this.dispatch({ type: 'notice', level: 'success', message: 'Copied.' })
+    } catch {
+      this.dispatch({ type: 'notice', level: 'error', message: 'Could not copy to the clipboard.' })
+    }
+  }
+
   private recordLatency(context: SessionContext): void {
     const m = context.marks
     const diff = (a?: number, b?: number): number | null =>
@@ -1129,7 +1171,9 @@ export class DictationService {
       permissions,
       helper: this.deps.helper.available ? 'ready' : 'unavailable',
       toggleShortcut: this.toggleState,
-      pasteLastShortcut: this.pasteLastState,
+      pasteLastShortcut: this.actionKeys.paste.state,
+      copyLastShortcut: this.actionKeys.copy.state,
+      fnKeyAction: helper?.fnKeyAction ?? null,
       microphones: this.devices,
       microphoneMissing:
         settings.microphoneUid !== null &&

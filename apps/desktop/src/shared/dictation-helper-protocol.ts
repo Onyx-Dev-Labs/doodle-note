@@ -7,6 +7,12 @@ export interface HelperStatus {
   /** Running dictation apps whose shortcuts may overlap (names only). */
   conflicts: string[]
   holdActive: boolean
+  /**
+   * What macOS does on its own when the Fn/Globe key is pressed: 0 nothing,
+   * 1 change input source, 2 emoji and symbols, 3 start dictation. Null when
+   * the setting cannot be read.
+   */
+  fnKeyAction: number | null
 }
 
 export interface TargetDescription {

@@ -38,6 +38,7 @@ interface Harness {
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     input: InputState | null
+    fnKeyAction: number | null
     exitListener: (() => void) | null
     holdKeys: HoldKey[]
   }
@@ -57,6 +58,7 @@ function harness(
     settings?: Partial<DictationSettings>
     cleanup?: CleanupRunner
     access?: 'granted' | 'denied'
+    clipboardFails?: boolean
   } = {}
 ): Harness {
   const settings: DictationSettings = {
@@ -95,6 +97,7 @@ function harness(
     holdListener: null,
     tapListener: null,
     input: { muted: false, volume: 0.5 },
+    fnKeyAction: null,
     exitListener: null,
     holdKeys: []
   }
@@ -130,7 +133,8 @@ function harness(
         inputMonitoring: true,
         secureInput: false,
         conflicts: [],
-        holdActive: false
+        holdActive: false,
+        fnKeyAction: helper.fnKeyAction
       }),
       snapshot: async () => helper.target,
       deliver: async (_id, text) => {
@@ -178,7 +182,10 @@ function harness(
       }),
     cleanupOptions: () => ({ localModelLabel: 'Test model', byok: null }),
     microphoneAccess: () => options.access ?? 'granted',
-    writeClipboard: (text) => void clipboard.push(text),
+    writeClipboard: (text) => {
+      if (options.clipboardFails) throw new Error('clipboard unavailable')
+      clipboard.push(text)
+    },
     broadcast: () => {},
     onMicHeld: (held) => void micHeld.push(held),
     openSettings: () => void settingsOpened.push(1),
@@ -1002,4 +1009,118 @@ test('an unreadable input never raises a muted notice', async () => {
   await ready(h)
   await tick()
   assert.equal(lastView(h).warning, null)
+})
+
+/* ---- copy last, and Fn ---- */
+
+test('copy last puts the previous transcript on the clipboard and nothing else', async () => {
+  const h = harness()
+  await h.service.start()
+  await speak(h, 'copy me please')
+  finish(h)
+  h.clock.now += 5_000
+  h.shortcuts.get(DEFAULT_DICTATION_SETTINGS.copyLastShortcut)?.()
+  await tick()
+  assert.deepEqual(h.clipboard, ['copy me please'])
+  assert.equal(lastView(h).title, 'Copied.')
+  assert.deepEqual(h.delivered, ['copy me please'], 'only the original delivery typed anything')
+  const status = await h.service.status()
+  assert.ok(!JSON.stringify(status).includes('copy me please'), 'the text never reaches status')
+})
+
+test('copy last with nothing to copy, while recording, or when the clipboard fails', async () => {
+  const empty = harness()
+  await empty.service.start()
+  await empty.service.copyLast()
+  assert.deepEqual(empty.clipboard, [])
+  assert.match(lastView(empty).title, /no transcript to copy/i)
+
+  const busy = harness()
+  await busy.service.start()
+  await speak(busy, 'earlier')
+  finish(busy)
+  busy.clock.now += 5_000
+  busy.service.toggle()
+  await ready(busy)
+  await busy.service.copyLast()
+  assert.deepEqual(busy.clipboard, [])
+})
+
+test('the copy-last menu item copies; it is enabled only once there is a transcript', async () => {
+  const h = harness()
+  await h.service.start()
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  const item = (n: number): { enabled?: boolean; label?: string } => h.menus[n]!.items[3]!
+  assert.equal(item(0).label, 'Copy the last transcript')
+  assert.equal(item(0).enabled, false)
+  await speak(h, 'menu copy')
+  finish(h)
+  h.clock.now += 5_000
+  h.service.onOverlayAction('menu', null)
+  await tick()
+  assert.equal(item(1).enabled, true)
+  h.menus[1]!.pick({ kind: 'copy-last' })
+  await tick()
+  assert.deepEqual(h.clipboard, ['menu copy'])
+})
+
+test('copy-last and paste-last shortcuts register, clear, and flag every collision', async () => {
+  const h = harness()
+  await h.service.start()
+  assert.ok(h.shortcuts.has('Control+Alt+Shift+C'))
+  assert.equal((await h.service.status()).copyLastShortcut, 'registered')
+  await h.service.setSettings({ copyLastShortcut: '' })
+  assert.ok(!h.shortcuts.has('Control+Alt+Shift+C'))
+  assert.equal((await h.service.status()).copyLastShortcut, 'off')
+
+  const sameAsToggle = harness({ settings: { copyLastShortcut: 'control+alt+d' } })
+  await sameAsToggle.service.start()
+  assert.equal((await sameAsToggle.service.status()).copyLastShortcut, 'conflict')
+
+  // Both actions on one combination: neither registers, both say so.
+  const both = harness({
+    settings: { pasteLastShortcut: 'Control+Alt+Shift+K', copyLastShortcut: 'control+alt+shift+k' }
+  })
+  await both.service.start()
+  const status = await both.service.status()
+  assert.equal(status.pasteLastShortcut, 'conflict')
+  assert.equal(status.copyLastShortcut, 'conflict')
+  assert.ok(!both.shortcuts.has('Control+Alt+Shift+K'))
+
+  // Changing one onto the other later releases the one that was registered.
+  const later = harness()
+  await later.service.start()
+  await later.service.setSettings({ pasteLastShortcut: 'Control+Alt+Shift+C' })
+  const after = await later.service.status()
+  assert.equal(after.pasteLastShortcut, 'conflict')
+  assert.equal(after.copyLastShortcut, 'conflict')
+  assert.ok(!later.shortcuts.has('Control+Alt+Shift+C'))
+})
+
+test('double tap works with Fn as the hold key, and the status carries the macOS Fn setting', async () => {
+  const h = harness({ settings: { holdKey: 'fn' } })
+  h.helper.fnKeyAction = 2
+  await h.service.start()
+  assert.deepEqual(h.helper.holdKeys, ['fn'])
+  tap(h)
+  h.clock.now += 180
+  tap(h)
+  assert.equal(h.service.phase, 'preparing')
+  await ready(h)
+  h.clock.now += 4_000
+  tap(h)
+  assert.equal(h.service.phase, 'finalizing')
+  assert.equal((await h.service.status()).fnKeyAction, 2)
+})
+
+test('a failing clipboard is reported, and the transcript is not lost', async () => {
+  const h = harness({ clipboardFails: true })
+  await h.service.start()
+  await speak(h, 'still here')
+  finish(h)
+  h.clock.now += 5_000
+  await h.service.copyLast()
+  assert.match(lastView(h).title, /could not copy/i)
+  assert.equal((await h.service.status()).hasLastTranscript, true)
 })
