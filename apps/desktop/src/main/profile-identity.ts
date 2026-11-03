@@ -1,5 +1,9 @@
-import { join } from 'node:path'
+import { posix } from 'node:path'
 import { DEV_APP_NAME, type AppChannel } from '../shared/app-channel'
+
+// The development build is macOS-only, so these are always POSIX paths, whatever platform
+// the tests happen to run on.
+const { join } = posix
 
 /** Directory names the shipping app and its historical dev runs write under appData. */
 const PRODUCTION_PROFILE_NAMES = ['DoodleNote', 'desktop', 'DoodleNote Local']
