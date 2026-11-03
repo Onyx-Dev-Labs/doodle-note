@@ -63,6 +63,7 @@ import {
   overlayView,
   panelView,
   type OverlayContext,
+  type OverlayTarget,
   type OverlayPanel,
   type OverlayView
 } from './dictation-overlay-view'
@@ -91,6 +92,8 @@ export interface HelperLike {
   readonly available: boolean
   status(): Promise<HelperStatus | null>
   snapshot(snapshotId: string): Promise<TargetDescription | null>
+  /** An app bundle's icon as a small PNG data URL; null when it cannot be drawn. */
+  appIcon(appPath: string): Promise<string | null>
   deliver(snapshotId: string, text: string, guards?: DeliveryGuards): Promise<HelperDelivery>
   /** The text selected in the snapshot's field; refused for secure fields. */
   selection(snapshotId: string): Promise<SelectionResult>
@@ -288,6 +291,8 @@ export class DictationService {
   >()
   /** The apps dictation went into lately, newest first, so one can be placed in a style. */
   private recentApps: Array<{ bundleId: string; name: string }> = []
+  /** App icons by bundle id, so each app's icon is read from disk once. */
+  private readonly appIcons = new Map<string, string | null>()
   private rearming = false
   private restartedForPermission = false
   private escapeRegistered = false
@@ -1208,10 +1213,45 @@ export class DictationService {
       pillVisible: this.pillVisible(),
       edge: this.deps.settings.get().pillEdge,
       showLiveText: this.deps.settings.get().showLiveText,
-      showStatusMessages: this.deps.settings.get().showStatusMessages
+      showStatusMessages: this.deps.settings.get().showStatusMessages,
+      target: this.overlayTarget()
     }
     const base = overlayView(this.state, context)
     this.deps.overlay.render(this.panel && this.panelFits() ? panelView(this.panel, base) : base)
+  }
+
+  /** The app a live session will type into, when the user wants it shown on the pill. */
+  private overlayTarget(): OverlayTarget | null {
+    const active = this.state.active
+    if (!active) return null
+    const context = this.sessions.get(active.gen)
+    // The setting is read once per session, with the rest, so it cannot flip mid-flight.
+    if (!context?.settings.showTargetApp) return null
+    const description = context.targetDescription
+    if (!description || !description.appName) return null
+    // Wait for the icon to be read (or to fail) so the pill never flashes a placeholder.
+    if (description.appPath && description.bundleId && !this.appIcons.has(description.bundleId))
+      return null
+    return {
+      name: description.appName,
+      icon: this.appIcons.get(description.bundleId) ?? null
+    }
+  }
+
+  private async loadAppIcon(gen: number, description: TargetDescription): Promise<void> {
+    const { bundleId, appPath } = description
+    if (!bundleId || !appPath || this.appIcons.has(bundleId)) return
+    if (!this.sessions.get(gen)?.settings.showTargetApp) return
+    let icon: string | null = null
+    try {
+      icon = await this.deps.helper.appIcon(appPath)
+    } catch {
+      icon = null
+    }
+    // Remember a miss too, so a bad bundle is not retried on every session.
+    if (this.appIcons.size >= 64) this.appIcons.clear()
+    this.appIcons.set(bundleId, icon)
+    if (this.state.active?.gen === gen) this.render()
   }
 
   /** A panel sits over the resting pill; it never covers a live session, kept text or an error. */
@@ -1262,6 +1302,7 @@ export class DictationService {
     context.target = this.deps.helper.snapshot(context.snapshotId).then((description) => {
       context.targetDescription = description
       if (description?.bundleId) this.noteRecentApp(description.bundleId, description.appName)
+      if (description) void this.loadAppIcon(gen, description)
       if (description && this.helperStatus)
         this.helperStatus.accessibility = description.accessibility
       if (description && !this.helperStatus) {

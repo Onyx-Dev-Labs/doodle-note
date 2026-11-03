@@ -38,6 +38,8 @@ export class DictationOverlay {
   private loaded = false
   private lastView: OverlayView | null = null
   private lastBounds: Rect | null = null
+  /** The icon image the page currently holds, so it is sent once per change. */
+  private sentIcon: string | null = null
   /** The display a live session stays on, so it does not hop with the cursor. */
   private pinned: Display | null = null
   private follow: NodeJS.Timeout | null = null
@@ -211,6 +213,7 @@ export class DictationOverlay {
       if (match) this.handle(match[1] as string)
     })
     this.loaded = false
+    this.sentIcon = null
     this.lastBounds = null
     window.webContents.once('did-finish-load', () => {
       this.loaded = true
@@ -247,10 +250,17 @@ export class DictationOverlay {
 
   private push(window: BrowserWindow, view: OverlayView): void {
     if (!this.loaded) return
-    void window.webContents
-      .executeJavaScript(
-        `window.render(${JSON.stringify(view)}, ${nativeTheme.shouldUseDarkColors})`
-      )
-      .catch(() => {})
+    // The level changes many times a second; the icon image does not. Send the
+    // image only when it changes and leave it out of the frames.
+    const icon = view.target?.icon ?? null
+    const frame = view.target ? { ...view, target: { name: view.target.name, icon: null } } : view
+    const script = [
+      icon !== this.sentIcon ? `window.setTargetIcon(${JSON.stringify(icon)})` : '',
+      `window.render(${JSON.stringify(frame)}, ${nativeTheme.shouldUseDarkColors})`
+    ]
+      .filter(Boolean)
+      .join(';')
+    this.sentIcon = icon
+    void window.webContents.executeJavaScript(script).catch(() => {})
   }
 }

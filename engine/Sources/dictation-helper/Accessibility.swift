@@ -110,6 +110,8 @@ final class TargetSnapshot {
     let pid: pid_t
     let bundleId: String
     let appName: String
+    /// Where the app lives on disk, so the host can draw its icon. Empty when unknown.
+    let appPath: String
     let element: AXUIElement?
     let facts: ElementFacts?
     /// The app is built on Chromium (browsers, Electron apps). Their text
@@ -120,12 +122,13 @@ final class TargetSnapshot {
 
     init(
         id: String, pid: pid_t, bundleId: String, appName: String, element: AXUIElement?,
-        chromiumBased: Bool = false
+        chromiumBased: Bool = false, appPath: String = ""
     ) {
         self.id = id
         self.pid = pid
         self.bundleId = bundleId
         self.appName = appName
+        self.appPath = appPath
         self.element = element
         self.facts = element.map(ElementFacts.init)
         self.chromiumBased = chromiumBased
@@ -228,7 +231,7 @@ enum Target {
         return TargetSnapshot(
             id: id, pid: pid, bundleId: app.bundleIdentifier ?? "",
             appName: app.localizedName ?? "", element: element,
-            chromiumBased: WebEngine.isChromiumBased(app))
+            chromiumBased: WebEngine.isChromiumBased(app), appPath: app.bundleURL?.path ?? "")
     }
 
     static func describe(_ snapshot: TargetSnapshot) -> [String: Any] {
@@ -237,6 +240,7 @@ enum Target {
             "pid": Int(snapshot.pid),
             "bundleId": snapshot.bundleId,
             "appName": snapshot.appName,
+            "appPath": snapshot.appPath,
             "hasElement": snapshot.element != nil,
             "accessibility": AX.trusted,
         ]

@@ -78,6 +78,8 @@ export interface DictationSettings {
   showLiveText: boolean
   /** Show status captions ("Transcribing", "Inserting") and success confirmations. */
   showStatusMessages: boolean
+  /** Show the icon of the app the text will go into on the live pill. */
+  showTargetApp: boolean
   /**
    * An optional second hold-to-talk trigger: a mouse button, numbered from 0
    * (2 middle, 3 back, 4 forward, higher extras). Left and right click (0, 1)
@@ -113,6 +115,7 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   copyLastShortcut: 'Control+Alt+Shift+C',
   showLiveText: true,
   showStatusMessages: true,
+  showTargetApp: true,
   holdMouseButton: null,
   holdMouseSwallow: true,
   holdMouseMode: 'click'

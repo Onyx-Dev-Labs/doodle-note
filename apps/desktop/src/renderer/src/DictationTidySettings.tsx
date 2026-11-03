@@ -34,21 +34,6 @@ interface Props {
   update: (patch: DictationSettingsUpdate) => Promise<void>
 }
 
-const cardStyle = (active: boolean): React.CSSProperties => ({
-  textAlign: 'left',
-  font: 'inherit',
-  color: 'inherit',
-  background: active ? 'var(--wash, #ece5d0)' : 'transparent',
-  border: `1.6px solid ${active ? 'currentColor' : 'rgba(128,128,128,.4)'}`,
-  borderRadius: '14px 12px 15px 11px / 11px 15px 12px 14px',
-  boxShadow: active ? '2px 2px 0 currentColor' : 'none',
-  padding: '10px 12px',
-  cursor: 'pointer',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4
-})
-
 const TIDY_CARDS: Array<{ level: TidyLevel; title: string; blurb: string }> = [
   {
     level: 'off',
@@ -87,18 +72,14 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
         typed. If a model step fails or looks doubtful, the words as you said them are typed
         instead, and the pill says so. Nothing is lost.
       </p>
-      <div
-        role="radiogroup"
-        aria-label="Tidy-up level"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}
-      >
+      <div role="radiogroup" aria-label="Tidy-up level" className="choice-grid">
         {TIDY_CARDS.map((card) => (
           <button
             key={card.level}
             type="button"
             role="radio"
             aria-checked={settings.tidyLevel === card.level}
-            style={cardStyle(settings.tidyLevel === card.level)}
+            className={settings.tidyLevel === card.level ? 'choice-card on' : 'choice-card'}
             onClick={() => void update({ tidyLevel: card.level })}
           >
             <strong>{card.title}</strong>
@@ -165,19 +146,14 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
         other languages are typed as they are. Applied after tidy-up, so it does nothing while
         tidy-up is Off.
       </p>
-      <div
-        role="tablist"
-        aria-label="App category"
-        style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
-      >
+      <div role="tablist" aria-label="App category" className="choice-tabs">
         {STYLE_CATEGORIES.map((id) => (
           <button
             key={id}
             type="button"
             role="tab"
             aria-selected={category === id}
-            className="pill-btn"
-            style={category === id ? { boxShadow: '2px 2px 0 currentColor' } : undefined}
+            className={category === id ? 'pill-btn on' : 'pill-btn'}
             onClick={() => setCategory(id)}
           >
             {STYLE_CATEGORY_LABELS[id]}
@@ -185,14 +161,14 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
         ))}
       </div>
       <p className="models-sub">Before: {STYLE_SAMPLE_INPUT}</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+      <div className="choice-grid">
         {STYLE_TONES.map((tone) => (
           <button
             key={tone}
             type="button"
             role="radio"
             aria-checked={settings.styles[category] === tone}
-            style={cardStyle(settings.styles[category] === tone)}
+            className={settings.styles[category] === tone ? 'choice-card on' : 'choice-card'}
             onClick={() => void update({ styles: { ...settings.styles, [category]: tone } })}
           >
             <strong>{STYLE_TONE_LABELS[tone]}</strong>

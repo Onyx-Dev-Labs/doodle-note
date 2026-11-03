@@ -9,7 +9,7 @@
  */
 export function overlayHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <style>
   :root{--paper:#fbf6e9;--ink:#2b2a26;--mute:#6f6c60;--wash:#ece5d0;--accent:#c4562f;--ok:#4f7a4a;--warn:#a8741a;--err:#b3412f}
   .dark{--paper:#2a2b25;--ink:#efeadb;--mute:#a9a698;--wash:#3a3b33;--accent:#f08a63;--ok:#8fbf86;--warn:#e0b45a;--err:#e8806d}
@@ -37,6 +37,12 @@ export function overlayHtml(): string {
   .mid svg{flex:none}
   .active path.wave{stroke:var(--accent)}
   .busy path.wave{stroke:var(--mute)}
+  /* the app the text will land in: a drawn arrow, then its own icon */
+  .into{flex:none;display:flex;align-items:center;gap:5px}
+  .into svg path{stroke:var(--mute);stroke-width:1.8}
+  .app{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--wash);overflow:hidden}
+  .app img{width:24px;height:24px;display:block;-webkit-user-drag:none}
+  .app .dot{font:700 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--mute)}
   .state{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;color:var(--mute)}
   .caption{box-sizing:border-box;border-radius:14px 12px 15px 11px/11px 15px 12px 14px;padding:5px 10px;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;align-self:stretch}
   .caption .warn{color:var(--warn);font-weight:600;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -67,6 +73,10 @@ export function overlayHtml(): string {
     <div class="mid" id="mid">
       <svg id="midSvg" width="120" height="24" viewBox="0 0 120 24" aria-hidden="true"><path class="wave" id="wave" d=""/></svg>
       <span class="state" id="state"></span>
+    </div>
+    <div class="into" id="into" role="img" hidden>
+      <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true"><path d="M1.4 6.2 C4.4 5.8 8 6.1 11.8 6 M8.2 2.2 C9.6 3.6 10.8 4.8 12.2 6 C10.8 7.4 9.6 8.6 8.4 10"/></svg>
+      <span class="app" id="app"><img id="appImg" alt="" hidden><span class="dot" id="appDot"></span></span>
     </div>
     <a class="act fin" id="stop" href="doodle-dictation://stop" role="button" aria-label="Finish and insert the text" hidden>
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 8.6 C4.2 10.4 5.6 12 6.6 13.4 C8.6 9.6 11.4 5.6 14 2.8"/></svg><span>Finish</span>
@@ -127,6 +137,10 @@ export function overlayHtml(): string {
     if (!calm.matches && view && view.visible && view.mode !== 'message') frame = requestAnimationFrame(tick)
   }
 
+  // The app icon arrives on its own, only when it changes, so the frames stay small.
+  let appIcon = null
+  window.setTargetIcon = (icon) => { appIcon = icon }
+
   window.render = (next, dark) => {
     const was = view
     view = next
@@ -152,6 +166,15 @@ export function overlayHtml(): string {
       $('detail').textContent = next.detail
       $('detail').hidden = !next.detail
       $('caption').hidden = !next.warning && !next.detail
+      const into = next.target
+      $('into').hidden = !into
+      if (into) {
+        $('into').setAttribute('aria-label', 'Typing into ' + into.name)
+        $('into').title = 'Typing into ' + into.name
+        $('appImg').hidden = !appIcon
+        if (appIcon && $('appImg').getAttribute('src') !== appIcon) $('appImg').setAttribute('src', appIcon)
+        $('appDot').textContent = appIcon ? '' : [...into.name][0] || ''
+      }
       $('mid').style.cursor = next.controls.stop ? 'pointer' : 'default'
     } else {
       $('caption').hidden = true
@@ -177,8 +200,9 @@ export function overlayHtml(): string {
       }
     }
     // Spoken once per change, never on every level update.
-    if (!was || was.title !== next.title || was.mode !== next.mode || was.warning !== next.warning) {
-      $('live').textContent = next.mode === 'rest' ? '' : [next.title, next.warning].filter(Boolean).join('. ')
+    const into = next.target ? next.target.name : ''
+    if (!was || was.title !== next.title || was.mode !== next.mode || was.warning !== next.warning || (was.target ? was.target.name : '') !== into) {
+      $('live').textContent = next.mode === 'rest' ? '' : [next.title, next.warning, into ? 'Typing into ' + into : ''].filter(Boolean).join('. ')
     }
     draw()
     if (!frame && !calm.matches && next.visible && next.mode !== 'message') frame = requestAnimationFrame(tick)

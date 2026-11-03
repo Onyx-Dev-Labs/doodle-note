@@ -23,6 +23,8 @@ export interface TargetDescription {
   pid: number
   bundleId: string
   appName: string
+  /** The app bundle on disk, used only to draw its icon. May be absent or empty. */
+  appPath?: string
   hasElement: boolean
   accessibility: boolean
   role?: string

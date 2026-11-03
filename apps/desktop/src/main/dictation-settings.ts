@@ -110,6 +110,8 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
       raw.showStatusMessages === undefined
         ? defaults.showStatusMessages
         : raw.showStatusMessages === true,
+    showTargetApp:
+      raw.showTargetApp === undefined ? defaults.showTargetApp : raw.showTargetApp === true,
     // Left and right click, and anything that is not a button number, never stick.
     holdMouseButton: isAllowedMouseButton(raw.holdMouseButton) ? raw.holdMouseButton : null,
     holdMouseSwallow:

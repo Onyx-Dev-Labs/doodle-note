@@ -18,6 +18,7 @@ const ctx = (over: Partial<OverlayContext> = {}): OverlayContext => ({
   edge: 'bottom',
   showLiveText: true,
   showStatusMessages: true,
+  target: null,
   ...over
 })
 
@@ -254,4 +255,17 @@ test('the working panel is a caption only and follows the dock edge', () => {
     view: false,
     undo: false
   })
+})
+
+test('the live pill carries the target app; every other mode drops it', () => {
+  const target = { name: 'Chrome', icon: 'data:image/png;base64,AAAA' }
+  const recording = overlayView(live(), ctx({ target }))
+  assert.deepEqual(recording.target, target)
+  assert.ok(overlaySize(recording).width > overlaySize({ ...recording, target: null }).width)
+  assert.equal(overlayView(initialSessionState(), ctx({ target })).target, null)
+  const done = overlayView(
+    reduce(initialSessionState(), { type: 'notice', level: 'error', message: 'No.' }).state,
+    ctx({ target })
+  )
+  assert.equal(done.target, null)
 })

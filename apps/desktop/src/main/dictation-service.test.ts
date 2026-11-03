@@ -68,6 +68,7 @@ interface Harness {
   menus: Array<{ items: PillMenuItem[]; pick: (command: PillMenuCommand) => void }>
   shortcuts: Map<string, () => void>
   settingsOpened: number[]
+  icons: { calls: string[]; value: string | null; fails: boolean }
   settings: DictationSettings
   cleanupCalls: Array<{ mode: string; consent: unknown; signal: AbortSignal }>
 }
@@ -105,6 +106,7 @@ function harness(
   const menus: Harness['menus'] = []
   const shortcuts = new Map<string, () => void>()
   const settingsOpened: number[] = []
+  const icons: Harness['icons'] = { calls: [], value: 'data:image/png;base64,AAAA', fails: false }
   const perms: Harness['perms'] = {
     mic: options.access ?? 'granted',
     micAnswer: true,
@@ -117,6 +119,7 @@ function harness(
       pid: 1,
       bundleId: 'com.apple.TextEdit',
       appName: 'TextEdit',
+      appPath: '/System/Applications/TextEdit.app',
       hasElement: true,
       accessibility: true,
       role: 'AXTextArea',
@@ -182,6 +185,11 @@ function harness(
         fnKeyAction: helper.fnKeyAction
       }),
       snapshot: async () => helper.target,
+      appIcon: async (appPath) => {
+        icons.calls.push(appPath)
+        if (icons.fails) throw new Error('no icon')
+        return icons.value
+      },
       deliver: async (_id, text, guards) => {
         delivered.push(text)
         helper.deliverGuards.push(guards ?? {})
@@ -300,6 +308,7 @@ function harness(
     menus,
     shortcuts,
     settingsOpened,
+    icons,
     settings,
     cleanupCalls
   }
@@ -2068,4 +2077,77 @@ test('what a transform held is forgotten when dictation shuts down', async () =>
   assert.equal((await h.service.status()).hasLastChange, true)
   await h.service.dispose()
   assert.ok(!JSON.stringify(await h.service.status()).includes('We should go'), 'no text in status')
+})
+
+/** Start a session and let the target snapshot and its icon arrive. */
+async function startListening(h: Harness): Promise<void> {
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  await tick()
+}
+const lastLive = (h: Harness): OverlayView | undefined =>
+  [...h.overlay].reverse().find((view) => view.mode === 'session')
+
+test('the live pill shows the icon of the app the text will go into', async () => {
+  const h = harness()
+  await startListening(h)
+  assert.deepEqual(h.icons.calls, ['/System/Applications/TextEdit.app'])
+  assert.deepEqual(lastLive(h)?.target, {
+    name: 'TextEdit',
+    icon: 'data:image/png;base64,AAAA'
+  })
+  assert.ok(
+    h.overlay.every((view) => view.mode === 'session' || view.target === null),
+    'the resting pill and cards never carry the app'
+  )
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'final', channel: 'mic', text: 'hello' })
+  await tick()
+  finish(h)
+})
+
+test('the pill does not wait on the icon: it appears with the app only once the icon is known', async () => {
+  const h = harness()
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  // Before the icon has loaded nothing is drawn, so the pill never flashes a placeholder.
+  assert.ok(
+    h.overlay
+      .filter((view) => view.mode === 'session')
+      .every((view) => view.target === null || view.target.icon !== null)
+  )
+  await tick()
+  assert.equal(lastLive(h)?.target?.name, 'TextEdit')
+})
+
+test('turning the setting off shows no app and never reads an icon', async () => {
+  const h = harness({ settings: { showTargetApp: false } })
+  await startListening(h)
+  assert.equal(lastLive(h)?.target, null)
+  assert.deepEqual(h.icons.calls, [])
+})
+
+test('a missing icon still names the app, and the miss is not retried every session', async () => {
+  const h = harness()
+  h.icons.fails = true
+  await startListening(h)
+  assert.deepEqual(lastLive(h)?.target, { name: 'TextEdit', icon: null })
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'final', channel: 'mic', text: 'one' })
+  await tick()
+  finish(h)
+  await startListening(h)
+  assert.equal(h.icons.calls.length, 1, 'read once per app')
+})
+
+test('an app the helper cannot place on disk is named without an icon read', async () => {
+  const h = harness()
+  delete h.helper.target!.appPath
+  await startListening(h)
+  assert.deepEqual(lastLive(h)?.target, { name: 'TextEdit', icon: null })
+  assert.deepEqual(h.icons.calls, [])
 })

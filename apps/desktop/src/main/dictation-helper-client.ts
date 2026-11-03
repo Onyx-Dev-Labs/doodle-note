@@ -143,6 +143,7 @@ export class DictationHelperClient {
       pid: Number(reply.pid ?? 0),
       bundleId: String(reply.bundleId ?? ''),
       appName: String(reply.appName ?? ''),
+      ...(typeof reply.appPath === 'string' && reply.appPath ? { appPath: reply.appPath } : {}),
       hasElement: reply.hasElement === true,
       accessibility: reply.accessibility === true,
       ...(typeof reply.role === 'string' ? { role: reply.role } : {}),
@@ -202,6 +203,14 @@ export class DictationHelperClient {
       clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
       ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
     }
+  }
+
+  /** An app's icon as a PNG data URL, for the pill. Null when it cannot be drawn. */
+  async appIcon(appPath: string): Promise<string | null> {
+    const reply = await this.request('app-icon', { path: appPath }, this.timeouts.snapshot)
+    return reply?.ok && typeof reply.png === 'string' && reply.png.length > 0
+      ? `data:image/png;base64,${reply.png}`
+      : null
   }
 
   /** The text selected in the field the snapshot was taken from; refused for a secure field. */

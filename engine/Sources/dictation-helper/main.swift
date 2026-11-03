@@ -57,6 +57,15 @@ func handle(_ request: [String: Any]) {
             if let volume = state.volume { fields["volume"] = Double(volume) }
             Wire.reply(id, fields)
         }
+    case "app-icon":
+        let path = request["path"] as? String ?? ""
+        workQueue.async {
+            guard let png = AppIcon.png(path: path) else {
+                Wire.reply(id, ok: false, ["reason": "no-icon"])
+                return
+            }
+            Wire.reply(id, ["png": png.base64EncodedString()])
+        }
     case "snapshot":
         let snapshotId = request["snapshotId"] as? String ?? id
         workQueue.async {

@@ -84,6 +84,16 @@ The Fn key reaches the helper as a flags-changed event (key code 63, the seconda
 - **A lost release.** If Fn's key-up is lost, the next modifier event from another key that no longer carries the Fn flag ends the hold, as for every hold key; the macOS event tap being paused ends it too. A hold also has the 3-minute backstop.
 - **Not verified without a physical keyboard:** that a real Globe key delivers the flags-changed sequence the tests model (including on Apple keyboards with a dedicated Globe key), and how it interacts with the macOS setting above. The decision logic was split into `HoldMachine` and is covered by 17 Swift tests that feed it the same event sequences; the event tap itself is unchanged.
 
+### Where the text will go
+
+The live pill shows the icon of the app the text will be typed into (Chrome's icon for Chrome, and so on), after a small drawn arrow, so you can see at a glance that the focused app is the one you meant. Setting: Settings, Dictation, Pill and microphone, **Show where the text will go** (default on).
+
+- The app is the one that was frontmost when the session began, the same snapshot the delivery uses. The helper reports its bundle path with the snapshot and draws the icon itself (`app-icon` request, `NSWorkspace`, 64 px PNG), only for an absolute path ending in `.app`. Nothing about the app's contents is read.
+- Icons are cached by bundle id in memory (up to 64) and sent to the overlay page once per change, not with every level frame. The pill appears with the icon once it is loaded, so it never flashes a placeholder. If the icon cannot be drawn, the pill shows the app's first letter instead; if the helper cannot place the app on disk it does the same without asking for an icon.
+- Off: no icon request is made and the pill is unchanged. The setting is read once per session, with the rest, so it cannot flip halfway.
+- The icon is also announced to screen readers ("Typing into Google Chrome") and is the tooltip on the icon.
+- Live pill only: the resting pill, message cards and panels do not carry it.
+
 ### Settings added
 
 Settings, Dictation: Show the pill at all times (with "Show it now" while hidden); Pill position (bottom, left, right); Microphone; Start and stop tones; Keep recording with a double tap; Type the last transcript again and Copy the last transcript (shortcuts: change or turn off). All are saved in `dictation.json`: booleans, the edge, the hide expiry time, a device UID and an accelerator string. No audio, text or history.
@@ -223,7 +233,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 874 desktop tests (872 pass, 2 skipped) with typecheck and lint clean, plus 45 Swift tests for the hold-key and mouse logic, delivery helpers and the text locator (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (15), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 881 desktop tests (879 pass, 2 skipped) with typecheck and lint clean, plus 47 Swift tests for the hold-key and mouse logic, delivery helpers, the text locator and app icons (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (16), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.
@@ -285,6 +295,9 @@ Kept on purpose (safety over speed):
 Not measured: the live microphone path (microphone teardown, queued audio, and the IPC from the engine to the app). Open Settings, Dictation after one dictation and read the line under "Last dictation": `speech` is `stopToFinalMs` with its two engine parts, and the remainder is capture teardown plus the pipe.
 
 ## Not verified, and known gaps
+
+- **App icon on the pill, needs a person:** the helper's `app-icon` request was driven for real (Chrome's icon came back as a 64 px PNG, a missing app is refused) and the overlay page was rendered with that icon in a browser. Not seen in the real overlay window on a real display, and the icon appears only once the target snapshot has returned (up to about a second in a Chromium app while its accessibility tree wakes up).
+- **Settings page layout, needs a person:** the refreshed Settings page was checked in a browser with stubbed app data (light and dark; General, Notes model, Dictation, Integrations). It was not opened in the packaged app, and Calendar and Cloud sync were not looked at.
 
 - **Tidy-up, styles and transforms, needs a person and a model:** no notes model is installed on the development Mac and no provider key was used, so Full tidy-up and every transform were tested with stub models. Not exercised against real model output: the prompts' quality, the validators on real rewrites, timing of the local model. Not driven in a real app: reading a selection and replacing it through accessibility in TextEdit, Notes or a browser, Undo's search in real fields, the View and Undo pill on screen with a pointer, and the settings sections (they type-check and the components share the existing page patterns, but were not opened).
 

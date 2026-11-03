@@ -21,8 +21,11 @@ process.stdin.on('data', (d) => {
   for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
     const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
     if (req.op === 'status') send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: false, secureInput: false, conflicts: ['Wispr Flow'], holdActive: false, mouseActive: true, inputMonitoringAccess: mode === 'not-asked' ? 'not-determined' : 'granted', fnKeyAction: 2 })
-    else if (req.op === 'snapshot') send({ event: 'reply', id: req.id, ok: true, snapshotId: req.snapshotId, pid: 42, bundleId: 'com.apple.TextEdit', appName: 'TextEdit', hasElement: true, accessibility: true, role: 'AXTextArea', secure: false, editable: true })
-    else if (req.op === 'selection') {
+    else if (req.op === 'snapshot') send({ event: 'reply', id: req.id, ok: true, snapshotId: req.snapshotId, pid: 42, bundleId: 'com.apple.TextEdit', appName: 'TextEdit', appPath: '/System/Applications/TextEdit.app', hasElement: true, accessibility: true, role: 'AXTextArea', secure: false, editable: true })
+    else if (req.op === 'app-icon') {
+      if (req.path === '/Applications/Missing.app') send({ event: 'reply', id: req.id, ok: false, reason: 'no-icon' })
+      else send({ event: 'reply', id: req.id, ok: true, png: 'QUJD' })
+    } else if (req.op === 'selection') {
       if (mode === 'secure') send({ event: 'reply', id: req.id, ok: false, reason: 'secure-field' })
       else send({ event: 'reply', id: req.id, ok: true, text: 'picked words' })
     } else if (req.op === 'deliver') {
@@ -90,6 +93,7 @@ test('status, snapshot and deliver round-trip with typed fields', async () => {
     assert.equal(status?.mouseActive, true)
     const target = await client.snapshot('s-1')
     assert.equal(target?.appName, 'TextEdit')
+    assert.equal(target?.appPath, '/System/Applications/TextEdit.app')
     assert.equal(target?.editable, true)
     const result = await client.deliver('s-1', 'hello')
     assert.deepEqual(result, {
@@ -322,4 +326,19 @@ test('delivery guards travel with the request and a refusal says why', async () 
   } finally {
     await client.dispose()
   }
+})
+
+test('an app icon comes back as a PNG data URL, or null when it cannot be drawn', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    assert.equal(
+      await client.appIcon('/System/Applications/TextEdit.app'),
+      'data:image/png;base64,QUJD'
+    )
+    assert.equal(await client.appIcon('/Applications/Missing.app'), null)
+  } finally {
+    await client.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.equal(await missing.appIcon('/System/Applications/TextEdit.app'), null)
 })

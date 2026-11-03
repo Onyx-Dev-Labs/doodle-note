@@ -35,7 +35,15 @@ export interface OverlayView {
   }
   /** Before and after words, shown as a diff in a message card; null otherwise. */
   diff: DiffSegment[] | null
+  /** The app the text is going into, drawn on the live pill; null hides it. */
+  target: OverlayTarget | null
   gen: number | null
+}
+
+export interface OverlayTarget {
+  name: string
+  /** A small image as a data URL; null draws a plain placeholder. */
+  icon: string | null
 }
 
 export interface OverlayContext {
@@ -51,6 +59,8 @@ export interface OverlayContext {
   showLiveText: boolean
   /** Quiet mode: show status captions and success confirmations. */
   showStatusMessages: boolean
+  /** The app the live session will type into, when the user wants it shown. */
+  target: OverlayTarget | null
 }
 
 const NONE = { stop: false, cancel: false, copy: false, dismiss: false, view: false, undo: false }
@@ -80,6 +90,8 @@ const WINDOW = {
   restLong: 92,
   restShort: 40,
   sessionWidth: 320,
+  /** Room for the arrow and the app icon on the live pill. */
+  sessionWithTargetWidth: 372,
   sessionBase: 56,
   warningLine: 26,
   detailBlock: 64,
@@ -101,7 +113,7 @@ export function overlaySize(view: OverlayView): Size {
   if (view.mode === 'message') return { ...WINDOW.message }
   if (view.mode === 'session') {
     return {
-      width: WINDOW.sessionWidth,
+      width: view.target ? WINDOW.sessionWithTargetWidth : WINDOW.sessionWidth,
       height:
         WINDOW.sessionBase +
         (view.warning ? WINDOW.warningLine : 0) +
@@ -131,6 +143,8 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
     warning: null,
     showStatus: isMessageShown('status', prefs),
     diff: null,
+    // Only the live pill points at the app; the resting pill and cards do not.
+    target: mode === 'session' ? ctx.target : null,
     gen,
     ...fields
   })
@@ -257,7 +271,8 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
     showStatus: base.showStatus,
     gen: null,
     level: null,
-    detail: ''
+    detail: '',
+    target: null
   }
   switch (panel.kind) {
     case 'working':

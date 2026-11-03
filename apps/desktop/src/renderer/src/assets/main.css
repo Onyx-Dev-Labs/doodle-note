@@ -2831,6 +2831,419 @@ button.fp-row:hover {
   transform: translateX(15px);
 }
 
+/* ================= settings refresh =================
+   One calm layout for every settings section: a full-width scroller (so the
+   scrollbar sits at the window edge, not mid-window), a quiet navigation rail,
+   and one card per section with its rows inside. Colours come from the theme
+   variables, so light and dark both follow. */
+
+.models {
+  max-width: none;
+  margin: 0;
+  /* Centre the content with padding rather than max-width, so the scroll
+     container itself spans the window and its scrollbar stays at the edge. */
+  padding: 40px max(36px, calc((100% - 1040px) / 2)) 64px;
+  gap: 32px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--control-track) transparent;
+}
+
+.models-header {
+  align-items: center;
+  gap: 16px;
+}
+
+.models-header .settings-mascot {
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+}
+
+.models-header h2 {
+  margin: 0 0 3px;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+
+.models-header .models-sub {
+  font-size: 13.5px;
+}
+
+.settings-shell {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  align-items: start;
+  gap: 44px;
+  /* never squeezed to the window height, or the sticky nav would stop following */
+  flex-shrink: 0;
+}
+
+.settings-nav {
+  top: 8px;
+  min-width: 0;
+  padding: 0;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.settings-nav-btn {
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.settings-nav-btn:hover {
+  background: var(--fill);
+}
+
+.settings-nav-btn.on {
+  background: var(--sage-fill);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.settings-nav-icon {
+  display: inline-flex;
+  justify-content: center;
+  width: 18px;
+  color: var(--muted);
+}
+
+.settings-nav-btn.on .settings-nav-icon {
+  color: var(--accent-deep);
+}
+
+.settings-version {
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-top: none;
+  border-radius: 10px;
+}
+
+.settings-version:hover {
+  background: var(--fill);
+  text-decoration: none;
+}
+
+.settings-content {
+  max-width: 740px;
+  gap: 20px;
+}
+
+/* a section is a card: title and note on top, its rows below */
+.settings-content .keys-section,
+.settings-content > .keys-section:first-child {
+  gap: 10px;
+  padding: 24px 26px 24px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(38, 40, 31, 0.04);
+}
+
+.settings-content .keys-section h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.settings-content .keys-section > .models-sub {
+  max-width: 60ch;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.settings-content .keys-section > .models-sub strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* a card that ends in rows keeps the last row's own padding instead */
+.settings-content .keys-section:has(> .cal-subcard:last-child) {
+  padding-bottom: 8px;
+}
+
+/* a sub-card holding plain controls (a picker and its buttons) stays a small card */
+.settings-content .cal-subcard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  max-width: none;
+  margin-top: 6px;
+  padding: 14px 16px;
+  background: var(--card-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.settings-content .cal-subcard > .models-sub {
+  flex-basis: 100%;
+}
+
+.settings-content .cal-subcard label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--body);
+}
+
+.settings-content .cal-subcard > button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  font-size: 13px;
+  color: var(--accent-deep);
+  font-weight: 500;
+}
+
+.settings-content .cal-subcard > button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--sage-fill);
+}
+
+.settings-content .cal-subcard > button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* a sub-card made of rows sits directly in the section card, divided by hairlines */
+.settings-content .cal-subcard:has(> .cal-row, > .cal-subcard-head) {
+  display: block;
+  margin: 10px -26px 0;
+  padding: 0 26px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.settings-content
+  .cal-subcard:has(> .cal-row, > .cal-subcard-head)
+  + .cal-subcard:has(> .cal-row, > .cal-subcard-head) {
+  margin-top: 0;
+}
+
+.settings-content .keys-section > h3:not(:first-child) {
+  margin-top: 16px;
+}
+
+.settings-content .cal-subcard-head {
+  padding: 16px 0 4px;
+  font-size: 13px;
+}
+
+.settings-content .cal-row {
+  gap: 20px;
+  padding: 15px 0;
+}
+
+.settings-content .cal-row-label {
+  font-size: 13.5px;
+  font-weight: 550;
+}
+
+.settings-content .cal-row-sub {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* controls */
+.settings-content .pill-btn {
+  padding: 6px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  white-space: nowrap;
+  box-shadow: 0 1px 1px rgba(38, 40, 31, 0.05);
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.settings-content .pill-btn:hover:not(:disabled) {
+  background: var(--sage-fill);
+  box-shadow: 0 1px 1px rgba(38, 40, 31, 0.05);
+}
+
+.settings-content .pill-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-content select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 150px;
+  max-width: 100%;
+  padding: 7px 32px 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8d7f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 12px center;
+  color: var(--ink);
+  font-size: 13px;
+  box-shadow: 0 1px 1px rgba(38, 40, 31, 0.05);
+}
+
+.settings-content select:hover {
+  border-color: var(--accent);
+}
+
+.settings-content input[type='text'],
+.settings-content input[type='password'],
+.settings-content input[type='search'],
+.settings-content input[type='number'],
+.settings-content input:not([type]),
+.settings-content textarea {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.settings-content select:focus-visible,
+.settings-content input:focus-visible,
+.settings-content textarea:focus-visible,
+.settings-content button:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.settings-content input[type='checkbox'],
+.settings-content input[type='radio'] {
+  accent-color: var(--accent);
+}
+
+.toggle {
+  width: 42px;
+  height: 24px;
+}
+
+.toggle-knob {
+  width: 20px;
+  height: 20px;
+}
+
+.toggle.on .toggle-knob {
+  transform: translateX(18px);
+}
+
+.toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.settings-content .model-card {
+  border-radius: 14px;
+}
+
+.settings-content .theme-seg {
+  border-radius: 11px;
+}
+
+/* pick-one cards (tidy-up level, style tone) and the app-category tabs */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 8px 0 6px;
+}
+
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: var(--card-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.choice-card:hover {
+  border-color: var(--accent);
+}
+
+.choice-card.on {
+  background: var(--sage-fill);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.choice-card strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.choice-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  margin: 6px 0 4px;
+  width: fit-content;
+  background: var(--fill);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.settings-content .choice-tabs .pill-btn {
+  padding: 5px 13px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.settings-content .choice-tabs .pill-btn:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.settings-content .choice-tabs .pill-btn.on {
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+@media (max-width: 860px) {
+  .choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-shell {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
 /* ==============================================================   Dev console — the old dark developer palette, scoped to .dev-dark so
    it can never leak into the product surfaces.
    ===================================================================== */

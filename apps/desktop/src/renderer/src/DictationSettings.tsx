@@ -590,6 +590,21 @@ export function DictationSettings(): React.JSX.Element {
           </div>
           <div className="cal-row">
             <span className="cal-row-main">
+              <span className="cal-row-label">Show where the text will go</span>
+              <span className="cal-row-sub">
+                The icon of the app you are dictating into (Chrome, Slack, your editor) sits on the
+                pill while you speak, so you can see where the words will land. Only the app&apos;s
+                icon is read; nothing about what is in it.
+              </span>
+            </span>
+            <Toggle
+              checked={settings.showTargetApp}
+              label="Show the icon of the app the text will be typed into"
+              onChange={() => void update({ showTargetApp: !settings.showTargetApp })}
+            />
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
               <span className="cal-row-label">Start and stop tones</span>
               <span className="cal-row-sub">
                 A short two-note chime when recording begins and ends.
