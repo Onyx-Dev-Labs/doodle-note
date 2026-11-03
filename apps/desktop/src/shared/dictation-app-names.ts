@@ -44,6 +44,23 @@ export function fallbackAppName(bundleId: string): string | null {
   return byLowerId.get(bundleId.trim().toLowerCase()) ?? null
 }
 
+/**
+ * Which of a category's apps to list. The built-in lists name apps people may not
+ * have, so a built-in app is listed only when it is installed on this Mac; an app
+ * the person added is always listed. `known` is what the helper reported for each
+ * app (a name or an icon means installed); null means the helper cannot say, so
+ * everything is listed rather than nothing. `hidden` counts the built-in apps left out.
+ */
+export function visibleApps<T extends { bundleId: string; builtin: boolean }>(
+  apps: readonly T[],
+  known: Record<string, { name: string | null; icon: string | null }> | null
+): { shown: T[]; hidden: number } {
+  if (known === null) return { shown: [...apps], hidden: 0 }
+  const installed = (id: string): boolean => Boolean(known[id]?.name || known[id]?.icon)
+  const shown = apps.filter((app) => !app.builtin || installed(app.bundleId))
+  return { shown, hidden: apps.length - shown.length }
+}
+
 /** What an app is shown as: the system's name, else one the app reported, else ours, else its identifier. */
 export function appDisplayName(
   bundleId: string,

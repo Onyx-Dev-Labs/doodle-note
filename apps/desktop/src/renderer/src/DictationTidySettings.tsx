@@ -27,7 +27,7 @@ import {
   resetTransforms,
   type TransformDef
 } from '../../shared/dictation-transforms'
-import { appDisplayName } from '../../shared/dictation-app-names'
+import { appDisplayName, visibleApps } from '../../shared/dictation-app-names'
 import { acceleratorFrom } from './dictation-accelerator'
 import { Toggle } from './ModelsView'
 
@@ -189,9 +189,9 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
     asked: '',
     apps: {}
   })
-  const apps = appsInCategory(category, settings.styleApps)
-  // Real names and icons for the listed apps, asked of the helper whenever the list changes.
-  const wanted = apps.map((app) => app.bundleId).join('\n')
+  const allApps = appsInCategory(category, settings.styleApps)
+  // Real names and icons for the apps, asked of the helper whenever the list changes.
+  const wanted = allApps.map((app) => app.bundleId).join('\n')
   useEffect(() => {
     if (!wanted) return
     let current = true
@@ -202,6 +202,13 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
       current = false
     }
   }, [wanted])
+  // Only installed built-in apps are listed. Until the helper answers nothing is known to be
+  // installed, so they appear a moment later; with no helper everything is listed.
+  const loaded = info.asked === wanted
+  const { shown: apps, hidden } = visibleApps(
+    allApps,
+    status.helper === 'unavailable' ? null : loaded ? info.apps : {}
+  )
   return (
     <section className="keys-section">
       <h3>Style</h3>
@@ -301,6 +308,15 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
             </div>
           )
         })}
+        {loaded && hidden > 0 && status.helper !== 'unavailable' && (
+          <div className="cal-row">
+            <span className="cal-row-sub">
+              {hidden} more built-in {hidden === 1 ? 'app is' : 'apps are'} not installed on this
+              Mac. {hidden === 1 ? 'It uses' : 'They use'} this style if you install{' '}
+              {hidden === 1 ? 'it' : 'them'}.
+            </span>
+          </div>
+        )}
         <div className="cal-row">
           <span className="cal-row-main">
             <span className="cal-row-label">Add an app</span>
