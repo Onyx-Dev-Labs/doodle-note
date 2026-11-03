@@ -1,3 +1,4 @@
+import { FEATURE_NAME } from '../shared/dictation-brand'
 import { isMessageShown, type PillEdge, type Size } from '../shared/dictation-pill'
 import type { DiffSegment } from '../shared/dictation-transforms'
 import type { RecoveryReason, SessionState } from '../shared/dictation-session'
@@ -157,7 +158,7 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
       if (!ctx.pillVisible) return hidden()
       return view('rest', {
         tone: 'ok',
-        title: 'Start dictating',
+        title: `Start ${FEATURE_NAME}`,
         detail: '',
         level: null,
         controls: NONE
@@ -237,7 +238,7 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
         return ctx.pillVisible
           ? view('rest', {
               tone: 'ok',
-              title: 'Start dictating',
+              title: `Start ${FEATURE_NAME}`,
               detail: '',
               level: null,
               controls: NONE

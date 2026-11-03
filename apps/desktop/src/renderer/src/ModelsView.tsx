@@ -29,6 +29,7 @@ import {
   type NotesSettingsView
 } from '../../shared/notes-api'
 import { PaidRemoteMcpSetup } from './PaidRemoteMcpSetup'
+import { FEATURE_NAME } from '../../shared/dictation-brand'
 import { DictationSettings } from './DictationSettings'
 import mascotUrl from './assets/mascot-square.png'
 
@@ -176,7 +177,7 @@ const SETTINGS_NAV: Array<{ key: SettingsSection; icon: React.JSX.Element; label
   { key: 'calendar', icon: <CalendarIcon size={15} />, label: 'Calendar' },
   { key: 'sync', icon: <CloudIcon size={15} />, label: 'Cloud sync' },
   { key: 'model', icon: <SparkleIcon size={15} />, label: 'Notes model' },
-  { key: 'dictation', icon: <SparkleIcon size={15} />, label: 'Dictation' },
+  { key: 'dictation', icon: <SparkleIcon size={15} />, label: FEATURE_NAME },
   { key: 'integrations', icon: <UsersIcon size={15} />, label: 'Integrations' }
 ]
 

@@ -31,6 +31,7 @@ import {
   DictationTransformSettings
 } from './DictationTidySettings'
 import { DictationDictionarySettings } from './DictationDictionarySettings'
+import { FEATURE_NAME } from '../../shared/dictation-brand'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -103,7 +104,7 @@ export function DictationSettings(): React.JSX.Element {
   if (!status) {
     return (
       <section className="keys-section">
-        <h3>Dictation</h3>
+        <h3>{FEATURE_NAME}</h3>
         <p className="models-sub">{error || 'Loading…'}</p>
       </section>
     )
@@ -111,11 +112,11 @@ export function DictationSettings(): React.JSX.Element {
   if (!status.supported) {
     return (
       <section className="keys-section">
-        <h3>Dictation</h3>
+        <h3>{FEATURE_NAME}</h3>
         <p className="models-sub">
           {status.channel === 'dev'
-            ? 'System-wide dictation is available on macOS only for now.'
-            : 'System-wide dictation is in development and is not part of this release.'}
+            ? `${FEATURE_NAME}, DoodleNote's dictation, is available on macOS only for now.`
+            : `${FEATURE_NAME}, DoodleNote's dictation, is in development and is not part of this release.`}
         </p>
       </section>
     )
@@ -217,10 +218,11 @@ export function DictationSettings(): React.JSX.Element {
   return (
     <>
       <section className="keys-section">
-        <h3>Dictation</h3>
+        <h3>{FEATURE_NAME}</h3>
         <p className="models-sub">
-          Press a shortcut in any app and speak. Speech is recognized on this Mac and the text is
-          typed into the field you were using. Audio is never retained and never leaves this Mac.
+          {FEATURE_NAME} is DoodleNote&apos;s dictation. Press a shortcut in any app and speak.
+          Speech is recognized on this Mac and the text is typed into the field you were using.
+          Audio is never retained and never leaves this Mac.
         </p>
         {status.channel === 'dev' && (
           <p className="models-sub">
@@ -231,14 +233,14 @@ export function DictationSettings(): React.JSX.Element {
         <div className="cal-subcard">
           <div className="cal-row">
             <span className="cal-row-main">
-              <span className="cal-row-label">Enable system-wide dictation</span>
+              <span className="cal-row-label">Turn on {FEATURE_NAME}</span>
               <span className="cal-row-sub">
                 Off keeps the microphone, the shortcut and the insertion helper idle.
               </span>
             </span>
             <Toggle
               checked={settings.enabled}
-              label="Enable system-wide dictation"
+              label={`Turn on ${FEATURE_NAME}`}
               onChange={() => void update({ enabled: !settings.enabled })}
             />
           </div>

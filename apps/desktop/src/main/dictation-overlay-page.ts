@@ -7,6 +7,8 @@
  * offset ink outline, a hand-drawn squiggle that follows the voice level, and
  * hand-drawn cancel and finish marks.
  */
+import { FEATURE_NAME } from '../shared/dictation-brand'
+
 export function overlayHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
@@ -63,11 +65,11 @@ export function overlayHtml(): string {
   @media (prefers-reduced-motion:reduce){.rest{transition:none}.rest:hover{transform:none}}
 </style></head><body>
 <div class="root bottom" id="root">
-  <div class="pill rest" id="rest" role="button" aria-label="Start dictation" hidden>
+  <div class="pill rest" id="rest" role="button" aria-label="Start ${FEATURE_NAME}" hidden>
     <svg width="56" height="18" viewBox="0 0 56 18" aria-hidden="true"><path class="wave" id="restWave" d=""/></svg>
   </div>
   <div class="pill session" id="session" hidden>
-    <a class="act can" id="cancel" href="doodle-dictation://cancel" role="button" aria-label="Cancel dictation" hidden>
+    <a class="act can" id="cancel" href="doodle-dictation://cancel" role="button" aria-label="Cancel ${FEATURE_NAME}" hidden>
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.4 C6 6.2 9.6 9.8 13 13.2 M12.8 2.8 C10 5.8 6.4 9.6 2.9 13"/></svg><span>Cancel</span>
     </a>
     <div class="mid" id="mid">

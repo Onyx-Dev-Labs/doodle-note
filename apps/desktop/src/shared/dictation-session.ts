@@ -1,3 +1,4 @@
+import { FEATURE_NAME } from './dictation-brand'
 /**
  * Pure dictation session model. No I/O: the main-process service feeds events
  * in and executes the effects that come out. Every asynchronous result carries
@@ -258,7 +259,8 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
 
   switch (event.type) {
     case 'start': {
-      if (isBusy(state)) return { state, effects: [], refused: 'Dictation is already running.' }
+      if (isBusy(state))
+        return { state, effects: [], refused: `${FEATURE_NAME} is already running.` }
       const gen = state.nextGen
       // A hold that follows a quick tap is the second half of a double tap.
       const latched =

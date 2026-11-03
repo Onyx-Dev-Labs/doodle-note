@@ -151,8 +151,8 @@ test('the menu lists the actions in order, with the default microphone ticked', 
       'Paste the last transcript',
       'Copy the last transcript',
       '---',
-      'Open dictation settings',
-      'Mouse button for dictation: none',
+      'Open Bark settings',
+      'Mouse button for Bark: none',
       'Keep the pill on screen',
       "Show what I'm saying",
       'Show status messages'
@@ -442,12 +442,12 @@ test('the menu shows the mouse button with the warning underneath, and opens set
     showStatusMessages: true
   }
   const unset = buildPillMenu({ ...model, mouseButton: null, mouseMode: 'click' })[6]!
-  assert.equal(unset.label, 'Mouse button for dictation: none')
+  assert.equal(unset.label, 'Mouse button for Bark: none')
   const set = buildPillMenu({ ...model, mouseButton: 3, mouseMode: 'click' })[6]!
-  assert.equal(set.label, 'Mouse button for dictation: Back button, click to start and stop')
+  assert.equal(set.label, 'Mouse button for Bark: Back button, click to start and stop')
   assert.equal(set.sublabel, MOUSE_SOFTWARE_NOTE)
   const holding = buildPillMenu({ ...model, mouseButton: 4, mouseMode: 'hold' })[6]!
-  assert.equal(holding.label, 'Mouse button for dictation: Forward button, hold to talk')
+  assert.equal(holding.label, 'Mouse button for Bark: Forward button, hold to talk')
   assert.deepEqual(set.command, { kind: 'settings' })
   const template = toMenuTemplate([set], () => {})
   assert.equal(template[0]!.sublabel, MOUSE_SOFTWARE_NOTE)
@@ -489,7 +489,7 @@ test('the menu offers the transforms and the last change only when they exist', 
   assert.deepEqual(labels.slice(2, 7), [
     'Paste the last transcript',
     'Copy the last transcript',
-    'Rewrite the selection or last dictation',
+    'Rewrite the selection or the last thing you said',
     'View the last change',
     'Undo the last change'
   ])

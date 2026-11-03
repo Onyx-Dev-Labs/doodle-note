@@ -1,3 +1,4 @@
+import { FEATURE_NAME } from './dictation-brand'
 /**
  * Pure helpers for the always-visible dictation pill: where it docks, when a
  * "hide for an hour" ends, which microphone a session uses, what the right-click
@@ -285,7 +286,7 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
       ? [
           {
             type: 'normal' as const,
-            label: 'Rewrite the selection or last dictation',
+            label: 'Rewrite the selection or the last thing you said',
             submenu: model.transforms.map((item): PillMenuItem => ({
               type: 'normal',
               label: item.name,
@@ -309,10 +310,10 @@ export function buildPillMenu(model: PillMenuModel): PillMenuItem[] {
         ]
       : []),
     { type: 'separator' },
-    { type: 'normal', label: 'Open dictation settings', command: { kind: 'settings' } },
+    { type: 'normal', label: `Open ${FEATURE_NAME} settings`, command: { kind: 'settings' } },
     {
       type: 'normal',
-      label: `Mouse button for dictation: ${model.mouseButton === null ? 'none' : `${describeMouseButton(model.mouseButton)}, ${model.mouseMode === 'click' ? 'click to start and stop' : 'hold to talk'}`}`,
+      label: `Mouse button for ${FEATURE_NAME}: ${model.mouseButton === null ? 'none' : `${describeMouseButton(model.mouseButton)}, ${model.mouseMode === 'click' ? 'click to start and stop' : 'hold to talk'}`}`,
       sublabel: MOUSE_SOFTWARE_NOTE,
       command: { kind: 'settings' }
     },
@@ -489,7 +490,7 @@ export function describeMouseCaptureFailure(failure: string): string {
     case 'input-monitoring-denied':
       return 'Allow Input Monitoring for DoodleNote Dev first, then try again.'
     case 'helper-unavailable':
-      return 'The dictation helper is not available.'
+      return `The ${FEATURE_NAME} helper is not available.`
     default:
       return 'Could not read a mouse button. Try again.'
   }

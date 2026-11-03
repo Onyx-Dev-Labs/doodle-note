@@ -2,6 +2,8 @@
 
 Development-only. Dictation is compiled in only when the app is built with `DOODLENOTE_CHANNEL=dev`; production builds report it as "not part of this release" and never start the engine, shortcut or helper for it.
 
+> **Name.** In the interface the dictation feature is called **Bark** (the Settings tab, the page title, the pill's tooltip and menu, and its notices). "Dictation" stays the plain-English word for what it does. The name lives in one place, `FEATURE_NAME` in `src/shared/dictation-brand.ts`. File names, settings keys, IPC channels and the macOS permission texts are unchanged.
+
 ## What it does
 
 Press a shortcut in any macOS app, speak, and the recognized text is typed into the field you were using.

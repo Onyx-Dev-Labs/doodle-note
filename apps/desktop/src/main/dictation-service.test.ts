@@ -2054,7 +2054,7 @@ test('the pill menu lists the transforms and the last change; picking one runs i
   h.service.onOverlayAction('menu', null)
   await tick()
   const labels = h.menus[0]!.items.map((item) => item.label)
-  assert.ok(labels.includes('Rewrite the selection or last dictation'))
+  assert.ok(labels.includes('Rewrite the selection or the last thing you said'))
   assert.ok(!labels.includes('Undo the last change'), 'nothing to undo yet')
   const rewrite = h.menus[0]!.items.find((item) => item.label?.startsWith('Rewrite'))!
   assert.deepEqual(

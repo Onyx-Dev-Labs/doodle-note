@@ -1,3 +1,4 @@
+import { FEATURE_NAME } from '../shared/dictation-brand'
 import { randomUUID } from 'node:crypto'
 import type { AppChannel } from '../shared/app-channel'
 import {
@@ -926,7 +927,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message: 'The dictation helper is missing from this build.'
+        message: `The ${FEATURE_NAME} helper is missing from this build.`
       })
       return
     }
@@ -1643,7 +1644,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message: 'The dictation helper is missing from this build.'
+        message: `The ${FEATURE_NAME} helper is missing from this build.`
       })
       return
     }
@@ -1819,7 +1820,7 @@ export class DictationService {
         level: 'error',
         message:
           model.path === 'needs-consent'
-            ? `Allow sending text to ${model.label} in Settings, Dictation, Tidy-up, then try ${def.name} again.`
+            ? `Allow sending text to ${model.label} in Settings, ${FEATURE_NAME}, Tidy-up, then try ${def.name} again.`
             : 'Transforms need a notes model on this Mac or your own provider. Set one up under Notes model.'
       })
       return
@@ -1828,7 +1829,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message: 'The dictation helper is missing from this build.'
+        message: `The ${FEATURE_NAME} helper is missing from this build.`
       })
       return
     }
