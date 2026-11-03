@@ -13,6 +13,7 @@ import * as batch from '../shared/batch-transcription'
 import * as recovery from '../shared/meeting-recovery'
 import * as markdownHtml from '../shared/markdown-html'
 import * as libraryPath from './library-path'
+import * as dictationModel from './dictation-model'
 import { LibraryActivity } from './library-activity'
 import { NotesGenerationJobs } from './notes-generation-job'
 
@@ -21,7 +22,19 @@ interface CloudCall {
   ran: Array<{ system: string; prompt: string }>
 }
 
+/** What the stand-in local engines and model store saw. */
+interface LocalRig {
+  installed: Set<string>
+  engines: Array<{
+    uri: string
+    prepared: number
+    disposed: boolean
+    ran: Array<Record<string, unknown>>
+  }>
+}
+
 interface Service {
+  warmDictationModel(): void
   settings: Record<string, unknown>
   askBusy: boolean
   activateBusy: boolean
@@ -39,7 +52,8 @@ interface Service {
 /** The real NotesService with only Electron and the hosted engine replaced. */
 function createService(
   dir: string,
-  hold?: { release?: () => void }
+  hold?: { release?: () => void },
+  local?: LocalRig
 ): { service: Service; cloud: CloudCall[] } {
   const cloud: CloudCall[] = []
   class StubCloudEngine {
@@ -55,6 +69,37 @@ function createService(
       return { markdown: 'Cleaned text.' }
     }
   }
+  class StubLocalEngine {
+    readonly id: string
+    private readonly record: LocalRig['engines'][number]
+    constructor(options: { modelUri: string }) {
+      this.id = `local:${options.modelUri}`
+      this.record = { uri: options.modelUri, prepared: 0, disposed: false, ran: [] }
+      local?.engines.push(this.record)
+    }
+    async prepare(): Promise<void> {
+      this.record.prepared += 1
+    }
+    async runBounded(
+      _system: string,
+      _prompt: string,
+      control: Record<string, unknown>
+    ): Promise<{ markdown: string }> {
+      this.record.ran.push(control)
+      return { markdown: 'Tidy.' }
+    }
+    async dispose(): Promise<void> {
+      this.record.disposed = true
+    }
+  }
+  class StubModelStore {
+    async find(spec: { id: string }): Promise<string | null> {
+      return local?.installed.has(spec.id) ? `/models/${spec.id}.gguf` : null
+    }
+    async ensure(): Promise<string> {
+      throw new Error('not used')
+    }
+  }
   const deps: Record<string, unknown> = {
     electron: {
       app: { getPath: () => dir },
@@ -66,10 +111,15 @@ function createService(
     './library-ipc': { libraryIpc: { handle: () => {} } },
     './library-path': libraryPath,
     './cloud-models': { fetchCloudModels: () => [] },
+    './dictation-model': dictationModel,
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,
-    '@repo/ai': { ...ai, CloudNotesEngine: StubCloudEngine },
+    '@repo/ai': {
+      ...ai,
+      CloudNotesEngine: StubCloudEngine,
+      ...(local ? { LocalNotesEngine: StubLocalEngine, LocalModelStore: StubModelStore } : {})
+    },
     '@repo/meetings-store': meetings,
     '../shared/notes-api': api,
     '../shared/markdown-html': markdownHtml,
@@ -91,7 +141,9 @@ function createService(
     process,
     console,
     setInterval,
-    clearInterval
+    clearInterval,
+    setTimeout,
+    clearTimeout
   })
   const service = new exports.NotesService!(dir, () => {}, { readAll: () => [] })
   return { service, cloud }
@@ -235,4 +287,90 @@ test('cleanup never writes settings', async () => {
     service.runDictationCleanup('byok', 's', 'p', new AbortController().signal, null)
   )
   assert.deepEqual(fs.readdirSync(dir).sort(), before, 'no settings.json (or anything) was created')
+})
+
+const rig = (...installed: string[]): LocalRig => ({ installed: new Set(installed), engines: [] })
+
+test('local cleanup asks for a small context, a short answer and a low temperature', async () => {
+  const local = rig('qwen3-4b-instruct')
+  const { service } = createService(sandbox(), undefined, local)
+  service.settings = { engineChoice: 'local', activeLocalModelId: 'qwen3-4b-instruct' }
+  await service.runDictationCleanup(
+    'local',
+    'Tidy.',
+    'um hello there',
+    new AbortController().signal,
+    null
+  )
+  const control = local.engines[0]!.ran[0]!
+  assert.equal(control.phase, 'writing')
+  assert.ok((control.contextSize as number) <= 2048, `context ${String(control.contextSize)}`)
+  assert.ok((control.maxTokens as number) <= 512)
+  assert.equal(control.temperature, 0.2)
+})
+
+test('cleanup runs on the quickest installed model, leaving the notes model alone', async () => {
+  const local = rig('gemma-3-12b-it', 'qwen3-4b-instruct')
+  const { service } = createService(sandbox(), undefined, local)
+  // Notes run on the big model; dictation should not swap it out for the small one.
+  service.settings = { engineChoice: 'local', activeLocalModelId: 'gemma-3-12b-it' }
+  await service.runDictationCleanup('local', 'Tidy.', 'hello', new AbortController().signal, null)
+  assert.equal(local.engines.length, 1)
+  assert.match(local.engines[0]!.uri, /Qwen3-4B/, 'the small model ran it')
+  assert.equal(local.engines[0]!.disposed, false)
+  assert.equal(service.dictationCleanupOptions().localModelLabel, 'Fast', 'and the page says so')
+  // A second cleanup reuses that engine.
+  await service.runDictationCleanup('local', 'Tidy.', 'again', new AbortController().signal, null)
+  assert.equal(local.engines.length, 1)
+  assert.equal(local.engines[0]!.ran.length, 2)
+})
+
+test('when the quickest model is the one notes use, the same engine is shared', async () => {
+  const local = rig('qwen3-4b-instruct')
+  const { service } = createService(sandbox(), undefined, local)
+  service.settings = { engineChoice: 'local', activeLocalModelId: 'qwen3-4b-instruct' }
+  await service.runDictationCleanup('local', 'Tidy.', 'one', new AbortController().signal, null)
+  await service.runDictationCleanup('local', 'Tidy.', 'two', new AbortController().signal, null)
+  assert.equal(local.engines.length, 1)
+})
+
+test('the model is loaded ahead of time, once, and cleanup waits for it rather than being refused', async () => {
+  const local = rig('qwen3-4b-instruct')
+  const { service } = createService(sandbox(), undefined, local)
+  service.settings = { engineChoice: 'local', activeLocalModelId: 'qwen3-4b-instruct' }
+  service.warmDictationModel()
+  service.warmDictationModel()
+  assert.equal(service.askBusy, true, 'the lease is held while loading')
+  // Cleanup starts while the load is still running.
+  const cleaned = await service.runDictationCleanup(
+    'local',
+    'Tidy.',
+    'hello',
+    new AbortController().signal,
+    null
+  )
+  assert.equal(cleaned.markdown, 'Tidy.')
+  assert.equal(local.engines.length, 1)
+  assert.equal(local.engines[0]!.prepared, 1, 'loaded once')
+  assert.equal(service.askBusy, false)
+})
+
+test('warming is skipped, not queued, while another model task holds the lease', async () => {
+  const local = rig('qwen3-4b-instruct')
+  const { service } = createService(sandbox(), undefined, local)
+  service.settings = { engineChoice: 'local', activeLocalModelId: 'qwen3-4b-instruct' }
+  service.askBusy = true
+  service.warmDictationModel()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(local.engines.length, 0)
+  assert.equal(service.askBusy, true, 'the other task keeps its lease')
+})
+
+test('a warm-up with no model installed fails quietly and releases the lease', async () => {
+  const local = rig()
+  const { service } = createService(sandbox(), undefined, local)
+  service.settings = { engineChoice: 'local' }
+  service.warmDictationModel()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(service.askBusy, false)
 })

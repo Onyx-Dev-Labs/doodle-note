@@ -83,6 +83,7 @@ function harness(
     cleanup?: CleanupRunner
     access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
+    warm?: () => void
     modelOptions?: {
       localModelLabel: string | null
       byok: { provider: string; model: string; hasKey: boolean } | null
@@ -94,6 +95,8 @@ function harness(
     enabled: true,
     // The older tests are about raw words moving through; tidy-up has its own tests.
     tidyLevel: 'off',
+    // And those that use the model use short phrases: the short-phrase rule has its own tests.
+    fullTidyMinWords: 0,
     ...options.settings
   }
   const clock = { now: 1_000_000 }
@@ -276,6 +279,7 @@ function harness(
         cleanupCalls.push({ mode, consent, signal })
         return 'Cleaned.'
       }),
+    ...(options.warm ? { warmCleanupModel: options.warm } : {}),
     cleanupOptions: () => options.modelOptions ?? { localModelLabel: 'Test model', byok: null },
     microphoneAccess: () => perms.mic,
     requestMicrophone: async () => {
@@ -2316,4 +2320,49 @@ test('app names and icons for the style lists come from the helper once, then fr
   await h.service.appInfo(['com.tinyspeck.slackmacgap'])
   assert.equal(h.helper.appInfoCalls.length, 3, 'asked again after ten minutes')
   assert.deepEqual(await h.service.appInfo('nope'), {})
+})
+
+test('a short phrase skips the model and is typed at once, even when the session expected one', async () => {
+  const h = harness({ settings: { tidyLevel: 'full', fullTidyMinWords: 12 } })
+  await speak(h, 'sounds good see you at three')
+  assert.equal(h.cleanupCalls.length, 0, 'no model call')
+  assert.equal(h.delivered.length, 1)
+  assert.equal(h.delivered[0], 'Sounds good see you at three.')
+  assert.equal(h.service.phase, 'notice')
+})
+
+test('a long phrase still goes through the model', async () => {
+  const h = harness({ settings: { tidyLevel: 'full', fullTidyMinWords: 12 } })
+  await speak(
+    h,
+    'um so I was thinking that we should probably move the meeting to Thursday afternoon'
+  )
+  assert.equal(h.cleanupCalls.length, 1)
+})
+
+test('the local model starts loading as the dictation starts, and only when a model will be used', async () => {
+  const warmed: number[] = []
+  const withModel = harness({ settings: { tidyLevel: 'full' }, warm: () => void warmed.push(1) })
+  withModel.service.toggle()
+  await tick()
+  assert.equal(warmed.length, 1)
+  const light = harness({ settings: { tidyLevel: 'light' }, warm: () => void warmed.push(1) })
+  light.service.toggle()
+  await tick()
+  assert.equal(warmed.length, 1, 'Light never needs the model')
+  const provider = harness({
+    settings: {
+      tidyLevel: 'full',
+      cleanupMode: 'byok',
+      byokConsent: { provider: 'openai', model: 'gpt-x' }
+    },
+    modelOptions: {
+      localModelLabel: null,
+      byok: { provider: 'openai', model: 'gpt-x', hasKey: true }
+    },
+    warm: () => void warmed.push(1)
+  })
+  provider.service.toggle()
+  await tick()
+  assert.equal(warmed.length, 1, 'a hosted provider is not warmed')
 })

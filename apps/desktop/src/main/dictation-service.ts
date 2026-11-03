@@ -18,6 +18,7 @@ import {
 import {
   MAX_DICTIONARY_ENTRIES,
   mergeLearned,
+  wordsOf,
   sanitizePhrase,
   type DictionaryEntry,
   type LearnedPair
@@ -190,6 +191,8 @@ export interface DictationDeps {
   /** Bring the app's dictation settings page forward. */
   openSettings(): void
   now(): number
+  /** Begin loading the local cleanup model; called as a dictation starts that expects to use it. */
+  warmCleanupModel?(): void
   /** Run `tick` every `ms` until the returned function is called. Defaults to setInterval. */
   every?(ms: number, tick: () => void): () => void
   log(line: string): void
@@ -995,11 +998,14 @@ export class DictationService {
     this.deps.onMicHeld(true)
     this.micOpen = false
     this.level = 0
+    const expectedEngine = modelEngineFor(context)
+    // Load the local model while the person speaks, so it is ready when they stop.
+    if (expectedEngine === 'local') this.deps.warmCleanupModel?.()
     this.dispatch({
       type: 'start',
       trigger,
       // Only the model steps need the engine path; the rest is instant and runs in place.
-      cleanupMode: modelEngineFor(context),
+      cleanupMode: expectedEngine,
       nowMs: now,
       doubleTap: settings.handsFreeDoubleTap,
       micFellBack: microphone.fellBack,
@@ -1167,11 +1173,18 @@ export class DictationService {
     const plan = planDictation(
       context.settings,
       context.modelOptions,
-      context.targetDescription?.bundleId
+      context.targetDescription?.bundleId,
+      wordsOf(trimmed).length
     )
     context.plan = plan
     if (!trimmed || plan.steps === 0) {
-      this.dispatch({ type: 'final', gen, text: trimmed ? deterministicText(trimmed, plan) : text })
+      // steps: 0 says no model call is coming, even if the session began expecting one.
+      this.dispatch({
+        type: 'final',
+        gen,
+        text: trimmed ? deterministicText(trimmed, plan) : text,
+        steps: 0
+      })
       return
     }
     this.dispatch({

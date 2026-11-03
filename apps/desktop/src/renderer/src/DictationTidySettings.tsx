@@ -100,7 +100,8 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
           <span className="cal-row-main">
             <span className="cal-row-label">Model for Full tidy-up and transforms</span>
             <span className="cal-row-sub">
-              {model.path === 'local' && `Uses ${model.label} on this Mac. Nothing leaves it.`}
+              {model.path === 'local' &&
+                `Uses ${model.label} on this Mac, the quickest model you have installed. Nothing leaves it. The Fast model under Notes model is the quickest to download and run.`}
               {model.path === 'byok' &&
                 `Uses your provider (${model.label}). Only the finished text is sent, never audio.`}
               {model.path === 'needs-consent' &&
@@ -110,6 +111,33 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
             </span>
           </span>
         </div>
+        {settings.tidyLevel === 'full' && (
+          <div className="cal-row">
+            <span className="cal-row-main">
+              <span className="cal-row-label">Use the model for</span>
+              <span className="cal-row-sub">
+                A short phrase gets the instant Light tidy-up instead, because a model adds a wait
+                and rarely changes much. An auto-applied transform still runs on every dictation.
+              </span>
+            </span>
+            <select
+              aria-label="Shortest dictation that uses the model"
+              value={settings.fullTidyMinWords}
+              onChange={(event) => void update({ fullTidyMinWords: Number(event.target.value) })}
+            >
+              {[0, 8, 12, 20, 30].map((words) => (
+                <option key={words} value={words}>
+                  {words === 0 ? 'Every dictation' : `${words} words or more`}
+                </option>
+              ))}
+              {![0, 8, 12, 20, 30].includes(settings.fullTidyMinWords) && (
+                <option value={settings.fullTidyMinWords}>
+                  {settings.fullTidyMinWords} words or more
+                </option>
+              )}
+            </select>
+          </div>
+        )}
         {byok && (
           <div className="cal-row">
             <span className="cal-row-main">

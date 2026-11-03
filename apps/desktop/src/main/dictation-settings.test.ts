@@ -235,3 +235,16 @@ test('the dictionary persists, is validated on load, and a settings patch cannot
     0
   )
 })
+
+test('the word threshold for the model defaults to 12 and rejects nonsense', () => {
+  assert.equal(normalizeDictationSettings({}).fullTidyMinWords, 12)
+  assert.equal(normalizeDictationSettings({ fullTidyMinWords: 0 }).fullTidyMinWords, 0)
+  assert.equal(normalizeDictationSettings({ fullTidyMinWords: 20 }).fullTidyMinWords, 20)
+  for (const bad of [-1, 1.5, 201, '12', null, Number.NaN]) {
+    assert.equal(
+      normalizeDictationSettings({ fullTidyMinWords: bad }).fullTidyMinWords,
+      12,
+      String(bad)
+    )
+  }
+})

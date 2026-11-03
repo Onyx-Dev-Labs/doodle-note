@@ -142,6 +142,7 @@ export function createDictationHost(options: DictationHostOptions): {
       )
       return result.markdown
     },
+    warmCleanupModel: () => options.notes()?.warmDictationModel(),
     cleanupOptions: () =>
       options.notes()?.dictationCleanupOptions() ?? { localModelLabel: null, byok: null },
     microphoneAccess,

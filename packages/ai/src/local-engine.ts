@@ -222,12 +222,11 @@ export class LocalNotesEngine implements NotesEngine {
       signal.throwIfAborted()
       const { LlamaChatSession } = await loadNodeLlamaCpp()
       const started = Date.now()
+      const contextSize = control?.contextSize ?? this.options.contextSize ?? 16384
 
       let context: Awaited<ReturnType<LlamaModel['createContext']>>
       try {
-        context = await this.model!.createContext({
-          contextSize: this.options.contextSize ?? 16384
-        })
+        context = await this.model!.createContext({ contextSize })
       } catch (err) {
         signal.throwIfAborted()
         if (this.forceCpu) throw err
@@ -239,9 +238,7 @@ export class LocalNotesEngine implements NotesEngine {
         this.model = null
         this.llama = null
         await this.prepareModel(signal, err)
-        context = await this.model!.createContext({
-          contextSize: this.options.contextSize ?? 16384
-        })
+        context = await this.model!.createContext({ contextSize })
       }
       try {
         signal.throwIfAborted()
@@ -271,7 +268,10 @@ export class LocalNotesEngine implements NotesEngine {
           : undefined
         if (bounded) assertRequestFits(systemPrompt, userMessage, {
           contextWindowTokens: context.contextSize,
-          outputReserveTokens: GENERATION_LIMITS.writing.maxTokens,
+          outputReserveTokens: Math.min(
+            control?.maxTokens ?? Infinity,
+            GENERATION_LIMITS.writing.maxTokens
+          ),
           safetyMarginTokens: 256,
           accounting: 'model-tokenizer',
           countInputTokens: (_system, user) => session.chatWrapper.generateContextState({
@@ -281,8 +281,11 @@ export class LocalNotesEngine implements NotesEngine {
         signal.throwIfAborted()
         const result = await session.promptWithMeta(prompt?.user ?? userMessage, {
           signal,
-          maxTokens: GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens,
-          temperature: 0.3,
+          maxTokens: Math.min(
+            control?.maxTokens ?? Infinity,
+            GENERATION_LIMITS[control?.phase ?? 'writing'].maxTokens
+          ),
+          temperature: control?.temperature ?? 0.3,
           onTextChunk: (text) => {
             control?.onActivity?.()
             onToken?.(text)

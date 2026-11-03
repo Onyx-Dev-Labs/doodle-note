@@ -23,6 +23,7 @@ const consent = { provider: 'openai', model: 'gpt-x' }
 const settings = (over: Partial<DictationSettings> = {}): DictationSettings => ({
   ...DEFAULT_DICTATION_SETTINGS,
   enabled: true,
+  fullTidyMinWords: 0,
   ...over
 })
 
@@ -359,4 +360,27 @@ test('the dictionary applies to model output, to the fallback, and to a transfor
   assert.ok(!/Alec/.test(outcome.text))
   if (outcome.change)
     assert.equal(outcome.change.after, outcome.text, 'View and Undo see what was typed')
+})
+
+test('Full tidy-up skips the model for a short phrase and uses it for a long one', () => {
+  const full = settings({ tidyLevel: 'full', fullTidyMinWords: 12 })
+  assert.equal(planDictation(full, local, null, 6).tidy, 'light', 'short: instant')
+  assert.equal(planDictation(full, local, null, 6).steps, 0)
+  assert.equal(planDictation(full, local, null, 12).tidy, 'full', 'at the limit: model')
+  assert.equal(planDictation(full, local, null, 40).steps, 1)
+  assert.equal(planDictation(full, local, null).tidy, 'full', 'unknown length counts as long')
+  const always = settings({ tidyLevel: 'full', fullTidyMinWords: 0 })
+  assert.equal(planDictation(always, local, null, 1).tidy, 'full', '0 means always')
+})
+
+test('an auto-applied transform still runs on a short phrase', () => {
+  const plan = planDictation(
+    settings({ tidyLevel: 'full', fullTidyMinWords: 12, transforms: withTransforms('polish') }),
+    local,
+    null,
+    3
+  )
+  assert.equal(plan.tidy, 'light')
+  assert.ok(plan.transform, "the transform is the person's explicit choice")
+  assert.equal(plan.steps, 1)
 })

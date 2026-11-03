@@ -414,7 +414,9 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         fallbackText: event.fallback ?? text,
         cleanupSteps: Math.max(1, event.steps ?? 1)
       }
-      if (active.cleanupMode === 'raw') {
+      // Zero model steps (the plan skipped the model for a short phrase) delivers directly,
+      // even in a session that started expecting one.
+      if (active.cleanupMode === 'raw' || event.steps === 0) {
         return {
           state: { ...state, phase: 'delivering', active: { ...withRaw, deliverText: text } },
           effects: [clear, { type: 'deliver', gen: active.gen, text }]

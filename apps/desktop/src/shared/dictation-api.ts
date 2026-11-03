@@ -52,6 +52,11 @@ export interface DictationSettings {
   cleanupMode: CleanupMode
   /** How much a brain dump is tidied before it is inserted. */
   tidyLevel: TidyLevel
+  /**
+   * Full tidy-up uses the model only for dictations of at least this many words;
+   * shorter ones get the instant Light tidy-up. 0 means always use the model.
+   */
+  fullTidyMinWords: number
   /** The tone per app category, applied after tidy-up. */
   styles: StyleChoices
   /** Apps the user placed in a category, over the built-in list. */
@@ -113,6 +118,7 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   holdKey: 'off',
   cleanupMode: 'raw',
   tidyLevel: 'light',
+  fullTidyMinWords: 12,
   styles: DEFAULT_STYLES,
   styleApps: EMPTY_STYLE_APPS,
   transforms: DEFAULT_TRANSFORM_SETTINGS,

@@ -1,3 +1,4 @@
+import { dictationBudget, fastestInstalled } from './dictation-model'
 import { NotesGenerationJobs } from './notes-generation-job'
 import { libraryActivity } from './library-activity'
 import {
@@ -127,6 +128,18 @@ export class NotesService {
   }
   private readonly modelStore: LocalModelStore
   private settings: StoredSettings
+  /**
+   * Dictation's own engine, used only when the quickest installed model is not the
+   * one notes run on. Freed after ten idle minutes so a second model does not sit in memory.
+   */
+  private dictationEngine: LocalNotesEngine | null = null
+  private dictationEngineModelId: string | null = null
+  private dictationEngineTimer: NodeJS.Timeout | null = null
+  /** The model dictation last chose, so the settings page can name it without touching a file. */
+  private dictationSpec: LocalModelSpec | null = null
+  private dictationSpecAt = 0
+  /** A model load started while the person speaks; cleanup waits for it. */
+  private dictationWarm: Promise<void> | null = null
   private localEngine: LocalNotesEngine | null = null
   private localEngineModelId: string | null = null
   private localEnginePath: string | null = null
@@ -221,6 +234,7 @@ export class NotesService {
     } catch {
       // Shutting down anyway.
     }
+    await this.disposeDictationEngine()
   }
 
   /* ---- models ---- */
@@ -704,6 +718,8 @@ export class NotesService {
     signal: AbortSignal,
     consent: { provider: string; model: string } | null
   ): Promise<{ markdown: string; engineId: string }> {
+    // A model load begun while the person was speaking holds the lease; let it finish first.
+    if (this.dictationWarm) await this.dictationWarm.catch(() => {})
     if (this.askBusy || this.enhanceBusy || this.activateBusy)
       throw new DictationCleanupError('busy', 'The notes model is busy with another task.')
     this.askBusy = true
@@ -711,9 +727,17 @@ export class NotesService {
       const settingsBefore = JSON.stringify(this.settings)
       const engine = await this.pickDictationEngine(mode, consent)
       signal.throwIfAborted()
+      // Cleanup is a sentence or a paragraph: a small context, a short answer and a
+      // low temperature are much quicker than the meeting-sized defaults.
+      const control = {
+        signal,
+        phase: 'writing' as const,
+        ...dictationBudget(system, prompt),
+        temperature: 0.2
+      }
       const result = engine.runBounded
-        ? await engine.runBounded(system, prompt, { signal, phase: 'writing' })
-        : await engine.runRaw(system, prompt, undefined, { signal, phase: 'writing' })
+        ? await engine.runBounded(system, prompt, control)
+        : await engine.runRaw(system, prompt, undefined, control)
       signal.throwIfAborted()
       if (settingsBefore !== JSON.stringify(this.settings))
         throw new DictationCleanupError('failed', 'Model settings changed during cleanup.')
@@ -758,13 +782,75 @@ export class NotesService {
         ...(model ? { model } : {})
       })
     }
-    const selected = LOCAL_MODELS.find((m) => m.id === this.settings.activeLocalModelId)
-    for (const spec of selected ? [selected] : LOCAL_MODELS) {
+    // The quickest installed model that fits this Mac, not necessarily the one notes use.
+    const installed: Array<{ spec: LocalModelSpec; path: string }> = []
+    for (const spec of LOCAL_MODELS) {
       if (spec.minRamGB > totalRamGB()) continue
-      const modelPath = await this.modelStore.find(spec)
-      if (modelPath) return this.obtainLocalEngine(spec, modelPath)
+      const path = await this.modelStore.find(spec)
+      if (path) installed.push({ spec, path })
     }
-    throw new DictationCleanupError('no-model', 'No local notes model is installed.')
+    const fastest = fastestInstalled(installed.map((item) => item.spec))
+    const chosen = installed.find((item) => item.spec.id === fastest?.id)
+    if (!chosen) throw new DictationCleanupError('no-model', 'No local notes model is installed.')
+    this.dictationSpec = chosen.spec
+    this.dictationSpecAt = Date.now()
+    return this.obtainDictationEngine(chosen.spec, chosen.path)
+  }
+
+  /**
+   * The notes engine when it already runs this model; otherwise a dedicated one, so
+   * dictating never swaps the model notes use (a reload each way).
+   */
+  private obtainDictationEngine(spec: LocalModelSpec, modelPath: string): LocalNotesEngine {
+    if (this.localEngineModelId === spec.id || this.settings.activeLocalModelId === spec.id) {
+      return this.obtainLocalEngine(spec, modelPath)
+    }
+    if (!this.dictationEngine || this.dictationEngineModelId !== spec.id) {
+      void this.dictationEngine?.dispose().catch(() => {})
+      this.dictationEngine = new LocalNotesEngine({ modelUri: spec.uri, modelPath })
+      this.dictationEngineModelId = spec.id
+    }
+    if (this.dictationEngineTimer) clearTimeout(this.dictationEngineTimer)
+    this.dictationEngineTimer = setTimeout(() => void this.disposeDictationEngine(), 10 * 60_000)
+    this.dictationEngineTimer.unref?.()
+    return this.dictationEngine
+  }
+
+  private async disposeDictationEngine(): Promise<void> {
+    if (this.dictationEngineTimer) clearTimeout(this.dictationEngineTimer)
+    this.dictationEngineTimer = null
+    const engine = this.dictationEngine
+    this.dictationEngine = null
+    this.dictationEngineModelId = null
+    try {
+      await engine?.dispose()
+    } catch {
+      // Freed anyway.
+    }
+  }
+
+  /**
+   * Load the local cleanup model now, while the person is still speaking, so it is
+   * ready when they stop. Skipped (never queued) when a model task is running;
+   * holds the shared lease while loading so nothing else starts on a half-loaded
+   * model. A failure here is silent: the real cleanup reports its own.
+   */
+  warmDictationModel(): void {
+    if (this.dictationWarm || this.askBusy || this.enhanceBusy || this.activateBusy) return
+    this.askBusy = true
+    const work = (async () => {
+      try {
+        const engine = await this.pickDictationEngine('local', null)
+        if (engine instanceof LocalNotesEngine) await engine.prepare()
+      } catch {
+        // Cleanup will say what is wrong, if it is needed at all.
+      } finally {
+        this.askBusy = false
+      }
+    })()
+    this.dictationWarm = work.finally(() => {
+      this.dictationWarm = null
+    })
   }
 
   /** Cheap, settings-only view for the Dictation panel; touches no model file. */
@@ -774,8 +860,10 @@ export class NotesService {
   } {
     const { activeLocalModelId, engineChoice, cloud } = this.settings
     const local = LOCAL_MODELS.find((m) => m.id === activeLocalModelId)
+    // The model dictation last used, once it has used one; until then the notes model.
+    const chosen = this.dictationSpec && Date.now() - this.dictationSpecAt < 60 * 60_000
     return {
-      localModelLabel: local?.label ?? null,
+      localModelLabel: (chosen ? this.dictationSpec?.label : local?.label) ?? null,
       byok:
         engineChoice === 'cloud' && cloud
           ? {

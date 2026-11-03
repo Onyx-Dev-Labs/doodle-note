@@ -1,3 +1,4 @@
+import * as dictationModel from './dictation-model'
 import { EventEmitter } from 'node:events'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -37,6 +38,7 @@ test('service IPC owns preparation, scopes cancel/progress, preserves sources an
     },
     './library-path': libraryPath,
     './cloud-models': { fetchCloudModels: () => [] },
+    './dictation-model': dictationModel,
     './model-paths': { modelSearchDirectories: () => [dir] },
     'node:fs': fs,
     'node:path': path,

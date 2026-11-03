@@ -81,12 +81,16 @@ export interface DictationPlan {
 export function planDictation(
   settings: DictationSettings,
   options: ModelOptions,
-  bundleId: string | null | undefined
+  bundleId: string | null | undefined,
+  /** Words in what was said, once known. Unknown counts as long enough. */
+  wordCount?: number
 ): DictationPlan {
   const model = resolveModel(options, settings)
   const category = categoryForApp(bundleId, settings.styleApps)
+  // A short phrase gains little from a model and waits seconds for it: Light is instant.
+  const shortPhrase = wordCount !== undefined && wordCount < settings.fullTidyMinWords
   const tidy: TidyLevel =
-    settings.tidyLevel === 'full' && !model.engine ? 'light' : settings.tidyLevel
+    settings.tidyLevel === 'full' && (!model.engine || shortPhrase) ? 'light' : settings.tidyLevel
   const wanted = settings.transforms.enabled && settings.transforms.autoApply
   const transform =
     wanted && model.engine

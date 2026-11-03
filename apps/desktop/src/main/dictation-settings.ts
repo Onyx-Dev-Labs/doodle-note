@@ -111,6 +111,13 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
       raw.showStatusMessages === undefined
         ? defaults.showStatusMessages
         : raw.showStatusMessages === true,
+    fullTidyMinWords:
+      typeof raw.fullTidyMinWords === 'number' &&
+      Number.isInteger(raw.fullTidyMinWords) &&
+      raw.fullTidyMinWords >= 0 &&
+      raw.fullTidyMinWords <= 200
+        ? raw.fullTidyMinWords
+        : defaults.fullTidyMinWords,
     dictionary: normalizeDictionary(raw.dictionary),
     learnFromEdits:
       raw.learnFromEdits === undefined ? defaults.learnFromEdits : raw.learnFromEdits === true,
