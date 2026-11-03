@@ -112,3 +112,27 @@ test('macOS-only settings are gated out of the Windows UI', () => {
     /detect\?\.platform === 'darwin'[\s\S]*Capture without screen permission/
   )
 })
+
+const indexSource = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+
+test("the production Mac package ships Bark's typing helper beside the engine", () => {
+  assert.match(builderConfig, /from: \.\.\/\.\.\/engine\/\.build\/release\/dictation-helper/)
+  assert.match(builderConfig, /to: engine\/dictation-helper/)
+  // The app looks for it in Resources/engine when packaged.
+  assert.match(indexSource, /join\(process\.resourcesPath, 'engine', 'dictation-helper'\)/)
+})
+
+test('the microphone permission text covers dictation as well as meetings', () => {
+  const text = /NSMicrophoneUsageDescription: (.+)/.exec(builderConfig)?.[1] ?? ''
+  assert.match(text, /meeting audio/)
+  assert.match(text, /dictation/i)
+  assert.match(text, /on-device/)
+  assert.match(text, /Nothing leaves your Mac/)
+})
+
+test('Bark is no longer limited to the development build, and still needs macOS and the engine', () => {
+  const block = /dictation = createDictationHost\(\{[\s\S]*?\n {2}\}\)/.exec(indexSource)?.[0] ?? ''
+  assert.ok(block.length > 0, 'the dictation host options were found')
+  assert.doesNotMatch(block, /APP_CHANNEL\s*===\s*'dev'/)
+  assert.match(block, /process\.platform === 'darwin' && engine instanceof EngineProcess/)
+})

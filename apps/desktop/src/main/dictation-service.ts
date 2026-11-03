@@ -360,7 +360,8 @@ export class DictationService {
   /** Apply persisted settings: register shortcuts, arm hold-to-talk. */
   async start(): Promise<void> {
     await this.applySettings()
-    void this.refreshDevices()
+    // Off means idle: do not even list microphones until the person turns it on.
+    if (this.deps.settings.get().enabled) void this.refreshDevices()
   }
 
   async dispose(): Promise<void> {

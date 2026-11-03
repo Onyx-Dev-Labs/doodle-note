@@ -1,6 +1,6 @@
 # System-wide dictation: DoodleNote Dev build
 
-Development-only. Dictation is compiled in only when the app is built with `DOODLENOTE_CHANNEL=dev`; production builds report it as "not part of this release" and never start the engine, shortcut or helper for it.
+From 0.4.38 Bark ships in the production macOS app, **off until the person turns it on** (Settings, Bark). This page describes the feature and how the isolated development build (`DOODLENOTE_CHANNEL=dev`) is used to test it; that build keeps its own profile, bundle id and permissions so it never touches the installed app. Production builds do not write the timing log (`dictation-metrics.jsonl`), and Windows reports Bark as macOS-only.
 
 > **Name.** In the interface the dictation feature is called **Bark** (the Settings tab, the page title, the pill's tooltip and menu, and its notices). "Dictation" stays the plain-English word for what it does. The name lives in one place, `FEATURE_NAME` in `src/shared/dictation-brand.ts`. File names, settings keys, IPC channels and the macOS permission texts are unchanged.
 

@@ -677,11 +677,9 @@ app.whenReady().then(async () => {
     userData: app.getPath('userData'),
     logsDir: app.getPath('logs'),
     helperPath: resolveDictationHelperBinary(),
-    // Unfinished feature: gated to the development lineage until it ships.
-    engine:
-      APP_CHANNEL === 'dev' && process.platform === 'darwin' && engine instanceof EngineProcess
-        ? engine
-        : null,
+    // Bark needs the Swift engine for speech and the helper for typing: macOS only.
+    // It is off until the person turns it on in Settings.
+    engine: process.platform === 'darwin' && engine instanceof EngineProcess ? engine : null,
     notes: () => notesService,
     meetingBusy: () => recording.busy || libraryActivity.moving,
     setMicHeld: (held) => {

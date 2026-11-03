@@ -114,9 +114,7 @@ export function DictationSettings(): React.JSX.Element {
       <section className="keys-section">
         <h3>{FEATURE_NAME}</h3>
         <p className="models-sub">
-          {status.channel === 'dev'
-            ? `${FEATURE_NAME}, DoodleNote's dictation, is available on macOS only for now.`
-            : `${FEATURE_NAME}, DoodleNote's dictation, is in development and is not part of this release.`}
+          {`${FEATURE_NAME}, DoodleNote's dictation, is available on macOS only for now.`}
         </p>
       </section>
     )
