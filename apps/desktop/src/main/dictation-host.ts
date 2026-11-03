@@ -5,6 +5,7 @@ import type { WebContents } from 'electron'
 import type { AppChannel } from '../shared/app-channel'
 import {
   DICTATION_CANCEL_CHANNEL,
+  DICTATION_APP_INFO_CHANNEL,
   DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL,
   DICTATION_DICTIONARY_ADD_CHANNEL,
   DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL,
@@ -189,6 +190,9 @@ export function createDictationHost(options: DictationHostOptions): {
   )
   ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
     trusted(event) ? service.setSettings(update ?? {}) : null
+  )
+  ipcMain.handle(DICTATION_APP_INFO_CHANNEL, (event, ids: unknown) =>
+    trusted(event) ? service.appInfo(ids) : {}
   )
   ipcMain.handle(DICTATION_DICTIONARY_ADD_CHANNEL, (event, entry: unknown) => {
     const value = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>

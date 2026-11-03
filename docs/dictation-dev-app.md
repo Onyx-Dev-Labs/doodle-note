@@ -126,6 +126,10 @@ The category comes from the focused app's bundle id, read by the helper when the
 
 A "Cheerful" tone was not built: it would mean swapping a full stop for an exclamation mark or adding emoji, which turns "my dog died." into "my dog died!". A tone shift needs understanding of meaning, so it belongs in a transform (see Friendly email), not in a deterministic rule.
 
+### App names and icons on the Style list
+
+Each app in a category shows its real icon and name instead of its bundle identifier ("Built in" or "Added by you" under it; the identifier is the hover tooltip). The page asks the helper once per list change (`app-info`: `NSWorkspace` finds the app from its bundle id; the name is its display name, the icon a 64 px PNG), and the app remembers answers for ten minutes. An app that is not installed on this Mac gets a dimmed letter tile and the name from a small built-in table (`src/shared/dictation-app-names.ts`, which a test keeps complete for every built-in app). Only the app bundle's own name and icon are read.
+
 ### Transforms
 
 Named rewrite prompts, opt-in (Settings, Dictation, Transforms, "Turn on transforms"). Built in, with our own prompts: Polish, Make it shorter, Friendly email, Bullet summary, and Turn it into a prompt for an AI assistant. You can edit any of them, delete them, create your own (a name and your own prompt, up to 20 transforms), give each an optional global shortcut, and reset to the defaults. Your prompts and shortcuts are stored in `dictation.json`, which never holds dictated text.
@@ -257,7 +261,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 920 desktop tests (918 pass, 2 skipped) with typecheck and lint clean, plus 50 Swift tests for the hold-key and mouse logic, delivery helpers, the text locator and app icons (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (16), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 924 desktop tests (922 pass, 2 skipped) with typecheck and lint clean, plus 52 Swift tests for the hold-key and mouse logic, delivery helpers, the text locator and app icons (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (16), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.

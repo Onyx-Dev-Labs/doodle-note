@@ -58,6 +58,7 @@ interface Harness {
     accessibilityGrantedAfterAsk: boolean | null
     inputMonitoringGrantedAfterAsk: boolean | null
     permissionAsks: string[]
+    appInfoCalls: string[][]
     exitListener: (() => void) | null
     holdKeys: HoldKey[]
   }
@@ -153,6 +154,7 @@ function harness(
     accessibilityGrantedAfterAsk: false,
     inputMonitoringGrantedAfterAsk: false,
     permissionAsks: [],
+    appInfoCalls: [],
     exitListener: null,
     holdKeys: []
   }
@@ -195,6 +197,12 @@ function harness(
         fnKeyAction: helper.fnKeyAction
       }),
       snapshot: async () => helper.target,
+      appInfo: async (ids) => {
+        helper.appInfoCalls.push(ids)
+        return ids
+          .filter((id) => id === 'com.tinyspeck.slackmacgap')
+          .map((bundleId) => ({ bundleId, name: 'Slack', icon: 'data:image/png;base64,SLACK' }))
+      },
       appIcon: async (appPath) => {
         icons.calls.push(appPath)
         if (icons.fails) throw new Error('no icon')
@@ -2290,4 +2298,22 @@ test('hand-made entries: add, replace, remove, and the page cannot overwrite the
   assert.equal(h.settings.dictionary.length, 1)
   h.service.clearLearnedEntries()
   assert.equal(h.settings.dictionary.length, 1, 'hand-made entries survive')
+})
+
+test('app names and icons for the style lists come from the helper once, then from memory', async () => {
+  const h = harness()
+  const first = await h.service.appInfo(['com.tinyspeck.slackmacgap', 'com.example.missing', 7])
+  assert.deepEqual(first, {
+    'com.tinyspeck.slackmacgap': { name: 'Slack', icon: 'data:image/png;base64,SLACK' },
+    'com.example.missing': { name: null, icon: null }
+  })
+  await h.service.appInfo(['com.tinyspeck.slackmacgap', 'com.example.missing', 'com.new.app'])
+  assert.deepEqual(h.helper.appInfoCalls, [
+    ['com.tinyspeck.slackmacgap', 'com.example.missing'],
+    ['com.new.app']
+  ])
+  h.clock.now += 11 * 60_000
+  await h.service.appInfo(['com.tinyspeck.slackmacgap'])
+  assert.equal(h.helper.appInfoCalls.length, 3, 'asked again after ten minutes')
+  assert.deepEqual(await h.service.appInfo('nope'), {})
 })

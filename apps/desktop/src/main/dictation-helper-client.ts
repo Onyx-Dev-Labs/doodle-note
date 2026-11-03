@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import type { Readable, Writable } from 'node:stream'
 import type {
+  AppInfoEntry,
   DeliveryGuards,
   HelperDelivery,
   HelperDeliveryTimings,
@@ -227,6 +228,24 @@ export class DictationHelperClient {
 
   watchStop(watchId: string): void {
     if (this.child) void this.request('watch-stop', { watchId }, this.timeouts.hold, false)
+  }
+
+  /** The name and icon of each installed app among these identifiers. Empty when the helper cannot say. */
+  async appInfo(bundleIds: string[]): Promise<AppInfoEntry[]> {
+    const reply = await this.request('app-info', { bundleIds }, this.timeouts.snapshot)
+    if (!reply?.ok || !Array.isArray(reply.apps)) return []
+    const out: AppInfoEntry[] = []
+    for (const item of reply.apps as unknown[]) {
+      if (!item || typeof item !== 'object') continue
+      const raw = item as Record<string, unknown>
+      if (typeof raw.bundleId !== 'string') continue
+      out.push({
+        bundleId: raw.bundleId,
+        name: typeof raw.name === 'string' && raw.name ? raw.name : null,
+        icon: typeof raw.png === 'string' && raw.png ? `data:image/png;base64,${raw.png}` : null
+      })
+    }
+    return out
   }
 
   /** An app's icon as a PNG data URL, for the pill. Null when it cannot be drawn. */

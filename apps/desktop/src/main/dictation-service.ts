@@ -5,6 +5,7 @@ import {
   type DictationLatency,
   type DictationPermissions,
   type DictationSettings,
+  type AppDisplay,
   type DictationSettingsUpdate,
   type DictationStatus,
   type DictionaryAddOutcome,
@@ -24,6 +25,7 @@ import { DictationLearner } from './dictation-learner'
 import type {
   DeliveryGuards,
   HelperDelivery,
+  AppInfoEntry,
   FieldReading,
   HelperDeliveryTimings,
   HelperStatus,
@@ -108,6 +110,8 @@ export interface HelperLike {
   deliver(snapshotId: string, text: string, guards?: DeliveryGuards): Promise<HelperDelivery>
   /** The text selected in the snapshot's field; refused for secure fields. */
   selection(snapshotId: string): Promise<SelectionResult>
+  /** The name and icon of each installed app among these bundle identifiers. */
+  appInfo(bundleIds: string[]): Promise<AppInfoEntry[]>
   /** Read a watched field back (see DeliveryGuards.watch). */
   watchRead(watchId: string): Promise<FieldReading>
   watchStop(watchId: string): void
@@ -239,6 +243,7 @@ const MIC_POLL_MS = 2_000
 /** "Changed by Polish. View / Undo" stays this long. */
 const CHANGE_PANEL_MS = 8_000
 const DIFF_PANEL_MS = 60_000
+const APP_INFO_TTL_MS = 10 * 60_000
 const LEARNED_PANEL_MS = 7_000
 /** A transform run by hand gives up after this long. */
 const TRANSFORM_TIMEOUT_MS = { local: 40_000, byok: 25_000 } as const
@@ -311,6 +316,11 @@ export class DictationService {
   private recentApps: Array<{ bundleId: string; name: string }> = []
   /** App icons by bundle id, so each app's icon is read from disk once. */
   private readonly appIcons = new Map<string, string | null>()
+  /** Names and icons for the settings page's app lists, by bundle id. */
+  private readonly appInfoCache = new Map<
+    string,
+    { name: string | null; icon: string | null; at: number }
+  >()
   private rearming = false
   private restartedForPermission = false
   private escapeRegistered = false
@@ -385,6 +395,45 @@ export class DictationService {
       this.setPanel({ kind: 'learned', pairs: added }, LEARNED_PANEL_MS)
     }
     this.broadcast()
+  }
+
+  /**
+   * The real name and icon of apps, for the style lists. Asked of the helper in one
+   * batch, remembered for ten minutes (an app installed later turns up then).
+   */
+  async appInfo(ids: unknown): Promise<Record<string, AppDisplay>> {
+    if (!Array.isArray(ids)) return {}
+    const wanted = [
+      ...new Set(
+        ids.filter(
+          (id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 200
+        )
+      )
+    ].slice(0, 60)
+    const now = this.deps.now()
+    const missing = wanted.filter((id) => {
+      const hit = this.appInfoCache.get(id)
+      return !hit || now - hit.at > APP_INFO_TTL_MS
+    })
+    if (missing.length > 0) {
+      let found: AppInfoEntry[] = []
+      try {
+        found = this.deps.helper.available ? await this.deps.helper.appInfo(missing) : []
+      } catch {
+        found = []
+      }
+      if (this.appInfoCache.size > 200) this.appInfoCache.clear()
+      for (const id of missing) {
+        const entry = found.find((item) => item.bundleId === id)
+        this.appInfoCache.set(id, { name: entry?.name ?? null, icon: entry?.icon ?? null, at: now })
+      }
+    }
+    const out: Record<string, AppDisplay> = {}
+    for (const id of wanted) {
+      const hit = this.appInfoCache.get(id)
+      out[id] = { name: hit?.name ?? null, icon: hit?.icon ?? null }
+    }
+    return out
   }
 
   /** Add a hand-made dictionary entry. `heard` may be empty: always write it exactly like this. */

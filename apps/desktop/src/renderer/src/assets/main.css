@@ -3153,6 +3153,33 @@ button.fp-row:hover {
   border-radius: 11px;
 }
 
+/* an app's icon beside its name */
+.app-tile {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--fill);
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.app-tile.dim {
+  opacity: 0.6;
+}
+
+.app-tile img {
+  width: 34px;
+  height: 34px;
+  display: block;
+  -webkit-user-drag: none;
+}
+
 /* dictionary: add form and entry list */
 .dict-add {
   display: flex;

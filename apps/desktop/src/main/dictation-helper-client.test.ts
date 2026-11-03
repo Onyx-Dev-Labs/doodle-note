@@ -25,6 +25,13 @@ process.stdin.on('data', (d) => {
     else if (req.op === 'app-icon') {
       if (req.path === '/Applications/Missing.app') send({ event: 'reply', id: req.id, ok: false, reason: 'no-icon' })
       else send({ event: 'reply', id: req.id, ok: true, png: 'QUJD' })
+    } else if (req.op === 'app-info') {
+      send({ event: 'reply', id: req.id, ok: true, apps: [
+        { bundleId: req.bundleIds[0], name: 'Slack', png: 'QUJD' },
+        { bundleId: req.bundleIds[1] || 'x' },
+        'junk',
+        { name: 'no id' }
+      ] })
     } else if (req.op === 'watch-read') {
       if (req.watchId === 'gone') send({ event: 'reply', id: req.id, ok: true, state: 'gone' })
       else if (req.watchId === 'secure') send({ event: 'reply', id: req.id, ok: true, state: 'secure' })
@@ -367,4 +374,18 @@ test('a watched field reads back as text, or as the reason it cannot', async () 
   }
   const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
   assert.deepEqual(await missing.watchRead('w'), { state: 'unreadable' })
+})
+
+test('app names and icons are decoded, and an app that is not installed has neither', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    assert.deepEqual(await client.appInfo(['com.tinyspeck.slackmacgap', 'com.example.none']), [
+      { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', icon: 'data:image/png;base64,QUJD' },
+      { bundleId: 'com.example.none', name: null, icon: null }
+    ])
+  } finally {
+    await client.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.deepEqual(await missing.appInfo(['a']), [])
 })

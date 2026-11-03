@@ -67,6 +67,11 @@ func handle(_ request: [String: Any]) {
             }
             Wire.reply(id, ["png": png.base64EncodedString()])
         }
+    case "app-info":
+        let ids = (request["bundleIds"] as? [String] ?? []).prefix(AppInfo.maxBatch)
+        workQueue.async {
+            Wire.reply(id, ["apps": ids.map { AppInfo.lookup(bundleId: $0) }])
+        }
     case "snapshot":
         let snapshotId = request["snapshotId"] as? String ?? id
         workQueue.async {

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
+  AppDisplay,
   DictationSettingsUpdate,
   DictationStatus,
   TidyLevel
@@ -26,6 +27,7 @@ import {
   resetTransforms,
   type TransformDef
 } from '../../shared/dictation-transforms'
+import { appDisplayName } from '../../shared/dictation-app-names'
 import { acceleratorFrom } from './dictation-accelerator'
 import { Toggle } from './ModelsView'
 
@@ -133,11 +135,45 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
   )
 }
 
+/** An app's own icon, or its first letter while the icon is not known. */
+function AppTile({
+  name,
+  icon,
+  dim
+}: {
+  name: string
+  icon: string | null
+  /** The app is not on this Mac, so only a letter can be drawn. */
+  dim: boolean
+}): React.JSX.Element {
+  return (
+    <span className={dim ? 'app-tile dim' : 'app-tile'} aria-hidden="true">
+      {icon ? <img src={icon} alt="" draggable={false} /> : <span>{[...name][0] ?? ''}</span>}
+    </span>
+  )
+}
+
 export function DictationStyleSettings({ status, update }: Props): React.JSX.Element {
   const { settings, recentApps } = status
   const [category, setCategory] = useState<StyleCategory>('personal')
   const [newApp, setNewApp] = useState('')
+  const [info, setInfo] = useState<{ asked: string; apps: Record<string, AppDisplay> }>({
+    asked: '',
+    apps: {}
+  })
   const apps = appsInCategory(category, settings.styleApps)
+  // Real names and icons for the listed apps, asked of the helper whenever the list changes.
+  const wanted = apps.map((app) => app.bundleId).join('\n')
+  useEffect(() => {
+    if (!wanted) return
+    let current = true
+    void window.dictation.getAppInfo(wanted.split('\n')).then((result) => {
+      if (current) setInfo({ asked: wanted, apps: result })
+    })
+    return () => {
+      current = false
+    }
+  }, [wanted])
   return (
     <section className="keys-section">
       <h3>Style</h3>
@@ -188,49 +224,55 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
             </span>
           </span>
         </div>
-        {apps.map((app) => (
-          <div className="cal-row" key={app.bundleId}>
-            <span className="cal-row-main">
-              <span className="cal-row-label">
-                {recentApps.find((r) => r.bundleId === app.bundleId)?.name ?? app.bundleId}
+        {apps.map((app) => {
+          const shown = info.apps[app.bundleId]
+          const name = appDisplayName(
+            app.bundleId,
+            shown?.name,
+            recentApps.find((r) => r.bundleId === app.bundleId)?.name
+          )
+          // Only once the helper has answered: an app that is not on this Mac gets a dim letter tile.
+          const notInstalled = info.asked === wanted && !shown?.name && !shown?.icon
+          return (
+            <div className="cal-row" key={app.bundleId}>
+              <AppTile name={name} icon={shown?.icon ?? null} dim={notInstalled} />
+              <span className="cal-row-main" title={app.bundleId}>
+                <span className="cal-row-label">{name}</span>
+                <span className="cal-row-sub">{app.builtin ? 'Built in' : 'Added by you'}</span>
               </span>
-              <span className="cal-row-sub">
-                {app.bundleId}
-                {app.builtin ? ' · built in' : ''}
-              </span>
-            </span>
-            <select
-              aria-label={`Category for ${app.bundleId}`}
-              value={category}
-              onChange={(event) =>
-                void update({
-                  styleApps: moveApp(
-                    settings.styleApps,
-                    app.bundleId,
-                    event.target.value as StyleCategory
-                  )
-                })
-              }
-            >
-              {STYLE_CATEGORIES.map((id) => (
-                <option key={id} value={id}>
-                  {STYLE_CATEGORY_LABELS[id]}
-                </option>
-              ))}
-            </select>
-            {!app.builtin && (
-              <button
-                type="button"
-                className="pill-btn"
-                onClick={() =>
-                  void update({ styleApps: removeApp(settings.styleApps, app.bundleId) })
+              <select
+                aria-label={`Category for ${name}`}
+                value={category}
+                onChange={(event) =>
+                  void update({
+                    styleApps: moveApp(
+                      settings.styleApps,
+                      app.bundleId,
+                      event.target.value as StyleCategory
+                    )
+                  })
                 }
               >
-                Remove
-              </button>
-            )}
-          </div>
-        ))}
+                {STYLE_CATEGORIES.map((id) => (
+                  <option key={id} value={id}>
+                    {STYLE_CATEGORY_LABELS[id]}
+                  </option>
+                ))}
+              </select>
+              {!app.builtin && (
+                <button
+                  type="button"
+                  className="pill-btn"
+                  onClick={() =>
+                    void update({ styleApps: removeApp(settings.styleApps, app.bundleId) })
+                  }
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          )
+        })}
         <div className="cal-row">
           <span className="cal-row-main">
             <span className="cal-row-label">Add an app</span>

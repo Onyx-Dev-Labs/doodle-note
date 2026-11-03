@@ -32,6 +32,14 @@ export interface TargetDescription {
   editable?: boolean
 }
 
+/** An installed app's own name and icon, found from its bundle identifier. Null when not installed. */
+export interface AppInfoEntry {
+  bundleId: string
+  name: string | null
+  /** A small PNG data URL. */
+  icon: string | null
+}
+
 /** Guards for a delivery that edits text already in the field. */
 export interface DeliveryGuards {
   /** Refuse unless the selection is exactly this text. */

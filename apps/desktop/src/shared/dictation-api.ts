@@ -29,6 +29,7 @@ export const DICTATION_VIEW_CHANGE_CHANNEL = 'dictation:view-change'
 export const DICTATION_UNDO_CHANGE_CHANNEL = 'dictation:undo-change'
 export const DICTATION_REQUEST_PERMISSION_CHANNEL = 'dictation:request-permission'
 export const DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL = 'dictation:capture-mouse-button'
+export const DICTATION_APP_INFO_CHANNEL = 'dictation:app-info'
 export const DICTATION_DICTIONARY_ADD_CHANNEL = 'dictation:dictionary-add'
 export const DICTATION_DICTIONARY_REMOVE_CHANNEL = 'dictation:dictionary-remove'
 export const DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL = 'dictation:dictionary-clear-learned'
@@ -253,6 +254,12 @@ export interface ModelAvailability {
   label: string | null
 }
 
+/** How an app is drawn on the settings page. Both null when it is not installed. */
+export interface AppDisplay {
+  name: string | null
+  icon: string | null
+}
+
 export type DictionaryAddOutcome =
   { ok: true } | { ok: false; reason: 'invalid' | 'full' | 'unchanged' }
 
@@ -280,6 +287,8 @@ export interface DictationApi {
   viewLastChange(): Promise<void>
   /** Put the text from before the last transform back. */
   undoLastChange(): Promise<void>
+  /** The real name and icon of each of these apps, by bundle identifier, for the apps that are installed. */
+  getAppInfo(bundleIds: string[]): Promise<Record<string, AppDisplay>>
   /** Add a dictionary entry; an empty `heard` means "always write it exactly like this". */
   addDictionaryEntry(entry: { heard: string; written: string }): Promise<DictionaryAddOutcome>
   removeDictionaryEntry(id: string): Promise<void>
