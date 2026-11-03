@@ -133,7 +133,7 @@ table('URLs, e-mail, file names and code identifiers are left alone', [
     'open https://github.com/doodle/note then click',
     'Open https://github.com/doodle/note then click.'
   ],
-  ['email me at sean@inman.tech please', 'Email me at sean@inman.tech please.'],
+  ['email me at sam@example.com please', 'Email me at sam@example.com please.'],
   ['edit main.swift and run it', 'Edit main.swift and run it.'],
   ['call the getUserName function', 'Call the getUserName function.'],
   ['set max_retries to five', 'Set max_retries to five.'],
