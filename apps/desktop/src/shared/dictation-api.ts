@@ -1,4 +1,5 @@
 import type { AppChannel } from './app-channel'
+import type { DictionaryEntry } from './dictation-dictionary'
 import type { HelperDeliveryTimings, HoldKey, MouseMode } from './dictation-helper-protocol'
 import type { PermissionOutcome, PermissionPane } from './dictation-permissions'
 import type { InputDevice, PillEdge } from './dictation-pill'
@@ -28,6 +29,9 @@ export const DICTATION_VIEW_CHANGE_CHANNEL = 'dictation:view-change'
 export const DICTATION_UNDO_CHANGE_CHANNEL = 'dictation:undo-change'
 export const DICTATION_REQUEST_PERMISSION_CHANNEL = 'dictation:request-permission'
 export const DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL = 'dictation:capture-mouse-button'
+export const DICTATION_DICTIONARY_ADD_CHANNEL = 'dictation:dictionary-add'
+export const DICTATION_DICTIONARY_REMOVE_CHANNEL = 'dictation:dictionary-remove'
+export const DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL = 'dictation:dictionary-clear-learned'
 
 /** Off keeps the raw words, Light is instant and local, Full also uses a model. */
 export const TIDY_LEVELS = ['off', 'light', 'full'] as const
@@ -53,6 +57,13 @@ export interface DictationSettings {
   styleApps: StyleApps
   /** Named rewrite prompts, run on a selection or the last dictation. */
   transforms: TransformSettings
+  /** Words the recognizer gets wrong and how to write them. Changed only through the dictionary calls. */
+  dictionary: DictionaryEntry[]
+  /**
+   * After a dictation is typed, watch that one field for a short while and, if you
+   * correct a misheard word and send, add the correction to the dictionary.
+   */
+  learnFromEdits: boolean
   /**
    * Approval to send dictated TEXT to one provider/model. Bound to that pair:
    * changing either invalidates it. Never covers audio.
@@ -104,6 +115,8 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   styles: DEFAULT_STYLES,
   styleApps: EMPTY_STYLE_APPS,
   transforms: DEFAULT_TRANSFORM_SETTINGS,
+  dictionary: [],
+  learnFromEdits: true,
   byokConsent: null,
   showPill: true,
   pillEdge: 'bottom',
@@ -240,6 +253,9 @@ export interface ModelAvailability {
   label: string | null
 }
 
+export type DictionaryAddOutcome =
+  { ok: true } | { ok: false; reason: 'invalid' | 'full' | 'unchanged' }
+
 export interface DictationApi {
   getStatus(): Promise<DictationStatus>
   setSettings(update: DictationSettingsUpdate): Promise<DictationStatus>
@@ -264,6 +280,11 @@ export interface DictationApi {
   viewLastChange(): Promise<void>
   /** Put the text from before the last transform back. */
   undoLastChange(): Promise<void>
+  /** Add a dictionary entry; an empty `heard` means "always write it exactly like this". */
+  addDictionaryEntry(entry: { heard: string; written: string }): Promise<DictionaryAddOutcome>
+  removeDictionaryEntry(id: string): Promise<void>
+  /** Remove every entry that was learned from corrections, keeping the hand-made ones. */
+  clearLearnedEntries(): Promise<void>
   copyRecovery(gen: number): Promise<boolean>
   dismissRecovery(gen: number): Promise<void>
   openPrivacySettings(pane: 'microphone' | 'accessibility' | 'input-monitoring'): Promise<void>

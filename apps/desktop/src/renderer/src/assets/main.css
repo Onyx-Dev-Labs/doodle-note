@@ -3153,6 +3153,92 @@ button.fp-row:hover {
   border-radius: 11px;
 }
 
+/* dictionary: add form and entry list */
+.dict-add {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+
+.dict-add label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 140px;
+  min-width: 120px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.dict-arrow {
+  align-self: center;
+  color: var(--faint);
+}
+
+.dict-add .dict-arrow {
+  padding-bottom: 6px;
+}
+
+.dict-list {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 4px;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card-soft);
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.dict-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+}
+
+.dict-row + .dict-row {
+  border-top: 1px solid var(--border);
+}
+
+.dict-words {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.dict-from {
+  color: var(--muted);
+}
+
+.dict-to {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.dict-tag {
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.dict-tag.learned {
+  border-color: var(--accent);
+  background: var(--sage-fill);
+  color: var(--accent-deep);
+}
+
 /* pick-one cards (tidy-up level, style tone) and the app-category tabs */
 .choice-grid {
   display: grid;

@@ -30,6 +30,7 @@ import {
   DictationTidySettings,
   DictationTransformSettings
 } from './DictationTidySettings'
+import { DictationDictionarySettings } from './DictationDictionarySettings'
 import { Toggle } from './ModelsView'
 
 const HOLD_OPTIONS: Array<{ value: DictationStatus['settings']['holdKey']; label: string }> = [
@@ -622,6 +623,7 @@ export function DictationSettings(): React.JSX.Element {
       <DictationTidySettings status={status} update={update} />
       <DictationStyleSettings status={status} update={update} />
       <DictationTransformSettings status={status} update={update} />
+      <DictationDictionarySettings status={status} update={update} />
 
       <section className="keys-section">
         <h3>Try it</h3>

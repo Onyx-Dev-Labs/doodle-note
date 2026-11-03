@@ -260,6 +260,7 @@ export type OverlayPanel =
   | { kind: 'working'; name: string }
   | { kind: 'changed'; name: string }
   | { kind: 'diff'; name: string; segments: DiffSegment[] }
+  | { kind: 'learned'; pairs: Array<{ from: string; to: string }> }
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
 export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
@@ -285,6 +286,14 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
         controls: { ...NONE, view: true, undo: true, dismiss: true },
         diff: null
       }
+    case 'learned': {
+      const [first] = panel.pairs
+      const title =
+        panel.pairs.length === 1 && first
+          ? `Added to your dictionary: ${first.from} → ${first.to}`
+          : `Added ${panel.pairs.length} corrections to your dictionary.`
+      return { ...common, tone: 'ok', title, controls: { ...NONE, dismiss: true }, diff: null }
+    }
     case 'diff':
       return {
         ...common,

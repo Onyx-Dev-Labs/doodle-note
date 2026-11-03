@@ -147,6 +147,30 @@ Named rewrite prompts, opt-in (Settings, Dictation, Transforms, "Turn on transfo
 - Transforms in apps whose accessibility tree does not expose the selection (some web views) fall back to the last dictation, and Undo there may keep the text on the card instead of replacing it.
 - A local model is not installed on the development Mac: the model path was tested with stubs only.
 
+## Dictionary and learning from your corrections
+
+Settings, Dictation, **Dictionary**. Two things: a list of words the recognizer gets wrong, and a watcher that adds to the list when you fix one.
+
+### The list
+
+- An entry is **heard, written**: "Alec" is written "Alex". It matches whole words in any case ("Alec's" becomes "Alex's"; "alecs" is left alone), up to four words ("doodle note" is written "DoodleNote"). An entry with nothing in "When it hears" is a spelling: whenever those letters appear, they are written exactly like this ("macos" becomes "macOS").
+- It applies to every dictation **after** tidy-up and style, at every tidy-up level including Off, in one pass: an entry's output is never matched by another entry, a style such as Lowercase quick cannot change how a dictionary word is written, and a transform's result is passed through it too (View and Undo compare against what was typed). If the written word is all lower case, it follows the capitalisation of what was heard.
+- Up to 500 entries, each at most 60 characters on one line. Hand-made entries show "Added" or "Spelling"; learned ones show "Learned". Adding an entry for words that already have one replaces it. **Remove** removes one; **Remove all learned** keeps the hand-made ones.
+- Stored in `dictation.json` with the other preferences (words only, mode 0600). A settings update from the page cannot replace the list; it changes only through the add, remove and clear calls, so a stale page cannot erase what was learned.
+- The recognizer itself is not told about the words (the speech engine has no vocabulary biasing); the fix happens in the text. Full tidy-up sees the raw words, and the dictionary is applied to its answer.
+
+### Learning from corrections
+
+On by default (**Learn from my corrections**). After a dictation is **confirmed typed** into a field (not kept for copying, not a transform, not paste-last):
+
+1. The helper keeps a handle on that one field (for at most 5 minutes; one field at a time; never a secure field).
+2. The app reads the field back about once a second. Each time the text changes it aligns the words it typed against the best-matching stretch of the field (the field may hold other text before and after).
+3. When the typed words are gone (the message was sent and the field cleared or removed), you moved to another app for 15 seconds, 3 minutes passed, or the field becomes unreadable, whatever corrections were visible at the last reading are judged and the watch ends. A new dictation ends the previous watch first.
+4. A changed stretch is learned only if it **looks like a misheard word**: one to three words replaced by one to three words, at least 60% alike letter by letter (Alec/Alex, Jonathon/Jonathan and "doodle note"/"DoodleNote" qualify; Thursday/Friday does not), not numbers, not a case-only change, and not when the heard side is made of everyday words or homophones (to/too, their/there), which would be replaced everywhere. Added or deleted words are edits, not corrections. If more than about 40% of the message changed, it was a rewrite and nothing is learned.
+5. The pill says "Added to your dictionary: Alec → Alex" for 7 seconds (narration: hidden by "Show status messages" being off). Repeating the same correction raises its count; a newer learned spelling replaces an older learned one; a hand-made entry is never overwritten.
+
+What it touches, in plain terms: the text of the field you dictated into is read into memory about once a second for a few minutes, compared with what was typed, and dropped. Only the changed words that pass the check are kept, in the dictionary, where you can see and remove them. The text is never logged (the log says how many corrections were learned, not what), never written to disk, never sent anywhere (no network, no model). It reads only that one field, never a password field, nothing longer than 20,000 characters, and nothing after the watch ends. Turn it off under Dictionary to stop it entirely: the helper is then not even asked to keep the field.
+
 ## Isolation from the production app
 
 | Concern | Dev build |
@@ -233,7 +257,7 @@ Use only synthetic phrases and scratch destinations. Do not send or submit anyth
 
 ## Verification performed on this Mac
 
-Automated (all pass): 881 desktop tests (879 pass, 2 skipped) with typecheck and lint clean, plus 47 Swift tests for the hold-key and mouse logic, delivery helpers, the text locator and app icons (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (16), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
+Automated (all pass): 920 desktop tests (918 pass, 2 skipped) with typecheck and lint clean, plus 50 Swift tests for the hold-key and mouse logic, delivery helpers, the text locator and app icons (`cd engine && swift test`). The dictation suites: session state machine (42), pill rules (33), overlay view and panels (13), settings normalization and persistence (12), service orchestration (105: the earlier flows plus tidy-up, styles by app, Full with a stub model, auto-apply, transform hotkeys, selection and last-dictation runs, View, Undo and its recovery, shortcut clashes, quiet mode), helper client (16), Light tidy-up (13 tests over a table of about 85 phrases), styles and app categories (12), transforms, validation and the word diff (12), the plan and model steps with a stub model (16), permissions (6), model cleanup validation (7), plus capture ownership, NotesService model ownership and consent, profile isolation and packaging invariants.
 
 Real components (not mocks), synthetic text only:
 - **Native helper vs TextEdit** (AX and forced paste): delivered once and verified; every clipboard representation (text, HTML, custom blob) hash-identical afterward; snapshots are single-use; a focus change is refused. Found and fixed a stale `NSWorkspace` focus check during this testing.
@@ -295,6 +319,9 @@ Kept on purpose (safety over speed):
 Not measured: the live microphone path (microphone teardown, queued audio, and the IPC from the engine to the app). Open Settings, Dictation after one dictation and read the line under "Last dictation": `speech` is `stopToFinalMs` with its two engine parts, and the remainder is capture teardown plus the pipe.
 
 ## Not verified, and known gaps
+
+- **Dictionary learning, needs a person:** the decisions are covered by tests (alignment, what counts as a misheard word, the watcher's timing, the service flow and the settings page), and the Dictionary section was viewed in a browser with sample entries. **Not run against a real app:** whether a given app exposes its field text to accessibility. Native text boxes (TextEdit, Notes, Mail's body) are expected to; Chrome, Slack and other Electron apps expose text fields and text areas but may not expose rich message boxes, in which case the field reads as "unreadable", the watch ends after three misses and nothing is learned. The helper's read-back, and how a sent message looks to it in Slack, Messages, Gmail and a browser textarea, still need trying. An attempt to drive TextEdit from this session was abandoned because the Mac was locked.
+- **Learning only sees a correction that is still in the field.** A message sent in under a second after the fix, or an app that removes the box before the next reading, loses it: the last reading is what counts. Rewording a name inside a long paragraph is found; moving text around is not.
 
 - **App icon on the pill, needs a person:** the helper's `app-icon` request was driven for real (Chrome's icon came back as a 64 px PNG, a missing app is refused) and the overlay page was rendered with that icon in a browser. Not seen in the real overlay window on a real display, and the icon appears only once the target snapshot has returned (up to about a second in a Chromium app while its accessibility tree wakes up).
 - **Settings page layout, needs a person:** the refreshed Settings page was checked in a browser with stubbed app data (light and dark; General, Notes model, Dictation, Integrations). It was not opened in the packaged app, and Calendar and Cloud sync were not looked at.

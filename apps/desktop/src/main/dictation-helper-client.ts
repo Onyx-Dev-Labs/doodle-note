@@ -8,6 +8,7 @@ import type {
   HelperDeliveryTimings,
   HelperStatus,
   HoldFailure,
+  FieldReading,
   HoldKey,
   InputState,
   MouseCaptureResult,
@@ -178,7 +179,8 @@ export class DictationHelperClient {
         ...(guards.expectSelection !== undefined
           ? { expectSelection: guards.expectSelection }
           : {}),
-        ...(guards.replace !== undefined ? { replace: guards.replace } : {})
+        ...(guards.replace !== undefined ? { replace: guards.replace } : {}),
+        ...(guards.watch ? { watch: true } : {})
       },
       this.timeouts.deliver,
       false
@@ -203,6 +205,28 @@ export class DictationHelperClient {
       clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
       ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
     }
+  }
+
+  /** Read the text of a watched field back. Unreachable helper reads as `unreadable`. */
+  async watchRead(watchId: string): Promise<FieldReading> {
+    const reply = await this.request('watch-read', { watchId }, this.timeouts.snapshot)
+    if (!reply?.ok) return { state: 'unreadable' }
+    switch (reply.state) {
+      case 'ok':
+        return typeof reply.value === 'string'
+          ? { state: 'ok', value: reply.value, focused: reply.focused === true }
+          : { state: 'unreadable' }
+      case 'gone':
+      case 'secure':
+      case 'too-long':
+        return { state: reply.state }
+      default:
+        return { state: 'unreadable' }
+    }
+  }
+
+  watchStop(watchId: string): void {
+    if (this.child) void this.request('watch-stop', { watchId }, this.timeouts.hold, false)
   }
 
   /** An app's icon as a PNG data URL, for the pill. Null when it cannot be drawn. */

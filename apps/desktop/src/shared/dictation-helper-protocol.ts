@@ -38,7 +38,19 @@ export interface DeliveryGuards {
   expectSelection?: string
   /** Select the one copy of this text in the field and replace it; refuse if it is not there once. */
   replace?: string
+  /** After a confirmed insertion, keep the field so it can be read back for a few minutes. */
+  watch?: boolean
 }
+
+/**
+ * A read-back of a watched field. `ok` carries the field's text and whether it
+ * still has the user's focus. gone: the field or its app no longer exists (a sent
+ * message usually clears or removes it). secure: it became a password field.
+ * unreadable: this control does not expose its text. too-long: over the size cap.
+ */
+export type FieldReading =
+  | { state: 'ok'; value: string; focused: boolean }
+  | { state: 'gone' | 'secure' | 'unreadable' | 'too-long' }
 
 export type SelectionResult =
   | { ok: true; text: string }

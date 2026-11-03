@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AppChannel } from '../shared/app-channel'
 import {
   DEFAULT_DICTATION_SETTINGS,
@@ -6,14 +7,24 @@ import {
   type DictationSettings,
   type DictationSettingsUpdate,
   type DictationStatus,
+  type DictionaryAddOutcome,
   type MouseCaptureOutcome,
   type MicrophoneAccess,
   type RecoveryItem,
   type ShortcutState
 } from '../shared/dictation-api'
+import {
+  MAX_DICTIONARY_ENTRIES,
+  mergeLearned,
+  sanitizePhrase,
+  type DictionaryEntry,
+  type LearnedPair
+} from '../shared/dictation-dictionary'
+import { DictationLearner } from './dictation-learner'
 import type {
   DeliveryGuards,
   HelperDelivery,
+  FieldReading,
   HelperDeliveryTimings,
   HelperStatus,
   HoldFailure,
@@ -97,6 +108,9 @@ export interface HelperLike {
   deliver(snapshotId: string, text: string, guards?: DeliveryGuards): Promise<HelperDelivery>
   /** The text selected in the snapshot's field; refused for secure fields. */
   selection(snapshotId: string): Promise<SelectionResult>
+  /** Read a watched field back (see DeliveryGuards.watch). */
+  watchRead(watchId: string): Promise<FieldReading>
+  watchStop(watchId: string): void
   release(snapshotId: string): void
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
   /** Arm or disarm the optional mouse-button trigger. Null result means it was switched off. */
@@ -151,6 +165,7 @@ export interface DictationDeps {
   settings: {
     get(): DictationSettings
     update(patch: DictationSettingsUpdate): DictationSettings
+    setDictionary(entries: DictionaryEntry[]): DictationSettings
   }
   engine: EngineLike
   ownership: CaptureOwnership
@@ -170,6 +185,8 @@ export interface DictationDeps {
   /** Bring the app's dictation settings page forward. */
   openSettings(): void
   now(): number
+  /** Run `tick` every `ms` until the returned function is called. Defaults to setInterval. */
+  every?(ms: number, tick: () => void): () => void
   log(line: string): void
   /** Numbers-only latency record; never receives transcript text. */
   recordMetrics(record: Record<string, number | string | boolean | null>): void
@@ -222,6 +239,7 @@ const MIC_POLL_MS = 2_000
 /** "Changed by Polish. View / Undo" stays this long. */
 const CHANGE_PANEL_MS = 8_000
 const DIFF_PANEL_MS = 60_000
+const LEARNED_PANEL_MS = 7_000
 /** A transform run by hand gives up after this long. */
 const TRANSFORM_TIMEOUT_MS = { local: 40_000, byok: 25_000 } as const
 /** The device list is re-read at most this often unless the menu asks. */
@@ -297,10 +315,24 @@ export class DictationService {
   private restartedForPermission = false
   private escapeRegistered = false
   private disposed = false
+  private readonly learner: DictationLearner
   private lastToggleAt = 0
   private readonly unsubscribe: Array<() => void> = []
 
   constructor(private readonly deps: DictationDeps) {
+    this.learner = new DictationLearner({
+      read: (id) => deps.helper.watchRead(id),
+      stop: (id) => deps.helper.watchStop(id),
+      now: () => deps.now(),
+      onLearn: (pairs) => this.onLearned(pairs),
+      every:
+        deps.every ??
+        ((ms, tick) => {
+          const timer = setInterval(tick, ms)
+          timer.unref?.()
+          return () => clearInterval(timer)
+        })
+    })
     this.unsubscribe.push(
       deps.helper.onHold((event) => this.onHold(event)),
       deps.helper.onTap(() => this.onTap()),
@@ -319,6 +351,7 @@ export class DictationService {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    this.learner.discard()
     this.dispatch({ type: 'cancel' })
     this.clearAllTimers()
     this.stopMicPoll()
@@ -339,6 +372,71 @@ export class DictationService {
     await this.deps.helper.dispose()
   }
 
+  /** Corrections the watcher saw you make to a dictation: add them to the dictionary. */
+  private onLearned(pairs: LearnedPair[]): void {
+    const settings = this.deps.settings.get()
+    if (this.disposed || !settings.enabled || !settings.learnFromEdits) return
+    const { entries, added } = mergeLearned(settings.dictionary, pairs, this.deps.now())
+    if (JSON.stringify(entries) === JSON.stringify(settings.dictionary)) return
+    this.deps.settings.setDictionary(entries)
+    // Counts only; the words themselves never go to the log.
+    this.deps.log(`dictionary learned ${added.length} correction(s)`)
+    if (added.length > 0 && isMessageShown('learned', this.quiet())) {
+      this.setPanel({ kind: 'learned', pairs: added }, LEARNED_PANEL_MS)
+    }
+    this.broadcast()
+  }
+
+  /** Add a hand-made dictionary entry. `heard` may be empty: always write it exactly like this. */
+  async addDictionaryEntry(entry: {
+    heard: unknown
+    written: unknown
+  }): Promise<DictionaryAddOutcome> {
+    const written = sanitizePhrase(entry.written)
+    const heard = entry.heard === '' || entry.heard === undefined ? '' : sanitizePhrase(entry.heard)
+    if (written === null || heard === null) return { ok: false, reason: 'invalid' }
+    const entries = this.deps.settings.get().dictionary
+    if (entries.some((existing) => existing.from === heard && existing.to === written))
+      return { ok: false, reason: 'unchanged' }
+    // The same heard words already map somewhere: the new entry replaces it.
+    const heardKey = (heard || written).toLowerCase()
+    const kept = entries.filter(
+      (existing) => (existing.from || existing.to).toLowerCase() !== heardKey
+    )
+    if (kept.length >= MAX_DICTIONARY_ENTRIES) return { ok: false, reason: 'full' }
+    const now = this.deps.now()
+    this.deps.settings.setDictionary([
+      ...kept,
+      {
+        id: `dict-${now}-${randomUUID().slice(0, 8)}`,
+        from: heard,
+        to: written,
+        source: 'manual',
+        count: 1,
+        at: now
+      }
+    ])
+    this.broadcast()
+    return { ok: true }
+  }
+
+  removeDictionaryEntry(id: unknown): void {
+    if (typeof id !== 'string') return
+    const entries = this.deps.settings.get().dictionary
+    const kept = entries.filter((entry) => entry.id !== id)
+    if (kept.length === entries.length) return
+    this.deps.settings.setDictionary(kept)
+    this.broadcast()
+  }
+
+  clearLearnedEntries(): void {
+    const entries = this.deps.settings.get().dictionary
+    const kept = entries.filter((entry) => entry.source !== 'learned')
+    if (kept.length === entries.length) return
+    this.deps.settings.setDictionary(kept)
+    this.broadcast()
+  }
+
   async setSettings(update: DictationSettingsUpdate): Promise<DictationStatus> {
     const before = this.deps.settings.get()
     const next = this.deps.settings.update(update)
@@ -356,6 +454,7 @@ export class DictationService {
 
   private async applySettings(): Promise<void> {
     const settings = this.deps.settings.get()
+    if (!settings.enabled || !settings.learnFromEdits) this.learner.discard()
     if (!this.deps.supported || !settings.enabled) {
       this.dispatch({ type: 'cancel' })
       this.setToggleShortcut('')
@@ -1425,15 +1524,24 @@ export class DictationService {
     this.mark(gen, 'deliverStart')
     // Kept only in memory so "paste last" can type it again; never logged or written.
     this.lastTranscript = text
-    const outcome = await this.deliver(context, text, (stage) => {
-      if (stage === 'sent') this.mark(gen, 'helperSent')
-    })
+    // Ask the helper to keep the field only when learning from corrections is on.
+    const learn = context?.settings.learnFromEdits === true
+    const outcome = await this.deliver(
+      context,
+      text,
+      (stage) => {
+        if (stage === 'sent') this.mark(gen, 'helperSent')
+      },
+      learn ? { watch: true } : undefined
+    )
     this.mark(gen, 'deliverEnd')
     if (context?.detail && outcome.helper) context.detail.helper = outcome.helper
     // A transform that changed the text: remember before and after, for View and Undo.
     if (outcome.kind === 'delivered' && context?.change) {
       this.recordChange(context.change)
     }
+    if (learn && context && outcome.kind === 'delivered')
+      this.learner.start(context.snapshotId, text)
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })

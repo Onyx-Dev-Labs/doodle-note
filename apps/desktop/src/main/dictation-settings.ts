@@ -15,6 +15,7 @@ import {
   type StyleApps,
   type StyleChoices
 } from '../shared/dictation-style'
+import { normalizeDictionary } from '../shared/dictation-dictionary'
 import { normalizeTransformSettings } from '../shared/dictation-transforms'
 
 const CLEANUP_MODES = ['raw', 'local', 'byok'] as const
@@ -110,6 +111,9 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
       raw.showStatusMessages === undefined
         ? defaults.showStatusMessages
         : raw.showStatusMessages === true,
+    dictionary: normalizeDictionary(raw.dictionary),
+    learnFromEdits:
+      raw.learnFromEdits === undefined ? defaults.learnFromEdits : raw.learnFromEdits === true,
     showTargetApp:
       raw.showTargetApp === undefined ? defaults.showTargetApp : raw.showTargetApp === true,
     // Left and right click, and anything that is not a button number, never stick.
@@ -124,7 +128,10 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
   }
 }
 
-/** userData/dictation.json: preferences only. No audio, text, keys or history. */
+/**
+ * userData/dictation.json: preferences and the user's own dictionary words. No
+ * audio, no dictated text, keys or history.
+ */
 export class DictationSettingsStore {
   private readonly path: string
   private current: DictationSettings
@@ -139,7 +146,17 @@ export class DictationSettingsStore {
   }
 
   update(patch: DictationSettingsUpdate): DictationSettings {
-    this.current = normalizeDictationSettings({ ...this.current, ...patch })
+    // The dictionary has its own calls, so a stale page can never overwrite what was learned.
+    const { dictionary: _ignored, ...rest } = patch
+    void _ignored
+    this.current = normalizeDictationSettings({ ...this.current, ...rest })
+    this.save()
+    return this.current
+  }
+
+  /** Replace the dictionary. The only way it changes: a settings patch cannot carry one. */
+  setDictionary(entries: DictationSettings['dictionary']): DictationSettings {
+    this.current = normalizeDictationSettings({ ...this.current, dictionary: entries })
     this.save()
     return this.current
   }

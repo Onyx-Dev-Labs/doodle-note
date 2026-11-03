@@ -9,6 +9,7 @@ import IOKit.hid
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let snapshots = SnapshotStore()
+let watches = FieldWatches()
 // Accessibility calls can block on an unresponsive app; keep them off the main
 // run loop, which services the hold-key event tap.
 let workQueue = DispatchQueue(label: "dictation.work", qos: .userInitiated)
@@ -82,6 +83,7 @@ func handle(_ request: [String: Any]) {
         let guards = DeliveryGuards(
             expectSelection: request["expectSelection"] as? String,
             replace: request["replace"] as? String)
+        let watch = request["watch"] as? Bool ?? false
         workQueue.async {
             guard !text.isEmpty else {
                 Wire.reply(id, DeliveryResult(outcome: .failed, reason: "empty-text").fields)
@@ -94,8 +96,27 @@ func handle(_ request: [String: Any]) {
             let result = Delivery.deliver(snapshot, text: text, guards: guards)
             // A snapshot is single-use: a second deliver can never re-insert.
             snapshots.drop(snapshotId)
+            // Keep the field for read-backs only when asked, only after a confirmed
+            // insertion, and never a secure field.
+            if watch, result.outcome == .delivered, let element = snapshot.element,
+                !(snapshot.facts?.secure ?? false)
+            {
+                watches.start(id: snapshotId, pid: snapshot.pid, element: element)
+            }
             Wire.reply(id, result.fields)
         }
+    case "watch-read":
+        let watchId = request["watchId"] as? String ?? ""
+        workQueue.async {
+            guard let watch = watches.get(watchId) else {
+                Wire.reply(id, ["state": "gone"])
+                return
+            }
+            Wire.reply(id, FieldRead.read(watch))
+        }
+    case "watch-stop":
+        if let watchId = request["watchId"] as? String { watches.stop(watchId) }
+        Wire.reply(id)
     case "selection":
         // The text currently selected in the field the snapshot was taken from, so a
         // transform can work on it. Never read from a secure field.

@@ -309,3 +309,54 @@ test('oversized text skips the model steps instead of sending it', async () => {
   assert.equal(calls.length, 0)
   assert.match(out.note ?? '', /Too long/)
 })
+
+const entries = (...pairs: Array<[string, string]>): DictationSettings['dictionary'] =>
+  pairs.map(([from, to], index) => ({
+    id: `d${index}`,
+    from,
+    to,
+    source: 'manual' as const,
+    count: 1,
+    at: 1
+  }))
+
+test('the dictionary applies at every tidy level, including Off', () => {
+  const dictionary = entries(['alec', 'Alex'])
+  for (const tidyLevel of ['off', 'light'] as const) {
+    const plan = planDictation(settings({ tidyLevel, dictionary }), noModel, null)
+    assert.equal(deterministicText('tell alec hello', plan).includes('Alex'), true, tidyLevel)
+  }
+})
+
+test('a style cannot change how a dictionary word is written', () => {
+  const plan = planDictation(
+    settings({
+      tidyLevel: 'light',
+      dictionary: entries(['alec', 'Alex']),
+      styles: { personal: 'lowercase', work: 'lowercase', email: 'lowercase', other: 'lowercase' }
+    }),
+    noModel,
+    null
+  )
+  assert.match(deterministicText('hey alec are you free', plan), /Alex/)
+})
+
+test('the dictionary applies to model output, to the fallback, and to a transform result', async () => {
+  const dictionary = entries(['alec', 'Alex'])
+  const plan = planDictation(
+    settings({ tidyLevel: 'full', dictionary, transforms: withTransforms('polish') }),
+    local,
+    null
+  )
+  assert.match(fallbackText('tell alec hello', plan), /Alex/)
+  const outcome = await runModelSteps(
+    'tell alec hello',
+    plan,
+    async () => 'Tell Alec hello.',
+    new AbortController().signal
+  )
+  assert.match(outcome.text, /Alex/)
+  assert.ok(!/Alec/.test(outcome.text))
+  if (outcome.change)
+    assert.equal(outcome.change.after, outcome.text, 'View and Undo see what was typed')
+})

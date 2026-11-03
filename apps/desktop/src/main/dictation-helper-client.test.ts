@@ -25,6 +25,13 @@ process.stdin.on('data', (d) => {
     else if (req.op === 'app-icon') {
       if (req.path === '/Applications/Missing.app') send({ event: 'reply', id: req.id, ok: false, reason: 'no-icon' })
       else send({ event: 'reply', id: req.id, ok: true, png: 'QUJD' })
+    } else if (req.op === 'watch-read') {
+      if (req.watchId === 'gone') send({ event: 'reply', id: req.id, ok: true, state: 'gone' })
+      else if (req.watchId === 'secure') send({ event: 'reply', id: req.id, ok: true, state: 'secure' })
+      else if (req.watchId === 'odd') send({ event: 'reply', id: req.id, ok: true, state: 'surprise' })
+      else send({ event: 'reply', id: req.id, ok: true, state: 'ok', value: 'typed words', focused: true })
+    } else if (req.op === 'watch-stop') {
+      send({ event: 'reply', id: req.id, ok: true })
     } else if (req.op === 'selection') {
       if (mode === 'secure') send({ event: 'reply', id: req.id, ok: false, reason: 'secure-field' })
       else send({ event: 'reply', id: req.id, ok: true, text: 'picked words' })
@@ -341,4 +348,23 @@ test('an app icon comes back as a PNG data URL, or null when it cannot be drawn'
   }
   const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
   assert.equal(await missing.appIcon('/System/Applications/TextEdit.app'), null)
+})
+
+test('a watched field reads back as text, or as the reason it cannot', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  try {
+    assert.deepEqual(await client.watchRead('w'), {
+      state: 'ok',
+      value: 'typed words',
+      focused: true
+    })
+    assert.deepEqual(await client.watchRead('gone'), { state: 'gone' })
+    assert.deepEqual(await client.watchRead('secure'), { state: 'secure' })
+    assert.deepEqual(await client.watchRead('odd'), { state: 'unreadable' })
+    client.watchStop('w')
+  } finally {
+    await client.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.deepEqual(await missing.watchRead('w'), { state: 'unreadable' })
 })

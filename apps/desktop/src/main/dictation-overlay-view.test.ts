@@ -269,3 +269,26 @@ test('the live pill carries the target app; every other mode drops it', () => {
   )
   assert.equal(done.target, null)
 })
+
+test('the learned-word panel names the pair, or counts several, and only offers Dismiss', () => {
+  const base = overlayView(initialSessionState(), ctx())
+  const one = panelView({ kind: 'learned', pairs: [{ from: 'Alec', to: 'Alex' }] }, base)
+  assert.equal(one.title, 'Added to your dictionary: Alec → Alex')
+  assert.deepEqual(
+    Object.entries(one.controls)
+      .filter(([, on]) => on)
+      .map(([name]) => name),
+    ['dismiss']
+  )
+  const two = panelView(
+    {
+      kind: 'learned',
+      pairs: [
+        { from: 'Alec', to: 'Alex' },
+        { from: 'Jonathon', to: 'Jonathan' }
+      ]
+    },
+    base
+  )
+  assert.equal(two.title, 'Added 2 corrections to your dictionary.')
+})

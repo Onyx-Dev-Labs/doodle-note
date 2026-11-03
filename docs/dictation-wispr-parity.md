@@ -111,7 +111,7 @@ Source: the Swift helper (arm64, 29,580 procedures, Swift symbols stripped) open
 | Dictation reminder coach | yes | no | **Talk** |
 | Block dictation in chosen apps/URLs | yes | no | **P2** |
 | Hide bar during screen share | yes | no | **P2** (content-protection flag) |
-| Custom dictionary + auto-add | yes | no | **Talk** (not built; Lowercase quick has a hook for it) |
+| Custom dictionary + auto-add | yes | **yes** (hand-made entries and learning from your corrections; see `docs/dictation-dev-app.md`) | Built. Snippets are still not built |
 | Snippets | yes | no | **Talk** (not built) |
 | Styles (tone per app type) | yes | yes: four app categories, Proper / Relaxed / Lowercase quick, per-app mapping you can edit, English only, deterministic | done |
 | Transforms / Polish / voice profile | yes | transforms yes (five of our own, your own, hotkeys, auto-apply, view and undo, on a selection or the last dictation); voice profile no | done (needs a model; stub-tested) |
@@ -147,7 +147,7 @@ Built on `feat/system-dictation` (see `docs/dictation-dev-app.md` for behaviour,
 
 - [x] Optional mouse-button trigger (click to start and stop by default, or hold to talk), with capture, swallowing and a warning about remapping software
 
-- [x] Tidy-up levels, per-app styles and transforms with view and undo (see `docs/dictation-dev-app.md`); Dictionary and Snippets stay out
+- [x] Tidy-up levels, per-app styles and transforms with view and undo (see `docs/dictation-dev-app.md`); Dictionary and learning from corrections added later; Snippets stay out
 
 Still to see with a human at the Mac: the look on real displays, dragging with a real pointer, the native right-click menu, live dictation through every path, and the tones through speakers.
 

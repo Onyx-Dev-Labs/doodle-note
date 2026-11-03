@@ -13,6 +13,7 @@ import {
   type StyleCategory,
   type StyleTone
 } from '../shared/dictation-style'
+import { applyDictionary, type DictionaryEntry } from '../shared/dictation-dictionary'
 import { tidyLight } from '../shared/dictation-tidy'
 import type { TransformDef } from '../shared/dictation-transforms'
 import {
@@ -73,6 +74,8 @@ export interface DictationPlan {
   transform: TransformDef | null
   /** Model calls this plan makes. Zero means everything is instant. */
   steps: number
+  /** The user's dictionary, applied once to the finished text. */
+  dictionary: DictionaryEntry[]
 }
 
 export function planDictation(
@@ -96,13 +99,18 @@ export function planDictation(
     tidy,
     engine: model.engine,
     transform,
-    steps: (tidy === 'full' ? 1 : 0) + (transform ? 1 : 0)
+    steps: (tidy === 'full' ? 1 : 0) + (transform ? 1 : 0),
+    dictionary: settings.dictionary
   }
 }
 
-/** Off keeps the raw words and skips styles; Light and Full apply the style. */
+/**
+ * Off keeps the raw words and skips styles; Light and Full apply the style. The
+ * dictionary always applies, and last, so a style can never change how a word in
+ * it is written and one entry's output is never matched by another.
+ */
 function styled(text: string, plan: DictationPlan): string {
-  return plan.tidy === 'off' ? text : applyStyle(text, plan.tone)
+  return applyDictionary(plan.tidy === 'off' ? text : applyStyle(text, plan.tone), plan.dictionary)
 }
 
 /** The text for a plan with no model step: instant and deterministic. */
@@ -192,10 +200,10 @@ export async function runModelSteps(
         const output = await run(buildTransformRequest(plan.transform, text), signal)
         const verdict = validateTransform(text, output, plan.transform.keepFacts)
         if (verdict.ok) {
-          if (verdict.text !== text) {
-            change = { name: plan.transform.name, before: text, after: verdict.text }
-          }
-          text = verdict.text
+          // View and Undo compare against what is typed, so the dictionary is applied first.
+          const after = applyDictionary(verdict.text, plan.dictionary)
+          if (after !== text) change = { name: plan.transform.name, before: text, after }
+          text = after
         } else {
           notes.push(`${plan.transform.name}: ${verdict.reason} The text before it was used.`)
         }

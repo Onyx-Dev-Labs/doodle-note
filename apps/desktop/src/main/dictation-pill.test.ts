@@ -351,6 +351,7 @@ test('every message kind is classified, and only narration is suppressible', () 
   assert.deepEqual(suppressible.sort(), [
     'change',
     'cleanup-note',
+    'learned',
     'live-text',
     'status',
     'success',
@@ -367,7 +368,7 @@ test('every message kind is classified, and only narration is suppressible', () 
     'recovery',
     'shortcut-conflict'
   ])
-  assert.equal(OVERLAY_MESSAGE_KINDS.length, 14)
+  assert.equal(OVERLAY_MESSAGE_KINDS.length, 15)
 })
 
 test('failures, recovery and warnings stay visible with everything switched off', () => {

@@ -143,6 +143,8 @@ export type OverlayMessageKind =
   | 'change'
   /** "Polish..." while a transform runs. */
   | 'working'
+  /** "Added to your dictionary: Alec to Alex" after a correction was learned. */
+  | 'learned'
   /** A refusal or an empty result: no speech, nothing to paste, still finishing. */
   | 'info'
   /** A failure: microphone denied or lost, helper missing, engine error. */
@@ -173,6 +175,7 @@ const MESSAGE_GOVERNOR: Record<OverlayMessageKind, 'liveText' | 'status' | 'alwa
   success: 'status',
   change: 'status',
   working: 'status',
+  learned: 'status',
   info: 'always',
   error: 'always',
   recovery: 'always',

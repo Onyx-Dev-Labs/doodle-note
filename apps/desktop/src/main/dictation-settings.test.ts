@@ -216,3 +216,22 @@ test('transforms persist with their prompts and shortcuts, and never hold dictat
   assert.equal(reloaded.transforms.autoApplyId, 'mine')
   assert.equal(reloaded.transforms.items[0]!.hotkey, 'Control+Alt+9')
 })
+
+test('the dictionary persists, is validated on load, and a settings patch cannot replace it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-settings-'))
+  const store = new DictationSettingsStore(dir)
+  store.setDictionary([
+    { id: 'a', from: 'alec', to: 'Alex', source: 'learned', count: 2, at: 5 },
+    { id: 'b', from: '', to: 'DoodleNote', source: 'manual', count: 1, at: 6 }
+  ])
+  store.update({ dictionary: [], learnFromEdits: false })
+  const reloaded = new DictationSettingsStore(dir).get()
+  assert.equal(reloaded.dictionary.length, 2, 'a patch does not touch the dictionary')
+  assert.equal(reloaded.learnFromEdits, false)
+  assert.equal(normalizeDictationSettings({}).learnFromEdits, true, 'on by default')
+  assert.deepEqual(normalizeDictationSettings({ dictionary: 'nope' }).dictionary, [])
+  assert.equal(
+    normalizeDictationSettings({ dictionary: [{ from: 'x', to: 'bad\nline' }] }).dictionary.length,
+    0
+  )
+})

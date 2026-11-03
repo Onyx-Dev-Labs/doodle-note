@@ -6,6 +6,9 @@ import type { AppChannel } from '../shared/app-channel'
 import {
   DICTATION_CANCEL_CHANNEL,
   DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL,
+  DICTATION_DICTIONARY_ADD_CHANNEL,
+  DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL,
+  DICTATION_DICTIONARY_REMOVE_CHANNEL,
   DICTATION_COPY_LAST_CHANNEL,
   DICTATION_COPY_RECOVERY_CHANNEL,
   DICTATION_DISMISS_RECOVERY_CHANNEL,
@@ -187,6 +190,18 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
     trusted(event) ? service.setSettings(update ?? {}) : null
   )
+  ipcMain.handle(DICTATION_DICTIONARY_ADD_CHANNEL, (event, entry: unknown) => {
+    const value = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
+    return trusted(event)
+      ? service.addDictionaryEntry({ heard: value.heard, written: value.written })
+      : { ok: false, reason: 'invalid' }
+  })
+  ipcMain.handle(DICTATION_DICTIONARY_REMOVE_CHANNEL, (event, id: unknown) => {
+    if (trusted(event)) service.removeDictionaryEntry(id)
+  })
+  ipcMain.handle(DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL, (event) => {
+    if (trusted(event)) service.clearLearnedEntries()
+  })
   ipcMain.handle(DICTATION_TOGGLE_CHANNEL, (event) => {
     if (trusted(event)) service.toggle()
   })

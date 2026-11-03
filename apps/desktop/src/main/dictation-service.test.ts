@@ -4,6 +4,7 @@ import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/di
 import { BUILTIN_TRANSFORMS } from '../shared/dictation-transforms'
 import type {
   HelperDelivery,
+  FieldReading,
   HelperStatus,
   HoldKey,
   DeliveryGuards,
@@ -69,6 +70,8 @@ interface Harness {
   shortcuts: Map<string, () => void>
   settingsOpened: number[]
   icons: { calls: string[]; value: string | null; fails: boolean }
+  /** What the helper says a watched field holds; the learner polls it. */
+  field: { reading: FieldReading; reads: number; stopped: string[]; tick: (() => void) | null }
   settings: DictationSettings
   cleanupCalls: Array<{ mode: string; consent: unknown; signal: AbortSignal }>
 }
@@ -107,6 +110,12 @@ function harness(
   const shortcuts = new Map<string, () => void>()
   const settingsOpened: number[] = []
   const icons: Harness['icons'] = { calls: [], value: 'data:image/png;base64,AAAA', fails: false }
+  const field: Harness['field'] = {
+    reading: { state: 'gone' },
+    reads: 0,
+    stopped: [],
+    tick: null
+  }
   const perms: Harness['perms'] = {
     mic: options.access ?? 'granted',
     micAnswer: true,
@@ -154,7 +163,8 @@ function harness(
     supported: true,
     settings: {
       get: () => settings,
-      update: (patch) => Object.assign(settings, patch)
+      update: (patch) => Object.assign(settings, patch),
+      setDictionary: (entries) => Object.assign(settings, { dictionary: entries })
     },
     engine: {
       tryStartLive: (opts) => {
@@ -196,6 +206,11 @@ function harness(
         return helper.deliveryFor?.(text, guards ?? {}) ?? helper.delivery
       },
       selection: async () => helper.selection,
+      watchRead: async () => {
+        field.reads += 1
+        return field.reading
+      },
+      watchStop: (id) => void field.stopped.push(id),
       release: () => {},
       setHoldKey: async (key) => {
         helper.holdKeys.push(key)
@@ -269,6 +284,12 @@ function harness(
     onMicHeld: (held) => void micHeld.push(held),
     openSettings: () => void settingsOpened.push(1),
     now: () => clock.now,
+    every: (_ms, tick) => {
+      field.tick = tick
+      return () => {
+        field.tick = null
+      }
+    },
     log: () => {},
     recordMetrics: (record) => void metrics.push(record)
   }
@@ -309,6 +330,7 @@ function harness(
     shortcuts,
     settingsOpened,
     icons,
+    field,
     settings,
     cleanupCalls
   }
@@ -2150,4 +2172,122 @@ test('an app the helper cannot place on disk is named without an icon read', asy
   await startListening(h)
   assert.deepEqual(lastLive(h)?.target, { name: 'TextEdit', icon: null })
   assert.deepEqual(h.icons.calls, [])
+})
+
+/** Run a whole dictation that types `text`, then let the learner poll the field. */
+async function dictateAndWatch(h: Harness, text: string): Promise<void> {
+  await speak(h, text)
+  finish(h)
+  await tick()
+}
+const poll = async (h: Harness): Promise<void> => {
+  h.field.tick?.()
+  await tick()
+}
+
+test('a corrected word is added to the dictionary once the message is gone', async () => {
+  const h = harness()
+  await dictateAndWatch(h, 'tell Alec the report is ready')
+  assert.equal(h.helper.deliverGuards.at(-1)?.watch, true, 'the helper is asked to keep the field')
+  assert.ok(h.field.tick, 'a watch is running')
+  // The person fixes the name, then sends: the field is cleared.
+  h.field.reading = { state: 'ok', value: 'tell Alex the report is ready', focused: true }
+  await poll(h)
+  assert.equal(h.settings.dictionary.length, 0, 'nothing is learned until the message is gone')
+  h.field.reading = { state: 'ok', value: '', focused: true }
+  await poll(h)
+  assert.deepEqual(
+    h.settings.dictionary.map((e) => [e.from, e.to, e.source]),
+    [['Alec', 'Alex', 'learned']]
+  )
+  assert.equal(h.field.tick, null, 'the watch ended')
+  assert.equal(h.overlay.at(-1)?.title, 'Added to your dictionary: Alec → Alex')
+  assert.ok(!JSON.stringify(h.metrics).includes('Alec'), 'no words in the metrics')
+})
+
+test('the next dictation applies what was learned', async () => {
+  const h = harness({
+    settings: {
+      dictionary: [{ id: 'a', from: 'Alec', to: 'Alex', source: 'learned', count: 1, at: 1 }]
+    }
+  })
+  await speak(h, 'tell alec hello')
+  assert.deepEqual(h.delivered, ['tell Alex hello'])
+})
+
+test('an untouched message and a change of mind teach nothing', async () => {
+  const h = harness()
+  await dictateAndWatch(h, 'lets meet on Thursday at noon')
+  h.field.reading = { state: 'ok', value: 'lets meet on Friday at noon', focused: true }
+  await poll(h)
+  h.field.reading = { state: 'gone' }
+  await poll(h)
+  assert.equal(h.settings.dictionary.length, 0)
+  assert.equal(h.overlay.at(-1)?.title?.startsWith('Added'), false)
+})
+
+test('with learning off the helper is not asked to keep the field and nothing is watched', async () => {
+  const h = harness({ settings: { learnFromEdits: false } })
+  await dictateAndWatch(h, 'tell Alec hello')
+  assert.equal(h.helper.deliverGuards.at(-1)?.watch, undefined)
+  assert.equal(h.field.tick, null)
+})
+
+test('a secure field is dropped without learning, and switching learning off ends a watch', async () => {
+  const h = harness()
+  await dictateAndWatch(h, 'tell Alec hello')
+  h.field.reading = { state: 'secure' }
+  await poll(h)
+  assert.equal(h.field.tick, null)
+  assert.equal(h.settings.dictionary.length, 0)
+  const g = harness()
+  await dictateAndWatch(g, 'tell Alec hello')
+  assert.ok(g.field.tick)
+  await g.service.setSettings({ learnFromEdits: false })
+  assert.equal(g.field.tick, null)
+})
+
+test('a failed delivery watches nothing', async () => {
+  const h = harness()
+  h.helper.delivery = {
+    outcome: 'refused',
+    reason: 'focus-changed',
+    verified: false,
+    clipboard: 'untouched'
+  }
+  await dictateAndWatch(h, 'tell Alec hello')
+  assert.equal(h.field.tick, null)
+})
+
+test('hand-made entries: add, replace, remove, and the page cannot overwrite them', async () => {
+  const h = harness()
+  assert.deepEqual(await h.service.addDictionaryEntry({ heard: 'alec', written: 'Alex' }), {
+    ok: true
+  })
+  assert.deepEqual(await h.service.addDictionaryEntry({ heard: 'alec', written: 'Alex' }), {
+    ok: false,
+    reason: 'unchanged'
+  })
+  assert.deepEqual(await h.service.addDictionaryEntry({ heard: '', written: 'DoodleNote' }), {
+    ok: true
+  })
+  assert.deepEqual(await h.service.addDictionaryEntry({ heard: 'a\nb', written: 'x' }), {
+    ok: false,
+    reason: 'invalid'
+  })
+  assert.deepEqual(await h.service.addDictionaryEntry({ heard: 'alec', written: 'Alexa' }), {
+    ok: true
+  })
+  assert.deepEqual(
+    h.settings.dictionary.map((e) => [e.from, e.to]),
+    [
+      ['', 'DoodleNote'],
+      ['alec', 'Alexa']
+    ]
+  )
+  const entry = h.settings.dictionary[0]!
+  h.service.removeDictionaryEntry(entry.id)
+  assert.equal(h.settings.dictionary.length, 1)
+  h.service.clearLearnedEntries()
+  assert.equal(h.settings.dictionary.length, 1, 'hand-made entries survive')
 })
