@@ -1,6 +1,13 @@
 /* eslint-disable @next/next/no-img-element -- Local, fixed-size illustrative mascot assets. */
+import type { Metadata } from "next";
+import { siteMetadata } from "@/lib/site-metadata";
 import { MarketingLayout, MarketingDownloadButtons } from "./marketing";
 import "./marketing.css";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+  openGraph: { ...siteMetadata.openGraph, url: "/" },
+};
 
 export default function HomePage() {
   return (
