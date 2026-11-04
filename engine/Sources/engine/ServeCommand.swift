@@ -45,7 +45,10 @@ enum ServeCommand {
                 let inputDevice = (object["inputDevice"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let audioDir = (object["audioDir"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let systemBackend = (object["systemBackend"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let wantsLevels = (object["levels"] as? Bool) == true
                 let started = box.begin(stopper) {
+                    LevelReporter.shared.setEnabled(wantsLevels)
+                    defer { LevelReporter.shared.setEnabled(false) }
                     do {
                         try await LiveSession.run(
                             source: source,

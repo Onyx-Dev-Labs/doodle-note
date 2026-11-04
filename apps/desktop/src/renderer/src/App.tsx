@@ -120,6 +120,16 @@ function App(): React.JSX.Element {
     setHomeRefresh((n) => n + 1)
   }, [])
 
+  // The dictation pill's menu asks for its settings page.
+  useEffect(
+    () =>
+      window.dictation.onOpenSettings(() => {
+        setSettingsJump({ section: 'dictation', n: Date.now() })
+        setView('settings')
+      }),
+    []
+  )
+
   // Cloud pull can add/update meetings while Home is on screen.
   useEffect(() => window.meetings.onChanged(refreshHome), [refreshHome])
 
