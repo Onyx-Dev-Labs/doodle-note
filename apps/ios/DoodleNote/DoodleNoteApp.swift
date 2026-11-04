@@ -45,6 +45,7 @@ struct DoodleNoteApp: App {
 
     init() {
         NotificationRouter.shared.configure()
+        WatchInbox.shared.activate()
     }
 
     var body: some Scene {
