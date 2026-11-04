@@ -27,6 +27,9 @@ overrides:
   "brace-expansion@>=1.0.0 <1.1.21": 1.1.21
   "brace-expansion@>=2.0.0 <2.1.7": 2.1.7
   "brace-expansion@>=5.0.0 <5.0.12": 5.0.12
+  # GHSA-g3hv-75wg-m249: the fix exists only in 11.x, so every older line is
+  # raised to it. Reached through ESLint and electron-builder tooling only.
+  "minimatch@>=3.0.0 <11.0.1": 11.0.4
   esbuild@<=0.24.2: 0.25.12
   postcss@<=8.5.22: 8.5.23
   postcss@8.4.31: 8.5.26

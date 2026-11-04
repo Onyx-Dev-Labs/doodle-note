@@ -5,6 +5,10 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main: {
     define: {
+      // Which lineage this build belongs to. Anything but an explicit `dev` is production.
+      __DOODLENOTE_CHANNEL__: JSON.stringify(
+        process.env.DOODLENOTE_CHANNEL === 'dev' ? 'dev' : 'release'
+      ),
       __DOODLENOTE_GOOGLE_CLIENT_SECRET__: JSON.stringify(
         process.env.DOODLENOTE_GOOGLE_CLIENT_SECRET?.trim() ?? ''
       )

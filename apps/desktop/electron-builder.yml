@@ -33,6 +33,9 @@ mac:
       filter: ["*.png"]
     - from: ../../engine/.build/release/engine
       to: engine/engine
+    # Bark's typing helper: a separate small binary, signed like the engine.
+    - from: ../../engine/.build/release/dictation-helper
+      to: engine/dictation-helper
     - from: ../../engine/.build/whisper/whisper-cli
       to: engine/whisper-cli
     - from: ../../engine/.build/whisper/whisper-LICENSE.txt
@@ -81,7 +84,7 @@ mac:
   notarize: true
   extendInfo:
     CFBundleIconFile: doodlenote-opaque-v0411.icns
-    NSMicrophoneUsageDescription: DoodleNote captures meeting audio to transcribe it on-device. Nothing leaves your Mac.
+    NSMicrophoneUsageDescription: DoodleNote captures meeting audio, and your voice when you use Bark dictation, to transcribe it on-device. Nothing leaves your Mac.
     NSAudioCaptureUsageDescription: DoodleNote captures meeting audio (the other side of your call) to transcribe it on-device.
 dmg:
   title: DoodleNote ${version}

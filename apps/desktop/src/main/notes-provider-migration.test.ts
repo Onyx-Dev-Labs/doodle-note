@@ -1,3 +1,4 @@
+import * as dictationModel from './dictation-model'
 import { NotesGenerationJobs } from './notes-generation-job'
 import * as batchTranscription from '../shared/batch-transcription'
 import { LibraryActivity } from './library-activity'
@@ -49,6 +50,7 @@ test('retired settings survive reload, block requests, and never migrate keys to
       }
     },
     './cloud-models': { fetchCloudModels },
+    './dictation-model': dictationModel,
     'node:fs': fs,
     'node:path': path,
     '@repo/ai': {
