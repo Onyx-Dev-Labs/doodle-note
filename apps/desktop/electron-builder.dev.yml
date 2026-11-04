@@ -1,0 +1,68 @@
+# DoodleNote Dev: an installable development build that can sit beside the
+# shipping app. It is a separate lineage, not a pre-release of the shipping one:
+#   - its own bundle id and product name, so macOS keeps separate permissions,
+#     Keychain entries ("DoodleNote Dev Safe Storage"), login item and single-
+#     instance lock;
+#   - its own profile, ~/Library/Application Support/DoodleNote Dev, chosen at
+#     build time (DOODLENOTE_CHANNEL=dev), never from an environment variable;
+#   - no update feed, no publish target and no notarization: it cannot reach or
+#     replace anything in production.
+# Derived from electron-builder.yml. Keep the file lists in sync when that one
+# changes; scripts/verify-dev-app.sh checks the identity-bearing fields.
+appId: com.doodlenote.desktop.dev
+productName: DoodleNote Dev
+directories:
+  buildResources: resources
+  output: release-dev
+files:
+  - out/**
+extraResources:
+  - from: ../../packages/doodle-note-mcp/dist/cli.js
+    to: mcp/cli.js
+  - from: ../../packages/doodle-note-mcp/package.json
+    to: mcp/package.json
+asarUnpack:
+  - "**/node_modules/node-llama-cpp/**"
+  - "**/node_modules/@node-llama-cpp/**"
+  - "**/node_modules/sherpa-onnx-node/**"
+  - "**/node_modules/sherpa-onnx-win-x64/**"
+mac:
+  extraResources:
+    - from: resources/tray
+      to: tray
+      filter: ["*.png"]
+    - from: ../../engine/.build/release/engine
+      to: engine/engine
+    # Original native delivery helper for system-wide dictation.
+    - from: ../../engine/.build/release/dictation-helper
+      to: engine/dictation-helper
+    - from: resources/icon.icns
+      to: doodlenote-opaque-v0411.icns
+  files:
+    - out/**
+    - "!**/node_modules/@node-llama-cpp/win-*/**"
+    - "!**/node_modules/@node-llama-cpp/linux-*/**"
+    - "!**/node_modules/@node-llama-cpp/mac-x64/**"
+    - "!**/node_modules/sherpa-onnx-*/**"
+  # A folder build only: no zip (updater payload) and no dmg (distribution).
+  target:
+    - target: dir
+      arch:
+        - arm64
+  icon: resources/icon.icns
+  category: public.app-category.productivity
+  # Signed for local use only. DOODLENOTE_DEV_IDENTITY selects the certificate;
+  # scripts/package-dev.sh falls back to an ad-hoc signature when none is found.
+  identity: null
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+  extendInfo:
+    CFBundleIconFile: doodlenote-opaque-v0411.icns
+    NSMicrophoneUsageDescription: DoodleNote Dev captures audio on this Mac to transcribe meetings and dictation. Nothing leaves your Mac.
+    NSAudioCaptureUsageDescription: DoodleNote Dev captures meeting audio on this Mac to transcribe it on-device.
+npmRebuild: false
+# Deliberately no `publish` block: electron-builder then writes no app-update.yml,
+# so even a stray updater call has no feed to contact.

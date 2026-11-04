@@ -218,7 +218,7 @@ async function main() {
     await stop.click()
     await page.getByTitle('Resume recording', { exact: true }).waitFor()
     // Empty capture A exposes the vacuous .every() in the ended-snapshot filter.
-    await page.getByRole('button', { name: 'Back to home', exact: true }).click()
+    await page.getByRole('button', { name: 'Back to overview', exact: true }).click()
     await page.evaluate(() =>
       window.meetings.upsert({
         id: 'qa-empty',
@@ -244,7 +244,7 @@ async function main() {
     assert.deepEqual(emptySnapshot.segments, [])
     assert.deepEqual(emptySnapshot.savedAudioFailures, { mic: true })
     // Stay in this main process: B must not receive A's capture ID on a pre-start failure.
-    await page.getByRole('button', { name: 'Back to home', exact: true }).click()
+    await page.getByRole('button', { name: 'Back to overview', exact: true }).click()
     await page.evaluate(() =>
       window.meetings.upsert({
         id: 'qa-next',
@@ -323,7 +323,7 @@ async function main() {
     await page.getByText('Synthetic audio warning QA', { exact: true }).click()
     await expect(page.locator('.saved-audio-warning')).toContainText('Microphone and System audio')
     await page.screenshot({ path: path.join(evidence, 'reopened-after-relaunch.png') })
-    await page.getByRole('button', { name: 'Back to home', exact: true }).click()
+    await page.getByRole('button', { name: 'Back to overview', exact: true }).click()
     await page.evaluate(() =>
       window.meetings.upsert({
         id: 'qa-clean',

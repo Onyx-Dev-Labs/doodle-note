@@ -1,4 +1,8 @@
 import { createBeforeQuitHandler } from './engine-quit'
+import { APP_CHANNEL } from '../shared/app-channel'
+import { planProfile } from './profile-identity'
+import { createDictationHost } from './dictation-host'
+import type { DictationService } from './dictation-service'
 import { SourceIndexService } from './source-index-service'
 import { RecipeRunner } from './recipe-runner'
 import { registerRecipes } from './recipe-service'
@@ -16,6 +20,7 @@ import {
   desktopCapturer,
   ipcMain,
   nativeTheme,
+  Notification,
   protocol,
   session as electronSession
 } from 'electron'
@@ -97,6 +102,22 @@ function resolveEngineBinary(): string {
   return path.resolve(app.getAppPath(), '..', '..', 'engine', '.build', 'release', 'engine')
 }
 
+/** The native dictation helper: beside the engine in the packaged app. */
+function resolveDictationHelperBinary(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, 'engine', 'dictation-helper')
+  }
+  return path.resolve(
+    app.getAppPath(),
+    '..',
+    '..',
+    'engine',
+    '.build',
+    'release',
+    'dictation-helper'
+  )
+}
+
 /**
  * How MCP clients launch the bundled doodle-note-mcp server: the DoodleNote
  * binary itself doubles as the Node runtime via ELECTRON_RUN_AS_NODE, so
@@ -117,7 +138,8 @@ function resolveMcpServerSpec(): McpServerSpec {
  * on first launch. Models are discovered in place by NotesService.
  */
 function migrateDevUserData(): void {
-  if (!app.isPackaged) return
+  // A development build never adopts another profile's meetings or settings.
+  if (!app.isPackaged || !profile.adoptLegacyData) return
   try {
     const newDir = app.getPath('userData')
     const oldDir = join(newDir, '..', 'desktop')
@@ -137,11 +159,20 @@ function migrateDevUserData(): void {
 if (process.env.DOODLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DOODLE_DEBUG_PORT)
 }
-// Dev affordance: point userData somewhere else to exercise fresh-install
-// flows (the setup wizard) without touching the real profile.
-if (process.env.DOODLE_USER_DATA && !app.isPackaged) {
-  app.setPath('userData', process.env.DOODLE_USER_DATA)
-}
+// Where this build keeps its state. The production lineage keeps the existing
+// rule (DOODLE_USER_DATA relocates unpackaged runs only). A development build
+// owns a distinct, explicitly named profile, because that variable cannot
+// isolate a packaged app. Must run before anything resolves a path or locks.
+const profile = planProfile({
+  channel: APP_CHANNEL,
+  isPackaged: app.isPackaged,
+  appData: app.getPath('appData'),
+  home: app.getPath('home'),
+  env: { DOODLE_USER_DATA: process.env.DOODLE_USER_DATA }
+})
+if (profile.appName) app.setName(profile.appName)
+if (profile.userData) app.setPath('userData', profile.userData)
+if (profile.logs) app.setAppLogsPath(profile.logs)
 
 // One owner per desktop profile. Mac library transfers must finish before any
 // other app instance can write; Windows also shares the updater cache.
@@ -180,6 +211,14 @@ const recording = new RecordingStartCoordinator(
 
 function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
   if (libraryActivity.moving) return false
+  if (dictation?.ownsCapture) {
+    // One microphone owner at a time: never start a meeting over dictation.
+    new Notification({
+      title: 'Dictation is using the microphone',
+      body: 'Finish or cancel dictation, then start recording.'
+    }).show()
+    return false
+  }
   if (event) {
     const resolved = calendarService?.resolveStart(event)
     if (!resolved) return false
@@ -199,6 +238,7 @@ function requestRecordingStart(event?: CalendarStartMeetingEvent): boolean {
 }
 
 let notesService: NotesService | null = null
+let dictation: DictationService | null = null
 let recipeRunner: RecipeRunner | null = null
 let calendarService: CalendarService | null = null
 let winBatchTranscriber: WinBatchTranscriber | null = null
@@ -515,6 +555,9 @@ app.whenReady().then(async () => {
   }
 
   engine.onEvent((rawEvent) => {
+    // Dictation owns the sidecar for its session: its events must never reach
+    // the meeting transcript, the renderer, saved audio or the event log.
+    if (dictation?.handleEngineEvent(rawEvent)) return
     // Bind terminal transcript persistence to the exact capture the renderer saw start.
     if (rawEvent.event === 'started') {
       captureId = randomUUID()
@@ -539,6 +582,13 @@ app.whenReady().then(async () => {
 
   ipcMain.on(ENGINE_START_CHANNEL, (event, request: EngineStartRequest) => {
     if (event.sender !== mainWindow?.webContents) return
+    if (dictation?.ownsCapture) {
+      broadcastEngineEvent({
+        event: 'spawn-error',
+        message: 'Dictation is using the microphone. Finish or cancel it, then start recording.'
+      })
+      return
+    }
     if (libraryActivity.moving) {
       broadcastEngineEvent({
         event: 'spawn-error',
@@ -584,6 +634,8 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.on(ENGINE_STOP_CHANNEL, () => {
+    // A meeting's stop must not end someone's dictation.
+    if (dictation?.ownsCapture) return
     recording.stop()
     engine.stop()
   })
@@ -616,6 +668,31 @@ app.whenReady().then(async () => {
     assertLibrary
   )
   notesService.registerIpc()
+
+  // System-wide dictation (macOS). Created once the notes service exists so
+  // optional cleanup shares its model ownership. Disabled until the user
+  // turns it on in Settings; nothing here opens the microphone by itself.
+  dictation = createDictationHost({
+    channel: APP_CHANNEL,
+    userData: app.getPath('userData'),
+    logsDir: app.getPath('logs'),
+    helperPath: resolveDictationHelperBinary(),
+    // Bark needs the Swift engine for speech and the helper for typing: macOS only.
+    // It is off until the person turns it on in Settings.
+    engine: process.platform === 'darwin' && engine instanceof EngineProcess ? engine : null,
+    notes: () => notesService,
+    meetingBusy: () => recording.busy || libraryActivity.moving,
+    setMicHeld: (held) => {
+      // Our own capture must not look like a Zoom call to the meeting detector.
+      if (held) micWatcher.setSuppressed(true)
+      else if (!recording.busy) micWatcher.setSuppressed(false)
+    },
+    showMainWindow: focusMainWindow,
+    isTrustedSender: (sender) => sender === mainWindow?.webContents,
+    broadcast
+  }).service
+  void dictation.start()
+
   recipeRunner = new RecipeRunner(
     libraryRoot,
     assertLibrary,
@@ -764,10 +841,16 @@ app.whenReady().then(async () => {
   })
   // macOS: engine micmon (CoreAudio). Windows: ConsentStore registry poll.
   if (process.platform === 'darwin' || process.platform === 'win32') micWatcher.start()
-  initAutoUpdater(broadcast, async () => {
-    await recipeRunner?.stop()
-    await notesService?.dispose()
-  })
+  initAutoUpdater(
+    broadcast,
+    async () => {
+      await recipeRunner?.stop()
+      await notesService?.dispose()
+    },
+    { enabled: profile.updatesEnabled }
+  )
+  // Make a development build unmistakable in the Dock and Cmd-Tab.
+  if (APP_CHANNEL === 'dev') app.dock?.setBadge('DEV')
 
   // Keep the host alive while the engine exits. Only then bypass llama addon
   // teardown on ordinary quit; updater quits must resume Electron's hand-off.
@@ -809,14 +892,21 @@ app.whenReady().then(async () => {
     meetingsService,
     foldersService,
     broadcast,
-    libraryRoot
+    libraryRoot,
+    // A development build must not reach the production dashboard by accident.
+    // Port 9 is the discard service: a connection fails immediately and locally.
+    APP_CHANNEL === 'dev' ? 'http://127.0.0.1:9' : undefined
   )
   syncService.registerIpc()
 
   // Integrations: local MCP access remains off until enabled in Settings.
   const agentAccessService = new AgentAccessService(
     () => join(libraryRoot(), 'meetings'),
-    resolveMcpServerSpec()
+    resolveMcpServerSpec(),
+    // The opt-in file and client configs normally live in the real home
+    // directory and are shared by every DoodleNote. A development build gets a
+    // sandboxed home inside its own profile so it can never rewrite them.
+    APP_CHANNEL === 'dev' ? join(app.getPath('userData'), 'agent-access-home') : undefined
   )
   const previousLibrary = storage?.status().recoveryPath
   if (previousLibrary) {
@@ -892,6 +982,8 @@ function focusMainWindow(): void {
 
 // Engine shutdown is awaited by before-quit; release remaining services here.
 app.on('will-quit', () => {
+  // Cancels any dictation session and releases the shortcuts and the helper.
+  void dictation?.dispose()
   void recipeRunner?.stop().then(() => notesService?.dispose())
   calendarService?.dispose()
   winBatchTranscriber?.dispose()

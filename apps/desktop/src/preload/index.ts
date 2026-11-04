@@ -1,5 +1,29 @@
 import { RECIPE_CHANNELS, type RecipesApi } from '../shared/recipes-api'
 import {
+  DICTATION_CANCEL_CHANNEL,
+  DICTATION_APP_INFO_CHANNEL,
+  DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL,
+  DICTATION_DICTIONARY_ADD_CHANNEL,
+  DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL,
+  DICTATION_DICTIONARY_REMOVE_CHANNEL,
+  DICTATION_COPY_LAST_CHANNEL,
+  DICTATION_COPY_RECOVERY_CHANNEL,
+  DICTATION_DISMISS_RECOVERY_CHANNEL,
+  DICTATION_GET_STATUS_CHANNEL,
+  DICTATION_OPEN_PRIVACY_CHANNEL,
+  DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
+  DICTATION_PASTE_LAST_CHANNEL,
+  DICTATION_RUN_TRANSFORM_CHANNEL,
+  DICTATION_UNDO_CHANGE_CHANNEL,
+  DICTATION_VIEW_CHANGE_CHANNEL,
+  DICTATION_REQUEST_PERMISSION_CHANNEL,
+  DICTATION_SET_SETTINGS_CHANNEL,
+  DICTATION_STATUS_EVENT_CHANNEL,
+  DICTATION_TOGGLE_CHANNEL,
+  type DictationApi,
+  type DictationStatus
+} from '../shared/dictation-api'
+import {
   SOURCES_SEARCH,
   SOURCES_CANCEL,
   SOURCES_RESOLVE,
@@ -698,8 +722,44 @@ const audioApi: AudioApi = {
   }
 }
 
+const dictationApi: DictationApi = {
+  getStatus: () => ipcRenderer.invoke(DICTATION_GET_STATUS_CHANNEL),
+  setSettings: (update) => ipcRenderer.invoke(DICTATION_SET_SETTINGS_CHANNEL, update),
+  toggle: () => ipcRenderer.invoke(DICTATION_TOGGLE_CHANNEL),
+  cancel: () => ipcRenderer.invoke(DICTATION_CANCEL_CHANNEL),
+  pasteLast: () => ipcRenderer.invoke(DICTATION_PASTE_LAST_CHANNEL),
+  copyLast: () => ipcRenderer.invoke(DICTATION_COPY_LAST_CHANNEL),
+  runTransform: (id) => ipcRenderer.invoke(DICTATION_RUN_TRANSFORM_CHANNEL, id),
+  viewLastChange: () => ipcRenderer.invoke(DICTATION_VIEW_CHANGE_CHANNEL),
+  undoLastChange: () => ipcRenderer.invoke(DICTATION_UNDO_CHANGE_CHANNEL),
+  requestPermission: (pane) => ipcRenderer.invoke(DICTATION_REQUEST_PERMISSION_CHANNEL, pane),
+  captureMouseButton: () => ipcRenderer.invoke(DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL),
+  getAppInfo: (bundleIds) => ipcRenderer.invoke(DICTATION_APP_INFO_CHANNEL, bundleIds),
+  addDictionaryEntry: (entry) => ipcRenderer.invoke(DICTATION_DICTIONARY_ADD_CHANNEL, entry),
+  removeDictionaryEntry: (id) => ipcRenderer.invoke(DICTATION_DICTIONARY_REMOVE_CHANNEL, id),
+  clearLearnedEntries: () => ipcRenderer.invoke(DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL),
+  copyRecovery: (gen) => ipcRenderer.invoke(DICTATION_COPY_RECOVERY_CHANNEL, gen),
+  dismissRecovery: (gen) => ipcRenderer.invoke(DICTATION_DISMISS_RECOVERY_CHANNEL, gen),
+  openPrivacySettings: (pane) => ipcRenderer.invoke(DICTATION_OPEN_PRIVACY_CHANNEL, pane),
+  onStatus: (callback) => {
+    const listener = (_event: IpcRendererEvent, status: DictationStatus): void => callback(status)
+    ipcRenderer.on(DICTATION_STATUS_EVENT_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(DICTATION_STATUS_EVENT_CHANNEL, listener)
+    }
+  },
+  onOpenSettings: (callback) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(DICTATION_OPEN_SETTINGS_EVENT_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(DICTATION_OPEN_SETTINGS_EVENT_CHANNEL, listener)
+    }
+  }
+}
+
 if (process.contextIsolated) {
   try {
+    contextBridge.exposeInMainWorld('dictation', dictationApi)
     contextBridge.exposeInMainWorld('storage', {
       status: () => ipcRenderer.invoke(STORAGE_STATUS_CHANNEL),
       retry: () => ipcRenderer.invoke(STORAGE_RETRY_CHANNEL),
@@ -776,4 +836,5 @@ if (process.contextIsolated) {
   window.wizard = wizardApi
   // @ts-ignore (defined in index.d.ts)
   window.exporter = exporterApi
+  Object.assign(window, { dictation: dictationApi })
 }

@@ -185,6 +185,7 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
         statusText: `saved ${ev.segmentCount} segments → ${ev.path}`
       }
     case 'channel_start':
+    case 'level':
       return base
     case 'audio':
       return {

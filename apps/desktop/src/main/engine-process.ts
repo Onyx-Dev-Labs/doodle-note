@@ -318,6 +318,27 @@ export class EngineProcess {
     return this.child !== null || this.serveSessionActive
   }
 
+  /** True once the resident engine has loaded its models (starts are instant). */
+  get warm(): boolean {
+    return this.serveReady && this.serveChild !== null
+  }
+
+  /**
+   * Start a live session only if nothing else is using the sidecar. Unlike
+   * start(), which retires whatever is running, this never supersedes a meeting
+   * that is recording or finishing. Used by callers that are not the recorder.
+   */
+  tryStartLive(
+    opts: EngineStartOptions = {}
+  ): { started: true } | { started: false; reason: string } {
+    if (this.disposed) return { started: false, reason: 'The speech engine is shutting down.' }
+    if (this.running) {
+      return { started: false, reason: 'The speech engine is busy with another session.' }
+    }
+    this.start('live', undefined, opts)
+    return { started: true }
+  }
+
   start(command: EngineCommand, filePath?: string, opts: EngineStartOptions = {}): void {
     if (this.disposed) return
     // Only one sidecar at a time; a new start supersedes (hard-discards) the previous run.
@@ -335,7 +356,8 @@ export class EngineProcess {
         source: opts.source ?? 'both',
         inputDevice: opts.inputDevice ?? '',
         audioDir: opts.audioDir ?? '',
-        systemBackend: opts.systemBackend ?? ''
+        systemBackend: opts.systemBackend ?? '',
+        levels: opts.levels === true
       })
       if (ok) return
       this.serveSessionActive = false // fall through to the classic spawn
@@ -373,6 +395,7 @@ export class EngineProcess {
       if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
       if (opts.audioDir) args.push('--audio-dir', opts.audioDir)
       if (opts.systemBackend) args.push('--system-backend', opts.systemBackend)
+      if (opts.levels) args.push('--levels')
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }

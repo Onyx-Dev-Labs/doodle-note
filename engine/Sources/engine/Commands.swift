@@ -199,7 +199,9 @@ enum Commands {
             offset = end
         }
 
+        let finishStarted = Date()
         let text = try await manager.finish()
+        let finishMs = Int(Date().timeIntervalSince(finishStarted) * 1000)
         let tail = await manager.consumeTokenTimings()
         if !tail.isEmpty {
             Events.emit(["event": "timings", "tokens": Timings.payload(tail)])
@@ -209,6 +211,7 @@ enum Commands {
         Events.emit([
             "event": "final",
             "text": text,
+            "finishMs": finishMs,
             "audioSeconds": audioSeconds,
             "processingSeconds": processing,
             "speedup": processing > 0 ? ((audioSeconds / processing) * 10).rounded() / 10 : 0,
