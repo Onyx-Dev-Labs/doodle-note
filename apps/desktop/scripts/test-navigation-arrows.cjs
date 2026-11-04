@@ -90,7 +90,7 @@ async function main() {
       assert.equal(await page.evaluate(()=>window.qa.newMeetings),1)
       await page.evaluate(()=>window.showMeeting())
       const template=page.locator('.generate-cta-arrow');await template.waitFor();await settle()
-      const back=baseline ? page.getByTitle('Back to home',{exact:true}) : page.getByRole('button',{name:'Back to home',exact:true})
+      const back=baseline ? page.getByTitle('Back to home',{exact:true}) : page.getByRole('button',{name:'Back to overview',exact:true})
       await shot('back',back);await shot('template',page.locator('.generate-cta-arrow').locator('..'))
       const box=await template.boundingBox()
       await template.click();assert.equal(await template.getAttribute('aria-expanded'),'true')

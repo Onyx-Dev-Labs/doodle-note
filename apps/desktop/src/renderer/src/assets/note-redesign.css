@@ -1,0 +1,352 @@
+/* Quiet paper note page, matching the redesigned home. Presentation only:
+   capture, transcript, chat and generation controls keep their own styles. */
+.editor-page.note-redesign {
+  --note-line: #dfe3d5;
+  --note-paper: #f6f5ed;
+  --note-card: #fffef9;
+  --note-soft: #eff3e8;
+  --note-tag: #edf1e6;
+  --note-tag-ink: #70805c;
+  --note-heading: #344f3e;
+  --note-prose: #5f6a56;
+  --note-tab: #929c87;
+  --note-tab-active: #526e44;
+  --note-tab-rule: #6d885d;
+  --note-quote: #6b815b;
+  --note-quote-rule: #9bb684;
+  --note-sticky: #f0dfa0;
+  --note-sticky-ink: #665936;
+  --note-sticky-muted: #7b6c42;
+  --note-sticky-line: #baa46360;
+  --note-primary: #344f3e;
+  --note-primary-ink: #faf8ed;
+  background: var(--note-paper);
+  font-family: var(--redesign-body, var(--sans));
+}
+
+html[data-theme='dark'] .editor-page.note-redesign {
+  --note-line: #3a4434;
+  --note-paper: #20261f;
+  --note-card: #262c24;
+  --note-soft: #2c3529;
+  --note-tag: #303d2e;
+  --note-tag-ink: #b6c99c;
+  --note-heading: #d7e3c6;
+  --note-prose: #c5c9b6;
+  --note-tab: #8d977f;
+  --note-tab-active: #c4d6aa;
+  --note-tab-rule: #9fb985;
+  --note-quote: #c1d3a8;
+  --note-quote-rule: #7f9a68;
+  --note-sticky: #514b2e;
+  --note-sticky-ink: #f2e4b4;
+  --note-sticky-muted: #d0c394;
+  --note-sticky-line: #b7a96d50;
+  --note-primary: #b6c99c;
+  --note-primary-ink: #22301f;
+}
+
+/* ---- top bar ---- */
+
+.note-redesign .editor-topbar {
+  height: 56px;
+  border-bottom: 1px solid var(--note-line);
+}
+
+.note-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.note-breadcrumb strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.note-breadcrumb-divider {
+  color: var(--faint);
+}
+
+/* ---- desk layout ---- */
+
+.note-redesign .editor-scroll {
+  container-type: inline-size;
+}
+
+.note-redesign .editor-col.note-desk {
+  max-width: 1120px;
+  padding: 26px 36px 0;
+}
+
+.note-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 17px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--note-tab);
+}
+
+.note-back:hover {
+  color: var(--note-tab-active);
+}
+
+.note-desk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 24px;
+  align-items: start;
+}
+
+.note-paper {
+  min-width: 0;
+  padding: 30px 32px 24px;
+  background: var(--note-card);
+  border: 1px solid var(--note-line);
+  border-radius: 14px;
+  box-shadow: 0 5px 12px #243c3205;
+}
+
+.note-paper-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: var(--note-tag);
+  color: var(--note-tag-ink);
+  font-size: 11px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-tag:hover {
+  filter: brightness(0.97);
+}
+
+.note-redesign .doc-title {
+  margin: 14px 0 10px;
+  font-family: var(--redesign-display, var(--serif));
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--note-heading);
+}
+
+.note-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 22px;
+  font-size: 11px;
+  color: var(--note-tab);
+}
+
+.note-tabs {
+  display: flex;
+  gap: 26px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--note-line);
+}
+
+.note-tabs button {
+  padding: 12px 0;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+  color: var(--note-tab);
+}
+
+.note-tabs button:hover {
+  color: var(--note-tab-active);
+}
+
+.note-tabs button.active {
+  border-color: var(--note-tab-rule);
+  color: var(--note-tab-active);
+}
+
+.note-redesign .note-paper .models-sub {
+  margin: -8px 0 14px;
+  font-size: 11px;
+}
+
+/* ---- note prose ---- */
+
+.note-redesign .doc-editor .tiptap {
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--note-prose);
+}
+
+.note-redesign .doc-editor .tiptap h1,
+.note-redesign .doc-editor .tiptap h2,
+.note-redesign .doc-editor .tiptap h3 {
+  font-family: var(--redesign-display, var(--sans));
+  color: var(--note-heading);
+  letter-spacing: -0.01em;
+}
+
+.note-redesign .doc-editor .tiptap h2 {
+  margin-top: 26px;
+  font-size: 19px;
+}
+
+.note-redesign .doc-editor .tiptap h3 {
+  margin-top: 22px;
+  font-size: 16px;
+}
+
+.note-redesign .doc-editor .tiptap blockquote {
+  margin: 22px 0;
+  padding: 12px 20px;
+  border-left: 3px solid var(--note-quote-rule);
+  background: var(--note-soft);
+  color: var(--note-quote);
+  font-family: var(--redesign-hand, cursive);
+  font-size: 24px;
+  line-height: 1.4;
+}
+
+/* ---- side rail ---- */
+
+.note-side {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.note-eyebrow {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--note-tag-ink);
+}
+
+.note-nudge {
+  padding: 20px;
+  background: var(--note-card);
+  border: 1px solid var(--note-line);
+  border-radius: 12px;
+}
+
+.note-nudge h2 {
+  margin: 12px 0 10px;
+  font-family: var(--redesign-display, var(--sans));
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--note-heading);
+}
+
+.note-nudge p:not(.note-eyebrow) {
+  margin: 0 0 18px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+
+.note-nudge-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 17px;
+  border-radius: 9px;
+  background: var(--note-primary);
+  color: var(--note-primary-ink);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.note-nudge-action:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.note-nudge-action:disabled {
+  opacity: 0.6;
+}
+
+.note-nudge-action > svg {
+  display: block;
+}
+
+.note-sticky {
+  position: relative;
+  padding: 25px 20px 20px;
+  border-radius: 2px 4px 18px 3px;
+  background: var(--note-sticky);
+  color: var(--note-sticky-ink);
+  box-shadow: 2px 6px 14px #302e2312;
+  transform: rotate(-1.4deg);
+}
+
+.note-sticky::before {
+  content: '';
+  position: absolute;
+  width: 62px;
+  height: 17px;
+  left: calc(50% - 31px);
+  top: -8px;
+  transform: rotate(3deg);
+  background: color-mix(in srgb, var(--note-sticky) 65%, transparent);
+  border: 1px solid var(--note-sticky-line);
+}
+
+.note-sticky .note-eyebrow {
+  color: var(--note-sticky-muted);
+}
+
+.note-sticky-hand {
+  margin: 12px 0 14px;
+  font-family: var(--redesign-hand, cursive);
+  font-size: 27px;
+  line-height: 1.15;
+  color: var(--note-sticky-ink);
+}
+
+.note-sticky-copy {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--note-sticky-muted);
+}
+
+/* Narrow panes (small windows or an open transcript) stack the rail below. */
+@container (max-width: 860px) {
+  .note-redesign .editor-col.note-desk {
+    padding: 22px 20px 0;
+  }
+
+  .note-desk-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .note-side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+  }
+
+  .note-paper {
+    padding: 22px 20px 18px;
+  }
+
+  .note-redesign .doc-title {
+    font-size: 27px;
+  }
+}

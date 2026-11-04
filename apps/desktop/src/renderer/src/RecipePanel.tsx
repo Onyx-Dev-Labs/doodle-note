@@ -27,12 +27,16 @@ function exportOutput(output: RecipeOutput): void {
 }
 export default function RecipePanel({
   meetingId,
-  disabled
+  disabled,
+  open: controlledOpen
 }: {
   meetingId: string
   disabled: boolean
+  /** When set, the host shows and hides the panel (e.g. as a tab) and no toggle renders. */
+  open?: boolean
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOpen] = useState(false)
+  const open = controlledOpen ?? ownOpen
   const [list, setList] = useState<RecipeList | null>(null)
   const [selected, setSelected] = useState('')
   const [draft, setDraft] = useState<RecipeDraft>(blank)
@@ -183,15 +187,21 @@ export default function RecipePanel({
     }
   }
   return (
-    <section className="recipe-panel" aria-label="Meeting fetches">
-      <button
-        type="button"
-        className="recipe-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-      >
-        Fetches <span>{open ? '−' : '+'}</span>
-      </button>
+    <section
+      className={controlledOpen === undefined ? 'recipe-panel' : 'recipe-panel embedded'}
+      aria-label="Meeting fetches"
+      hidden={controlledOpen === false}
+    >
+      {controlledOpen === undefined && (
+        <button
+          type="button"
+          className="recipe-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          Fetches <span>{open ? '−' : '+'}</span>
+        </button>
+      )}
       {open && (
         <div className="recipe-body">
           <p className="models-sub">
