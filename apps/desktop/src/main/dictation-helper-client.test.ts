@@ -52,6 +52,10 @@ process.stdin.on('data', (d) => {
       if (req.uid === 'gone') send({ event: 'reply', id: req.id, ok: false, reason: 'no-input-device' })
       else if (req.uid === 'bare') send({ event: 'reply', id: req.id, ok: true })
       else send({ event: 'reply', id: req.id, ok: true, muted: true, volume: 0 })
+    } else if (req.op === 'mute-output') {
+      send({ event: 'reply', id: req.id, ok: true, outcome: mode === 'silent' ? 'already-silent' : 'muted' })
+    } else if (req.op === 'restore-output') {
+      send({ event: 'reply', id: req.id, ok: true, outcome: 'restored' })
     } else if (req.op === 'request-accessibility') {
       send({ event: 'reply', id: req.id, ok: true, trusted: mode === 'grant' })
     } else if (req.op === 'request-input-monitoring') {
@@ -388,4 +392,20 @@ test('app names and icons are decoded, and an app that is not installed has neit
   }
   const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
   assert.deepEqual(await missing.appInfo(['a']), [])
+})
+
+test('muting the output says whether it was this call that did it; restoring is always safe', async () => {
+  const client = new DictationHelperClient(fakeHelper('ok'), fast)
+  const quiet = new DictationHelperClient(fakeHelper('silent'), fast)
+  try {
+    assert.equal(await client.muteOutput(), true)
+    await client.restoreOutput()
+    assert.equal(await quiet.muteOutput(), false, 'already silent: nothing to give back')
+  } finally {
+    await client.dispose()
+    await quiet.dispose()
+  }
+  const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
+  assert.equal(await missing.muteOutput(), false)
+  await missing.restoreOutput()
 })

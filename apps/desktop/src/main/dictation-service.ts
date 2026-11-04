@@ -140,6 +140,9 @@ export interface HelperLike {
   onTap(listener: () => void): () => void
   /** Mute and volume of the input a session records from; null when unreadable. */
   inputState(uid: string | null): Promise<InputState | null>
+  /** Silence the sound output (true if this call did). Always paired with restoreOutput. */
+  muteOutput(): Promise<boolean>
+  restoreOutput(): Promise<void>
   onExit(listener: () => void): () => void
   dispose(): Promise<void>
 }
@@ -244,6 +247,8 @@ const NOTICE_MS = 6_000
 const ESCAPE = 'Escape'
 /** How often the chosen input is checked for a mute or zero volume while recording. */
 const MIC_POLL_MS = 2_000
+/** Let the start tone finish before the sound is muted, or the tone would be cut off. */
+const MUTE_AFTER_TONE_MS = 350
 /** "Changed by Polish. View / Undo" stays this long. */
 const CHANGE_PANEL_MS = 8_000
 const DIFF_PANEL_MS = 60_000
@@ -297,6 +302,10 @@ export class DictationService {
   private devicesPending: Promise<void> | null = null
   private hideTimer: NodeJS.Timeout | null = null
   private micPoll: NodeJS.Timeout | null = null
+  /** Sound is silenced (or about to be) for the current recording and must be given back. */
+  private audioMuted = false
+  private muteTimer: NodeJS.Timeout | null = null
+  private muteInFlight: Promise<unknown> | null = null
   private deferredStart: { until: number } | null = null
   private lastStartAt = 0
   private holdState: DictationStatus['holdKey'] = 'off'
@@ -370,6 +379,7 @@ export class DictationService {
     this.dispatch({ type: 'cancel' })
     this.clearAllTimers()
     this.stopMicPoll()
+    this.restoreAudio()
     this.unregisterEscape()
     if (this.toggleAccelerator) this.deps.shortcuts.unregister(this.toggleAccelerator)
     this.toggleAccelerator = null
@@ -1313,6 +1323,12 @@ export class DictationService {
     } else if (previous.phase === 'recording' && state.phase !== 'recording') {
       this.stopMicPoll()
     }
+    // Sound comes back before the stop tone is played, and goes away after the start tone.
+    if (state.phase === 'recording' && previous.phase !== 'recording' && state.active) {
+      this.muteAudio(state.active.gen)
+    } else if (state.phase !== 'recording' && state.phase !== 'preparing') {
+      this.restoreAudio()
+    }
     this.scheduleRestingDismiss()
     this.render()
     this.broadcast()
@@ -1323,6 +1339,43 @@ export class DictationService {
       this.deps.settings.get().startSound
     )
     if (sound) this.deps.overlay.playSound(sound)
+  }
+
+  /**
+   * Silence music, radio or video for the length of the recording. Only when the
+   * person has asked for it, and only a change the helper can undo: whatever it
+   * mutes comes back when recording ends, is cancelled or fails.
+   */
+  private muteAudio(gen: number): void {
+    this.restoreAudio()
+    const context = this.sessions.get(gen)
+    if (!context?.settings.muteAudioWhileDictating) return
+    this.audioMuted = true
+    const mute = (): void => {
+      this.muteTimer = null
+      this.muteInFlight = this.deps.helper.muteOutput().catch(() => false)
+    }
+    if (context.settings.startSound) {
+      this.muteTimer = setTimeout(mute, MUTE_AFTER_TONE_MS)
+      this.muteTimer.unref?.()
+    } else {
+      mute()
+    }
+  }
+
+  private restoreAudio(): void {
+    if (!this.audioMuted) return
+    this.audioMuted = false
+    if (this.muteTimer) clearTimeout(this.muteTimer)
+    this.muteTimer = null
+    // Wait for a mute that is already on its way (the helper may still be starting), so
+    // the restore can never run first and leave the sound off. With nothing held the
+    // helper treats it as a no-op.
+    const pending = this.muteInFlight
+    this.muteInFlight = null
+    void Promise.resolve(pending)
+      .then(() => this.deps.helper.restoreOutput())
+      .catch(() => undefined)
   }
 
   /** While recording, watch the chosen input for a mute or a volume of zero. */

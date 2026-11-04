@@ -123,6 +123,10 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
       raw.learnFromEdits === undefined ? defaults.learnFromEdits : raw.learnFromEdits === true,
     showTargetApp:
       raw.showTargetApp === undefined ? defaults.showTargetApp : raw.showTargetApp === true,
+    muteAudioWhileDictating:
+      raw.muteAudioWhileDictating === undefined
+        ? defaults.muteAudioWhileDictating
+        : raw.muteAudioWhileDictating === true,
     // Left and right click, and anything that is not a button number, never stick.
     holdMouseButton: isAllowedMouseButton(raw.holdMouseButton) ? raw.holdMouseButton : null,
     holdMouseSwallow:

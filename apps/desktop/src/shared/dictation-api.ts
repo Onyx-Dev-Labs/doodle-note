@@ -97,6 +97,8 @@ export interface DictationSettings {
   showStatusMessages: boolean
   /** Show the icon of the app the text will go into on the live pill. */
   showTargetApp: boolean
+  /** Silence whatever is playing (music, radio, a video) while recording, then bring it back. */
+  muteAudioWhileDictating: boolean
   /**
    * An optional second hold-to-talk trigger: a mouse button, numbered from 0
    * (2 middle, 3 back, 4 forward, higher extras). Left and right click (0, 1)
@@ -136,6 +138,7 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   showLiveText: true,
   showStatusMessages: true,
   showTargetApp: true,
+  muteAudioWhileDictating: true,
   holdMouseButton: null,
   holdMouseSwallow: true,
   holdMouseMode: 'click'

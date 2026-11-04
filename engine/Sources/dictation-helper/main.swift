@@ -58,6 +58,17 @@ func handle(_ request: [String: Any]) {
             if let volume = state.volume { fields["volume"] = Double(volume) }
             Wire.reply(id, fields)
         }
+    case "mute-output":
+        // Silences what is playing while the user dictates. Serial with restore-output
+        // on the audio queue, so the two can never cross.
+        audioQueue.async {
+            let outcome = OutputAudio.mute(on: audioQueue)
+            Wire.reply(id, ["outcome": outcome.rawValue])
+        }
+    case "restore-output":
+        audioQueue.async {
+            Wire.reply(id, ["outcome": OutputAudio.restore().rawValue])
+        }
     case "app-icon":
         let path = request["path"] as? String ?? ""
         workQueue.async {
@@ -217,10 +228,24 @@ Thread {
             }
         }
     }
-    // The app is gone. Make sure no hold stays "down" for anyone, then leave.
+    // The app is gone. Make sure no hold stays "down" and no sound stays muted, then leave.
     DispatchQueue.main.sync { HoldWatcher.shared.stopAll() }
+    audioQueue.sync { _ = OutputAudio.restore() }
     exit(0)
 }.start()
+
+// Being asked to quit must never leave the user's sound muted.
+var terminationSources: [DispatchSourceSignal] = []
+for signalNumber in [SIGTERM, SIGINT, SIGHUP] {
+    signal(signalNumber, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: audioQueue)
+    source.setEventHandler {
+        _ = OutputAudio.restore()
+        exit(0)
+    }
+    source.resume()
+    terminationSources.append(source)
+}
 
 Wire.send(["event": "ready", "pid": Int(getpid())])
 RunLoop.main.run()

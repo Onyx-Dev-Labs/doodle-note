@@ -52,6 +52,10 @@ interface Harness {
     mouseResult: MouseStartResult | null
     captureResult: MouseCaptureResult
     input: InputState | null
+    /** The order the sound output was silenced and given back, as the helper saw it. */
+    audio: string[]
+    /** When set, a mute does not finish until this resolves (a helper that is still starting). */
+    muteGate: Promise<void> | null
     fnKeyAction: number | null
     inputMonitoring: boolean
     inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
@@ -151,6 +155,8 @@ function harness(
     mouseResult: null,
     captureResult: { ok: true, button: 3 },
     input: { muted: false, volume: 0.5 },
+    audio: [],
+    muteGate: null,
     fnKeyAction: null,
     inputMonitoring: true,
     inputMonitoringAccess: 'granted',
@@ -254,6 +260,12 @@ function harness(
         return () => {}
       },
       inputState: async () => helper.input,
+      muteOutput: async () => {
+        await helper.muteGate
+        helper.audio.push('mute')
+        return true
+      },
+      restoreOutput: async () => void helper.audio.push('restore'),
       onExit: (cb) => {
         helper.exitListener = cb
         return () => {}
@@ -2365,4 +2377,79 @@ test('the local model starts loading as the dictation starts, and only when a mo
   provider.service.toggle()
   await tick()
   assert.equal(warmed.length, 1, 'a hosted provider is not warmed')
+})
+
+test('the sound is silenced while recording and comes back when it ends', async () => {
+  const h = harness({ settings: { startSound: false } })
+  await startListening(h)
+  assert.deepEqual(h.helper.audio, ['mute'])
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  assert.deepEqual(h.helper.audio, ['mute', 'restore'], 'back before the words are typed')
+  h.emit({ event: 'final', channel: 'mic', text: 'one' })
+  await tick()
+  finish(h)
+  assert.deepEqual(h.helper.audio, ['mute', 'restore'], 'once per recording')
+})
+
+test('with the setting off the sound is never touched', async () => {
+  const h = harness({ settings: { startSound: false, muteAudioWhileDictating: false } })
+  await startListening(h)
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  assert.deepEqual(h.helper.audio, [])
+})
+
+test('cancelling a recording gives the sound back', async () => {
+  const h = harness({ settings: { startSound: false } })
+  await startListening(h)
+  h.service.cancel()
+  await tick()
+  assert.deepEqual(h.helper.audio, ['mute', 'restore'])
+})
+
+test('shutting down mid-recording gives the sound back', async () => {
+  const h = harness({ settings: { startSound: false } })
+  await startListening(h)
+  await h.service.dispose()
+  await tick()
+  assert.deepEqual(h.helper.audio, ['mute', 'restore'])
+})
+
+test('a restore never overtakes a mute that is still on its way', async () => {
+  const h = harness({ settings: { startSound: false } })
+  let open!: () => void
+  h.helper.muteGate = new Promise<void>((resolve) => (open = resolve))
+  await startListening(h)
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  assert.deepEqual(h.helper.audio, [], 'the helper has not answered the mute yet')
+  open()
+  await tick()
+  assert.deepEqual(h.helper.audio, ['mute', 'restore'])
+})
+
+test('the start tone is allowed to finish before the sound is silenced', async () => {
+  const h = harness({ settings: { startSound: true } })
+  await startListening(h)
+  assert.deepEqual(h.helper.audio, [], 'not yet: the tone is playing')
+  await new Promise((resolve) => setTimeout(resolve, 450))
+  assert.deepEqual(h.helper.audio, ['mute'])
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  assert.deepEqual(h.helper.audio, ['mute', 'restore'])
+})
+
+test('a recording that ends inside the tone never mutes at all', async () => {
+  const h = harness({ settings: { startSound: true } })
+  await startListening(h)
+  h.clock.now += 1_000
+  h.service.toggle()
+  await tick()
+  await new Promise((resolve) => setTimeout(resolve, 450))
+  assert.deepEqual(h.helper.audio, ['restore'], 'nothing was muted, so nothing is left muted')
 })

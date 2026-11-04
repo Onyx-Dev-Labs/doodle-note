@@ -136,6 +136,23 @@ export class DictationHelperClient {
     }
   }
 
+  /**
+   * Silence the sound output until restoreOutput. True when this call silenced it;
+   * false when it was already silent, cannot be silenced, or the helper is down.
+   * Starts the helper if it is not running, since the sound must be able to come back.
+   */
+  async muteOutput(): Promise<boolean> {
+    if (!(await this.ensureRunning())) return false
+    const reply = await this.request('mute-output', {}, this.timeouts.status)
+    return reply?.ok === true && reply.outcome === 'muted'
+  }
+
+  /** Give back the sound muteOutput took. Safe to call when nothing was muted. */
+  async restoreOutput(): Promise<void> {
+    if (!this.child) return
+    await this.request('restore-output', {}, this.timeouts.status)
+  }
+
   /** The focused app and control right now; null when the helper cannot say. */
   async snapshot(snapshotId: string): Promise<TargetDescription | null> {
     const reply = await this.request('snapshot', { snapshotId }, this.timeouts.snapshot)

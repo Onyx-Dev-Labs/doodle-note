@@ -606,6 +606,23 @@ export function DictationSettings(): React.JSX.Element {
           </div>
           <div className="cal-row">
             <span className="cal-row-main">
+              <span className="cal-row-label">Mute other audio while dictating</span>
+              <span className="cal-row-sub">
+                Music, radio or a video is silenced while you record and comes straight back when
+                you finish, so it does not leak into your voice. If your sound was already muted, or
+                you change the volume yourself meanwhile, it is left as you set it.
+              </span>
+            </span>
+            <Toggle
+              checked={settings.muteAudioWhileDictating}
+              label="Mute other audio while dictating"
+              onChange={() =>
+                void update({ muteAudioWhileDictating: !settings.muteAudioWhileDictating })
+              }
+            />
+          </div>
+          <div className="cal-row">
+            <span className="cal-row-main">
               <span className="cal-row-label">Start and stop tones</span>
               <span className="cal-row-sub">
                 A short two-note chime when recording begins and ends.

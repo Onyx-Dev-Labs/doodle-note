@@ -27,6 +27,7 @@ test('an old settings file gains the pill defaults and keeps what it had', () =>
   assert.equal(settings.showLiveText, true)
   assert.equal(settings.showStatusMessages, true)
   assert.equal(settings.showTargetApp, true)
+  assert.equal(settings.muteAudioWhileDictating, true)
 })
 
 test('the default shortcuts do not collide with each other', () => {
@@ -60,6 +61,7 @@ test('garbage values fall back; explicit false and empty values are kept', () =>
     showLiveText: false,
     showStatusMessages: false,
     showTargetApp: false,
+    muteAudioWhileDictating: false,
     microphoneUid: '',
     pillHiddenUntil: Number.NaN
   })
@@ -71,6 +73,7 @@ test('garbage values fall back; explicit false and empty values are kept', () =>
   assert.equal(off.showLiveText, false)
   assert.equal(off.showStatusMessages, false)
   assert.equal(off.showTargetApp, false)
+  assert.equal(off.muteAudioWhileDictating, false)
   assert.equal(off.microphoneUid, null)
   assert.equal(off.pillHiddenUntil, null)
 })
