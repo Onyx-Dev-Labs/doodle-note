@@ -301,3 +301,55 @@ test('two Google subjects add independently, deduplicate, restore and remove onl
   assert.equal(after.views().length, 1)
   assert.equal(after.get(firstId)?.view.email, 'first@example.test')
 })
+
+test('sign-in callback shows the connected page and drops the code from the address bar', async (t) => {
+  const { client } = setup(t)
+  const networkFetch = globalThis.fetch
+  let page: Promise<Response> | undefined
+  browser = async (url) => {
+    const auth = new URL(url)
+    const callback = new URL(auth.searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', auth.searchParams.get('state')!)
+    page = networkFetch(callback)
+    await page
+  }
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) =>
+    String(input).endsWith('/userinfo')
+      ? response({ sub: 'fixture-subject', email: 'qa@example.test' })
+      : response({
+          access_token: 'fixture-access',
+          refresh_token: 'fixture-refresh',
+          expires_in: 3600
+        })
+  )
+  await client.initialize()
+  await client.connect()
+  const callback = await page!
+  assert.equal(callback.status, 200)
+  assert.equal(callback.headers.get('cache-control'), 'no-store')
+  const html = await callback.text()
+  assert.match(html, /You&rsquo;re connected/)
+  assert.match(html, /linked to your Google Calendar\. Head back to the app/)
+  assert.match(html, /history\.replaceState\(null,'',location\.pathname\)/)
+})
+
+test('a mismatched sign-in callback shows the error page instead of success', async (t) => {
+  const { client } = setup(t)
+  const networkFetch = globalThis.fetch
+  let page: Promise<Response> | undefined
+  browser = async (url) => {
+    const callback = new URL(new URL(url).searchParams.get('redirect_uri')!)
+    callback.searchParams.set('code', 'fixture-code')
+    callback.searchParams.set('state', 'not-the-request-state')
+    page = networkFetch(callback)
+    await page
+  }
+  await client.initialize()
+  await assert.rejects(client.connect(), /state mismatch/)
+  const callback = await page!
+  assert.equal(callback.status, 400)
+  const html = await callback.text()
+  assert.match(html, /Sign-in didn&rsquo;t finish/)
+  assert.doesNotMatch(html, /You&rsquo;re connected/)
+})

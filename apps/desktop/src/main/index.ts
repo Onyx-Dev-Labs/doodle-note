@@ -967,9 +967,11 @@ app.whenReady().then(async () => {
   })
 })
 
-/** Bring the app forward for a notification click, recreating the window if
+/** Bring the app forward for a notification click or sign-in, recreating the window if
  *  the user closed it (macOS keeps the app alive without windows). */
 function focusMainWindow(): void {
+  // Activate from the background (e.g. the browser after calendar sign-in).
+  if (process.platform === 'darwin') app.focus({ steal: true })
   const window = mainWindow
   if (window) {
     if (window.isMinimized()) window.restore()
