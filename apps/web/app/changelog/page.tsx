@@ -10,7 +10,7 @@ const RELEASES: Array<{
 }> = [
   {
     version: "0.5.0",
-    date: "Unreleased",
+    date: "November 5, 2026",
     highlights: [
       "Bark has its final logo and a vertical dictation pill when positioned on the left or right edge of your screen",
       "A cleaner Settings layout groups Your preferences, Your workflow, and More, with sections open by default and consistent spacing as you switch tabs",
