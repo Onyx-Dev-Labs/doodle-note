@@ -1,5 +1,6 @@
 appId: com.doodlenote.desktop
 productName: DoodleNote
+copyright: Copyright © 2026 Onyx Dev Labs
 directories:
   buildResources: resources
   output: release
@@ -71,8 +72,8 @@ mac:
         - arm64
   icon: resources/icon.icns
   category: public.app-category.productivity
-  # Signed with Sean's Developer ID (in the login Keychain). Stable signature
-  # = safeStorage/Keychain secrets survive rebuilds; TCC grants stick.
+  # Keep the shipped Developer ID team: Squirrel.Mac requires the same team
+  # for automatic updates. CI holds its certificate and notarization credentials.
   identity: "SEAN INMAN (VTZW6K32K4)"
   hardenedRuntime: true
   gatekeeperAssess: false

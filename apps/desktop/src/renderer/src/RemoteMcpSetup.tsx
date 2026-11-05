@@ -67,7 +67,7 @@ export function RemoteMcpSetup({ baseUrl }: { baseUrl: string | undefined }): Re
               Copying this URL does not connect an account.
             </li>
           </ol>
-          <details>
+          <details open>
             <summary>API setup and troubleshooting</summary>
             <p className="models-sub">
               If your Composio form only offers OAuth or cannot set the bearer header, use its

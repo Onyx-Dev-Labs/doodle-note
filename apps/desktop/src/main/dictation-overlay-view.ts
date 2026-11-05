@@ -9,7 +9,7 @@ export type OverlayMode = 'rest' | 'session' | 'message'
 export interface OverlayView {
   visible: boolean
   mode: OverlayMode
-  /** The dock edge, so the page can lay the resting pill out along it. */
+  /** The dock edge, so the page can lay the resting and live pills out along it. */
   edge: PillEdge
   /** A short heads-up under the pill: mic muted, time almost up. */
   warning: string | null
@@ -94,6 +94,10 @@ const WINDOW = {
   /** Room for the arrow and the app icon on the live pill. */
   sessionWithTargetWidth: 372,
   sessionBase: 56,
+  sideWidth: 58,
+  sideHeight: 224,
+  sideTargetHeight: 36,
+  sideCaptionWidth: 250,
   warningLine: 26,
   detailBlock: 64,
   message: { width: 380, height: 132 },
@@ -113,6 +117,14 @@ export function overlaySize(view: OverlayView): Size {
   }
   if (view.mode === 'message') return { ...WINDOW.message }
   if (view.mode === 'session') {
+    if (view.edge !== 'bottom') {
+      const status = view.showStatus && !(view.tone === 'active' && view.title === 'Listening')
+      return {
+        width:
+          WINDOW.sideWidth + (view.warning || view.detail || status ? WINDOW.sideCaptionWidth : 0),
+        height: WINDOW.sideHeight + (view.target ? WINDOW.sideTargetHeight : 0)
+      }
+    }
     return {
       width: view.target ? WINDOW.sessionWithTargetWidth : WINDOW.sessionWidth,
       height:

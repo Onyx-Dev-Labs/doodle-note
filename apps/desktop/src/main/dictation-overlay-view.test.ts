@@ -109,6 +109,31 @@ test('window size follows the layout: along the edge, with room for the warning 
   assert.equal(plain.width, warned.width)
 })
 
+test('live side docks keep a vertical rail and expand inward for readable captions', () => {
+  for (const edge of ['left', 'right'] as const) {
+    const view = overlayView(live(), ctx({ edge }))
+    const plain = overlaySize(view)
+    assert.ok(plain.height > plain.width, 'the active pill stays vertical')
+    const target = overlaySize({ ...view, target: { name: 'Notes', icon: null } })
+    assert.equal(target.width, plain.width, 'the app icon stacks within the rail')
+    assert.ok(target.height > plain.height)
+    for (const caption of [
+      { warning: WARNINGS.muted },
+      { detail: 'A sentence being dictated.' },
+      { tone: 'busy' as const, title: 'Transcribing…' }
+    ]) {
+      const expanded = overlaySize({ ...view, ...caption })
+      assert.ok(expanded.width > plain.width, 'captions have room beside the rail')
+      assert.equal(expanded.height, plain.height, 'captions do not move the rail vertically')
+    }
+    assert.deepEqual(
+      overlaySize({ ...view, tone: 'busy', title: 'Transcribing…', showStatus: false }),
+      plain,
+      'quiet status does not leave an empty caption area'
+    )
+  }
+})
+
 /* ---- quiet mode ---- */
 
 const quietCtx = (over: Partial<OverlayContext> = {}): OverlayContext =>
