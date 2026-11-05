@@ -70,7 +70,6 @@ async function main() {
           signedIn: true,
           msSignedIn: true,
           googleSignedIn: true,
-          googleAvailable: false,
           connections,
           calendars: connections.map((c) => ({
             id: `cal-${c.id}`,
@@ -130,16 +129,12 @@ async function main() {
         .waitFor()
       assert.equal(await page.getByRole('button', { name: /^Reconnect owner-/ }).count(), 4)
       const addGoogle = page.getByRole('button', { name: 'Add Google account', exact: true })
-      assert.equal(await addGoogle.isDisabled(), true)
+      assert.equal(await addGoogle.isEnabled(), true)
       const googleReconnect = page.getByRole('button', {
         name: 'Reconnect owner-2@example.test',
         exact: true
       })
-      assert.equal(
-        await googleReconnect.isEnabled(),
-        true,
-        'Existing Google accounts must reconnect while new Google connections are gated'
-      )
+      assert.equal(await googleReconnect.isEnabled(), true)
       await page.screenshot({
         path: join(output, `${width}-${theme}-google-reconnect.png`),
         fullPage: true
@@ -150,10 +145,10 @@ async function main() {
       for (const button of await page.getByRole('button', { name: /^Reconnect owner-/ }).all()) {
         assert.equal(await button.isDisabled(), true, 'Prevent overlapping sign-in attempts')
       }
-      assert.equal(await addGoogle.isDisabled(), true)
+      assert.equal(await addGoogle.isDisabled(), true, 'Prevent overlapping sign-in attempts')
       await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()
       assert.equal(await googleReconnect.isEnabled(), true)
-      assert.equal(await addGoogle.isDisabled(), true)
+      assert.equal(await addGoogle.isEnabled(), true)
       const reconnect = page.getByRole('button', {
         name: 'Reconnect owner-1@example.test',
         exact: true
@@ -184,7 +179,7 @@ async function main() {
     }
     assert.deepEqual(errors, [])
     console.log(
-      `PASS: Google reconnect with new connections gated, concurrent sign-in guard, targeted keyboard reconnect, cancel, single remove, selection, account errors, compact layout. Evidence: ${output}`
+      `PASS: Google add and reconnect, concurrent sign-in guard, targeted keyboard reconnect, cancel, single remove, selection, account errors, compact layout. Evidence: ${output}`
     )
   } finally {
     await browser.close()

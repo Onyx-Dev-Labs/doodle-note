@@ -1,4 +1,3 @@
-import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CalendarState } from '../../shared/calendar-api'
 import type { DetectState } from '../../shared/detect-api'
@@ -43,7 +42,7 @@ function OnboardingTour({
     cancel: cancelSync
   } = useSyncConnection()
   const [notes, setNotes] = useState<NotesSettingsView | null>(null)
-  const [busy, setBusy] = useState<'ms' | null>(null)
+  const [busy, setBusy] = useState<'ms' | 'google' | null>(null)
   const [stepIndex, setStepIndex] = useState(0)
 
   useEffect(() => {
@@ -92,6 +91,15 @@ function OnboardingTour({
     setBusy('ms')
     try {
       await window.calendar.connect()
+    } finally {
+      setBusy(null)
+    }
+  }, [])
+
+  const connectGoogle = useCallback(async () => {
+    setBusy('google')
+    try {
+      await window.calendar.connectGoogle()
     } finally {
       setBusy(null)
     }
@@ -203,9 +211,14 @@ function OnboardingTour({
                 >
                   {busy === 'ms' ? 'Waiting for browser…' : 'Connect Microsoft 365'}
                 </button>
-                <GoogleCalendarPending buttonClassName="tour-action">
-                  Connect Google
-                </GoogleCalendarPending>
+                <button
+                  type="button"
+                  className="tour-action"
+                  disabled={busy !== null}
+                  onClick={() => void connectGoogle()}
+                >
+                  {busy === 'google' ? 'Waiting for browser…' : 'Connect Google'}
+                </button>
               </div>
             )}
             <p className="tour-footnote">Optional — you can always start meetings by hand.</p>

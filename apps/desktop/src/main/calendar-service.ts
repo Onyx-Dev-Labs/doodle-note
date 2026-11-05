@@ -415,8 +415,6 @@ export class CalendarService {
     return {
       connections,
       connecting: this.pendingAuth ? { ...this.pendingAuth } : undefined,
-      // Keep new Google consent gated until the shipped registration is verified.
-      googleAvailable: false,
       configured: this.effectiveConfig() !== null,
       builtIn: BUILT_IN_MS_CLIENT_ID.length > 0,
       ...(this.config ? { clientId: this.config.clientId, tenantId: this.config.tenantId } : {}),

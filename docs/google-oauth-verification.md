@@ -1,6 +1,8 @@
 # Google OAuth verification: scope and AI data use
 
-Prepared September 12, 2026. This describes the provider replacement patch, not a completed production release or Google's approval. Do not send the response template until the release, published privacy page, and new demo have been verified.
+**Status: approved.** Google approved `https://www.googleapis.com/auth/calendar.readonly` for project `doodle-note`. The Verification Center showed branding and data access as verified on November 5, 2026, and desktop builds no longer gate new Google connections. Adding a scope or changing the OAuth consent screen configuration requires a new verification request.
+
+The rest of this document is the September 12, 2026 record of the provider replacement patch and the review response. The remaining gates, demo script and response template below are historical and no longer need to be completed.
 
 ## Calendar permissions and data flow
 

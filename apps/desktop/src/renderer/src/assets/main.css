@@ -4070,27 +4070,6 @@ button.fp-row:hover {
   cursor: default;
 }
 
-/* Explain why Google connection controls are temporarily unavailable. */
-.google-calendar-pending {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.google-calendar-pending > button:disabled {
-  opacity: 0.55;
-  filter: grayscale(1);
-  cursor: not-allowed;
-}
-
-.google-calendar-pending-note {
-  max-width: 230px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 .soon-badge {
   font-size: 10.5px;
   font-weight: 600;

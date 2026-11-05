@@ -5,7 +5,6 @@ import {
 } from '../../shared/batch-transcription'
 import { StorageSettings } from './StorageSettings'
 import CloudModelPicker from './CloudModelPicker'
-import { GoogleCalendarPending } from './GoogleCalendarPending'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AUDIO_PERSIST_STORAGE_KEY,
@@ -787,20 +786,14 @@ export default function ModelsView({
                     >
                       <MicrosoftLogo /> Add Microsoft account
                     </button>
-                    {calState.googleAvailable ? (
-                      <button
-                        type="button"
-                        className="provider-btn"
-                        disabled={connecting || !!calState.connecting}
-                        onClick={() => void connectCalendar('google')}
-                      >
-                        <GoogleLogo /> Add Google account
-                      </button>
-                    ) : (
-                      <GoogleCalendarPending buttonClassName="provider-btn">
-                        <GoogleLogo /> Add Google account
-                      </GoogleCalendarPending>
-                    )}
+                    <button
+                      type="button"
+                      className="provider-btn"
+                      disabled={connecting || !!calState.connecting}
+                      onClick={() => void connectCalendar('google')}
+                    >
+                      <GoogleLogo /> Add Google account
+                    </button>
                     {calState.signedIn && (
                       <button
                         type="button"
