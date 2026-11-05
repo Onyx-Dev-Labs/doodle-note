@@ -9,6 +9,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.4.38",
+    date: "November 5, 2026",
+    highlights: [
+      "Meet Bark, DoodleNote's dictation for Mac: press a key anywhere, speak, and your words are typed into the app you are using. It runs on your Mac, never keeps audio, and is off until you turn it on in Settings",
+      "Google Calendar connections are back: Google has approved DoodleNote's read-only calendar access, so you can add a Google account in Settings or during setup",
+      "A redesigned note page, with Fetches in its own tab next to The good stuff, My doodles, and Transcript",
+      "Settings has a new look",
+    ],
+  },
+  {
     version: "0.4.37",
     date: "October 30, 2026",
     highlights: [
