@@ -1,3 +1,4 @@
+import { SettingsFold } from './SettingsFold'
 import { useState } from 'react'
 import type { DictationSettingsUpdate, DictationStatus } from '../../shared/dictation-api'
 import { MAX_DICTIONARY_ENTRIES, MAX_PHRASE_CHARS } from '../../shared/dictation-dictionary'
@@ -34,8 +35,11 @@ export function DictationDictionarySettings({ status, update }: Props): React.JS
   }
 
   return (
-    <section className="keys-section">
-      <h3>Dictionary</h3>
+    <SettingsFold
+      title="Dictionary"
+      description="Spellings and learned corrections"
+      attention={message}
+    >
       <p className="models-sub">
         Names and terms the recognizer spells wrong. Each entry says what it hears and how to write
         it, and applies to every dictation, whatever the tidy-up level. Leave the first box empty to
@@ -147,6 +151,6 @@ export function DictationDictionarySettings({ status, update }: Props): React.JS
           </button>
         </div>
       )}
-    </section>
+    </SettingsFold>
   )
 }

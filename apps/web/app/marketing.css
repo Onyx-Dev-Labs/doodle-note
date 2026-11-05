@@ -9,8 +9,8 @@
   --muted: #73796c;
   --line: #dedfd3;
   --hand: var(--font-caveat), cursive;
-  --display: var(--font-bricolage), sans-serif;
-  --body: var(--font-geist-sans), sans-serif;
+  --display: var(--font-fraunces), Georgia, serif;
+  --body: var(--font-figtree), sans-serif;
 }
 .marketing * {
   box-sizing: border-box;

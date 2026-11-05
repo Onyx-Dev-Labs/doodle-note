@@ -1,3 +1,4 @@
+import { SettingsFold } from './SettingsFold'
 import { useEffect, useState } from 'react'
 import type {
   AppDisplay,
@@ -67,8 +68,7 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
     settings.byokConsent?.provider === byok.provider &&
     settings.byokConsent?.model === byok.model
   return (
-    <section className="keys-section">
-      <h3>Tidy-up</h3>
+    <SettingsFold title="Tidy-up" description="Off, Light, or Full cleanup of dictated text">
       <p className="models-sub">
         Speech is recognised on this Mac. Tidy-up decides what happens to the words before they are
         typed. If a model step fails or looks doubtful, the words as you said them are typed
@@ -159,7 +159,7 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
           </div>
         )}
       </div>
-    </section>
+    </SettingsFold>
   )
 }
 
@@ -210,8 +210,7 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
     status.helper === 'unavailable' ? null : loaded ? info.apps : {}
   )
   return (
-    <section className="keys-section">
-      <h3>Style</h3>
+    <SettingsFold title="Style" description="App categories, tone, and app assignments">
       <p className="models-sub">
         How the words are cased and punctuated depends on the app you are typing into. English only:
         other languages are typed as they are. Applied after tidy-up, so it does nothing while
@@ -362,7 +361,7 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
           </button>
         </div>
       </div>
-    </section>
+    </SettingsFold>
   )
 }
 
@@ -380,8 +379,7 @@ export function DictationTransformSettings({ status, update }: Props): React.JSX
     save(transforms.items.map((item) => (item.id === id ? { ...item, ...patch } : item)))
 
   return (
-    <section className="keys-section">
-      <h3>Transforms</h3>
+    <SettingsFold title="Transforms" description="Rewrite actions, shortcuts, and custom prompts">
       <p className="models-sub">
         Rewrite text with a model: the text you have selected in any app, or your last dictation if
         nothing is selected. Each transform can have its own shortcut, and the pill&apos;s menu
@@ -662,6 +660,6 @@ export function DictationTransformSettings({ status, update }: Props): React.JSX
           </div>
         </>
       )}
-    </section>
+    </SettingsFold>
   )
 }

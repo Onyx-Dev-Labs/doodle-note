@@ -1,3 +1,5 @@
+import { SettingsFold } from './SettingsFold'
+import { BarkMark } from './BarkMark'
 import { useCallback, useEffect, useState } from 'react'
 import type {
   DictationSettingsUpdate,
@@ -104,7 +106,10 @@ export function DictationSettings(): React.JSX.Element {
   if (!status) {
     return (
       <section className="keys-section">
-        <h3>{FEATURE_NAME}</h3>
+        <h3 className="bark-heading">
+          <BarkMark size={44} />
+          {FEATURE_NAME}
+        </h3>
         <p className="models-sub">{error || 'Loading…'}</p>
       </section>
     )
@@ -112,7 +117,10 @@ export function DictationSettings(): React.JSX.Element {
   if (!status.supported) {
     return (
       <section className="keys-section">
-        <h3>{FEATURE_NAME}</h3>
+        <h3 className="bark-heading">
+          <BarkMark size={44} />
+          {FEATURE_NAME}
+        </h3>
         <p className="models-sub">
           {`${FEATURE_NAME}, DoodleNote's dictation, is available on macOS only for now.`}
         </p>
@@ -216,7 +224,10 @@ export function DictationSettings(): React.JSX.Element {
   return (
     <>
       <section className="keys-section">
-        <h3>{FEATURE_NAME}</h3>
+        <h3 className="bark-heading">
+          <BarkMark size={44} />
+          {FEATURE_NAME}
+        </h3>
         <p className="models-sub">
           {FEATURE_NAME} is DoodleNote&apos;s dictation. Press a shortcut in any app and speak.
           Speech is recognized on this Mac and the text is typed into the field you were using.
@@ -245,8 +256,10 @@ export function DictationSettings(): React.JSX.Element {
         </div>
       </section>
 
-      <section className="keys-section">
-        <h3>Permissions</h3>
+      <SettingsFold
+        title="Permissions"
+        description="Microphone, Accessibility, and Input Monitoring"
+      >
         <p className="models-sub">
           Allow asks macOS directly, which also lists DoodleNote Dev under Privacy &amp; Security.
           Once you have answered, macOS will not ask again and the button opens System Settings
@@ -272,10 +285,9 @@ export function DictationSettings(): React.JSX.Element {
             permissions.inputMonitoringAccess ?? accessibilityState(permissions.inputMonitoring)
           )}
         </div>
-      </section>
+      </SettingsFold>
 
-      <section className="keys-section">
-        <h3>Shortcuts</h3>
+      <SettingsFold title="Shortcuts" description="Keyboard, mouse, and hands-free controls">
         {status.conflicts.length > 0 && (
           <p className="models-sub">
             {status.conflicts.join(', ')} is running. If both listen to the same keys, pick
@@ -480,10 +492,12 @@ export function DictationSettings(): React.JSX.Element {
             )}
           </div>
         </div>
-      </section>
+      </SettingsFold>
 
-      <section className="keys-section">
-        <h3>Pill and microphone</h3>
+      <SettingsFold
+        title="Pill and microphone"
+        description="Position, input, live words, and audio feedback"
+      >
         <p className="models-sub">
           The pill is a small doodle at the edge of your screen. Click it to start dictating, click
           Finish to insert, right-click it for a menu, or drag it to another edge.
@@ -635,15 +649,14 @@ export function DictationSettings(): React.JSX.Element {
             />
           </div>
         </div>
-      </section>
+      </SettingsFold>
 
       <DictationTidySettings status={status} update={update} />
       <DictationStyleSettings status={status} update={update} />
-      <DictationTransformSettings status={status} update={update} />
       <DictationDictionarySettings status={status} update={update} />
+      <DictationTransformSettings status={status} update={update} />
 
-      <section className="keys-section">
-        <h3>Try it</h3>
+      <SettingsFold title="Try it" description="Dictation scratch field and model diagnostics">
         <p className="models-sub">
           Click in this box, then use your shortcut. This is a scratch field; nothing is saved.
         </p>
@@ -678,11 +691,14 @@ export function DictationSettings(): React.JSX.Element {
             </span>
           </div>
         </div>
-      </section>
+      </SettingsFold>
 
       {status.recoveries.length > 0 && (
-        <section className="keys-section">
-          <h3>Kept text</h3>
+        <SettingsFold
+          title="Kept text"
+          description="Text that could not be inserted"
+          attention={status.recoveries.map((item) => item.gen).join(',')}
+        >
           <p className="models-sub">
             Text that could not be inserted. It stays in memory until you dismiss it or quit.
           </p>
@@ -710,7 +726,7 @@ export function DictationSettings(): React.JSX.Element {
               </div>
             ))}
           </div>
-        </section>
+        </SettingsFold>
       )}
       {error && <p className="models-sub">{error}</p>}
     </>

@@ -7,15 +7,17 @@
  * offset ink outline, a hand-drawn squiggle that follows the voice level, and
  * hand-drawn cancel and finish marks.
  */
+import { overlayFontCss, barkPine, barkWhite } from './brand-assets'
 import { FEATURE_NAME } from '../shared/dictation-brand'
 
 export function overlayHtml(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
 <style>
+${overlayFontCss}
   :root{--paper:#fbf6e9;--ink:#2b2a26;--mute:#6f6c60;--wash:#ece5d0;--accent:#c4562f;--ok:#4f7a4a;--warn:#a8741a;--err:#b3412f}
   .dark{--paper:#2a2b25;--ink:#efeadb;--mute:#a9a698;--wash:#3a3b33;--accent:#f08a63;--ok:#8fbf86;--warn:#e0b45a;--err:#e8806d}
-  html,body{margin:0;height:100%;background:transparent;color:var(--ink);overflow:hidden;-webkit-user-select:none;user-select:none;cursor:default;font:13px "Bradley Hand","Marker Felt","Chalkboard SE",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  html,body{margin:0;height:100%;background:transparent;color:var(--ink);overflow:hidden;-webkit-user-select:none;user-select:none;cursor:default;font:13px "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
   .root{box-sizing:border-box;height:100vh;padding:6px 8px 8px 6px;display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:6px}
   .root.bottom{flex-direction:column-reverse}
   .root.left{align-items:flex-start}.root.right{align-items:flex-end}
@@ -28,10 +30,14 @@ export function overlayHtml(): string {
   .rest:hover{transform:scale(1.07)}
   .rest:hover path{stroke:var(--accent)}
   .root.left .rest,.root.right .rest{width:28px;height:78px;align-self:auto}
-  .root.left .rest svg,.root.right .rest svg{transform:rotate(90deg)}
+  .root.left .rest svg,.root.right .rest svg{flex:none;transform:rotate(90deg)}
+  .bark-logo{display:block;width:28px;height:28px;object-fit:contain;flex:none}
+  .bark-logo-dark{display:none}.dark .bark-logo-light{display:none}.dark .bark-logo-dark{display:block}
+  .rest .bark-logo{width:24px;height:24px}
+  .rest>svg{display:none}
   /* live pill */
-  .session{height:38px;padding:0 10px;gap:8px;align-self:center}
-  .act{display:flex;align-items:center;gap:4px;color:var(--ink);text-decoration:none;font-size:14px;padding:2px 4px;border-radius:10px}
+  .session{max-width:100%;height:38px;padding:0 10px;gap:8px;align-self:center}
+  .act{flex:none;display:flex;align-items:center;gap:4px;color:var(--ink);text-decoration:none;font-size:14px;padding:2px 4px;border-radius:10px}
   .act:hover{background:var(--wash)}
   .act.fin path{stroke:var(--ok)}
   .act.can path{stroke:var(--err)}
@@ -44,17 +50,29 @@ export function overlayHtml(): string {
   .into svg path{stroke:var(--mute);stroke-width:1.8}
   .app{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--wash);overflow:hidden}
   .app img{width:24px;height:24px;display:block;-webkit-user-drag:none}
-  .app .dot{font:700 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--mute)}
+  .app .dot{font:700 12px "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--mute)}
   .state{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;color:var(--mute)}
-  .caption{box-sizing:border-box;border-radius:14px 12px 15px 11px/11px 15px 12px 14px;padding:5px 10px;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;align-self:stretch}
+  .caption{box-sizing:border-box;border-radius:14px 12px 15px 11px/11px 15px 12px 14px;padding:5px 10px;font:12px "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;align-self:stretch}
   .caption .warn{color:var(--warn);font-weight:600;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .caption .detail{color:var(--mute);line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
+  /* Side docks use a vertical control rail; readable captions open inward. */
+  .root.side{flex-direction:row;align-items:center;justify-content:flex-start}
+  .root.side.right{flex-direction:row-reverse}
+  .side .session{flex:none;flex-direction:column;width:44px;height:100%;padding:10px 0;gap:8px;border-radius:23px 21px 22px 20px}
+  .side .act{flex:none;box-sizing:border-box;width:28px;height:28px;padding:0;justify-content:center;border-radius:50%}
+  .side .act span{display:none}
+  .side .mid{flex-direction:column;gap:8px;flex:1;min-height:0;width:28px;justify-content:center}
+  .side .into{justify-content:center;width:28px;padding-top:8px;border-top:1px solid var(--wash)}
+  .side .into>svg{display:none}
+  .side .caption{flex:1;min-width:0;align-self:center;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+  .side .caption .warn{white-space:normal}
+  .caption-state{color:var(--mute);line-height:1.35;overflow-wrap:anywhere}
   /* message card */
   .card{box-sizing:border-box;flex:1;border-radius:16px 14px 17px 13px/13px 17px 14px 16px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;min-height:0}
   .card .title{font-weight:700;font-size:14px;line-height:1.3}
   .card.warn{border-color:var(--warn)}.card.error{border-color:var(--err)}
-  .card .detail{flex:1;min-height:0;color:var(--mute);font:12px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
-  .diff{flex:1;min-height:0;overflow:hidden;font:12px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word;-webkit-user-select:text;user-select:text;background:var(--wash);border-radius:8px;padding:6px 8px}
+  .card .detail{flex:1;min-height:0;color:var(--mute);font:12px/1.35 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;-webkit-user-select:text;user-select:text;white-space:pre-wrap;word-break:break-word}
+  .diff{flex:1;min-height:0;overflow:hidden;font:12px/1.45 "Doodle Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;white-space:pre-wrap;word-break:break-word;-webkit-user-select:text;user-select:text;background:var(--wash);border-radius:8px;padding:6px 8px}
   .diff ins{text-decoration:none;color:var(--ok);background:rgba(79,122,74,.16);border-radius:3px}
   .diff del{color:var(--err);background:rgba(179,65,47,.14);border-radius:3px;text-decoration:line-through}
   .btns{display:flex;gap:6px;justify-content:flex-end}
@@ -66,25 +84,27 @@ export function overlayHtml(): string {
 </style></head><body>
 <div class="root bottom" id="root">
   <div class="pill rest" id="rest" role="button" aria-label="Start ${FEATURE_NAME}" hidden>
+    <img class="bark-logo bark-logo-light" src="${barkPine}" alt="" aria-hidden="true"><img class="bark-logo bark-logo-dark" src="${barkWhite}" alt="" aria-hidden="true">
     <svg width="56" height="18" viewBox="0 0 56 18" aria-hidden="true"><path class="wave" id="restWave" d=""/></svg>
   </div>
   <div class="pill session" id="session" hidden>
-    <a class="act can" id="cancel" href="doodle-dictation://cancel" role="button" aria-label="Cancel ${FEATURE_NAME}" hidden>
+    <a class="act can" id="cancel" href="doodle-dictation://cancel" role="button" aria-label="Cancel ${FEATURE_NAME}" title="Cancel ${FEATURE_NAME}" hidden>
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.4 C6 6.2 9.6 9.8 13 13.2 M12.8 2.8 C10 5.8 6.4 9.6 2.9 13"/></svg><span>Cancel</span>
     </a>
     <div class="mid" id="mid">
-      <svg id="midSvg" width="120" height="24" viewBox="0 0 120 24" aria-hidden="true"><path class="wave" id="wave" d=""/></svg>
+      <img class="bark-logo bark-logo-light" src="${barkPine}" alt="" aria-hidden="true"><img class="bark-logo bark-logo-dark" src="${barkWhite}" alt="" aria-hidden="true">
+      <svg id="midSvg" width="96" height="24" viewBox="0 0 96 24" aria-hidden="true"><path class="wave" id="wave" d=""/></svg>
       <span class="state" id="state"></span>
     </div>
     <div class="into" id="into" role="img" hidden>
       <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true"><path d="M1.4 6.2 C4.4 5.8 8 6.1 11.8 6 M8.2 2.2 C9.6 3.6 10.8 4.8 12.2 6 C10.8 7.4 9.6 8.6 8.4 10"/></svg>
       <span class="app" id="app"><img id="appImg" alt="" hidden><span class="dot" id="appDot"></span></span>
     </div>
-    <a class="act fin" id="stop" href="doodle-dictation://stop" role="button" aria-label="Finish and insert the text" hidden>
+    <a class="act fin" id="stop" href="doodle-dictation://stop" role="button" aria-label="Finish and insert the text" title="Finish and insert the text" hidden>
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 8.6 C4.2 10.4 5.6 12 6.6 13.4 C8.6 9.6 11.4 5.6 14 2.8"/></svg><span>Finish</span>
     </a>
   </div>
-  <div class="caption" id="caption" hidden><div class="warn" id="warn" hidden></div><div class="detail" id="detail"></div></div>
+  <div class="caption" id="caption" hidden><div class="caption-state" id="captionState" hidden></div><div class="warn" id="warn" hidden></div><div class="detail" id="detail"></div></div>
   <div class="card" id="card" hidden>
     <div class="title" id="title"></div>
     <div class="detail" id="cardDetail"></div>
@@ -107,7 +127,7 @@ export function overlayHtml(): string {
 
   // A hand-drawn wave: fixed irregularities per point, so the line looks inked,
   // not computed. Amplitude follows the voice; the ends taper to the baseline.
-  function wave(width, height, amp, ph, cycles) {
+  function wave(width, height, amp, ph, cycles, vertical = false) {
     const n = Math.round(width / 3)
     let d = ''
     for (let i = 0; i <= n; i++) {
@@ -115,7 +135,8 @@ export function overlayHtml(): string {
       const taper = Math.pow(Math.sin(Math.PI * t), 0.8)
       const wobble = 1 + 0.16 * Math.sin(i * 1.7 + 3)
       const y = height / 2 + Math.sin(ph + t * cycles * 2 * Math.PI) * amp * taper * wobble + Math.sin(t * 9 + 1) * 0.35
-      d += (i ? 'L' : 'M') + (t * width).toFixed(1) + ' ' + y.toFixed(1)
+      const x = t * width
+      d += (i ? 'L' : 'M') + (vertical ? y : x).toFixed(1) + ' ' + (vertical ? x : y).toFixed(1)
     }
     return d
   }
@@ -127,7 +148,8 @@ export function overlayHtml(): string {
     } else if (view.mode === 'session') {
       const talking = view.tone === 'active'
       const amp = talking ? 2 + shown * 9 : 1.6
-      $('wave').setAttribute('d', wave(Number($('midSvg').getAttribute('width')), 24, amp, phase, talking ? 4 : 2))
+      const vertical = view.edge !== 'bottom'
+      $('wave').setAttribute('d', wave(vertical ? 88 : Number($('midSvg').getAttribute('width')), 24, amp, phase, talking ? 4 : 2, vertical))
     }
   }
 
@@ -147,7 +169,8 @@ export function overlayHtml(): string {
     const was = view
     view = next
     document.documentElement.className = dark ? 'dark' : ''
-    $('root').className = 'root ' + next.edge
+    const side = next.mode === 'session' && next.edge !== 'bottom'
+    $('root').className = 'root ' + next.edge + (side ? ' side' : '')
     $('rest').hidden = next.mode !== 'rest'
     $('session').hidden = next.mode !== 'session'
     $('card').hidden = next.mode !== 'message'
@@ -161,13 +184,19 @@ export function overlayHtml(): string {
       // live region below still announces every title.
       const plain = (next.tone === 'active' && next.title === 'Listening') || !next.showStatus
       $('state').textContent = plain ? '' : next.title
-      $('state').hidden = plain
-      $('midSvg').setAttribute('width', plain ? '120' : '40')
+      $('state').hidden = plain || side
+      $('captionState').textContent = side && !plain ? next.title : ''
+      $('captionState').hidden = !side || plain
+      const waveWidth = side ? 24 : plain ? 96 : 40
+      const waveHeight = side ? 88 : 24
+      $('midSvg').setAttribute('width', String(waveWidth))
+      $('midSvg').setAttribute('height', String(waveHeight))
+      $('midSvg').setAttribute('viewBox', '0 0 ' + waveWidth + ' ' + waveHeight)
       $('warn').textContent = next.warning || ''
       $('warn').hidden = !next.warning
       $('detail').textContent = next.detail
       $('detail').hidden = !next.detail
-      $('caption').hidden = !next.warning && !next.detail
+      $('caption').hidden = !next.warning && !next.detail && !(side && !plain)
       const into = next.target
       $('into').hidden = !into
       if (into) {

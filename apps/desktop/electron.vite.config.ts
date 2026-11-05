@@ -1,10 +1,23 @@
 import { resolve } from 'path'
+import { readFileSync } from 'node:fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
     define: {
+      __DOODLENOTE_FIGTREE__: JSON.stringify(
+        readFileSync(resolve('src/renderer/src/assets/fonts/figtree.woff2')).toString('base64')
+      ),
+      __DOODLENOTE_FRAUNCES__: JSON.stringify(
+        readFileSync(resolve('src/renderer/src/assets/fonts/fraunces.woff2')).toString('base64')
+      ),
+      __DOODLENOTE_BARK_PINE__: JSON.stringify(
+        readFileSync(resolve('src/renderer/src/assets/bark/bark-pine.png')).toString('base64')
+      ),
+      __DOODLENOTE_BARK_WHITE__: JSON.stringify(
+        readFileSync(resolve('src/renderer/src/assets/bark/bark-white.png')).toString('base64')
+      ),
       // Which lineage this build belongs to. Anything but an explicit `dev` is production.
       __DOODLENOTE_CHANNEL__: JSON.stringify(
         process.env.DOODLENOTE_CHANNEL === 'dev' ? 'dev' : 'release'

@@ -9,6 +9,17 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.5.0",
+    date: "Unreleased",
+    highlights: [
+      "Bark has its final logo and a vertical dictation pill when positioned on the left or right edge of your screen",
+      "A cleaner Settings layout groups Your preferences, Your workflow, and More, with sections open by default and consistent spacing as you switch tabs",
+      "Refined Calendar icons, appearance previews, and clearer controls for recordings, storage, and notes models",
+      "A refreshed Get more page with a Cloud Sync access overlay and blurred setup controls until subscription access is confirmed",
+      "Fraunces headings and Figtree text bring the app and existing website together",
+    ],
+  },
+  {
     version: "0.4.38",
     date: "November 5, 2026",
     highlights: [

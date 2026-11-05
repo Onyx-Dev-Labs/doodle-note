@@ -1,9 +1,16 @@
-/* Bundled fonts: no remote requests or network requirement in the desktop app. */
+/* Bundled fonts keep the local app fully usable offline. */
 @font-face {
-  font-family: 'Doodle Bricolage';
-  src: url('./fonts/bricolage.woff2') format('woff2');
+  font-family: 'Doodle Fraunces';
+  src: url('./fonts/fraunces.woff2') format('woff2');
   font-style: normal;
-  font-weight: 400 800;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Doodle Figtree';
+  src: url('./fonts/figtree.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 300 900;
   font-display: swap;
 }
 @font-face {
@@ -13,15 +20,33 @@
   font-weight: 400 700;
   font-display: swap;
 }
-@font-face {
-  font-family: 'Doodle Geist';
-  src: url('./fonts/geist.woff2') format('woff2');
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-}
 :root {
-  --redesign-display: 'Doodle Bricolage', var(--sans);
+  --sans: 'Doodle Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --serif: 'Doodle Fraunces', Georgia, serif;
+  --redesign-display: var(--serif);
   --redesign-hand: 'Doodle Caveat', cursive;
-  --redesign-body: 'Doodle Geist', var(--sans);
+  --redesign-body: var(--sans);
+}
+body {
+  font-optical-sizing: auto;
+}
+.bark-mark {
+  display: inline-block;
+  flex: none;
+  object-fit: contain;
+  vertical-align: middle;
+}
+.bark-mark-dark {
+  display: none;
+}
+html[data-theme='dark'] .bark-mark-light {
+  display: none;
+}
+html[data-theme='dark'] .bark-mark-dark {
+  display: inline-block;
+}
+.bark-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
