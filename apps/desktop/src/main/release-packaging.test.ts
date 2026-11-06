@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const builderConfig = readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8')
@@ -86,6 +86,47 @@ test('Windows builds an x64 NSIS updater with the Windows icon and native engine
   assert.match(publishScript, /name === 'latest\.yml'/)
   assert.match(publishScript, /name\.endsWith\('\.exe\.blockmap'\)/)
   assert.match(builderConfig, /publish:\s+[\s\S]*useMultipleRangeRequest:\s*false/)
+})
+
+/** The `mac.files` patterns, which replace the shared allowlist on macOS. */
+function macFilePatterns(config: string): string[] {
+  const mac = /^mac:\n((?:[ \t].*\n|\n)*)/m.exec(config.replace(/\r\n/g, '\n'))?.[1] ?? ''
+  const files = /^ {2}files:\n((?: {4}.*\n)*)/m.exec(mac)?.[1] ?? ''
+  return files
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2).replace(/^(['"])(.*)\1$/, '$2'))
+}
+
+test('the Mac package excludes the Windows-only Koffi DLL loader', () => {
+  const patterns = macFilePatterns(builderConfig)
+  assert.ok(patterns.includes('out/**'), 'the mac files block was found')
+  assert.ok(patterns.includes('!**/node_modules/koffi/**'))
+  assert.ok(patterns.includes('!**/node_modules/@koromix/**'))
+  // Windows still ships it, unpacked so its native binary loads from disk.
+  assert.match(builderConfig, /asarUnpack:[\s\S]*"\*\*\/node_modules\/koffi\/\*\*"/)
+  assert.match(
+    builderConfig,
+    /asarUnpack:[\s\S]*"\*\*\/node_modules\/@koromix\/koffi-win32-x64\/\*\*"/
+  )
+  const win = /^win:\n((?:[ \t].*\n|\n)*)/m.exec(builderConfig.replace(/\r\n/g, '\n'))?.[1] ?? ''
+  assert.doesNotMatch(win, /node_modules\/(koffi|@koromix)\/\*\*|koffi-win32-x64/)
+})
+
+test('only the platform-guarded Windows speech worker loads Koffi', () => {
+  const src = new URL('../', import.meta.url)
+  const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
+    .map((name) => name.replace(/\\/g, '/'))
+    .filter((name) => /\.(ts|tsx|js|cjs|mjs)$/.test(name) && !/\.test\.[cm]?[jt]sx?$/.test(name))
+  const read = (name: string): string => readFileSync(new URL(name, src), 'utf8')
+  const importing = (pattern: RegExp): string[] =>
+    sources.filter((name) => pattern.test(read(name)))
+  assert.deepEqual(importing(/['"]koffi['"]/), ['main/windows-asr-runtime.ts'])
+  assert.deepEqual(importing(/['"]\.\/windows-asr-runtime['"]/), ['main/engine-win.ts'])
+  // engine-win is its own bundle entry, started only by the Windows hosts.
+  assert.deepEqual(importing(/from ['"]\.\/engine-win['"]/), [])
+  assert.match(read('main/windows-asr-runtime.ts'), /process\.platform !== 'win32'/)
 })
 
 test('CI builds and retains a real Windows installer', () => {
