@@ -26,7 +26,10 @@ Run `pnpm engine:build` and `pnpm whisper:build` before packaging a Mac app.
 The latter requires CMake and an Apple Silicon compiler and builds a static
 binary with embedded Metal shaders, macOS 14 minimum, portable armv8.4-a CPU
 instructions. It does not download a speech model. The Mac packaging resources
-include the executable and its MIT notice. Windows packaging is unchanged.
+include the executable and its MIT notice. Windows packaging is unchanged:
+Windows imports and Re-transcribe use Parakeet TDT v2 (English) or v3
+(multilingual) through sherpa-onnx, driven by the same batch setting, and
+Settings does not offer Whisper on Windows.
 
 - whisper.cpp v1.9.4: commit `927cfce34f31707e17f2bff35c349632fb9e2c3a`
 - Source: https://github.com/ggml-org/whisper.cpp
