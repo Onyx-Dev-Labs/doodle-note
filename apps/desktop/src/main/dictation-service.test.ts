@@ -3,6 +3,7 @@ import { mock, test } from 'node:test'
 import {
   DEFAULT_DICTATION_SETTINGS,
   type DictationSettings,
+  type DictationStatus,
   type VoiceEnrollOutcome
 } from '../shared/dictation-api'
 import { BUILTIN_TRANSFORMS } from '../shared/dictation-transforms'
@@ -91,6 +92,8 @@ interface Harness {
   settings: DictationSettings
   cleanupCalls: Array<{ mode: string; consent: unknown; signal: AbortSignal }>
   logs: string[]
+  /** Every status pushed to the settings page, oldest first. */
+  broadcasts: DictationStatus[]
 }
 
 function harness(
@@ -126,6 +129,7 @@ function harness(
   const metrics: Array<Record<string, unknown>> = []
   const cleanupCalls: Harness['cleanupCalls'] = []
   const logs: string[] = []
+  const broadcasts: DictationStatus[] = []
   const startOpts: Harness['startOpts'] = []
   const devices: Harness['devices'] = { list: [] }
   const sounds: SoundKind[] = []
@@ -332,7 +336,7 @@ function harness(
       if (options.clipboardFails) throw new Error('clipboard unavailable')
       clipboard.push(text)
     },
-    broadcast: () => {},
+    broadcast: (status) => void broadcasts.push(status),
     onMicHeld: (held) => void micHeld.push(held),
     openSettings: () => void settingsOpened.push(1),
     now: () => clock.now,
@@ -385,7 +389,8 @@ function harness(
     field,
     settings,
     cleanupCalls,
-    logs
+    logs,
+    broadcasts
   }
 }
 
@@ -2612,6 +2617,10 @@ test('recording a voice uses the dictation microphone, quiets meeting detection,
 
   voice.settle({ ok: true })
   assert.deepEqual(await pending, { ok: true })
+  // The settings page is told at once: it does not ask again after a recording.
+  assert.equal(h.broadcasts.at(-1)?.settings.onlyMyVoice, true)
+  assert.equal(h.broadcasts.at(-1)?.voice?.deviceName, 'USB Mic')
+  assert.equal(h.broadcasts.at(-1)?.voiceEnrolling, false)
   assert.deepEqual(h.micHeld, [true, false])
   assert.equal(h.settings.onlyMyVoice, true)
   assert.deepEqual(events, ['preparing'])
@@ -2642,9 +2651,13 @@ test('a voice recording that fails changes nothing; one is refused while dictati
 test('removing the voice turns the filter off', async () => {
   const voice = fakeVoice({ enrolled: true })
   const h = harness({ settings: { onlyMyVoice: true }, voice })
+  const before = h.broadcasts.length
   const status = await h.service.removeVoice()
   assert.equal(status.voice, null)
   assert.equal(status.settings.onlyMyVoice, false)
+  assert.ok(h.broadcasts.length > before, 'the settings page is told the voice is gone')
+  assert.equal(h.broadcasts.at(-1)?.voice, null)
+  assert.equal(h.broadcasts.at(-1)?.settings.onlyMyVoice, false)
   h.service.toggle()
   await ready(h)
   assert.equal('voiceprint' in h.startOpts[0]!, false)

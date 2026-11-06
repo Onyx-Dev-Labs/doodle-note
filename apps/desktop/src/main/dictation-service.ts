@@ -587,11 +587,10 @@ export class DictationService {
       this.deps.onMicHeld(false)
     }
     this.deps.log(`voice enroll ${outcome.ok ? 'ok' : outcome.reason}`)
-    if (outcome.ok) {
-      await this.setSettings({ onlyMyVoice: true })
-    } else {
-      this.broadcast()
-    }
+    if (outcome.ok) await this.setSettings({ onlyMyVoice: true })
+    // Saving a setting answers only its caller. The page learns that the voice
+    // exists (or that the recording is over) from this, before the call returns.
+    this.broadcast()
     return outcome
   }
 
@@ -606,7 +605,9 @@ export class DictationService {
   async removeVoice(): Promise<DictationStatus> {
     await this.deps.voice?.remove()
     this.deps.log('voice removed')
-    return this.setSettings({ onlyMyVoice: false })
+    const status = await this.setSettings({ onlyMyVoice: false })
+    this.broadcast()
+    return status
   }
 
   private enqueueSettings<T>(run: () => Promise<T>): Promise<T> {
