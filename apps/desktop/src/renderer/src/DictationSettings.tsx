@@ -33,6 +33,7 @@ import {
   DictationTransformSettings
 } from './DictationTidySettings'
 import { DictationDictionarySettings } from './DictationDictionarySettings'
+import { DictationVoiceSettings } from './DictationVoiceSettings'
 import { FEATURE_NAME } from '../../shared/dictation-brand'
 import { Toggle } from './ModelsView'
 
@@ -496,7 +497,7 @@ export function DictationSettings(): React.JSX.Element {
 
       <SettingsFold
         title="Pill and microphone"
-        description="Position, input, live words, and audio feedback"
+        description="Position, input, your voice, live words, and audio feedback"
       >
         <p className="models-sub">
           The pill is a small doodle at the edge of your screen. Click it to start dictating, click
@@ -574,6 +575,7 @@ export function DictationSettings(): React.JSX.Element {
               ))}
             </select>
           </div>
+          <DictationVoiceSettings status={status} update={update} />
           <div className="cal-row">
             <span className="cal-row-main">
               <span className="cal-row-label">Show what I&apos;m saying</span>

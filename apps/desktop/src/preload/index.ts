@@ -20,8 +20,14 @@ import {
   DICTATION_SET_SETTINGS_CHANNEL,
   DICTATION_STATUS_EVENT_CHANNEL,
   DICTATION_TOGGLE_CHANNEL,
+  DICTATION_VOICE_CANCEL_CHANNEL,
+  DICTATION_VOICE_ENROLL_CHANNEL,
+  DICTATION_VOICE_EVENT_CHANNEL,
+  DICTATION_VOICE_FINISH_CHANNEL,
+  DICTATION_VOICE_REMOVE_CHANNEL,
   type DictationApi,
-  type DictationStatus
+  type DictationStatus,
+  type VoiceEnrollEvent
 } from '../shared/dictation-api'
 import {
   SOURCES_SEARCH,
@@ -738,6 +744,17 @@ const dictationApi: DictationApi = {
   addDictionaryEntry: (entry) => ipcRenderer.invoke(DICTATION_DICTIONARY_ADD_CHANNEL, entry),
   removeDictionaryEntry: (id) => ipcRenderer.invoke(DICTATION_DICTIONARY_REMOVE_CHANNEL, id),
   clearLearnedEntries: () => ipcRenderer.invoke(DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL),
+  enrollVoice: () => ipcRenderer.invoke(DICTATION_VOICE_ENROLL_CHANNEL),
+  finishVoiceEnroll: () => ipcRenderer.invoke(DICTATION_VOICE_FINISH_CHANNEL),
+  cancelVoiceEnroll: () => ipcRenderer.invoke(DICTATION_VOICE_CANCEL_CHANNEL),
+  removeVoice: () => ipcRenderer.invoke(DICTATION_VOICE_REMOVE_CHANNEL),
+  onVoiceEvent: (callback) => {
+    const listener = (_event: IpcRendererEvent, event: VoiceEnrollEvent): void => callback(event)
+    ipcRenderer.on(DICTATION_VOICE_EVENT_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(DICTATION_VOICE_EVENT_CHANNEL, listener)
+    }
+  },
   copyRecovery: (gen) => ipcRenderer.invoke(DICTATION_COPY_RECOVERY_CHANNEL, gen),
   dismissRecovery: (gen) => ipcRenderer.invoke(DICTATION_DISMISS_RECOVERY_CHANNEL, gen),
   openPrivacySettings: (pane) => ipcRenderer.invoke(DICTATION_OPEN_PRIVACY_CHANNEL, pane),

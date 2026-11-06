@@ -184,6 +184,8 @@ export type SessionEvent =
       fallback?: string
       /** How many model calls the cleaning phase makes; scales its time limit. */
       steps?: number
+      /** "Only my voice" silenced speech in this session; explains an empty result. */
+      othersOnly?: boolean
     }
   /** Text that must not be lost has nowhere to go: keep it for copying. Never interrupts a live session. */
   | { type: 'keep'; text: string; reason: RecoveryReason }
@@ -407,7 +409,18 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       if (!['preparing', 'recording', 'finalizing'].includes(state.phase)) return ignore
       const text = event.text.trim()
       const clear: SessionEffect = { type: 'timers-clear', gen: active.gen }
-      if (!text) return toIdle(state, notice('info', 'No speech detected.'), [clear])
+      if (!text) {
+        return toIdle(
+          state,
+          notice(
+            'info',
+            event.othersOnly
+              ? 'Only other voices were heard. If that was you, record your voice again in Settings.'
+              : 'No speech detected.'
+          ),
+          [clear]
+        )
+      }
       const withRaw = {
         ...active,
         rawText: text,

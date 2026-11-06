@@ -13,7 +13,10 @@ import {
   type MouseCaptureOutcome,
   type MicrophoneAccess,
   type RecoveryItem,
-  type ShortcutState
+  type ShortcutState,
+  type VoiceEnrollEvent,
+  type VoiceEnrollOutcome,
+  type VoiceProfile
 } from '../shared/dictation-api'
 import {
   MAX_DICTIONARY_ENTRIES,
@@ -101,6 +104,23 @@ export interface EngineLike {
   readonly warm: boolean
   /** Audio inputs, for the microphone picker. Resolves [] when listing fails. */
   listInputDevices?(): Promise<InputDevice[]>
+  /** Keep the speaker models behind "Only my voice" loaded, so the first dictation does not wait. */
+  warmVoice?(): void
+}
+
+/** The recorded voice behind "Only my voice", and the recording that makes it. */
+export interface VoiceLike {
+  profile(): VoiceProfile | null
+  /** The file the engine filters by; null until a voice has been recorded. */
+  voiceprintPath(): string | null
+  readonly enrolling: boolean
+  enroll(
+    inputDevice: string | null,
+    onEvent: (event: VoiceEnrollEvent) => void
+  ): Promise<VoiceEnrollOutcome>
+  finish(): void
+  cancel(): void
+  remove(): void
 }
 
 export interface HelperLike {
@@ -177,6 +197,8 @@ export interface DictationDeps {
     setDictionary(entries: DictionaryEntry[]): DictationSettings
   }
   engine: EngineLike
+  /** Absent where voices cannot be recorded; "Only my voice" then does nothing. */
+  voice?: VoiceLike
   ownership: CaptureOwnership
   helper: HelperLike
   shortcuts: ShortcutsLike
@@ -235,6 +257,8 @@ interface SessionContext {
   detail: {
     engineDrainMs?: number
     engineFinishMs?: number
+    /** "Only my voice" silenced this much speech (ms) in the session. */
+    voiceDroppedMs?: number
     helper?: HelperDeliveryTimings
     tidyMs?: number
     transformMs?: number
@@ -242,6 +266,8 @@ interface SessionContext {
 }
 
 const MAX_RECOVERIES = 5
+/** An empty result with at least this much silenced speech says "only other voices were heard". */
+const VOICE_DROPPED_NOTICE_MS = 700
 const SUCCESS_NOTICE_MS = 1_200
 const NOTICE_MS = 6_000
 const ESCAPE = 'Escape'
@@ -501,6 +527,64 @@ export class DictationService {
     this.broadcast()
   }
 
+  /* ---- "Only my voice" ---- */
+
+  /**
+   * Record the user's voice from the dictation microphone. On success the filter
+   * is switched on: recording a voice is asking for it.
+   */
+  async enrollVoice(onEvent: (event: VoiceEnrollEvent) => void): Promise<VoiceEnrollOutcome> {
+    const voice = this.deps.voice
+    if (!voice || !this.deps.supported) return { ok: false, reason: 'unavailable' }
+    const idle =
+      this.state.phase === 'idle' ||
+      this.state.phase === 'notice' ||
+      this.state.phase === 'recovery'
+    if (!idle || voice.enrolling || this.deps.engine.running) return { ok: false, reason: 'busy' }
+    let access = this.deps.microphoneAccess()
+    if (access === 'not-determined') {
+      access = (await this.deps.requestMicrophone()) ? 'granted' : 'denied'
+    }
+    if (access === 'denied' || access === 'restricted') return { ok: false, reason: 'microphone' }
+    if (voice.enrolling || this.deps.engine.running) return { ok: false, reason: 'busy' }
+
+    await this.refreshDevices()
+    const microphone = resolveMicrophone(this.deps.settings.get().microphoneUid, this.devices)
+    // Our own recording must not look like a call to the meeting detector.
+    this.deps.onMicHeld(true)
+    const pending = voice.enroll(microphone.uid, onEvent)
+    this.broadcast()
+    let outcome: VoiceEnrollOutcome
+    try {
+      outcome = await pending
+    } catch {
+      outcome = { ok: false, reason: 'failed' }
+    } finally {
+      this.deps.onMicHeld(false)
+    }
+    this.deps.log(`voice enroll ${outcome.ok ? 'ok' : outcome.reason}`)
+    if (outcome.ok) {
+      await this.setSettings({ onlyMyVoice: true })
+    } else {
+      this.broadcast()
+    }
+    return outcome
+  }
+
+  finishVoiceEnroll(): void {
+    this.deps.voice?.finish()
+  }
+
+  cancelVoiceEnroll(): void {
+    this.deps.voice?.cancel()
+  }
+
+  async removeVoice(): Promise<DictationStatus> {
+    this.deps.voice?.remove()
+    this.deps.log('voice removed')
+    return this.setSettings({ onlyMyVoice: false })
+  }
+
   async setSettings(update: DictationSettingsUpdate): Promise<DictationStatus> {
     const before = this.deps.settings.get()
     const next = this.deps.settings.update(update)
@@ -537,6 +621,7 @@ export class DictationService {
       this.render()
       return
     }
+    if (settings.onlyMyVoice && this.deps.voice?.voiceprintPath()) this.deps.engine.warmVoice?.()
     this.setToggleShortcut(settings.toggleShortcut)
     const clashes = this.shortcutClashes(settings)
     this.setActionShortcut('paste', settings.pasteLastShortcut, clashes)
@@ -945,6 +1030,14 @@ export class DictationService {
       })
       return
     }
+    if (this.deps.voice?.enrolling) {
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: 'Your voice is being recorded in Settings. Finish that first.'
+      })
+      return
+    }
     const access = this.deps.microphoneAccess()
     if (access === 'not-determined') {
       // macOS has never been asked: show its dialog from here, so it appears from
@@ -1121,7 +1214,12 @@ export class DictationService {
         if (event.stage === 'input_default_fallback') {
           this.dispatch({ type: 'mic-fallback', gen })
         }
-        if (event.stage === 'input_default_fallback' || event.stage === 'mic_restarting') {
+        if (
+          event.stage === 'input_default_fallback' ||
+          event.stage === 'mic_restarting' ||
+          // The session runs unfiltered when the voice filter cannot load.
+          event.stage === 'voice_gate_unavailable'
+        ) {
           this.deps.log(`engine ${event.stage}`)
         }
         break
@@ -1144,6 +1242,18 @@ export class DictationService {
           const detail = this.sessions.get(gen)?.detail
           if (detail && typeof event.drainMs === 'number') detail.engineDrainMs = event.drainMs
           if (detail && typeof event.finishMs === 'number') detail.engineFinishMs = event.finishMs
+          if (event.voiceGate) {
+            const gate = event.voiceGate
+            if (detail) detail.voiceDroppedMs = gate.droppedMs
+            // Durations and distances, for tuning. Never what was said.
+            const distances =
+              gate.minDistance === undefined
+                ? ''
+                : ` distance=${gate.minDistance.toFixed(2)}..${(gate.maxDistance ?? gate.minDistance).toFixed(2)}`
+            this.deps.log(
+              `voice filter kept=${gate.keptMs}ms dropped=${gate.droppedMs}ms failures=${gate.failures}${distances}`
+            )
+          }
           this.finishSpeech(gen, event.text)
         }
         break
@@ -1194,7 +1304,9 @@ export class DictationService {
         type: 'final',
         gen,
         text: trimmed ? deterministicText(trimmed, plan) : text,
-        steps: 0
+        steps: 0,
+        // Nothing came out and speech was silenced: say so, in case it was the user.
+        othersOnly: !trimmed && (context.detail.voiceDroppedMs ?? 0) >= VOICE_DROPPED_NOTICE_MS
       })
       return
     }
@@ -1539,11 +1651,14 @@ export class DictationService {
   }
 
   private startCapture(gen: number): void {
-    const micUid = this.sessions.get(gen)?.micUid ?? null
+    const session = this.sessions.get(gen)
+    const micUid = session?.micUid ?? null
+    const voiceprint = session?.settings.onlyMyVoice ? this.deps.voice?.voiceprintPath() : null
     const started = this.deps.engine.tryStartLive({
       source: 'mic',
       levels: true,
-      ...(micUid ? { inputDevice: micUid } : {})
+      ...(micUid ? { inputDevice: micUid } : {}),
+      ...(voiceprint ? { voiceprint } : {})
     })
     if (started.started) return
     this.deps.log(`capture refused: ${started.reason}`)
@@ -2123,6 +2238,8 @@ export class DictationService {
         settings.microphoneUid !== null &&
         this.devices.length > 0 &&
         !this.devices.some((device) => device.uid === settings.microphoneUid),
+      voice: this.deps.voice?.profile() ?? null,
+      voiceEnrolling: this.deps.voice?.enrolling ?? false,
       pillHidden: isPillHidden(settings.pillHiddenUntil, this.deps.now()),
       hasLastTranscript: this.lastTranscript !== null,
       hasLastChange: this.lastChange !== null,

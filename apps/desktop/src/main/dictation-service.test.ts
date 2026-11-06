@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
-import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/dictation-api'
+import {
+  DEFAULT_DICTATION_SETTINGS,
+  type DictationSettings,
+  type VoiceEnrollOutcome
+} from '../shared/dictation-api'
 import { BUILTIN_TRANSFORMS } from '../shared/dictation-transforms'
 import type {
   HelperDelivery,
@@ -16,7 +20,12 @@ import type {
 } from '../shared/dictation-helper-protocol'
 import type { EngineEvent } from '../shared/engine-events'
 import { CaptureOwnership } from './capture-ownership'
-import { DictationService, type CleanupRunner, type DictationDeps } from './dictation-service'
+import {
+  DictationService,
+  type CleanupRunner,
+  type DictationDeps,
+  type VoiceLike
+} from './dictation-service'
 import type { OverlayView } from './dictation-overlay-view'
 import type {
   InputDevice,
@@ -79,6 +88,7 @@ interface Harness {
   field: { reading: FieldReading; reads: number; stopped: string[]; tick: (() => void) | null }
   settings: DictationSettings
   cleanupCalls: Array<{ mode: string; consent: unknown; signal: AbortSignal }>
+  logs: string[]
 }
 
 function harness(
@@ -88,6 +98,7 @@ function harness(
     access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
     warm?: () => void
+    voice?: VoiceLike
     modelOptions?: {
       localModelLabel: string | null
       byok: { provider: string; model: string; hasKey: boolean } | null
@@ -111,6 +122,7 @@ function harness(
   const micHeld: boolean[] = []
   const metrics: Array<Record<string, unknown>> = []
   const cleanupCalls: Harness['cleanupCalls'] = []
+  const logs: string[] = []
   const startOpts: Harness['startOpts'] = []
   const devices: Harness['devices'] = { list: [] }
   const sounds: SoundKind[] = []
@@ -190,8 +202,10 @@ function harness(
         return engineBusy
       },
       warm: true,
-      listInputDevices: async () => devices.list
+      listInputDevices: async () => devices.list,
+      warmVoice: () => void engineCalls.push('warm-voice')
     },
+    ...(options.voice ? { voice: options.voice } : {}),
     ownership,
     helper: {
       available: true,
@@ -314,7 +328,7 @@ function harness(
         field.tick = null
       }
     },
-    log: () => {},
+    log: (line) => void logs.push(line),
     recordMetrics: (record) => void metrics.push(record)
   }
   // Wrap cleanup to record calls when the caller supplied their own runner too.
@@ -356,7 +370,8 @@ function harness(
     icons,
     field,
     settings,
-    cleanupCalls
+    cleanupCalls,
+    logs
   }
 }
 
@@ -2452,4 +2467,169 @@ test('a recording that ends inside the tone never mutes at all', async () => {
   await tick()
   await new Promise((resolve) => setTimeout(resolve, 450))
   assert.deepEqual(h.helper.audio, ['restore'], 'nothing was muted, so nothing is left muted')
+})
+
+/* ---- "Only my voice" ---- */
+
+/** A recorded voice (or none) and a recording that ends however the test says. */
+function fakeVoice(initial: { enrolled: boolean }): VoiceLike & {
+  state: { enrolled: boolean; enrolling: boolean; devices: Array<string | null> }
+  settle: (outcome: VoiceEnrollOutcome) => void
+} {
+  const state = {
+    enrolled: initial.enrolled,
+    enrolling: false,
+    devices: [] as Array<string | null>
+  }
+  let resolve: ((outcome: VoiceEnrollOutcome) => void) | null = null
+  return {
+    state,
+    profile: () => (state.enrolled ? { createdAt: 1, deviceName: 'USB Mic' } : null),
+    voiceprintPath: () => (state.enrolled ? '/profile/dictation-voiceprint.json' : null),
+    get enrolling() {
+      return state.enrolling
+    },
+    enroll: (inputDevice, onEvent) => {
+      state.devices.push(inputDevice)
+      state.enrolling = true
+      onEvent({ type: 'preparing' })
+      return new Promise<VoiceEnrollOutcome>((done) => {
+        resolve = done
+      })
+    },
+    settle: (outcome) => {
+      state.enrolling = false
+      if (outcome.ok) state.enrolled = true
+      resolve?.(outcome)
+    },
+    finish: () => {},
+    cancel: () => {},
+    remove: () => {
+      state.enrolled = false
+    }
+  }
+}
+
+test('only my voice: the recorded voice is handed to the recorder, and only when it is on', async () => {
+  const on = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  on.service.toggle()
+  await ready(on)
+  assert.equal(on.startOpts[0]?.voiceprint, '/profile/dictation-voiceprint.json')
+
+  const off = harness({ settings: { onlyMyVoice: false }, voice: fakeVoice({ enrolled: true }) })
+  off.service.toggle()
+  await ready(off)
+  assert.equal('voiceprint' in off.startOpts[0]!, false)
+
+  const none = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: false }) })
+  none.service.toggle()
+  await ready(none)
+  assert.equal('voiceprint' in none.startOpts[0]!, false, 'on without a voice filters nothing')
+})
+
+test('only my voice: the speaker models are warmed when it is on with a voice', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  await h.service.start()
+  assert.ok(h.engineCalls.includes('warm-voice'))
+  const off = harness({ voice: fakeVoice({ enrolled: true }) })
+  await off.service.start()
+  assert.ok(!off.engineCalls.includes('warm-voice'))
+})
+
+test('only my voice: an empty result after silenced speech says whose voices were heard', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.emit({ event: 'status', stage: 'transcribing' })
+  h.clock.now += 1_000
+  h.service.toggle()
+  h.emit({
+    event: 'final',
+    channel: 'mic',
+    text: '',
+    voiceGate: { keptMs: 0, droppedMs: 2_400, failures: 0, minDistance: 0.88, maxDistance: 0.93 }
+  })
+  await tick()
+  assert.deepEqual(h.delivered, [])
+  assert.match(lastView(h).title ?? '', /Only other voices were heard/)
+  assert.ok(
+    h.logs.some((line) => /voice filter kept=0ms dropped=2400ms.*0\.88\.\.0\.93/.test(line))
+  )
+})
+
+test('only my voice: silence with nothing filtered is still just silence', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.clock.now += 1_000
+  h.service.toggle()
+  h.emit({
+    event: 'final',
+    channel: 'mic',
+    text: '',
+    voiceGate: { keptMs: 0, droppedMs: 0, failures: 0 }
+  })
+  await tick()
+  assert.match(lastView(h).title ?? '', /No speech/)
+})
+
+test('recording a voice uses the dictation microphone, quiets meeting detection, and turns the filter on', async () => {
+  const voice = fakeVoice({ enrolled: false })
+  const h = harness({ settings: { microphoneUid: 'usb-1' }, voice })
+  h.devices.list = [builtin, usb]
+  await h.service.start()
+  const events: string[] = []
+  const pending = h.service.enrollVoice((event) => void events.push(event.type))
+  await tick()
+  await tick()
+  assert.deepEqual(voice.state.devices, ['usb-1'])
+  assert.deepEqual(h.micHeld, [true])
+  assert.equal((await h.service.status()).voiceEnrolling, true)
+
+  // Dictation waits for the recording instead of fighting it for the microphone.
+  h.service.toggle()
+  await tick()
+  assert.deepEqual(h.engineCalls, [])
+  assert.match(lastView(h).title ?? '', /voice is being recorded/)
+
+  voice.settle({ ok: true })
+  assert.deepEqual(await pending, { ok: true })
+  assert.deepEqual(h.micHeld, [true, false])
+  assert.equal(h.settings.onlyMyVoice, true)
+  assert.deepEqual(events, ['preparing'])
+  const status = await h.service.status()
+  assert.equal(status.voiceEnrolling, false)
+  assert.equal(status.voice?.deviceName, 'USB Mic')
+})
+
+test('a voice recording that fails changes nothing; one is refused while dictating', async () => {
+  const voice = fakeVoice({ enrolled: false })
+  const h = harness({ voice })
+  const pending = h.service.enrollVoice(() => {})
+  await tick()
+  await tick()
+  voice.settle({ ok: false, reason: 'not-enough-speech' })
+  assert.deepEqual(await pending, { ok: false, reason: 'not-enough-speech' })
+  assert.equal(h.settings.onlyMyVoice, false)
+  assert.equal((await h.service.status()).voice, null)
+
+  h.service.toggle()
+  await ready(h)
+  assert.deepEqual(await h.service.enrollVoice(() => {}), { ok: false, reason: 'busy' })
+
+  const denied = harness({ voice: fakeVoice({ enrolled: false }), access: 'denied' })
+  assert.deepEqual(await denied.service.enrollVoice(() => {}), { ok: false, reason: 'microphone' })
+})
+
+test('removing the voice turns the filter off', async () => {
+  const voice = fakeVoice({ enrolled: true })
+  const h = harness({ settings: { onlyMyVoice: true }, voice })
+  const status = await h.service.removeVoice()
+  assert.equal(status.voice, null)
+  assert.equal(status.settings.onlyMyVoice, false)
+  h.service.toggle()
+  await ready(h)
+  assert.equal('voiceprint' in h.startOpts[0]!, false)
 })

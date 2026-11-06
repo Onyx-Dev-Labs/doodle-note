@@ -251,3 +251,12 @@ test('the word threshold for the model defaults to 12 and rejects nonsense', () 
     )
   }
 })
+
+test('only my voice is off unless it was explicitly turned on', () => {
+  assert.equal(DEFAULT_DICTATION_SETTINGS.onlyMyVoice, false)
+  assert.equal(normalizeDictationSettings({}).onlyMyVoice, false)
+  assert.equal(normalizeDictationSettings({ onlyMyVoice: true }).onlyMyVoice, true)
+  for (const bad of ['true', 1, null]) {
+    assert.equal(normalizeDictationSettings({ onlyMyVoice: bad }).onlyMyVoice, false, String(bad))
+  }
+})

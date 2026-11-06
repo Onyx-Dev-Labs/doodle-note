@@ -62,6 +62,7 @@ enum LiveCommand {
             inputDevice: options.values["input-device"],
             audioDir: options.values["audio-dir"],
             systemBackend: options.values["system-backend"],
+            voiceprint: options.values["voiceprint"],
             micManager: nil,
             systemManager: nil,
             stopper: stopper
@@ -96,6 +97,7 @@ enum LiveSession {
         inputDevice: String? = nil,
         audioDir: String? = nil,
         systemBackend: String? = nil,
+        voiceprint: String? = nil,
         micManager: StreamingUnifiedAsrManager?,
         systemManager: StreamingUnifiedAsrManager?,
         stopper: Stopper
@@ -133,7 +135,8 @@ enum LiveSession {
         if wantMic {
             micPipeline = ChannelPipeline(
                 channel: "mic", manager: micManager,
-                recorder: sessionRecorder?.recorder(for: "mic"))
+                recorder: sessionRecorder?.recorder(for: "mic"),
+                voiceprint: voiceprint.map { ($0, AudioInputDevices.resolvedInputUID(inputDevice)) })
         }
         if wantSystem {
             systemPipeline = ChannelPipeline(
@@ -355,7 +358,7 @@ enum LiveSession {
 /// Owns one StreamingUnifiedAsrManager and a serial ingest queue bridging capture
 /// callbacks (arbitrary threads) into the actor. Capture stays realtime even if
 /// ASR hiccups — buffers queue in the AsyncStream.
-final class ChannelPipeline {
+final class ChannelPipeline: MicSink {
     let channel: String
     private let manager: StreamingUnifiedAsrManager
     private let recorder: ChannelRecorder?
@@ -367,6 +370,12 @@ final class ChannelPipeline {
     private var epochEmitted = false
 
     private let preloaded: Bool
+
+    /// "Only my voice": the enrolled voice's file and the device this session
+    /// records from. The gate itself is built in prepare(), once its models load.
+    private let voiceprint: (path: String, deviceUID: String?)?
+    private var gate: VoiceGate?
+    private let gateConverter = AudioConverter()
 
     /** Diagnostics tap on incoming buffers (used by the tap self-test). */
     private let probe: ((AVAudioPCMBuffer) -> Void)?
@@ -385,9 +394,11 @@ final class ChannelPipeline {
         channel: String,
         manager: StreamingUnifiedAsrManager? = nil,
         recorder: ChannelRecorder? = nil,
+        voiceprint: (path: String, deviceUID: String?)? = nil,
         probe: ((AVAudioPCMBuffer) -> Void)? = nil
     ) {
         self.channel = channel
+        self.voiceprint = voiceprint
         self.preloaded = manager != nil
         self.manager = manager ?? StreamingUnifiedAsrManager()
         self.recorder = recorder
@@ -405,6 +416,30 @@ final class ChannelPipeline {
         let ch = channel
         await manager.setPartialTranscriptCallback { text in
             Events.emit(["event": "partial", "channel": ch, "text": text])
+        }
+        await prepareVoiceGate()
+    }
+
+    /// A gate that cannot be built (no voiceprint, models unavailable) never
+    /// blocks dictation: the session runs unfiltered and the host is told.
+    private func prepareVoiceGate() async {
+        guard let voiceprint else { return }
+        do {
+            let voice = try Voiceprint.load(path: voiceprint.path)
+            let models = try await VoiceModels.shared.load()
+            // Loudness only compares on the microphone the voice was recorded with.
+            let sameDevice = voice.deviceUid != nil && voice.deviceUid == voiceprint.deviceUID
+            gate = VoiceGate(
+                analyzer: SpeakerAnalyzer(models: models, voice: voice.embedding),
+                enrolledLevelDb: sameDevice ? voice.levelDb : nil,
+                log: { Events.log($0) })
+            Events.emit(["event": "status", "stage": "voice_gate_on", "channel": channel])
+        } catch {
+            Events.log("voice gate unavailable: \(error)")
+            Events.emit([
+                "event": "status", "stage": "voice_gate_unavailable", "channel": channel,
+                "reason": String(describing: error),
+            ])
         }
     }
 
@@ -456,19 +491,38 @@ final class ChannelPipeline {
     }
 
     func begin() {
-        consumeTask = Task { [manager, bufferStream, channel] in
+        consumeTask = Task { [manager, bufferStream, channel, gate, gateConverter] in
             for await buffer in bufferStream {
-                do {
-                    try await manager.appendAudio(buffer)
-                    try await manager.processBufferedAudio()
-                    let timings = await manager.consumeTokenTimings()
-                    if !timings.isEmpty {
-                        Events.emit(["event": "timings", "channel": channel, "tokens": Timings.payload(timings)])
-                    }
-                } catch {
-                    Events.log("(\(channel)) dropped buffer: \(error)")
+                // Gated audio comes out in steps, with other voices silenced.
+                // A buffer the gate cannot read goes through as it is.
+                guard let gate, let samples = try? gateConverter.resampleBuffer(buffer) else {
+                    await Self.transcribe(buffer, with: manager, channel: channel)
+                    continue
                 }
+                await Self.transcribe(samples: gate.push(samples), with: manager, channel: channel)
             }
+        }
+    }
+
+    private static func transcribe(
+        samples: [Float], with manager: StreamingUnifiedAsrManager, channel: String
+    ) async {
+        guard !samples.isEmpty, let buffer = try? AudioSupport.makePCMBuffer(samples) else { return }
+        await transcribe(buffer, with: manager, channel: channel)
+    }
+
+    private static func transcribe(
+        _ buffer: AVAudioPCMBuffer, with manager: StreamingUnifiedAsrManager, channel: String
+    ) async {
+        do {
+            try await manager.appendAudio(buffer)
+            try await manager.processBufferedAudio()
+            let timings = await manager.consumeTokenTimings()
+            if !timings.isEmpty {
+                Events.emit(["event": "timings", "channel": channel, "tokens": Timings.payload(timings)])
+            }
+        } catch {
+            Events.log("(\(channel)) dropped buffer: \(error)")
         }
     }
 
@@ -479,6 +533,10 @@ final class ChannelPipeline {
         let drainStarted = Date()
         bufferContinuation.finish()
         await consumeTask?.value
+        // Whatever the gate still holds is judged now and goes in before the flush.
+        if let gate {
+            await Self.transcribe(samples: gate.finish(), with: manager, channel: channel)
+        }
         let drainMs = Int(Date().timeIntervalSince(drainStarted) * 1000)
         do {
             let finishStarted = Date()
@@ -488,14 +546,25 @@ final class ChannelPipeline {
             if !tail.isEmpty {
                 Events.emit(["event": "timings", "channel": channel, "tokens": Timings.payload(tail)])
             }
-            Events.emit([
+            var final: [String: Any] = [
                 "event": "final",
                 "channel": channel,
                 "text": text,
                 "sessionSeconds": Date().timeIntervalSince(startedAt),
                 "drainMs": drainMs,
                 "finishMs": finishMs,
-            ])
+            ]
+            if let stats = gate?.stats {
+                // Durations and distances only — what the host needs to say
+                // "only other voices were heard" and to tune the thresholds.
+                var report: [String: Any] = [
+                    "keptMs": stats.keptMs, "droppedMs": stats.droppedMs, "failures": stats.failures,
+                ]
+                if let nearest = stats.minDistance { report["minDistance"] = Double(nearest) }
+                if let farthest = stats.maxDistance { report["maxDistance"] = Double(farthest) }
+                final["voiceGate"] = report
+            }
+            Events.emit(final)
         } catch {
             Events.emit(["event": "error", "channel": channel, "message": "finish failed: \(error)"])
         }
@@ -504,9 +573,16 @@ final class ChannelPipeline {
 
 // MARK: - Microphone capture
 
+/// Where captured microphone audio goes: a transcription pipeline, or the
+/// recorder behind voice enrollment.
+protocol MicSink: AnyObject {
+    /// Called from capture callbacks on arbitrary threads.
+    func ingest(_ buffer: AVAudioPCMBuffer)
+}
+
 final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     private var engine = AVAudioEngine()
-    private let pipeline: ChannelPipeline
+    private let pipeline: MicSink
     private let enableAEC: Bool
     /// CoreAudio device UID to record from; nil = system default input.
     let deviceUID: String?
@@ -522,7 +598,7 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     private var stoppedOnce = false
     private var usingAEC = false
 
-    init(into pipeline: ChannelPipeline, enableAEC: Bool, deviceUID: String? = nil) {
+    init(into pipeline: MicSink, enableAEC: Bool, deviceUID: String? = nil) {
         self.pipeline = pipeline
         self.enableAEC = enableAEC
         self.deviceUID = deviceUID
