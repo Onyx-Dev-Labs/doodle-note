@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Build a candidate or verify an existing signed artifact
+        description: Build, verify an existing artifact, or probe hosted GUI session prerequisites
         type: choice
-        options: [candidate, verify-existing]
+        options: [candidate, verify-existing, gui-session-preflight]
         default: candidate
       candidate_run_id:
         description: Exact successful signing run ID (verify-existing only)
@@ -38,6 +38,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Reuse the registered dispatch entry; a new workflow is unavailable until on main.
+  # Session diagnostics only: exit blocked, never download or launch the application.
+  gui-session-preflight:
+    if: github.repository == 'Onyx-Dev-Labs/doodle-note' && inputs.operation == 'gui-session-preflight' && startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main'
+    runs-on: macos-15 # Explicit supported ARM64 image; verify actual OS/build/arch.
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test session-only preflight boundaries (mocked probes)
+        run: |
+          python3 -m unittest discover -s apps/desktop/scripts -p 'test_hosted_mac_gui_session_preflight.py'
+          ruby apps/desktop/scripts/test_hosted_mac_gui_session_workflow.rb
+          ruby apps/desktop/scripts/test_mac_verification_workflow.rb
+
+      - name: Record hosted session prerequisites (GUI and updater remain blocked)
+        timeout-minutes: 2
+        env:
+          HARNESS_SHA: ${{ github.sha }}
+        run: python3 apps/desktop/scripts/hosted-mac-gui-session-preflight.py --output "$RUNNER_TEMP/hosted-mac-gui-session/result.json"
+
+      - name: Retain session-only report even when blocked
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hosted-mac-gui-session-${{ github.run_id }}
+          path: ${{ runner.temp }}/hosted-mac-gui-session/result.json
+          retention-days: 14
+          if-no-files-found: warn
+
   release:
     if: github.repository == 'Onyx-Dev-Labs/doodle-note' && (inputs.operation == 'candidate' || inputs.operation == '')
     runs-on: macos-15

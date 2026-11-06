@@ -40,6 +40,8 @@ jobs:
 
       - name: Mac candidate verification boundaries
         run: |
+          python3 -m unittest discover -s apps/desktop/scripts -p 'test_hosted_mac_gui_session_preflight.py'
+          ruby apps/desktop/scripts/test_hosted_mac_gui_session_workflow.rb
           python3 -m unittest discover -s apps/desktop/scripts -p 'test_verify_existing_mac_candidate.py'
           node --test apps/desktop/scripts/mac-candidate-runtime-smoke.test.cjs
           ruby apps/desktop/scripts/test_mac_verification_workflow.rb
