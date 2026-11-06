@@ -10,7 +10,6 @@ import {
   type EngineChannel,
   type EngineTokenTiming
 } from '../shared/engine-events'
-import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import {
   assembleBatchTokens,
   type BatchOptions,
@@ -63,13 +62,6 @@ export class WinBatchTranscriber {
   private active: ActiveJob | null = null
   private preparing = false
 
-  constructor(
-    private readonly ensureEngineReady: (
-      onEvent?: (event: WizardPreflightEvent) => void,
-      signal?: AbortSignal
-    ) => Promise<WizardPreflightResult>
-  ) {}
-
   registerIpc(): void {
     ipcMain.handle(ENGINE_BATCH_READ_CHANNEL, (event, jobId: unknown) => {
       const job = this.active
@@ -121,17 +113,9 @@ export class WinBatchTranscriber {
       reject(new Error(`Could not read that audio file: ${String(error)}`))
       return
     }
+    // Imports depend only on their own batch model: the worker below downloads
+    // or loads it (with progress), independent of the live engine.
     checkImportCanceled(options.signal)
-    const readiness = await this.ensureEngineReady((event) => {
-      if (event.stage === 'download') {
-        onProgress?.({ stage: 'downloading_model', progress: event.progress })
-      }
-    }, options.signal)
-    checkImportCanceled(options.signal)
-    if (!readiness.ok) {
-      reject(new Error(readiness.error ?? 'The Windows transcription engine is not ready.'))
-      return
-    }
 
     let child: UtilityProcess
     try {

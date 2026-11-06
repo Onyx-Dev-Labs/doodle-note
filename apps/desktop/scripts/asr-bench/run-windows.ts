@@ -30,6 +30,7 @@ import {
   sileroVadConfig,
   vadBufferSeconds
 } from '../../src/main/windows-asr-recognizers'
+import { SegmentAssembler } from '../../src/main/segmenter'
 import { calibrationSignal } from '../../src/main/windows-asr-guard'
 
 const localRequire = createRequire(__filename)
@@ -310,7 +311,7 @@ async function runPipeline(
       new sherpa.Vad(sileroVadConfig(vadModel, settings), vadBufferSeconds(settings)),
       {
         channel: index === 0 ? 'system' : 'mic',
-        interim: live,
+        interim: live && !flag('no-interim'),
         vadSettings: settings,
         load,
         realtime,
@@ -475,6 +476,16 @@ async function main(): Promise<void> {
     const result = results[0]!
     const scored = scoring.score(fixture.reference, result.text) as Record<string, number | boolean>
     const lags = result.commitLagSec ?? []
+    // The path users see: tokens -> app segmenter -> segment texts in time order.
+    let segmentScore: Record<string, number | boolean> | null = null
+    if (result.tokens && result.tokens.length > 0) {
+      const assembler = new SegmentAssembler()
+      const segments = [
+        ...assembler.addTimings('system', result.tokens),
+        ...assembler.flush('system')
+      ].sort((a, b) => a.startMs - b.startMs)
+      segmentScore = scoring.score(fixture.reference, segments.map((s) => s.text).join(' '))
+    }
     const row = {
       config,
       threads,
@@ -492,6 +503,9 @@ async function main(): Promise<void> {
       finalizeMs: Math.round(result.finalizeMs),
       commitLagMeanSec: lags.length ? lags.reduce((a, b) => a + b, 0) / lags.length : null,
       commitLagP90Sec: quantile(lags, 0.9),
+      commitLagMedianSec: quantile(lags, 0.5),
+      segmentErrors: segmentScore ? (segmentScore.errors as number) : null,
+      segmentWer: segmentScore ? (segmentScore.wer as number) : null,
       ...(result.extra ?? {}),
       ...(fixture.wordTimings && result.tokens
         ? { drift: drift(result.tokens, join(fixturesDir, `${fixture.id}.words.json`)) }
@@ -527,6 +541,15 @@ async function main(): Promise<void> {
       firstTextAudioSecMedian: quantile(firsts, 0.5),
       finalizeMsMedian: quantile(subset.map((r) => r.finalizeMs as number), 0.5),
       finalizeMsMax: Math.max(...subset.map((r) => r.finalizeMs as number)),
+      segmentWer: subset.every((r) => typeof r.segmentErrors === 'number')
+        ? subset.reduce((sum, r) => sum + (r.segmentErrors as number), 0) /
+          subset.reduce((sum, r) => sum + r.refWords, 0)
+        : null,
+      commitLagMeanSec:
+        subset.some((r) => typeof r.commitLagMeanSec === 'number')
+          ? subset.reduce((sum, r) => sum + ((r.commitLagMeanSec as number) ?? 0), 0) / subset.length
+          : null,
+      commitLagP90SecMax: Math.max(...subset.map((r) => (r.commitLagP90Sec as number) ?? 0)),
       cased: subset.filter((r) => r.hasCase).length,
       punctuated: subset.filter((r) => r.hasPunctuation).length
     }

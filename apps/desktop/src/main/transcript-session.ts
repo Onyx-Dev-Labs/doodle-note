@@ -19,6 +19,14 @@ import type { SavedAudioFailures } from '@repo/meetings-store/types'
  * upcoming local-buffer + cloud-sync path. Echo-flagged segments are saved
  * (for tuning) but display layers filter them.
  */
+/** Windows-only behaviours; the Mac uses the defaults (all off). */
+export interface TranscriptSessionOptions {
+  checkpointOpenText?: boolean
+  sortOnFinish?: boolean
+}
+
+const OPEN_TEXT_CHECKPOINT_MS = 5_000
+
 export class TranscriptSession {
   private assembler: SegmentAssembler | null = null
   private segments: TranscriptSegment[] = []
@@ -31,6 +39,8 @@ export class TranscriptSession {
   private pendingMeetingId: string | undefined
   private phase: EngineSessionSnapshot['phase'] = 'starting'
   private partials: Partial<Record<EngineChannel, string>> = {}
+  private captionsDelayed = false
+  private legacyModel = false
   private savedAudioFailures: SavedAudioFailures = {}
 
   bindMeeting(meetingId?: string): void {
@@ -48,7 +58,9 @@ export class TranscriptSession {
       segments: [...this.segments],
       partials: { ...this.partials },
       savedAudioFailures: { ...this.savedAudioFailures },
-      error: this.error
+      error: this.error,
+      ...(this.captionsDelayed ? { captionsDelayed: true } : {}),
+      ...(this.legacyModel ? { legacyModel: true } : {})
     }
   }
 
@@ -64,7 +76,8 @@ export class TranscriptSession {
       segments: TranscriptSegment[],
       ended: boolean,
       savedAudioFailures: SavedAudioFailures
-    ) => void = () => {}
+    ) => void = () => {},
+    private readonly options: TranscriptSessionOptions = {}
   ) {}
 
   handle(ev: EngineEvent): void {
@@ -82,6 +95,8 @@ export class TranscriptSession {
         this.captureId = ev.captureId
         this.phase = 'starting'
         this.partials = {}
+        this.captionsDelayed = false
+        this.legacyModel = false
         this.savedAudioFailures = {}
         return
       case 'ready':
@@ -98,6 +113,9 @@ export class TranscriptSession {
             this.persistCheckpoint(false)
           }
         }
+        if (ev.stage === 'captions_delayed') this.captionsDelayed = true
+        if (ev.stage === 'captions_caught_up') this.captionsDelayed = false
+        if (ev.stage === 'legacy_model') this.legacyModel = true
         if (['finishing', 'saving_audio'].includes(ev.stage ?? '')) this.phase = 'finishing'
         return
       case 'channel_start':
@@ -105,7 +123,9 @@ export class TranscriptSession {
         return
       case 'timings':
         if (this.assembler && ev.channel) {
-          this.publish(this.assembler.addTimings(ev.channel, ev.tokens))
+          const closed = this.assembler.addTimings(ev.channel, ev.tokens)
+          if (closed.length > 0) this.publish(closed)
+          else this.maybeCheckpointOpenText()
         }
         return
       case 'final':
@@ -139,9 +159,26 @@ export class TranscriptSession {
     this.broadcast({ event: 'segments', segments: newSegments })
   }
 
+  /** Committed words not yet in a closed segment reach disk at most this often. */
+  private lastOpenCheckpoint = 0
+
+  private maybeCheckpointOpenText(): void {
+    if (!this.options.checkpointOpenText) return
+    const now = Date.now()
+    if (now - this.lastOpenCheckpoint < OPEN_TEXT_CHECKPOINT_MS) return
+    this.persistCheckpoint(false)
+  }
+
   private persistCheckpoint(ended: boolean): void {
     try {
-      this.checkpoint(this.segments, ended, { ...this.savedAudioFailures })
+      // Windows commits whole utterances; include the still-open segment (as
+      // provisional text) so a crash keeps it. Each checkpoint rewrites the
+      // full list, so the real segment replaces it once it closes.
+      const open =
+        this.options.checkpointOpenText && !ended && this.assembler ? this.assembler.peekOpen() : []
+      this.lastOpenCheckpoint = Date.now()
+      const segments = open.length > 0 ? [...this.segments, ...open] : this.segments
+      this.checkpoint(segments, ended, { ...this.savedAudioFailures })
     } catch (error) {
       console.error('[transcript] meeting checkpoint failed:', error)
       this.error =
@@ -153,6 +190,15 @@ export class TranscriptSession {
   private finish(exitError?: string): void {
     if (!this.assembler || this.saved) return
     this.publish(this.assembler.flush())
+    // Segments arrive in commit order; Windows commits per utterance and per
+    // channel, so restore time order before the final save.
+    if (this.options.sortOnFinish) {
+      this.segments.sort(
+        (a, b) =>
+          (a.absoluteStartMs ?? a.startMs) - (b.absoluteStartMs ?? b.startMs) ||
+          a.channel.localeCompare(b.channel)
+      )
+    }
     this.saved = true
     this.phase = 'ended'
     this.partials = {}

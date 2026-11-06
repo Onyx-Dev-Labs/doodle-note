@@ -17,7 +17,7 @@ import type { EngineChannel, EngineEvent, EngineInputDevice } from '../../shared
 import type { MeetingTranscriptSegment as TranscriptSegment } from '@repo/meetings-store/types'
 import { autoGenerateNotesAfterStop, MeetingGeneration } from '../../shared/auto-notes'
 import { listWinInputDevices } from './lib/win-capture'
-import { applyCaptureStatus } from './lib/capture-status'
+import { applyCaptureStatus, captureNotices } from './lib/capture-status'
 import { AUDIO_PERSIST_STORAGE_KEY, SYSTEM_BACKEND_STORAGE_KEY } from '../../shared/audio-api'
 import type { FolderRecord } from '../../shared/folders-api'
 import type { MeetingChatEntry, MeetingRecord } from '../../shared/meetings-api'
@@ -64,6 +64,10 @@ interface SessionState {
   error: string | null
   /** True once the ASR models finished warming and transcription is live. */
   transcribing: boolean
+  /** Windows: the speech engine is behind real time. */
+  captionsDelayed?: boolean
+  /** Windows: this capture uses the previous speech model. */
+  legacyModel?: boolean
 }
 
 const initialSessionState: SessionState = {
@@ -108,6 +112,8 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         partials: snapshot.partials,
         echoCount: snapshot.segments.filter((s) => s.echo).length,
         error: snapshot.error ?? state.error,
+        captionsDelayed: snapshot.captionsDelayed === true,
+        legacyModel: snapshot.legacyModel === true,
         statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
       }
     }
@@ -1584,6 +1590,12 @@ export default function MeetingView({
           available transcription.
         </div>
       )}
+
+      {captureNotices(state).map((notice) => (
+        <div key={notice} className="saved-audio-warning" role="status" aria-live="polite">
+          {notice}
+        </div>
+      ))}
 
       {autoStopped && !state.error && (
         <div className="toast" role="status">

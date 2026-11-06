@@ -131,3 +131,74 @@ test('a failed speech-model download is retried by the next setup request', asyn
     host.dispose()
   }
 })
+
+test('an idle worker is closed to free its model and reloaded, losing no audio, at the next start', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const controls: Array<Record<string, unknown>> = []
+  const events: EngineEvent[] = []
+  const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
+    idleUnloadMs: 60_000
+  })
+  host.onEvent((event) => events.push(event))
+  try {
+    host.startServe()
+    const first = workers.at(-1)!
+    first.event({ event: 'status', stage: 'serve_ready' })
+    t.mock.timers.tick(60_001)
+    assert.equal(first.kills, 1, 'idle worker closed')
+    first.emit('exit', 0)
+    t.mock.timers.tick(10_000)
+    const count = workers.length
+    assert.equal(workers.at(-1), first, 'an idle close does not restart the worker')
+    // Setup stays complete while unloaded.
+    assert.equal((await host.preflight()).ok, true)
+
+    host.start('live', undefined, { source: 'mic' })
+    assert.equal(workers.length, count + 1, 'the next recording reloads the worker')
+    const second = workers.at(-1)!
+    const sessionId = controls.at(-1)!.sessionId as number
+    host.captureStatus({ type: 'ready', sessionId })
+    // Capture runs while the model loads; frames wait in the host.
+    host.pushAudio(sessionId, 'mic', new Float32Array([0.1]))
+    host.pushAudio(sessionId, 'mic', new Float32Array([0.2]))
+    assert.equal(second.messages.filter((message) => message.t === 'audio').length, 0)
+    second.event({ event: 'status', stage: 'serve_ready' })
+    assert.deepEqual(
+      second.messages.map((message) => message.t),
+      ['init', 'start', 'audio', 'audio']
+    )
+    host.pushAudio(sessionId, 'mic', new Float32Array([0.3]))
+    assert.equal(second.messages.filter((message) => message.t === 'audio').length, 3)
+  } finally {
+    host.dispose()
+  }
+})
+
+test('Stop during a reload still transcribes the buffered audio before finishing', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const controls: Array<Record<string, unknown>> = []
+  const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
+    idleUnloadMs: 1_000
+  })
+  try {
+    host.startServe()
+    const first = workers.at(-1)!
+    first.event({ event: 'status', stage: 'serve_ready' })
+    t.mock.timers.tick(1_001)
+    first.emit('exit', 0)
+    host.start('live', undefined, { source: 'mic' })
+    const second = workers.at(-1)!
+    const sessionId = controls.at(-1)!.sessionId as number
+    host.captureStatus({ type: 'ready', sessionId })
+    host.pushAudio(sessionId, 'mic', new Float32Array([0.5]))
+    host.stop()
+    host.captureStatus({ type: 'drained', sessionId })
+    second.event({ event: 'status', stage: 'serve_ready' })
+    assert.deepEqual(
+      second.messages.map((message) => message.t),
+      ['init', 'start', 'audio', 'stop']
+    )
+  } finally {
+    host.dispose()
+  }
+})

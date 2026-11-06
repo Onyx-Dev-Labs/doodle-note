@@ -4,14 +4,24 @@ import { DEFAULT_SEGMENTER_CONFIG } from './segmenter'
 /**
  * Windows speech pipeline shared by live captions and imports.
  *
- * Silero VAD cuts each channel into utterances; every utterance is decoded by
- * an offline Parakeet TDT recognizer, whose tokens carry real start times,
- * durations and log-probabilities. Decoding whole utterances keeps the full
- * model context while bounding cost: unlike the buffered streaming export of
- * Parakeet Unified, nothing is re-encoded per 80 ms step, so two channels fit
- * comfortably on ordinary laptop CPUs. Live captions additionally re-decode
- * the utterance in progress at a fixed interval, under a load guard, to show
- * a growing caption before the utterance ends.
+ * Silero VAD says when someone is speaking; this pipeline turns that into
+ * utterances itself and decodes each one whole with an offline Parakeet
+ * recognizer, whose tokens carry real start times and log-probabilities.
+ * Decoding whole utterances keeps the full model context while bounding cost:
+ * unlike the buffered streaming export of Parakeet Unified, nothing is
+ * re-encoded per 80 ms step, so two channels fit on ordinary laptop CPUs.
+ *
+ * Utterance length is bounded here, not by the VAD: sherpa's VAD only raises
+ * its threshold past its maximum and can run on for minutes. When an
+ * utterance reaches `maxSpeechSec`, it is cut at the quietest 100 ms of the
+ * last few seconds; both sides are decoded with overlapping context and each
+ * word is kept by exactly one side (by its start time), so a forced cut can
+ * neither drop nor double a word. Every sample from an utterance's start is
+ * retained until it is decoded, so no speech is ever dropped. Padding before
+ * an utterance never reaches back into audio that was already decoded.
+ *
+ * Live captions additionally re-decode the utterance in progress on a
+ * geometric schedule, under a load guard, to show a growing caption.
  */
 
 export const ASR_SAMPLE_RATE = 16_000
@@ -44,39 +54,51 @@ export interface SpeechSegmentLike {
 
 export interface VadLike {
   acceptWaveform(samples: Float32Array): void
-  isEmpty(): boolean
+  /** True from a detected speech start until its required silence has passed. */
   isDetected(): boolean
-  /** Pass false: Electron's V8 sandbox rejects external (addon-owned) buffers. */
-  front(enableExternalBuffer?: boolean): SpeechSegmentLike
-  pop(): void
-  flush(): void
+  isEmpty(): boolean
+  /** Drop sherpa's queued segments; the pipeline forms its own. */
+  clear(): void
 }
 
 export interface VadSettings {
   threshold: number
   minSilenceSec: number
   minSpeechSec: number
+  /** Hard utterance bound enforced by the pipeline (forced cut). */
   maxSpeechSec: number
 }
 
-/** Live: end utterances quickly so committed text follows speech closely. */
+/** Passed to sherpa so its own maximum-length behaviour never engages. */
+export const VAD_UNBOUNDED_SEC = 36_000
+/** A forced cut picks the quietest point in this many trailing seconds. */
+export const FORCED_CUT_SEARCH_SEC = 3
+/** Context shared by the two decodes around a forced cut. */
+export const FORCED_CUT_OVERLAP_SEC = 1
+
+/**
+ * Live: utterances end at a 0.5 s pause and are force-cut at 12 s. Measured on
+ * the 30-minute AMI meeting (Unified): cap 8 s -> 16.9% WER, words committed
+ * 4.4 s (p90 7.1 s) after they end; 12 s -> 15.7%, 5.9 s (p90 10.4 s);
+ * 15 s -> 15.9%, 6.9 s (p90 12.7 s). Captions fill the gap with interims.
+ */
 export const LIVE_VAD: VadSettings = {
   threshold: 0.5,
   minSilenceSec: 0.5,
   minSpeechSec: 0.25,
-  maxSpeechSec: 15
+  maxSpeechSec: 12
 }
 
 /**
  * Imports and Re-transcribe: no caption latency to protect, so utterances end
- * only at a 1 s pause and may run to 30 s, giving the model more context
- * (Dev04 meeting clips: TDT v2 11.8% -> 10.5% WER versus the live settings).
+ * only at a 1 s pause and are cut at 20 s (30-minute meeting, TDT v2: 20 s ->
+ * 14.9% WER, 30 s -> 15.7%, 45 s -> 16.0%; meeting clips 10.5% for all).
  */
 export const BATCH_VAD: VadSettings = {
   threshold: 0.5,
   minSilenceSec: 1,
   minSpeechSec: 0.25,
-  maxSpeechSec: 30
+  maxSpeechSec: 20
 }
 
 export interface PipelineOptions {
@@ -91,8 +113,6 @@ export interface PipelineOptions {
    */
   interimIntervalSec?: number
   interimGrowth?: number
-  /** Utterances longer than this get no further interim decodes. */
-  maxInterimSec?: number
   /** Context added on both sides of a VAD segment before decoding. */
   paddingSec?: number
   vadSettings?: VadSettings
@@ -185,49 +205,65 @@ export function tokensFromResult(
   return timings
 }
 
-function joinedText(result: TdtResult): string {
-  return result.text.replace(/▁/g, ' ').replace(/\s+/g, ' ').trim()
-}
+/** Contiguous channel audio from `base` (absolute sample index) to `end`. */
+class SampleStore {
+  private data = new Float32Array(16_000 * 8)
+  private base = 0
+  private length = 0
 
-/** Ring buffer of the most recent channel audio, addressed by absolute sample index. */
-class RecentAudio {
-  private readonly buffer: Float32Array
-  private total = 0
-
-  constructor(seconds: number) {
-    this.buffer = new Float32Array(Math.ceil(seconds * ASR_SAMPLE_RATE))
+  get end(): number {
+    return this.base + this.length
   }
 
-  get length(): number {
-    return this.total
+  get start(): number {
+    return this.base
   }
 
   push(samples: Float32Array): void {
-    const capacity = this.buffer.length
-    let source = samples
-    if (source.length > capacity) {
-      // Only the newest `capacity` samples can be retained.
-      this.total += source.length - capacity
-      source = source.subarray(source.length - capacity)
+    if (this.length + samples.length > this.data.length) {
+      const next = new Float32Array(Math.max(this.data.length * 2, this.length + samples.length))
+      next.set(this.data.subarray(0, this.length))
+      this.data = next
     }
-    const at = this.total % capacity
-    const first = Math.min(source.length, capacity - at)
-    this.buffer.set(source.subarray(0, first), at)
-    if (first < source.length) this.buffer.set(source.subarray(first), 0)
-    this.total += source.length
+    this.data.set(samples, this.length)
+    this.length += samples.length
   }
 
-  /** Copy [from, to) clamped to what is still retained. */
+  /** Forget samples before `index` (never forgets anything after it). */
+  dropBefore(index: number): void {
+    const drop = Math.min(this.length, index - this.base)
+    if (drop <= 0) return
+    this.data.copyWithin(0, drop, this.length)
+    this.length -= drop
+    this.base += drop
+  }
+
+  /** Copy [from, to), clamped to what is retained. */
   slice(from: number, to: number): { start: number; samples: Float32Array } {
-    const capacity = this.buffer.length
-    const start = Math.max(from, this.total - capacity, 0)
-    const end = Math.min(to, this.total)
-    const out = new Float32Array(Math.max(0, end - start))
-    const at = start % capacity
-    const first = Math.min(out.length, capacity - at)
-    out.set(this.buffer.subarray(at, at + first))
-    if (first < out.length) out.set(this.buffer.subarray(0, out.length - first), first)
-    return { start, samples: out }
+    const start = Math.max(from, this.base)
+    const end = Math.min(to, this.end)
+    if (end <= start) return { start, samples: new Float32Array(0) }
+    return { start, samples: this.data.slice(start - this.base, end - this.base) }
+  }
+
+  /** Absolute index of the quietest 100 ms window centred in [from, to). */
+  quietest(from: number, to: number): number {
+    const hop = 160
+    const width = 1600
+    let best = from
+    let bestEnergy = Number.POSITIVE_INFINITY
+    for (let centre = from; centre < to; centre += hop) {
+      const a = Math.max(this.base, centre - width / 2) - this.base
+      const b = Math.min(this.end, centre + width / 2) - this.base
+      let energy = 0
+      for (let i = a; i < b; i++) energy += this.data[i]! * this.data[i]!
+      energy /= Math.max(1, b - a)
+      if (energy < bestEnergy) {
+        bestEnergy = energy
+        best = centre
+      }
+    }
+    return best
   }
 }
 
@@ -237,39 +273,156 @@ interface OpenWord {
   text: string
 }
 
+/** The words committed just before a forced cut, to stitch the next part. */
+interface Seam {
+  cutSec: number
+  words: Array<{ norm: string; startSec: number }>
+}
+
+interface Utterance {
+  /** First sample whose words this utterance owns. */
+  keepFrom: number
+  /** Set on the part after a forced cut. */
+  seam?: Seam
+  /** First sample given to the decoder (keepFrom minus context). */
+  decodeFrom: number
+}
+
 export interface PipelineStats {
   audioSeconds: number
   decodeMs: number
   utterances: number
+  forcedCuts: number
+  /** Longest stretch of audio given to one decode, in seconds. */
+  longestDecodeSec: number
   interimDecodes: number
   skippedInterims: number
 }
 
+/** Group tokens into words (a leading space starts one) and keep words starting in [from, to). */
+export function keepWords(
+  tokens: EngineTokenTiming[],
+  fromSec: number,
+  toSec: number
+): EngineTokenTiming[] {
+  const kept: EngineTokenTiming[] = []
+  let keeping = false
+  tokens.forEach((token, index) => {
+    if (index === 0 || token.token.startsWith(' ')) {
+      keeping = token.startSec >= fromSec && token.startSec < toSec
+    }
+    if (keeping) kept.push(token)
+  })
+  if (kept.length > 0 && !kept[0]!.token.startsWith(' ')) {
+    kept[0] = { ...kept[0]!, token: ` ${kept[0]!.token}` }
+  }
+  return kept
+}
+
+function wordNorm(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9']/g, '')
+}
+
+/** Words as token runs (a leading space starts one). */
+function groupWords(tokens: EngineTokenTiming[]): EngineTokenTiming[][] {
+  const words: EngineTokenTiming[][] = []
+  for (const token of tokens) {
+    if (words.length === 0 || token.token.startsWith(' ')) words.push([token])
+    else words[words.length - 1]!.push(token)
+  }
+  return words
+}
+
+/**
+ * Two decodes around a forced cut can place the same word on either side of
+ * it: timestamps move by up to a second with different context, so time alone
+ * cannot decide ownership. The part after a cut is decoded from a second
+ * before the cut and aligned on text: it resumes after its copy of the last
+ * word the part before committed (the copy nearest in time, within 1.5 s).
+ * Only when that word cannot be found does time decide (words after it).
+ */
+export function stitchSeam(tokens: EngineTokenTiming[], seam: Seam): EngineTokenTiming[] {
+  const words = groupWords(tokens)
+  const last = seam.words[seam.words.length - 1]
+  let resume = 0
+  if (last) {
+    let best = -1
+    let bestDistance = Number.POSITIVE_INFINITY
+    words.forEach((word, index) => {
+      const startSec = word[0]!.startSec
+      const distance = Math.abs(startSec - last.startSec)
+      if (startSec > seam.cutSec + 1.5 || distance > 1.5) return
+      const norm = wordNorm(word.map((t) => t.token).join(''))
+      const same =
+        norm.length > 0 &&
+        (norm === last.norm ||
+          (Math.min(norm.length, last.norm.length) >= 3 &&
+            (norm.startsWith(last.norm) || last.norm.startsWith(norm))))
+      if (same && distance < bestDistance) {
+        best = index
+        bestDistance = distance
+      }
+    })
+    resume =
+      best >= 0
+        ? best + 1
+        : Math.max(
+            0,
+            words.findIndex((word) => word[0]!.startSec > last.startSec + 0.05)
+          )
+    if (best < 0 && words.every((word) => word[0]!.startSec <= last.startSec + 0.05)) {
+      resume = words.length
+    }
+  } else {
+    const first = words.findIndex((word) => word[0]!.startSec >= seam.cutSec - 0.3)
+    resume = first < 0 ? words.length : first
+  }
+  const kept = words.slice(resume).flat()
+  if (kept.length > 0 && !kept[0]!.token.startsWith(' ')) {
+    kept[0] = { ...kept[0]!, token: ` ${kept[0]!.token}` }
+  }
+  return kept
+}
+
+function tokensText(tokens: EngineTokenTiming[]): string {
+  return tokens
+    .map((token) => token.token)
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLike> {
-  private readonly audio: RecentAudio
+  private readonly audio = new SampleStore()
   private readonly pending: Float32Array
   private pendingLength = 0
+  /** Samples given to the VAD (whole windows). */
   private fed = 0
-  private activeStart: number | null = null
+  private utterance: Utterance | null = null
+  /** End of the last decoded window; padding never reaches before it. */
+  private decodedThrough = 0
   /** Utterance length (samples) at which the next interim decode runs. */
   private nextInterimLength = 0
-  private lastSegmentEnd = 0
   private lastPartial = ''
   private openWords: OpenWord[] = []
   private readonly texts: string[] = []
   private started = false
   private firstAudioAt = 0
   private queueLagSec: number | null = null
+  private readonly settings: VadSettings
   private readonly interimSamples: number
-  private readonly maxInterimSamples: number
+  private readonly maxSamples: number
   private readonly paddingSamples: number
-  private readonly minSpeechSamples: number
+  private readonly onsetSamples: number
   private readonly minSilenceSamples: number
-  private lastDetectedAt = 0
+  private readonly overlapSamples: number
+  private readonly searchSamples: number
   readonly stats: PipelineStats = {
     audioSeconds: 0,
     decodeMs: 0,
     utterances: 0,
+    forcedCuts: 0,
+    longestDecodeSec: 0,
     interimDecodes: 0,
     skippedInterims: 0
   }
@@ -279,15 +432,19 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     private readonly vad: VadLike,
     private readonly options: PipelineOptions
   ) {
-    const settings = options.vadSettings ?? LIVE_VAD
-    this.interimSamples = Math.round((options.interimIntervalSec ?? 1) * ASR_SAMPLE_RATE)
+    this.settings = options.vadSettings ?? LIVE_VAD
+    const rate = ASR_SAMPLE_RATE
+    this.interimSamples = Math.round((options.interimIntervalSec ?? 1) * rate)
     this.nextInterimLength = this.interimSamples
-    this.maxInterimSamples = Math.round((options.maxInterimSec ?? 12) * ASR_SAMPLE_RATE)
-    this.paddingSamples = Math.round((options.paddingSec ?? 0.2) * ASR_SAMPLE_RATE)
-    this.minSpeechSamples = Math.round(settings.minSpeechSec * ASR_SAMPLE_RATE)
-    this.minSilenceSamples = Math.round(settings.minSilenceSec * ASR_SAMPLE_RATE)
-    // Must cover the longest utterance plus padding.
-    this.audio = new RecentAudio(settings.maxSpeechSec * 2 + 10)
+    this.maxSamples = Math.round(this.settings.maxSpeechSec * rate)
+    this.paddingSamples = Math.round((options.paddingSec ?? 0.2) * rate)
+    // Silero backdates a speech start by two windows plus the minimum speech.
+    this.onsetSamples = 2 * VAD_WINDOW_SAMPLES + Math.round(this.settings.minSpeechSec * rate)
+    this.minSilenceSamples = Math.round(this.settings.minSilenceSec * rate)
+    this.overlapSamples = Math.round(FORCED_CUT_OVERLAP_SEC * rate)
+    this.searchSamples = Math.round(
+      Math.min(FORCED_CUT_SEARCH_SEC, this.settings.maxSpeechSec / 2) * rate
+    )
     this.pending = new Float32Array(VAD_WINDOW_SAMPLES)
   }
 
@@ -302,6 +459,17 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     return Math.max(0, (this.now() - this.firstAudioAt) / 1000 - this.stats.audioSeconds)
   }
 
+  /**
+   * Channel time (seconds) before which every word has been committed or the
+   * audio is known not to contain speech. Used to hold back echo checks.
+   */
+  settledThroughSec(): number {
+    const settled = this.utterance
+      ? this.utterance.keepFrom
+      : Math.max(this.decodedThrough, this.fed - this.onsetSamples)
+    return Math.max(0, settled) / ASR_SAMPLE_RATE
+  }
+
   private now(): number {
     return this.options.now ? this.options.now() : performance.now()
   }
@@ -311,11 +479,18 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
    * frame was sent; processing it later than that means the engine is behind.
    */
   ingest(samples: Float32Array, queuedAt?: number): void {
-    if (queuedAt !== undefined) this.queueLagSec = Math.max(0, (this.now() - queuedAt) / 1000)
+    const lag = queuedAt !== undefined ? Math.max(0, this.now() - queuedAt) : 0
+    if (queuedAt !== undefined) this.queueLagSec = lag / 1000
     if (!this.started) {
       this.started = true
       this.firstAudioAt = this.now()
-      this.options.emit({ event: 'channel_start', channel: this.channel, epochMs: Date.now() })
+      // Anchor the channel to when its first frame arrived, not when a busy
+      // worker got round to it.
+      this.options.emit({
+        event: 'channel_start',
+        channel: this.channel,
+        epochMs: Math.round(Date.now() - lag)
+      })
     }
     this.audio.push(samples)
     this.stats.audioSeconds += samples.length / ASR_SAMPLE_RATE
@@ -329,11 +504,11 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
         this.vad.acceptWaveform(this.pending.slice())
         this.fed += VAD_WINDOW_SAMPLES
         this.pendingLength = 0
-        this.trackActivity()
-        this.drainSegments(false)
+        this.step(false)
       }
     }
     this.maybeInterim()
+    this.trim()
   }
 
   /** End of input: decode what remains and emit the channel's final text. */
@@ -344,10 +519,11 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
       this.vad.acceptWaveform(tail)
       this.fed += VAD_WINDOW_SAMPLES
       this.pendingLength = 0
+      this.step(true)
     }
-    this.vad.flush()
-    this.drainSegments(true)
-    this.activeStart = null
+    if (this.utterance) this.decodeUtterance(this.audio.end, Number.POSITIVE_INFINITY, true)
+    this.utterance = null
+    this.vad.clear()
     this.options.emit({
       event: 'final',
       channel: this.channel,
@@ -356,40 +532,59 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     })
   }
 
-  private trackActivity(): void {
-    if (!this.vad.isDetected()) {
-      // A blip shorter than Silero's minimum speech never becomes a segment;
-      // forget it so the next interim decode starts at the next real speech.
-      if (
-        this.activeStart !== null &&
-        this.fed - this.lastDetectedAt > 2 * this.minSilenceSamples
-      ) {
-        this.activeStart = null
-        this.nextInterimLength = this.interimSamples
-      }
-      return
+  /** One VAD window: open, close or force-cut the current utterance. */
+  private step(final: boolean): void {
+    const speaking = this.vad.isDetected()
+    // Segments are formed here; sherpa's own queue is not used.
+    if (!this.vad.isEmpty()) this.vad.clear()
+    if (speaking && !this.utterance) {
+      const start = Math.max(0, this.fed - this.onsetSamples, this.decodedThrough)
+      const decodeFrom = Math.max(
+        this.decodedThrough,
+        start - this.paddingSamples,
+        this.audio.start
+      )
+      // Padding never overlaps an earlier decode, so every word heard in this
+      // window is this utterance's (models often time the first word early).
+      this.utterance = { keepFrom: decodeFrom, decodeFrom }
+      this.nextInterimLength = this.interimSamples
+    } else if (!speaking && this.utterance) {
+      const end = Math.max(this.utterance.keepFrom, this.fed - this.minSilenceSamples)
+      this.decodeUtterance(
+        Math.min(this.audio.end, end + this.paddingSamples),
+        Number.POSITIVE_INFINITY,
+        final
+      )
+      this.utterance = null
     }
-    this.lastDetectedAt = this.fed
-    // Mirrors Silero's own segment start (two windows plus min speech back).
-    this.activeStart ??= Math.max(
-      this.lastSegmentEnd,
-      this.fed - 2 * VAD_WINDOW_SAMPLES - this.minSpeechSamples,
-      0
-    )
+    if (this.utterance && this.fed - this.utterance.keepFrom >= this.maxSamples)
+      this.forceCut(final)
   }
 
-  private drainSegments(final: boolean): void {
-    while (!this.vad.isEmpty()) {
-      // A copied segment: Electron forbids addon-owned external ArrayBuffers.
-      const segment = this.vad.front(false)
-      const start = segment.start
-      const length = segment.samples.length
-      this.vad.pop()
-      this.decodeSegment(start, start + length, final)
-      this.activeStart = null
-      this.nextInterimLength = this.interimSamples
-      if (this.vad.isDetected()) this.trackActivity()
+  /** Cut a long utterance at its quietest recent point; decode the first part. */
+  private forceCut(final: boolean): void {
+    const utterance = this.utterance!
+    const latest = this.fed - this.overlapSamples
+    const earliest = Math.max(utterance.keepFrom + this.overlapSamples, latest - this.searchSamples)
+    const cut = this.audio.quietest(earliest, Math.max(earliest + 1, latest))
+    // The first part sees `overlap` beyond the cut; words starting before it are its own.
+    const committed = this.decodeUtterance(cut + this.overlapSamples, cut, final)
+    this.stats.forcedCuts++
+    const cutSec = cut / ASR_SAMPLE_RATE
+    this.utterance = {
+      keepFrom: cut,
+      decodeFrom: cut - this.overlapSamples,
+      seam: {
+        cutSec,
+        words: groupWords(committed)
+          .filter((word) => word[0]!.startSec >= cutSec - 1.5)
+          .map((word) => ({
+            norm: wordNorm(word.map((t) => t.token).join('')),
+            startSec: word[0]!.startSec
+          }))
+      }
     }
+    this.nextInterimLength = this.interimSamples
   }
 
   private decode(samples: Float32Array): { result: TdtResult; ms: number } {
@@ -404,26 +599,63 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     return { result, ms }
   }
 
-  private decodeSegment(start: number, end: number, final: boolean): void {
-    const audioEnd = this.audio.length
-    const window = this.audio.slice(
-      start - this.paddingSamples,
-      Math.min(audioEnd, end + this.paddingSamples)
-    )
-    this.lastSegmentEnd = Math.max(this.lastSegmentEnd, end)
-    if (window.samples.length < VAD_WINDOW_SAMPLES) return
+  /**
+   * Decode [utterance.decodeFrom, to) and commit the words that start in
+   * [utterance.keepFrom, keepUntil).
+   */
+  /** This utterance's words from one decode of it. */
+  private ownWords(
+    all: EngineTokenTiming[],
+    utterance: Utterance,
+    keepUntilSec: number
+  ): EngineTokenTiming[] {
+    const rate = ASR_SAMPLE_RATE
+    if (!utterance.seam) return keepWords(all, utterance.keepFrom / rate, keepUntilSec)
+    return stitchSeam(keepWords(all, utterance.decodeFrom / rate, keepUntilSec), utterance.seam)
+  }
+
+  private decodeUtterance(to: number, keepUntil: number, final: boolean): EngineTokenTiming[] {
+    const utterance = this.utterance!
+    const window = this.audio.slice(utterance.decodeFrom, to)
+    if (window.start > utterance.decodeFrom) {
+      // Unreachable by construction (audio is kept from decodeFrom); never silent.
+      this.options.emit({
+        event: 'error',
+        channel: this.channel,
+        message: 'Speech audio was released before it was transcribed.'
+      })
+    }
+    this.decodedThrough = Math.max(this.decodedThrough, Math.min(to, keepUntil))
+    if (window.samples.length < VAD_WINDOW_SAMPLES) return []
     const { result } = this.decode(window.samples)
     this.stats.utterances++
-    const offsetSec = window.start / ASR_SAMPLE_RATE
-    const limitSec = (window.start + window.samples.length) / ASR_SAMPLE_RATE
-    const tokens = tokensFromResult(result, offsetSec, limitSec)
-    const text = joinedText(result)
+    this.stats.longestDecodeSec = Math.max(
+      this.stats.longestDecodeSec,
+      window.samples.length / ASR_SAMPLE_RATE
+    )
+    const rate = ASR_SAMPLE_RATE
+    const all = tokensFromResult(
+      result,
+      window.start / rate,
+      (window.start + window.samples.length) / rate
+    )
+    const tokens = this.ownWords(all, utterance, keepUntil / rate)
+    const text = tokensText(tokens)
     if (text) this.texts.push(text)
     if (tokens.length > 0) {
       this.options.emit({ event: 'timings', channel: this.channel, tokens })
       this.trackOpenWords(tokens)
     }
     if (!final) this.publishPartial('')
+    return tokens
+  }
+
+  /** Keep only what an open or upcoming utterance can still need. */
+  private trim(): void {
+    const keep = this.utterance
+      ? this.utterance.decodeFrom
+      : Math.max(this.decodedThrough, this.fed - this.onsetSamples - this.paddingSamples)
+    this.audio.dropBefore(Math.max(0, keep - VAD_WINDOW_SAMPLES))
   }
 
   /** Mirror the host segmenter so captions show exactly the not-yet-closed text. */
@@ -450,9 +682,10 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
   }
 
   private maybeInterim(): void {
-    if (!this.options.interim || this.activeStart === null) return
-    const length = this.fed - this.activeStart
-    if (length < this.nextInterimLength || length > this.maxInterimSamples) return
+    const utterance = this.utterance
+    if (!this.options.interim || !utterance) return
+    const length = this.fed - utterance.keepFrom
+    if (length < this.nextInterimLength) return
     this.nextInterimLength = Math.max(
       length + this.interimSamples,
       Math.round(length * (this.options.interimGrowth ?? 1.5))
@@ -464,10 +697,17 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
       this.stats.skippedInterims++
       return
     }
-    const window = this.audio.slice(this.activeStart - this.paddingSamples, this.fed)
+    const window = this.audio.slice(utterance.decodeFrom, this.audio.end)
+    if (window.samples.length < VAD_WINDOW_SAMPLES) return
     const { result } = this.decode(window.samples)
     this.stats.interimDecodes++
-    this.publishPartial(joinedText(result))
+    const rate = ASR_SAMPLE_RATE
+    const tokens = this.ownWords(
+      tokensFromResult(result, window.start / rate, (window.start + window.samples.length) / rate),
+      utterance,
+      Number.POSITIVE_INFINITY
+    )
+    this.publishPartial(tokensText(tokens))
   }
 
   private publishPartial(interim: string): void {

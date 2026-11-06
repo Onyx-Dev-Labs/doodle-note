@@ -118,6 +118,49 @@ export class SegmentAssembler {
     return completed
   }
 
+  /**
+   * The text of each channel's still-open segment (plus its pending word) as
+   * provisional segments, without closing anything. For crash checkpoints.
+   */
+  peekOpen(): TranscriptSegment[] {
+    const open: TranscriptSegment[] = []
+    for (const channel of ['mic', 'system'] as const) {
+      const state = this.channels[channel]
+      const words = [...state.segmentWords]
+      if (state.pendingTokens.length > 0) {
+        const tokens = state.pendingTokens
+        words.push({
+          text: tokens.map((t) => t.token).join(''),
+          norm: '',
+          startSec: tokens[0]!.startSec,
+          endSec: tokens[tokens.length - 1]!.endSec,
+          confidence: tokens.reduce((sum, t) => sum + t.confidence, 0) / tokens.length
+        })
+      }
+      const text = words
+        .map((w) => w.text)
+        .join('')
+        .trim()
+      if (!text) continue
+      const startSec = words[0]!.startSec
+      const epochMs = state.epochMs
+      open.push({
+        id: `open_${this.sessionId}_${channel}`,
+        channel,
+        speaker: defaultSpeakerLabel(channel),
+        speakerId: defaultSpeakerId(channel),
+        text,
+        startMs: Math.round(startSec * 1000),
+        endMs: Math.round(words[words.length - 1]!.endSec * 1000),
+        confidence:
+          Math.round((words.reduce((sum, w) => sum + w.confidence, 0) / words.length) * 1000) /
+          1000,
+        ...(epochMs !== undefined ? { absoluteStartMs: epochMs + Math.round(startSec * 1000) } : {})
+      })
+    }
+    return open
+  }
+
   /* ---- word/segment assembly ---- */
 
   private finalizePendingWord(state: ChannelState): Word | null {

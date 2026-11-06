@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
+  modelContentMatches,
   PARAKEET_UNIFIED,
   PARAKEET_TDT_V2,
   PARAKEET_TDT_V3,
@@ -203,6 +204,53 @@ test('single-file assets and multi-asset progress are weighted by download size'
     assert.equal(asrDir, join(root, 'fake-asr'))
     assert.equal(statSync(join(vadDir!, 'vad.onnx')).size, payload.length)
     assert.deepEqual(progress, [0.5, 1])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a model with the right sizes but damaged contents fails the content check', async () => {
+  const root = tempDir()
+  const content = Buffer.from('abcd')
+  const spec: WindowsAsrModelSpec = {
+    ...fakeArchive('fake-hashed', { 'tokens.txt': 4 }),
+    fileSha256: { 'tokens.txt': createHash('sha256').update(content).digest('hex') }
+  }
+  try {
+    mkdirSync(join(root, spec.name))
+    writeFileSync(join(root, spec.name, 'tokens.txt'), content)
+    assert.equal(await modelContentMatches(join(root, spec.name), spec), true)
+    writeFileSync(join(root, spec.name, 'tokens.txt'), Buffer.from('abce'))
+    assert.equal(modelFilesMatch(join(root, spec.name), spec.files), true)
+    assert.equal(await modelContentMatches(join(root, spec.name), spec), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('live and import workers use separate partial downloads, and a model installed meanwhile wins', async () => {
+  const root = tempDir()
+  const spec = fakeArchive('fake-shared', { 'tokens.txt': 2 })
+  const partials: string[] = []
+  try {
+    await ensureWindowsAsrModel(root, spec, () => {}, {
+      partialTag: 'batch',
+      download: async (_url, path) => {
+        partials.push(path)
+        writeFileSync(path, payload)
+        // The live worker finishes installing the same model first.
+        mkdirSync(join(root, spec.name), { recursive: true })
+        writeFileSync(join(root, spec.name, 'tokens.txt'), Buffer.alloc(2))
+        writeFileSync(join(root, spec.name, 'marker'), 'installed by the other worker')
+      },
+      extract: fakeExtract(spec, false)
+    })
+    assert.match(partials[0]!, /fake-shared\.batch\.download\.partial$/)
+    assert.equal(
+      existsSync(join(root, spec.name, 'marker')),
+      true,
+      'the loaded copy is not replaced'
+    )
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

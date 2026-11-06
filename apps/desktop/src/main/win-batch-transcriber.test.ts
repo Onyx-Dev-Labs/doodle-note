@@ -67,11 +67,7 @@ async function batch(
   const dir = mkdtempSync(join(tmpdir(), 'doodle-win-batch-'))
   const file = join(dir, 'synthetic.wav')
   writeFileSync(file, 'synthetic fixture transport only')
-  const transcriber = new WinBatchTranscriber(async () => ({
-    ok: true,
-    micGranted: true,
-    screenGranted: true
-  }))
+  const transcriber = new WinBatchTranscriber()
   transcriber.registerIpc()
   try {
     const pending = transcriber.transcribe(file, undefined, options)
@@ -151,4 +147,47 @@ test('a worker error rejects the import instead of returning partial text', asyn
     }),
     /could not be prepared/
   )
+})
+
+test('an import downloads only its own model, without waiting for the live engine, and cancels cleanly', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'doodle-win-batch-cancel-'))
+  const file = join(dir, 'synthetic.wav')
+  writeFileSync(file, 'synthetic fixture transport only')
+  // No live engine exists at all: the import must not depend on one.
+  const transcriber = new WinBatchTranscriber()
+  transcriber.registerIpc()
+  try {
+    const controller = new AbortController()
+    const stages: string[] = []
+    const pending = transcriber.transcribe(
+      file,
+      (progress) => {
+        stages.push(progress.stage)
+        if (progress.stage === 'downloading_model') controller.abort()
+      },
+      {
+        signal: controller.signal,
+        settings: { backend: 'parakeet', parakeetModel: 'v3', language: 'auto' }
+      }
+    )
+    void pending.catch(() => {})
+    const deadline = Date.now() + 2000
+    while (!worker?.messages.some((message) => message.t === 'init')) {
+      assert.ok(Date.now() < deadline, 'the import worker starts immediately')
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    assert.equal(worker.messages[0]!.parakeetModel, 'v3')
+    const importWorker = worker
+    let killed = false
+    importWorker.once('exit', () => (killed = true))
+    importWorker.event({ event: 'download', progress: 0.1 })
+    await assert.rejects(pending, { name: 'AbortError' })
+    assert.deepEqual(stages, ['starting', 'downloading_model'])
+    assert.equal(killed, true)
+  } finally {
+    transcriber.dispose()
+    worker = undefined
+    controls.length = 0
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

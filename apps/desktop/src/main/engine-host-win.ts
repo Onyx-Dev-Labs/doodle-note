@@ -18,6 +18,16 @@ const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
 /** After Stop, the worker is killed only if it makes no progress for this long. */
 const WORKER_FINISH_IDLE_MS = 15_000
+/**
+ * The live worker holds about 1 GB of model memory. With no recording for this
+ * long it is closed, and reloaded (about 2.5 s on Dev04) when the next one
+ * starts; capture begins at once and its first frames are buffered meanwhile.
+ */
+export const IDLE_UNLOAD_MS = 5 * 60_000
+
+export interface WinEngineHostOptions {
+  idleUnloadMs?: number
+}
 
 /**
  * Windows counterpart of EngineProcess: drives the sherpa-onnx engine
@@ -51,7 +61,62 @@ export class WinEngineHost {
   /** Tees renderer PCM frames to disk when the session persists audio. */
   private recorder: WinSessionRecorder | null = null
 
-  constructor(private readonly broadcast: (channel: string, payload: unknown) => void) {}
+  private idleTimer: NodeJS.Timeout | null = null
+  /** The worker was closed while idle; the next start reloads it. */
+  private unloaded = false
+  private unloading = false
+  private keepWarm = false
+  /** Frames captured while a reloading worker loads its model. */
+  private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
+  private startAfterReload = false
+  private stopAfterReload = false
+  private readonly idleUnloadMs: number
+
+  constructor(
+    private readonly broadcast: (channel: string, payload: unknown) => void,
+    options: WinEngineHostOptions = {}
+  ) {
+    this.idleUnloadMs = options.idleUnloadMs ?? IDLE_UNLOAD_MS
+  }
+
+  /**
+   * Keep the model loaded while idle (for features that need instant starts,
+   * such as dictation). Off by default.
+   */
+  setKeepWarm(on: boolean): void {
+    this.keepWarm = on
+    if (on) {
+      if (this.idleTimer) clearTimeout(this.idleTimer)
+      this.idleTimer = null
+      if (this.unloaded && !this.child) this.reload()
+    } else this.armIdleTimer()
+  }
+
+  private armIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    if (
+      this.keepWarm ||
+      this.disposed ||
+      this.sessionActive ||
+      !this.ready ||
+      this.idleUnloadMs <= 0
+    )
+      return
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (this.sessionActive || this.keepWarm || !this.child || !this.ready) return
+      this.unloading = true
+      this.ready = false
+      this.child.kill()
+    }, this.idleUnloadMs)
+    this.idleTimer.unref()
+  }
+
+  private reload(): void {
+    this.unloaded = false
+    this.startServe()
+  }
 
   onEvent(listener: EngineEventListener): () => void {
     this.listeners.add(listener)
@@ -81,11 +146,18 @@ export class WinEngineHost {
     })
     child.on('exit', (code) => {
       if (this.child !== child) return
-      const failedDuringWarmup = !this.ready && !this.sessionActive
+      if (this.unloading) {
+        // Deliberate idle close: setup stays complete; nothing restarts.
+        this.unloading = false
+        this.unloaded = true
+        this.child = null
+        return
+      }
+      const failedDuringWarmup = !this.ready && !this.sessionActive && !this.warmupResult?.ok
       this.child = null
       this.ready = false
       if (failedDuringWarmup && !this.disposed) {
-        const message = `The Windows transcription engine exited during setup (${code}). Restart DoodleNote to retry.`
+        const message = `The Windows transcription engine exited during setup (${code}). Try again; a damaged speech model is verified and downloaded again.`
         this.finishWarmup(
           { ok: false, micGranted: false, screenGranted: false, error: message },
           { stage: 'error', message }
@@ -125,10 +197,12 @@ export class WinEngineHost {
     if (event.event === 'status' && event.stage === 'serve_ready') {
       // Diagnostics only: model, measured decode cost and caption mode.
       console.info(
-        `[win-asr] ready model=${String(event.model ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
+        `[win-asr] ready model=${String(event.model ?? '')} loadMs=${String(event.loadMs ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
       )
       this.ready = true
       this.finishWarmup({ ok: true, micGranted: false, screenGranted: false }, { stage: 'ready' })
+      if (this.sessionActive) this.resumeAfterReload()
+      else this.armIdleTimer()
       return
     }
     if (!this.ready && !this.sessionActive) {
@@ -197,6 +271,7 @@ export class WinEngineHost {
     this.workerStarted = false
     this.emit({ event: 'done' })
     this.emit({ event: 'exit', code: 0, signal: null })
+    this.armIdleTimer()
   }
 
   start(command: EngineCommand, filePath?: string, opts: EngineStartOptions = {}): void {
@@ -207,7 +282,19 @@ export class WinEngineHost {
       })
       return
     }
-    if (!this.child || !this.ready) {
+    const reloading = this.unloaded && !this.child && !this.disposed
+    if (!reloading && !this.child && this.warmupResult && !this.warmupResult.ok && !this.disposed) {
+      // Setup failed earlier (for example a damaged model crashed the loader):
+      // this request starts the engine again, which verifies and repairs it.
+      void this.preflight().catch(() => {})
+      this.emit({
+        event: 'spawn-error',
+        message:
+          'The speech engine is restarting to check its model. Try recording again in a moment.'
+      })
+      return
+    }
+    if (!reloading && (!this.child || !this.ready)) {
       this.emit({
         event: 'spawn-error',
         message:
@@ -228,8 +315,14 @@ export class WinEngineHost {
       source === 'system' || source === 'both' ? 'system' : null
     ].filter((c): c is string => c !== null)
 
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
     this.sessionActive = true
     this.captureState = 'starting'
+    this.pendingFrames = []
+    this.startAfterReload = false
+    this.stopAfterReload = false
+    if (reloading) this.reload()
     this.activeSessionId = ++this.nextSessionId
     this.workerStarted = false
     this.activeChannels = channels
@@ -268,11 +361,19 @@ export class WinEngineHost {
   }
 
   private finishAfterCaptureDrain(): void {
-    if (!this.sessionActive || this.captureState !== 'draining' || !this.child) return
+    if (!this.sessionActive || this.captureState !== 'draining') return
+    if (!this.child && !this.startAfterReload) return
     if (this.drainTimer) clearTimeout(this.drainTimer)
     this.drainTimer = null
     this.captureState = 'finishing'
-    if (this.workerStarted) {
+    if (this.startAfterReload) {
+      // Stopped before the reloading worker was ready: transcribe the buffered
+      // frames as soon as it is, then finish.
+      this.stopAfterReload = true
+      this.armWorkerFinishTimer()
+      return
+    }
+    if (this.workerStarted && this.child) {
       this.child.postMessage({ t: 'stop', sessionId: this.activeSessionId })
     } else {
       this.handleEngineEvent({ event: 'done' })
@@ -295,13 +396,17 @@ export class WinEngineHost {
   pushAudio(sessionId: number, channel: string, samples: Float32Array): void {
     if (
       !this.sessionActive ||
-      !this.child ||
-      !this.workerStarted ||
       sessionId !== this.activeSessionId ||
       (this.captureState !== 'capturing' && this.captureState !== 'draining')
     ) {
       return
     }
+    if (this.startAfterReload) {
+      this.recorder?.write(channel, samples)
+      this.pendingFrames.push({ channel, samples, sentAt: Date.now() })
+      return
+    }
+    if (!this.child || !this.workerStarted) return
     this.recorder?.write(channel, samples)
     this.child.postMessage({ t: 'audio', sessionId, channel, samples, sentAt: Date.now() })
   }
@@ -310,6 +415,12 @@ export class WinEngineHost {
   captureStatus(status: EngineCaptureStatus): void {
     if (!status || typeof status.sessionId !== 'number' || typeof status.type !== 'string') return
     if (!this.sessionActive || status.sessionId !== this.activeSessionId) return
+    if (status.type === 'ready' && this.captureState === 'starting' && !this.ready) {
+      // Capture runs while the worker reloads its model; frames are buffered.
+      this.captureState = 'capturing'
+      this.startAfterReload = true
+      return
+    }
     if (status.type === 'ready' && this.captureState === 'starting' && this.child) {
       this.captureState = 'capturing'
       this.workerStarted = true
@@ -331,6 +442,24 @@ export class WinEngineHost {
     if (status.type === 'error') {
       this.emit({ event: 'error', message: status.message })
       this.stop()
+    }
+  }
+
+  /** A reloaded worker is ready mid-session: start it and hand over buffered audio. */
+  private resumeAfterReload(): void {
+    if (!this.startAfterReload || !this.child || this.activeSessionId === null) return
+    this.startAfterReload = false
+    this.workerStarted = true
+    const sessionId = this.activeSessionId
+    this.child.postMessage({ t: 'start', sessionId, channels: this.activeChannels })
+    for (const frame of this.pendingFrames) {
+      this.child.postMessage({ t: 'audio', sessionId, ...frame })
+    }
+    this.pendingFrames = []
+    if (this.stopAfterReload) {
+      this.stopAfterReload = false
+      this.child.postMessage({ t: 'stop', sessionId })
+      this.armWorkerFinishTimer()
     }
   }
 
@@ -370,10 +499,13 @@ export class WinEngineHost {
       }
       // A failed model download (offline, stalled) is retried on the next
       // request; the verified partial download resumes where it stopped.
-      if (this.warmupResult && !this.warmupResult.ok && this.child && !this.disposed) {
+      // A worker that died while loading (a damaged model can abort the native
+      // loader) is started again on request; it verifies and repairs the model.
+      if (this.warmupResult && !this.warmupResult.ok && !this.disposed) {
         this.warmupResult = null
         this.lastWarmupEvent = { stage: 'models' }
-        this.postInit()
+        if (this.child) this.postInit()
+        else this.startServe()
       }
       this.warmupWaiters.add(finish)
       if (onEvent) this.warmupListeners.add(onEvent)
@@ -407,6 +539,7 @@ export class WinEngineHost {
 
   dispose(): void {
     this.disposed = true
+    if (this.idleTimer) clearTimeout(this.idleTimer)
     if (this.restartTimer) clearTimeout(this.restartTimer)
     if (this.drainTimer) clearTimeout(this.drainTimer)
     if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)

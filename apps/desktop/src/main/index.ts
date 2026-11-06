@@ -509,7 +509,9 @@ app.whenReady().then(async () => {
         ended,
         savedAudioFailures
       )
-    }
+    },
+    // Windows commits per utterance: checkpoint open text, save in time order.
+    process.platform === 'win32' ? { checkpointOpenText: true, sortOnFinish: true } : {}
   )
 
   ipcMain.handle(ENGINE_SNAPSHOT_CHANNEL, (event, meetingId: unknown) => {
@@ -702,9 +704,7 @@ app.whenReady().then(async () => {
   registerRecipes(recipeRunner)
 
   if (engine instanceof WinEngineHost) {
-    winBatchTranscriber = new WinBatchTranscriber((onEvent, signal) =>
-      engine.preflight(onEvent, signal)
-    )
+    winBatchTranscriber = new WinBatchTranscriber()
     winBatchTranscriber.registerIpc()
   }
 

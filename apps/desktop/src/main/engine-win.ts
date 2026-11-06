@@ -15,14 +15,22 @@
  *        {t:'audio', channel, samples}    — 16k mono Float32Array frame
  *        {t:'stop'}                       — finish session (emit finals+done)
  *   out: {t:'event', event:{...}}         — engine event object
+ *
+ * An updated install whose Parakeet model is not downloaded yet uses the
+ * cached streaming Zipformer from earlier builds for live captions (see
+ * windows-asr-legacy.ts) and downloads Parakeet in the background.
  */
+import { existsSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   PARAKEET_UNIFIED,
   SILERO_VAD,
   ensureWindowsAsrModels,
+  modelContentMatches,
   parakeetSpec,
-  windowsAsrModelMissing
+  removeWindowsAsrModel,
+  windowsAsrModelMissing,
+  type WindowsAsrModelSpec
 } from './windows-asr-models'
 import {
   BATCH_DECODE_THREADS,
@@ -43,6 +51,14 @@ import {
   type OfflineStreamLike
 } from './windows-asr-pipeline'
 import { calibrationSignal, liveCaptionMode, type LiveCaptionMode } from './windows-asr-guard'
+import {
+  LEGACY_ZIPFORMER,
+  LegacyStreamingChannel,
+  legacyRecognizerConfig,
+  legacyZipformerInstalled,
+  type LegacyRecognizer
+} from './windows-asr-legacy'
+import { EchoOrderGate } from './windows-asr-echo-gate'
 
 interface AudioMessage {
   t: 'audio'
@@ -61,37 +77,188 @@ type InMessage =
   | AudioMessage
   | { t: 'stop'; sessionId?: number }
 
+interface ChannelTranscriber {
+  readonly channel: string
+  ingest(samples: Float32Array, queuedAt?: number): void
+  finish(extra?: Record<string, unknown>): void
+  lagSec(): number
+  settledThroughSec(): number
+}
+
 const port = process.parentPort
 
 function emit(event: Record<string, unknown>): void {
   port.postMessage({ t: 'event', event })
 }
 
-/** Lag (seconds behind capture) after which the recorder says captions are delayed. */
+/**
+ * QA hook (packaged-app smoke only, inert unless set): stall the first decode
+ * of each live session for this many milliseconds to force a real backlog.
+ */
+const TEST_STALL_MS = Number(process.env.DOODLENOTE_ASR_TEST_STALL_MS ?? 0)
+
+function withTestStall(
+  model: OfflineRecognizerLike<OfflineStreamLike>
+): OfflineRecognizerLike<OfflineStreamLike> {
+  if (!(TEST_STALL_MS > 0)) return model
+  let stalled = false
+  return {
+    createStream: () => model.createStream(),
+    getResult: (stream) => model.getResult(stream),
+    decode: (stream) => {
+      if (!stalled) {
+        stalled = true
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TEST_STALL_MS)
+      }
+      model.decode(stream)
+    }
+  }
+}
+
+/** Frames waiting longer than this make the recorder say captions are late... */
 const DELAYED_LAG_SEC = 5
+/** ...until every channel is back under this. */
+const CAUGHT_UP_LAG_SEC = 1
 
 let sherpa: SherpaModule | null = null
 let recognizer: OfflineRecognizerLike<OfflineStreamLike> | null = null
+let legacy: LegacyRecognizer | null = null
 let vadModel = ''
+let modelsRoot = ''
 let quality: 'live' | 'final' = 'live'
 let captionMode: LiveCaptionMode = 'interim'
-let pipelines = new Map<string, UtteranceTranscriber>()
+let pipelines = new Map<string, ChannelTranscriber>()
+let gate: EchoOrderGate | null = null
 let sessionActive = false
 let activeSessionId: number | null = null
-let delayedNotified = false
+let captionsDelayed = false
+/** Parakeet finished downloading during a legacy session; switch after it. */
+let pendingUpgrade: { asrDir: string; vadDir: string } | null = null
+
+function loadingMarker(spec: WindowsAsrModelSpec): string {
+  return join(modelsRoot, `.${spec.name}.loading`)
+}
+
+/**
+ * Load a model, repairing a damaged copy. A load that threw, or a previous
+ * load that never finished (the worker died inside the native loader), makes
+ * the engine hash the files; a mismatch deletes the folder and downloads it
+ * again. Size checks alone cannot see a corrupt file of the right length.
+ */
+async function loadWithRepair<T>(
+  spec: WindowsAsrModelSpec,
+  ensure: () => Promise<string>,
+  build: (dir: string) => T
+): Promise<T> {
+  const marker = loadingMarker(spec)
+  let dir = await ensure()
+  if (existsSync(marker) && !(await modelContentMatches(dir, spec))) {
+    console.error(`[win-asr] ${spec.name} failed verification after an interrupted load; repairing`)
+    removeWindowsAsrModel(modelsRoot, spec)
+    dir = await ensure()
+  }
+  writeFileSync(marker, '')
+  try {
+    const built = build(dir)
+    rmSync(marker, { force: true })
+    return built
+  } catch (error) {
+    if (await modelContentMatches(dir, spec)) {
+      rmSync(marker, { force: true })
+      throw error
+    }
+    console.error(`[win-asr] ${spec.name} is damaged; downloading it again`)
+    removeWindowsAsrModel(modelsRoot, spec)
+    dir = await ensure()
+    const built = build(dir)
+    rmSync(marker, { force: true })
+    return built
+  }
+}
+
+function calibrate(model: OfflineRecognizerLike<OfflineStreamLike>): number {
+  // Measure this machine once: the decode cost decides whether live captions
+  // can afford interim updates (see windows-asr-guard.ts).
+  const signal = calibrationSignal()
+  const began = performance.now()
+  const stream = model.createStream()
+  stream.acceptWaveform({ samples: signal, sampleRate: 16_000 })
+  model.decode(stream)
+  model.getResult(stream)
+  return (performance.now() - began) / 1000 / (signal.length / 16_000)
+}
+
+async function loadParakeet(
+  asr: WindowsAsrModelSpec,
+  ensureAsr: () => Promise<string>,
+  vadDir: string
+): Promise<{ calibrationRtf?: number }> {
+  vadModel = join(vadDir, 'silero_vad.onnx')
+  sherpa ??= loadSherpa()
+  const threads = quality === 'live' ? LIVE_DECODE_THREADS : BATCH_DECODE_THREADS
+  const options = ensureSessionOptions(modelsRoot, quality === 'live' ? 'live' : 'batch')
+  recognizer = await loadWithRepair(
+    asr,
+    ensureAsr,
+    (dir) => new sherpa!.OfflineRecognizer(parakeetRecognizerConfig(dir, threads, options))
+  )
+  legacy = null
+  if (quality !== 'live') return {}
+  const calibrationRtf = calibrate(recognizer)
+  captionMode = liveCaptionMode(calibrationRtf)
+  return { calibrationRtf: Math.round(calibrationRtf * 1000) / 1000 }
+}
+
+function initError(err: unknown): void {
+  console.error('[win-asr] init failed:', err)
+  emit({
+    event: 'error',
+    message:
+      err instanceof Error &&
+      /verification|download|incomplete|unpacked|stalled|HTTP|ENOTFOUND|ECONN|EAI_AGAIN/i.test(
+        err.message
+      )
+        ? `The speech model could not be downloaded. ${err.message} Check your connection, then try again.`
+        : `The speech model could not be prepared: ${String(err)}`
+  })
+}
 
 async function init(
   modelsDir: string,
   requestedQuality: 'live' | 'final' = 'live',
   parakeetModel: 'v2' | 'v3' = 'v2'
 ): Promise<void> {
+  modelsRoot = modelsDir
+  quality = requestedQuality
+  // Live: the Mac's live model (Parakeet Unified). Batch: the Mac's batch
+  // setting (Parakeet TDT v2 English or v3 multilingual).
+  const asr = quality === 'live' ? PARAKEET_UNIFIED : parakeetSpec(parakeetModel)
+  const partialTag = quality === 'live' ? 'live' : 'batch'
+  const missing = [asr, SILERO_VAD].filter((spec) => windowsAsrModelMissing(modelsDir, spec))
+
+  if (quality === 'live' && missing.includes(asr) && legacyZipformerInstalled(modelsDir)) {
+    // An updated install: record now with the cached model, upgrade later.
+    try {
+      sherpa ??= loadSherpa()
+      legacy = new (sherpa.OnlineRecognizer as new (c: unknown) => LegacyRecognizer)(
+        legacyRecognizerConfig(modelsDir)
+      )
+      captionMode = 'interim'
+      emit({
+        event: 'status',
+        stage: 'serve_ready',
+        model: LEGACY_ZIPFORMER.name,
+        captionMode: 'legacy'
+      })
+    } catch (err) {
+      initError(err)
+      return
+    }
+    void upgradeInBackground(asr, partialTag)
+    return
+  }
+
   try {
-    quality = requestedQuality
-    // Live: the Mac's live model (Parakeet Unified). Batch: the Mac's batch
-    // setting (Parakeet TDT v2 English or v3 multilingual).
-    const asr = quality === 'live' ? PARAKEET_UNIFIED : parakeetSpec(parakeetModel)
-    const specs = [asr, SILERO_VAD]
-    const missing = specs.filter((spec) => windowsAsrModelMissing(modelsDir, spec))
     if (missing.length > 0) {
       emit({
         event: 'status',
@@ -100,55 +267,84 @@ async function init(
         bytes: missing.reduce((sum, spec) => sum + spec.bytes, 0)
       })
     }
-    const [asrDir, vadDir] = await ensureWindowsAsrModels(modelsDir, specs, (progress) =>
-      emit({ event: 'download', progress: Math.floor(progress * 100) / 100 })
+    const [, vadDir] = await ensureWindowsAsrModels(
+      modelsDir,
+      [asr, SILERO_VAD],
+      (progress) => emit({ event: 'download', progress: Math.floor(progress * 100) / 100 }),
+      { partialTag }
     )
-    vadModel = join(vadDir!, 'silero_vad.onnx')
     emit({ event: 'status', stage: 'serve_loading_models', model: asr.name })
-    sherpa = loadSherpa()
-    recognizer = new sherpa.OfflineRecognizer(
-      parakeetRecognizerConfig(
-        asrDir!,
-        quality === 'live' ? LIVE_DECODE_THREADS : BATCH_DECODE_THREADS,
-        ensureSessionOptions(modelsDir, quality === 'live' ? 'live' : 'batch')
-      )
-    )
-    let calibrationRtf: number | undefined
-    if (quality === 'live') {
-      // Measure this machine once: the decode cost decides whether live
-      // captions can afford interim updates (see windows-asr-guard.ts).
-      const signal = calibrationSignal()
-      const began = performance.now()
-      const stream = recognizer.createStream()
-      stream.acceptWaveform({ samples: signal, sampleRate: 16_000 })
-      recognizer.decode(stream)
-      recognizer.getResult(stream)
-      calibrationRtf = (performance.now() - began) / 1000 / (signal.length / 16_000)
-      captionMode = liveCaptionMode(calibrationRtf)
-    }
+    const ensureAsr = async (): Promise<string> =>
+      (
+        await ensureWindowsAsrModels(
+          modelsDir,
+          [asr],
+          (progress) => emit({ event: 'download', progress: Math.floor(progress * 100) / 100 }),
+          { partialTag }
+        )
+      )[0]!
+    const loadStarted = performance.now()
+    const { calibrationRtf } = await loadParakeet(asr, ensureAsr, vadDir!)
     emit({
       event: 'status',
       stage: 'serve_ready',
       model: asr.name,
-      ...(calibrationRtf !== undefined
-        ? { calibrationRtf: Math.round(calibrationRtf * 1000) / 1000, captionMode }
-        : {})
+      loadMs: Math.round(performance.now() - loadStarted),
+      ...(calibrationRtf !== undefined ? { calibrationRtf, captionMode } : {})
     })
   } catch (err) {
-    console.error('[win-asr] init failed:', err)
+    initError(err)
+  }
+}
+
+/** Legacy mode: fetch Parakeet without blocking recording; switch between sessions. */
+async function upgradeInBackground(asr: WindowsAsrModelSpec, partialTag: string): Promise<void> {
+  try {
+    let last = -1
+    const [asrDir, vadDir] = await ensureWindowsAsrModels(
+      modelsRoot,
+      [asr, SILERO_VAD],
+      (progress) => {
+        const percent = Math.floor(progress * 100)
+        if (percent === last) return
+        last = percent
+        emit({ event: 'status', stage: 'model_download', model: asr.name, progress: percent / 100 })
+      },
+      { partialTag }
+    )
+    pendingUpgrade = { asrDir: asrDir!, vadDir: vadDir! }
+    if (!sessionActive) await activateUpgrade()
+  } catch (err) {
+    // Stay on the cached model; the next app start tries again (and resumes).
+    console.error('[win-asr] background model download failed:', err)
+    emit({ event: 'status', stage: 'model_download_failed', model: asr.name })
+  }
+}
+
+async function activateUpgrade(): Promise<void> {
+  const upgrade = pendingUpgrade
+  if (!upgrade) return
+  pendingUpgrade = null
+  try {
+    const { calibrationRtf } = await loadParakeet(
+      PARAKEET_UNIFIED,
+      async () => upgrade.asrDir,
+      upgrade.vadDir
+    )
     emit({
-      event: 'error',
-      message:
-        err instanceof Error &&
-        /verification|download|incomplete|unpacked|stalled|HTTP/i.test(err.message)
-          ? `${err.message} Check your connection, then try again.`
-          : `The speech model could not be prepared: ${String(err)}`
+      event: 'status',
+      stage: 'model_upgraded',
+      model: PARAKEET_UNIFIED.name,
+      calibrationRtf,
+      captionMode
     })
+  } catch (err) {
+    console.error('[win-asr] could not switch to the new speech model:', err)
   }
 }
 
 function startSession(channels: string[], sessionId = 0): void {
-  if (!recognizer || !sherpa) {
+  if ((!recognizer && !legacy) || !sherpa) {
     emit({ event: 'error', message: 'engine is not ready yet' })
     emit({ event: 'done' })
     return
@@ -159,46 +355,69 @@ function startSession(channels: string[], sessionId = 0): void {
   }
   sessionActive = true
   activeSessionId = sessionId
-  delayedNotified = false
+  captionsDelayed = false
   const live = quality === 'live'
   const settings = live ? LIVE_VAD : BATCH_VAD
   const load = new DecodeLoadMonitor()
+  const both = channels.includes('mic') && channels.includes('system')
+  const sessionRecognizer = recognizer ? withTestStall(recognizer) : recognizer!
+  // Live echo checks need system text committed before the mic copy of it.
+  gate =
+    live && both
+      ? new EchoOrderGate(emit, () => pipelines.get('system')?.settledThroughSec() ?? 0)
+      : null
+  const route = gate ? (event: Record<string, unknown>) => gate!.push(event) : emit
   pipelines = new Map(
-    channels.map((channel) => [
+    channels.map((channel): [string, ChannelTranscriber] => [
       channel,
-      new UtteranceTranscriber(
-        recognizer!,
-        new sherpa!.Vad(sileroVadConfig(vadModel, settings), vadBufferSeconds(settings)),
-        {
-          channel,
-          interim: live && captionMode === 'interim',
-          vadSettings: settings,
-          load,
-          realtime: live,
-          now: () => Date.now(),
-          emit
-        }
-      )
+      legacy
+        ? new LegacyStreamingChannel(channel, legacy, route)
+        : new UtteranceTranscriber(
+            live ? sessionRecognizer : recognizer!,
+            new sherpa!.Vad(sileroVadConfig(vadModel, settings), vadBufferSeconds(settings)),
+            {
+              channel,
+              interim: live && captionMode === 'interim',
+              vadSettings: settings,
+              load,
+              realtime: live,
+              now: () => Date.now(),
+              emit: route
+            }
+          )
     ])
   )
   emit({ event: 'ready', mode: quality, channels })
   emit({ event: 'status', stage: 'transcribing' })
+  if (legacy) emit({ event: 'status', stage: 'legacy_model', model: LEGACY_ZIPFORMER.name })
 }
 
 function stopSession(sessionId = 0): void {
   if (!sessionActive || activeSessionId !== sessionId) return
   sessionActive = false
   emit({ event: 'status', stage: 'finishing' })
-  for (const pipeline of pipelines.values()) {
+  // The system channel first, so held mic timings can still be echo-checked.
+  const ordered = [...pipelines.values()].sort((a, b) =>
+    a.channel === 'system' ? -1 : b.channel === 'system' ? 1 : 0
+  )
+  for (const pipeline of ordered) {
     try {
-      pipeline.finish(quality === 'final' ? { audioSeconds: pipeline.stats.audioSeconds } : {})
+      if (pipeline instanceof UtteranceTranscriber && quality === 'final') {
+        pipeline.finish({ audioSeconds: pipeline.stats.audioSeconds })
+      } else {
+        if (pipeline.channel === 'mic') gate?.release(true)
+        pipeline.finish()
+      }
     } catch (err) {
       emit({ event: 'error', channel: pipeline.channel, message: `finish failed: ${String(err)}` })
     }
   }
+  gate?.release(true)
+  gate = null
   pipelines = new Map()
   activeSessionId = null
   emit({ event: 'done' })
+  if (pendingUpgrade) void activateUpgrade()
 }
 
 function ingest(data: AudioMessage): void {
@@ -210,11 +429,17 @@ function ingest(data: AudioMessage): void {
     emit({ event: 'error', channel: data.channel, message: `transcription failed: ${String(err)}` })
     return
   }
-  if (quality === 'live' && !delayedNotified && pipeline.lagSec() > DELAYED_LAG_SEC) {
-    // Never fall behind silently: the recorder tells the person captions are
-    // late. All audio is still transcribed and saved.
-    delayedNotified = true
+  if (data.channel === 'system') gate?.release()
+  if (quality !== 'live') return
+  // Never fall behind silently: the recorder says captions are late while any
+  // channel's frames wait more than 5 s, and clears it once all catch up.
+  const lag = Math.max(...[...pipelines.values()].map((p) => p.lagSec()))
+  if (!captionsDelayed && lag > DELAYED_LAG_SEC) {
+    captionsDelayed = true
     emit({ event: 'status', stage: 'captions_delayed', channel: data.channel })
+  } else if (captionsDelayed && lag < CAUGHT_UP_LAG_SEC) {
+    captionsDelayed = false
+    emit({ event: 'status', stage: 'captions_caught_up' })
   }
 }
 

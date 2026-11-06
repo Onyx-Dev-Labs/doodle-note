@@ -6,6 +6,31 @@ interface CaptureStatusState {
   phase: 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
   statusText: string
   transcribing: boolean
+  /** Windows only: the engine is behind real time; set and cleared by status events. */
+  captionsDelayed?: boolean
+  /** Windows only: this capture uses the previous speech model (new one downloading). */
+  legacyModel?: boolean
+}
+
+/** Windows recorder notices for the live session, in display order. */
+export function captureNotices(state: {
+  phase: CaptureStatusState['phase']
+  captionsDelayed?: boolean
+  legacyModel?: boolean
+}): string[] {
+  const live = state.phase === 'recording' || state.phase === 'starting'
+  const notices: string[] = []
+  if (live && state.legacyModel) {
+    notices.push(
+      'Transcribing with the previous speech model while the new one downloads. This recording keeps that transcript; Re-transcribe it later for the new model.'
+    )
+  }
+  if (live && state.captionsDelayed) {
+    notices.push(
+      'Live captions are running behind on this PC. Everything is still being transcribed and will appear shortly.'
+    )
+  }
+  return notices
 }
 
 /** Only deliberate lifecycle copy belongs in the recorder, never raw engine diagnostics. */
@@ -54,10 +79,12 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
       return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
     case 'captions_delayed':
       // Windows only: this PC is decoding slower than real time. Every word is
-      // still transcribed from the saved audio stream; captions just lag.
-      return state.phase === 'recording'
-        ? { ...state, statusText: 'Live captions are running behind on this PC.' }
-        : state
+      // still transcribed; captions just lag until it catches up.
+      return { ...state, captionsDelayed: true }
+    case 'captions_caught_up':
+      return { ...state, captionsDelayed: false }
+    case 'legacy_model':
+      return { ...state, legacyModel: true }
     default:
       return state
   }

@@ -34,15 +34,26 @@ export interface WindowsAsrModelSpec {
   kind: 'archive' | 'file'
   /** Files kept after extraction, with their exact sizes. */
   files: Readonly<Record<string, number>>
+  /** SHA256 of each kept file, checked when a model fails to load. */
+  fileSha256?: Readonly<Record<string, string>>
 }
 
 function archive(
   name: string,
   bytes: number,
   sha256: string,
-  files: Record<string, number>
+  files: Record<string, number>,
+  fileSha256: Record<string, string>
 ): WindowsAsrModelSpec {
-  return { name, url: `${RELEASE}/${name}.tar.bz2`, bytes, sha256, kind: 'archive', files }
+  return {
+    name,
+    url: `${RELEASE}/${name}.tar.bz2`,
+    bytes,
+    sha256,
+    kind: 'archive',
+    files,
+    fileSha256
+  }
 }
 
 /**
@@ -59,6 +70,12 @@ export const PARAKEET_UNIFIED = archive(
     'decoder.int8.onnx': 7_257_753,
     'joiner.int8.onnx': 1_735_860,
     'tokens.txt': 8_952
+  },
+  {
+    'encoder.int8.onnx': '6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0',
+    'decoder.int8.onnx': 'a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6',
+    'joiner.int8.onnx': '869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a',
+    'tokens.txt': 'dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff'
   }
 )
 
@@ -72,6 +89,12 @@ export const PARAKEET_TDT_V2 = archive(
     'decoder.int8.onnx': 7_257_753,
     'joiner.int8.onnx': 1_739_080,
     'tokens.txt': 9_384
+  },
+  {
+    'encoder.int8.onnx': 'a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab',
+    'decoder.int8.onnx': 'b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e',
+    'joiner.int8.onnx': '7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2',
+    'tokens.txt': 'ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d'
   }
 )
 
@@ -85,6 +108,12 @@ export const PARAKEET_TDT_V3 = archive(
     'decoder.int8.onnx': 11_845_275,
     'joiner.int8.onnx': 6_355_277,
     'tokens.txt': 93_939
+  },
+  {
+    'encoder.int8.onnx': 'acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247',
+    'decoder.int8.onnx': '179e50c43d1a9de79c8a24149a2f9bac6eb5981823f2a2ed88d655b24248db4e',
+    'joiner.int8.onnx': '3164c13fc2821009440d20fcb5fdc78bff28b4db2f8d0f0b329101719c0948b3',
+    'tokens.txt': 'd58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d'
   }
 )
 
@@ -95,7 +124,10 @@ export const SILERO_VAD: WindowsAsrModelSpec = {
   bytes: 643_854,
   sha256: '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6',
   kind: 'file',
-  files: { 'silero_vad.onnx': 643_854 }
+  files: { 'silero_vad.onnx': 643_854 },
+  fileSha256: {
+    'silero_vad.onnx': '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6'
+  }
 }
 
 export function parakeetSpec(model: 'v2' | 'v3'): WindowsAsrModelSpec {
@@ -205,6 +237,11 @@ export interface EnsureModelOptions {
   signal?: AbortSignal
   download?: ModelDownloader
   extract?: ModelExtractor
+  /**
+   * Distinguishes the partial download of each worker kind, so the live and
+   * import workers never write the same partial file (both need the VAD).
+   */
+  partialTag?: string
 }
 
 /**
@@ -224,7 +261,10 @@ export async function ensureWindowsAsrModel(
   const extract = options.extract ?? extractArchive
 
   mkdirSync(modelsDir, { recursive: true })
-  const partial = join(modelsDir, `${spec.name}.download.partial`)
+  const partial = join(
+    modelsDir,
+    `${spec.name}${options.partialTag ? `.${options.partialTag}` : ''}.download.partial`
+  )
   if (existsSync(partial) && statSync(partial).size > spec.bytes) rmSync(partial, { force: true })
   await download(
     spec.url,
@@ -260,8 +300,11 @@ export async function ensureWindowsAsrModel(
         rmSync(join(extracted, entry), { recursive: true, force: true })
       }
     }
-    rmSync(target, { recursive: true, force: true })
-    renameSync(extracted, target)
+    // Another worker may have installed (and loaded) the same model meanwhile.
+    if (!modelFilesMatch(target, spec.files)) {
+      rmSync(target, { recursive: true, force: true })
+      renameSync(extracted, target)
+    }
     rmSync(partial, { force: true })
     return target
   } finally {
@@ -291,6 +334,31 @@ export async function ensureWindowsAsrModels(
     done += spec.bytes
   }
   return dirs
+}
+
+/**
+ * Size checks are cheap and run at every start; content hashes run only after
+ * a model failed to load (or a load was interrupted), to tell a damaged file
+ * from any other failure.
+ */
+export async function modelContentMatches(
+  dir: string,
+  spec: WindowsAsrModelSpec
+): Promise<boolean> {
+  if (!modelFilesMatch(dir, spec.files)) return false
+  for (const [name, expected] of Object.entries(spec.fileSha256 ?? {})) {
+    try {
+      if ((await sha256(join(dir, name))) !== expected) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+/** Remove an installed model folder so the next ensure downloads it again. */
+export function removeWindowsAsrModel(modelsDir: string, spec: WindowsAsrModelSpec): void {
+  rmSync(join(modelsDir, spec.name), { recursive: true, force: true })
 }
 
 /** Whether a model still needs to be downloaded (for first-run copy). */

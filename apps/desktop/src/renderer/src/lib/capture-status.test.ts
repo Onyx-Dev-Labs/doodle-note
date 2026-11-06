@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { applyCaptureStatus } from './capture-status'
+import { applyCaptureStatus, captureNotices } from './capture-status'
 
 const starting = (): Parameters<typeof applyCaptureStatus>[0] => ({
   phase: 'starting' as const,
@@ -74,12 +74,32 @@ test('Windows model preparation and refinement remain explicit without macOS ter
   const transcribing = applyCaptureStatus(recording, { event: 'status', stage: 'transcribing' })
   assert.equal(transcribing.transcribing, true)
   assert.equal(transcribing.statusText, '')
-  const delayed = applyCaptureStatus(transcribing, {
-    event: 'status',
-    stage: 'captions_delayed'
-  })
+})
+
+test('the Windows captions-delayed warning is shown while late and cleared when caught up', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  assert.deepEqual(captureNotices(recording), [])
+  const delayed = applyCaptureStatus(recording, { event: 'status', stage: 'captions_delayed' })
   assert.equal(delayed.phase, 'recording')
-  assert.equal(delayed.statusText, 'Live captions are running behind on this PC.')
+  // The recorder shows the clock, not statusText, while recording: the warning
+  // must come from captureNotices or it is invisible.
+  assert.equal(delayed.statusText, '')
+  assert.match(captureNotices(delayed).join(' '), /running behind/)
+  const caughtUp = applyCaptureStatus(delayed, { event: 'status', stage: 'captions_caught_up' })
+  assert.deepEqual(captureNotices(caughtUp), [])
+  // Re-arms: a second slow stretch shows it again.
+  const again = applyCaptureStatus(caughtUp, { event: 'status', stage: 'captions_delayed' })
+  assert.match(captureNotices(again).join(' '), /running behind/)
+  assert.deepEqual(captureNotices({ ...again, phase: 'ended' }), [])
+})
+
+test('a capture on the previous speech model says so honestly', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  const legacy = applyCaptureStatus(recording, { event: 'status', stage: 'legacy_model' })
+  assert.match(
+    captureNotices(legacy).join(' '),
+    /previous speech model while the new one downloads/
+  )
 })
 
 test('idle and completed sessions ignore delayed status events', () => {

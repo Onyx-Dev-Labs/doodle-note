@@ -281,6 +281,10 @@ export interface EngineSessionSnapshot {
   segments: TranscriptSegment[]
   partials: Partial<Record<EngineChannel, string>>
   error?: string
+  /** Windows: live captions currently lag real time (see captions_delayed). */
+  captionsDelayed?: boolean
+  /** Windows: this capture uses the previous speech model (see legacy_model). */
+  legacyModel?: boolean
 }
 
 export type EngineLifecycleEvent =

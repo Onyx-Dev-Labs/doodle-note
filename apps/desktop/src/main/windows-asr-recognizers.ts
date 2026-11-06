@@ -7,11 +7,13 @@ import type {
   VadLike,
   VadSettings
 } from './windows-asr-pipeline'
-import { ASR_SAMPLE_RATE, VAD_WINDOW_SAMPLES } from './windows-asr-pipeline'
+import { ASR_SAMPLE_RATE, VAD_UNBOUNDED_SEC, VAD_WINDOW_SAMPLES } from './windows-asr-pipeline'
 
 /** The subset of sherpa-onnx-node the Windows engine uses. */
 export interface SherpaModule {
   OfflineRecognizer: new (config: unknown) => OfflineRecognizerLike<OfflineStreamLike>
+  /** Only the legacy upgrade fallback (windows-asr-legacy.ts) streams. */
+  OnlineRecognizer: new (config: unknown) => unknown
   Vad: new (config: unknown, bufferSizeInSeconds: number) => VadLike
 }
 
@@ -79,7 +81,8 @@ export function sileroVadConfig(model: string, settings: VadSettings): Record<st
       threshold: settings.threshold,
       minSilenceDuration: settings.minSilenceSec,
       minSpeechDuration: settings.minSpeechSec,
-      maxSpeechDuration: settings.maxSpeechSec,
+      // The pipeline enforces the utterance bound itself (see FORCED_CUT_*).
+      maxSpeechDuration: VAD_UNBOUNDED_SEC,
       windowSize: VAD_WINDOW_SAMPLES
     },
     sampleRate: ASR_SAMPLE_RATE,
@@ -89,7 +92,10 @@ export function sileroVadConfig(model: string, settings: VadSettings): Record<st
   }
 }
 
-/** Silero keeps every sample of an utterance in progress; cover the longest one. */
+/**
+ * Initial size of Silero's own buffer. It holds the speech in progress and
+ * grows itself (without loss) past this; the pipeline keeps its own copy.
+ */
 export function vadBufferSeconds(settings: VadSettings): number {
   return Math.max(60, settings.maxSpeechSec * 3)
 }

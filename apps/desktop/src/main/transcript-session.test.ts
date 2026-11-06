@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import type { EngineEvent } from '../shared/engine-events'
+import type { EngineEvent, EngineTokenTiming } from '../shared/engine-events'
 import { TranscriptSession } from './transcript-session'
 
 test('a pending meeting cannot take ownership of an empty ended capture', () => {
@@ -208,4 +208,53 @@ test('checkpoint failure is reported at finalization while the recovery session 
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('Windows sessions checkpoint the open utterance and save in time order', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'doodlenote-session-win-'))
+  const checkpoints: Array<{ texts: string[]; ended: boolean }> = []
+  try {
+    const session = new TranscriptSession(
+      () => {},
+      dir,
+      () => {},
+      (segments, ended) => checkpoints.push({ texts: segments.map((s) => s.text), ended }),
+      { checkpointOpenText: true, sortOnFinish: true }
+    )
+    session.bindMeeting('w')
+    session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
+    session.handle({ event: 'channel_start', channel: 'mic', epochMs: 1_000_000 })
+    session.handle({ event: 'channel_start', channel: 'system', epochMs: 1_000_000 })
+    // One committed utterance, still an open segment: a crash must keep it.
+    const token = (text: string, startSec: number): EngineTokenTiming => ({
+      token: ` ${text}`,
+      startSec,
+      endSec: startSec + 0.3,
+      confidence: 0.9
+    })
+    session.handle({
+      event: 'timings',
+      channel: 'system',
+      tokens: [token('Later', 10), token('words.', 10.4)]
+    })
+    assert.deepEqual(checkpoints.at(-1), { texts: ['Later words.'], ended: false })
+    // The mic utterance is committed later but happened earlier.
+    session.handle({ event: 'timings', channel: 'mic', tokens: [token('Earlier.', 2)] })
+    session.handle({ event: 'final', channel: 'system', text: 'Later words.' })
+    session.handle({ event: 'final', channel: 'mic', text: 'Earlier.' })
+    session.handle({ event: 'done' })
+    assert.deepEqual(checkpoints.at(-1), { texts: ['Earlier.', 'Later words.'], ended: true })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the captions-delayed state survives a renderer snapshot until it clears', () => {
+  const session = new TranscriptSession(() => {}, 'unused')
+  session.bindMeeting('d')
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
+  session.handle({ event: 'status', stage: 'captions_delayed' })
+  assert.equal(session.snapshot('d')?.captionsDelayed, true)
+  session.handle({ event: 'status', stage: 'captions_caught_up' })
+  assert.equal(session.snapshot('d')?.captionsDelayed, undefined)
 })
