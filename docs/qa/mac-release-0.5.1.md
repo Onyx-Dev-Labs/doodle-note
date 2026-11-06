@@ -1,6 +1,6 @@
 # DoodleNote 0.5.1 release preparation
 
-Status: prepared for review; not merged, signed, notarized, or published.
+Status: merged, signed, notarized, uploaded, and the Blob feed activated. This change publishes the static web feed. Not yet installed or manually verified from the signed build; see Production acceptance.
 
 ## Scope
 
@@ -9,7 +9,7 @@ Status: prepared for review; not merged, signed, notarized, or published.
 - Bark keyboard shortcut recorder from `alec-temp-0.5.1`: single keys, modifier-plus-key combinations, and standalone left/right modifiers including Right Option, with explicit Save and Cancel, conflict messages, and Input Monitoring handling.
 - 1024px pine and white Bark logos in Settings and the pill.
 - Dependencies: Electron 44.10.2, FluidAudio 0.18.2 in the Swift engine, Next.js 16.4.5, better-auth 1.7.18.
-- Desktop version 0.5.1. Website changelog remains explicitly Unreleased until publication.
+- Desktop version 0.5.1.
 
 ## Security review
 
@@ -22,7 +22,30 @@ Left open for a maintainer decision, not changed here:
 
 ## Signing
 
-The production signing identity remains **SEAN INMAN (VTZW6K32K4)**; the macOS updater requires signing continuity. After merge, dispatch **Mac release candidate** on `main` and retain the exact signed, notarized, verified artifacts and receipt. Follow [RELEASING](../RELEASING.md) and the [receipt-bound publisher](mac-publisher.md); do not rebuild during promotion.
+The production signing identity remains **SEAN INMAN (VTZW6K32K4)**; the macOS updater requires signing continuity. The candidate was built by **Mac release candidate** on `main` and promoted without rebuilding, following [RELEASING](../RELEASING.md) and the [receipt-bound publisher](mac-publisher.md).
+
+## Retained Mac candidate
+
+- PR #272 merged to `main` as `b6400d0bc6af247a371f9423df1afed3c6ed8b3e`.
+- The first [signing run](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/42289363932) signed and notarized the app and DMG, then failed verification and retained no candidate. `stapler validate` on the app inside the mounted DMG lost its connection to Apple's ticket service (`NSURLErrorDomain -1005`) on all three attempts; the same check passed for the built app, the ZIP app, and the DMG. Nothing was published from that run.
+- The second [signing run](https://github.com/Onyx-Dev-Labs/doodle-note/actions/runs/42301578955) succeeded at the same source. Artifact ID `13544903406`; GitHub archive digest `sha256:7c9e672fb2ae2a82e2723e44197b10e4db026a19873dc2390f78e84dae595f0d`.
+- **Exact-artifact macOS 14 verification has not run.** `verify-existing` is refused on `main` and its macOS 14 runner image has retired. This gap is the same as 0.4.37, 0.4.38, and 0.5.0.
+
+| Payload | SHA-256 |
+| --- | --- |
+| DoodleNote-0.5.1-arm64-mac.zip | `ab989e65a52f6d2dc0fe797c30710c09e26b436b071b87c2723826d6e38e8687` |
+| DoodleNote-0.5.1-arm64.dmg | `7964c50eab625e107a5b837920fe074922098c7e3fe84c1ce5f79f6a2429b50b` |
+| latest-mac.yml | `8a4f415bd455d3e6299c7615ea9fc855e750e59f796e23ac4b1a4c9c66d30ad4` |
+
+Local checks on the downloaded candidate (macOS 26, arm64):
+
+- Hashes match the receipt, and the receipt-bound publisher dry run passed.
+- Deep/strict `codesign` passed for the ZIP app and the DMG app, Team ID `VTZW6K32K4`, identical CDHash; `spctl` accepted both apps and the DMG as Notarized Developer ID; `stapler validate` passed for all three.
+- The ZIP app and the DMG app are identical.
+- The packaged app reports 0.5.1, points at `https://www.doodlenote.ai/updates`, carries the microphone entitlement and usage text, and includes `engine/dictation-helper`, the speaker models' code in `engine/engine`, and the Only my voice settings.
+- The verifier's runtime smoke, run against the ZIP app with an isolated home and no window, passed on Electron 44.10.2: the packaged llama addon and SQLite FTS5 load, and the search worker and MCP protocols. The bundle was byte-identical to a fresh extraction afterwards.
+
+**Not performed on this candidate:** launching the signed app's window, Bark dictation, recording a voice, Only my voice with two people, the Microphone, Accessibility, and Input Monitoring prompts, a recording with note generation, and a hands-on test of an existing library. The release owner chose to publish and test Check for updates from 0.5.0 afterwards, as with 0.5.0.
 
 ## Validation
 
@@ -46,3 +69,39 @@ Sean installed ad-hoc signed Dev builds of this branch on his daily Mac and repo
 - An existing 0.5.0 install discovers, downloads, restarts into, and reports 0.5.1 with its library, Bark settings, and shortcut intact.
 
 Only my voice was measured against synthetic voices during development. It has not been tuned on a wide range of real voices or microphones; the accept and reject thresholds may need adjusting from real logs.
+
+## Publication evidence
+
+Payload upload completed for both files, then the publisher's immediate public
+check of the DMG's raw Blob URL returned 404 before the object was readable; the
+feeds were unchanged. A deliberate rerun verified both existing payloads by hash
+and size at the raw Blob URL and at `https://www.doodlenote.ai/updates/<file>`.
+
+The first activation wrote the Blob feed, then failed read-back with
+`Payload hash/size conflict: latest-mac.yml` before staging a static proposal, as
+with 0.4.37, 0.4.38, and 0.5.0. A direct Blob `head` returned the 510-byte feed
+uploaded at 2026-11-06T22:32:02Z, ETag `"79a5df192fa2b96e58c61788c5034322"`, while
+the public copy still served cached 0.5.0 within its 60-second TTL. Once the public
+copy matched the candidate manifest, activation was deliberately retried and
+completed with `activated: true`. This PR copies that exact verified proposal to
+the static web feed; its SHA-256 matches the receipt above.
+
+The prior Blob and static feed SHA-256 is
+`db66bd7bbdf7f10bd6ef224ef782aba9e10a1991195856dc1d2e36abae5f482a` (0.5.0), prior
+Blob ETag `"64a7b43bebda5c72a4beccb9fdf82049"`. Rollback records, both activation
+directories, and the upload, activation, and local check logs are retained locally
+under `~/.local/share/doodlenote-release-evidence/mac-0.5.1/`. Rollback cannot undo
+already-installed updates.
+
+## Windows
+
+This release does not change any Windows feed.
+
+## Production acceptance still required
+
+After merge and deployment, verify the deployed manifest and both payload hashes,
+then confirm a 0.5.0 Mac offers, installs, and relaunches into 0.5.1 with its
+library, Bark settings, and shortcut preserved. Then run the manual test notes
+above on the installed build, in particular Only my voice with two people and the
+Microphone, Accessibility, and Input Monitoring prompts.
+
