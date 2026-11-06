@@ -163,7 +163,7 @@ export default function HomePage() {
             <div className="bark-copy">
               <p className="eyebrow">A NEW WAY TO GET YOUR WORDS OUT</p>
               <div className="bark-brand">
-                <img src="/bark-pine.png" alt="" width={84} height={84} />
+                <img src="/bark-pine-1024.png" alt="" width={84} height={84} />
                 <div>
                   <span className="bark-introducing">Introducing</span>
                   <h2 id="bark-heading">Bark<span>.</span></h2>
