@@ -14,6 +14,7 @@ import type { CleanupMode, Phase, RecoveryReason } from './dictation-session'
 
 export const DICTATION_GET_STATUS_CHANNEL = 'dictation:get-status'
 export const DICTATION_SET_SETTINGS_CHANNEL = 'dictation:set-settings'
+export const DICTATION_SHORTCUT_RECORDING_CHANNEL = 'dictation:shortcut-recording'
 export const DICTATION_TOGGLE_CHANNEL = 'dictation:toggle'
 export const DICTATION_CANCEL_CHANNEL = 'dictation:cancel'
 export const DICTATION_COPY_RECOVERY_CHANNEL = 'dictation:copy-recovery'
@@ -50,7 +51,7 @@ export type TidyLevel = (typeof TIDY_LEVELS)[number]
 export interface DictationSettings {
   /** Master switch. Off means no shortcut, no helper and no microphone use. */
   enabled: boolean
-  /** Electron accelerator for press-to-start / press-to-stop; empty disables it. */
+  /** Electron accelerator or Modifier:<physical key> for toggle; empty disables it. */
   toggleShortcut: string
   /** Modifier held on its own for hold-to-talk. */
   holdKey: HoldKey
@@ -162,13 +163,13 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
 export type DictationSettingsUpdate = Partial<DictationSettings>
 
 export type MicrophoneAccess = 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
-export type ShortcutState = 'off' | 'registered' | 'conflict' | 'invalid'
+export type ShortcutState = 'off' | 'registered' | 'conflict' | 'invalid' | 'needs-permission'
 
 export interface DictationPermissions {
   microphone: MicrophoneAccess
   /** Needed to see the focused field and insert text. Null until the helper answers. */
   accessibility: boolean | null
-  /** Needed only for hold-to-talk. */
+  /** Needed for native modifier, hold-to-talk and mouse triggers. */
   inputMonitoring: boolean | null
   /** Input Monitoring as macOS reports it, so the page knows whether a prompt is still possible. */
   inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
@@ -188,6 +189,7 @@ export interface DictationStatus {
   phase: Phase
   permissions: DictationPermissions
   helper: 'ready' | 'unavailable'
+  shortcutIssues?: Partial<Record<'toggle' | 'paste' | 'copy', string>>
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState
@@ -330,6 +332,7 @@ export interface DictationApi {
   /** Put the most recent transcript on the clipboard. */
   copyLast(): Promise<void>
   /** Wait for the next mouse button press and say which button it was (or why it cannot be used). */
+  setShortcutRecording(active: boolean): Promise<void>
   captureMouseButton(): Promise<MouseCaptureOutcome>
   /**
    * Ask macOS for a permission (its own dialog, which also lists the app in System

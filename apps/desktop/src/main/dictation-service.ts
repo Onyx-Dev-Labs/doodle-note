@@ -1,3 +1,13 @@
+import { normalizeDictationSettings } from './dictation-settings'
+import {
+  modifierKey,
+  shortcutConflict,
+  shortcutIdentity,
+  validShortcut,
+  SHORTCUT_FIELDS,
+  type ModifierKey,
+  type ShortcutSlot
+} from '../shared/dictation-shortcuts'
 import { FEATURE_NAME } from '../shared/dictation-brand'
 import { randomUUID } from 'node:crypto'
 import type { AppChannel } from '../shared/app-channel'
@@ -138,6 +148,8 @@ export interface HelperLike {
   watchRead(watchId: string): Promise<FieldReading>
   watchStop(watchId: string): void
   release(snapshotId: string): void
+  setToggleKey(key: ModifierKey | 'off'): Promise<HoldFailure | null>
+  onKeyToggle(listener: () => void): () => void
   setHoldKey(key: HoldKey): Promise<HoldFailure | null>
   /** Arm or disarm the optional mouse-button trigger. Null result means it was switched off. */
   setMouseButton(
@@ -315,6 +327,9 @@ export class DictationService {
   private helperStatus: HelperStatus | null = null
   private toggleAccelerator: string | null = null
   private toggleState: ShortcutState = 'off'
+  private shortcutRecording = false
+  private settingsQueue: Promise<void> = Promise.resolve()
+  private shortcutIssues: Partial<Record<ShortcutSlot, string>> = {}
   /** The paste-last and copy-last shortcuts. */
   private readonly actionKeys = {
     paste: { accelerator: null as string | null, state: 'off' as ShortcutState },
@@ -383,6 +398,14 @@ export class DictationService {
         })
     })
     this.unsubscribe.push(
+      deps.helper.onKeyToggle(() => {
+        if (
+          !this.shortcutRecording &&
+          this.toggleState === 'registered' &&
+          modifierKey(this.deps.settings.get().toggleShortcut)
+        )
+          this.toggle()
+      }),
       deps.helper.onHold((event) => this.onHold(event)),
       deps.helper.onTap(() => this.onTap()),
       deps.helper.onClick(() => this.onClick()),
@@ -585,7 +608,70 @@ export class DictationService {
     return this.setSettings({ onlyMyVoice: false })
   }
 
+  private enqueueSettings<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.settingsQueue.then(run)
+    this.settingsQueue = next.then(
+      () => {},
+      () => {}
+    )
+    return next
+  }
+
+  async setShortcutRecording(active: boolean): Promise<void> {
+    if (active && isBusy(this.state))
+      throw new Error('Finish dictating before changing your shortcut.')
+    // Block callbacks immediately, before asynchronous helper disarming completes.
+    this.shortcutRecording = active
+    await this.applySettings()
+    this.broadcast()
+  }
+
   async setSettings(update: DictationSettingsUpdate): Promise<DictationStatus> {
+    return this.enqueueSettings(() => this.setSettingsNow(update))
+  }
+
+  private async setSettingsNow(update: DictationSettingsUpdate): Promise<DictationStatus> {
+    const current = this.deps.settings.get()
+    const candidate = normalizeDictationSettings({ ...current, ...update })
+    this.shortcutIssues = {}
+    for (const slot of Object.keys(SHORTCUT_FIELDS) as ShortcutSlot[]) {
+      const field = SHORTCUT_FIELDS[slot]
+      const value = candidate[field]
+      const changed = update[field] !== undefined && update[field] !== current[field]
+      if (
+        changed &&
+        (typeof update[field] !== 'string' || !validShortcut(value, slot === 'toggle'))
+      ) {
+        this.shortcutIssues[slot] = 'This shortcut isn’t available. Try another.'
+        return this.status()
+      }
+      const conflict = shortcutConflict(candidate, slot)
+      if (conflict && (changed || (slot === 'toggle' && update.holdKey !== undefined))) {
+        this.shortcutIssues[slot] = conflict
+        return this.status()
+      }
+      if (!changed || !value || modifierKey(value) || !candidate.enabled || !this.deps.supported)
+        continue
+      // Keep the working shortcut until the replacement is known to be registerable.
+      // Never identify another application's owner based on a boolean registration failure.
+      const ours = [
+        this.toggleAccelerator,
+        ...Object.values(this.actionKeys).map((k) => k.accelerator)
+      ].some((key) => key && shortcutIdentity(key) === shortcutIdentity(value))
+      if (ours) continue
+      let available = false
+      try {
+        available = this.deps.shortcuts.register(value, () => {})
+        if (available) this.deps.shortcuts.unregister(value)
+      } catch {
+        /* malformed or reserved OS shortcut */
+      }
+      if (!available) {
+        this.shortcutIssues[slot] =
+          'This shortcut isn’t available. Try another. Your previous shortcut was kept.'
+        return this.status()
+      }
+    }
     const before = this.deps.settings.get()
     const next = this.deps.settings.update(update)
     // The consent belongs to one provider/model pair. A different pair clears it.
@@ -596,16 +682,21 @@ export class DictationService {
     ) {
       this.deps.settings.update({ byokConsent: null })
     }
-    await this.applySettings()
+    await this.applySettingsNow()
     return this.status()
   }
 
-  private async applySettings(): Promise<void> {
+  private applySettings(): Promise<void> {
+    return this.enqueueSettings(() => this.applySettingsNow())
+  }
+
+  private async applySettingsNow(): Promise<void> {
+    if (this.disposed) return
     const settings = this.deps.settings.get()
     if (!settings.enabled || !settings.learnFromEdits) this.learner.discard()
-    if (!this.deps.supported || !settings.enabled) {
+    if (!this.deps.supported || !settings.enabled || this.shortcutRecording) {
       this.dispatch({ type: 'cancel' })
-      this.setToggleShortcut('')
+      await this.setToggleShortcut('')
       this.setActionShortcut('paste', '', new Set())
       this.setActionShortcut('copy', '', new Set())
       this.applyTransformShortcuts(
@@ -615,14 +706,14 @@ export class DictationService {
       this.holdState = 'off'
       this.mouseState = 'off'
       this.mouseSwallowing = false
-      void this.deps.helper.setHoldKey('off')
-      void this.deps.helper.setMouseButton(null, false, 'hold')
+      await this.deps.helper.setHoldKey('off')
+      await this.deps.helper.setMouseButton(null, false, 'hold')
       this.refreshPillTimer()
       this.render()
       return
     }
     if (settings.onlyMyVoice && this.deps.voice?.voiceprintPath()) this.deps.engine.warmVoice?.()
-    this.setToggleShortcut(settings.toggleShortcut)
+    await this.setToggleShortcut(settings.toggleShortcut)
     const clashes = this.shortcutClashes(settings)
     this.setActionShortcut('paste', settings.pasteLastShortcut, clashes)
     this.setActionShortcut('copy', settings.copyLastShortcut, clashes)
@@ -679,10 +770,21 @@ export class DictationService {
       : { ok: false, message: describeMouseCaptureFailure(result.failure) }
   }
 
-  private setToggleShortcut(accelerator: string): void {
+  private async setToggleShortcut(accelerator: string): Promise<void> {
     if (this.toggleAccelerator === accelerator && this.toggleState === 'registered') return
     if (this.toggleAccelerator) this.deps.shortcuts.unregister(this.toggleAccelerator)
     this.toggleAccelerator = null
+    const nativeKey = modifierKey(accelerator)
+    const failure = await this.deps.helper.setToggleKey(nativeKey ?? 'off')
+    if (nativeKey) {
+      this.toggleState =
+        failure === null
+          ? 'registered'
+          : failure === 'input-monitoring-denied'
+            ? 'needs-permission'
+            : 'invalid'
+      return
+    }
     if (!accelerator) {
       this.toggleState = 'off'
       return
@@ -870,7 +972,7 @@ export class DictationService {
 
   /** The shortcut, tray item and settings button all land here. */
   toggle(): void {
-    if (this.disposed) return
+    if (this.disposed || this.shortcutRecording) return
     const now = this.deps.now()
     // Key auto-repeat or a double tap must not stop a session that just began.
     if (now - this.lastToggleAt < 250) return
@@ -888,7 +990,7 @@ export class DictationService {
   }
 
   private onHold(event: { phase: 'down' | 'up'; holdId: number }): void {
-    if (this.disposed) return
+    if (this.disposed || this.shortcutRecording) return
     if (event.phase === 'down') {
       // A press while a double tap has the microphone latched on ends it.
       if (this.state.active?.trigger === 'handsfree') {
@@ -912,7 +1014,7 @@ export class DictationService {
    */
   private onTap(): void {
     const settings = this.deps.settings.get()
-    if (this.disposed || !this.deps.supported || !settings.enabled) return
+    if (this.disposed || this.shortcutRecording || !this.deps.supported || !settings.enabled) return
     const now = this.deps.now()
     if (this.state.active?.trigger === 'handsfree') {
       this.dispatch({ type: 'tap', nowMs: now })
@@ -931,7 +1033,7 @@ export class DictationService {
    */
   private onClick(): void {
     const settings = this.deps.settings.get()
-    if (this.disposed || !this.deps.supported || !settings.enabled) return
+    if (this.disposed || this.shortcutRecording || !this.deps.supported || !settings.enabled) return
     if (this.state.active) {
       this.dispatch({ type: 'click', nowMs: this.deps.now() })
       return
@@ -1811,7 +1913,14 @@ export class DictationService {
    */
   async pasteLast(): Promise<void> {
     const settings = this.deps.settings.get()
-    if (this.disposed || !this.deps.supported || !settings.enabled || this.pasting) return
+    if (
+      this.disposed ||
+      this.shortcutRecording ||
+      !this.deps.supported ||
+      !settings.enabled ||
+      this.pasting
+    )
+      return
     if (isBusy(this.state)) return
     const text = this.lastTranscript
     if (!text) {
@@ -1854,7 +1963,14 @@ export class DictationService {
    */
   async copyLast(): Promise<void> {
     const settings = this.deps.settings.get()
-    if (this.disposed || !this.deps.supported || !settings.enabled || isBusy(this.state)) return
+    if (
+      this.disposed ||
+      this.shortcutRecording ||
+      !this.deps.supported ||
+      !settings.enabled ||
+      isBusy(this.state)
+    )
+      return
     const text = this.lastTranscript
     if (!text) {
       this.dispatch({
@@ -1991,7 +2107,7 @@ export class DictationService {
    */
   async runTransform(id: string): Promise<void> {
     const settings = this.deps.settings.get()
-    if (this.disposed || !this.deps.supported || !settings.enabled) return
+    if (this.disposed || this.shortcutRecording || !this.deps.supported || !settings.enabled) return
     if (!settings.transforms.enabled || this.transforming || isBusy(this.state)) return
     const def = settings.transforms.items.find((item) => item.id === id)
     if (!def) return
@@ -2186,17 +2302,29 @@ export class DictationService {
   private rearmAfterPermissionGrant(helper: HelperStatus | null): void {
     if (!helper) return
     if (!helper.inputMonitoring) {
+      if (
+        !this.shortcutRecording &&
+        this.deps.settings.get().enabled &&
+        modifierKey(this.deps.settings.get().toggleShortcut)
+      ) {
+        this.toggleState = 'needs-permission'
+      }
       this.restartedForPermission = false
       return
     }
-    const waiting = this.holdState === 'needs-permission' || this.mouseState === 'needs-permission'
+    const waiting =
+      this.toggleState === 'needs-permission' ||
+      this.holdState === 'needs-permission' ||
+      this.mouseState === 'needs-permission'
     if (!waiting || this.rearming || !this.deps.settings.get().enabled) return
     this.rearming = true
     void (async () => {
       try {
         await this.applySettings()
         const stillWaiting =
-          this.holdState === 'needs-permission' || this.mouseState === 'needs-permission'
+          this.toggleState === 'needs-permission' ||
+          this.holdState === 'needs-permission' ||
+          this.mouseState === 'needs-permission'
         if (stillWaiting && !this.restartedForPermission) {
           this.restartedForPermission = true
           this.deps.helper.restart()
@@ -2229,6 +2357,28 @@ export class DictationService {
       phase: this.state.phase,
       permissions,
       helper: this.deps.helper.available ? 'ready' : 'unavailable',
+      shortcutIssues: {
+        ...(this.toggleState === 'conflict'
+          ? {
+              toggle:
+                shortcutConflict(settings, 'toggle') ??
+                'This shortcut isn’t available. Try another.'
+            }
+          : {}),
+        ...(this.actionKeys.paste.state === 'conflict'
+          ? {
+              paste:
+                shortcutConflict(settings, 'paste') ?? 'This shortcut isn’t available. Try another.'
+            }
+          : {}),
+        ...(this.actionKeys.copy.state === 'conflict'
+          ? {
+              copy:
+                shortcutConflict(settings, 'copy') ?? 'This shortcut isn’t available. Try another.'
+            }
+          : {}),
+        ...this.shortcutIssues
+      },
       toggleShortcut: this.toggleState,
       pasteLastShortcut: this.actionKeys.paste.state,
       copyLastShortcut: this.actionKeys.copy.state,

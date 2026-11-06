@@ -14,6 +14,7 @@ import {
   DICTATION_COPY_RECOVERY_CHANNEL,
   DICTATION_DISMISS_RECOVERY_CHANNEL,
   DICTATION_GET_STATUS_CHANNEL,
+  DICTATION_SHORTCUT_RECORDING_CHANNEL,
   DICTATION_OPEN_PRIVACY_CHANNEL,
   DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
   DICTATION_PASTE_LAST_CHANNEL,
@@ -209,6 +210,27 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_GET_STATUS_CHANNEL, (event) =>
     trusted(event) ? service.status() : null
   )
+  let recordingSender: WebContents | null = null
+  const endRecording = (): void => {
+    recordingSender?.removeListener('destroyed', endRecording)
+    recordingSender?.removeListener('render-process-gone', endRecording)
+    recordingSender?.removeListener('did-start-navigation', endRecording)
+    recordingSender = null
+    void service.setShortcutRecording(false)
+  }
+  ipcMain.handle(DICTATION_SHORTCUT_RECORDING_CHANNEL, async (event, active: unknown) => {
+    if (!trusted(event) || typeof active !== 'boolean') return
+    if (active) {
+      if (recordingSender) endRecording()
+      recordingSender = event.sender
+      event.sender.once('destroyed', endRecording)
+      event.sender.once('render-process-gone', endRecording)
+      event.sender.once('did-start-navigation', endRecording)
+    } else if (recordingSender === event.sender) {
+      endRecording()
+    }
+    await service.setShortcutRecording(active)
+  })
   ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
     trusted(event) ? service.setSettings(update ?? {}) : null
   )

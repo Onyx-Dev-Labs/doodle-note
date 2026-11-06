@@ -3,6 +3,7 @@ import {
   DICTATION_CANCEL_CHANNEL,
   DICTATION_APP_INFO_CHANNEL,
   DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL,
+  DICTATION_SHORTCUT_RECORDING_CHANNEL,
   DICTATION_DICTIONARY_ADD_CHANNEL,
   DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL,
   DICTATION_DICTIONARY_REMOVE_CHANNEL,
@@ -739,6 +740,8 @@ const dictationApi: DictationApi = {
   viewLastChange: () => ipcRenderer.invoke(DICTATION_VIEW_CHANGE_CHANNEL),
   undoLastChange: () => ipcRenderer.invoke(DICTATION_UNDO_CHANGE_CHANNEL),
   requestPermission: (pane) => ipcRenderer.invoke(DICTATION_REQUEST_PERMISSION_CHANNEL, pane),
+  setShortcutRecording: (active) =>
+    ipcRenderer.invoke(DICTATION_SHORTCUT_RECORDING_CHANNEL, active),
   captureMouseButton: () => ipcRenderer.invoke(DICTATION_CAPTURE_MOUSE_BUTTON_CHANNEL),
   getAppInfo: (bundleIds) => ipcRenderer.invoke(DICTATION_APP_INFO_CHANNEL, bundleIds),
   addDictionaryEntry: (entry) => ipcRenderer.invoke(DICTATION_DICTIONARY_ADD_CHANNEL, entry),

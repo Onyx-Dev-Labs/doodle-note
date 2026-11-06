@@ -161,6 +161,15 @@ func handle(_ request: [String: Any]) {
     case "release":
         if let snapshotId = request["snapshotId"] as? String { snapshots.drop(snapshotId) }
         Wire.reply(id)
+    case "toggle-key-set":
+        let key = request["key"] as? String ?? ""
+        DispatchQueue.main.async {
+            if let failure = ModifierToggleWatcher.shared.set(key: key) {
+                Wire.reply(id, ok: false, ["reason": failure])
+            } else {
+                Wire.reply(id)
+            }
+        }
     case "hold-start":
         let key = request["key"] as? String ?? ""
         let minHold = request["minHoldMs"] as? Int ?? 150
@@ -229,7 +238,10 @@ Thread {
         }
     }
     // The app is gone. Make sure no hold stays "down" and no sound stays muted, then leave.
-    DispatchQueue.main.sync { HoldWatcher.shared.stopAll() }
+    DispatchQueue.main.sync {
+        HoldWatcher.shared.stopAll()
+        ModifierToggleWatcher.shared.stop()
+    }
     audioQueue.sync { _ = OutputAudio.restore() }
     exit(0)
 }.start()
@@ -240,6 +252,10 @@ for signalNumber in [SIGTERM, SIGINT, SIGHUP] {
     signal(signalNumber, SIG_IGN)
     let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: audioQueue)
     source.setEventHandler {
+        DispatchQueue.main.sync {
+            HoldWatcher.shared.stopAll()
+            ModifierToggleWatcher.shared.stop()
+        }
         _ = OutputAudio.restore()
         exit(0)
     }
