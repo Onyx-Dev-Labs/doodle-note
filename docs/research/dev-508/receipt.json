@@ -1,0 +1,478 @@
+{
+  "node": "v24.22.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "limits": {
+    "frames": 16000,
+    "bytes": 32000,
+    "pendingPerSource": 4,
+    "recordsPerSource": 32,
+    "attempts": 2,
+    "deadlineMs": 200,
+    "maxWorkers": 2,
+    "maxSessions": 2
+  },
+  "measurements": [
+    {
+      "name": "asr-hang-restart",
+      "sources": {
+        "mic": {
+          "capturedFrames": 48000,
+          "transcribedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1",
+            "capture-A-mic-2"
+          ],
+          "committedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1",
+            "capture-A-mic-2"
+          ],
+          "committedFrames": 48000,
+          "committedContiguousFrames": 48000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 48000,
+          "transcribedIds": [
+            "capture-A-system-0",
+            "capture-A-system-1",
+            "capture-A-system-2"
+          ],
+          "committedIds": [
+            "capture-A-system-0",
+            "capture-A-system-1",
+            "capture-A-system-2"
+          ],
+          "committedFrames": 48000,
+          "committedContiguousFrames": 48000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 192000,
+      "rejectedEvents": 1,
+      "emittedIds": [
+        "capture-A-mic-0",
+        "capture-A-mic-1",
+        "capture-A-mic-2",
+        "capture-A-system-0",
+        "capture-A-system-1",
+        "capture-A-system-2"
+      ],
+      "workers": 2,
+      "maxAttempts": 2
+    },
+    {
+      "name": "missing-chunk",
+      "sources": {
+        "mic": {
+          "capturedFrames": 48000,
+          "transcribedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-2"
+          ],
+          "committedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-2"
+          ],
+          "committedFrames": 32000,
+          "committedContiguousFrames": 16000,
+          "gapIds": [
+            "capture-A-mic-1"
+          ],
+          "missingTranscriptFrames": 16000,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 96000,
+      "rejectedEvents": 0,
+      "emittedIds": [
+        "capture-A-mic-0",
+        "capture-A-mic-1",
+        "capture-A-mic-2"
+      ]
+    },
+    {
+      "name": "disk-write-failure-retry-manual-edit",
+      "sources": {
+        "mic": {
+          "capturedFrames": 32000,
+          "transcribedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1"
+          ],
+          "committedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1"
+          ],
+          "committedFrames": 32000,
+          "committedContiguousFrames": 32000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 32000,
+      "rejectedEvents": 0,
+      "injectedError": "EIO before rename",
+      "realError": "ENOTDIR"
+    },
+    {
+      "name": "lost-acknowledgement",
+      "sources": {
+        "mic": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 16000,
+          "transcribedIds": [
+            "capture-A-system-0"
+          ],
+          "committedIds": [
+            "capture-A-system-0"
+          ],
+          "committedFrames": 16000,
+          "committedContiguousFrames": 16000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 32000,
+      "rejectedEvents": 0,
+      "replayedIds": [
+        "capture-A-system-0"
+      ],
+      "duplicateRows": 0
+    },
+    {
+      "name": "persistent-storage-failure",
+      "sources": {
+        "mic": {
+          "capturedFrames": 16000,
+          "transcribedIds": [
+            "capture-A-mic-0"
+          ],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 16000,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 32000,
+      "rejectedEvents": 0,
+      "writeAttempts": 2,
+      "retainedFrames": 16000
+    },
+    {
+      "name": "device-change-model",
+      "sources": {
+        "mic": {
+          "capturedFrames": 32000,
+          "transcribedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1"
+          ],
+          "committedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1"
+          ],
+          "committedFrames": 32000,
+          "committedContiguousFrames": 32000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 64000,
+      "rejectedEvents": 1
+    },
+    {
+      "name": "pending-attempt-stale-terminal",
+      "sources": {
+        "mic": {
+          "capturedFrames": 16000,
+          "transcribedIds": [
+            "capture-B-mic-0"
+          ],
+          "committedIds": [
+            "capture-B-mic-0"
+          ],
+          "committedFrames": 16000,
+          "committedContiguousFrames": 16000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 32000,
+      "rejectedEvents": 1
+    },
+    {
+      "name": "renderer-replacement-model",
+      "sources": {
+        "mic": {
+          "capturedFrames": 32000,
+          "transcribedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1"
+          ],
+          "committedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1"
+          ],
+          "committedFrames": 32000,
+          "committedContiguousFrames": 32000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 32000,
+      "rejectedEvents": 0,
+      "rendererGeneration": 1
+    },
+    {
+      "name": "bounded-retention-retry",
+      "sources": {
+        "mic": {
+          "capturedFrames": 64000,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 64000,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 64000,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 64000,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 256000,
+      "rejectedEvents": 0,
+      "pendingPcmBytes": 256000,
+      "attempts": 2
+    },
+    {
+      "name": "bounded-session-metadata",
+      "sources": {
+        "mic": {
+          "capturedFrames": 512000,
+          "transcribedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1",
+            "capture-A-mic-2",
+            "capture-A-mic-3",
+            "capture-A-mic-4",
+            "capture-A-mic-5",
+            "capture-A-mic-6",
+            "capture-A-mic-7",
+            "capture-A-mic-8",
+            "capture-A-mic-9",
+            "capture-A-mic-10",
+            "capture-A-mic-11",
+            "capture-A-mic-12",
+            "capture-A-mic-13",
+            "capture-A-mic-14",
+            "capture-A-mic-15",
+            "capture-A-mic-16",
+            "capture-A-mic-17",
+            "capture-A-mic-18",
+            "capture-A-mic-19",
+            "capture-A-mic-20",
+            "capture-A-mic-21",
+            "capture-A-mic-22",
+            "capture-A-mic-23",
+            "capture-A-mic-24",
+            "capture-A-mic-25",
+            "capture-A-mic-26",
+            "capture-A-mic-27",
+            "capture-A-mic-28",
+            "capture-A-mic-29",
+            "capture-A-mic-30",
+            "capture-A-mic-31"
+          ],
+          "committedIds": [
+            "capture-A-mic-0",
+            "capture-A-mic-1",
+            "capture-A-mic-2",
+            "capture-A-mic-3",
+            "capture-A-mic-4",
+            "capture-A-mic-5",
+            "capture-A-mic-6",
+            "capture-A-mic-7",
+            "capture-A-mic-8",
+            "capture-A-mic-9",
+            "capture-A-mic-10",
+            "capture-A-mic-11",
+            "capture-A-mic-12",
+            "capture-A-mic-13",
+            "capture-A-mic-14",
+            "capture-A-mic-15",
+            "capture-A-mic-16",
+            "capture-A-mic-17",
+            "capture-A-mic-18",
+            "capture-A-mic-19",
+            "capture-A-mic-20",
+            "capture-A-mic-21",
+            "capture-A-mic-22",
+            "capture-A-mic-23",
+            "capture-A-mic-24",
+            "capture-A-mic-25",
+            "capture-A-mic-26",
+            "capture-A-mic-27",
+            "capture-A-mic-28",
+            "capture-A-mic-29",
+            "capture-A-mic-30",
+            "capture-A-mic-31"
+          ],
+          "committedFrames": 512000,
+          "committedContiguousFrames": 512000,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        },
+        "system": {
+          "capturedFrames": 0,
+          "transcribedIds": [],
+          "committedIds": [],
+          "committedFrames": 0,
+          "committedContiguousFrames": 0,
+          "gapIds": [],
+          "missingTranscriptFrames": 0,
+          "duplicateRows": 0
+        }
+      },
+      "peakPendingBytes": 32000,
+      "rejectedEvents": 0,
+      "maxRecordsPerSource": 32
+    },
+    {
+      "name": "writer-process-kill",
+      "stage": "file-synced",
+      "acknowledged": false,
+      "reopenedRows": 0,
+      "powerLossTest": false
+    },
+    {
+      "name": "writer-process-kill",
+      "stage": "renamed",
+      "acknowledged": false,
+      "reopenedRows": 1,
+      "powerLossTest": false
+    },
+    {
+      "name": "writer-process-kill",
+      "stage": "directory-synced",
+      "acknowledged": false,
+      "reopenedRows": 1,
+      "powerLossTest": false
+    },
+    {
+      "name": "capture-process-shutdown",
+      "action": "stop",
+      "reason": "independent-stop",
+      "ticks": 4,
+      "stoppedAt": 1792280004928,
+      "observedShutdownMs": 0,
+      "nativeDeviceProof": false
+    },
+    {
+      "name": "capture-process-shutdown",
+      "action": "kill",
+      "reason": "host-eof",
+      "ticks": 5,
+      "stoppedAt": 1792280005065,
+      "observedShutdownMs": 2,
+      "nativeDeviceProof": false
+    }
+  ],
+  "runnerMemoryAtEnd": {
+    "rss": 67682304,
+    "heapTotal": 12419072,
+    "heapUsed": 8367296,
+    "external": 2703297,
+    "arrayBuffers": 268853
+  }
+}
