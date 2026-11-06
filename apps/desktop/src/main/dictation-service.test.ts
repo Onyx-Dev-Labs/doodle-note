@@ -65,6 +65,8 @@ interface Harness {
     appInfoCalls: string[][]
     exitListener: (() => void) | null
     holdKeys: HoldKey[]
+    toggleKeys: string[]
+    toggleListener: (() => void) | null
   }
   setEngineBusy: (busy: boolean) => void
   perms: { mic: 'granted' | 'denied' | 'not-determined'; micAnswer: boolean; micAsked: number }
@@ -88,6 +90,7 @@ function harness(
     access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
     warm?: () => void
+    blockedShortcut?: string
     modelOptions?: {
       localModelLabel: string | null
       byok: { provider: string; model: string; hasKey: boolean } | null
@@ -165,7 +168,9 @@ function harness(
     permissionAsks: [],
     appInfoCalls: [],
     exitListener: null,
-    holdKeys: []
+    holdKeys: [],
+    toggleKeys: [],
+    toggleListener: null
   }
   const ownership = new CaptureOwnership()
   let listener: ((event: EngineEvent) => boolean) | null = null
@@ -229,6 +234,14 @@ function harness(
       },
       watchStop: (id) => void field.stopped.push(id),
       release: () => {},
+      setToggleKey: async (key) => {
+        helper.toggleKeys.push(key)
+        return key === 'off' || helper.inputMonitoring ? null : 'input-monitoring-denied'
+      },
+      onKeyToggle: (cb) => {
+        helper.toggleListener = cb
+        return () => {}
+      },
       setHoldKey: async (key) => {
         helper.holdKeys.push(key)
         return null
@@ -274,6 +287,7 @@ function harness(
     },
     shortcuts: {
       register: (accelerator, callback) => {
+        if (accelerator === options.blockedShortcut) return false
         shortcuts.set(accelerator, callback)
         return true
       },
@@ -1223,14 +1237,16 @@ test('copy-last and paste-last shortcuts register, clear, and flag every collisi
   assert.equal(status.copyLastShortcut, 'conflict')
   assert.ok(!both.shortcuts.has('Control+Alt+Shift+K'))
 
-  // Changing one onto the other later releases the one that was registered.
+  // A new collision is rejected while both previous registrations stay active.
   const later = harness()
   await later.service.start()
   await later.service.setSettings({ pasteLastShortcut: 'Control+Alt+Shift+C' })
   const after = await later.service.status()
-  assert.equal(after.pasteLastShortcut, 'conflict')
-  assert.equal(after.copyLastShortcut, 'conflict')
-  assert.ok(!later.shortcuts.has('Control+Alt+Shift+C'))
+  assert.equal(after.pasteLastShortcut, 'registered')
+  assert.equal(after.copyLastShortcut, 'registered')
+  assert.match(after.shortcutIssues?.paste ?? '', /Copy last transcript/)
+  assert.notEqual(after.settings.pasteLastShortcut, 'Control+Alt+Shift+C')
+  assert.ok(later.shortcuts.has('Control+Alt+Shift+C'))
 })
 
 test('double tap works with Fn as the hold key, and the status carries the macOS Fn setting', async () => {
@@ -2452,4 +2468,113 @@ test('a recording that ends inside the tone never mutes at all', async () => {
   await tick()
   await new Promise((resolve) => setTimeout(resolve, 450))
   assert.deepEqual(h.helper.audio, ['restore'], 'nothing was muted, so nothing is left muted')
+})
+
+test('Right Option toggle uses native release listener and suspends while recording a shortcut', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  await h.service.start()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  assert.equal(h.helper.toggleKeys.at(-1), 'AltRight')
+  assert.equal(h.shortcuts.has('Modifier:AltRight'), false)
+  await h.service.setShortcutRecording(true)
+  assert.equal(h.helper.toggleKeys.at(-1), 'off')
+  assert.equal(h.shortcuts.size, 0)
+  h.helper.toggleListener?.()
+  assert.equal(h.engineCalls.length, 0)
+  await h.service.setShortcutRecording(false)
+  assert.equal(h.helper.toggleKeys.at(-1), 'AltRight')
+  h.helper.toggleListener?.()
+  await tick()
+  assert.equal(h.engineCalls[0], 'start')
+  await h.service.dispose()
+})
+
+test('unavailable replacement preserves the active shortcut and reports no invented owner', async () => {
+  const h = harness({ blockedShortcut: 'F8' })
+  await h.service.start()
+  const before = h.settings.toggleShortcut
+  const status = await h.service.setSettings({ toggleShortcut: 'F8' })
+  assert.equal(h.settings.toggleShortcut, before)
+  assert.equal(status.toggleShortcut, 'registered')
+  assert.match(status.shortcutIssues?.toggle ?? '', /previous shortcut was kept/)
+  assert.ok(h.shortcuts.has(before))
+  await h.service.dispose()
+})
+
+test('single ordinary key saves and internal duplicate does not replace it', async () => {
+  const h = harness()
+  await h.service.start()
+  await h.service.setSettings({ toggleShortcut: 'B' })
+  assert.ok(h.shortcuts.has('B'))
+  const status = await h.service.setSettings({ toggleShortcut: h.settings.copyLastShortcut })
+  assert.equal(status.settings.toggleShortcut, 'B')
+  assert.match(status.shortcutIssues?.toggle ?? '', /Copy last transcript/)
+  await h.service.dispose()
+})
+
+test('standalone modifier cannot share the hold-to-talk key', async () => {
+  const h = harness({ settings: { holdKey: 'rightOption' } })
+  await h.service.start()
+  const before = h.settings.toggleShortcut
+  const status = await h.service.setSettings({ toggleShortcut: 'Modifier:AltRight' })
+  assert.equal(status.settings.toggleShortcut, before)
+  assert.match(status.shortcutIssues?.toggle ?? '', /Hold to talk/)
+  await h.service.dispose()
+})
+
+test('modifier trigger reports Input Monitoring requirement and re-arms after grant', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  h.helper.inputMonitoring = false
+  await h.service.start()
+  assert.equal((await h.service.status()).toggleShortcut, 'needs-permission')
+  h.helper.inputMonitoring = true
+  await h.service.status()
+  await tick()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  await h.service.dispose()
+})
+
+test('immediate recorder cancellation restores shortcuts after queued disarming', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  await h.service.start()
+  await Promise.all([h.service.setShortcutRecording(true), h.service.setShortcutRecording(false)])
+  assert.equal(h.helper.toggleKeys.at(-1), 'AltRight')
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  await h.service.dispose()
+})
+
+test('revoking and restoring Input Monitoring re-arms a formerly active modifier', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  await h.service.start()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  h.helper.inputMonitoring = false
+  assert.equal((await h.service.status()).toggleShortcut, 'needs-permission')
+  const prior = h.helper.toggleKeys.length
+  h.helper.inputMonitoring = true
+  await h.service.status()
+  await tick()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  assert.ok(h.helper.toggleKeys.length > prior)
+  await h.service.dispose()
+})
+
+test('copy and paste callbacks are inert immediately while shortcut suspension is pending', async () => {
+  const h = harness()
+  await h.service.start()
+  await speak(h, 'keep this transcript')
+  finish(h)
+  h.clock.now += 5000
+  const copy = h.shortcuts.get(h.settings.copyLastShortcut)
+  const paste = h.shortcuts.get(h.settings.pasteLastShortcut)
+  const pending = h.service.setShortcutRecording(true)
+  copy?.()
+  paste?.()
+  await pending
+  await tick()
+  assert.deepEqual(h.clipboard, [])
+  assert.deepEqual(h.delivered, ['keep this transcript'])
+  await h.service.setShortcutRecording(false)
+  await h.service.copyLast()
+  assert.deepEqual(h.clipboard, ['keep this transcript'])
+  await h.service.dispose()
 })
