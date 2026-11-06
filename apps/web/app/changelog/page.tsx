@@ -10,7 +10,7 @@ const RELEASES: Array<{
 }> = [
   {
     version: "0.5.1",
-    date: "Unreleased",
+    date: "November 6, 2026",
     highlights: [
       "Only my voice for Bark: turn it on in Settings, read aloud for about twenty seconds, and Bark leaves out anyone else talking near your microphone. What it learns stays on your Mac, and the recording is not kept",
       "Choose your own Bark keyboard shortcut: record a single key, a key combination, or a modifier on its own such as Right Option, then save or cancel",
