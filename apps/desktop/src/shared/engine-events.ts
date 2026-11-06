@@ -34,6 +34,8 @@ export type EngineCaptureStatus =
 export interface EngineBatchControl {
   action: 'decode' | 'cancel'
   jobId: string
+  /** Split only for recordings with known microphone/system provenance. */
+  channels?: 'mixed' | 'split'
 }
 
 export type EngineBatchMessage =
@@ -168,12 +170,6 @@ export interface EngineFinalEvent {
   tokens?: EngineTokenTiming[]
 }
 
-/** Windows: high-accuracy local text for each channel after live capture stops. */
-export interface EngineRefinedEvent {
-  event: 'refined'
-  transcripts: Array<{ channel: EngineChannel; text: string; audioSeconds?: number }>
-}
-
 export interface EngineErrorEvent {
   event: 'error'
   message: string
@@ -216,7 +212,6 @@ export type EngineSidecarEvent =
   | EnginePartialEvent
   | EngineTimingsEvent
   | EngineFinalEvent
-  | EngineRefinedEvent
   | EngineErrorEvent
   | EngineDoneEvent
   | EngineChannelStartEvent

@@ -123,7 +123,10 @@ test('only the platform-guarded Windows speech worker loads Koffi', () => {
   const importing = (pattern: RegExp): string[] =>
     sources.filter((name) => pattern.test(read(name)))
   assert.deepEqual(importing(/['"]koffi['"]/), ['main/windows-asr-runtime.ts'])
-  assert.deepEqual(importing(/['"]\.\/windows-asr-runtime['"]/), ['main/engine-win.ts'])
+  assert.deepEqual(importing(/['"]\.\/windows-asr-runtime['"]/), [
+    'main/windows-asr-recognizers.ts'
+  ])
+  assert.deepEqual(importing(/['"]\.\/windows-asr-recognizers['"]/), ['main/engine-win.ts'])
   // engine-win is its own bundle entry, started only by the Windows hosts.
   assert.deepEqual(importing(/from ['"]\.\/engine-win['"]/), [])
   assert.match(read('main/windows-asr-runtime.ts'), /process\.platform !== 'win32'/)

@@ -1,36 +1,48 @@
 /**
  * Windows transcription engine — the counterpart of the Swift sidecar,
- * running as an Electron utilityProcess (plain Node). Streaming on-device
- * ASR via sherpa-onnx (zipformer transducer, CPU int8); audio arrives as
- * 16kHz mono Float32 frames from the renderer's capture (WASAPI loopback +
- * mic via Chromium), and events go back to the host shaped exactly like the
- * Swift engine's NDJSON — channel_start / partial / timings / final / done —
- * so the segmenter, renderer, and sync pipeline need zero changes.
+ * running as an Electron utilityProcess (plain Node). On-device ASR via
+ * sherpa-onnx on the CPU: Silero VAD utterances decoded by NVIDIA Parakeet
+ * 0.6b (int8) — Unified for live captions and TDT v2/v3 for imports, the same
+ * models the Mac uses for each. Audio arrives as 16 kHz
+ * mono Float32 frames from the renderer's capture (WASAPI loopback + mic via
+ * Chromium), and events go back to the host shaped exactly like the Swift
+ * engine's NDJSON — channel_start / partial / timings / final / done — so the
+ * segmenter, renderer, and sync pipeline need zero changes.
  *
  * Protocol (parentPort messages):
- *   in:  {t:'init', modelsDir}            — download/load models once
+ *   in:  {t:'init', modelsDir, quality?, parakeetModel?} — download/load models once
  *        {t:'start', channels:[...]}      — begin a session
  *        {t:'audio', channel, samples}    — 16k mono Float32Array frame
  *        {t:'stop'}                       — finish session (emit finals+done)
  *   out: {t:'event', event:{...}}         — engine event object
  */
-import { spawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
-import { get as httpsGet } from 'node:https'
 import { join } from 'node:path'
 import {
-  WINDOWS_ASR_SAMPLE_RATE,
-  boundedTokenWindow,
-  finishOnlineStream
-} from './engine-win-finalize'
-import { ensureWindowsWhisperModel, splitWhisperWindows } from './windows-whisper-model'
-import { loadWindowsAsrRuntime } from './windows-asr-runtime'
-
-const MODEL_NAME = 'sherpa-onnx-streaming-zipformer-en-2023-06-26'
-const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
-const PARTIAL_THROTTLE_MS = 400
-/** endSec for the trailing token when the next one hasn't arrived yet. */
-const TOKEN_TAIL_SEC = 0.25
+  PARAKEET_UNIFIED,
+  SILERO_VAD,
+  ensureWindowsAsrModels,
+  parakeetSpec,
+  windowsAsrModelMissing
+} from './windows-asr-models'
+import {
+  BATCH_DECODE_THREADS,
+  LIVE_DECODE_THREADS,
+  ensureSessionOptions,
+  loadSherpa,
+  parakeetRecognizerConfig,
+  sileroVadConfig,
+  vadBufferSeconds,
+  type SherpaModule
+} from './windows-asr-recognizers'
+import {
+  BATCH_VAD,
+  DecodeLoadMonitor,
+  LIVE_VAD,
+  UtteranceTranscriber,
+  type OfflineRecognizerLike,
+  type OfflineStreamLike
+} from './windows-asr-pipeline'
+import { calibrationSignal, liveCaptionMode, type LiveCaptionMode } from './windows-asr-guard'
 
 interface AudioMessage {
   t: 'audio'
@@ -39,10 +51,12 @@ interface AudioMessage {
   samples: Float32Array
   /** Batch imports use an acknowledgement for IPC backpressure. */
   sequence?: number
+  /** Live: Date.now() when the host forwarded the frame (lag measurement). */
+  sentAt?: number
 }
 
 type InMessage =
-  | { t: 'init'; modelsDir: string; quality?: 'live' | 'final' }
+  | { t: 'init'; modelsDir: string; quality?: 'live' | 'final'; parakeetModel?: 'v2' | 'v3' }
   | { t: 'start'; channels: string[]; sessionId?: number }
   | AudioMessage
   | { t: 'stop'; sessionId?: number }
@@ -53,263 +67,88 @@ function emit(event: Record<string, unknown>): void {
   port.postMessage({ t: 'event', event })
 }
 
-/* ---- model management ---- */
+/** Lag (seconds behind capture) after which the recorder says captions are delayed. */
+const DELAYED_LAG_SEC = 5
 
-async function ensureModel(modelsDir: string): Promise<string> {
-  const dir = join(modelsDir, MODEL_NAME)
-  if (existsSync(join(dir, 'tokens.txt'))) return dir
-  mkdirSync(modelsDir, { recursive: true })
-  const archive = join(modelsDir, `${MODEL_NAME}.tar.bz2`)
-
-  emit({ event: 'status', stage: 'downloading_model', model: MODEL_NAME })
-  await download(MODEL_URL, archive, (pct) => emit({ event: 'download', progress: pct / 100 }))
-
-  emit({ event: 'status', stage: 'extracting_model' })
-  // Windows 10+ ships bsdtar as tar.exe; -xjf handles .tar.bz2.
-  await new Promise<void>((resolve, reject) => {
-    const tar = spawn('tar', ['-xjf', archive, '-C', modelsDir])
-    tar.on('error', reject)
-    tar.on('exit', (code) =>
-      code === 0 ? resolve() : reject(new Error(`tar exited with ${code}`))
-    )
-  })
-  rmSync(archive, { force: true })
-  if (!existsSync(join(dir, 'tokens.txt'))) {
-    throw new Error('Model archive extracted but tokens.txt is missing')
-  }
-  return dir
-}
-
-function download(url: string, dest: string, onPct: (pct: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const follow = (target: string, redirects: number): void => {
-      if (redirects > 5) return reject(new Error('Too many redirects'))
-      httpsGet(target, (res) => {
-        if (
-          res.statusCode &&
-          res.statusCode >= 300 &&
-          res.statusCode < 400 &&
-          res.headers.location
-        ) {
-          res.resume()
-          return follow(res.headers.location, redirects + 1)
-        }
-        if (res.statusCode !== 200) {
-          res.resume()
-          return reject(new Error(`Model download failed: HTTP ${res.statusCode}`))
-        }
-        const total = Number(res.headers['content-length'] ?? 0)
-        let seen = 0
-        let lastPct = -1
-        const file = createWriteStream(dest)
-        res.on('data', (chunk: Buffer) => {
-          seen += chunk.length
-          if (total > 0) {
-            const pct = Math.floor((seen / total) * 100)
-            if (pct !== lastPct) {
-              lastPct = pct
-              onPct(pct)
-            }
-          }
-        })
-        res.pipe(file)
-        file.on('finish', () => file.close(() => resolve()))
-        file.on('error', reject)
-        res.on('error', reject)
-      }).on('error', reject)
-    }
-    follow(url, 0)
-  })
-}
-
-/* ---- per-channel streaming pipeline ---- */
-
-interface SherpaModule {
-  OnlineRecognizer: new (config: unknown) => SherpaRecognizer
-  OfflineRecognizer: new (config: unknown) => SherpaOfflineRecognizer
-}
-interface SherpaOfflineStream {
-  acceptWaveform(obj: { samples: Float32Array; sampleRate: number }): void
-}
-interface SherpaOfflineRecognizer {
-  createStream(): SherpaOfflineStream
-  decode(stream: SherpaOfflineStream): void
-  getResult(stream: SherpaOfflineStream): { text: string }
-}
-interface SherpaStream {
-  acceptWaveform(obj: { samples: Float32Array; sampleRate: number }): void
-  inputFinished(): void
-}
-interface SherpaRecognizer {
-  createStream(): SherpaStream
-  isReady(stream: SherpaStream): boolean
-  decode(stream: SherpaStream): void
-  getResult(stream: SherpaStream): { text: string; tokens?: string[]; timestamps?: number[] }
-}
-
-function createOnlineRecognizer(sherpa: SherpaModule, dir: string): SherpaRecognizer {
-  return new sherpa.OnlineRecognizer({
-    featConfig: { sampleRate: 16000, featureDim: 80 },
-    modelConfig: {
-      transducer: {
-        encoder: join(dir, 'encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx'),
-        decoder: join(dir, 'decoder-epoch-99-avg-1-chunk-16-left-128.onnx'),
-        joiner: join(dir, 'joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx')
-      },
-      tokens: join(dir, 'tokens.txt'),
-      numThreads: 2,
-      provider: 'cpu',
-      modelType: 'zipformer2'
-    },
-    decodingMethod: 'greedy_search',
-    enableEndpoint: 0
-  })
-}
-
-class ChannelPipeline {
-  private stream: SherpaStream
-  private emittedTokens = 0
-  private lastPartialAt = 0
-  private lastPartialText = ''
-  private started = false
-  private realSamples = 0
-  private readonly startedAtMs = Date.now()
-
-  constructor(
-    readonly channel: string,
-    private readonly recognizer: SherpaRecognizer
-  ) {
-    this.stream = recognizer.createStream()
-  }
-
-  ingest(samples: Float32Array): void {
-    this.realSamples += samples.length
-    if (!this.started) {
-      this.started = true
-      emit({ event: 'channel_start', channel: this.channel, epochMs: Date.now() })
-    }
-    this.stream.acceptWaveform({ samples, sampleRate: WINDOWS_ASR_SAMPLE_RATE })
-    while (this.recognizer.isReady(this.stream)) {
-      this.recognizer.decode(this.stream)
-    }
-    this.publish(false)
-  }
-
-  finish(): void {
-    try {
-      finishOnlineStream(this.stream, this.recognizer)
-      this.publish(true)
-      const result = this.recognizer.getResult(this.stream)
-      emit({
-        event: 'final',
-        channel: this.channel,
-        text: joinedText(result),
-        sessionSeconds: (Date.now() - this.startedAtMs) / 1000
-      })
-    } catch (err) {
-      emit({ event: 'error', channel: this.channel, message: `finish failed: ${String(err)}` })
-    }
-  }
-
-  /** Emit newly-decoded token timings + a throttled partial. */
-  private publish(force: boolean): void {
-    const result = this.recognizer.getResult(this.stream)
-    const tokens = result.tokens ?? []
-    const timestamps = result.timestamps ?? []
-    if (tokens.length > this.emittedTokens) {
-      const fresh: Array<Record<string, unknown>> = []
-      const realAudioSeconds = this.realSamples / WINDOWS_ASR_SAMPLE_RATE
-      for (let i = this.emittedTokens; i < tokens.length; i++) {
-        const start = timestamps[i] ?? 0
-        const end = timestamps[i + 1] ?? start + TOKEN_TAIL_SEC
-        const bounded = boundedTokenWindow(start, Math.max(end, start), realAudioSeconds)
-        if (!bounded) continue
-        fresh.push({
-          // sherpa marks word starts with ▁ — the segmenter's contract is a
-          // leading space (same as the Parakeet engine).
-          token: tokens[i]!.replace(/▁/g, ' '),
-          startSec: Math.round(bounded.startSec * 1000) / 1000,
-          endSec: Math.round(bounded.endSec * 1000) / 1000,
-          confidence: 0.9
-        })
-      }
-      this.emittedTokens = tokens.length
-      if (fresh.length > 0) emit({ event: 'timings', channel: this.channel, tokens: fresh })
-    }
-    const now = Date.now()
-    const text = joinedText(result)
-    if (
-      (force || now - this.lastPartialAt > PARTIAL_THROTTLE_MS) &&
-      text !== this.lastPartialText
-    ) {
-      this.lastPartialAt = now
-      this.lastPartialText = text
-      emit({ event: 'partial', channel: this.channel, text })
-    }
-  }
-}
-
-function joinedText(result: { text: string }): string {
-  return result.text.replace(/▁/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-/* ---- session orchestration ---- */
-
-let recognizer: SherpaRecognizer | null = null
-let offlineRecognizer: SherpaOfflineRecognizer | null = null
+let sherpa: SherpaModule | null = null
+let recognizer: OfflineRecognizerLike<OfflineStreamLike> | null = null
+let vadModel = ''
 let quality: 'live' | 'final' = 'live'
-let pipelines = new Map<string, ChannelPipeline>()
-let offlineAudio = new Map<string, Float32Array[]>()
+let captionMode: LiveCaptionMode = 'interim'
+let pipelines = new Map<string, UtteranceTranscriber>()
 let sessionActive = false
 let activeSessionId: number | null = null
+let delayedNotified = false
 
-async function init(modelsDir: string, requestedQuality: 'live' | 'final' = 'live'): Promise<void> {
+async function init(
+  modelsDir: string,
+  requestedQuality: 'live' | 'final' = 'live',
+  parakeetModel: 'v2' | 'v3' = 'v2'
+): Promise<void> {
   try {
     quality = requestedQuality
-    const dir =
-      quality === 'final'
-        ? await ensureWindowsWhisperModel(modelsDir, (progress) =>
-            emit({ event: 'download', progress })
-          )
-        : await ensureModel(modelsDir)
-    emit({ event: 'status', stage: 'serve_loading_models' })
-    loadWindowsAsrRuntime()
-    // Deferred require: the native addon must not load before it's needed.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sherpa = require('sherpa-onnx-node') as SherpaModule
-    if (quality === 'final') {
-      offlineRecognizer = new sherpa.OfflineRecognizer({
-        featConfig: { sampleRate: 16000, featureDim: 80 },
-        modelConfig: {
-          whisper: {
-            encoder: join(dir, 'tiny.en-encoder.int8.onnx'),
-            decoder: join(dir, 'tiny.en-decoder.int8.onnx'),
-            language: 'en',
-            task: 'transcribe',
-            tailPaddings: -1
-          },
-          tokens: join(dir, 'tiny.en-tokens.txt'),
-          numThreads: 2,
-          provider: 'cpu',
-          debug: 0
-        }
+    // Live: the Mac's live model (Parakeet Unified). Batch: the Mac's batch
+    // setting (Parakeet TDT v2 English or v3 multilingual).
+    const asr = quality === 'live' ? PARAKEET_UNIFIED : parakeetSpec(parakeetModel)
+    const specs = [asr, SILERO_VAD]
+    const missing = specs.filter((spec) => windowsAsrModelMissing(modelsDir, spec))
+    if (missing.length > 0) {
+      emit({
+        event: 'status',
+        stage: 'downloading_model',
+        model: asr.name,
+        bytes: missing.reduce((sum, spec) => sum + spec.bytes, 0)
       })
-      recognizer = createOnlineRecognizer(sherpa, await ensureModel(modelsDir))
-    } else recognizer = createOnlineRecognizer(sherpa, dir)
-    emit({ event: 'status', stage: 'serve_ready' })
+    }
+    const [asrDir, vadDir] = await ensureWindowsAsrModels(modelsDir, specs, (progress) =>
+      emit({ event: 'download', progress: Math.floor(progress * 100) / 100 })
+    )
+    vadModel = join(vadDir!, 'silero_vad.onnx')
+    emit({ event: 'status', stage: 'serve_loading_models', model: asr.name })
+    sherpa = loadSherpa()
+    recognizer = new sherpa.OfflineRecognizer(
+      parakeetRecognizerConfig(
+        asrDir!,
+        quality === 'live' ? LIVE_DECODE_THREADS : BATCH_DECODE_THREADS,
+        ensureSessionOptions(modelsDir, quality === 'live' ? 'live' : 'batch')
+      )
+    )
+    let calibrationRtf: number | undefined
+    if (quality === 'live') {
+      // Measure this machine once: the decode cost decides whether live
+      // captions can afford interim updates (see windows-asr-guard.ts).
+      const signal = calibrationSignal()
+      const began = performance.now()
+      const stream = recognizer.createStream()
+      stream.acceptWaveform({ samples: signal, sampleRate: 16_000 })
+      recognizer.decode(stream)
+      recognizer.getResult(stream)
+      calibrationRtf = (performance.now() - began) / 1000 / (signal.length / 16_000)
+      captionMode = liveCaptionMode(calibrationRtf)
+    }
+    emit({
+      event: 'status',
+      stage: 'serve_ready',
+      model: asr.name,
+      ...(calibrationRtf !== undefined
+        ? { calibrationRtf: Math.round(calibrationRtf * 1000) / 1000, captionMode }
+        : {})
+    })
   } catch (err) {
+    console.error('[win-asr] init failed:', err)
     emit({
       event: 'error',
       message:
-        quality === 'final'
-          ? 'The high-accuracy speech model could not be prepared. Check your connection and try again.'
-          : `engine init failed: ${String(err)}`
+        err instanceof Error &&
+        /verification|download|incomplete|unpacked|stalled|HTTP/i.test(err.message)
+          ? `${err.message} Check your connection, then try again.`
+          : `The speech model could not be prepared: ${String(err)}`
     })
   }
 }
 
 function startSession(channels: string[], sessionId = 0): void {
-  if (quality === 'final' ? !offlineRecognizer : !recognizer) {
+  if (!recognizer || !sherpa) {
     emit({ event: 'error', message: 'engine is not ready yet' })
     emit({ event: 'done' })
     return
@@ -320,10 +159,28 @@ function startSession(channels: string[], sessionId = 0): void {
   }
   sessionActive = true
   activeSessionId = sessionId
+  delayedNotified = false
+  const live = quality === 'live'
+  const settings = live ? LIVE_VAD : BATCH_VAD
+  const load = new DecodeLoadMonitor()
   pipelines = new Map(
-    channels.map((channel) => [channel, new ChannelPipeline(channel, recognizer!)])
+    channels.map((channel) => [
+      channel,
+      new UtteranceTranscriber(
+        recognizer!,
+        new sherpa!.Vad(sileroVadConfig(vadModel, settings), vadBufferSeconds(settings)),
+        {
+          channel,
+          interim: live && captionMode === 'interim',
+          vadSettings: settings,
+          load,
+          realtime: live,
+          now: () => Date.now(),
+          emit
+        }
+      )
+    ])
   )
-  offlineAudio = new Map(channels.map((channel) => [channel, []]))
   emit({ event: 'ready', mode: quality, channels })
   emit({ event: 'status', stage: 'transcribing' })
 }
@@ -332,59 +189,47 @@ function stopSession(sessionId = 0): void {
   if (!sessionActive || activeSessionId !== sessionId) return
   sessionActive = false
   emit({ event: 'status', stage: 'finishing' })
-  if (quality === 'final' && offlineRecognizer) {
-    for (const pipeline of pipelines.values()) pipeline.finish()
-    for (const [channel, chunks] of offlineAudio) {
-      const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
-      const samples = new Float32Array(length)
-      let offset = 0
-      for (const chunk of chunks) {
-        samples.set(chunk, offset)
-        offset += chunk.length
-      }
-      if (samples.length === 0) continue
-      const text: string[] = []
-      for (const window of splitWhisperWindows(samples)) {
-        const stream = offlineRecognizer.createStream()
-        stream.acceptWaveform({
-          samples: window,
-          sampleRate: WINDOWS_ASR_SAMPLE_RATE
-        })
-        offlineRecognizer.decode(stream)
-        const windowText = joinedText(offlineRecognizer.getResult(stream))
-        if (windowText) text.push(windowText)
-      }
-      emit({
-        event: 'final',
-        channel,
-        text: text.join(' '),
-        audioSeconds: samples.length / WINDOWS_ASR_SAMPLE_RATE
-      })
+  for (const pipeline of pipelines.values()) {
+    try {
+      pipeline.finish(quality === 'final' ? { audioSeconds: pipeline.stats.audioSeconds } : {})
+    } catch (err) {
+      emit({ event: 'error', channel: pipeline.channel, message: `finish failed: ${String(err)}` })
     }
-  } else {
-    for (const pipeline of pipelines.values()) pipeline.finish()
   }
   pipelines = new Map()
-  offlineAudio = new Map()
   activeSessionId = null
   emit({ event: 'done' })
+}
+
+function ingest(data: AudioMessage): void {
+  const pipeline = pipelines.get(data.channel)
+  if (!pipeline) return
+  try {
+    pipeline.ingest(data.samples, typeof data.sentAt === 'number' ? data.sentAt : undefined)
+  } catch (err) {
+    emit({ event: 'error', channel: data.channel, message: `transcription failed: ${String(err)}` })
+    return
+  }
+  if (quality === 'live' && !delayedNotified && pipeline.lagSec() > DELAYED_LAG_SEC) {
+    // Never fall behind silently: the recorder tells the person captions are
+    // late. All audio is still transcribed and saved.
+    delayedNotified = true
+    emit({ event: 'status', stage: 'captions_delayed', channel: data.channel })
+  }
 }
 
 port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
   switch (data.t) {
     case 'init':
-      void init(data.modelsDir, data.quality)
+      void init(data.modelsDir, data.quality, data.parakeetModel)
       break
     case 'start':
       startSession(data.channels, data.sessionId)
       break
     case 'audio': {
       if (sessionActive && activeSessionId === (data.sessionId ?? 0)) {
-        if (data.samples instanceof Float32Array && data.samples.length > 0) {
-          pipelines.get(data.channel)?.ingest(data.samples)
-          if (quality === 'final') offlineAudio.get(data.channel)?.push(data.samples)
-        }
+        if (data.samples instanceof Float32Array && data.samples.length > 0) ingest(data)
       }
       if (typeof data.sequence === 'number') {
         port.postMessage({ t: 'ack', sequence: data.sequence })

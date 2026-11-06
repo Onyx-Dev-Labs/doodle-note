@@ -1,6 +1,4 @@
 import { join } from 'node:path'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import {
   ENGINE_CAPTURE_CONTROL_CHANNEL,
@@ -14,11 +12,12 @@ import type { EngineEventListener } from './engine-process'
 import { WinSessionRecorder } from './win-audio-recorder'
 import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
-import type { BatchProgress, BatchTranscription } from './import-logic'
 import { ImportCanceledError } from './import-jobs'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
+/** After Stop, the worker is killed only if it makes no progress for this long. */
+const WORKER_FINISH_IDLE_MS = 15_000
 
 /**
  * Windows counterpart of EngineProcess: drives the sherpa-onnx engine
@@ -33,7 +32,7 @@ export class WinEngineHost {
   private child: UtilityProcess | null = null
   private ready = false
   private sessionActive = false
-  private captureState: 'idle' | 'starting' | 'capturing' | 'draining' | 'finishing' | 'refining' =
+  private captureState: 'idle' | 'starting' | 'capturing' | 'draining' | 'finishing' | 'saving' =
     'idle'
   private nextSessionId = 0
   private activeSessionId: number | null = null
@@ -51,13 +50,6 @@ export class WinEngineHost {
   private activeChannels: string[] = []
   /** Tees renderer PCM frames to disk when the session persists audio. */
   private recorder: WinSessionRecorder | null = null
-  private ephemeralAudioDir: string | null = null
-  private finalRefiner:
-    | ((
-        path: string,
-        onProgress?: (progress: BatchProgress) => void
-      ) => Promise<BatchTranscription>)
-    | null = null
 
   constructor(private readonly broadcast: (channel: string, payload: unknown) => void) {}
 
@@ -70,15 +62,6 @@ export class WinEngineHost {
 
   get running(): boolean {
     return this.sessionActive
-  }
-
-  setFinalRefiner(
-    refiner: (
-      path: string,
-      onProgress?: (progress: BatchProgress) => void
-    ) => Promise<BatchTranscription>
-  ): void {
-    this.finalRefiner = refiner
   }
 
   /** Fork the engine and load models (call once, after app ready). */
@@ -123,7 +106,6 @@ export class WinEngineHost {
         // next launch's orphan recovery merges them.
         this.recorder?.abort()
         this.recorder = null
-        this.removeEphemeralAudio()
         this.emit({ event: 'exit', code: null, signal: 'SIGTERM' })
       }
       if (!this.disposed && !failedDuringWarmup) {
@@ -132,11 +114,19 @@ export class WinEngineHost {
       }
     })
 
-    child.postMessage({ t: 'init', modelsDir: join(app.getPath('userData'), 'asr-models') })
+    this.postInit()
+  }
+
+  private postInit(): void {
+    this.child?.postMessage({ t: 'init', modelsDir: join(app.getPath('userData'), 'asr-models') })
   }
 
   private handleEngineEvent(event: Record<string, unknown>): void {
     if (event.event === 'status' && event.stage === 'serve_ready') {
+      // Diagnostics only: model, measured decode cost and caption mode.
+      console.info(
+        `[win-asr] ready model=${String(event.model ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
+      )
       this.ready = true
       this.finishWarmup({ ok: true, micGranted: false, screenGranted: false }, { stage: 'ready' })
       return
@@ -165,6 +155,9 @@ export class WinEngineHost {
     }
     // Model download/boot progress is host-side noise, not session traffic.
     if (!this.sessionActive) return
+    // A slow machine may still be decoding queued speech after Stop; each
+    // decoded utterance is progress, so only a silent worker is killed.
+    if (this.captureState === 'finishing' && this.workerFinishTimer) this.armWorkerFinishTimer()
     if (event.event === 'done') {
       if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
       this.workerFinishTimer = null
@@ -175,63 +168,28 @@ export class WinEngineHost {
   }
 
   private async completeSession(): Promise<void> {
-    if (!this.sessionActive || this.captureState === 'refining') return
-    this.captureState = 'refining'
+    if (!this.sessionActive || this.captureState === 'saving') return
+    this.captureState = 'saving'
     if (this.drainTimer) clearTimeout(this.drainTimer)
     this.drainTimer = null
     const sessionId = this.activeSessionId
     if (sessionId !== null) this.stopCaptureInRenderer(sessionId)
     const recorder = this.recorder
     this.recorder = null
-    let audioPath: string | null = null
     try {
       const saved = await recorder?.finish()
       if (saved && recorder) {
-        audioPath = joinPath(recorder.dir, 'audio.wav')
-        if (!this.ephemeralAudioDir) {
-          this.emit({
-            event: 'audio',
-            path: audioPath,
-            durationMs: saved.durationMs,
-            startEpochMs: saved.startEpochMs
-          })
-        }
+        this.emit({
+          event: 'audio',
+          path: joinPath(recorder.dir, 'audio.wav'),
+          durationMs: saved.durationMs,
+          startEpochMs: saved.startEpochMs
+        })
       }
     } catch (error) {
       console.error('[win-audio] merge failed:', error)
     }
 
-    if (audioPath && this.finalRefiner && !this.disposed) {
-      try {
-        const refinementPath = audioPath
-        this.emit({ event: 'status', stage: 'refining_transcript' })
-        const result = await this.finalRefiner(refinementPath, (progress) => {
-          if (progress.stage === 'downloading_model') {
-            this.emit({ event: 'download', progress: progress.progress ?? 0 })
-          } else if (progress.stage === 'transcribing') {
-            this.emit({ event: 'status', stage: 'refining_transcript' })
-          }
-        })
-        const transcripts = (['mic', 'system'] as const).flatMap((channel) => {
-          const text = result.segments
-            .filter((segment) => segment.channel === channel && !segment.echo)
-            .sort((a, b) => a.startMs - b.startMs)
-            .map((segment) => segment.text.trim())
-            .filter(Boolean)
-            .join(' ')
-          return text ? [{ channel, text, audioSeconds: result.audioSeconds }] : []
-        })
-        if (transcripts.length > 0) this.emit({ event: 'refined', transcripts })
-      } catch {
-        console.error('[win-asr] final refinement failed')
-        this.emit({
-          event: 'error',
-          message: 'High-accuracy refinement could not finish; the live transcript was kept.'
-        })
-      }
-    }
-
-    this.removeEphemeralAudio()
     if (this.disposed || !this.sessionActive || this.activeSessionId !== sessionId) return
     this.sessionActive = false
     this.captureState = 'idle'
@@ -276,9 +234,9 @@ export class WinEngineHost {
     this.workerStarted = false
     this.activeChannels = channels
     this.inputDevice = opts.inputDevice
-    const audioDir = opts.audioDir ?? mkdtempSync(join(tmpdir(), 'doodlenote-asr-'))
-    this.ephemeralAudioDir = opts.audioDir ? null : audioDir
-    this.recorder = new WinSessionRecorder(audioDir)
+    // Audio is written only when the session persists it; with no post-stop
+    // refinement pass there is no temporary copy any more.
+    this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
       action: 'start',
@@ -290,7 +248,12 @@ export class WinEngineHost {
 
   stop(): void {
     if (!this.sessionActive || !this.child || this.activeSessionId === null) return
-    if (this.captureState === 'draining' || this.captureState === 'finishing') return
+    if (
+      this.captureState === 'draining' ||
+      this.captureState === 'finishing' ||
+      this.captureState === 'saving'
+    )
+      return
     this.captureState = 'draining'
     this.stopCaptureInRenderer(this.activeSessionId)
     this.drainTimer = setTimeout(() => {
@@ -315,11 +278,16 @@ export class WinEngineHost {
       this.handleEngineEvent({ event: 'done' })
       return
     }
+    this.armWorkerFinishTimer()
+  }
+
+  private armWorkerFinishTimer(): void {
+    if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
     this.workerFinishTimer = setTimeout(() => {
       if (this.sessionActive && this.captureState === 'finishing' && this.child) {
         this.child.kill() // exit handler synthesizes the session end
       }
-    }, 15_000)
+    }, WORKER_FINISH_IDLE_MS)
     this.workerFinishTimer.unref()
   }
 
@@ -335,7 +303,7 @@ export class WinEngineHost {
       return
     }
     this.recorder?.write(channel, samples)
-    this.child.postMessage({ t: 'audio', sessionId, channel, samples })
+    this.child.postMessage({ t: 'audio', sessionId, channel, samples, sentAt: Date.now() })
   }
 
   /** Renderer capture lifecycle acknowledgements and actionable errors. */
@@ -400,6 +368,13 @@ export class WinEngineHost {
         abort()
         return
       }
+      // A failed model download (offline, stalled) is retried on the next
+      // request; the verified partial download resumes where it stopped.
+      if (this.warmupResult && !this.warmupResult.ok && this.child && !this.disposed) {
+        this.warmupResult = null
+        this.lastWarmupEvent = { stage: 'models' }
+        this.postInit()
+      }
       this.warmupWaiters.add(finish)
       if (onEvent) this.warmupListeners.add(onEvent)
       signal?.addEventListener('abort', abort, { once: true })
@@ -430,12 +405,6 @@ export class WinEngineHost {
     this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop', sessionId })
   }
 
-  private removeEphemeralAudio(): void {
-    if (!this.ephemeralAudioDir) return
-    rmSync(this.ephemeralAudioDir, { recursive: true, force: true })
-    this.ephemeralAudioDir = null
-  }
-
   dispose(): void {
     this.disposed = true
     if (this.restartTimer) clearTimeout(this.restartTimer)
@@ -444,7 +413,6 @@ export class WinEngineHost {
     // Quit mid-recording: chunks stay for next-launch recovery.
     this.recorder?.abort()
     this.recorder = null
-    this.removeEphemeralAudio()
     this.child?.kill()
     this.child = null
     this.listeners.clear()

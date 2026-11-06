@@ -39,12 +39,14 @@ async function main() {
         const timer = setTimeout(() => finish(new Error('Native ASR stream timed out')), 60_000)
         let settled = false
         let ready = false
+        let serve = null
+        let final = null
         function finish(error) {
           if (settled) return
           settled = true
           clearTimeout(timer)
           worker.kill()
-          error ? reject(error) : resolve({ ready, finalized: true })
+          error ? reject(error) : resolve({ ready, finalized: final !== null, serve })
         }
         worker.on('exit', (code) => finish(new Error(`Native ASR exited: ${code}`)))
         worker.on('message', (message) => {
@@ -52,8 +54,10 @@ async function main() {
           if (!event) return
           if (event.event === 'error') return finish(new Error(event.message))
           if (event.event === 'status' && event.stage === 'serve_ready') {
+            serve = { model: event.model, calibrationRtf: event.calibrationRtf, captionMode: event.captionMode }
             worker.postMessage({ t: 'start', channels: ['system'], sessionId: 1 })
           }
+          if (event.event === 'final') final = event
           if (event.event === 'ready') {
             ready = true
             worker.postMessage({
@@ -69,7 +73,12 @@ async function main() {
         worker.postMessage({ t: 'init', modelsDir: `${app.getPath('userData')}\\asr-models` })
       })
     })
-    assert.deepEqual(stream, { ready: true, finalized: true })
+    assert.equal(stream.ready, true)
+    assert.equal(stream.finalized, true)
+    // The live model is Parakeet Unified behind Silero VAD; calibration ran natively.
+    assert.equal(stream.serve.model, 'sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming')
+    assert.ok(stream.serve.calibrationRtf > 0, JSON.stringify(stream.serve))
+    assert.ok(['interim', 'utterance'].includes(stream.serve.captionMode))
     console.log(JSON.stringify({ executablePath, profile, preflight: result, stream }))
   } finally {
     await app?.close()

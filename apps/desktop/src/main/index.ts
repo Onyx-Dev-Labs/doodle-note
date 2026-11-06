@@ -706,9 +706,6 @@ app.whenReady().then(async () => {
       engine.preflight(onEvent, signal)
     )
     winBatchTranscriber.registerIpc()
-    engine.setFinalRefiner((filePath, onProgress) =>
-      winBatchTranscriber!.transcribe(filePath, onProgress)
-    )
   }
 
   // Audio import + re-transcription: batch engine runs in its own process,
@@ -734,12 +731,15 @@ app.whenReady().then(async () => {
                 options
               )
             : transcribeFileToSegments(resolveEngineBinary(), filePath, onProgress, options),
-    () =>
-      notesService?.batchTranscriptionSettings() ?? {
+    () => {
+      const settings = notesService?.batchTranscriptionSettings() ?? {
         backend: 'parakeet',
         parakeetModel: 'v2',
         language: 'auto'
       }
+      // Windows batch transcription is Parakeet only; Whisper is a Mac backend.
+      return winBatchTranscriber ? { ...settings, backend: 'parakeet' } : settings
+    }
   )
   importService.setCaptureGuard(
     (meetingId) => recording.busy && recording.snapshot().meetingId === meetingId

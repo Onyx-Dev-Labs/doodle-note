@@ -157,13 +157,6 @@ function reducer(state: ConsoleState, ev: EngineEvent): ConsoleState {
         statusKind: 'done',
         statusText: 'done'
       }
-    case 'refined':
-      return {
-        ...base,
-        liveFinals: Object.fromEntries(ev.transcripts.map((item) => [item.channel, item.text])),
-        statusKind: 'busy',
-        statusText: 'high-accuracy transcript ready'
-      }
     case 'segments': {
       const kept = ev.segments.filter((s) => !s.echo)
       const echoDropped = ev.segments.length - kept.length

@@ -8,7 +8,6 @@ import type {
   TranscriptSegment
 } from '../shared/engine-events'
 import { SegmentAssembler } from './segmenter'
-import { reconcileRefinedTranscript } from './transcript-refinement'
 import type { SavedAudioFailures } from '@repo/meetings-store/types'
 
 /**
@@ -99,8 +98,7 @@ export class TranscriptSession {
             this.persistCheckpoint(false)
           }
         }
-        if (['finishing', 'saving_audio', 'refining_transcript'].includes(ev.stage ?? ''))
-          this.phase = 'finishing'
+        if (['finishing', 'saving_audio'].includes(ev.stage ?? '')) this.phase = 'finishing'
         return
       case 'channel_start':
         this.assembler?.setChannelEpoch(ev.channel, ev.epochMs)
@@ -115,15 +113,6 @@ export class TranscriptSession {
           delete this.partials[ev.channel]
           this.finals[ev.channel] = ev.text
           this.publish(this.assembler.flush(ev.channel))
-        }
-        return
-      case 'refined':
-        if (this.assembler) {
-          this.publish(this.assembler.flush())
-          this.segments = reconcileRefinedTranscript(this.segments, ev.transcripts)
-          for (const transcript of ev.transcripts) this.finals[transcript.channel] = transcript.text
-          this.persistCheckpoint(false)
-          this.broadcast({ event: 'segments-replaced', segments: this.segments })
         }
         return
       case 'error':

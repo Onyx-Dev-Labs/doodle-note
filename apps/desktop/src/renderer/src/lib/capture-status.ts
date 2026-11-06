@@ -52,8 +52,12 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
     case 'finishing':
     case 'saving_audio':
       return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
-    case 'refining_transcript':
-      return { ...state, phase: 'finishing', statusText: 'Improving transcript locally…' }
+    case 'captions_delayed':
+      // Windows only: this PC is decoding slower than real time. Every word is
+      // still transcribed from the saved audio stream; captions just lag.
+      return state.phase === 'recording'
+        ? { ...state, statusText: 'Live captions are running behind on this PC.' }
+        : state
     default:
       return state
   }

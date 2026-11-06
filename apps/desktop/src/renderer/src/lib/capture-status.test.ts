@@ -74,12 +74,12 @@ test('Windows model preparation and refinement remain explicit without macOS ter
   const transcribing = applyCaptureStatus(recording, { event: 'status', stage: 'transcribing' })
   assert.equal(transcribing.transcribing, true)
   assert.equal(transcribing.statusText, '')
-  const refined = applyCaptureStatus(transcribing, {
+  const delayed = applyCaptureStatus(transcribing, {
     event: 'status',
-    stage: 'refining_transcript'
+    stage: 'captions_delayed'
   })
-  assert.equal(refined.phase, 'finishing')
-  assert.equal(refined.statusText, 'Improving transcript locally…')
+  assert.equal(delayed.phase, 'recording')
+  assert.equal(delayed.statusText, 'Live captions are running behind on this PC.')
 })
 
 test('idle and completed sessions ignore delayed status events', () => {
@@ -116,7 +116,7 @@ test('channel warnings survive lifecycle copy without stopping transcription or 
     assert.equal(state.transcribing, true)
     assert.equal(state.savedAudioFailures?.[channel], true)
   }
-  for (const stage of ['transcribing', 'saving_audio', 'refining_transcript', 'audio_saved']) {
+  for (const stage of ['transcribing', 'saving_audio', 'captions_delayed', 'audio_saved']) {
     state = applyCaptureStatus(state, { event: 'status', stage, captureId: 'current' })
     assert.deepEqual(state.savedAudioFailures, { mic: true, system: true })
   }
