@@ -366,9 +366,10 @@ test('every message kind is classified, and only narration is suppressible', () 
     'mic-fallback',
     'mic-muted',
     'recovery',
-    'shortcut-conflict'
+    'shortcut-conflict',
+    'voice-filter-off'
   ])
-  assert.equal(OVERLAY_MESSAGE_KINDS.length, 15)
+  assert.equal(OVERLAY_MESSAGE_KINDS.length, 16)
 })
 
 test('failures, recovery and warnings stay visible with everything switched off', () => {

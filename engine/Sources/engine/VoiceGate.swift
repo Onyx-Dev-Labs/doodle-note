@@ -169,7 +169,7 @@ final class VoiceGate {
             let pending = lastActive >= pendingFrame
 
             let verdict: Verdict
-            if let distance = speaker.distance {
+            if let distance = speaker.distance, distance.isFinite {
                 if pending {
                     stats.minDistance = min(stats.minDistance ?? distance, distance)
                     stats.maxDistance = max(stats.maxDistance ?? distance, distance)

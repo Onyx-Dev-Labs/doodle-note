@@ -11,7 +11,7 @@ const voiceprint = (extra: Record<string, unknown> = {}): string =>
   JSON.stringify({
     version: 1,
     model: 'wespeaker-v2',
-    embedding: [0.1, 0.2, 0.3],
+    embedding: Array.from({ length: 256 }, () => 0.0625),
     levelDb: -22,
     speechSeconds: 14,
     createdAtMs: 1_800_000_000_000,
@@ -66,10 +66,29 @@ test('a voiceprint file is described without exposing the voice; damage reads as
   assert.deepEqual(readVoiceProfile(path), { createdAt: 1_800_000_000_000, deviceName: 'USB Mic' })
   writeFileSync(path, voiceprint({ deviceName: undefined, createdAtMs: 'soon' }))
   assert.deepEqual(readVoiceProfile(path), { createdAt: 0, deviceName: null })
-  writeFileSync(path, voiceprint({ embedding: [] }))
-  assert.equal(readVoiceProfile(path), null)
   writeFileSync(path, '{ not json')
   assert.equal(readVoiceProfile(path), null)
+})
+
+test('a file the engine would refuse to filter by is not reported as a voice', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-voice-'))
+  const path = join(dir, 'dictation-voiceprint.json')
+  const full = Array.from({ length: 256 }, () => 0.0625)
+  for (const [why, extra] of [
+    ['no embedding', { embedding: [] }],
+    ['wrong size', { embedding: full.slice(1) }],
+    ['a value that is not a number', { embedding: [...full.slice(1), 'x'] }],
+    ['a value that is not finite', { embedding: [...full.slice(1), null] }],
+    ['another version', { version: 2 }],
+    ['another model', { model: 'something-else' }],
+    ['all zeros', { embedding: full.map(() => 0) }],
+    ['absurdly large values', { embedding: full.map(() => 3e38) }],
+    ['no level', { levelDb: undefined }],
+    ['an impossible level', { levelDb: 500 }]
+  ] as const) {
+    writeFileSync(path, voiceprint(extra))
+    assert.equal(readVoiceProfile(path), null, why)
+  }
 })
 
 test('recording a voice: progress is relayed, and the new voice is there afterwards', async () => {
@@ -111,9 +130,30 @@ test('recording a voice: progress is relayed, and the new voice is there afterwa
 
   // It is still there after a restart, until it is removed.
   assert.ok(new DictationVoice(dir, engine).profile())
-  voice.remove()
+  writeFileSync(join(dir, 'dictation-voiceprint.json.tmp'), 'left behind by an interrupted save')
+  await voice.remove()
   assert.equal(voice.profile(), null)
   assert.equal(existsSync(join(dir, 'dictation-voiceprint.json')), false)
+  assert.equal(existsSync(join(dir, 'dictation-voiceprint.json.tmp')), false)
+})
+
+test('removing the voice during a recording waits for it, so nothing is saved afterwards', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-voice-'))
+  // This engine finishes saving even though it was cancelled: the worst case.
+  const engine = fakeEngine({ ok: true, deviceName: null })
+  const voice = new DictationVoice(dir, engine)
+  const recording = voice.enroll(null, () => {})
+  const removal = voice.remove()
+  let removed = false
+  void removal.then(() => (removed = true))
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(engine.cancelled, 1)
+  assert.equal(removed, false, 'the file is not deleted while the recording could still write it')
+  engine.settle()
+  await removal
+  await recording
+  assert.equal(existsSync(join(dir, 'dictation-voiceprint.json')), false)
+  assert.equal(voice.profile(), null)
 })
 
 test('a failed recording keeps the previous voice; no engine means no recording', async () => {

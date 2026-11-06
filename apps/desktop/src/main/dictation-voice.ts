@@ -19,12 +19,29 @@ export interface VoiceEngine {
   }): VoiceEnrollRun | null
 }
 
-/** Read what the page shows about a voiceprint file; null when it is missing or unreadable. */
+/** What the engine writes and will accept; anything else it refuses to filter by. */
+const VOICEPRINT_VERSION = 1
+const VOICEPRINT_MODEL = 'wespeaker-v2'
+const VOICEPRINT_SIZE = 256
+
+/**
+ * Read what the page shows about a voiceprint file. Null when it is missing,
+ * unreadable, or not something the engine would filter by: the switch must
+ * never read "on" for a file that silently filters nothing.
+ */
 export function readVoiceProfile(path: string): VoiceProfile | null {
   try {
     if (!existsSync(path)) return null
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
-    if (!Array.isArray(raw.embedding) || raw.embedding.length === 0) return null
+    if (raw.version !== VOICEPRINT_VERSION || raw.model !== VOICEPRINT_MODEL) return null
+    if (!Array.isArray(raw.embedding) || raw.embedding.length !== VOICEPRINT_SIZE) return null
+    if (!raw.embedding.every((value) => typeof value === 'number' && Number.isFinite(value))) {
+      return null
+    }
+    // A real embedding is unit length; the engine refuses anything far from it.
+    const norm = Math.hypot(...(raw.embedding as number[]))
+    if (!(norm > 0.5 && norm < 2)) return null
+    if (typeof raw.levelDb !== 'number' || !(raw.levelDb >= -120 && raw.levelDb <= 20)) return null
     return {
       createdAt:
         typeof raw.createdAtMs === 'number' && Number.isFinite(raw.createdAtMs)
@@ -119,12 +136,20 @@ export class DictationVoice {
     this.run?.cancel()
   }
 
-  remove(): void {
-    this.run?.cancel()
-    try {
-      rmSync(this.path, { force: true })
-    } catch {
-      // Best-effort; the profile is reported gone either way and re-read on next launch.
+  async remove(): Promise<void> {
+    // A recording that is running could still save a voice after the file is
+    // deleted: stop it and wait for it to be gone first.
+    const run = this.run
+    if (run) {
+      run.cancel()
+      await run.result.catch(() => undefined)
+    }
+    for (const path of [this.path, `${this.path}.tmp`]) {
+      try {
+        rmSync(path, { force: true })
+      } catch {
+        // Best-effort; the profile is reported gone either way and re-read on next launch.
+      }
     }
     this.cached = null
   }

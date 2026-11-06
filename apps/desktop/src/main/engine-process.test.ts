@@ -355,4 +355,28 @@ describe('EngineProcess voice filter', { skip: process.platform === 'win32' }, (
     assert.deepEqual(await run?.result, { ok: false, reason: 'cancelled' })
     assert.ok(logLines(waiting.log).includes('stdin-closed'))
   })
+
+  it('a voice that was already saved when the cancel arrived is reported as saved', async () => {
+    const { binary } = fakeEngine(
+      [
+        "process.stdin.on('end', () => {",
+        "  emit({ event: 'voiceprint', ok: true, speechSeconds: 12, levelDb: -20 })",
+        '  process.exit(0)',
+        '})',
+        'process.stdin.resume()',
+        "emit({ event: 'ready', mode: 'enroll' })"
+      ].join('\n')
+    )
+    const engine = new EngineProcess(binary)
+    cleanups.push(() => engine.dispose())
+    const seen: string[] = []
+    const run = engine.enrollVoice({
+      outPath: '/x',
+      seconds: 20,
+      onProgress: (event) => void seen.push(event.type)
+    })
+    await waitFor(() => seen.includes('recording'), 'recording')
+    run?.cancel()
+    assert.deepEqual(await run?.result, { ok: true, deviceName: null })
+  })
 })

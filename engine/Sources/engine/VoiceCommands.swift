@@ -13,6 +13,10 @@ import Foundation
 /// the recording early and keeps it; stdin closing cancels (nothing is saved).
 /// `--file <audio>` builds the voiceprint from a recording instead of the mic.
 enum EnrollVoiceCommand {
+    /// Held while the voiceprint is written. The cancel path takes it before
+    /// exiting, so the process never dies halfway through a save.
+    private static let saving = NSLock()
+
     static func run(_ options: CLIOptions) async throws {
         guard let out = options.values["out"] else {
             throw EngineError.usage("enroll-voice requires --out <voiceprint path>")
@@ -48,7 +52,14 @@ enum EnrollVoiceCommand {
             let capture = MicCapture(into: recording, enableAEC: false, deviceUID: deviceUID)
             let stopper = Stopper()
             if options.flags.contains("exit-on-stdin-close") {
-                watchStdin(finish: { stopper.stop() }, closed: { capture.stop() })
+                watchStdin(
+                    finish: { stopper.stop() },
+                    closed: {
+                        capture.stop()
+                        // Wait out a save that is already under way, so a cancel
+                        // either prevents the voice or finds it fully written.
+                        saving.lock()
+                    })
             }
             LevelReporter.shared.setEnabled(true)
             try capture.start()
@@ -63,11 +74,12 @@ enum EnrollVoiceCommand {
         do {
             let analyzer = SpeakerAnalyzer(models: try await loading.value)
             let voice = try VoiceEnrollment.voiceprint(from: samples, analyzer: analyzer)
-            try Voiceprint(
-                embedding: voice.embedding, levelDb: voice.levelDb, speechSeconds: voice.speechSeconds,
-                deviceUid: deviceUID, deviceName: deviceName,
-                createdAtMs: (Date().timeIntervalSince1970 * 1000).rounded()
-            ).save(path: out)
+            try save(
+                Voiceprint(
+                    embedding: voice.embedding, levelDb: voice.levelDb, speechSeconds: voice.speechSeconds,
+                    deviceUid: deviceUID, deviceName: deviceName,
+                    createdAtMs: (Date().timeIntervalSince1970 * 1000).rounded()),
+                to: out)
             var verdict: [String: Any] = [
                 "event": "voiceprint", "ok": true,
                 "speechSeconds": voice.speechSeconds, "levelDb": Double(voice.levelDb),
@@ -84,6 +96,12 @@ enum EnrollVoiceCommand {
             Events.emit(["event": "voiceprint", "ok": false, "reason": "failed"])
         }
         Events.emit(["event": "done"])
+    }
+
+    private static func save(_ voice: Voiceprint, to path: String) throws {
+        saving.lock()
+        defer { saving.unlock() }
+        try voice.save(path: path)
     }
 
     private static func watchStdin(finish: @escaping () -> Void, closed: @escaping () -> Void) {

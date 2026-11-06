@@ -2520,7 +2520,7 @@ function fakeVoice(initial: { enrolled: boolean }): VoiceLike & {
     },
     finish: () => {},
     cancel: () => {},
-    remove: () => {
+    remove: async () => {
       state.enrolled = false
     }
   }
@@ -2756,5 +2756,16 @@ test('copy and paste callbacks are inert immediately while shortcut suspension i
   await h.service.setShortcutRecording(false)
   await h.service.copyLast()
   assert.deepEqual(h.clipboard, ['keep this transcript'])
+  await h.service.dispose()
+})
+
+test('only my voice: a filter that cannot start is said on the pill, not hidden in a log', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  h.service.toggle()
+  await ready(h)
+  assert.equal(lastView(h).warning, null)
+  h.emit({ event: 'status', stage: 'voice_gate_unavailable', channel: 'mic' })
+  assert.match(lastView(h).warning ?? '', /Only my voice could not start/)
+  assert.ok(h.logs.includes('engine voice_gate_unavailable'))
   await h.service.dispose()
 })

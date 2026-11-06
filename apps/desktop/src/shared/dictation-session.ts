@@ -115,6 +115,8 @@ export interface ActiveSession {
   micMuted: boolean
   /** The saved microphone was missing, so the system default is in use. */
   micFellBack: boolean
+  /** "Only my voice" is on but could not start, so this session hears everyone. */
+  voiceFilterOff: boolean
 }
 
 export type Resting =
@@ -198,6 +200,7 @@ export type SessionEvent =
   | { type: 'mic-state'; gen: number; muted: boolean }
   /** The engine could not find the saved microphone and used the system default. */
   | { type: 'mic-fallback'; gen: number }
+  | { type: 'voice-filter-off'; gen: number }
   | { type: 'dismiss' }
   /** A message with no session behind it, e.g. a refused start. Never interrupts a live session. */
   | { type: 'notice'; level: NoticeLevel; message: string }
@@ -286,7 +289,8 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         cleanupSteps: 1,
         limitWarning: false,
         micMuted: false,
-        micFellBack: event.micFellBack === true
+        micFellBack: event.micFellBack === true,
+        voiceFilterOff: false
       }
       const limitMs = recordingLimitMs(trigger)
       return {
@@ -573,6 +577,12 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       if (!active || active.gen !== event.gen || active.micFellBack) return ignore
       if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
       return { state: { ...state, active: { ...active, micFellBack: true } }, effects: [] }
+    }
+
+    case 'voice-filter-off': {
+      if (!active || active.gen !== event.gen || active.voiceFilterOff) return ignore
+      if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
+      return { state: { ...state, active: { ...active, voiceFilterOff: true } }, effects: [] }
     }
 
     case 'dismiss': {

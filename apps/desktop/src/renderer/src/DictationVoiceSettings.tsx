@@ -85,6 +85,19 @@ export function DictationVoiceSettings({ status, update }: Props): React.JSX.Ele
     return () => clearInterval(timer)
   }, [phase])
 
+  // Leaving the page mid-recording must not leave the microphone open or save
+  // a voice nobody finished recording.
+  const recordingNow = useRef(false)
+  useEffect(() => {
+    recordingNow.current = phase === 'preparing' || phase === 'recording'
+  }, [phase])
+  useEffect(
+    () => () => {
+      if (recordingNow.current) void window.dictation.cancelVoiceEnroll()
+    },
+    []
+  )
+
   const record = async (): Promise<void> => {
     setMessage('')
     setLevel(0)

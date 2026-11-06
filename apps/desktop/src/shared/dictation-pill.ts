@@ -156,6 +156,8 @@ export type OverlayMessageKind =
   | 'accessibility-hint'
   | 'mic-muted'
   | 'mic-fallback'
+  /** "Only my voice" is on but could not start for this session. */
+  | 'voice-filter-off'
   /** One minute left in a hands-free session. */
   | 'limit-warning'
   /** A shortcut that another app or action already owns (shown on the settings page). */
@@ -183,6 +185,7 @@ const MESSAGE_GOVERNOR: Record<OverlayMessageKind, 'liveText' | 'status' | 'alwa
   'accessibility-hint': 'always',
   'mic-muted': 'always',
   'mic-fallback': 'always',
+  'voice-filter-off': 'always',
   'limit-warning': 'always',
   'shortcut-conflict': 'always'
 }

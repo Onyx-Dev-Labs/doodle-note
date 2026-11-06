@@ -249,13 +249,28 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL, (event) => {
     if (trusted(event)) service.clearLearnedEntries()
   })
-  ipcMain.handle(DICTATION_VOICE_ENROLL_CHANNEL, (event) =>
-    trusted(event)
-      ? service.enrollVoice((progress) =>
-          options.broadcast(DICTATION_VOICE_EVENT_CHANNEL, progress)
-        )
-      : { ok: false, reason: 'unavailable' }
-  )
+  ipcMain.handle(DICTATION_VOICE_ENROLL_CHANNEL, async (event) => {
+    if (!trusted(event)) return { ok: false, reason: 'unavailable' }
+    // The recording belongs to the page that asked for it: if that page goes
+    // away, the microphone is released and nothing is saved.
+    const sender = event.sender
+    const abandon = (): void => service.cancelVoiceEnroll()
+    sender.once('destroyed', abandon)
+    sender.once('render-process-gone', abandon)
+    sender.once('did-start-navigation', abandon)
+    try {
+      return await service.enrollVoice((progress) =>
+        options.broadcast(DICTATION_VOICE_EVENT_CHANNEL, progress)
+      )
+    } finally {
+      // A destroyed page has already dropped its listeners.
+      if (!sender.isDestroyed()) {
+        sender.removeListener('destroyed', abandon)
+        sender.removeListener('render-process-gone', abandon)
+        sender.removeListener('did-start-navigation', abandon)
+      }
+    }
+  })
   ipcMain.handle(DICTATION_VOICE_FINISH_CHANNEL, (event) => {
     if (trusted(event)) service.finishVoiceEnroll()
   })

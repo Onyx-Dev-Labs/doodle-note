@@ -130,7 +130,8 @@ export interface VoiceLike {
   ): Promise<VoiceEnrollOutcome>
   finish(): void
   cancel(): void
-  remove(): void
+  /** Resolves once the voice is gone, including one a running recording was about to save. */
+  remove(): Promise<void>
 }
 
 export interface HelperLike {
@@ -603,7 +604,7 @@ export class DictationService {
   }
 
   async removeVoice(): Promise<DictationStatus> {
-    this.deps.voice?.remove()
+    await this.deps.voice?.remove()
     this.deps.log('voice removed')
     return this.setSettings({ onlyMyVoice: false })
   }
@@ -1316,10 +1317,14 @@ export class DictationService {
         if (event.stage === 'input_default_fallback') {
           this.dispatch({ type: 'mic-fallback', gen })
         }
+        // The session still runs when the voice filter cannot load, but unfiltered:
+        // the pill says so, because the switch in Settings still reads on.
+        if (event.stage === 'voice_gate_unavailable') {
+          this.dispatch({ type: 'voice-filter-off', gen })
+        }
         if (
           event.stage === 'input_default_fallback' ||
           event.stage === 'mic_restarting' ||
-          // The session runs unfiltered when the voice filter cannot load.
           event.stage === 'voice_gate_unavailable'
         ) {
           this.deps.log(`engine ${event.stage}`)

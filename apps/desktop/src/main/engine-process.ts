@@ -453,9 +453,13 @@ export class EngineProcess {
         child.on('error', () => settle({ ok: false, reason: 'failed' }))
         child.on('close', () =>
           settle(
-            cancelled
-              ? { ok: false, reason: 'cancelled' }
-              : (verdict ?? { ok: false, reason: 'failed' })
+            // A voice the engine had already saved before the cancel reached it is
+            // real: report it, so the page matches the file.
+            verdict?.ok
+              ? verdict
+              : cancelled
+                ? { ok: false, reason: 'cancelled' }
+                : (verdict ?? { ok: false, reason: 'failed' })
           )
         )
       }),

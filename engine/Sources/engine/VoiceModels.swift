@@ -122,7 +122,9 @@ final class SpeakerAnalyzer: VoiceAnalyzing {
             bb += b[index] * b[index]
         }
         guard aa > 0, bb > 0 else { return 2 }
-        return 1 - dot / (aa.squareRoot() * bb.squareRoot())
+        let distance = 1 - dot / (aa.squareRoot() * bb.squareRoot())
+        // Overflow in a damaged embedding must read as "not this voice", not NaN.
+        return distance.isFinite ? distance : 2
     }
 }
 
@@ -148,6 +150,15 @@ struct Voiceprint: Codable {
         guard print.version == 1, print.model == currentModel, print.embedding.count == 256 else {
             throw EngineError.internalError("voiceprint was made by a different version; record it again")
         }
+        // The file sits in the user's profile, where other software can write.
+        // A real embedding is unit length and a real level is a dBFS value; a
+        // file that is neither must not decide what gets silenced.
+        let norm = print.embedding.reduce(Float(0)) { $0 + $1 * $1 }.squareRoot()
+        guard print.embedding.allSatisfy({ $0.isFinite }), norm.isFinite, norm > 0.5, norm < 2,
+            print.levelDb.isFinite, print.levelDb >= -120, print.levelDb <= 20
+        else {
+            throw EngineError.internalError("voiceprint is damaged; record it again")
+        }
         return print
     }
 
@@ -157,9 +168,12 @@ struct Voiceprint: Codable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(self)
+        try? FileManager.default.removeItem(at: temp)
         FileManager.default.createFile(
             atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600])
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
+        // Replacing keeps the old file's mode; this one is always private.
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
 
