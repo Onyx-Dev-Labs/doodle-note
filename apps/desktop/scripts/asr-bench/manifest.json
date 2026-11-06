@@ -1,0 +1,1047 @@
+{
+ "version": 1,
+ "normalization": "dn-asr-v1 (scoring.cjs)",
+ "selection": {
+  "read": "CMU ARCTIC utterances arctic_a0001-a0015 from four speakers (US male, US female, Indian English, Scottish English); prompts are the references.",
+  "meeting": "AMI Mix-Headset clips: manual transcriber segments of 4-20 s with at least 6 words and no other speaker word within 0.3 s, up to 12 evenly spaced per meeting, padded 0.25 s; reference is the segment speaker's manual words.",
+  "long": "AMI IS1009c Mix-Headset, the complete 30.3-minute meeting; reference is all four speakers' manual words in start-time order (overlapping speech makes this WER an upper bound). Used for the long live session, memory and timestamp drift.",
+  "long-pair": "AMI IS1009c Headset-0 (speaker A, the project manager) paired with the mix as a second live channel; reference is speaker A only, so cross-talk counts as insertions."
+ },
+ "sources": [
+  {
+   "id": "ami-annotations",
+   "file": "ami_public_manual_1.6.2.zip",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d",
+   "bytes": 22887865
+  },
+  {
+   "id": "ami-ES2004a-mix-headset",
+   "file": "ES2004a.Mix-Headset.wav",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2004a/audio/ES2004a.Mix-Headset.wav",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "3e2560b19bee6952c7c7ce041b0f1ea8a7ea9468044c4eea79d2a2c67e24ab0f",
+   "bytes": 33579394
+  },
+  {
+   "id": "ami-IS1009a-mix-headset",
+   "file": "IS1009a.Mix-Headset.wav",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IS1009a/audio/IS1009a.Mix-Headset.wav",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "6eb5a0ede0d9e72794f976ce7bea5b78133eae969f99b4c5418b43c2468d25b1",
+   "bytes": 26844093
+  },
+  {
+   "id": "ami-EN2002a-mix-headset",
+   "file": "EN2002a.Mix-Headset.wav",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/EN2002a/audio/EN2002a.Mix-Headset.wav",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "a15017d0d3c871866971ee178052a0ce3a7e44d6fbf89fc23dcab326511b65f5",
+   "bytes": 68566744
+  },
+  {
+   "id": "ami-TS3003a-mix-headset",
+   "file": "TS3003a.Mix-Headset.wav",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/TS3003a/audio/TS3003a.Mix-Headset.wav",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "b6ce59ff735c234afdd94b13744aa26f6785af746170543fd03b33160e920a6d",
+   "bytes": 48180608
+  },
+  {
+   "id": "ami-IS1009c-mix-headset",
+   "file": "IS1009c.Mix-Headset.wav",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IS1009c/audio/IS1009c.Mix-Headset.wav",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "f317910070db0f2649315decbb34686d648bbe9dc3f7576710184f4d572bdbcc",
+   "bytes": 58268093
+  },
+  {
+   "id": "ami-IS1009c-headset-0",
+   "file": "IS1009c.Headset-0.wav",
+   "url": "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/IS1009c/audio/IS1009c.Headset-0.wav",
+   "license": "CC BY 4.0 (AMI Meeting Corpus, University of Edinburgh et al.)",
+   "sha256": "2d0b713a9a10ad3b3ea1719c845ab3758be092d09cfced4a37188a5084af412d",
+   "bytes": 58262973
+  },
+  {
+   "id": "arctic-bdl",
+   "file": "cmu_us_bdl_arctic-0.95-release.tar.bz2",
+   "url": "http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_bdl_arctic-0.95-release.tar.bz2",
+   "license": "CMU ARCTIC: free for any use with notice retained (BSD-style, see COPYING)",
+   "sha256": "3c9ec89942056cb4609ea788a6a455d507f5fa3729fc5d0ffcb6ba7ae1d594c9",
+   "bytes": 94333107
+  },
+  {
+   "id": "arctic-slt",
+   "file": "cmu_us_slt_arctic-0.95-release.tar.bz2",
+   "url": "http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_slt_arctic-0.95-release.tar.bz2",
+   "license": "CMU ARCTIC: free for any use with notice retained (BSD-style, see COPYING)",
+   "sha256": "9fddec16fbfbfb7d4989dff0fe77ccbe31f80b07b57be49d09994aa7a67d6dba",
+   "bytes": 119914432
+  },
+  {
+   "id": "arctic-ksp",
+   "file": "cmu_us_ksp_arctic-0.95-release.tar.bz2",
+   "url": "http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_ksp_arctic-0.95-release.tar.bz2",
+   "license": "CMU ARCTIC: free for any use with notice retained (BSD-style, see COPYING)",
+   "sha256": "a968b063012c3efcc4a3f0e93e0eda4765df8f92426a4b06bf470eba7ab574b0",
+   "bytes": 119175914
+  },
+  {
+   "id": "arctic-awb",
+   "file": "cmu_us_awb_arctic-0.95-release.tar.bz2",
+   "url": "http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_awb_arctic-0.95-release.tar.bz2",
+   "license": "CMU ARCTIC: free for any use with notice retained (BSD-style, see COPYING)",
+   "sha256": "3f42f17fcb7eaec5cac61f7e6b6aa928a6ffb45f51b1da124278fd300d47984a",
+   "bytes": 128979457
+  }
+ ],
+ "fixtures": [
+  {
+   "id": "arctic-bdl-a0001",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0001.wav",
+   "reference": "Author of the danger trail, Philip Steels, etc.",
+   "sha256": "2594562568c97203d6c3c2c2ff87b9a7c62389100a014934ab0ad39d15af0384"
+  },
+  {
+   "id": "arctic-bdl-a0002",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0002.wav",
+   "reference": "Not at this particular case, Tom, apologized Whittemore.",
+   "sha256": "88b2c3f29f696637ec34f8a031964920d7e187a903ba88fd720d3cb1b0d50c2a"
+  },
+  {
+   "id": "arctic-bdl-a0003",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0003.wav",
+   "reference": "For the twentieth time that evening the two men shook hands.",
+   "sha256": "6bf2ec5e40a8a01a690d7aa5d1aa3a1489baae614850c7a716bf00092b005028"
+  },
+  {
+   "id": "arctic-bdl-a0004",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0004.wav",
+   "reference": "Lord, but I'm glad to see you again, Phil.",
+   "sha256": "9014c7af0c450ffab8a64f211559ed6eb61d1eb6c8a8288cca40325e64f702e7"
+  },
+  {
+   "id": "arctic-bdl-a0005",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0005.wav",
+   "reference": "Will we ever forget it.",
+   "sha256": "b654e28a68b0f49d40f715744f99f4bba338b1f66e61b58e428588e886d8fa1f"
+  },
+  {
+   "id": "arctic-bdl-a0006",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0006.wav",
+   "reference": "God bless 'em, I hope I'll go on seeing them forever.",
+   "sha256": "e6a208e722288591e15bc5e4a509002514b234661c6a411b9da96f21a25d492e"
+  },
+  {
+   "id": "arctic-bdl-a0007",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0007.wav",
+   "reference": "And you always want to see it in the superlative degree.",
+   "sha256": "d324b72f14c530d4f6caaf7bac20b669d8d181d03ced45f19a028003ae01ebab"
+  },
+  {
+   "id": "arctic-bdl-a0008",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0008.wav",
+   "reference": "Gad, your letter came just in time.",
+   "sha256": "e1bd98e83ec2a6427eb60542aa5f7bf2e69d62223f5999f8d4ef0cc4cf312874"
+  },
+  {
+   "id": "arctic-bdl-a0009",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0009.wav",
+   "reference": "He turned sharply, and faced Gregson across the table.",
+   "sha256": "cadf1036a3a7c5b2c5abcf0f9818b5abebd2bcb0b8969fa92ea923d2fa793266"
+  },
+  {
+   "id": "arctic-bdl-a0010",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0010.wav",
+   "reference": "I'm playing a single hand in what looks like a losing game.",
+   "sha256": "fe455dac4a03eb16c698793be30e6172080d3cace7d23a709d38a92686d3da19"
+  },
+  {
+   "id": "arctic-bdl-a0011",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0011.wav",
+   "reference": "If I ever needed a fighter in my life I need one now.",
+   "sha256": "e556b2e886cbaeab47e3fa2317ff5ca965136870e6b79c0eb8fcb33038c202de"
+  },
+  {
+   "id": "arctic-bdl-a0012",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0012.wav",
+   "reference": "Gregson shoved back his chair and rose to his feet.",
+   "sha256": "4f8965996031522087c32b0321ef62c925dc6055ec76087a2725f51cb8db84ae"
+  },
+  {
+   "id": "arctic-bdl-a0013",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0013.wav",
+   "reference": "He was a head shorter than his companion, of almost delicate physique.",
+   "sha256": "ad8db05088f39b3992bd1cd315ae1f5e2b192929b351150f226674e2a36fef62"
+  },
+  {
+   "id": "arctic-bdl-a0014",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0014.wav",
+   "reference": "Now you're coming down to business, Phil, he exclaimed.",
+   "sha256": "8accbc7b75f93430daa9399ea83b86b133303ebb40e54c5c5f88ff4f86dfb1e1"
+  },
+  {
+   "id": "arctic-bdl-a0015",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-bdl",
+   "member": "cmu_us_bdl_arctic/wav/arctic_a0015.wav",
+   "reference": "It's the aurora borealis.",
+   "sha256": "5f880d5c7639317ba21ba540c52f1b75cdccde4c228a1f0dc29aa0f71e8e9b63"
+  },
+  {
+   "id": "arctic-slt-a0001",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0001.wav",
+   "reference": "Author of the danger trail, Philip Steels, etc.",
+   "sha256": "7862eb2cccb56875910f6bf46f9b8d26dac36e7672829aabe3956b0837ae122e"
+  },
+  {
+   "id": "arctic-slt-a0002",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0002.wav",
+   "reference": "Not at this particular case, Tom, apologized Whittemore.",
+   "sha256": "d09c9367d7e756cb5f6854d4e8a279e6e6e543fafeb4d04b32757c639f7f38d3"
+  },
+  {
+   "id": "arctic-slt-a0003",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0003.wav",
+   "reference": "For the twentieth time that evening the two men shook hands.",
+   "sha256": "0b32e00846e132826f46d7e5cabb2d8b370a5dc654bac0447cb63285f81cc413"
+  },
+  {
+   "id": "arctic-slt-a0004",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0004.wav",
+   "reference": "Lord, but I'm glad to see you again, Phil.",
+   "sha256": "2a653cf74346ff24690f8a2abcff5091b81463f277b0062c851031a293f25167"
+  },
+  {
+   "id": "arctic-slt-a0005",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0005.wav",
+   "reference": "Will we ever forget it.",
+   "sha256": "f93c823f955875d2389ae0f731a95128afb1ee096df7614e063e8b4b5695801d"
+  },
+  {
+   "id": "arctic-slt-a0006",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0006.wav",
+   "reference": "God bless 'em, I hope I'll go on seeing them forever.",
+   "sha256": "69b800a69455e35d05162b78b69446294ace69be903693ffd02ccd0150f17d66"
+  },
+  {
+   "id": "arctic-slt-a0007",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0007.wav",
+   "reference": "And you always want to see it in the superlative degree.",
+   "sha256": "3c10caa9c2b5434f64c393a85a70aba57adf2858628d7983a8fd4f98a19a83d6"
+  },
+  {
+   "id": "arctic-slt-a0008",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0008.wav",
+   "reference": "Gad, your letter came just in time.",
+   "sha256": "603ac9585ddb5022d9c973bde867d7957fa1b8c1f44b2ee40fbbafedde8b5f0e"
+  },
+  {
+   "id": "arctic-slt-a0009",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0009.wav",
+   "reference": "He turned sharply, and faced Gregson across the table.",
+   "sha256": "198d856649b370c483609bdc61558e515c6349210e6dd755e975ab1d2e468936"
+  },
+  {
+   "id": "arctic-slt-a0010",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0010.wav",
+   "reference": "I'm playing a single hand in what looks like a losing game.",
+   "sha256": "8a2e6c72b933f737ca476eabcbee309f312ff7db4d58138db4f13648c1f426a6"
+  },
+  {
+   "id": "arctic-slt-a0011",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0011.wav",
+   "reference": "If I ever needed a fighter in my life I need one now.",
+   "sha256": "7779f9cb7c5c4bbd5803162d7007cdc9caf63070d1a1400b2d808d753c45246b"
+  },
+  {
+   "id": "arctic-slt-a0012",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0012.wav",
+   "reference": "Gregson shoved back his chair and rose to his feet.",
+   "sha256": "c29a511741798a6386a7611a20c505e4d45741b838deacbd7dccca8444e0237d"
+  },
+  {
+   "id": "arctic-slt-a0013",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0013.wav",
+   "reference": "He was a head shorter than his companion, of almost delicate physique.",
+   "sha256": "8b82f94be931652b176e3befe47b3a25276fd2d6b0a6e93a6275d75ab1330546"
+  },
+  {
+   "id": "arctic-slt-a0014",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0014.wav",
+   "reference": "Now you're coming down to business, Phil, he exclaimed.",
+   "sha256": "5a0b623b100cf0cd993da4616b259c40b15e2c0d2a7dbea53a285fe777c292d7"
+  },
+  {
+   "id": "arctic-slt-a0015",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-slt",
+   "member": "cmu_us_slt_arctic/wav/arctic_a0015.wav",
+   "reference": "It's the aurora borealis.",
+   "sha256": "800671e8306f9ad34e09476d2fd739eabd7169b159bc067ec04552aa58553ee9"
+  },
+  {
+   "id": "arctic-ksp-a0001",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0001.wav",
+   "reference": "Author of the danger trail, Philip Steels, etc.",
+   "sha256": "1f7c300199340733daf09fb440c64517047124c2703048a3c6b965a39e17553a"
+  },
+  {
+   "id": "arctic-ksp-a0002",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0002.wav",
+   "reference": "Not at this particular case, Tom, apologized Whittemore.",
+   "sha256": "2ff5029c6f4ded953b9bb964935913f639e8d6b021fc7c7428d15e605dcab06d"
+  },
+  {
+   "id": "arctic-ksp-a0003",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0003.wav",
+   "reference": "For the twentieth time that evening the two men shook hands.",
+   "sha256": "0af26fb7e5488ee9536b0e0ae0c56be9f8a598e190faf5c1088d3a6697719708"
+  },
+  {
+   "id": "arctic-ksp-a0004",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0004.wav",
+   "reference": "Lord, but I'm glad to see you again, Phil.",
+   "sha256": "64af85ce3acf67081178bf9c54bad4dd500743343b1cd7787369347d36c8676b"
+  },
+  {
+   "id": "arctic-ksp-a0005",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0005.wav",
+   "reference": "Will we ever forget it.",
+   "sha256": "dbaf077726b438247124a1da8a93159fb314f1980c14463307bf49297a380fea"
+  },
+  {
+   "id": "arctic-ksp-a0006",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0006.wav",
+   "reference": "God bless 'em, I hope I'll go on seeing them forever.",
+   "sha256": "e51a6f91182cbc069b4e5a866d9060154b572bed5617132ea7cff2717627ff6f"
+  },
+  {
+   "id": "arctic-ksp-a0007",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0007.wav",
+   "reference": "And you always want to see it in the superlative degree.",
+   "sha256": "938c80c20f17ed6f7dc709549eef3c977e6edbadfaf1e96b272d524845781709"
+  },
+  {
+   "id": "arctic-ksp-a0008",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0008.wav",
+   "reference": "Gad, your letter came just in time.",
+   "sha256": "9c52948d66b7d5eb877e84e56a6dbb5ba50bdf890b2e1602950dade2e4a8e0f9"
+  },
+  {
+   "id": "arctic-ksp-a0009",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0009.wav",
+   "reference": "He turned sharply, and faced Gregson across the table.",
+   "sha256": "689e62f3b1a2fe07a55d04bb95d4b3ed8d3146c25346ceb59175ee0dc1aacf07"
+  },
+  {
+   "id": "arctic-ksp-a0010",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0010.wav",
+   "reference": "I'm playing a single hand in what looks like a losing game.",
+   "sha256": "9b2047cb940720c62bbd2f29023728adb346bf43b9a6be5851f0bb4e6ceb23a5"
+  },
+  {
+   "id": "arctic-ksp-a0011",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0011.wav",
+   "reference": "If I ever needed a fighter in my life I need one now.",
+   "sha256": "aea8992a91ee4b0fc9bca884d2b4862edd494c4988560551d1be49615ab57216"
+  },
+  {
+   "id": "arctic-ksp-a0012",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0012.wav",
+   "reference": "Gregson shoved back his chair and rose to his feet.",
+   "sha256": "e5a9f4b4e4c76b630dd87dd924a91bf9f447648d653343a7b0d271af740fc636"
+  },
+  {
+   "id": "arctic-ksp-a0013",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0013.wav",
+   "reference": "He was a head shorter than his companion, of almost delicate physique.",
+   "sha256": "f6884b752a266f4964ec6fd5fb1ab7f61985eeb8ea1faf20f19dcf0164cec170"
+  },
+  {
+   "id": "arctic-ksp-a0014",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0014.wav",
+   "reference": "Now you're coming down to business, Phil, he exclaimed.",
+   "sha256": "6adb3ed2a594a415569a33720e7f545c318467059e5f41aeb20afa68262ee6dc"
+  },
+  {
+   "id": "arctic-ksp-a0015",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-ksp",
+   "member": "cmu_us_ksp_arctic/wav/arctic_a0015.wav",
+   "reference": "It's the aurora borealis.",
+   "sha256": "0aaf75dc693fc9a453c1e284c8fc2058dec5d034ba56d8c07b3016b8223fd29c"
+  },
+  {
+   "id": "arctic-awb-a0001",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0001.wav",
+   "reference": "AUTHOR OF THE DANGER TRAIL, PHILIP STEELS, ETC",
+   "sha256": "d1ebf15b59fb1887bb0282bbff508c1db28a706b98cfa8a683a85a98fe2b7567"
+  },
+  {
+   "id": "arctic-awb-a0002",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0002.wav",
+   "reference": "Not at this particular case, Tom, apologized Whittemore.",
+   "sha256": "26d811548f811128ebe3e969fe0fa74f91c5fad9097e2057f16ffbe4af0e0105"
+  },
+  {
+   "id": "arctic-awb-a0003",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0003.wav",
+   "reference": "For the twentieth time that evening the two men shook hands.",
+   "sha256": "ad01ac37983ff61b251115e0461a36cd7af014f432084313a2c00205443c3d70"
+  },
+  {
+   "id": "arctic-awb-a0004",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0004.wav",
+   "reference": "Lord, but I'm glad to see you again, Phil.",
+   "sha256": "896c6fb751391a4e25117acb57f17436f44ec71932d2c9af69556c4adb1caa40"
+  },
+  {
+   "id": "arctic-awb-a0005",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0005.wav",
+   "reference": "Will we ever forget it.",
+   "sha256": "e525cf1c4e98b15b5e9aa191897534aed9e69163d67f6b14de86179db08b6b85"
+  },
+  {
+   "id": "arctic-awb-a0006",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0006.wav",
+   "reference": "God bless 'em, I hope I'll go on seeing them forever.",
+   "sha256": "946fd098367666c269ffbdafcd03cc1d61676acd76d4a3c211480f8da32b762c"
+  },
+  {
+   "id": "arctic-awb-a0007",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0007.wav",
+   "reference": "And you always want to see it in the superlative degree.",
+   "sha256": "1b850392f8c87ee2efe5a686523f1bab61d2a38d59bc43d1127e17e406f9e57d"
+  },
+  {
+   "id": "arctic-awb-a0008",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0008.wav",
+   "reference": "Gad, your letter came just in time.",
+   "sha256": "0b10f2d27ef3636491d04188332edea8cb2df7add13f43cca32c493b5fd31176"
+  },
+  {
+   "id": "arctic-awb-a0009",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0009.wav",
+   "reference": "He turned sharply, and faced Gregson across the table.",
+   "sha256": "52424758f0624ce8442955db50209a4e4dc141c95c6a0a0ceca494464dcb73f9"
+  },
+  {
+   "id": "arctic-awb-a0010",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0010.wav",
+   "reference": "I'm playing a single hand in what looks like a losing game.",
+   "sha256": "fb6fca8e2bd34da82a7598023272931ea79894855ffdcc6907cdc79dda594fa7"
+  },
+  {
+   "id": "arctic-awb-a0011",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0011.wav",
+   "reference": "If I ever needed a fighter in my life I need one now.",
+   "sha256": "cd1f219da6080530a268ee5809178179ae73f7cd9231cbaab6985cbbab6ca06b"
+  },
+  {
+   "id": "arctic-awb-a0012",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0012.wav",
+   "reference": "Gregson shoved back his chair and rose to his feet.",
+   "sha256": "7fa46a989278c97605894c4ac556a4db48416609cbd006dd70790c528aed373f"
+  },
+  {
+   "id": "arctic-awb-a0013",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0013.wav",
+   "reference": "He was a head shorter than his companion, of almost delicate physique.",
+   "sha256": "be40a8486f275ced2b443aef82d8f939083d469f2c1834687739e31e1cc56301"
+  },
+  {
+   "id": "arctic-awb-a0014",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0014.wav",
+   "reference": "Now you're coming down to business, Phil, he exclaimed.",
+   "sha256": "4cff95a5957b6f23f44e22495d3960e94341660e44f5f0ebae6eaec5d80088de"
+  },
+  {
+   "id": "arctic-awb-a0015",
+   "set": "read",
+   "kind": "tar-member",
+   "source": "arctic-awb",
+   "member": "cmu_us_awb_arctic/wav/arctic_a0015.wav",
+   "reference": "It's the aurora borealis.",
+   "sha256": "f4717f2f9667a1726fc8e85b2b918f2eeb78045cc98add2d2cf11a637dea5893"
+  },
+  {
+   "id": "ami-ES2004a-B-162038",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-ES2004a-mix-headset",
+   "meeting": "ES2004a",
+   "start": 162.038,
+   "end": 168.154,
+   "reference": "what we're thinking, how it's gonna go and then the detailed design, how we're actually gonna put it into practice and make it work.",
+   "sha256": "d5438d34e9a8ad9cf1e1545aa6f0327e4334b1dadd45cc86ef79ff25f487f1e7"
+  },
+  {
+   "id": "ami-ES2004a-B-170038",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-ES2004a-mix-headset",
+   "meeting": "ES2004a",
+   "start": 170.038,
+   "end": 186.378,
+   "reference": "Okay, right. We're gonna practice with the pens and draw our favourite animal on the white board, I'll go first, and um sum up the characteristics of that animal. So",
+   "sha256": "ec20927186901266f14b0660d08683146a1459f31049fa2b58b51812b258e6f3"
+  },
+  {
+   "id": "ami-IS1009a-C-90932",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 90.932,
+   "end": 107.754,
+   "reference": "Yeah. Uh I'm Jeanne-Oui. Um uh my role is industrial designer and my responsibilities are uh uh um deal with the technical-functional designs and specifications of user interface and dealing with user interface design.",
+   "sha256": "06e46f79ae96e17e46d1895353aa01f2319f69dbbb81186dc091339b7611d9a7"
+  },
+  {
+   "id": "ami-IS1009a-A-107606",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 107.606,
+   "end": 118.458,
+   "reference": "Very good. And as you already know I am Betty. I am the project manager for today. So why don't we look at the presentation to see what we really are supposed to do.",
+   "sha256": "bc3fb3c7d2cee8671707cf20921f5843edc7382c26ac2270a5df84c71daaa09d"
+  },
+  {
+   "id": "ami-IS1009a-A-196086",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 196.086,
+   "end": 202.682,
+   "reference": "All right. Here is what the functional design is supposed to achieve. Um.",
+   "sha256": "0d6631168e420094e12a38ee2b1b33732838d7b3964575d3dae2e82cd5241899"
+  },
+  {
+   "id": "ami-IS1009a-A-203462",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 203.462,
+   "end": 218.49,
+   "reference": "That is it's gonna be individual work and then at the meeting we'll discuss what uh we have come up with. The same goes for the conceptual design, there will be individual work whic and then discussion afterwards.",
+   "sha256": "c8a6b520e486843c52a92088ed550c3522ba9ac9f07e163491a2cc266ae16c54"
+  },
+  {
+   "id": "ami-IS1009a-A-259733",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 259.734,
+   "end": 272.826,
+   "reference": "Then, tool training try out the white board, participant can draw their favourite animal. Does anybody want to go and see how the white board works? So that in case we have to, in the next meeting, present something on the white board.",
+   "sha256": "f353f5f75c867c1bd2b49b3776ca27d0a6738c6211ddcfa194911bf9d9e995c0"
+  },
+  {
+   "id": "ami-IS1009a-A-366982",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 366.982,
+   "end": 376.218,
+   "reference": "Here's the project finance uh which, of course, we all have to think about when we design this thing. Um selling price is supposed to be twenty five Euro.",
+   "sha256": "521edb376021fc3d38c815e4452c1834a14d6ee0c8dd0fd57e5e5d8a92050049"
+  },
+  {
+   "id": "ami-IS1009a-A-387126",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 387.126,
+   "end": 393.946,
+   "reference": "and the production cost should not exceed hopefully should be less than twelve fifty Euro.",
+   "sha256": "2520b6df851507b3c678638a7d070eb6d173ac47fbf5612a3be9168c93a88c5e"
+  },
+  {
+   "id": "ami-IS1009a-A-436294",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 436.294,
+   "end": 449.61,
+   "reference": "now having used a remote control for years does anybody already have like an idea like things you didn't like with it, things you would like to change, things you would like to improve with this thing ye any first ideas?",
+   "sha256": "81a54275cf2e41ce564b69609d2db6965b508e1dd30dd0a84dca43530e800451"
+  },
+  {
+   "id": "ami-IS1009a-A-751110",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 751.11,
+   "end": 758.282,
+   "reference": "And, you know, specifi you you will get specific um instructions for that. I think that's the end of the show. Yeah.",
+   "sha256": "e28aa42058168497661b88641bdf4550ca800dc5008a5725283e5ad0d219ead9"
+  },
+  {
+   "id": "ami-IS1009a-A-764454",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-IS1009a-mix-headset",
+   "meeting": "IS1009a",
+   "start": 764.454,
+   "end": 776.234,
+   "reference": "So um we have well, we have a twen two two two three minutes. Um any questions at this point? Or uh suggestions?",
+   "sha256": "b3674fe16fb1ce776dae48f60b91bbc44c86e31976e39b3fa721a0ef8c06a0a8"
+  },
+  {
+   "id": "ami-EN2002a-C-88326",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 88.326,
+   "end": 104.234,
+   "reference": "Um the transcription box has got a summarise but button, which doesn't do anything yet. Um now I wonder wh how we wanna do, you know, we want a pop-up window with the speaker characterisation.",
+   "sha256": "46f45e4191d9bb495f845c9169f573d768747835f03212c4e17a3dc4ad9a6d30"
+  },
+  {
+   "id": "ami-EN2002a-C-162371",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 162.371,
+   "end": 169.034,
+   "reference": "Um so we can't put it on left-click. We could put it on a right-click. We could for example have a little menu that pops up.",
+   "sha256": "d2c73f2aa98ff58513816f1a270621f2aea76e7d0263930082390cc968bbcf92"
+  },
+  {
+   "id": "ami-EN2002a-A-707494",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 707.494,
+   "end": 712.833,
+   "reference": "Yeah, or even just have buttons on it, toggle buttons or something on the tool-bar for that window.",
+   "sha256": "fae49672087e0900dbdabf4d64f4404abeed0b31f87605b162c65f218868323e"
+  },
+  {
+   "id": "ami-EN2002a-C-783766",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 783.766,
+   "end": 789.509,
+   "reference": "Yeah, do you wanna do that with summaries in? Put the summaries in in the same window.",
+   "sha256": "9a1322ced2bbbb51d5a01a7c102056b01a9b3d76a504803a8c53175d4d6ee23b"
+  },
+  {
+   "id": "ami-EN2002a-C-816278",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 816.278,
+   "end": 822.665,
+   "reference": "And finally the prototype he spoke about. What kind of prototype could we produce?",
+   "sha256": "22bb22407de2851f0e60b597061bac2d4ae771e6de1bc9854599a6dbeb7cb0ce"
+  },
+  {
+   "id": "ami-EN2002a-D-1119094",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 1119.094,
+   "end": 1130.874,
+   "reference": "Yeah. Oh yeah, I will. I'm sure it's nothing difficult. I'm sure I'm making a meal of it at the moment actually.",
+   "sha256": "0fef8f0f3912b9ec6879d7ef697f96e3bf81ceb1703dacb3d089f74166118d18"
+  },
+  {
+   "id": "ami-EN2002a-C-1246953",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 1246.953,
+   "end": 1256.113,
+   "reference": "To get the data i for example to get the summarisation data, you have to search for I think the I_D_s or something. Yeah.",
+   "sha256": "106baa1c2fb9ae5e6fa135f25100ed21871b7cd202b9ce459bc54884e127ff25"
+  },
+  {
+   "id": "ami-EN2002a-C-1331142",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 1331.142,
+   "end": 1341.922,
+   "reference": "these files have got um tha an I_D_. And all the transcript files have got the string, I don't know what it is, words or text or something in it, so it just searches for those files.",
+   "sha256": "9f7db1b46074637f930faac03ff4456a9742960fb7afc365e1254daa10bc639c"
+  },
+  {
+   "id": "ami-EN2002a-A-1576246",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 1576.246,
+   "end": 1581.012,
+   "reference": "Did we wanna meet before we talk to Steve next week.",
+   "sha256": "0a87b6bfa0a5c750a0d1b3e279e4151431c04912355322fa5712cec60d6e691c"
+  },
+  {
+   "id": "ami-EN2002a-B-1797926",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 1797.926,
+   "end": 1810.154,
+   "reference": "It would be nice to, I don't know, meet up and uh you can sort of show us a bit what you know already, so we don't sort of have to do all the work again of just like figuring out stuff.",
+   "sha256": "e6a50fa4f86cefd2904751209d280f96f4f713a9c6f096c0acd9ebd633c3affa"
+  },
+  {
+   "id": "ami-EN2002a-B-2069318",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-EN2002a-mix-headset",
+   "meeting": "EN2002a",
+   "start": 2069.318,
+   "end": 2075.178,
+   "reference": "um the same things as in the comments, if I could read it.",
+   "sha256": "fc5f34ecfae5a9e19b712e9dde173fe1e54985ba76388429d7eafcb4f55e43bc"
+  },
+  {
+   "id": "ami-TS3003a-A-49830",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 49.83,
+   "end": 58.394,
+   "reference": "Uh let's see. Uh let's start off um with a little presentation.",
+   "sha256": "94c84b5f0be5d91cdd7a2e360d6fd7af5a1c31c7552e1c54892a23c25446ec38"
+  },
+  {
+   "id": "ami-TS3003a-A-142652",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 142.652,
+   "end": 148.586,
+   "reference": "Uh we have our opening acquaintance, tool training, project plan description closing.",
+   "sha256": "95723e26d94a2251af85279d7445202a6f56be29656739860c4045b30e8498da"
+  },
+  {
+   "id": "ami-TS3003a-A-149398",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 149.398,
+   "end": 159.674,
+   "reference": "Uh maybe I can sit down, then I can take some notes or Let's see.",
+   "sha256": "f1dd8e325895535948c0cb1c9819783851d64fae6e0ce602f97cae75bd0a508f"
+  },
+  {
+   "id": "ami-TS3003a-A-262886",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 262.886,
+   "end": 280.218,
+   "reference": "Uh project method um is uh there are three phases we are going through. First is functional des uh design, individual work, meetings. After the functional design, then the conceptual design and the detailed design.",
+   "sha256": "b3ac7334558797060ae48c17f1a4a009ed07875f579e9b073e2954e6386e4221"
+  },
+  {
+   "id": "ami-TS3003a-A-439142",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 439.142,
+   "end": 449.866,
+   "reference": "Here is a simple tool bar. It's what I just said, it's save, print, move back or forward one page. You can switch between the different drawings.",
+   "sha256": "5d03d533387635c0a6abb31d6588522914347337ea03229c686384aaa4ea8459"
+  },
+  {
+   "id": "ami-TS3003a-A-596534",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 596.534,
+   "end": 607.692,
+   "reference": "Ah it's okay. And I've got to write down a few of its characteristics. Uh is",
+   "sha256": "703d1d08b52ee39c514c715392dabd780dcceaeb38aecd5de06e534877272bcd"
+  },
+  {
+   "id": "ami-TS3003a-A-642726",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 642.726,
+   "end": 653.802,
+   "reference": "upside-down. I think that's it because if you wan ar are going to do it like this then it will be a stripe. But I don't know, I'm just trying.",
+   "sha256": "c8f772ce6c626909e8a37a2d39663b286aee172ae419ecc87575cebc0b5c5224"
+  },
+  {
+   "id": "ami-TS3003a-A-683318",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 683.318,
+   "end": 690.458,
+   "reference": "Uh. I think it's a it wants to draw a another animal? I don't know.",
+   "sha256": "24e5809547aeabd503e89e2643844cd4a5602aa43ae51623578cc972d833647d"
+  },
+  {
+   "id": "ami-TS3003a-D-801142",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 801.142,
+   "end": 808.666,
+   "reference": "Okay. This is my um Hmm.",
+   "sha256": "a68dd4d7cd223c49f5860aa53b242cb4f7b4bde18fecbbd48f5c8942740bde90"
+  },
+  {
+   "id": "ami-TS3003a-A-1048150",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 1048.15,
+   "end": 1053.722,
+   "reference": "Is your cat, or did you find him on the street?",
+   "sha256": "b521b3d57ea5a4216954e264e09bdef7de9af682cc9a93c81ffb0fae028f3452"
+  },
+  {
+   "id": "ami-TS3003a-C-1056630",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 1056.63,
+   "end": 1061.61,
+   "reference": "Well, it's supposed to be a cat. I like cats because uh",
+   "sha256": "3702f242abce036e9fa5fa292e0d8449a6e79c90efb6b01888026212a2acabfa"
+  },
+  {
+   "id": "ami-TS3003a-A-1389260",
+   "set": "meeting",
+   "kind": "ami-clip",
+   "source": "ami-TS3003a-mix-headset",
+   "meeting": "TS3003a",
+   "start": 1389.26,
+   "end": 1400.586,
+   "reference": "Okay. So these are our um a few things we can think of. Um I will put the minutes from this meeting uh in our project folder.",
+   "sha256": "f53e24fd5d77be652e679b43ab8aeaf2cf3551d9a9c8aa7580fc652c91ab10f1"
+  },
+  {
+   "id": "ami-IS1009c-mix",
+   "set": "long",
+   "kind": "ami-meeting",
+   "source": "ami-IS1009c-mix-headset",
+   "meeting": "IS1009c",
+   "sha256": "0736e7f88d021c18eb1c4daf6fab98458addb046cfdfd705f3e94c80ee25e525"
+  },
+  {
+   "id": "ami-IS1009c-headset0",
+   "set": "long-pair",
+   "kind": "ami-meeting",
+   "source": "ami-IS1009c-headset-0",
+   "meeting": "IS1009c",
+   "speakers": [
+    "A"
+   ],
+   "pairWith": "ami-IS1009c-mix",
+   "sha256": "d4896bac9581c07b2f04f3ddccb1f929f221b8e0ab8387bbaabbac66bace57cf"
+  }
+ ]
+}

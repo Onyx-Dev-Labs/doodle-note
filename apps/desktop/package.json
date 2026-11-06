@@ -16,7 +16,7 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
-    "test": "tsx --test src/main/*.test.ts src/renderer/src/lib/*.test.ts",
+    "test": "tsx --test src/main/*.test.ts src/renderer/src/lib/*.test.ts scripts/asr-bench/*.test.cjs",
     "lint": "eslint --cache .",
     "format": "prettier --write .",
     "package": "node scripts/check-google-oauth.mjs && pnpm --workspace-root whisper:build && pnpm --filter doodle-note-mcp build && electron-vite build && DOODLENOTE_STAPLER_HELPER=\"$PWD/scripts/stapler.cjs\" APPLE_KEYCHAIN_PROFILE=doodlenote-notary electron-builder --mac",
