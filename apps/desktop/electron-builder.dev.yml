@@ -44,6 +44,9 @@ mac:
     - "!**/node_modules/@node-llama-cpp/linux-*/**"
     - "!**/node_modules/@node-llama-cpp/mac-x64/**"
     - "!**/node_modules/sherpa-onnx-*/**"
+    # Koffi only pins the Windows speech runtime; macOS never loads it.
+    - "!**/node_modules/koffi/**"
+    - "!**/node_modules/@koromix/**"
   # A folder build only: no zip (updater payload) and no dmg (distribution).
   target:
     - target: dir

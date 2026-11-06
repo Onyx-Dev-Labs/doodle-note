@@ -40,6 +40,25 @@ test('the dev build ships the engine and the dictation helper', () => {
   assert.match(config, /engine\/\.build\/release\/engine/)
 })
 
+test('the dev Mac build excludes the Windows-only Koffi DLL loader, like the release build', () => {
+  const macFiles = (text: string): string[] => {
+    const mac = /^mac:\n((?:[ \t].*\n|\n)*)/m.exec(text.replace(/\r\n/g, '\n'))?.[1] ?? ''
+    const files = /^ {2}files:\n((?: {4}.*\n)*)/m.exec(mac)?.[1] ?? ''
+    return files
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('- '))
+      .map((line) => line.slice(2).replace(/^(['"])(.*)\1$/, '$2'))
+  }
+  for (const config of [dev, prod]) {
+    const patterns = macFiles(config)
+    assert.ok(patterns.includes('out/**'), 'the mac files block was found')
+    assert.ok(patterns.includes('!**/node_modules/sherpa-onnx-*/**'))
+    assert.ok(patterns.includes('!**/node_modules/koffi/**'))
+    assert.ok(patterns.includes('!**/node_modules/@koromix/**'))
+  }
+})
+
 test('the packaging script never calls the release or publish scripts', () => {
   const script = live(read('scripts/package-dev.sh'))
   assert.doesNotMatch(script, /publish-release|publish-mac|publish-windows|stapler|notary/i)
