@@ -9,6 +9,16 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "0.5.1",
+    date: "Unreleased",
+    highlights: [
+      "Only my voice for Bark: turn it on in Settings, read aloud for about twenty seconds, and Bark leaves out anyone else talking near your microphone. What it learns stays on your Mac, and the recording is not kept",
+      "Choose your own Bark keyboard shortcut: record a single key, a key combination, or a modifier on its own such as Right Option, then save or cancel",
+      "Sharper Bark logos in Settings and on the dictation pill",
+      "Security maintenance: updates to Electron, the on-device speech engine, and website dependencies",
+    ],
+  },
+  {
     version: "0.5.0",
     date: "November 5, 2026",
     highlights: [

@@ -92,6 +92,7 @@ export function normalizeDictationSettings(input: unknown): DictationSettings {
       raw.microphoneUid.length <= 256
         ? raw.microphoneUid
         : null,
+    onlyMyVoice: raw.onlyMyVoice === true,
     startSound: raw.startSound === undefined ? defaults.startSound : raw.startSound === true,
     handsFreeDoubleTap:
       raw.handsFreeDoubleTap === undefined

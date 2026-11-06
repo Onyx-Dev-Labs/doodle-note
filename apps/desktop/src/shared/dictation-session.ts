@@ -115,6 +115,8 @@ export interface ActiveSession {
   micMuted: boolean
   /** The saved microphone was missing, so the system default is in use. */
   micFellBack: boolean
+  /** "Only my voice" is on but could not start, so this session hears everyone. */
+  voiceFilterOff: boolean
 }
 
 export type Resting =
@@ -184,6 +186,8 @@ export type SessionEvent =
       fallback?: string
       /** How many model calls the cleaning phase makes; scales its time limit. */
       steps?: number
+      /** "Only my voice" silenced speech in this session; explains an empty result. */
+      othersOnly?: boolean
     }
   /** Text that must not be lost has nowhere to go: keep it for copying. Never interrupts a live session. */
   | { type: 'keep'; text: string; reason: RecoveryReason }
@@ -196,6 +200,7 @@ export type SessionEvent =
   | { type: 'mic-state'; gen: number; muted: boolean }
   /** The engine could not find the saved microphone and used the system default. */
   | { type: 'mic-fallback'; gen: number }
+  | { type: 'voice-filter-off'; gen: number }
   | { type: 'dismiss' }
   /** A message with no session behind it, e.g. a refused start. Never interrupts a live session. */
   | { type: 'notice'; level: NoticeLevel; message: string }
@@ -284,7 +289,8 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
         cleanupSteps: 1,
         limitWarning: false,
         micMuted: false,
-        micFellBack: event.micFellBack === true
+        micFellBack: event.micFellBack === true,
+        voiceFilterOff: false
       }
       const limitMs = recordingLimitMs(trigger)
       return {
@@ -407,7 +413,18 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       if (!['preparing', 'recording', 'finalizing'].includes(state.phase)) return ignore
       const text = event.text.trim()
       const clear: SessionEffect = { type: 'timers-clear', gen: active.gen }
-      if (!text) return toIdle(state, notice('info', 'No speech detected.'), [clear])
+      if (!text) {
+        return toIdle(
+          state,
+          notice(
+            'info',
+            event.othersOnly
+              ? 'Only other voices were heard. If that was you, record your voice again in Settings.'
+              : 'No speech detected.'
+          ),
+          [clear]
+        )
+      }
       const withRaw = {
         ...active,
         rawText: text,
@@ -560,6 +577,12 @@ export function reduce(state: SessionState, event: SessionEvent): Transition {
       if (!active || active.gen !== event.gen || active.micFellBack) return ignore
       if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
       return { state: { ...state, active: { ...active, micFellBack: true } }, effects: [] }
+    }
+
+    case 'voice-filter-off': {
+      if (!active || active.gen !== event.gen || active.voiceFilterOff) return ignore
+      if (state.phase !== 'preparing' && state.phase !== 'recording') return ignore
+      return { state: { ...state, active: { ...active, voiceFilterOff: true } }, effects: [] }
     }
 
     case 'dismiss': {

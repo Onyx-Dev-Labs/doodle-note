@@ -188,6 +188,34 @@ On by default (**Learn from my corrections**). After a dictation is **confirmed 
 
 What it touches, in plain terms: the text of the field you dictated into is read into memory about once a second for a few minutes, compared with what was typed, and dropped. Only the changed words that pass the check are kept, in the dictionary, where you can see and remove them. The text is never logged (the log says how many corrections were learned, not what), never written to disk, never sent anywhere (no network, no model). It reads only that one field, never a password field, nothing longer than 20,000 characters, and nothing after the watch ends. Turn it off under Dictionary to stop it entirely: the helper is then not even asked to keep the field.
 
+## Only my voice
+
+Settings, Bark, Pill and microphone: **Only my voice**. For a shared room: someone talking nearby used to end up in your dictation whenever the microphone could hear them. With this on, only the voice you recorded is transcribed.
+
+- **Setting it up.** It is a switch. The first time it is turned on there is no voice to filter by, so the page asks for one: "Start recording" (or "Not now", which leaves the switch off) records about twenty seconds of you reading a passage aloud, from the dictation microphone ("I'm done" ends it early after ten seconds). The switch only stays on once that recording has succeeded; after that it turns the filter on and off without asking again. The engine turns it into a voiceprint (`userData/dictation-voiceprint.json`, mode 0600): 256 numbers that describe how the voice sounds, its speech level, the microphone's name and the date. **The recording itself is never written to disk**, and nothing leaves the Mac. A successful recording switches the setting on. "Record again" replaces it (a failed attempt keeps the old one); "Remove" deletes the file and switches the setting off.
+- **While dictating.** The engine silences speech that is not that voice before the recognizer hears it; see "Only my voice (the voice gate)" in `engine/README.md` for how it decides. Words on the pill appear about half a second later than without it. If a dictation comes out empty and speech was silenced, the pill says "Only other voices were heard. If that was you, record your voice again in Settings." instead of "No speech detected."
+- **It never blocks dictation.** A missing or unreadable voiceprint, speaker models that cannot be downloaded, or a model error mid-session all mean the dictation runs unfiltered (logged as `engine voice_gate_unavailable`).
+- **Other captures.** A recording is refused while a dictation or meeting has the microphone; dictation waits while a recording runs; a meeting that starts recording cancels it. Meeting detection is quieted for its duration, like a dictation.
+- **Log.** Each filtered dictation adds one line to `dictation.log`: `voice filter kept=…ms dropped=…ms failures=… distance=min..max`. Durations and distances only, never words. In a run from source the engine also prints each rejected voice (distance, level) to the terminal.
+- **Settings and state.** `onlyMyVoice` (boolean) in `dictation.json`; the status sent to the page carries only the recording date and microphone name.
+
+### Testing it with two people
+
+1. Settings, Bark, Pill and microphone: turn "Only my voice" on, choose "Start recording", read the passage. The switch stays on and "Your recorded voice" appears under it. Turning it on and choosing "Not now", or cancelling the recording, leaves it off.
+2. Dictate into the "Try it" box alone: everything you say arrives, including a short "Sounds good, thanks."
+3. Have the other person talk continuously nearby while you hold the key and say nothing: nothing is typed, and the pill says only other voices were heard.
+4. Both talk in turns during one dictation: only your sentences are typed.
+5. Talk at the same time: expect mostly your words; this case is not separated (see below).
+6. Switch "Only my voice" off and repeat step 4: their words are back. That is the comparison.
+7. Read `dictation.log` afterwards: the `distance=` range for your own dictations against the range when only they spoke is what the thresholds (0.60 / 0.75) should sit between.
+
+### Limits
+
+- **Talking over each other is not separated.** While you are speaking, your stretch of audio is kept whole, so a loud neighbour speaking at the same instant can still leak words.
+- **Very short remarks (under about three quarters of a second) cannot be told apart by voice**; loudness decides them, and with no loudness reference they are kept.
+- **One voiceprint, one microphone.** Loudness only counts on the microphone the voice was recorded with, and a very different microphone (AirPods against the built-in one) can make your own voice score farther away. Record again with the microphone you dictate with.
+- **macOS only**, like the rest of Bark.
+
 ## Isolation from the production app
 
 | Concern | Dev build |
@@ -336,6 +364,8 @@ Kept on purpose (safety over speed):
 Not measured: the live microphone path (microphone teardown, queued audio, and the IPC from the engine to the app). Open Settings, Dictation after one dictation and read the line under "Last dictation": `speech` is `stopToFinalMs` with its two engine parts, and the remainder is capture teardown plus the pipe.
 
 ## Not verified, and known gaps
+
+- **Only my voice, needs people and a microphone:** the gate's decisions are unit tested (`engine/tests/VoiceGateTests.swift`), and the real models, the live pipeline and the recognizer were run end to end on recordings made with macOS system voices (`say`): the enrolled voice was kept whole (distance 0.05 to 0.25; 0.36 to 0.50 for a one-second remark), ten other voices scored 0.62 to 1.06, and a mixed recording transcribed only the enrolled voice's sentences. Three voices similar to the enrolled one landed in the in-between band (0.62 to 0.72): they were dropped when quieter than the enrolled voice on the same microphone, and partly kept when no loudness reference was available. **Not run with a real microphone or real people:** recording a voice from the Settings page through the engine, real voices in a real room (reverberation, a similar-sounding colleague), AirPods, and how the half-second delay feels on the pill. Synthetic voices are cleaner and more consistent than people, so the thresholds may need moving after the two-person test above.
 
 - **Model speed-ups, needs a model and a person:** no local model is installed on the development Mac, so the speed-ups are tested with stand-in engines (what budget the engine is asked for, which model is chosen, that the load happens once and cleanup waits for it, that short phrases skip the model) and none of the milliseconds are measured. Expect the biggest saving from skipping the model on short phrases and from loading it while you speak; the smaller context and answer cap shave a fraction of a second. Read `tidyMs` under Settings, Bark, Last dictation after a long dictation to see the real number.
 

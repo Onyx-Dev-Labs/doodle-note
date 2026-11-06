@@ -3266,6 +3266,39 @@ button.fp-row:hover {
   color: var(--accent-deep);
 }
 
+/* "Only my voice": the passage to read and the level meter while recording */
+.voice-setup {
+  align-items: flex-start;
+}
+
+.voice-passage {
+  margin: 6px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-soft);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--body);
+}
+
+.voice-meter {
+  display: block;
+  height: 4px;
+  margin: 6px 0 2px;
+  border-radius: 999px;
+  background: var(--fill);
+  overflow: hidden;
+}
+
+.voice-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 90ms linear;
+}
+
 /* pick-one cards (tidy-up level, style tone) and the app-category tabs */
 .choice-grid {
   display: grid;

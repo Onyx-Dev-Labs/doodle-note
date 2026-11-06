@@ -19,6 +19,8 @@ import type {
   TargetDescription
 } from '../shared/dictation-helper-protocol'
 
+import type { ModifierKey } from '../shared/dictation-shortcuts'
+
 type HelperChild = ChildProcessByStdio<Writable, Readable, Readable>
 type Reply = { event: 'reply'; id: string; ok: boolean; reason?: string } & Record<string, unknown>
 
@@ -62,6 +64,8 @@ export class DictationHelperClient {
     { resolve: (reply: Reply | null) => void; timer: NodeJS.Timeout }
   >()
   private holdKey: HoldKey = 'off'
+  private toggleKey: ModifierKey | 'off' = 'off'
+  private readonly toggleListeners = new Set<() => void>()
   private mouse: { button: number; swallow: boolean; mode: MouseMode } | null = null
   private readonly holdListeners = new Set<(event: HoldEvent) => void>()
   private readonly tapListeners = new Set<() => void>()
@@ -99,6 +103,26 @@ export class DictationHelperClient {
   onExit(listener: () => void): () => void {
     this.exitListeners.add(listener)
     return () => this.exitListeners.delete(listener)
+  }
+
+  onKeyToggle(listener: () => void): () => void {
+    this.toggleListeners.add(listener)
+    return () => this.toggleListeners.delete(listener)
+  }
+
+  async setToggleKey(key: ModifierKey | 'off'): Promise<HoldFailure | null> {
+    if (key === 'off') {
+      this.toggleKey = 'off'
+      if (this.child) await this.request('toggle-key-set', { key }, this.timeouts.hold, false)
+      return null
+    }
+    const running = await this.ensureRunning()
+    this.toggleKey = key
+    if (!running) return 'helper-unavailable'
+    const reply = await this.request('toggle-key-set', { key }, this.timeouts.hold)
+    if (!reply) return 'helper-unavailable'
+    if (reply.ok) return null
+    return reply.reason === 'unknown-key' ? 'unknown-key' : 'input-monitoring-denied'
   }
 
   async status(): Promise<HelperStatus | null> {
@@ -393,6 +417,7 @@ export class DictationHelperClient {
 
   async dispose(): Promise<void> {
     this.disposed = true
+    this.toggleKey = 'off'
     this.holdKey = 'off'
     this.mouse = null
     this.failAll()
@@ -456,6 +481,9 @@ export class DictationHelperClient {
     })
     // Re-arm the mouse button and the hold watch on the fresh process.
     void this.ready.then((ok) => {
+      if (ok && this.toggleKey !== 'off' && this.child === child) {
+        void this.request('toggle-key-set', { key: this.toggleKey }, this.timeouts.hold, false)
+      }
       if (ok && this.mouse && this.child === child) {
         void this.request(
           'mouse-start',
@@ -493,6 +521,10 @@ export class DictationHelperClient {
       if (phase && Number.isInteger(holdId)) {
         for (const listener of this.holdListeners) listener({ phase, holdId })
       }
+      return false
+    }
+    if (parsed.event === 'key-toggle') {
+      if (this.toggleKey !== 'off') for (const listener of this.toggleListeners) listener()
       return false
     }
     if (parsed.event === 'click') {

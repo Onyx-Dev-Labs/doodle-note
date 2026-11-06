@@ -84,7 +84,8 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
 export const WARNINGS = {
   limit: 'One minute left. Then it finishes.',
   muted: 'Your microphone looks muted.',
-  fellBack: 'Microphone not found. Using the default.'
+  fellBack: 'Microphone not found. Using the default.',
+  voiceFilterOff: 'Only my voice could not start. Everyone nearby is being heard.'
 } as const
 
 const WINDOW = {
@@ -202,9 +203,11 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
           ? WARNINGS.muted
           : active?.limitWarning
             ? WARNINGS.limit
-            : active?.micFellBack
-              ? WARNINGS.fellBack
-              : null
+            : active?.voiceFilterOff
+              ? WARNINGS.voiceFilterOff
+              : active?.micFellBack
+                ? WARNINGS.fellBack
+                : null
       })
     }
     case 'finalizing':

@@ -1,6 +1,6 @@
 import { SettingsFold } from './SettingsFold'
 import { BarkMark } from './BarkMark'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   DictationSettingsUpdate,
   DictationStatus,
@@ -26,13 +26,20 @@ import {
   type PermissionPane,
   type PermissionState
 } from '../../shared/dictation-permissions'
-import { acceleratorFrom } from './dictation-accelerator'
+import { shortcutLabel, shortcutWarning } from './dictation-accelerator'
+import {
+  canSaveShortcutCapture,
+  captureShortcutKey,
+  emptyShortcutCapture
+} from './dictation-shortcut-capture'
+import './assets/shortcut-recorder.css'
 import {
   DictationStyleSettings,
   DictationTidySettings,
   DictationTransformSettings
 } from './DictationTidySettings'
 import { DictationDictionarySettings } from './DictationDictionarySettings'
+import { DictationVoiceSettings } from './DictationVoiceSettings'
 import { FEATURE_NAME } from '../../shared/dictation-brand'
 import { Toggle } from './ModelsView'
 
@@ -48,13 +55,189 @@ function shortcutNote(state: ShortcutState): string {
   switch (state) {
     case 'registered':
       return 'Active.'
+    case 'needs-permission':
+      return 'Allow Input Monitoring in Permissions to use this shortcut.'
     case 'conflict':
-      return 'Another app already uses this combination. Pick a different one.'
     case 'invalid':
-      return 'That combination is not valid.'
+      return 'This shortcut isn’t available. Try another.'
     default:
       return 'Off.'
   }
+}
+
+type RecordedAction = 'toggle' | 'pasteLast' | 'copyLast'
+
+function ShortcutRecorder({
+  action,
+  onSave,
+  onCancel
+}: {
+  action: RecordedAction
+  onSave: (candidate: string) => Promise<void>
+  onCancel: () => void
+}): React.JSX.Element {
+  const [capture, setCapture] = useState(emptyShortcutCapture)
+  const [armed, setArmed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [failure, setFailure] = useState('')
+  const input = useRef<HTMLDivElement>(null)
+  const alive = useRef(true)
+  const cancel = useRef(onCancel)
+  useEffect(() => {
+    cancel.current = onCancel
+  }, [onCancel])
+  useEffect(() => {
+    alive.current = true
+    let current = true
+    const blur = (): void => cancel.current()
+    window.addEventListener('blur', blur)
+    void window.dictation.setShortcutRecording(true).then(
+      () => {
+        if (!current) return
+        setArmed(true)
+        input.current?.focus()
+      },
+      () => {
+        if (current) setFailure('Could not pause dictation shortcuts. Cancel and try again.')
+      }
+    )
+    return () => {
+      current = false
+      alive.current = false
+      window.removeEventListener('blur', blur)
+      void window.dictation.setShortcutRecording(false).catch(() => {})
+    }
+  }, [])
+
+  const listen = (): void => {
+    setCapture(emptyShortcutCapture())
+    setFailure('')
+    input.current?.focus()
+  }
+  const key = (event: React.KeyboardEvent, direction: 'down' | 'up'): void => {
+    if (!armed || saving || capture.phase === 'ready' || capture.phase === 'error') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      onCancel()
+      return
+    }
+    setCapture((current) => captureShortcutKey(current, event, direction, action === 'toggle'))
+  }
+  const save = async (event: React.MouseEvent<HTMLButtonElement>): Promise<void> => {
+    if (!armed || saving || !capture.candidate || !canSaveShortcutCapture(capture)) return
+    if (!canSaveShortcutCapture(capture, event)) {
+      setFailure('Release the shortcut keys, then choose Save.')
+      return
+    }
+    // Keep focus inside the recorder before disabling the clicked Save button.
+    // Otherwise Chromium blurs it and cancels the editor before a rejection arrives.
+    input.current?.focus()
+    setSaving(true)
+    setFailure('')
+    try {
+      await onSave(capture.candidate)
+      if (alive.current) onCancel()
+    } catch (error) {
+      if (alive.current)
+        setFailure(
+          error instanceof Error ? error.message : 'This shortcut isn’t available. Try another.'
+        )
+    } finally {
+      if (alive.current) setSaving(false)
+    }
+  }
+  const warning = capture.candidate ? shortcutWarning(capture.candidate) : null
+  return (
+    <div
+      className="shortcut-recorder"
+      role="group"
+      aria-label="Record keyboard shortcut"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onCancel()
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          onCancel()
+        }
+      }}
+    >
+      <p className="models-sub">
+        Press and release your shortcut, then choose Save. Escape cancels and cannot be a shortcut.
+      </p>
+      <div
+        ref={input}
+        className="shortcut-recorder-input"
+        tabIndex={0}
+        role="group"
+        aria-label="Press shortcut keys"
+        onKeyDown={(event) => key(event, 'down')}
+        onKeyUp={(event) => key(event, 'up')}
+      >
+        {!armed
+          ? 'Preparing…'
+          : capture.phase === 'pressed'
+            ? capture.candidate && !capture.error
+              ? `${shortcutLabel(capture.candidate)} — release keys, then Save`
+              : 'Release all keys…'
+            : capture.candidate
+              ? shortcutLabel(capture.candidate)
+              : capture.phase === 'error'
+                ? 'Try another shortcut'
+                : 'Press a key or combination…'}
+      </div>
+      <div role="status" aria-live="polite">
+        {capture.error && <p className="models-sub">{capture.error}</p>}
+        {capture.candidate && (
+          <p className="models-sub">New shortcut: {shortcutLabel(capture.candidate)}</p>
+        )}
+        {warning && <p className="models-sub">{warning}</p>}
+        {capture.candidate?.startsWith('Modifier:') && (
+          <p className="models-sub">A standalone modifier needs Input Monitoring permission.</p>
+        )}
+      </div>
+      {failure && (
+        <p className="models-error" role="alert">
+          {failure}
+        </p>
+      )}
+      <div className="shortcut-recorder-actions">
+        {action === 'toggle' && (
+          <button
+            type="button"
+            className="pill-btn"
+            disabled={!armed || saving}
+            onClick={() => {
+              setFailure('')
+              setCapture({
+                ...emptyShortcutCapture(),
+                phase: 'ready',
+                candidate: 'Modifier:AltRight'
+              })
+            }}
+          >
+            Use Right Option (⌥)
+          </button>
+        )}
+        <button type="button" className="pill-btn" disabled={!armed || saving} onClick={listen}>
+          Record again
+        </button>
+        <button
+          type="button"
+          className="pill-btn"
+          disabled={!armed || saving || !canSaveShortcutCapture(capture)}
+          onClick={(event) => void save(event)}
+        >
+          {saving ? 'Saving…' : 'Save shortcut'}
+        </button>
+        <button type="button" className="pill-btn" disabled={saving} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 const EDGE_LABELS: Record<(typeof PILL_EDGES)[number], string> = {
@@ -201,25 +384,49 @@ export function DictationSettings(): React.JSX.Element {
       setCapturing(false)
     }
   }
-  const capture = (
-    which: 'toggle' | 'pasteLast' | 'copyLast',
-    event: React.KeyboardEvent
-  ): void => {
-    if (recording !== which) return
-    event.preventDefault()
-    if (event.key === 'Escape') return setRecording(null)
-    const accelerator = acceleratorFrom(event)
-    if (accelerator) {
-      setRecording(null)
-      void update(
+  const shortcutBusy = !['idle', 'notice', 'recovery'].includes(status.phase)
+  const saveShortcut = async (which: RecordedAction, candidate: string): Promise<void> => {
+    let next: DictationStatus
+    try {
+      next = await window.dictation.setSettings(
         which === 'toggle'
-          ? { toggleShortcut: accelerator }
+          ? { toggleShortcut: candidate }
           : which === 'pasteLast'
-            ? { pasteLastShortcut: accelerator }
-            : { copyLastShortcut: accelerator }
+            ? { pasteLastShortcut: candidate }
+            : { copyLastShortcut: candidate }
       )
+    } catch {
+      throw new Error('This shortcut isn’t available. Try another.')
     }
+    setStatus(next)
+    const state =
+      which === 'toggle'
+        ? next.toggleShortcut
+        : which === 'pasteLast'
+          ? next.pasteLastShortcut
+          : next.copyLastShortcut
+    const issue =
+      next.shortcutIssues?.[
+        which === 'toggle' ? 'toggle' : which === 'pasteLast' ? 'paste' : 'copy'
+      ]
+    const saved =
+      which === 'toggle'
+        ? next.settings.toggleShortcut
+        : which === 'pasteLast'
+          ? next.settings.pasteLastShortcut
+          : next.settings.copyLastShortcut
+    if (saved !== candidate || issue || state === 'conflict' || state === 'invalid')
+      throw new Error(issue || 'This shortcut isn’t available. Try another.')
   }
+  const recorder = (which: RecordedAction): React.JSX.Element | null =>
+    recording === which ? (
+      <ShortcutRecorder
+        key={which}
+        action={which}
+        onSave={(candidate) => saveShortcut(which, candidate)}
+        onCancel={() => setRecording(null)}
+      />
+    ) : null
 
   return (
     <>
@@ -281,7 +488,7 @@ export function DictationSettings(): React.JSX.Element {
           {permissionRow(
             'input-monitoring',
             'Input Monitoring',
-            'Only for hold-to-talk and the mouse button.',
+            'Needed for standalone modifier shortcuts, hold-to-talk, and mouse buttons.',
             permissions.inputMonitoringAccess ?? accessibilityState(permissions.inputMonitoring)
           )}
         </div>
@@ -294,25 +501,30 @@ export function DictationSettings(): React.JSX.Element {
             different shortcuts for each.
           </p>
         )}
+        {shortcutBusy && (
+          <p className="models-sub">Finish dictating before changing your shortcut.</p>
+        )}
         <div className="cal-subcard">
           <div className="cal-row">
             <span className="cal-row-main">
-              <span className="cal-row-label">Press to start, press again to stop</span>
+              <span className="cal-row-label">Bark keyboard shortcut</span>
               <span className="cal-row-sub">
-                {settings.toggleShortcut || 'None'} · {shortcutNote(status.toggleShortcut)} Esc
-                cancels while dictating.
+                {shortcutLabel(settings.toggleShortcut)} ·{' '}
+                {status.shortcutIssues?.toggle || shortcutNote(status.toggleShortcut)} Press once to
+                start and again to stop. Escape cancels dictation.
               </span>
             </span>
             <button
               type="button"
               className="pill-btn"
-              onKeyDown={(event) => capture('toggle', event)}
-              onBlur={() => setRecording(null)}
+              disabled={shortcutBusy || recording !== null}
+              title={shortcutBusy ? 'Finish dictating before changing your shortcut.' : undefined}
               onClick={() => setRecording('toggle')}
             >
-              {recording === 'toggle' ? 'Press the new shortcut…' : 'Change'}
+              Change shortcut
             </button>
           </div>
+          {recorder('toggle')}
           <div className="cal-row">
             <span className="cal-row-main">
               <span className="cal-row-label">Hold to talk</span>
@@ -441,18 +653,19 @@ export function DictationSettings(): React.JSX.Element {
             <span className="cal-row-main">
               <span className="cal-row-label">Type the last transcript again</span>
               <span className="cal-row-sub">
-                {settings.pasteLastShortcut || 'None'} · {shortcutNote(status.pasteLastShortcut)}{' '}
-                The last transcript is kept in memory only and is forgotten when you quit.
+                {shortcutLabel(settings.pasteLastShortcut)} ·{' '}
+                {status.shortcutIssues?.paste || shortcutNote(status.pasteLastShortcut)} The last
+                transcript is kept in memory only and is forgotten when you quit.
               </span>
             </span>
             <button
               type="button"
               className="pill-btn"
-              onKeyDown={(event) => capture('pasteLast', event)}
-              onBlur={() => setRecording(null)}
+              disabled={shortcutBusy || recording !== null}
+              title={shortcutBusy ? 'Finish dictating before changing your shortcut.' : undefined}
               onClick={() => setRecording('pasteLast')}
             >
-              {recording === 'pasteLast' ? 'Press the new shortcut…' : 'Change'}
+              Change shortcut
             </button>
             {settings.pasteLastShortcut && (
               <button
@@ -464,22 +677,24 @@ export function DictationSettings(): React.JSX.Element {
               </button>
             )}
           </div>
+          {recorder('pasteLast')}
           <div className="cal-row">
             <span className="cal-row-main">
               <span className="cal-row-label">Copy the last transcript</span>
               <span className="cal-row-sub">
-                {settings.copyLastShortcut || 'None'} · {shortcutNote(status.copyLastShortcut)} Puts
-                it on the clipboard instead of typing it. Same rule: memory only.
+                {shortcutLabel(settings.copyLastShortcut)} ·{' '}
+                {status.shortcutIssues?.copy || shortcutNote(status.copyLastShortcut)} Puts it on
+                the clipboard instead of typing it. Same rule: memory only.
               </span>
             </span>
             <button
               type="button"
               className="pill-btn"
-              onKeyDown={(event) => capture('copyLast', event)}
-              onBlur={() => setRecording(null)}
+              disabled={shortcutBusy || recording !== null}
+              title={shortcutBusy ? 'Finish dictating before changing your shortcut.' : undefined}
               onClick={() => setRecording('copyLast')}
             >
-              {recording === 'copyLast' ? 'Press the new shortcut…' : 'Change'}
+              Change shortcut
             </button>
             {settings.copyLastShortcut && (
               <button
@@ -491,12 +706,13 @@ export function DictationSettings(): React.JSX.Element {
               </button>
             )}
           </div>
+          {recorder('copyLast')}
         </div>
       </SettingsFold>
 
       <SettingsFold
         title="Pill and microphone"
-        description="Position, input, live words, and audio feedback"
+        description="Position, input, your voice, live words, and audio feedback"
       >
         <p className="models-sub">
           The pill is a small doodle at the edge of your screen. Click it to start dictating, click
@@ -574,6 +790,7 @@ export function DictationSettings(): React.JSX.Element {
               ))}
             </select>
           </div>
+          <DictationVoiceSettings status={status} update={update} />
           <div className="cal-row">
             <span className="cal-row-main">
               <span className="cal-row-label">Show what I&apos;m saying</span>

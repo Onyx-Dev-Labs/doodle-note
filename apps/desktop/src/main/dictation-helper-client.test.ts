@@ -74,6 +74,10 @@ process.stdin.on('data', (d) => {
       else if (mode === 'no-permission') send({ event: 'reply', id: req.id, ok: false, reason: 'input-monitoring-denied' })
       else if (mode === 'timeout') send({ event: 'reply', id: req.id, ok: false, reason: 'timeout' })
       else send({ event: 'reply', id: req.id, ok: true, button: 4 })
+    } else if (req.op === 'toggle-key-set') {
+      send({ event: 'reply', id: req.id, ok: mode !== 'no-permission', reason: 'input-monitoring-denied' })
+      // Include a deliberately stale off event: the client must suppress it.
+      if (mode === 'toggle-events') send({ event: 'key-toggle' })
     } else if (req.op === 'hold-start' && mode === 'taps') {
       send({ event: 'reply', id: req.id, ok: true })
       send({ event: 'tap' })
@@ -408,4 +412,36 @@ test('muting the output says whether it was this call that did it; restoring is 
   const missing = new DictationHelperClient({ command: '/nonexistent/dictation-helper' }, fast)
   assert.equal(await missing.muteOutput(), false)
   await missing.restoreOutput()
+})
+
+test('native toggle event is delivered when armed and suppressed after disarming', async () => {
+  const client = new DictationHelperClient(fakeHelper('toggle-events'), fast)
+  let toggles = 0
+  let heard: () => void = () => {}
+  const event = new Promise<void>((resolve) => {
+    heard = resolve
+  })
+  client.onKeyToggle(() => {
+    toggles++
+    heard()
+  })
+  try {
+    assert.equal(await client.setToggleKey('AltRight'), null)
+    await event
+    assert.equal(toggles, 1)
+    assert.equal(await client.setToggleKey('off'), null)
+    await client.status()
+    assert.equal(toggles, 1)
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('native toggle permission denial propagates without a registration claim', async () => {
+  const client = new DictationHelperClient(fakeHelper('no-permission'), fast)
+  try {
+    assert.equal(await client.setToggleKey('AltRight'), 'input-monitoring-denied')
+  } finally {
+    await client.dispose()
+  }
 })

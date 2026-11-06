@@ -12,6 +12,25 @@ import type {
 
 export type EngineEventListener = (event: EngineEvent) => void
 
+/** What `engine enroll-voice` reports while it records and when it is done. */
+export type VoiceEnrollProgress =
+  | { type: 'download'; progress: number }
+  | { type: 'recording' }
+  | { type: 'level'; peak: number }
+  | { type: 'analysing' }
+
+export type VoiceEnrollResult =
+  | { ok: true; deviceName: string | null }
+  | { ok: false; reason: 'microphone' | 'not-enough-speech' | 'cancelled' | 'failed' }
+
+export interface VoiceEnrollRun {
+  result: Promise<VoiceEnrollResult>
+  /** Done reading: stop recording now and keep it. */
+  finish(): void
+  /** Stop and keep nothing. */
+  cancel(): void
+}
+
 /**
  * How long dispose() waits for a finishing session to exit on its own before
  * escalating to SIGTERM/SIGKILL. Killing the engine mid-finish can strand its
@@ -64,6 +83,9 @@ export class EngineProcess {
   private readonly stopTimers = new Map<ChildProcess, NodeJS.Timeout>()
   /** True from the engine's "finishing" status until the session ends. */
   private sessionFinishing = false
+  /** "Only my voice" is on: the resident engine keeps the speaker models loaded. */
+  private voiceWarm = false
+  private enrollment: VoiceEnrollRun | null = null
 
   constructor(
     private readonly binaryPath: string,
@@ -95,6 +117,8 @@ export class EngineProcess {
     this.serveChild = child
     this.serveBuffer = ''
     this.serveReady = false
+    // Read once the ASR models are in; a restarted engine warms up again.
+    if (this.voiceWarm) this.serveWrite({ cmd: 'warm-voice' })
 
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => {
@@ -318,6 +342,152 @@ export class EngineProcess {
     return this.child !== null || this.serveSessionActive
   }
 
+  /** A voice recording for "Only my voice" has the microphone. */
+  get enrolling(): boolean {
+    return this.enrollment !== null
+  }
+
+  /**
+   * Keep the speaker models loaded in the resident engine, so a dictation that
+   * filters by voice does not wait for them. Stays on for later restarts.
+   */
+  warmVoice(): void {
+    if (this.voiceWarm || this.disposed) return
+    this.voiceWarm = true
+    this.serveWrite({ cmd: 'warm-voice' })
+  }
+
+  /**
+   * Record the user's voice and write its voiceprint to `outPath` (`engine
+   * enroll-voice`). One at a time, and never while a session is running.
+   */
+  enrollVoice(opts: {
+    outPath: string
+    inputDevice?: string | null
+    seconds: number
+    onProgress: (progress: VoiceEnrollProgress) => void
+  }): VoiceEnrollRun | null {
+    if (this.disposed || this.running || this.enrollment || !existsSync(this.binaryPath)) {
+      return null
+    }
+    const args = ['enroll-voice', '--out', opts.outPath, '--seconds', String(opts.seconds)]
+    args.push('--exit-on-stdin-close')
+    if (opts.inputDevice) args.push('--input-device', opts.inputDevice)
+    let child: EngineChild
+    try {
+      child = spawn(this.binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    } catch {
+      return null
+    }
+    this.shutdown.own(child)
+
+    let verdict: VoiceEnrollResult | null = null
+    let cancelled = false
+    let buffer = ''
+    const handle = (line: string): void => {
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(line) as Record<string, unknown>
+      } catch {
+        return // CoreML noise
+      }
+      if (parsed.event === 'download' && typeof parsed.progress === 'number') {
+        opts.onProgress({ type: 'download', progress: parsed.progress })
+      } else if (parsed.event === 'ready') {
+        opts.onProgress({ type: 'recording' })
+      } else if (parsed.event === 'level' && typeof parsed.peak === 'number') {
+        opts.onProgress({ type: 'level', peak: parsed.peak })
+      } else if (parsed.event === 'status' && parsed.stage === 'analysing_voice') {
+        opts.onProgress({ type: 'analysing' })
+      } else if (parsed.event === 'voiceprint') {
+        if (parsed.ok === true) {
+          verdict = {
+            ok: true,
+            deviceName: typeof parsed.deviceName === 'string' ? parsed.deviceName : null
+          }
+        } else {
+          verdict = {
+            ok: false,
+            reason:
+              parsed.reason === 'microphone'
+                ? 'microphone'
+                : parsed.reason === 'not_enough_speech'
+                  ? 'not-enough-speech'
+                  : 'failed'
+          }
+        }
+      }
+    }
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      buffer += chunk
+      let nl = buffer.indexOf('\n')
+      while (nl !== -1) {
+        handle(buffer.slice(0, nl))
+        buffer = buffer.slice(nl + 1)
+        nl = buffer.indexOf('\n')
+      }
+    })
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      for (const line of chunk.split('\n')) {
+        if (line.trim().length > 0) console.error(`[engine enroll] ${line}`)
+      }
+    })
+
+    const run: VoiceEnrollRun = {
+      result: new Promise<VoiceEnrollResult>((resolve) => {
+        // Recording, then a few seconds of analysis; a first run also downloads the models.
+        const timeout = setTimeout(
+          () => {
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+          },
+          opts.seconds * 1000 + 180_000
+        )
+        timeout.unref()
+        const settle = (result: VoiceEnrollResult): void => {
+          clearTimeout(timeout)
+          if (this.enrollment === run) this.enrollment = null
+          resolve(result)
+        }
+        child.on('error', () => settle({ ok: false, reason: 'failed' }))
+        child.on('close', () =>
+          settle(
+            // A voice the engine had already saved before the cancel reached it is
+            // real: report it, so the page matches the file.
+            verdict?.ok
+              ? verdict
+              : cancelled
+                ? { ok: false, reason: 'cancelled' }
+                : (verdict ?? { ok: false, reason: 'failed' })
+          )
+        )
+      }),
+      finish: () => {
+        try {
+          child.stdin.write(`${JSON.stringify({ cmd: 'finish' })}\n`)
+        } catch {
+          // Already ending.
+        }
+      },
+      cancel: () => {
+        cancelled = true
+        // Closing stdin is the engine's signal to drop the microphone and keep nothing.
+        try {
+          child.stdin.end()
+        } catch {
+          // Already ending.
+        }
+        const force = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+        }, 2_000)
+        force.unref()
+      }
+    }
+    this.enrollment = run
+    return run
+  }
+
   /** True once the resident engine has loaded its models (starts are instant). */
   get warm(): boolean {
     return this.serveReady && this.serveChild !== null
@@ -341,6 +511,8 @@ export class EngineProcess {
 
   start(command: EngineCommand, filePath?: string, opts: EngineStartOptions = {}): void {
     if (this.disposed) return
+    // A meeting that starts recording takes the microphone from a voice recording.
+    if (command === 'live') this.enrollment?.cancel()
     // Only one sidecar at a time; a new start supersedes (hard-discards) the previous run.
     this.discard()
     if (this.disposed) return
@@ -357,7 +529,8 @@ export class EngineProcess {
         inputDevice: opts.inputDevice ?? '',
         audioDir: opts.audioDir ?? '',
         systemBackend: opts.systemBackend ?? '',
-        levels: opts.levels === true
+        levels: opts.levels === true,
+        voiceprint: opts.voiceprint ?? ''
       })
       if (ok) return
       this.serveSessionActive = false // fall through to the classic spawn
@@ -396,6 +569,7 @@ export class EngineProcess {
       if (opts.audioDir) args.push('--audio-dir', opts.audioDir)
       if (opts.systemBackend) args.push('--system-backend', opts.systemBackend)
       if (opts.levels) args.push('--levels')
+      if (opts.voiceprint) args.push('--voiceprint', opts.voiceprint)
       if (typeof opts.seconds === 'number' && opts.seconds > 0) {
         args.push('--seconds', String(opts.seconds))
       }

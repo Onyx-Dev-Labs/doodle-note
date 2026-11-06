@@ -2,10 +2,11 @@ import Foundation
 
 /// NDJSON over stdio between the DoodleNote main process and this helper.
 ///
-/// Requests:  {"op":"status|snapshot|deliver|release|hold-start|hold-stop|input-state","id":"…", …}
+/// Requests:  {"op":"status|snapshot|deliver|release|hold-start|hold-stop|toggle-key-set|input-state","id":"…", …}
 /// Replies:   {"event":"reply","id":"…","ok":true|false, …}
 /// Unsolicited events: {"event":"hold","phase":"down|up","holdId":N,"reason":"…"}
 ///                     {"event":"tap"}  (a press-and-release too short to be a hold)
+///                     {"event":"key-toggle"} (a standalone configured modifier was released)
 ///                     {"event":"click"}  (mouse click mode: the button went down)
 ///
 /// The helper holds no credentials and never sees provider keys. It receives

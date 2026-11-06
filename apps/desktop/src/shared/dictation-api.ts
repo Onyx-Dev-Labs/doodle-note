@@ -14,6 +14,7 @@ import type { CleanupMode, Phase, RecoveryReason } from './dictation-session'
 
 export const DICTATION_GET_STATUS_CHANNEL = 'dictation:get-status'
 export const DICTATION_SET_SETTINGS_CHANNEL = 'dictation:set-settings'
+export const DICTATION_SHORTCUT_RECORDING_CHANNEL = 'dictation:shortcut-recording'
 export const DICTATION_TOGGLE_CHANNEL = 'dictation:toggle'
 export const DICTATION_CANCEL_CHANNEL = 'dictation:cancel'
 export const DICTATION_COPY_RECOVERY_CHANNEL = 'dictation:copy-recovery'
@@ -33,6 +34,15 @@ export const DICTATION_APP_INFO_CHANNEL = 'dictation:app-info'
 export const DICTATION_DICTIONARY_ADD_CHANNEL = 'dictation:dictionary-add'
 export const DICTATION_DICTIONARY_REMOVE_CHANNEL = 'dictation:dictionary-remove'
 export const DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL = 'dictation:dictionary-clear-learned'
+export const DICTATION_VOICE_ENROLL_CHANNEL = 'dictation:voice-enroll'
+export const DICTATION_VOICE_FINISH_CHANNEL = 'dictation:voice-finish'
+export const DICTATION_VOICE_CANCEL_CHANNEL = 'dictation:voice-cancel'
+export const DICTATION_VOICE_REMOVE_CHANNEL = 'dictation:voice-remove'
+/** main → renderer: progress of the voice recording in Settings. */
+export const DICTATION_VOICE_EVENT_CHANNEL = 'dictation:voice-event'
+
+/** How long the "set up my voice" recording runs unless it is finished early. */
+export const VOICE_ENROLL_SECONDS = 20
 
 /** Off keeps the raw words, Light is instant and local, Full also uses a model. */
 export const TIDY_LEVELS = ['off', 'light', 'full'] as const
@@ -41,7 +51,7 @@ export type TidyLevel = (typeof TIDY_LEVELS)[number]
 export interface DictationSettings {
   /** Master switch. Off means no shortcut, no helper and no microphone use. */
   enabled: boolean
-  /** Electron accelerator for press-to-start / press-to-stop; empty disables it. */
+  /** Electron accelerator or Modifier:<physical key> for toggle; empty disables it. */
   toggleShortcut: string
   /** Modifier held on its own for hold-to-talk. */
   holdKey: HoldKey
@@ -83,6 +93,11 @@ export interface DictationSettings {
   pillHiddenUntil: number | null
   /** CoreAudio UID of the chosen microphone; null = the system default. */
   microphoneUid: string | null
+  /**
+   * Transcribe only the voice recorded in Settings, so someone talking nearby is
+   * left out. Does nothing until a voice has been recorded.
+   */
+  onlyMyVoice: boolean
   /** Play a short tone when recording starts and stops. */
   startSound: boolean
   /** Two quick taps of the hold key latch hands-free. */
@@ -131,6 +146,7 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
   pillEdge: 'bottom',
   pillHiddenUntil: null,
   microphoneUid: null,
+  onlyMyVoice: false,
   startSound: true,
   handsFreeDoubleTap: true,
   pasteLastShortcut: 'Control+Alt+Shift+V',
@@ -147,13 +163,13 @@ export const DEFAULT_DICTATION_SETTINGS: DictationSettings = {
 export type DictationSettingsUpdate = Partial<DictationSettings>
 
 export type MicrophoneAccess = 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
-export type ShortcutState = 'off' | 'registered' | 'conflict' | 'invalid'
+export type ShortcutState = 'off' | 'registered' | 'conflict' | 'invalid' | 'needs-permission'
 
 export interface DictationPermissions {
   microphone: MicrophoneAccess
   /** Needed to see the focused field and insert text. Null until the helper answers. */
   accessibility: boolean | null
-  /** Needed only for hold-to-talk. */
+  /** Needed for native modifier, hold-to-talk and mouse triggers. */
   inputMonitoring: boolean | null
   /** Input Monitoring as macOS reports it, so the page knows whether a prompt is still possible. */
   inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
@@ -173,6 +189,7 @@ export interface DictationStatus {
   phase: Phase
   permissions: DictationPermissions
   helper: 'ready' | 'unavailable'
+  shortcutIssues?: Partial<Record<'toggle' | 'paste' | 'copy', string>>
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState
@@ -190,6 +207,10 @@ export interface DictationStatus {
   microphones: InputDevice[]
   /** The saved microphone is not among the listed devices (the default is used). */
   microphoneMissing: boolean
+  /** The voice recorded for "Only my voice"; null until one is recorded. */
+  voice: VoiceProfile | null
+  /** A voice recording is running in Settings; dictation waits for it. */
+  voiceEnrolling: boolean
   /** "Hide for an hour" is running right now. */
   pillHidden: boolean
   /** Whether a transcript is held in memory for "paste last". The text itself is never sent. */
@@ -253,6 +274,34 @@ export interface DictationStopStages {
 
 export type MouseCaptureOutcome = { ok: true; button: number } | { ok: false; message: string }
 
+/** What is known about the recorded voice. The voice itself never leaves the engine's file. */
+export interface VoiceProfile {
+  /** Epoch ms the voice was recorded. */
+  createdAt: number
+  /** The microphone it was recorded with, when known. */
+  deviceName: string | null
+}
+
+export type VoiceEnrollOutcome =
+  | { ok: true }
+  | {
+      ok: false
+      /**
+       * busy: dictation or a meeting has the microphone. microphone: access is off.
+       * not-enough-speech: too little of one clear voice. cancelled: stopped on purpose.
+       */
+      reason: 'busy' | 'microphone' | 'not-enough-speech' | 'cancelled' | 'unavailable' | 'failed'
+    }
+
+export type VoiceEnrollEvent =
+  /** Getting ready; `progress` (0..1) while the speaker models download on first use. */
+  | { type: 'preparing'; progress?: number }
+  /** The microphone is open: start reading. */
+  | { type: 'recording' }
+  /** Microphone level, 0..1. */
+  | { type: 'level'; level: number }
+  | { type: 'analysing' }
+
 /**
  * local: the notes model on this Mac. byok: the user's provider, with consent.
  * needs-consent: a provider is set up but the user has not allowed sending text.
@@ -283,6 +332,7 @@ export interface DictationApi {
   /** Put the most recent transcript on the clipboard. */
   copyLast(): Promise<void>
   /** Wait for the next mouse button press and say which button it was (or why it cannot be used). */
+  setShortcutRecording(active: boolean): Promise<void>
   captureMouseButton(): Promise<MouseCaptureOutcome>
   /**
    * Ask macOS for a permission (its own dialog, which also lists the app in System
@@ -303,6 +353,17 @@ export interface DictationApi {
   removeDictionaryEntry(id: string): Promise<void>
   /** Remove every entry that was learned from corrections, keeping the hand-made ones. */
   clearLearnedEntries(): Promise<void>
+  /**
+   * Record the user's voice for "Only my voice" (about twenty seconds of reading
+   * aloud). Resolves when the recording has been turned into a voice, or failed.
+   */
+  enrollVoice(): Promise<VoiceEnrollOutcome>
+  /** Done reading: stop the recording early and use it. */
+  finishVoiceEnroll(): Promise<void>
+  cancelVoiceEnroll(): Promise<void>
+  /** Forget the recorded voice and turn "Only my voice" off. */
+  removeVoice(): Promise<DictationStatus>
+  onVoiceEvent(cb: (event: VoiceEnrollEvent) => void): () => void
   copyRecovery(gen: number): Promise<boolean>
   dismissRecovery(gen: number): Promise<void>
   openPrivacySettings(pane: 'microphone' | 'accessibility' | 'input-monitoring'): Promise<void>

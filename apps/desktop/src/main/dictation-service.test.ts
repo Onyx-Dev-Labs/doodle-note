@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
-import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/dictation-api'
+import {
+  DEFAULT_DICTATION_SETTINGS,
+  type DictationSettings,
+  type DictationStatus,
+  type VoiceEnrollOutcome
+} from '../shared/dictation-api'
 import { BUILTIN_TRANSFORMS } from '../shared/dictation-transforms'
 import type {
   HelperDelivery,
@@ -16,7 +21,12 @@ import type {
 } from '../shared/dictation-helper-protocol'
 import type { EngineEvent } from '../shared/engine-events'
 import { CaptureOwnership } from './capture-ownership'
-import { DictationService, type CleanupRunner, type DictationDeps } from './dictation-service'
+import {
+  DictationService,
+  type CleanupRunner,
+  type DictationDeps,
+  type VoiceLike
+} from './dictation-service'
 import type { OverlayView } from './dictation-overlay-view'
 import type {
   InputDevice,
@@ -65,6 +75,8 @@ interface Harness {
     appInfoCalls: string[][]
     exitListener: (() => void) | null
     holdKeys: HoldKey[]
+    toggleKeys: string[]
+    toggleListener: (() => void) | null
   }
   setEngineBusy: (busy: boolean) => void
   perms: { mic: 'granted' | 'denied' | 'not-determined'; micAnswer: boolean; micAsked: number }
@@ -79,6 +91,9 @@ interface Harness {
   field: { reading: FieldReading; reads: number; stopped: string[]; tick: (() => void) | null }
   settings: DictationSettings
   cleanupCalls: Array<{ mode: string; consent: unknown; signal: AbortSignal }>
+  logs: string[]
+  /** Every status pushed to the settings page, oldest first. */
+  broadcasts: DictationStatus[]
 }
 
 function harness(
@@ -88,6 +103,8 @@ function harness(
     access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
     warm?: () => void
+    voice?: VoiceLike
+    blockedShortcut?: string
     modelOptions?: {
       localModelLabel: string | null
       byok: { provider: string; model: string; hasKey: boolean } | null
@@ -111,6 +128,8 @@ function harness(
   const micHeld: boolean[] = []
   const metrics: Array<Record<string, unknown>> = []
   const cleanupCalls: Harness['cleanupCalls'] = []
+  const logs: string[] = []
+  const broadcasts: DictationStatus[] = []
   const startOpts: Harness['startOpts'] = []
   const devices: Harness['devices'] = { list: [] }
   const sounds: SoundKind[] = []
@@ -165,7 +184,9 @@ function harness(
     permissionAsks: [],
     appInfoCalls: [],
     exitListener: null,
-    holdKeys: []
+    holdKeys: [],
+    toggleKeys: [],
+    toggleListener: null
   }
   const ownership = new CaptureOwnership()
   let listener: ((event: EngineEvent) => boolean) | null = null
@@ -190,8 +211,10 @@ function harness(
         return engineBusy
       },
       warm: true,
-      listInputDevices: async () => devices.list
+      listInputDevices: async () => devices.list,
+      warmVoice: () => void engineCalls.push('warm-voice')
     },
+    ...(options.voice ? { voice: options.voice } : {}),
     ownership,
     helper: {
       available: true,
@@ -229,6 +252,14 @@ function harness(
       },
       watchStop: (id) => void field.stopped.push(id),
       release: () => {},
+      setToggleKey: async (key) => {
+        helper.toggleKeys.push(key)
+        return key === 'off' || helper.inputMonitoring ? null : 'input-monitoring-denied'
+      },
+      onKeyToggle: (cb) => {
+        helper.toggleListener = cb
+        return () => {}
+      },
       setHoldKey: async (key) => {
         helper.holdKeys.push(key)
         return null
@@ -274,6 +305,7 @@ function harness(
     },
     shortcuts: {
       register: (accelerator, callback) => {
+        if (accelerator === options.blockedShortcut) return false
         shortcuts.set(accelerator, callback)
         return true
       },
@@ -304,7 +336,7 @@ function harness(
       if (options.clipboardFails) throw new Error('clipboard unavailable')
       clipboard.push(text)
     },
-    broadcast: () => {},
+    broadcast: (status) => void broadcasts.push(status),
     onMicHeld: (held) => void micHeld.push(held),
     openSettings: () => void settingsOpened.push(1),
     now: () => clock.now,
@@ -314,7 +346,7 @@ function harness(
         field.tick = null
       }
     },
-    log: () => {},
+    log: (line) => void logs.push(line),
     recordMetrics: (record) => void metrics.push(record)
   }
   // Wrap cleanup to record calls when the caller supplied their own runner too.
@@ -356,7 +388,9 @@ function harness(
     icons,
     field,
     settings,
-    cleanupCalls
+    cleanupCalls,
+    logs,
+    broadcasts
   }
 }
 
@@ -1223,14 +1257,16 @@ test('copy-last and paste-last shortcuts register, clear, and flag every collisi
   assert.equal(status.copyLastShortcut, 'conflict')
   assert.ok(!both.shortcuts.has('Control+Alt+Shift+K'))
 
-  // Changing one onto the other later releases the one that was registered.
+  // A new collision is rejected while both previous registrations stay active.
   const later = harness()
   await later.service.start()
   await later.service.setSettings({ pasteLastShortcut: 'Control+Alt+Shift+C' })
   const after = await later.service.status()
-  assert.equal(after.pasteLastShortcut, 'conflict')
-  assert.equal(after.copyLastShortcut, 'conflict')
-  assert.ok(!later.shortcuts.has('Control+Alt+Shift+C'))
+  assert.equal(after.pasteLastShortcut, 'registered')
+  assert.equal(after.copyLastShortcut, 'registered')
+  assert.match(after.shortcutIssues?.paste ?? '', /Copy last transcript/)
+  assert.notEqual(after.settings.pasteLastShortcut, 'Control+Alt+Shift+C')
+  assert.ok(later.shortcuts.has('Control+Alt+Shift+C'))
 })
 
 test('double tap works with Fn as the hold key, and the status carries the macOS Fn setting', async () => {
@@ -2452,4 +2488,297 @@ test('a recording that ends inside the tone never mutes at all', async () => {
   await tick()
   await new Promise((resolve) => setTimeout(resolve, 450))
   assert.deepEqual(h.helper.audio, ['restore'], 'nothing was muted, so nothing is left muted')
+})
+
+/* ---- "Only my voice" ---- */
+
+/** A recorded voice (or none) and a recording that ends however the test says. */
+function fakeVoice(initial: { enrolled: boolean }): VoiceLike & {
+  state: { enrolled: boolean; enrolling: boolean; devices: Array<string | null> }
+  settle: (outcome: VoiceEnrollOutcome) => void
+} {
+  const state = {
+    enrolled: initial.enrolled,
+    enrolling: false,
+    devices: [] as Array<string | null>
+  }
+  let resolve: ((outcome: VoiceEnrollOutcome) => void) | null = null
+  return {
+    state,
+    profile: () => (state.enrolled ? { createdAt: 1, deviceName: 'USB Mic' } : null),
+    voiceprintPath: () => (state.enrolled ? '/profile/dictation-voiceprint.json' : null),
+    get enrolling() {
+      return state.enrolling
+    },
+    enroll: (inputDevice, onEvent) => {
+      state.devices.push(inputDevice)
+      state.enrolling = true
+      onEvent({ type: 'preparing' })
+      return new Promise<VoiceEnrollOutcome>((done) => {
+        resolve = done
+      })
+    },
+    settle: (outcome) => {
+      state.enrolling = false
+      if (outcome.ok) state.enrolled = true
+      resolve?.(outcome)
+    },
+    finish: () => {},
+    cancel: () => {},
+    remove: async () => {
+      state.enrolled = false
+    }
+  }
+}
+
+test('only my voice: the recorded voice is handed to the recorder, and only when it is on', async () => {
+  const on = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  on.service.toggle()
+  await ready(on)
+  assert.equal(on.startOpts[0]?.voiceprint, '/profile/dictation-voiceprint.json')
+
+  const off = harness({ settings: { onlyMyVoice: false }, voice: fakeVoice({ enrolled: true }) })
+  off.service.toggle()
+  await ready(off)
+  assert.equal('voiceprint' in off.startOpts[0]!, false)
+
+  const none = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: false }) })
+  none.service.toggle()
+  await ready(none)
+  assert.equal('voiceprint' in none.startOpts[0]!, false, 'on without a voice filters nothing')
+})
+
+test('only my voice: the speaker models are warmed when it is on with a voice', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  await h.service.start()
+  assert.ok(h.engineCalls.includes('warm-voice'))
+  const off = harness({ voice: fakeVoice({ enrolled: true }) })
+  await off.service.start()
+  assert.ok(!off.engineCalls.includes('warm-voice'))
+})
+
+test('only my voice: an empty result after silenced speech says whose voices were heard', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.emit({ event: 'status', stage: 'transcribing' })
+  h.clock.now += 1_000
+  h.service.toggle()
+  h.emit({
+    event: 'final',
+    channel: 'mic',
+    text: '',
+    voiceGate: { keptMs: 0, droppedMs: 2_400, failures: 0, minDistance: 0.88, maxDistance: 0.93 }
+  })
+  await tick()
+  assert.deepEqual(h.delivered, [])
+  assert.match(lastView(h).title ?? '', /Only other voices were heard/)
+  assert.ok(
+    h.logs.some((line) => /voice filter kept=0ms dropped=2400ms.*0\.88\.\.0\.93/.test(line))
+  )
+})
+
+test('only my voice: silence with nothing filtered is still just silence', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.clock.now += 1_000
+  h.service.toggle()
+  h.emit({
+    event: 'final',
+    channel: 'mic',
+    text: '',
+    voiceGate: { keptMs: 0, droppedMs: 0, failures: 0 }
+  })
+  await tick()
+  assert.match(lastView(h).title ?? '', /No speech/)
+})
+
+test('recording a voice uses the dictation microphone, quiets meeting detection, and turns the filter on', async () => {
+  const voice = fakeVoice({ enrolled: false })
+  const h = harness({ settings: { microphoneUid: 'usb-1' }, voice })
+  h.devices.list = [builtin, usb]
+  await h.service.start()
+  const events: string[] = []
+  const pending = h.service.enrollVoice((event) => void events.push(event.type))
+  await tick()
+  await tick()
+  assert.deepEqual(voice.state.devices, ['usb-1'])
+  assert.deepEqual(h.micHeld, [true])
+  assert.equal((await h.service.status()).voiceEnrolling, true)
+
+  // Dictation waits for the recording instead of fighting it for the microphone.
+  h.service.toggle()
+  await tick()
+  assert.deepEqual(h.engineCalls, [])
+  assert.match(lastView(h).title ?? '', /voice is being recorded/)
+
+  voice.settle({ ok: true })
+  assert.deepEqual(await pending, { ok: true })
+  // The settings page is told at once: it does not ask again after a recording.
+  assert.equal(h.broadcasts.at(-1)?.settings.onlyMyVoice, true)
+  assert.equal(h.broadcasts.at(-1)?.voice?.deviceName, 'USB Mic')
+  assert.equal(h.broadcasts.at(-1)?.voiceEnrolling, false)
+  assert.deepEqual(h.micHeld, [true, false])
+  assert.equal(h.settings.onlyMyVoice, true)
+  assert.deepEqual(events, ['preparing'])
+  const status = await h.service.status()
+  assert.equal(status.voiceEnrolling, false)
+  assert.equal(status.voice?.deviceName, 'USB Mic')
+})
+
+test('a voice recording that fails changes nothing; one is refused while dictating', async () => {
+  const voice = fakeVoice({ enrolled: false })
+  const h = harness({ voice })
+  const pending = h.service.enrollVoice(() => {})
+  await tick()
+  await tick()
+  voice.settle({ ok: false, reason: 'not-enough-speech' })
+  assert.deepEqual(await pending, { ok: false, reason: 'not-enough-speech' })
+  assert.equal(h.settings.onlyMyVoice, false)
+  assert.equal((await h.service.status()).voice, null)
+
+  h.service.toggle()
+  await ready(h)
+  assert.deepEqual(await h.service.enrollVoice(() => {}), { ok: false, reason: 'busy' })
+
+  const denied = harness({ voice: fakeVoice({ enrolled: false }), access: 'denied' })
+  assert.deepEqual(await denied.service.enrollVoice(() => {}), { ok: false, reason: 'microphone' })
+})
+
+test('removing the voice turns the filter off', async () => {
+  const voice = fakeVoice({ enrolled: true })
+  const h = harness({ settings: { onlyMyVoice: true }, voice })
+  const before = h.broadcasts.length
+  const status = await h.service.removeVoice()
+  assert.equal(status.voice, null)
+  assert.equal(status.settings.onlyMyVoice, false)
+  assert.ok(h.broadcasts.length > before, 'the settings page is told the voice is gone')
+  assert.equal(h.broadcasts.at(-1)?.voice, null)
+  assert.equal(h.broadcasts.at(-1)?.settings.onlyMyVoice, false)
+  h.service.toggle()
+  await ready(h)
+  assert.equal('voiceprint' in h.startOpts[0]!, false)
+})
+
+test('Right Option toggle uses native release listener and suspends while recording a shortcut', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  await h.service.start()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  assert.equal(h.helper.toggleKeys.at(-1), 'AltRight')
+  assert.equal(h.shortcuts.has('Modifier:AltRight'), false)
+  await h.service.setShortcutRecording(true)
+  assert.equal(h.helper.toggleKeys.at(-1), 'off')
+  assert.equal(h.shortcuts.size, 0)
+  h.helper.toggleListener?.()
+  assert.equal(h.engineCalls.length, 0)
+  await h.service.setShortcutRecording(false)
+  assert.equal(h.helper.toggleKeys.at(-1), 'AltRight')
+  h.helper.toggleListener?.()
+  await tick()
+  assert.equal(h.engineCalls[0], 'start')
+  await h.service.dispose()
+})
+
+test('unavailable replacement preserves the active shortcut and reports no invented owner', async () => {
+  const h = harness({ blockedShortcut: 'F8' })
+  await h.service.start()
+  const before = h.settings.toggleShortcut
+  const status = await h.service.setSettings({ toggleShortcut: 'F8' })
+  assert.equal(h.settings.toggleShortcut, before)
+  assert.equal(status.toggleShortcut, 'registered')
+  assert.match(status.shortcutIssues?.toggle ?? '', /previous shortcut was kept/)
+  assert.ok(h.shortcuts.has(before))
+  await h.service.dispose()
+})
+
+test('single ordinary key saves and internal duplicate does not replace it', async () => {
+  const h = harness()
+  await h.service.start()
+  await h.service.setSettings({ toggleShortcut: 'B' })
+  assert.ok(h.shortcuts.has('B'))
+  const status = await h.service.setSettings({ toggleShortcut: h.settings.copyLastShortcut })
+  assert.equal(status.settings.toggleShortcut, 'B')
+  assert.match(status.shortcutIssues?.toggle ?? '', /Copy last transcript/)
+  await h.service.dispose()
+})
+
+test('standalone modifier cannot share the hold-to-talk key', async () => {
+  const h = harness({ settings: { holdKey: 'rightOption' } })
+  await h.service.start()
+  const before = h.settings.toggleShortcut
+  const status = await h.service.setSettings({ toggleShortcut: 'Modifier:AltRight' })
+  assert.equal(status.settings.toggleShortcut, before)
+  assert.match(status.shortcutIssues?.toggle ?? '', /Hold to talk/)
+  await h.service.dispose()
+})
+
+test('modifier trigger reports Input Monitoring requirement and re-arms after grant', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  h.helper.inputMonitoring = false
+  await h.service.start()
+  assert.equal((await h.service.status()).toggleShortcut, 'needs-permission')
+  h.helper.inputMonitoring = true
+  await h.service.status()
+  await tick()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  await h.service.dispose()
+})
+
+test('immediate recorder cancellation restores shortcuts after queued disarming', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  await h.service.start()
+  await Promise.all([h.service.setShortcutRecording(true), h.service.setShortcutRecording(false)])
+  assert.equal(h.helper.toggleKeys.at(-1), 'AltRight')
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  await h.service.dispose()
+})
+
+test('revoking and restoring Input Monitoring re-arms a formerly active modifier', async () => {
+  const h = harness({ settings: { toggleShortcut: 'Modifier:AltRight', holdKey: 'off' } })
+  await h.service.start()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  h.helper.inputMonitoring = false
+  assert.equal((await h.service.status()).toggleShortcut, 'needs-permission')
+  const prior = h.helper.toggleKeys.length
+  h.helper.inputMonitoring = true
+  await h.service.status()
+  await tick()
+  assert.equal((await h.service.status()).toggleShortcut, 'registered')
+  assert.ok(h.helper.toggleKeys.length > prior)
+  await h.service.dispose()
+})
+
+test('copy and paste callbacks are inert immediately while shortcut suspension is pending', async () => {
+  const h = harness()
+  await h.service.start()
+  await speak(h, 'keep this transcript')
+  finish(h)
+  h.clock.now += 5000
+  const copy = h.shortcuts.get(h.settings.copyLastShortcut)
+  const paste = h.shortcuts.get(h.settings.pasteLastShortcut)
+  const pending = h.service.setShortcutRecording(true)
+  copy?.()
+  paste?.()
+  await pending
+  await tick()
+  assert.deepEqual(h.clipboard, [])
+  assert.deepEqual(h.delivered, ['keep this transcript'])
+  await h.service.setShortcutRecording(false)
+  await h.service.copyLast()
+  assert.deepEqual(h.clipboard, ['keep this transcript'])
+  await h.service.dispose()
+})
+
+test('only my voice: a filter that cannot start is said on the pill, not hidden in a log', async () => {
+  const h = harness({ settings: { onlyMyVoice: true }, voice: fakeVoice({ enrolled: true }) })
+  h.service.toggle()
+  await ready(h)
+  assert.equal(lastView(h).warning, null)
+  h.emit({ event: 'status', stage: 'voice_gate_unavailable', channel: 'mic' })
+  assert.match(lastView(h).warning ?? '', /Only my voice could not start/)
+  assert.ok(h.logs.includes('engine voice_gate_unavailable'))
+  await h.service.dispose()
 })

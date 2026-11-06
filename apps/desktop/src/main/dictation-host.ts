@@ -14,6 +14,7 @@ import {
   DICTATION_COPY_RECOVERY_CHANNEL,
   DICTATION_DISMISS_RECOVERY_CHANNEL,
   DICTATION_GET_STATUS_CHANNEL,
+  DICTATION_SHORTCUT_RECORDING_CHANNEL,
   DICTATION_OPEN_PRIVACY_CHANNEL,
   DICTATION_OPEN_SETTINGS_EVENT_CHANNEL,
   DICTATION_PASTE_LAST_CHANNEL,
@@ -24,6 +25,11 @@ import {
   DICTATION_SET_SETTINGS_CHANNEL,
   DICTATION_STATUS_EVENT_CHANNEL,
   DICTATION_TOGGLE_CHANNEL,
+  DICTATION_VOICE_CANCEL_CHANNEL,
+  DICTATION_VOICE_ENROLL_CHANNEL,
+  DICTATION_VOICE_EVENT_CHANNEL,
+  DICTATION_VOICE_FINISH_CHANNEL,
+  DICTATION_VOICE_REMOVE_CHANNEL,
   type DictationSettingsUpdate,
   type MicrophoneAccess
 } from '../shared/dictation-api'
@@ -33,6 +39,7 @@ import { DictationHelperClient } from './dictation-helper-client'
 import { DictationOverlay } from './dictation-overlay'
 import { DictationService, type EngineLike } from './dictation-service'
 import { DictationSettingsStore } from './dictation-settings'
+import { DictationVoice, type VoiceEngine } from './dictation-voice'
 import type { NotesService } from './notes-service'
 
 export interface DictationHostOptions {
@@ -41,7 +48,7 @@ export interface DictationHostOptions {
   logsDir: string
   helperPath: string
   /** The macOS sidecar host; dictation is unavailable without it. */
-  engine: EngineLike | null
+  engine: (EngineLike & Partial<VoiceEngine>) | null
   notes: () => NotesService | null
   /** The meeting recorder, when it holds or is about to hold the microphone. */
   meetingBusy: () => boolean
@@ -78,6 +85,18 @@ export function createDictationHost(options: DictationHostOptions): {
   const ownership = new CaptureOwnership()
   const settings = new DictationSettingsStore(options.userData)
   const helper = new DictationHelperClient({ command: options.helperPath })
+  const voiceEngine = options.engine
+  const voice = new DictationVoice(
+    options.userData,
+    voiceEngine?.enrollVoice
+      ? {
+          get enrolling() {
+            return voiceEngine.enrolling === true
+          },
+          enrollVoice: (opts) => voiceEngine.enrollVoice?.(opts) ?? null
+        }
+      : null
+  )
 
   // The overlay callback fires only after construction, so the forward reference is safe.
   // The overlay is built before the service it reports to; actions arrive only after both exist.
@@ -121,8 +140,10 @@ export function createDictationHost(options: DictationHostOptions): {
       get warm() {
         return engine.warm
       },
-      listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([])
+      listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([]),
+      warmVoice: () => engine.warmVoice?.()
     },
+    voice,
     ownership,
     helper,
     shortcuts: {
@@ -189,6 +210,27 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_GET_STATUS_CHANNEL, (event) =>
     trusted(event) ? service.status() : null
   )
+  let recordingSender: WebContents | null = null
+  const endRecording = (): void => {
+    recordingSender?.removeListener('destroyed', endRecording)
+    recordingSender?.removeListener('render-process-gone', endRecording)
+    recordingSender?.removeListener('did-start-navigation', endRecording)
+    recordingSender = null
+    void service.setShortcutRecording(false)
+  }
+  ipcMain.handle(DICTATION_SHORTCUT_RECORDING_CHANNEL, async (event, active: unknown) => {
+    if (!trusted(event) || typeof active !== 'boolean') return
+    if (active) {
+      if (recordingSender) endRecording()
+      recordingSender = event.sender
+      event.sender.once('destroyed', endRecording)
+      event.sender.once('render-process-gone', endRecording)
+      event.sender.once('did-start-navigation', endRecording)
+    } else if (recordingSender === event.sender) {
+      endRecording()
+    }
+    await service.setShortcutRecording(active)
+  })
   ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
     trusted(event) ? service.setSettings(update ?? {}) : null
   )
@@ -207,6 +249,37 @@ export function createDictationHost(options: DictationHostOptions): {
   ipcMain.handle(DICTATION_DICTIONARY_CLEAR_LEARNED_CHANNEL, (event) => {
     if (trusted(event)) service.clearLearnedEntries()
   })
+  ipcMain.handle(DICTATION_VOICE_ENROLL_CHANNEL, async (event) => {
+    if (!trusted(event)) return { ok: false, reason: 'unavailable' }
+    // The recording belongs to the page that asked for it: if that page goes
+    // away, the microphone is released and nothing is saved.
+    const sender = event.sender
+    const abandon = (): void => service.cancelVoiceEnroll()
+    sender.once('destroyed', abandon)
+    sender.once('render-process-gone', abandon)
+    sender.once('did-start-navigation', abandon)
+    try {
+      return await service.enrollVoice((progress) =>
+        options.broadcast(DICTATION_VOICE_EVENT_CHANNEL, progress)
+      )
+    } finally {
+      // A destroyed page has already dropped its listeners.
+      if (!sender.isDestroyed()) {
+        sender.removeListener('destroyed', abandon)
+        sender.removeListener('render-process-gone', abandon)
+        sender.removeListener('did-start-navigation', abandon)
+      }
+    }
+  })
+  ipcMain.handle(DICTATION_VOICE_FINISH_CHANNEL, (event) => {
+    if (trusted(event)) service.finishVoiceEnroll()
+  })
+  ipcMain.handle(DICTATION_VOICE_CANCEL_CHANNEL, (event) => {
+    if (trusted(event)) service.cancelVoiceEnroll()
+  })
+  ipcMain.handle(DICTATION_VOICE_REMOVE_CHANNEL, (event) =>
+    trusted(event) ? service.removeVoice() : null
+  )
   ipcMain.handle(DICTATION_TOGGLE_CHANNEL, (event) => {
     if (trusted(event)) service.toggle()
   })
