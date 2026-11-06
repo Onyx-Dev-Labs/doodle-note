@@ -3406,3 +3406,106 @@
     font-size: 25px;
   }
 }
+
+/* Bark's launch lives alongside the notebook, with the shipped product mark. */
+.marketing .bark-announcement {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 24px;
+  background: var(--forest);
+  color: var(--paper);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.marketing .bark-announcement:hover { background: #345243; }
+.marketing .bark-new {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--yellow);
+  color: var(--forest);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 1px;
+}
+.marketing .bark-section {
+  background: #e1e8d8;
+  border-top: 1px solid #ced8c5;
+  padding: 80px 0 48px;
+  scroll-margin-top: 24px;
+}
+.marketing .bark-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px 80px;
+  align-items: center;
+}
+.marketing .bark-copy .eyebrow { color: #52634b; margin: 0 0 25px; }
+.marketing .bark-brand { display: flex; gap: 18px; align-items: center; }
+.marketing .bark-brand img { object-fit: contain; flex-shrink: 0; }
+.marketing .bark-introducing { font-size: 15px; }
+.marketing .bark-brand h2 {
+  margin: 0;
+  font: 650 76px/1 var(--display);
+  letter-spacing: -4px;
+}
+.marketing .bark-brand h2 span { color: var(--coral); }
+.marketing .bark-copy > h3 {
+  margin: 28px 0 14px;
+  font: 550 30px/1.2 var(--display);
+  letter-spacing: -0.8px;
+}
+.marketing .bark-description {
+  font-size: 16px;
+  line-height: 1.75;
+  max-width: 460px;
+  color: #4b5b46;
+  margin: 0 0 25px;
+}
+.marketing .bark-download { gap: 10px; font-size: 14px; }
+.marketing .bark-availability { font-size: 11px; line-height: 1.8; color: #52634b; margin: 14px 0 0; }
+.marketing .bark-art { padding: 38px 0 0; min-width: 0; text-align: center; }
+.marketing .bark-annotation { display: block; font-size: 26px; transform: rotate(-4deg); margin-bottom: 22px; }
+.marketing .bark-message {
+  position: relative;
+  text-align: left;
+  background: #fffdf5;
+  border: 1px solid #cbd2c0;
+  border-radius: 12px;
+  box-shadow: 8px 10px 0 #ccd6bf;
+  transform: rotate(2deg);
+  padding: 25px 30px 42px;
+}
+.marketing .bark-message-header { display: flex; justify-content: space-between; align-items: center; color: #68715d; font-size: 9px; letter-spacing: 1.4px; padding-bottom: 16px; border-bottom: 1px solid #e2e2d7; }
+.marketing .bark-message-to { color: #6b735f; font-size: 12px; margin: 20px 0; }
+.marketing .bark-message-text { font: 500 28px/1.5 var(--display); letter-spacing: -0.5px; margin: 0 0 24px; }
+.marketing .bark-cursor { display: inline-block; vertical-align: -3px; height: 28px; width: 2px; background: var(--coral); margin-left: 4px; }
+.marketing .bark-message-note { color: #73796c; font-size: 10px; }
+.marketing .bark-pill { position: relative; display: flex; justify-content: center; align-items: center; gap: 20px; width: fit-content; max-width: 100%; padding: 12px 17px; margin: -17px auto 0; background: #fffdf5; border: 1px solid #bfcab6; border-radius: 40px; box-shadow: 0 8px 24px #27332c19; }
+.marketing .bark-pill > img { object-fit: contain; flex-shrink: 0; }
+.marketing .bark-wave { display: flex; align-items: center; justify-content: center; gap: 4px; height: 40px; }
+.marketing .bark-wave i { display: block; width: 3px; border-radius: 3px; background: #526d4f; }
+.marketing .bark-stop { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #e9eede; }
+.marketing .bark-stop > span { display: block; width: 10px; height: 10px; border-radius: 2px; background: var(--forest); }
+.marketing .bark-art-caption { display: block; font-size: 11px; margin-top: 17px; color: #52634b; }
+.marketing .bark-details { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; padding-top: 30px; border-top: 1px solid #bdcbb1; }
+.marketing .bark-details h3 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
+.marketing .bark-details p { margin: 0; font-size: 13px; line-height: 1.7; color: #52634b; max-width: 320px; }
+@media (max-width: 1000px) {
+  .marketing .bark-grid { gap: 45px 40px; }
+  .marketing .bark-message { padding: 22px 24px 38px; }
+  .marketing .bark-message-text { font-size: 24px; }
+  .marketing .bark-annotation { font-size: 22px; }
+}
+@media (max-width: 760px) {
+  .marketing .bark-section { padding: 48px 0 36px; }
+  .marketing .bark-grid { grid-template-columns: 1fr; gap: 36px; }
+  .marketing .bark-brand h2 { font-size: 66px; }
+  .marketing .bark-brand img { width: 74px; height: 74px; }
+  .marketing .bark-art { width: min(440px, 100%); margin: auto; padding: 10px 5px 0; }
+  .marketing .bark-details { grid-template-columns: 1fr; gap: 24px; }
+  .marketing .bark-details p { max-width: none; }
+  .marketing .bark-description { max-width: none; font-size: 15px; }
+  .marketing .bark-announcement { font-size: 12px; gap: 10px; padding: 12px 20px; }
+}
