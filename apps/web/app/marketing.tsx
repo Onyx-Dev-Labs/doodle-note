@@ -45,6 +45,7 @@ export function MarketingHeader() {
     <header className="site-header wrap">
       <MarketingBrand />
       <nav className="desktop-nav" aria-label="Main navigation">
+        <Link href="/#bark">Bark</Link>
         <Link href="/#how-it-works">How it works</Link>
         <Link href="/pricing">Pricing</Link>
       </nav>
@@ -63,6 +64,7 @@ export function MarketingFooter() {
     <footer className="wrap footer">
       <MarketingBrand />
       <nav className="footer-nav" aria-label="Footer">
+        <Link href="/#bark">Bark</Link>
         <Link href="/pricing">Pricing</Link>
         <Link href="/changelog">What’s new</Link>
         <Link href="/contact">Contact</Link>
