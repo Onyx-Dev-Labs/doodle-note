@@ -353,16 +353,61 @@ launch from the new folder the app repoints the "Open at login" entry (keeping
 a Task Manager disable) and MCP client configs (Claude Desktop, Claude Code,
 Codex) that launched the old exe (`src/main/windows-install-migration.ts`).
 
-Upgrade test (isolated, never on a machine's real install): build the previous
-layout and this one with a QA identity (distinct `appId`, `productName` and
-package name, for example `-c.appId=com.doodlenote.desktop.qa -c.productName="DoodleNote QA"
--c.extraMetadata.name=desktop-qa`), install the old one, enable Open at login and
-connect an MCP client, run the new installer (also with `/S --updated`), and check:
-the new folder exists and the old one is gone, one Apps & features entry whose
-uninstaller is in the new folder, Start menu and desktop shortcuts start the new
-exe, the profile and library are unchanged, the Run entry and client configs
-name the new exe. Repeat with the old app running and with a file in the old
-folder held open (the folder is kept and removed by the next run).
+### Upgrade test: QA identity only
+
+**Never run this procedure against the production identity in a real Windows
+account.** A production build's installer, login item and MCP entries are the
+owner's real ones. The test uses the QA identity, a build-time mode that changes
+every identity-bearing name from the one entry in
+`apps/desktop/src/shared/app-identities.json` (checked by
+`src/main/app-identity.test.ts`):
+
+| | Production | QA identity |
+|---|---|---|
+| `appId` (uninstall key, `APP_GUID`) | `com.doodlenote.desktop` | `com.doodlenote.desktop.qa` |
+| Product name, exe, shortcuts | `DoodleNote`, `DoodleNote.exe` | `DoodleNote QA`, `DoodleNote QA.exe` |
+| Package name, profile | `desktop`, `%APPDATA%\desktop` | `desktop-qa`, `%APPDATA%\desktop-qa` |
+| Old / new install folder | `Programs\desktop` / `Programs\DoodleNote` | `Programs\desktop-qa` / `Programs\DoodleNote QA` |
+| AppUserModelID and the "Open at login" Run value | `com.doodlenote.desktop` | `com.doodlenote.desktop.qa` |
+| MCP entry in client configs | `doodle-note` | `doodle-note-qa` |
+| MCP opt-in file and client configs | the real home directory | a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`), like the dev channel |
+| Migration journal | `HKCU\Software\{f85f8dcf-...}\InstallMigration` | `HKCU\Software\{320d0756-...}\InstallMigration` |
+| Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
+
+`pnpm package:win:qa` builds it: the app code with `DOODLENOTE_QA_IDENTITY=1`
+(electron-vite bakes in `__DOODLENOTE_IDENTITY__`) and the package with the
+`electron-builder.qa.cjs` overlay, into `release-qa\`, unsigned (signing
+variables are dropped). The packaged app refuses to start if its code identity
+and its package name disagree, so a production bundle can never be packaged as
+QA or the reverse. `node scripts/package-win-qa.cjs --legacy-layout` builds the
+starting point: the same QA identity without the migration include, so it
+installs to `Programs\desktop-qa` exactly like builds from before the rename
+(output `release-qa-legacy\`). The Bark helper's `Global\DoodleNote-Bark-output`
+mutex is still shared by every identity (a coordination lock, not state; win/bark
+round 3 is moving it to `Local\`).
+
+Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
+`Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
+
+1. Install `release-qa-legacy\DoodleNote QA-<version>-setup.exe`. Turn on Open
+   at login, enable agent access and connect the three MCP clients (they are
+   written in the sandbox above, never the real `~/.claude.json` etc.). Record the
+   QA Run value (`com.doodlenote.desktop.qa`) and confirm the production one, if
+   any, is unchanged.
+2. Run `release-qa\DoodleNote QA-<version>-setup.exe` (also with `/S --updated`).
+   Check: `Programs\DoodleNote QA` exists and `Programs\desktop-qa` is gone; one
+   "DoodleNote QA" entry in Apps & features whose uninstaller is in the new
+   folder; Start menu and desktop shortcuts start the new exe; the profile and
+   library are unchanged; the QA Run value and the sandboxed client configs name
+   the new exe (`install-migration.json` in the profile says `complete`); the QA
+   journal key is gone; nothing of production changed (its folder, Run value,
+   uninstall key and real MCP configs).
+3. Repeat with the legacy QA app running (closed only after the OK prompt; with
+   `/S` and no `--updated` it is left running and its folder kept), with a file
+   in the old folder held open (the folder and its exe stay, the journal stays
+   armed, the next run finishes), and with `Programs\DoodleNote QA` replaced by a
+   junction to `Programs\desktop-qa` before step 2 (nothing is moved or deleted;
+   the install is upgraded in place).
 
 ## Automatic updates (off until activation)
 

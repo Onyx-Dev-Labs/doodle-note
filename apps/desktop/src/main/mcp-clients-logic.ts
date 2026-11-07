@@ -1,4 +1,5 @@
 import type { McpServerSpec } from '../shared/integrations-api'
+import { APP_IDENTITY } from './app-identity'
 
 /**
  * Pure read-modify-write helpers for wiring the doodle-note-mcp server into
@@ -9,8 +10,8 @@ import type { McpServerSpec } from '../shared/integrations-api'
  * fs boundary stays in AgentAccessService and this stays unit-testable.
  */
 
-/** The key our server is registered under in every client. */
-export const MCP_SERVER_KEY = 'doodle-note'
+/** The key our server is registered under in every client (doodle-note-qa for a QA build). */
+export const MCP_SERVER_KEY = APP_IDENTITY.mcpServerKey
 
 export class ClientConfigError extends Error {}
 

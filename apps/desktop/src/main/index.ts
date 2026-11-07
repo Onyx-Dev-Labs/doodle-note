@@ -1,5 +1,6 @@
 import { createBeforeQuitHandler, finishRecordingBeforeQuit } from './engine-quit'
 import { APP_CHANNEL } from '../shared/app-channel'
+import { APP_IDENTITY, identityMismatch } from './app-identity'
 import { planProfile } from './profile-identity'
 import { createDictationHost } from './dictation-host'
 import { WinDictationCapture } from './win-dictation-capture'
@@ -191,6 +192,17 @@ function migrateDevUserData(): void {
 if (process.env.DOODLE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DOODLE_DEBUG_PORT)
 }
+// A Windows package must carry the identity its code was built for (production or
+// QA, src/main/app-identity.ts); a mismatch would write the other one's login item
+// and MCP entries. The packaged app name is the package name in app.asar.
+if (process.platform === 'win32' && app.isPackaged && APP_CHANNEL === 'release') {
+  const mismatch = identityMismatch(app.getName())
+  if (mismatch) {
+    dialog.showErrorBox(APP_IDENTITY.productName, mismatch)
+    process.exit(1)
+  }
+}
+
 // Where this build keeps its state. The production lineage keeps the existing
 // rule (DOODLE_USER_DATA relocates unpackaged runs only). A development build
 // owns a distinct, explicitly named profile, because that variable cannot
@@ -586,7 +598,8 @@ app.whenReady().then(async () => {
     }
   })
 
-  electronApp.setAppUserModelId('com.doodlenote.desktop')
+  // Also names the Windows login item (Electron reads the Run value by this id).
+  electronApp.setAppUserModelId(APP_IDENTITY.appUserModelId)
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
@@ -1020,7 +1033,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(DETECT_GET_STATE_CHANNEL, (): DetectState => detectState())
   ipcMain.handle(DETECT_SET_PREFS_CHANNEL, (_event, update: DetectPrefsUpdate): DetectState => {
     if (typeof update?.loginItem === 'boolean') {
-      app.setLoginItemSettings({ openAtLogin: update.loginItem })
+      app.setLoginItemSettings({ openAtLogin: update.loginItem, name: APP_IDENTITY.loginItemName })
     }
     if (typeof update?.micDetect === 'boolean') {
       micWatcher.setEnabled(update.micDetect)
@@ -1038,7 +1051,7 @@ app.whenReady().then(async () => {
       await recipeRunner?.stop()
       await notesService?.dispose()
     },
-    { enabled: profile.updatesEnabled }
+    { enabled: profile.updatesEnabled && APP_IDENTITY.updatesAllowed }
   )
   // Make a development build unmistakable in the Dock and Cmd-Tab.
   if (APP_CHANNEL === 'dev') app.dock?.setBadge('DEV')
@@ -1109,9 +1122,11 @@ app.whenReady().then(async () => {
     () => join(libraryRoot(), 'meetings'),
     resolveMcpServerSpec(),
     // The opt-in file and client configs normally live in the real home
-    // directory and are shared by every DoodleNote. A development build gets a
-    // sandboxed home inside its own profile so it can never rewrite them.
-    APP_CHANNEL === 'dev' ? join(app.getPath('userData'), 'agent-access-home') : undefined
+    // directory and are shared by every DoodleNote. A development or QA identity
+    // build gets a sandboxed home inside its own profile so it can never rewrite them.
+    APP_CHANNEL === 'dev' || APP_IDENTITY.isolatesAgentAccess
+      ? join(app.getPath('userData'), 'agent-access-home')
+      : undefined
   )
   const previousLibrary = storage?.status().recoveryPath
   if (previousLibrary) {
@@ -1141,7 +1156,8 @@ app.whenReady().then(async () => {
           const item = settings.launchItems?.find((entry) => isInsideFolder(entry.path, exe))
           return { registered: settings.openAtLogin, enabled: item?.enabled ?? true }
         },
-        registerCurrent: (enabled) => app.setLoginItemSettings({ openAtLogin: true, enabled })
+        registerCurrent: (enabled) =>
+          app.setLoginItemSettings({ openAtLogin: true, enabled, name: APP_IDENTITY.loginItemName })
       },
       repointMcpClients: (isStale, only) => agentAccessService.repointStaleClients(isStale, only),
       log: (message) => console.log(message)

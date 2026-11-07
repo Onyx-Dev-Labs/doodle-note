@@ -1,0 +1,14 @@
+{
+  "production": {
+    "appId": "com.doodlenote.desktop",
+    "productName": "DoodleNote",
+    "packageName": "desktop",
+    "mcpServerKey": "doodle-note"
+  },
+  "qa": {
+    "appId": "com.doodlenote.desktop.qa",
+    "productName": "DoodleNote QA",
+    "packageName": "desktop-qa",
+    "mcpServerKey": "doodle-note-qa"
+  }
+}

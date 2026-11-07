@@ -1,4 +1,5 @@
 import { win32 } from 'node:path'
+import { APP_IDENTITY, type AppIdentity } from './app-identity'
 
 /**
  * Windows install folder rename, app side. Builds before 0.5.x installed to
@@ -17,19 +18,23 @@ import { win32 } from 'node:path'
  * app, not the install folder, and is not moved.
  */
 
-export const LEGACY_INSTALL_FOLDER = 'desktop'
-export const INSTALL_FOLDER = 'DoodleNote'
+/** Both folder names come from the app identity, so a QA build migrates its own folders. */
+export const LEGACY_INSTALL_FOLDER = APP_IDENTITY.legacyInstallFolder
+export const INSTALL_FOLDER = APP_IDENTITY.installFolder
 
 export interface LegacyInstall {
   dir: string
   exe: string
 }
 
-/** The pre-rename install this exe replaced, or null when not running from a DoodleNote folder. */
-export function legacyInstallFor(execPath: string): LegacyInstall | null {
+/** The pre-rename install this exe replaced, or null when not running from the new install folder. */
+export function legacyInstallFor(
+  execPath: string,
+  identity: Pick<AppIdentity, 'installFolder' | 'legacyInstallFolder'> = APP_IDENTITY
+): LegacyInstall | null {
   const dir = win32.dirname(win32.normalize(execPath))
-  if (win32.basename(dir).toLowerCase() !== INSTALL_FOLDER.toLowerCase()) return null
-  const legacyDir = win32.join(win32.dirname(dir), LEGACY_INSTALL_FOLDER)
+  if (win32.basename(dir).toLowerCase() !== identity.installFolder.toLowerCase()) return null
+  const legacyDir = win32.join(win32.dirname(dir), identity.legacyInstallFolder)
   return { dir: legacyDir, exe: win32.join(legacyDir, win32.basename(execPath)) }
 }
 

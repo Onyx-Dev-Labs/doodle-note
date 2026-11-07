@@ -31,6 +31,8 @@ pgdata/
 # packaged app output
 apps/desktop/release/
 apps/desktop/release-dev/
+apps/desktop/release-qa/
+apps/desktop/release-qa-legacy/
 .vercel
 .env*.local
 

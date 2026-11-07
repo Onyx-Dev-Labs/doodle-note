@@ -26,6 +26,11 @@ function helperIntegrity(): string {
   }
 }
 
+// A QA identity build (src/main/app-identity.ts) never contacts an update feed.
+if (process.env.DOODLENOTE_QA_IDENTITY === '1' && process.env.DOODLENOTE_WINDOWS_UPDATES === 'on') {
+  throw new Error('DOODLENOTE_QA_IDENTITY=1 builds cannot turn on DOODLENOTE_WINDOWS_UPDATES')
+}
+
 export default defineConfig({
   main: {
     define: {
@@ -49,6 +54,10 @@ export default defineConfig({
       // Windows automatic updates ship off; a release flips this (docs/WINDOWS-RELEASE-QA.md).
       __DOODLENOTE_WINDOWS_UPDATES__: JSON.stringify(
         process.env.DOODLENOTE_WINDOWS_UPDATES === 'on' ? 'on' : 'off'
+      ),
+      // The app identity (src/main/app-identity.ts); package with electron-builder.qa.cjs too.
+      __DOODLENOTE_IDENTITY__: JSON.stringify(
+        process.env.DOODLENOTE_QA_IDENTITY === '1' ? 'qa' : 'production'
       ),
       __DOODLENOTE_GOOGLE_CLIENT_SECRET__: JSON.stringify(
         process.env.DOODLENOTE_GOOGLE_CLIENT_SECRET?.trim() ?? ''
