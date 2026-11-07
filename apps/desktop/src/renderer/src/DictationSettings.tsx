@@ -206,7 +206,7 @@ export function DictationSettings(): React.JSX.Element {
     </div>
   )
   const microphoneState = permissions.microphone === 'unknown' ? 'unknown' : permissions.microphone
-  const hooks = describeWindowsHooks(permissions.inputMonitoring)
+  const hooks = describeWindowsHooks(permissions.inputMonitoring, permissions.hooksLive)
   const hiddenNow = status.pillHidden
   const captureMouse = async (): Promise<void> => {
     setCapturing(true)
@@ -288,7 +288,9 @@ export function DictationSettings(): React.JSX.Element {
                 ? 'Ready'
                 : status.helper === 'blocked'
                   ? 'Blocked by Windows'
-                  : 'Missing',
+                  : status.helper === 'damaged'
+                    ? 'Damaged'
+                    : 'Missing',
               describeWindowsHelper(status.helper)
             )}
             {infoRow('Keyboard and mouse hook', hooks.label, hooks.detail)}
@@ -351,6 +353,12 @@ export function DictationSettings(): React.JSX.Element {
               </span>
               {settings.holdKey === 'fn' && (
                 <span className="cal-row-sub">{describeFnKey(status.fnKeyAction)}</span>
+              )}
+              {windows && settings.holdKey === 'rightOption' && (
+                <span className="cal-row-sub">
+                  On a layout with AltGr, holding Right Alt types nothing on its own, but adding a
+                  letter key produces that layout&apos;s AltGr character instead of dictating.
+                </span>
               )}
             </span>
             <select
@@ -696,7 +704,7 @@ export function DictationSettings(): React.JSX.Element {
               <span className="cal-row-label">Speech model</span>
               <span className="cal-row-sub">
                 {status.speech === 'warm'
-                  ? 'Loaded. Dictation starts immediately.'
+                  ? `Loaded. Dictation starts immediately${windows ? `, and stays loaded while ${FEATURE_NAME} is on` : ''}.`
                   : 'Still loading. The first dictation may start slowly.'}
               </span>
             </span>

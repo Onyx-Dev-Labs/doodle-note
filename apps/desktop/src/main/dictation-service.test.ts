@@ -91,6 +91,10 @@ function harness(
     platform?: NodeJS.Platform
     /** Windows: the helper exists but Windows would not start it. */
     helperBlocked?: boolean
+    /** Windows: how the helper on disk compares with its manifest. */
+    helperIntegrity?: 'ok' | 'damaged' | 'absent'
+    /** Windows: the dictation model readiness the engine reports. */
+    modelState?: { ready: boolean; downloadProgress: number | null; usingFallback: boolean }
     warm?: () => void
     modelOptions?: {
       localModelLabel: string | null
@@ -177,6 +181,7 @@ function harness(
     channel: 'dev',
     supported: true,
     ...(options.platform ? { platform: options.platform } : {}),
+    ...(options.helperIntegrity ? { helperIntegrity: () => options.helperIntegrity! } : {}),
     settings: {
       get: () => settings,
       update: (patch) => Object.assign(settings, patch),
@@ -195,7 +200,8 @@ function harness(
         return engineBusy
       },
       warm: true,
-      listInputDevices: async () => devices.list
+      listInputDevices: async () => devices.list,
+      ...(options.modelState ? { dictationModelState: () => options.modelState! } : {})
     },
     ownership,
     helper: {
@@ -2487,7 +2493,10 @@ test('Windows: a blocked helper says so and never opens the microphone', async (
   const h = harness({ platform: 'win32', helperBlocked: true })
   h.service.toggle()
   await tick()
-  assert.match(JSON.stringify(h.overlay.at(-1)), /Windows did not let the Bark helper start/)
+  assert.match(
+    JSON.stringify(h.overlay.at(-1)),
+    /Windows refused to run the Bark helper because it is not signed/
+  )
   assert.deepEqual(h.engineCalls, [])
   assert.equal(h.ownership.owner, null)
   assert.equal((await h.service.status()).helper, 'blocked')
@@ -2542,4 +2551,64 @@ test('Windows: a Right Ctrl hold dictates and delivers through the same path', a
   h.emit({ event: 'final', channel: 'mic', text: 'typed on windows' })
   await tick()
   assert.deepEqual(h.delivered, ['typed on windows'])
+})
+
+test('Windows: Bark refuses to dictate on the weaker fallback model and shows the download percent', async () => {
+  const h = harness({
+    platform: 'win32',
+    modelState: { ready: false, downloadProgress: 0.42, usingFallback: true }
+  })
+  h.service.toggle()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Downloading the speech model… 42%/)
+  assert.deepEqual(h.engineCalls, [], 'the engine is never started on the weaker model')
+  assert.equal(h.ownership.owner, null)
+})
+
+test('Windows: once Parakeet is ready, dictation starts normally', async () => {
+  const h = harness({
+    platform: 'win32',
+    modelState: { ready: true, downloadProgress: null, usingFallback: false }
+  })
+  await speak(h, 'hello windows')
+  assert.deepEqual(h.delivered, ['hello windows'])
+})
+
+test('macOS never consults a dictation model state (the engine always has the full model)', async () => {
+  const h = harness()
+  await speak(h, 'hello mac')
+  assert.deepEqual(h.delivered, ['hello mac'])
+})
+
+test('Windows: a damaged helper refuses dictation and reports as damaged', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'damaged' })
+  h.service.toggle()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /does not match this build/)
+  assert.deepEqual(h.engineCalls, [])
+  assert.equal((await h.service.status()).helper, 'damaged')
+})
+
+test('an app running as administrator is refused with a clear reason, and the text is kept', async () => {
+  const h = harness()
+  h.helper.deliveryFor = () => ({
+    outcome: 'refused',
+    reason: 'elevated-target',
+    verified: false,
+    clipboard: 'untouched'
+  })
+  await speak(h, 'into an admin app')
+  const shown = JSON.stringify(h.overlay.at(-1))
+  assert.match(shown, /running as administrator/)
+  assert.match(shown, /into an admin app/, 'the text is kept on the recovery card')
+})
+
+test('a specific "no microphone" engine error reaches the user unchanged', async () => {
+  const h = harness()
+  h.service.toggle()
+  await tick()
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.emit({ event: 'error', message: 'No microphone was found.' })
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /No microphone was found\./)
 })

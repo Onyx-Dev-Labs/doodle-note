@@ -1,5 +1,6 @@
-import { appendFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { dirname, join } from 'node:path'
 import { clipboard, globalShortcut, ipcMain, shell, systemPreferences } from 'electron'
 import type { WebContents } from 'electron'
 import type { AppChannel } from '../shared/app-channel'
@@ -74,6 +75,25 @@ function microphoneAccess(): MicrophoneAccess {
   }
 }
 
+/**
+ * How the helper on disk compares with the manifest written beside it at build time:
+ * 'absent' missing, 'damaged' a hash mismatch, 'ok' otherwise (including a dev build with no
+ * manifest, which cannot be verified). Read once; the helper does not change under a running app.
+ */
+function computeHelperIntegrity(helperPath: string): 'ok' | 'damaged' | 'absent' {
+  if (!existsSync(helperPath)) return 'absent'
+  const manifestPath = join(dirname(helperPath), 'dictation-helper.manifest.json')
+  if (!existsSync(manifestPath)) return 'ok'
+  try {
+    const expected = JSON.parse(readFileSync(manifestPath, 'utf8')) as { sha256?: unknown }
+    if (typeof expected.sha256 !== 'string') return 'ok'
+    const actual = createHash('sha256').update(readFileSync(helperPath)).digest('hex')
+    return actual === expected.sha256 ? 'ok' : 'damaged'
+  } catch {
+    return 'ok'
+  }
+}
+
 /** Builds the real service from Electron pieces and registers its IPC. */
 export function createDictationHost(options: DictationHostOptions): {
   service: DictationService
@@ -83,6 +103,8 @@ export function createDictationHost(options: DictationHostOptions): {
   const settings = new DictationSettingsStore(options.userData)
   const platform = options.platform ?? process.platform
   const client = new DictationHelperClient({ command: options.helperPath, platform })
+  // Windows only: a missing/damaged helper is told apart from a launch refusal.
+  const helperIntegrity = platform === 'win32' ? computeHelperIntegrity(options.helperPath) : 'ok'
   const mapUid = options.inputStateUid
   // Windows only: the same client, with the microphone named the way the helper reads it.
   const helper = mapUid
@@ -127,6 +149,7 @@ export function createDictationHost(options: DictationHostOptions): {
     channel: options.channel,
     supported: options.engine !== null,
     platform,
+    ...(platform === 'win32' ? { helperIntegrity: () => helperIntegrity } : {}),
     settings,
     // The meeting recorder holds the microphone before the sidecar session
     // exists; treat that handshake as busy too.

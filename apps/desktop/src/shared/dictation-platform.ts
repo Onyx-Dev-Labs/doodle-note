@@ -47,6 +47,8 @@ export interface BarkCopy {
   transformsNeedModel: string
   /** Windows only: the helper program exists but Windows would not start it. */
   helperBlocked: string
+  /** Windows only: the shipped helper does not match its manifest (damaged or tampered). */
+  helperDamaged: string
   permissionsDescription: string
   permissionsIntro: string
   holdNeedsPermission: string
@@ -71,6 +73,7 @@ export const BARK_COPY: Record<BarkPlatform, BarkCopy> = {
     transformsNeedModel:
       'Transforms need a notes model on this Mac or your own provider. Set one up under Notes model.',
     helperBlocked: `The ${FEATURE_NAME} helper is missing from this build.`,
+    helperDamaged: `The ${FEATURE_NAME} helper is missing from this build.`,
     permissionsDescription: 'Microphone, Accessibility, and Input Monitoring',
     permissionsIntro:
       'Allow asks macOS directly, which also lists DoodleNote Dev under Privacy & Security. Once you have answered, macOS will not ask again and the button opens System Settings instead.',
@@ -96,7 +99,8 @@ export const BARK_COPY: Record<BarkPlatform, BarkCopy> = {
       'Windows does not ask for the microphone. Turn on "Let desktop apps access your microphone" in Windows Settings → Privacy & security → Microphone, then try again.',
     transformsNeedModel:
       'Transforms need a notes model on this PC or your own provider. Set one up under Notes model.',
-    helperBlocked: `Windows did not let the ${FEATURE_NAME} helper start. Application Control or Smart App Control can hold back an unsigned program for a while; nothing was typed. Try again in a few minutes, or ask whoever manages this PC to allow DoodleNote's dictation-helper.exe.`,
+    helperBlocked: `Windows refused to run the ${FEATURE_NAME} helper because it is not signed, so nothing was typed. A signed build fixes this; meanwhile, ask whoever manages this PC to allow DoodleNote's dictation-helper.exe. (Application Control can also hold back a freshly built unsigned program for a while.)`,
+    helperDamaged: `The ${FEATURE_NAME} helper on disk does not match this build (it may be damaged). Reinstall DoodleNote; nothing was typed.`,
     permissionsDescription: 'Microphone, typing into apps, and the keyboard hook',
     permissionsIntro: `Windows asks no permission for typing into other apps. ${FEATURE_NAME} needs microphone access for desktop apps, and its small helper program, which watches the hold-to-talk key and types the text for you.`,
     holdNeedsPermission: 'Windows did not allow the keyboard hook. See Permissions.',
@@ -137,29 +141,46 @@ export function privacySettingsUrl(
  * Windows: what the helper row says. ready: running; blocked: Windows would not start
  * it; unavailable: the program is missing from this build.
  */
-export function describeWindowsHelper(helper: 'ready' | 'blocked' | 'unavailable'): string {
+export function describeWindowsHelper(
+  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable'
+): string {
   switch (helper) {
     case 'ready':
       return 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
     case 'blocked':
-      return 'Windows held it back (Application Control or Smart App Control). Try again in a few minutes, or ask whoever manages this PC to allow it.'
+      return 'Windows refused to run it because it is unsigned. A signed build fixes this; or ask whoever manages this PC to allow it.'
+    case 'damaged':
+      return 'The file on disk does not match this build. Reinstall DoodleNote.'
     default:
       return `Missing from this build, so ${FEATURE_NAME} cannot type or hear the hold key.`
   }
 }
 
-/** Windows: the keyboard and mouse hook row. Null until the helper has answered. */
-export function describeWindowsHooks(allowed: boolean | null): { label: string; detail: string } {
+/**
+ * Windows: the keyboard and mouse hook row. `allowed` is whether a hook can be installed
+ * at all; `live` (when known) is whether it is installed right now. Null until the helper
+ * has answered.
+ */
+export function describeWindowsHooks(
+  allowed: boolean | null,
+  live?: boolean | null
+): { label: string; detail: string } {
   if (allowed === null) return { label: 'Checking…', detail: 'Waiting for the helper.' }
-  return allowed
-    ? {
-        label: 'Working',
-        detail:
-          'The helper may watch the hold-to-talk key and mouse button. It only looks; your keys still reach your apps.'
-      }
-    : {
-        label: 'Blocked',
-        detail:
-          'Windows or security software refused the low-level keyboard hook, so hold-to-talk and the mouse button cannot work. The press-to-start shortcut and the pill still do.'
-      }
+  if (!allowed)
+    return {
+      label: 'Blocked',
+      detail:
+        'Windows or security software refused the low-level keyboard hook, so hold-to-talk and the mouse button cannot work. The press-to-start shortcut and the pill still do.'
+    }
+  if (live === false)
+    return {
+      label: 'Reconnecting…',
+      detail:
+        'Windows briefly dropped the hook (a busy moment under load); the helper is re-installing it. Hold-to-talk works again in a moment.'
+    }
+  return {
+    label: 'Working',
+    detail:
+      'The helper may watch the hold-to-talk key and mouse button. It only looks; your keys still reach your apps.'
+  }
 }

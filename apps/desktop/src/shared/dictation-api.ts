@@ -157,6 +157,8 @@ export interface DictationPermissions {
   inputMonitoring: boolean | null
   /** Input Monitoring as macOS reports it, so the page knows whether a prompt is still possible. */
   inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
+  /** Windows: the low-level hooks are installed right now. Null off Windows and until the helper answers. */
+  hooksLive?: boolean | null
 }
 
 export interface RecoveryItem {
@@ -172,8 +174,11 @@ export interface DictationStatus {
   settings: DictationSettings
   phase: Phase
   permissions: DictationPermissions
-  /** blocked (Windows only): the helper program exists but Windows would not start it. */
-  helper: 'ready' | 'blocked' | 'unavailable'
+  /**
+   * blocked (Windows only): Windows refused to run the unsigned helper.
+   * damaged (Windows only): the helper does not match its manifest.
+   */
+  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable'
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState

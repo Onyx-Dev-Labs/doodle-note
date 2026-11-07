@@ -11,6 +11,7 @@ import {
 } from '../shared/engine-events'
 import type { EngineEventListener } from './engine-process'
 import { WinSessionRecorder } from './win-audio-recorder'
+import { PARAKEET_UNIFIED } from './windows-asr-models'
 import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import { ImportCanceledError } from './import-jobs'
@@ -75,6 +76,10 @@ export class WinEngineHost {
   private keepWarm = false
   /** The worker is downloading Parakeet in the background (upgrade fallback). */
   private backgroundDownload = false
+  /** The live model the worker loaded (serve_ready); dictation needs the preferred Parakeet. */
+  private liveModelName: string | null = null
+  /** Background Parakeet download progress 0..1 while the worker runs on the fallback model. */
+  private parakeetDownloadProgress: number | null = null
   /** Frames captured while a reloading worker loads its model. */
   private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
   private startAfterReload = false
@@ -162,6 +167,26 @@ export class WinEngineHost {
   /** True while the worker has its model loaded, so a start is immediate. */
   get warm(): boolean {
     return this.ready && this.child !== null && !this.unloaded
+  }
+
+  /**
+   * Whether dictation may run on the live model. Bark needs the preferred Parakeet, which gives
+   * the accuracy the Mac does; a fresh install serves the weaker legacy Zipformer while Parakeet
+   * downloads in the background, and Bark refuses until it is ready (matching the Mac, which never
+   * dictates on a weaker model).
+   */
+  dictationModelState(): {
+    ready: boolean
+    downloadProgress: number | null
+    usingFallback: boolean
+  } {
+    const onParakeet = this.liveModelName === PARAKEET_UNIFIED.name
+    const usingFallback = this.liveModelName !== null && !onParakeet
+    return {
+      ready: this.warm && onParakeet,
+      downloadProgress: this.parakeetDownloadProgress,
+      usingFallback
+    }
   }
 
   /** Where dictation's capture control messages go (the dictation capture window). */
@@ -280,6 +305,7 @@ export class WinEngineHost {
 
   private handleEngineEvent(event: Record<string, unknown>): void {
     if (event.event === 'status' && event.stage === 'serve_ready') {
+      this.liveModelName = typeof event.model === 'string' ? event.model : null
       // Diagnostics only: model, measured decode cost and caption mode.
       console.info(
         `[win-asr] ready model=${String(event.model ?? '')} loadMs=${String(event.loadMs ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
@@ -301,17 +327,23 @@ export class WinEngineHost {
       this.failReloadDuringSession(String(event.message ?? 'the speech model could not be loaded'))
       return
     }
-    if (event.event === 'status' && event.stage === 'model_download' && !this.backgroundDownload) {
-      // Closing the worker now would abort the download it is running.
-      this.backgroundDownload = true
-      if (this.idleTimer) clearTimeout(this.idleTimer)
-      this.idleTimer = null
+    if (event.event === 'status' && event.stage === 'model_download') {
+      if (typeof event.progress === 'number') this.parakeetDownloadProgress = event.progress
+      if (!this.backgroundDownload) {
+        // Closing the worker now would abort the download it is running.
+        this.backgroundDownload = true
+        if (this.idleTimer) clearTimeout(this.idleTimer)
+        this.idleTimer = null
+      }
     }
     if (
       event.event === 'status' &&
       (event.stage === 'model_upgraded' || event.stage === 'model_download_failed')
     ) {
       this.backgroundDownload = false
+      // On a successful upgrade the next serve_ready reports Parakeet; a failure leaves the fallback.
+      if (event.stage === 'model_upgraded') this.liveModelName = PARAKEET_UNIFIED.name
+      this.parakeetDownloadProgress = null
       if (!this.sessionActive) this.armIdleTimer()
     }
     if (!this.ready && !this.sessionActive) {

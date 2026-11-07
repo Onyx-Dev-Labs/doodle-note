@@ -74,6 +74,7 @@ import {
   backgroundQuitDue,
   hasThemedTitleBarOverlay,
   hidesToTrayOnClose,
+  onlyDictationWindowsRemain,
   quitsAfterBackgroundRecording,
   titleBarOverlayFor,
   windowChromeOptions
@@ -401,6 +402,21 @@ function createWindow(): void {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
     recording.rendererGone()
+    // Windows: the pill and the hidden capture window outlive the main window, so
+    // window-all-closed never fires on its own. When a real close (not hide-to-tray)
+    // leaves only those, quit — preserving step 3's "close quits unless recording".
+    if (process.platform === 'win32' && !quitting && !recording.busy) {
+      const remaining = BrowserWindow.getAllWindows()
+        .filter((other) => other !== window && !other.isDestroyed())
+        .map((other) => {
+          try {
+            return other.webContents.getURL()
+          } catch {
+            return ''
+          }
+        })
+      if (onlyDictationWindowsRemain(remaining)) app.quit()
+    }
   })
   window.webContents.on('did-start-loading', () => {
     if (recording.busy && engine.running) engine.stop()

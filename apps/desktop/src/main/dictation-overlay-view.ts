@@ -72,6 +72,8 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'no-target': 'No text field was focused, so nothing was typed.',
   'not-editable': 'That control cannot take text, so nothing was typed.',
   'accessibility-denied': 'Accessibility access is off, so nothing was typed.',
+  'elevated-target':
+    'That app is running as administrator, so DoodleNote cannot type into it. Your text is kept for copying.',
   'insertion-uncertain': 'Could not confirm the text was inserted. Check before pasting again.',
   'insertion-failed': 'Insertion failed, so nothing was typed.',
   'helper-unavailable': 'The insertion helper is unavailable, so nothing was typed.',

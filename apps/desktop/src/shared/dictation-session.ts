@@ -36,6 +36,8 @@ export type RecoveryReason =
   | 'no-target'
   | 'not-editable'
   | 'accessibility-denied'
+  /** Windows: the focused app runs as administrator, so a non-elevated helper cannot type into it. */
+  | 'elevated-target'
   | 'insertion-uncertain'
   | 'insertion-failed'
   | 'helper-unavailable'

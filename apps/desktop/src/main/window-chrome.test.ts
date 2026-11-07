@@ -7,6 +7,7 @@ import {
   BACKGROUND_FINISH_LIMITS,
   backgroundQuitDue,
   hidesToTrayOnClose,
+  onlyDictationWindowsRemain,
   quitsAfterBackgroundRecording,
   titleBarOverlayFor,
   windowChromeOptions
@@ -206,4 +207,23 @@ test('automatic notes progress and library writes feed the deferred quit', () =>
   // The tray says what is happening; reopening or Quit stop the wait.
   assert.match(indexSource, /recordingTray\?\.showFinishingNotes\(true\)/)
   assert.match(indexSource, /if \(quitting\) return cancelBackgroundFinish\(\)/)
+})
+
+test('Bark windows (the pill and hidden capture page) do not keep the app alive', () => {
+  // No windows, or only the dictation utility windows: closing the main window may quit.
+  assert.equal(onlyDictationWindowsRemain([]), true)
+  assert.equal(onlyDictationWindowsRemain(['data:text/html;charset=utf-8,%3C...']), true)
+  assert.equal(
+    onlyDictationWindowsRemain([
+      'file:///C:/app/out/renderer/dictation-capture.html',
+      'data:text/html;charset=utf-8,...'
+    ]),
+    true
+  )
+  // A real app window remains: do not quit.
+  assert.equal(onlyDictationWindowsRemain(['file:///C:/app/out/renderer/index.html']), false)
+})
+
+test('index.ts quits on a Windows close that leaves only dictation windows', () => {
+  assert.match(indexSource, /onlyDictationWindowsRemain\(remaining\)\) app\.quit\(\)/)
 })

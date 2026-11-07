@@ -102,6 +102,15 @@ export interface EngineLike {
   readonly warm: boolean
   /** Audio inputs, for the microphone picker. Resolves [] when listing fails. */
   listInputDevices?(): Promise<InputDevice[]>
+  /**
+   * Windows: whether the dictation-quality model (Parakeet) is loaded. Absent on macOS, where
+   * the engine always runs the full model. `ready: false` means Bark should not dictate yet.
+   */
+  dictationModelState?(): {
+    ready: boolean
+    downloadProgress: number | null
+    usingFallback: boolean
+  }
 }
 
 export interface HelperLike {
@@ -147,6 +156,8 @@ export interface HelperLike {
   muteOutput(): Promise<boolean>
   restoreOutput(): Promise<void>
   onExit(listener: () => void): () => void
+  /** Windows: the low-level hooks were lost and re-installed (or could not be). */
+  onHooks?(listener: (phase: 'lost' | 'restored' | 'failed') => void): () => void
   dispose(): Promise<void>
 }
 
@@ -176,6 +187,11 @@ export interface DictationDeps {
   supported: boolean
   /** Picks the platform's words (see dictation-platform.ts). Defaults to macOS. */
   platform?: NodeJS.Platform
+  /**
+   * Windows: how the helper on disk compares with its build manifest. 'absent' is missing,
+   * 'damaged' is a hash mismatch, 'ok' otherwise. Absent on macOS (treated as 'ok').
+   */
+  helperIntegrity?(): 'ok' | 'damaged' | 'absent'
   settings: {
     get(): DictationSettings
     update(patch: DictationSettingsUpdate): DictationSettings
@@ -369,6 +385,10 @@ export class DictationService {
       deps.helper.onClick(() => this.onClick()),
       deps.helper.onExit(() => this.onHelperExit())
     )
+    // Windows: a hook loss/re-install changes what the permissions panel shows; refresh it.
+    if (deps.helper.onHooks) {
+      this.unsubscribe.push(deps.helper.onHooks(() => void this.status()))
+    }
   }
 
   /* ---- lifecycle ---- */
@@ -958,8 +978,27 @@ export class DictationService {
       })
       return
     }
+    if (this.deps.helperIntegrity?.() === 'damaged') {
+      this.dispatch({ type: 'notice', level: 'error', message: this.copy.helperDamaged })
+      return
+    }
     if (this.deps.helper.blocked) {
       this.dispatch({ type: 'notice', level: 'error', message: this.copy.helperBlocked })
+      return
+    }
+    const model = this.deps.engine.dictationModelState?.()
+    if (model && !model.ready) {
+      // A fresh install serves a weaker model while Parakeet downloads; do not dictate on it
+      // (the Mac never dictates on a weaker model either).
+      const percent =
+        model.downloadProgress !== null ? ` ${Math.round(model.downloadProgress * 100)}%` : ''
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: model.usingFallback
+          ? `Downloading the speech model…${percent} ${FEATURE_NAME} will be ready in a moment.`
+          : `Preparing the speech model.${percent ? ` Downloading…${percent}.` : ''} Try again in a moment.`
+      })
       return
     }
     const access = this.deps.microphoneAccess()
@@ -1249,9 +1288,13 @@ export class DictationService {
     this.dispatch({
       type: 'engine-failed',
       gen,
-      message: /microphone/i.test(message)
-        ? 'The microphone stopped delivering audio. Check your input device and try again.'
-        : 'The speech engine reported an error. Nothing was inserted.'
+      message:
+        // Pass the capture layer's own specific microphone messages straight through.
+        /no microphone was found|access is turned off|could not be opened/i.test(message)
+          ? message
+          : /microphone/i.test(message)
+            ? 'The microphone stopped delivering audio. Check your input device and try again.'
+            : 'The speech engine reported an error. Nothing was inserted.'
     })
   }
 
@@ -1547,7 +1590,8 @@ export class DictationService {
           conflicts: [],
           holdActive: false,
           mouseActive: false,
-          fnKeyAction: null
+          fnKeyAction: null,
+          hooksLive: null
         }
       }
       if (this.state.active?.gen === gen) this.render()
@@ -2122,7 +2166,8 @@ export class DictationService {
       microphone: this.deps.microphoneAccess(),
       accessibility: helper ? helper.accessibility : null,
       inputMonitoring: helper ? helper.inputMonitoring : null,
-      inputMonitoringAccess: helper ? helper.inputMonitoringAccess : null
+      inputMonitoringAccess: helper ? helper.inputMonitoringAccess : null,
+      hooksLive: helper ? (helper.hooksLive ?? null) : null
     }
     return {
       channel: this.deps.channel,
@@ -2130,11 +2175,14 @@ export class DictationService {
       settings,
       phase: this.state.phase,
       permissions,
-      helper: !this.deps.helper.available
-        ? 'unavailable'
-        : this.deps.helper.blocked
-          ? 'blocked'
-          : 'ready',
+      helper:
+        !this.deps.helper.available || this.deps.helperIntegrity?.() === 'absent'
+          ? 'unavailable'
+          : this.deps.helperIntegrity?.() === 'damaged'
+            ? 'damaged'
+            : this.deps.helper.blocked
+              ? 'blocked'
+              : 'ready',
       toggleShortcut: this.toggleState,
       pasteLastShortcut: this.actionKeys.paste.state,
       copyLastShortcut: this.actionKeys.copy.state,
@@ -2188,11 +2236,15 @@ function refusalReason(reason: string | undefined): RecoveryReason {
     case 'no-target':
     case 'not-editable':
     case 'accessibility-denied':
+    case 'elevated-target':
     case 'selection-changed':
     case 'text-changed':
       return reason
     case 'helper-unavailable':
       return 'helper-unavailable'
+    // A delivery the helper refused because the client had already given up: keep the text.
+    case 'deadline-exceeded':
+      return 'insertion-failed'
     default:
       return 'insertion-failed'
   }

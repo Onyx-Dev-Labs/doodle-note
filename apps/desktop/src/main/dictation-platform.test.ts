@@ -35,6 +35,7 @@ test('macOS words are byte-for-byte what the app said before Windows support', (
     transformsNeedModel:
       'Transforms need a notes model on this Mac or your own provider. Set one up under Notes model.',
     helperBlocked: 'The Bark helper is missing from this build.',
+    helperDamaged: 'The Bark helper is missing from this build.',
     permissionsDescription: 'Microphone, Accessibility, and Input Monitoring',
     permissionsIntro:
       'Allow asks macOS directly, which also lists DoodleNote Dev under Privacy & Security. Once you have answered, macOS will not ask again and the button opens System Settings instead.',
@@ -99,11 +100,24 @@ test('privacy buttons: the same macOS panes as before; Windows has a microphone 
 
 test('Windows helper and hook rows say what is going on', () => {
   assert.match(describeWindowsHelper('ready'), /starts with DoodleNote/)
-  assert.match(describeWindowsHelper('blocked'), /Application Control or Smart App Control/)
+  assert.match(describeWindowsHelper('blocked'), /unsigned/)
   assert.match(describeWindowsHelper('unavailable'), /Missing/)
   assert.equal(describeWindowsHooks(null).label, 'Checking…')
   assert.equal(describeWindowsHooks(true).label, 'Working')
+  assert.equal(describeWindowsHooks(true, true).label, 'Working')
+  assert.equal(describeWindowsHooks(true, false).label, 'Reconnecting…')
   assert.equal(describeWindowsHooks(false).label, 'Blocked')
+  assert.equal(
+    describeWindowsHelper('damaged'),
+    'The file on disk does not match this build. Reinstall DoodleNote.'
+  )
+})
+
+test('the blocked helper copy is permanent (a signed build), not "try again in a few minutes"', () => {
+  assert.match(BARK_COPY.win32.helperBlocked, /not signed|unsigned/)
+  assert.match(BARK_COPY.win32.helperBlocked, /signed build/)
+  assert.doesNotMatch(BARK_COPY.win32.helperBlocked, /in a few minutes/)
+  assert.ok(BARK_COPY.win32.helperDamaged.length > 0)
 })
 
 test('mouse capture failures: macOS unchanged, Windows names its own buttons', () => {
