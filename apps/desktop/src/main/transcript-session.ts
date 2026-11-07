@@ -42,6 +42,7 @@ export class TranscriptSession {
   private captionsDelayed = false
   private legacyModel = false
   private legacyDownloadFailed = false
+  private untranscribedSec = 0
   private savedAudioFailures: SavedAudioFailures = {}
 
   bindMeeting(meetingId?: string): void {
@@ -62,7 +63,8 @@ export class TranscriptSession {
       error: this.error,
       ...(this.captionsDelayed ? { captionsDelayed: true } : {}),
       ...(this.legacyModel ? { legacyModel: true } : {}),
-      ...(this.legacyDownloadFailed ? { legacyDownloadFailed: true } : {})
+      ...(this.legacyDownloadFailed ? { legacyDownloadFailed: true } : {}),
+      ...(this.untranscribedSec > 0 ? { untranscribedSec: this.untranscribedSec } : {})
     }
   }
 
@@ -100,6 +102,7 @@ export class TranscriptSession {
         this.captionsDelayed = false
         this.legacyModel = false
         this.legacyDownloadFailed = false
+        this.untranscribedSec = 0
         this.savedAudioFailures = {}
         return
       case 'ready':
@@ -118,6 +121,9 @@ export class TranscriptSession {
         }
         if (ev.stage === 'captions_delayed') this.captionsDelayed = true
         if (ev.stage === 'captions_caught_up') this.captionsDelayed = false
+        if (ev.stage === 'audio_not_transcribed') {
+          this.untranscribedSec += Math.max(1, Math.round(ev.seconds ?? 0))
+        }
         if (ev.stage === 'legacy_model') {
           this.legacyModel = true
           this.legacyDownloadFailed = ev.download === 'failed'

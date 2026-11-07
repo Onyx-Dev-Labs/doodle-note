@@ -485,6 +485,70 @@ test('a forced-cut seam survives variant spellings, split words and repeats near
         ['go', 10.2]
       ],
       'we need to | go'
+    ],
+    [
+      'dropped "to", a later "to" after one new word',
+      [
+        ['want', 9.2],
+        ['to', 9.5]
+      ],
+      [
+        ['want', 9.2],
+        ['go', 9.8],
+        ['to', 10.1],
+        ['the', 10.3],
+        ['store', 10.5]
+      ],
+      'want to | go to the store'
+    ],
+    [
+      'dropped "the", a later "the" after one new word',
+      [
+        ['at', 9.3],
+        ['the', 9.6]
+      ],
+      [
+        ['at', 9.3],
+        ['end', 9.8],
+        ['the', 10.1],
+        ['day', 10.3]
+      ],
+      'at the | end the day'
+    ],
+    [
+      'two new words, then the committed pair again',
+      [
+        ['in', 9.2],
+        ['the', 9.5]
+      ],
+      [
+        ['in', 9.2],
+        ['fact', 9.8],
+        ['in', 10.05],
+        ['the', 10.3],
+        ['end', 10.5]
+      ],
+      'in the | fact in the end'
+    ],
+    [
+      'a new word right after a long committed word',
+      [['unfortunately', 9.0, 9.9]],
+      [
+        ['unfortunately', 9.05, 9.65],
+        ['we', 9.7],
+        ['lost', 10.0]
+      ],
+      'unfortunately | we lost'
+    ],
+    [
+      'a committed word timed through the pause, a new word inside its span',
+      [['okay', 9.0, 9.95]],
+      [
+        ['okay', 9.0, 9.3],
+        ['so', 9.35],
+        ['next', 9.8]
+      ],
+      'okay | so next'
     ]
   ]
   for (const [name, committed, second, expected] of cases) {

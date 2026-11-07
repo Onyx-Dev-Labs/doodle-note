@@ -249,6 +249,16 @@ test('Windows sessions checkpoint the open utterance and save in time order', ()
   }
 })
 
+test('the not-transcribed notice survives a renderer snapshot and resets per capture', () => {
+  const session = new TranscriptSession(() => {}, 'unused')
+  session.bindMeeting('u')
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
+  session.handle({ event: 'status', stage: 'audio_not_transcribed', seconds: 96 })
+  assert.equal(session.snapshot('u')?.untranscribedSec, 96)
+  session.handle({ event: 'started', command: 'live', binaryPath: 'test' })
+  assert.equal(session.snapshot('u')?.untranscribedSec, undefined)
+})
+
 test('the captions-delayed state survives a renderer snapshot until it clears', () => {
   const session = new TranscriptSession(() => {}, 'unused')
   session.bindMeeting('d')

@@ -555,10 +555,12 @@ export class WinEngineHost {
     }
     // Audio past the cap is in the recording but not in the transcript: the
     // worker hears silence for it, so later words keep their place in time.
+    let untranscribed = 0
     for (const [channel, dropped] of this.droppedSamples) {
       console.warn(
         `[win-asr] ${channel}: ${(dropped / 16_000).toFixed(1)} s recorded during a slow model load are not transcribed`
       )
+      untranscribed = Math.max(untranscribed, dropped / 16_000)
       for (let left = dropped; left > 0; left -= SILENCE_FRAME_SAMPLES) {
         const samples = new Float32Array(Math.min(left, SILENCE_FRAME_SAMPLES))
         this.child.postMessage({ t: 'audio', sessionId, channel, samples, sentAt })
@@ -567,6 +569,14 @@ export class WinEngineHost {
     this.pendingFrames = []
     this.pendingSamples = 0
     this.droppedSamples.clear()
+    if (untranscribed > 0) {
+      // A recorder notice, like captions_delayed: the user must know.
+      this.emit({
+        event: 'status',
+        stage: 'audio_not_transcribed',
+        seconds: Math.round(untranscribed)
+      })
+    }
     if (this.stopAfterReload) {
       this.stopAfterReload = false
       this.child.postMessage({ t: 'stop', sessionId })

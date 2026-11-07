@@ -424,10 +424,13 @@ export const SEAM_PRIOR_SEC = 2
  * Cost of a second-decode word left unmatched before a match: an alignment
  * may not claim that words the first part never wrote were already committed
  * just to reach a repeated word ("signed the | contract with the bank" must
- * not match the second "the"). Committed words the second decode dropped
- * cost nothing.
+ * not match the second "the", nor "want to | go to the store" the second
+ * "to"). It costs more than any one match gains (a split word gains 1.5), so
+ * skipping a new word is never cheaper than leaving the match out: a filler
+ * the first part did not write is bridged only when at least two matches
+ * follow it. Committed words the second decode dropped cost nothing.
  */
-const SEAM_GAP_COST = 0.6
+const SEAM_GAP_COST = 1.6
 
 /** Two decodes of one word start this close together, once their shift is allowed for. */
 const SEAM_SAME_START_SEC = 0.4
@@ -544,6 +547,8 @@ export function stitchSeam(tokens: EngineTokenTiming[], seam: Seam): EngineToken
     // Committed words left unmatched after the alignment, and the time shift there.
     let unmatched: SeamWord[]
     let shift = 0
+    // An alignment that only pays off by skipping new words is no alignment.
+    if (top <= 0) end = null
     if (end) {
       resume = end[1]
       unmatched = prior.slice(end[0])

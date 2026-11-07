@@ -12,6 +12,8 @@ interface CaptureStatusState {
   legacyModel?: boolean
   /** Windows only: the new model's background download failed (retried later). */
   legacyDownloadFailed?: boolean
+  /** Windows only: seconds of this capture saved but not transcribed live. */
+  untranscribedSec?: number
 }
 
 /** Windows recorder notices for the live session, in display order. */
@@ -20,6 +22,7 @@ export function captureNotices(state: {
   captionsDelayed?: boolean
   legacyModel?: boolean
   legacyDownloadFailed?: boolean
+  untranscribedSec?: number
 }): string[] {
   const live = state.phase === 'recording' || state.phase === 'starting'
   const notices: string[] = []
@@ -28,6 +31,11 @@ export function captureNotices(state: {
       state.legacyDownloadFailed
         ? 'Transcribing with the previous speech model. The new one could not be downloaded; DoodleNote tries again after this recording. This recording keeps the previous model’s transcript.'
         : 'Transcribing with the previous speech model while the new one downloads. This recording keeps that transcript; Re-transcribe it later for the new model.'
+    )
+  }
+  if (live && state.untranscribedSec) {
+    notices.push(
+      `About ${state.untranscribedSec} s of this recording, captured while the speech model was loading, was not transcribed live. The audio is saved; use Re-transcribe after the recording to include it.`
     )
   }
   if (live && state.captionsDelayed) {
@@ -88,6 +96,11 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
       return { ...state, captionsDelayed: true }
     case 'captions_caught_up':
       return { ...state, captionsDelayed: false }
+    case 'audio_not_transcribed':
+      return {
+        ...state,
+        untranscribedSec: (state.untranscribedSec ?? 0) + Math.max(1, Math.round(ev.seconds ?? 0))
+      }
     case 'legacy_model':
       return { ...state, legacyModel: true, legacyDownloadFailed: ev.download === 'failed' }
     case 'model_download_failed':

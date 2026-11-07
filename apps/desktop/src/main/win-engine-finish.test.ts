@@ -329,6 +329,8 @@ test('audio past the reload buffer is replaced by silence so later words keep th
   const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
     idleUnloadMs: 1_000
   })
+  const events: EngineEvent[] = []
+  host.onEvent((event) => events.push(event))
   try {
     host.startServe()
     const first = workers.at(-1)!
@@ -365,6 +367,13 @@ test('audio past the reload buffer is replaced by silence so later words keep th
       const silent = sent.slice(firstSilent, tail).reduce((sum, samples) => sum + samples.length, 0)
       assert.ok(silent > 30 * 16_000, `${channel}: ${silent} samples of silence`)
     }
+    // The recorder is told, like captions_delayed: 156 s recorded, 120 s buffered.
+    const notices = events.filter(
+      (event) => event.event === 'status' && event.stage === 'audio_not_transcribed'
+    )
+    assert.equal(notices.length, 1)
+    const seconds = (notices[0] as { seconds?: number }).seconds ?? 0
+    assert.ok(seconds >= 35 && seconds <= 37, `${seconds} s`)
   } finally {
     host.dispose()
   }

@@ -118,6 +118,8 @@ export interface EngineStatusEvent {
   permission?: string
   /** Windows, stage === "legacy_model": state of the background model download. */
   download?: 'in_progress' | 'failed'
+  /** Windows, stage === "audio_not_transcribed": recorded seconds missing from the live transcript. */
+  seconds?: number
 }
 
 export interface EngineDownloadEvent {
@@ -288,6 +290,8 @@ export interface EngineSessionSnapshot {
   /** Windows: this capture uses the previous speech model (see legacy_model). */
   legacyModel?: boolean
   legacyDownloadFailed?: boolean
+  /** Windows: seconds of this capture saved but not transcribed live (see audio_not_transcribed). */
+  untranscribedSec?: number
 }
 
 export type EngineLifecycleEvent =

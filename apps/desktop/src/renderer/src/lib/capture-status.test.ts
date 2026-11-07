@@ -93,6 +93,20 @@ test('the Windows captions-delayed warning is shown while late and cleared when 
   assert.deepEqual(captureNotices({ ...again, phase: 'ended' }), [])
 })
 
+test('audio saved but not transcribed live is announced with Re-transcribe advice', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  const missing = applyCaptureStatus(recording, {
+    event: 'status',
+    stage: 'audio_not_transcribed',
+    seconds: 96
+  })
+  assert.equal(missing.statusText, '')
+  const text = captureNotices(missing).join(' ')
+  assert.match(text, /About 96 s of this recording.*not transcribed live/)
+  assert.match(text, /audio is saved; use Re-transcribe/)
+  assert.deepEqual(captureNotices({ ...missing, phase: 'ended' }), [])
+})
+
 test('a capture on the previous speech model says so honestly', () => {
   const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
   const legacy = applyCaptureStatus(recording, { event: 'status', stage: 'legacy_model' })

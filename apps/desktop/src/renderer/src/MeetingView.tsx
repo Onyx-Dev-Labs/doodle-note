@@ -69,6 +69,8 @@ interface SessionState {
   /** Windows: this capture uses the previous speech model. */
   legacyModel?: boolean
   legacyDownloadFailed?: boolean
+  /** Windows: seconds saved but not transcribed live. */
+  untranscribedSec?: number
 }
 
 const initialSessionState: SessionState = {
@@ -116,6 +118,7 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         captionsDelayed: snapshot.captionsDelayed === true,
         legacyModel: snapshot.legacyModel === true,
         legacyDownloadFailed: snapshot.legacyDownloadFailed === true,
+        untranscribedSec: snapshot.untranscribedSec,
         statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
       }
     }
