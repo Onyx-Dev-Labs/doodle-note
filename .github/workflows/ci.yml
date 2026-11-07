@@ -119,9 +119,10 @@ jobs:
 
       # The packaged-app smokes below attach through Playwright, which needs the
       # Node inspector fuse that electron-builder.yml turns off. Only this CI
-      # test package re-enables it; release builds keep the hardened fuses.
+      # test package (electron-builder.ci.yml) re-enables it; release builds
+      # keep the hardened fuses.
       - name: Build Windows installer
-        run: pnpm --filter desktop package:win -c.electronFuses.enableNodeCliInspectArguments=true
+        run: pnpm --filter desktop package:win:ci
 
       - name: Test recorder with packaged Electron runtime
         run: node apps/desktop/scripts/test-electron-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe

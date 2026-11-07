@@ -1,0 +1,6 @@
+# CI-only overlay for the Windows smoke package. Playwright attaches to the
+# packaged app through the Node inspector, which electron-builder.yml turns off
+# for releases. Never use this file for a package that is published.
+extends: ./electron-builder.yml
+electronFuses:
+  enableNodeCliInspectArguments: true
