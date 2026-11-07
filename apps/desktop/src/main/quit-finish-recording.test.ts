@@ -115,10 +115,11 @@ test('only Windows quits wait for the recording; macOS keeps its engine-owned sh
     /if \(process\.platform === 'win32'\) \{\n\s+if \(engine\.running\) recordingTray\?\.showSavingBeforeQuit\(\)\n\s+await finishRecordingBeforeQuit\(\n\s+engine,\n\s+sessionEnding \? SESSION_END_FINISH_TIMEOUT_MS : undefined\n\s+\)\n\s+recordingTray\?\.dispose\(\)\n\s+\}\n\s+const results = await Promise\.allSettled\(\[engine\.dispose\(\), micWatcher\.dispose\(\)\]\)/
   )
   assert.equal(cleanup.match(/finishRecordingBeforeQuit/g)?.length, 1)
-  // The tray's Quit item runs app.quit(), which reaches this before-quit cleanup.
+  // The tray's Quit item runs app.quit(), which reaches this before-quit cleanup:
+  // macOS menu, Windows menu and the Windows "finishing notes" menu.
   const tray = readFileSync(new URL('./recording-tray.ts', import.meta.url), 'utf8')
   assert.equal(
     tray.match(/\{ label: 'Quit DoodleNote', click: \(\) => app\.quit\(\) \}/g)?.length,
-    2
+    3
   )
 })

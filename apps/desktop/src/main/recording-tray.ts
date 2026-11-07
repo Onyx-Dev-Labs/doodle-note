@@ -33,6 +33,8 @@ export class RecordingTray {
   private hintShown = false
   /** Windows: Quit is waiting for the recording to be saved. */
   private savingBeforeQuit = false
+  /** Windows: the window was closed; DoodleNote quits once notes finish. */
+  private finishingNotes = false
   private images: ReturnType<typeof nativeImage.createFromPath>[] = []
   private updateImage = (): void => {
     // App theme can differ from the menu bar; keep the recording body white.
@@ -114,6 +116,15 @@ export class RecordingTray {
    * Windows: Quit waits (bounded) for the recording to be saved. Keep the icon
    * and say so, instead of vanishing while the app is still finishing.
    */
+  /**
+   * Windows: the recording ended with its window closed; automatic notes are
+   * finishing before DoodleNote quits. Open and Quit stay available.
+   */
+  showFinishingNotes(active: boolean): void {
+    if (!this.windows || !this.tray || this.finishingNotes === active) return
+    this.finishingNotes = active
+    this.render()
+  }
   showSavingBeforeQuit(): void {
     if (!this.windows || !this.tray) return
     this.savingBeforeQuit = true
@@ -165,6 +176,19 @@ export class RecordingTray {
       this.tray.setToolTip('DoodleNote — Saving recording…')
       this.tray.setContextMenu(
         Menu.buildFromTemplate([{ label: 'Saving recording before quitting…', enabled: false }])
+      )
+      return
+    }
+    if (this.finishingNotes) {
+      this.tray.setToolTip('DoodleNote — Finishing notes…')
+      this.tray.setContextMenu(
+        Menu.buildFromTemplate([
+          { label: 'Finishing notes, then closing…', enabled: false },
+          { type: 'separator' },
+          { label: 'Open DoodleNote', click: () => this.open() },
+          { type: 'separator' },
+          { label: 'Quit DoodleNote', click: () => app.quit() }
+        ])
       )
       return
     }

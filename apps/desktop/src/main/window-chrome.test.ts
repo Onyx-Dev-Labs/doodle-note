@@ -4,6 +4,8 @@ import { test } from 'node:test'
 import {
   WINDOWS_TITLE_BAR_HEIGHT,
   hasThemedTitleBarOverlay,
+  BACKGROUND_FINISH_LIMITS,
+  backgroundQuitDue,
   hidesToTrayOnClose,
   quitsAfterBackgroundRecording,
   titleBarOverlayFor,
@@ -97,18 +99,26 @@ test('Windows quits when a recording that outlived its window ends, unless reope
   assert.equal(quitsAfterBackgroundRecording('darwin', true, 'idle'), false)
   assert.match(
     indexSource,
-    /if \(quitsAfterBackgroundRecording\(process\.platform, closedWhileRecording, state\.phase\)\)\n\s+app\.quit\(\)/
+    /if \(quitsAfterBackgroundRecording\(process\.platform, closedWhileRecording, state\.phase\)\)\n\s+startBackgroundFinish\(\)\n\s+else if \(state\.phase !== 'idle'\) cancelBackgroundFinish\(\)/
   )
   // Reopening clears it; shutdown / log-off stops and saves instead of holding the session.
   const win =
     /if \(process\.platform === 'win32'\) \{\n\s+\/\/ Reopened[\s\S]*?\n {2}\}\n/.exec(
       indexSource
     )?.[0] ?? ''
-  assert.match(win, /window\.on\('show', \(\) => \{\n\s+closedWhileRecording = false/)
-  assert.match(win, /window\.on\('query-session-end', \(\) => \{\n\s+sessionEnding = true/)
   assert.match(
     win,
-    /window\.on\('session-end', \(\) => \{\n\s+sessionEnding = true\n\s+app\.quit\(\)/
+    /window\.on\('show', \(\) => \{\n\s+closedWhileRecording = false\n\s+cancelBackgroundFinish\(\)\n\s+resetSessionEnding\(\)/
+  )
+  // A cancelled shutdown fires no event: focus or a timer resets it.
+  assert.match(win, /window\.on\('focus', resetSessionEnding\)/)
+  assert.match(
+    win,
+    /window\.on\('query-session-end', \(\) => \{\n\s+resetSessionEnding\(\)\n\s+sessionEnding = true\n\s+sessionEndingReset = setTimeout\(resetSessionEnding, SESSION_END_CANCEL_RESET_MS\)/
+  )
+  assert.match(
+    win,
+    /window\.on\('session-end', \(\) => \{[\s\S]*?sessionEnding = true\n\s+app\.quit\(\)/
   )
 })
 
@@ -137,9 +147,54 @@ test('every Windows chrome rule is scoped to html[data-platform=win32], so macOS
 test('the rendered Windows chrome is checked by a native behavior script in CI', () => {
   // scripts/test-windows-chrome.cjs measures the real app (scrollbar width and
   // offset, element under the cursor at the logo, headers clear of the overlay).
-  const ci = readFileSync(new URL('../../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const ci = readFileSync(
+    new URL('../../../../.github/workflows/ci.yml', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
   assert.match(
     ci,
     /node apps\/desktop\/scripts\/test-windows-chrome\.cjs apps\/desktop\/release\/win-unpacked\/DoodleNote\.exe/
   )
+  // Bounded: the check has its own step timeout and the job has one too.
+  assert.match(
+    ci,
+    /- name: Check Windows window chrome behavior\n\s+shell: pwsh\n\s+timeout-minutes: \d+/
+  )
+  assert.match(ci, /windows-package:\n(?:\s{4}.*\n)*?\s{4}timeout-minutes: \d+/)
+})
+
+test('the deferred Windows quit waits for automatic notes and their saves, bounded', () => {
+  const endedAt = 1_000_000
+  const at = (s: number): number => endedAt + s * 1000
+  const due = (now: number, notes: number, write: number): boolean =>
+    backgroundQuitDue(now, { endedAt, lastNotesActivityAt: notes, lastLibraryWriteAt: write })
+  // No notes job (turned off, or no model): wait out the start grace, then quit.
+  assert.equal(due(at(5), 0, 0), false)
+  assert.equal(due(at(14), 0, at(2)), false)
+  assert.equal(due(at(15), 0, at(2)), true)
+  // Notes start at 3 s with progress every second until 60 s, then the renderer saves at 61 s.
+  assert.equal(due(at(20), at(19.5), at(2)), false, 'notes are being written')
+  assert.equal(due(at(62), at(60), at(61)), false, 'the result is being saved')
+  assert.equal(due(at(65.9), at(60), at(61)), false)
+  assert.equal(due(at(66), at(60), at(61)), true, 'quiet for 5 s after the last save')
+  // Activity from before the recording ended does not count as a notes job.
+  assert.equal(due(at(6), endedAt - 10_000, 0), false)
+  // Never longer than the cap, even if notes keep running.
+  const max = BACKGROUND_FINISH_LIMITS.maxWaitMs / 1000
+  assert.equal(due(at(max - 1), at(max - 1), 0), false)
+  assert.equal(due(at(max), at(max), 0), true)
+})
+
+test('automatic notes progress and library writes feed the deferred quit', () => {
+  assert.match(
+    indexSource,
+    /if \(channel === NOTES_ENHANCE_PROGRESS_CHANNEL \|\| channel === NOTES_ENHANCE_TOKEN_CHANNEL\)\n\s+lastNotesActivityAt = Date\.now\(\)\n\s+broadcast\(channel, payload\)/
+  )
+  assert.match(
+    indexSource,
+    /meetingsService\.onDidWrite = \(change\) => \{\n\s+lastLibraryWriteAt = Date\.now\(\)/
+  )
+  // The tray says what is happening; reopening or Quit stop the wait.
+  assert.match(indexSource, /recordingTray\?\.showFinishingNotes\(true\)/)
+  assert.match(indexSource, /if \(quitting\) return cancelBackgroundFinish\(\)/)
 })

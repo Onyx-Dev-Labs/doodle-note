@@ -394,3 +394,36 @@ test('Windows keeps the tray while Quit saves the recording; macOS ignores it', 
   )
   mac.controller.dispose()
 })
+
+test('Windows tray says notes are finishing, with Open and Quit still working; macOS ignores it', () => {
+  const s = setup('win32')
+  s.controller.update({ phase: 'idle', eligible: true, meetingId: null })
+  s.controller.showFinishingNotes(true)
+  assert.equal(s.native.tooltip, 'DoodleNote — Finishing notes…')
+  assert.deepEqual(
+    Array.from(s.native.menu, (item) => item.label ?? item.type),
+    [
+      'Finishing notes, then closing…',
+      'separator',
+      'Open DoodleNote',
+      'separator',
+      'Quit DoodleNote'
+    ]
+  )
+  s.click('Open DoodleNote')
+  s.click('Quit DoodleNote')
+  assert.deepEqual(s.counts(), { starts: 0, opens: 1, quits: 1, timerCleared: false })
+  s.controller.showFinishingNotes(false)
+  assert.equal(s.native.tooltip, 'DoodleNote')
+  assert.ok(s.item('Record now'))
+  s.controller.dispose()
+
+  const mac = setup('darwin')
+  const before = Array.from(mac.native.menu, (item) => item.label ?? item.type)
+  mac.controller.showFinishingNotes(true)
+  assert.deepEqual(
+    Array.from(mac.native.menu, (item) => item.label ?? item.type),
+    before
+  )
+  mac.controller.dispose()
+})

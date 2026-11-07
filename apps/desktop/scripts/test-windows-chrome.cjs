@@ -17,9 +17,21 @@ async function main() {
   if (!executable)
     throw new Error('Usage: node test-windows-chrome.cjs <DoodleNote.exe> [screenshot-dir]')
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'doodle-chrome-qa-'))
+  let app
+  // Never hang CI: kill the app and fail if any step stalls.
+  const watchdog = setTimeout(() => {
+    console.error('Windows chrome check timed out')
+    try {
+      app?.process().kill()
+    } catch {
+      /* already gone */
+    }
+    removeProfile(profile)
+    process.exit(1)
+  }, 120_000)
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE
-  const app = await _electron.launch({
+  app = await _electron.launch({
     executablePath: path.resolve(executable),
     args: [`--user-data-dir=${profile}`],
     env,
@@ -110,8 +122,28 @@ async function main() {
     console.log(JSON.stringify({ home, settings }, null, 2))
     console.log('Windows window chrome behavior checks passed')
   } finally {
-    await app.close()
+    await Promise.race([app.close(), new Promise((resolve) => setTimeout(resolve, 15_000))])
+    try {
+      app.process().kill()
+    } catch {
+      /* already exited */
+    }
+    clearTimeout(watchdog)
+    removeProfile(profile)
   }
+}
+
+/** The app may hold profile files briefly after exit on Windows. */
+function removeProfile(profile) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      fs.rmSync(profile, { recursive: true, force: true })
+      return
+    } catch {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+    }
+  }
+  console.warn(`Could not remove the temporary profile ${profile}`)
 }
 main().catch((error) => {
   console.error(error)

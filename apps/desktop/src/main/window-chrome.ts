@@ -83,3 +83,37 @@ export function quitsAfterBackgroundRecording(
 
 /** Windows ends a shutdown/log-off session quickly; finish the recording within this. */
 export const SESSION_END_FINISH_TIMEOUT_MS = 4_000
+
+/** If no shutdown follows query-session-end within this, the person cancelled it. */
+export const SESSION_END_CANCEL_RESET_MS = 30_000
+
+/**
+ * Windows: after a recording that outlived its window ends, automatic notes
+ * (on by default) run in the hidden renderer and then save. The deferred quit
+ * waits for that work, bounded:
+ * - startGraceMs: time for automatic notes to start after the recording ends
+ *   (the renderer reads settings and saves rough notes first);
+ * - quietMs: no notes progress and no library write for this long;
+ * - maxWaitMs: quit regardless after this long.
+ */
+export const BACKGROUND_FINISH_LIMITS = {
+  startGraceMs: 15_000,
+  quietMs: 5_000,
+  maxWaitMs: 5 * 60_000
+} as const
+
+export function backgroundQuitDue(
+  now: number,
+  activity: { endedAt: number; lastNotesActivityAt: number; lastLibraryWriteAt: number },
+  limits: { startGraceMs: number; quietMs: number; maxWaitMs: number } = BACKGROUND_FINISH_LIMITS
+): boolean {
+  if (now - activity.endedAt >= limits.maxWaitMs) return true
+  const latest = Math.max(
+    activity.endedAt,
+    activity.lastNotesActivityAt,
+    activity.lastLibraryWriteAt
+  )
+  if (now - latest < limits.quietMs) return false
+  const notesStarted = activity.lastNotesActivityAt >= activity.endedAt
+  return notesStarted || now - activity.endedAt >= limits.startGraceMs
+}

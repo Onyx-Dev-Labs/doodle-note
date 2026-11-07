@@ -67,7 +67,9 @@ import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import { MAIN_WINDOW_SIZE } from './window-sizing'
 import {
+  SESSION_END_CANCEL_RESET_MS,
   SESSION_END_FINISH_TIMEOUT_MS,
+  backgroundQuitDue,
   hasThemedTitleBarOverlay,
   hidesToTrayOnClose,
   quitsAfterBackgroundRecording,
@@ -83,6 +85,7 @@ import {
   type DetectState
 } from '../shared/detect-api'
 import { THEME_SET_SOURCE_CHANNEL } from '../shared/theme-api'
+import { NOTES_ENHANCE_PROGRESS_CHANNEL, NOTES_ENHANCE_TOKEN_CHANNEL } from '../shared/notes-api'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_AUDIO_CHANNEL,
@@ -211,6 +214,43 @@ let libraryReady = false
 let closedWhileRecording = false
 /** Windows: shutdown or log-off is ending this session. */
 let sessionEnding = false
+let sessionEndingReset: ReturnType<typeof setTimeout> | null = null
+/** Windows: last automatic-notes progress and library write, for the deferred quit. */
+let lastNotesActivityAt = 0
+let lastLibraryWriteAt = 0
+let backgroundFinish: { endedAt: number; timer: ReturnType<typeof setInterval> } | null = null
+
+/**
+ * Windows: the recording that outlived its window has ended. Quit once the
+ * automatic notes and their saves have finished (bounded), as the close the
+ * person asked for. Reopening the window or a new recording cancels this.
+ */
+function startBackgroundFinish(): void {
+  if (backgroundFinish) return
+  const endedAt = Date.now()
+  recordingTray?.showFinishingNotes(true)
+  const timer = setInterval(() => {
+    if (quitting) return cancelBackgroundFinish()
+    if (backgroundQuitDue(Date.now(), { endedAt, lastNotesActivityAt, lastLibraryWriteAt })) {
+      cancelBackgroundFinish()
+      app.quit()
+    }
+  }, 1_000)
+  backgroundFinish = { endedAt, timer }
+}
+
+function cancelBackgroundFinish(): void {
+  if (!backgroundFinish) return
+  clearInterval(backgroundFinish.timer)
+  backgroundFinish = null
+  recordingTray?.showFinishingNotes(false)
+}
+
+function resetSessionEnding(): void {
+  sessionEnding = false
+  if (sessionEndingReset) clearTimeout(sessionEndingReset)
+  sessionEndingReset = null
+}
 const recording = new RecordingStartCoordinator(
   (request: RecordingStartRequest) =>
     mainWindow?.webContents.send(RECORDING_DELIVER_CHANNEL, request),
@@ -218,9 +258,11 @@ const recording = new RecordingStartCoordinator(
     recordingTray?.update(state)
     mainWindow?.webContents.send(RECORDING_STATE_CHANNEL, state)
     calendarService?.setRecordingActive(state.phase !== 'idle')
-    // Windows: the close the person asked for during the recording happens now.
+    // Windows: the close the person asked for during the recording happens once
+    // its automatic notes have finished; a new recording puts that on hold.
     if (quitsAfterBackgroundRecording(process.platform, closedWhileRecording, state.phase))
-      app.quit()
+      startBackgroundFinish()
+    else if (state.phase !== 'idle') cancelBackgroundFinish()
   },
   (url) => shell.openExternal(url)
 )
@@ -320,12 +362,20 @@ function createWindow(): void {
     // Reopened from the tray (or a second launch): the person wants the app again.
     window.on('show', () => {
       closedWhileRecording = false
+      cancelBackgroundFinish()
+      resetSessionEnding()
     })
+    // A cancelled shutdown fires no event: back to normal on focus or after a while.
+    window.on('focus', resetSessionEnding)
     // Shutdown / log-off: do not hold the session open; stop and save, then quit.
     window.on('query-session-end', () => {
+      resetSessionEnding()
       sessionEnding = true
+      sessionEndingReset = setTimeout(resetSessionEnding, SESSION_END_CANCEL_RESET_MS)
     })
     window.on('session-end', () => {
+      if (sessionEndingReset) clearTimeout(sessionEndingReset)
+      sessionEndingReset = null
       sessionEnding = true
       app.quit()
     })
@@ -700,7 +750,12 @@ app.whenReady().then(async () => {
 
   notesService = new NotesService(
     app.getPath('userData'),
-    broadcast,
+    (channel, payload) => {
+      // The deferred Windows quit waits while automatic notes make progress.
+      if (channel === NOTES_ENHANCE_PROGRESS_CHANNEL || channel === NOTES_ENHANCE_TOKEN_CHANNEL)
+        lastNotesActivityAt = Date.now()
+      broadcast(channel, payload)
+    },
     meetingsService,
     libraryRoot,
     assertLibrary
@@ -983,6 +1038,7 @@ app.whenReady().then(async () => {
 
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
+    lastLibraryWriteAt = Date.now()
     sourceIndex.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.
