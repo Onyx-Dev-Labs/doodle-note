@@ -70,3 +70,27 @@ test('adoption cannot revive Trash/purge or reuse another account operation', as
   assert.equal(payloads.rows[0].count,0);
  } finally {await f.close();}
 });
+
+test('share links stay revocable after adoption and are revoked by Trash; content stays guarded', async () => {
+  const f = await createInMemoryDb();
+  try {
+    await f.db.execute(sql`insert into organization(id,name,slug,created_at) values('share-a','A','share-a',now())`);
+    const noteId = randomUUID(), libraryId = randomUUID();
+    await f.db.execute(sql`insert into meetings(id,organization_id,title,share_token,share_include_transcript) values(${noteId}::uuid,'share-a','Synthetic',${'a'.repeat(32)},true)`);
+    const adopted: any = await adoptLegacy(f.db, 'share-a', { libraryId, noteId, operationId: randomUUID() });
+    assert.equal(adopted.status, 'ok');
+
+    // Content edits on the legacy row remain blocked once the note is adopted...
+    await assert.rejects(f.db.execute(sql`update meetings set title='Changed' where id=${noteId}::uuid`), (e: any) => /sync_upgrade_required/.test(String(e.cause?.message ?? e.message)));
+    // ...but a share-only change (turning sharing off) is allowed.
+    await f.db.execute(sql`update meetings set share_token=null, share_expires_at=null where id=${noteId}::uuid`);
+    assert.equal((await f.db.execute(sql`select share_token from meetings where id=${noteId}::uuid`)).rows[0]!.share_token, null);
+
+    // Trashing an adopted note revokes any link that is still live.
+    await f.db.execute(sql`update meetings set share_token=${'b'.repeat(32)}, share_include_transcript=true where id=${noteId}::uuid`);
+    await applySync(f.db, 'share-a', { protocolVersion: 2, libraryId, noteId, operationId: randomUUID(), kind: 'trash', expectedRevision: adopted.headRevision, expectedLifecycleGeneration: adopted.lifecycleGeneration });
+    const row = (await f.db.execute(sql`select share_token, share_include_transcript from meetings where id=${noteId}::uuid`)).rows[0]!;
+    assert.equal(row.share_token, null);
+    assert.equal(row.share_include_transcript, false);
+  } finally { await f.close(); }
+});

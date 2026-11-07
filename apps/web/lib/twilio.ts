@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * Minimal Twilio helpers for DoodleNote phone calls — hand-rolled (no SDK
@@ -140,6 +140,22 @@ export async function findVerifiedCallerId(
 }
 
 /**
+ * Removes a verified caller ID from the Twilio account so the number has to be
+ * re-verified (with a fresh keypad code) before anyone can use it again.
+ */
+export async function deleteOutgoingCallerId(
+  config: TwilioVoiceConfig,
+  sid: string,
+): Promise<boolean> {
+  if (!/^PN[0-9a-f]{32}$/i.test(sid)) return false;
+  const response = await fetch(
+    `${TWILIO_API}/Accounts/${config.accountSid}/OutgoingCallerIds/${sid}.json`,
+    { method: "DELETE", headers: { Authorization: restAuth(config) } },
+  );
+  return response.ok || response.status === 404;
+}
+
+/**
  * Validates X-Twilio-Signature on webhook requests: HMAC-SHA1 of the full URL
  * plus the POST params concatenated in sorted-key order, keyed by the account
  * auth token.
@@ -153,6 +169,7 @@ export function validTwilioSignature(
   if (!signature) return false;
   const sorted = [...params.entries()].sort(([a], [b]) => (a < b ? -1 : 1));
   const data = url + sorted.map(([key, value]) => key + value).join("");
-  const expected = createHmac("sha1", authToken).update(data).digest("base64");
-  return expected === signature;
+  const expected = Buffer.from(createHmac("sha1", authToken).update(data).digest("base64"));
+  const received = Buffer.from(signature);
+  return expected.length === received.length && timingSafeEqual(expected, received);
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
+import { sql } from "@repo/db";
 import { organization, user } from "@repo/db/auth-schema";
 import { meetings, notes, transcriptSegments } from "@repo/db/schema";
 import { createInMemoryDb, type InMemoryDb } from "@repo/db/testing";
@@ -165,4 +166,20 @@ test("getTranscript orders by startMs and renders speaker lines", async () => {
 test("malformed meeting ids return null instead of erroring", async () => {
   assert.equal(await source.getMeeting("not-a-uuid"), null);
   assert.equal(await source.getMeeting("'; drop table meetings;--"), null);
+});
+
+test("meetings that sync v2 moved to Trash are hidden from every tool until restored", async () => {
+  const library = "55555555-5555-4555-8555-555555555555";
+  await mem.db.execute(sql`insert into sync_libraries(id, organization_id) values (${library}::uuid, ${ORG_A})`);
+  await mem.db.execute(sql`insert into sync_notes(id, library_id, organization_id, state) values (${M1}::uuid, ${library}::uuid, ${ORG_A}, 'trashed')`);
+  try {
+    assert.deepEqual((await source.listRecent(10)).map((m) => m.meeting_id), [NOTE1, M2]);
+    assert.equal(await source.getMeeting(M1), null);
+    assert.equal(await source.getNotes(M1), null);
+    assert.equal(await source.getTranscript(M1), null);
+    assert.deepEqual(await source.search("approved", 10), []);
+  } finally {
+    await mem.db.execute(sql`update sync_notes set state = 'active' where id = ${M1}::uuid`);
+  }
+  assert.equal((await source.getMeeting(M1))?.meeting_id, M1);
 });

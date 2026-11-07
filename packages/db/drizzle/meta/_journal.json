@@ -141,6 +141,13 @@
       "when": 1793309251333,
       "tag": "0019_download_lead_links",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0020_share_revocation_on_adopted_notes",
+      "breakpoints": true
     }
   ]
 }

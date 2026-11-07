@@ -3,7 +3,7 @@ import { after, before, test } from "node:test";
 import { createHash } from "node:crypto";
 import { eq } from "@repo/db";
 
-import { organization, user } from "@repo/db/auth-schema";
+import { member, organization, user } from "@repo/db/auth-schema";
 import { agentTokens, meetings, notes, subscriptions } from "@repo/db/schema";
 import { createInMemoryDb, type InMemoryDb } from "@repo/db/testing";
 
@@ -70,6 +70,10 @@ before(async () => {
   await db.insert(organization).values([
     { id: "org-a", name: "A", slug: "a", createdAt: new Date() },
     { id: "org-b", name: "B", slug: "b", createdAt: new Date() },
+  ]);
+  await db.insert(member).values([
+    { id: "m-u1-a", organizationId: "org-a", userId: "u1", role: "owner", createdAt: new Date() },
+    { id: "m-u2-b", organizationId: "org-b", userId: "u2", role: "owner", createdAt: new Date() },
   ]);
   await db.insert(agentTokens).values([
     {
@@ -196,6 +200,34 @@ test("revoking a dedicated remote token denies the next request", async () => {
     });
   assert.equal((await call("tools/list", undefined, token)).status, 200);
   await mem.db.delete(agentTokens).where(eq(agentTokens.tokenHash, tokenHash));
+  assert.equal((await call("tools/list", undefined, token)).status, 401);
+});
+
+test("an agent token stops working once its holder is removed from the workspace", async () => {
+  const token = `dnag_${"12".repeat(32)}`;
+  await mem.db.insert(user).values({
+    id: "u3",
+    name: "Former member",
+    email: "former@example.com",
+    emailVerified: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  await mem.db.insert(member).values({
+    id: "m-u3-a",
+    organizationId: "org-a",
+    userId: "u3",
+    role: "member",
+    createdAt: new Date(),
+  });
+  await mem.db.insert(agentTokens).values({
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    userId: "u3",
+    organizationId: "org-a",
+    name: "Removed member fixture",
+  });
+  assert.equal((await call("tools/list", undefined, token)).status, 200);
+  await mem.db.delete(member).where(eq(member.id, "m-u3-a"));
   assert.equal((await call("tools/list", undefined, token)).status, 401);
 });
 

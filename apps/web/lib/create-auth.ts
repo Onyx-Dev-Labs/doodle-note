@@ -1,12 +1,14 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { APIError } from "better-auth/api";
 import { organization } from "better-auth/plugins";
 
-import { fullSchema, type Db } from "@repo/db";
+import { agentTokens, and, eq, fullSchema, syncDevices, type Db } from "@repo/db";
 
 import { sendAuthVerificationEmail } from "./auth-email";
 import { sendWorkspaceInvitationEmail } from "./invitation-email";
+import { isPersonalWorkspaceSlug } from "./personal-workspace-slug";
 import {
   resolveAuthBaseUrl,
   resolveAuthEmailEnabled,
@@ -90,6 +92,25 @@ export function createAuth(db: Db) {
       organization({
         cancelPendingInvitationsOnReInvite: true,
         sendInvitationEmail: sendWorkspaceInvitationEmail,
+        organizationHooks: {
+          // `personal-` slugs identify private Personal workspaces; a user-made
+          // team must not be able to claim one.
+          beforeCreateOrganization: async ({ organization: input }) => {
+            if (isPersonalWorkspaceSlug(input.slug)) {
+              throw new APIError("BAD_REQUEST", {
+                message: "That workspace address is reserved",
+              });
+            }
+          },
+          // Removing a member also revokes the credentials they minted for
+          // that workspace, so re-adding them later never revives old tokens.
+          afterRemoveMember: async ({ member, organization: org }) => {
+            const scope = (table: typeof agentTokens | typeof syncDevices) =>
+              and(eq(table.userId, member.userId), eq(table.organizationId, org.id));
+            await db.delete(agentTokens).where(scope(agentTokens));
+            await db.delete(syncDevices).where(scope(syncDevices));
+          },
+        },
       }),
       // Required for Next.js App Router — sets session cookies on OAuth return.
       nextCookies(),

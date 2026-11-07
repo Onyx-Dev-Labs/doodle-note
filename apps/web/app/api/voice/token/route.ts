@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { authenticateSyncRequest } from "@/lib/sync-auth";
+import { authenticateEntitledSyncRequest } from "@/lib/sync-auth";
 import { twilioConfig, voiceAccessToken } from "@/lib/twilio";
 
 /**
@@ -9,10 +9,9 @@ import { twilioConfig, voiceAccessToken } from "@/lib/twilio";
  * minutes per user (the metering source for the calling add-on).
  */
 export async function GET(request: Request) {
-  const device = await authenticateSyncRequest(request);
-  if (!device) {
-    return NextResponse.json({ error: "Invalid sync token" }, { status: 401 });
-  }
+  const authed = await authenticateEntitledSyncRequest(request);
+  if (authed.response) return authed.response;
+  const device = authed.device;
   const config = twilioConfig();
   if (!config) {
     return NextResponse.json(
