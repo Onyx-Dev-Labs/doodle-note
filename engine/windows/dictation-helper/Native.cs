@@ -163,6 +163,10 @@ namespace DoodleNote.DictationHelper
         public static extern IntPtr GlobalFree(IntPtr mem);
         [DllImport("gdi32.dll")]
         public static extern IntPtr CopyEnhMetaFile(IntPtr source, IntPtr fileName);
+        [DllImport("gdi32.dll")]
+        public static extern uint GetEnhMetaFileBits(IntPtr hemf, uint size, byte[] buffer);
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteEnhMetaFile(IntPtr hemf);
         public const uint GMEM_MOVEABLE = 0x0002;
 
         // Icons.

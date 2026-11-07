@@ -38,6 +38,29 @@ namespace DoodleNote.DictationHelper
             catch (ElementNotAvailableException) { return 0; }
         }
 
+        /// <summary>The element's RuntimeId as a stable key, or null when unavailable.</summary>
+        public static string RuntimeId(AutomationElement element)
+        {
+            if (element == null) return null;
+            try
+            {
+                int[] id = element.GetRuntimeId();
+                return id == null ? null : string.Join(".", id);
+            }
+            catch (ElementNotAvailableException) { return null; }
+            catch (InvalidOperationException) { return null; }
+            catch (System.Runtime.InteropServices.COMException) { return null; }
+        }
+
+        public static bool IsPassword(AutomationElement element)
+        {
+            if (element == null) return false;
+            try { return element.Current.IsPassword; }
+            catch (ElementNotAvailableException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (System.Runtime.InteropServices.COMException) { return false; }
+        }
+
         static object Pattern(AutomationElement element, AutomationPattern pattern)
         {
             object found;
@@ -115,6 +138,68 @@ namespace DoodleNote.DictationHelper
         }
     }
 
+    /// <summary>
+    /// A UI Automation focus-changed subscription whose latest result (RuntimeId, IsPassword,
+    /// process id) is cached, so a per-character safety check during typing is a cheap read of
+    /// the cache rather than a fresh FocusedElement/IsPassword round trip. Used to stop typing
+    /// the instant focus moves to a password control, even one in the same process.
+    /// </summary>
+    internal sealed class FocusMonitor : IDisposable
+    {
+        readonly object gate = new object();
+        AutomationFocusChangedEventHandler handler;
+        string runtimeId;
+        bool isPassword;
+        int pid;
+        long version;
+
+        public FocusMonitor()
+        {
+            // Seed from the current focus, then follow changes.
+            Update(UIA.Focused());
+            handler = (sender, e) => Update(sender as AutomationElement);
+            try { Automation.AddAutomationFocusChangedEventHandler(handler); }
+            catch (Exception) { handler = null; } // fall back to polling in Current()
+        }
+
+        void Update(AutomationElement element)
+        {
+            string rid = UIA.RuntimeId(element);
+            bool pwd = UIA.IsPassword(element);
+            int owner = element != null ? UIA.Pid(element) : 0;
+            lock (gate)
+            {
+                runtimeId = rid;
+                isPassword = pwd;
+                pid = owner;
+                version++;
+            }
+        }
+
+        /// <summary>
+        /// The focused element's identity as last seen. When no focus event handler could be
+        /// installed, refresh from the live focus so the check still holds.
+        /// </summary>
+        public void Current(out string rid, out bool pwd, out int owner)
+        {
+            if (handler == null) Update(UIA.Focused());
+            lock (gate)
+            {
+                rid = runtimeId;
+                pwd = isPassword;
+                owner = pid;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (handler == null) return;
+            try { Automation.RemoveAutomationFocusChangedEventHandler(handler); }
+            catch (Exception) { }
+            handler = null;
+        }
+    }
+
     internal sealed class ElementFacts
     {
         public string Role = "";
@@ -175,6 +260,8 @@ namespace DoodleNote.DictationHelper
         public string AppName = "";
         public string AppPath = "";
         public AutomationElement Element;
+        /// <summary>The focused control's RuntimeId at capture time, for the per-character typing check.</summary>
+        public string RuntimeId;
         public ElementFacts Facts;
         /// <summary>The target runs elevated and this helper does not: Windows drops typed input to it.</summary>
         public bool AboveUs;
@@ -309,6 +396,7 @@ namespace DoodleNote.DictationHelper
             snapshot.BundleId = AppNames.ExeName(path);
             snapshot.AppName = AppNames.DisplayName(path, pid);
             snapshot.Element = element;
+            snapshot.RuntimeId = UIA.RuntimeId(element);
             snapshot.Facts = ElementFacts.Of(element, gui);
             snapshot.AboveUs = Native.RunsAboveUs(pid);
             return snapshot;

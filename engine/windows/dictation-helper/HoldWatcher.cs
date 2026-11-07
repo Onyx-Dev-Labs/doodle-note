@@ -46,18 +46,24 @@ namespace DoodleNote.DictationHelper
         Ui.Cancelable watchdog;
         /// <summary>False only while the keyboard hook is known to be gone and not yet re-installed.</summary>
         bool hooksLive = true;
-        /// <summary>Whether a hooks-lost event has been sent and not yet balanced by a restored event.</summary>
-        bool lostAnnounced;
         /// <summary>Armed key down-state and callback count seen on the previous tick, to spot a missed callback.</summary>
         bool prevArmedDown;
         long prevKeyCallbackCount;
         long lastSilentReinstallTick;
-        int reinstallBackoffMs;
-        /// <summary>Test hook (DICTATION_HELPER_TEST): drop the key hook so the watchdog re-installs it.</summary>
-        int dropKeyHookForTest;
-        /// <summary>How often the watchdog runs and silently re-installs; overridable only under DICTATION_HELPER_TEST.</summary>
+        /// <summary>Per-hook backoff (ms) before the next re-install attempt; 0 = ready now.</summary>
+        int keyBackoffMs, mouseBackoffMs;
+        /// <summary>Whether a lost event has been announced for each hook, to balance with restored.</summary>
+        bool keyLostAnnounced, mouseLostAnnounced;
+        /// <summary>Test hook (DICTATION_HELPER_TEST): drop the key / mouse hook so the watchdog re-installs it.</summary>
+        int dropKeyHookForTest, dropMouseHookForTest;
+        /// <summary>How often the watchdog runs; overridable only under DICTATION_HELPER_TEST.</summary>
         static readonly int WatchdogMs = TestInt("DICTATION_HELPER_WATCHDOG_MS", 2000);
-        static readonly int SilentReinstallMs = TestInt("DICTATION_HELPER_SILENT_REINSTALL_MS", 30000);
+        /// <summary>
+        /// The silent periodic re-install interval. Kept long (5 min) because a re-install moves our
+        /// hook to the top of the chain, which would otherwise flip precedence with an AutoHotkey-style
+        /// remapper that often; real-traffic loss detection handles the common case between re-installs.
+        /// </summary>
+        static readonly int SilentReinstallMs = TestInt("DICTATION_HELPER_SILENT_REINSTALL_MS", 5 * 60 * 1000);
 
         static int TestInt(string name, int fallback)
         {
@@ -75,6 +81,9 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>Test only: ask the watchdog to drop the keyboard hook on its next tick.</summary>
         public void DropKeyHookForTest() { dropKeyHookForTest = 1; }
+
+        /// <summary>Test only: ask the watchdog to drop the mouse hook on its next tick.</summary>
+        public void DropMouseHookForTest() { dropMouseHookForTest = 1; }
 
         /// <summary>Whether a low-level hook can be installed at all (blocked by policy or security software otherwise).</summary>
         public bool HooksAllowed()
@@ -329,10 +338,10 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// Windows silently removes a low-level hook whose callback runs past
-        /// LowLevelHooksTimeout, which is most likely right after a key release while Parakeet
-        /// is decoding at full CPU. The hook thread runs at the highest priority to make that
-        /// rare, and a watchdog proves the keyboard hook is still there (by injecting a marked
-        /// mask key it alone would see) and re-installs both hooks if it is gone.
+        /// LowLevelHooksTimeout, most likely right after a key release while Parakeet is decoding
+        /// at full CPU. The hook thread runs at the highest priority to make that rare; the
+        /// watchdog (WatchdogTick) detects a loss from real traffic — never by injecting input —
+        /// and re-installs the keyboard and mouse hooks independently.
         /// </summary>
         static void RaiseHookThreadPriority()
         {
@@ -346,7 +355,8 @@ namespace DoodleNote.DictationHelper
             lastSilentReinstallTick = Environment.TickCount;
             prevKeyCallbackCount = keyCallbackCount;
             prevArmedDown = keySpec != null && Native.IsDown(keySpec.Vk);
-            reinstallBackoffMs = 0;
+            keyBackoffMs = 0;
+            mouseBackoffMs = 0;
             watchdog = Ui.Every(WatchdogMs, WatchdogTick);
         }
 
@@ -357,8 +367,10 @@ namespace DoodleNote.DictationHelper
                 watchdog.Cancel();
                 watchdog = null;
                 hooksLive = true;
-                lostAnnounced = false;
-                reinstallBackoffMs = 0;
+                keyLostAnnounced = false;
+                mouseLostAnnounced = false;
+                keyBackoffMs = 0;
+                mouseBackoffMs = 0;
             }
         }
 
@@ -375,59 +387,105 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         public void WatchdogTick()
         {
-            if (keyHook == IntPtr.Zero && mouseHook == IntPtr.Zero) return;
+            bool wantKey = keySpec != null;
+            bool wantMouse = mouseMachine != null;
+            if (!wantKey && !wantMouse) return;
+
+            // Test hooks: simulate Windows silently removing a hook.
             if (System.Threading.Interlocked.Exchange(ref dropKeyHookForTest, 0) == 1 && keyHook != IntPtr.Zero)
             {
                 Native.UnhookWindowsHookEx(keyHook);
-                keyHook = IntPtr.Zero; // simulate a hook Windows removed
+                keyHook = IntPtr.Zero;
+            }
+            if (System.Threading.Interlocked.Exchange(ref dropMouseHookForTest, 0) == 1 && mouseHook != IntPtr.Zero)
+            {
+                Native.UnhookWindowsHookEx(mouseHook);
+                mouseHook = IntPtr.Zero;
             }
 
-            // 1. Recover from a known-lost hook, with a growing backoff between attempts.
-            if (keyHook == IntPtr.Zero && keySpec != null)
+            // 1. Real-traffic loss detection for the keyboard hook: the armed key changed state but
+            //    the hook delivered no callback, so it was removed while a key moved. Suppressed when
+            //    the foreground app runs above us — there the low-level hook legitimately sees nothing
+            //    (secure desktop / higher integrity), so a transition without a callback is expected.
+            if (wantKey && keyHook != IntPtr.Zero)
             {
-                if (reinstallBackoffMs > 0) { reinstallBackoffMs -= WatchdogMs; return; }
-                if (!lostAnnounced) { hooksLive = false; lostAnnounced = true; Wire.Send(Wire.Fields("event", "hooks", "phase", "lost")); }
-                bool recovered = ReinstallKey() && (mouseHook != IntPtr.Zero ? ReinstallMouse() : true);
-                if (recovered)
+                bool armedDown = Native.IsDown(keySpec.Vk);
+                bool transitioned = armedDown != prevArmedDown;
+                bool callbackAdvanced = keyCallbackCount != prevKeyCallbackCount;
+                prevArmedDown = armedDown;
+                prevKeyCallbackCount = keyCallbackCount;
+                if (transitioned && !callbackAdvanced && !ForegroundRunsAboveUs())
                 {
-                    hooksLive = true;
-                    lostAnnounced = false;
-                    reinstallBackoffMs = 0;
-                    lastSilentReinstallTick = Environment.TickCount;
-                    prevKeyCallbackCount = keyCallbackCount;
-                    Wire.Send(Wire.Fields("event", "hooks", "phase", "restored"));
+                    Native.UnhookWindowsHookEx(keyHook);
+                    keyHook = IntPtr.Zero;
                 }
+            }
+
+            // 2. Recover each desired-but-missing hook independently, each with its own backoff.
+            if (wantKey && keyHook == IntPtr.Zero)
+            {
+                if (keyBackoffMs > 0) keyBackoffMs -= WatchdogMs;
                 else
                 {
-                    reinstallBackoffMs = Math.Min(reinstallBackoffMs <= 0 ? 2 * WatchdogMs : reinstallBackoffMs * 2, 30000);
+                    if (!keyLostAnnounced) { keyLostAnnounced = true; AnnounceHooks(); }
+                    if (ReinstallKey())
+                    {
+                        keyLostAnnounced = false;
+                        keyBackoffMs = 0;
+                        prevKeyCallbackCount = keyCallbackCount;
+                        AnnounceHooks();
+                    }
+                    else keyBackoffMs = NextBackoff(keyBackoffMs);
                 }
-                return;
             }
-
-            // 2. Real-traffic loss detection: the armed key changed state but the hook delivered
-            //    no callback since the last tick, so it was removed while a key moved.
-            bool armedDown = keySpec != null && Native.IsDown(keySpec.Vk);
-            bool transitioned = armedDown != prevArmedDown;
-            bool callbackAdvanced = keyCallbackCount != prevKeyCallbackCount;
-            prevArmedDown = armedDown;
-            prevKeyCallbackCount = keyCallbackCount;
-            if (keyHook != IntPtr.Zero && transitioned && !callbackAdvanced)
+            if (wantMouse && mouseHook == IntPtr.Zero)
             {
-                hooksLive = false;
-                if (!lostAnnounced) { lostAnnounced = true; Wire.Send(Wire.Fields("event", "hooks", "phase", "lost")); }
-                Native.UnhookWindowsHookEx(keyHook);
-                keyHook = IntPtr.Zero;
-                return; // the next tick re-installs under the backoff path and announces restored
+                if (mouseBackoffMs > 0) mouseBackoffMs -= WatchdogMs;
+                else
+                {
+                    if (!mouseLostAnnounced) { mouseLostAnnounced = true; AnnounceHooks(); }
+                    if (ReinstallMouse())
+                    {
+                        mouseLostAnnounced = false;
+                        mouseBackoffMs = 0;
+                        AnnounceHooks();
+                    }
+                    else mouseBackoffMs = NextBackoff(mouseBackoffMs);
+                }
             }
 
-            // 3. A silent periodic re-install (no event) keeps the hook fresh even when nothing
-            //    above fired, covering the callback-timeout removal there is no signal for.
+            // 3. A silent periodic re-install (no event) keeps the hooks fresh even when nothing above
+            //    fired, covering the callback-timeout removal there is no signal for. Long interval.
             if (Environment.TickCount - lastSilentReinstallTick >= SilentReinstallMs)
             {
                 lastSilentReinstallTick = Environment.TickCount;
-                if (keyHook != IntPtr.Zero && ReinstallKey()) prevKeyCallbackCount = keyCallbackCount;
-                if (mouseHook != IntPtr.Zero) ReinstallMouse();
+                if (wantKey && keyHook != IntPtr.Zero && ReinstallKey()) prevKeyCallbackCount = keyCallbackCount;
+                if (wantMouse && mouseHook != IntPtr.Zero) ReinstallMouse();
             }
+        }
+
+        static int NextBackoff(int current) { return Math.Min(current <= 0 ? 2 * WatchdogMs : current * 2, 30000); }
+
+        /// <summary>Whether the foreground window's process runs at a higher integrity than this helper.</summary>
+        static bool ForegroundRunsAboveUs()
+        {
+            IntPtr fg = Native.GetForegroundWindow();
+            if (fg == IntPtr.Zero) return false;
+            uint pid = Native.WindowPid(fg);
+            return pid != 0 && Native.RunsAboveUs(pid);
+        }
+
+        /// <summary>Recompute hooksLive and send a single lost/restored/failed event on a real change.</summary>
+        void AnnounceHooks()
+        {
+            bool wantKey = keySpec != null;
+            bool wantMouse = mouseMachine != null;
+            bool allInstalled = (!wantKey || keyHook != IntPtr.Zero) && (!wantMouse || mouseHook != IntPtr.Zero);
+            bool anyLost = keyLostAnnounced || mouseLostAnnounced;
+            bool nextLive = allInstalled && !anyLost;
+            if (nextLive == hooksLive) return;
+            hooksLive = nextLive;
+            Wire.Send(Wire.Fields("event", "hooks", "phase", nextLive ? "restored" : "lost"));
         }
 
         bool ReinstallKey()

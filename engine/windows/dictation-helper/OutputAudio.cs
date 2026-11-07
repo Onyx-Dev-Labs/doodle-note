@@ -310,21 +310,38 @@ namespace DoodleNote.DictationHelper
         /// <summary>Owner of a record this instance has adopted (so it may clear it on restore).</summary>
         static string adoptedOwner;
 
-        /// <summary>Serialize read/modify/write of the shared record across all helper instances.</summary>
+        /// <summary>
+        /// Serialize read/modify/write of the shared record across helper instances in this session.
+        /// The record file lives in the per-user %TEMP%, so a per-session (Local\) mutex is the right
+        /// scope and avoids the access-denied a Global\ mutex causes for a second signed-in user.
+        /// If the lock cannot be created or acquired the protected operation is SKIPPED (never run
+        /// unlocked) and the fallback returned, so two instances can never race the record.
+        /// </summary>
         static T WithStateLock<T>(Func<T> body, T fallback)
         {
-            bool created;
-            using (System.Threading.Mutex mutex = new System.Threading.Mutex(false, "Global\\DoodleNote-Bark-output", out created))
+            System.Threading.Mutex mutex;
+            try { mutex = new System.Threading.Mutex(false, "Local\\DoodleNote-Bark-output"); }
+            catch (Exception) { return fallback; }
+            using (mutex)
             {
                 bool held = false;
                 try { held = mutex.WaitOne(2000); }
                 catch (System.Threading.AbandonedMutexException) { held = true; }
+                catch (Exception) { return fallback; }
+                if (!held) return fallback;
                 try { return body(); }
-                finally { if (held) try { mutex.ReleaseMutex(); } catch (ApplicationException) { } }
+                finally { try { mutex.ReleaseMutex(); } catch (Exception) { } }
             }
         }
 
         static void WithStateLock(Action body) { WithStateLock<object>(() => { body(); return null; }, null); }
+
+        /// <summary>
+        /// Test-only probe (gated by the op): returns true only if the protected body actually ran
+        /// under the lock, false if the lock could not be taken within the timeout. Proves the body
+        /// is SKIPPED on a WaitOne timeout rather than run unlocked.
+        /// </summary>
+        public static bool ProbeStateLock() { return WithStateLock<bool>(() => true, false); }
 
         /// <summary>
         /// Windows can end the helper without warning (the app is killed), so a silence in

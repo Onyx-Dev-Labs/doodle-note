@@ -314,6 +314,19 @@ namespace DoodleNote.DictationHelper
                         });
                     }
                     break;
+                case "__boundary-table":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                    {
+                        byte[] bits = new byte[8192]; // 65536 bits
+                        for (int cp = 0; cp <= 0xFFFF; cp++)
+                        {
+                            char c = (char)cp;
+                            if (char.IsWhiteSpace(c) || char.IsPunctuation(c)) bits[cp >> 3] |= (byte)(1 << (cp & 7));
+                        }
+                        Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
+                    }
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    break;
                 case "__throw":
                     if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
                         work.Async(id, delegate { throw new InvalidOperationException("boom"); });
@@ -327,6 +340,32 @@ namespace DoodleNote.DictationHelper
                 case "__watchdog-tick":
                     if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
                         Ui.Post(id, delegate { HoldWatcher.Shared.WatchdogTick(); Wire.Reply(id); });
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    break;
+                case "__runs-above":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                        work.Async(id, delegate {
+                            uint pid = (uint)(Wire.Num(request, "pid") ?? 0);
+                            Wire.Reply(id, true, Wire.Fields("pid", (double)pid, "above", Native.RunsAboveUs(pid)));
+                        });
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    break;
+                case "__foreground-above":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                        work.Async(id, delegate {
+                            IntPtr fg = Native.GetForegroundWindow();
+                            uint pid = fg == IntPtr.Zero ? 0 : Native.WindowPid(fg);
+                            Wire.Reply(id, true, Wire.Fields("foregroundPid", (double)pid, "above", pid != 0 && Native.RunsAboveUs(pid)));
+                        });
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    break;
+                case "__state-lock-probe":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                        work.Async(id, delegate {
+                            int t0 = Environment.TickCount;
+                            bool ran = OutputAudio.ProbeStateLock();
+                            Wire.Reply(id, true, Wire.Fields("ran", ran, "waitedMs", Environment.TickCount - t0));
+                        });
                     else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
                     break;
                 default:
