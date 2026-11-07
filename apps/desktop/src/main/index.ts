@@ -1,4 +1,4 @@
-import { createBeforeQuitHandler } from './engine-quit'
+import { createBeforeQuitHandler, finishRecordingBeforeQuit } from './engine-quit'
 import { APP_CHANNEL } from '../shared/app-channel'
 import { planProfile } from './profile-identity'
 import { createDictationHost } from './dictation-host'
@@ -66,7 +66,12 @@ import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import { MAIN_WINDOW_SIZE } from './window-sizing'
-import { hasThemedTitleBarOverlay, titleBarOverlayFor, windowChromeOptions } from './window-chrome'
+import {
+  hasThemedTitleBarOverlay,
+  hidesToTrayOnClose,
+  titleBarOverlayFor,
+  windowChromeOptions
+} from './window-chrome'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -291,9 +296,11 @@ function createWindow(): void {
       return
     }
     // Keep the document renderer alive while it owns a recording.
-    if (process.platform === 'darwin' && recording.busy && !quitting) {
+    if (hidesToTrayOnClose(process.platform, recording.busy, quitting)) {
       event.preventDefault()
       window.hide()
+      // Windows has no Dock: point at the notification-area icon once.
+      if (process.platform === 'win32') recordingTray?.showBackgroundHint()
     }
   })
   window.on('closed', () => {
@@ -863,6 +870,9 @@ app.whenReady().then(async () => {
         quitting = true
         recordingTray?.dispose()
         calendarService?.dispose()
+        // Windows: stop and save an active recording first, as the macOS engine
+        // does inside dispose(). The hidden renderer still owns the capture.
+        if (process.platform === 'win32') await finishRecordingBeforeQuit(engine)
         const results = await Promise.allSettled([engine.dispose(), micWatcher.dispose()])
         const failures = results.filter((result) => result.status === 'rejected')
         if (failures.length)

@@ -64,7 +64,7 @@ test('desktop and in-app mascot artwork use the opaque sage master', () => {
     assert.equal(pngMetadata(asset).colorType, 2, `${asset.pathname} must not contain alpha`)
   }
   assert.match(brandScript, /iconutil --convert icns/)
-  assert.match(brandScript, /sips -z 256 256 -s format ico/)
+  assert.match(brandScript, /node "\$SCRIPT_DIR\/build-windows-icons\.cjs"/)
 })
 
 test('macOS builds a DMG for website installs while retaining the ZIP updater', () => {

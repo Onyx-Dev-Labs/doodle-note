@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   WINDOWS_TITLE_BAR_HEIGHT,
   hasThemedTitleBarOverlay,
+  hidesToTrayOnClose,
   titleBarOverlayFor,
   windowChromeOptions
 } from './window-chrome'
@@ -70,6 +71,19 @@ test('the main window takes its chrome from the platform helper and recolors on 
   assert.match(
     indexSource,
     /setTitleBarOverlay\(titleBarOverlayFor\(nativeTheme\.shouldUseDarkColors\)\)/
+  )
+})
+
+test('close while recording hides to the tray on macOS (unchanged) and now on Windows', () => {
+  for (const platform of ['darwin', 'win32'] as const) {
+    assert.equal(hidesToTrayOnClose(platform, true, false), true)
+    assert.equal(hidesToTrayOnClose(platform, false, false), false)
+    assert.equal(hidesToTrayOnClose(platform, true, true), false)
+  }
+  assert.equal(hidesToTrayOnClose('linux', true, false), false)
+  assert.match(
+    indexSource,
+    /if \(hidesToTrayOnClose\(process\.platform, recording\.busy, quitting\)\) \{\n\s+event\.preventDefault\(\)\n\s+window\.hide\(\)\n\s+\/\/[^\n]*\n\s+if \(process\.platform === 'win32'\) recordingTray\?\.showBackgroundHint\(\)/
   )
 })
 

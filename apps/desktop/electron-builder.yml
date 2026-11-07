@@ -114,6 +114,11 @@ win:
       arch:
         - x64
   icon: resources/icon.ico
+  # Notification-area dogs (multi-size ICO), loaded from Resources/tray.
+  extraResources:
+    - from: resources/tray
+      to: tray
+      filter: ["*.ico"]
   # Ship CPU + Vulkan llama binaries (Vulkan covers most Windows GPUs for
   # local note generation); CUDA variants add >500MB for little test value.
   files:

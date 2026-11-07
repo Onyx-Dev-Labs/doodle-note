@@ -54,3 +54,16 @@ export function windowChromeOptions(platform: NodeJS.Platform, dark: boolean): W
 export function hasThemedTitleBarOverlay(platform: NodeJS.Platform): boolean {
   return platform === 'win32'
 }
+
+/**
+ * Closing the window while a recording runs keeps the renderer (which owns
+ * the capture on Windows and the document on both) alive: the window hides
+ * and the tray icon remains the way back. Other platforms close as before.
+ */
+export function hidesToTrayOnClose(
+  platform: NodeJS.Platform,
+  recordingBusy: boolean,
+  quitting: boolean
+): boolean {
+  return (platform === 'darwin' || platform === 'win32') && recordingBusy && !quitting
+}
