@@ -103,15 +103,28 @@ namespace DoodleNote.DictationHelper
         static int Ms(Stopwatch watch) { return (int)watch.ElapsedMilliseconds; }
 
         /// <summary>Validate the target immediately before inserting, then insert once.</summary>
-        public static DeliveryResult Deliver(TargetSnapshot snapshot, string text, DeliveryGuards guards)
+        public static DeliveryResult Deliver(TargetSnapshot snapshot, string text, DeliveryGuards guards, int deadlineMs = 0)
         {
             DeliveryTimings timings = new DeliveryTimings();
-            DeliveryResult result = DeliverInner(snapshot, text, guards, timings);
+            DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs);
             result.Timings = timings;
             return result;
         }
 
-        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings)
+        /// <summary>How long a paste is expected to take, start to settled, for the deadline check.</summary>
+        static int PasteEstimateMs { get { return 1600; } }
+
+        /// <summary>How long typing `text` is expected to take, start to settled, for the deadline check.</summary>
+        static int TypeEstimateMs(string text)
+        {
+            string normalized = text.Replace("\r\n", "\n");
+            int boundaries = 0;
+            foreach (char c in normalized) if (char.IsWhiteSpace(c) || char.IsPunctuation(c)) boundaries++;
+            // Per-character 8 ms + 70 ms at each word boundary (Delivery typing), plus confirm and settle.
+            return normalized.Length * 16 + boundaries * 70 + 3000;
+        }
+
+        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs)
         {
             Stopwatch began = Stopwatch.StartNew();
             if (!snapshot.HasElement || snapshot.Facts == null) return new DeliveryResult(DeliveryOutcome.Refused, "no-target");
@@ -148,11 +161,21 @@ namespace DoodleNote.DictationHelper
             // when the clipboard cannot be opened. DICTATION_HELPER_STRATEGY=type is a test
             // switch for the fallback.
             bool forceType = Environment.GetEnvironmentVariable("DICTATION_HELPER_STRATEGY") == "type";
+            // The client sized its wait from the text length; never begin an insertion it has
+            // already given up on, or doubled text could land after the user pastes from the card.
+            if (deadlineMs > 0 && !forceType && began.ElapsedMilliseconds + PasteEstimateMs > deadlineMs
+                && began.ElapsedMilliseconds + TypeEstimateMs(text) > deadlineMs)
+                return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
             if (!forceType)
             {
-                DeliveryResult pasted = Paste(text, current, snapshot, before, timings);
-                if (pasted != null) return pasted;
+                if (deadlineMs == 0 || began.ElapsedMilliseconds + PasteEstimateMs <= deadlineMs)
+                {
+                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings);
+                    if (pasted != null) return pasted;
+                }
             }
+            if (deadlineMs > 0 && began.ElapsedMilliseconds + TypeEstimateMs(text) > deadlineMs)
+                return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
             return TypeText(text, current, snapshot, before, timings);
         }
 
@@ -410,25 +433,64 @@ namespace DoodleNote.DictationHelper
         }
     }
 
-    /// <summary>Every format on the clipboard, copied before a paste so the user's clipboard survives it.</summary>
+    /// <summary>
+    /// The user's clipboard, saved before a paste and put back afterwards. Only well-known,
+    /// safe formats are copied (text, HTML, RTF, bitmaps, a file list, PNG); OLE private data
+    /// and anything unknown is skipped, so nothing opaque is re-rendered as raw bytes. Total
+    /// bytes and the time spent copying are capped, so a huge Excel or Photoshop clipboard
+    /// cannot stall a delivery. When anything is skipped the restore reports it.
+    /// </summary>
     internal sealed class SavedClipboard
     {
-        const uint CF_BITMAP = 2, CF_METAFILEPICT = 3, CF_PALETTE = 9, CF_ENHMETAFILE = 14, CF_DIB = 8, CF_DIBV5 = 17;
-        const uint CF_OWNERDISPLAY = 0x80, CF_DSPBITMAP = 0x82, CF_DSPMETAFILEPICT = 0x83, CF_DSPENHMETAFILE = 0x8E;
+        const uint CF_TEXT = 1, CF_BITMAP = 2, CF_OEMTEXT = 7, CF_DIB = 8, CF_PALETTE = 9,
+            CF_ENHMETAFILE = 14, CF_HDROP = 15, CF_LOCALE = 16, CF_UNICODETEXT = 13, CF_DIBV5 = 17;
+        /// <summary>At most this many bytes are copied across all formats.</summary>
+        const int MaxBytes = 16 * 1024 * 1024;
+        /// <summary>At most this long is spent copying the clipboard.</summary>
+        const int MaxMs = 300;
         readonly List<KeyValuePair<uint, byte[]>> items = new List<KeyValuePair<uint, byte[]>>();
         IntPtr metafile = IntPtr.Zero;
         bool complete = true;
+        bool skipped;
+
+        /// <summary>Standard formats worth saving by number.</summary>
+        static readonly HashSet<uint> SafeStandard = new HashSet<uint>
+        {
+            CF_UNICODETEXT, CF_TEXT, CF_OEMTEXT, CF_DIB, CF_DIBV5, CF_HDROP, CF_LOCALE
+        };
+        /// <summary>Registered formats worth saving, by name (lower case).</summary>
+        static readonly HashSet<string> SafeRegistered = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "html format", "rich text format", "png", "image/png", "jfif", "gif",
+            "filenamew", "filename", "preferred dropeffect", "filegroupdescriptorw", "filegroupdescriptor"
+        };
+        /// <summary>Opaque OLE formats that must never be put back as raw bytes.</summary>
+        static readonly HashSet<string> Unsafe = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "dataobject", "ole private data", "object descriptor", "embed source", "embedded object",
+            "link source", "native", "ownerlink", "objectlink"
+        };
+
+        static string FormatName(uint format)
+        {
+            System.Text.StringBuilder name = new System.Text.StringBuilder(256);
+            int length = Native.GetClipboardFormatName(format, name, name.Capacity);
+            return length > 0 ? name.ToString(0, length) : "";
+        }
 
         /// <summary>Null when the clipboard cannot be opened.</summary>
         public static SavedClipboard Capture()
         {
             if (!ClipboardText.Open()) return null;
             SavedClipboard saved = new SavedClipboard();
+            Stopwatch watch = Stopwatch.StartNew();
+            int total = 0;
             try
             {
                 bool hasDib = Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5);
                 for (uint format = Native.EnumClipboardFormats(0); format != 0; format = Native.EnumClipboardFormats(format))
                 {
+                    if (watch.ElapsedMilliseconds > MaxMs) { saved.skipped = true; break; }
                     if (format == CF_BITMAP || format == CF_PALETTE)
                     {
                         // Windows rebuilds these from the device-independent bitmap.
@@ -442,12 +504,15 @@ namespace DoodleNote.DictationHelper
                         if (saved.metafile == IntPtr.Zero) saved.complete = false;
                         continue;
                     }
-                    if (format == CF_METAFILEPICT || format == CF_OWNERDISPLAY || format == CF_DSPBITMAP
-                        || format == CF_DSPMETAFILEPICT || format == CF_DSPENHMETAFILE || (format >= 0x300 && format <= 0x3FF))
+                    bool safe;
+                    if (format < 0xC000) safe = SafeStandard.Contains(format);
+                    else
                     {
-                        saved.complete = false; // GDI handles, not memory: cannot be copied as bytes
-                        continue;
+                        string name = FormatName(format);
+                        if (Unsafe.Contains(name)) { saved.skipped = true; continue; }
+                        safe = SafeRegistered.Contains(name);
                     }
+                    if (!safe) { saved.skipped = true; continue; }
                     IntPtr data = Native.GetClipboardData(format);
                     if (data == IntPtr.Zero)
                     {
@@ -455,6 +520,7 @@ namespace DoodleNote.DictationHelper
                         continue;
                     }
                     int size = (int)Native.GlobalSize(data).ToUInt64();
+                    if (size < 0 || total + size > MaxBytes) { saved.skipped = true; continue; }
                     IntPtr source = Native.GlobalLock(data);
                     if (source == IntPtr.Zero)
                     {
@@ -464,6 +530,7 @@ namespace DoodleNote.DictationHelper
                     byte[] bytes = new byte[size];
                     Marshal.Copy(source, bytes, 0, size);
                     Native.GlobalUnlock(data);
+                    total += size;
                     saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
                 }
             }
@@ -472,8 +539,14 @@ namespace DoodleNote.DictationHelper
         }
 
         public int Count { get { return items.Count; } }
+        public bool AnythingSkipped { get { return skipped; } }
 
-        /// <summary>Restores only if nobody else wrote to the clipboard since `expecting`.</summary>
+        /// <summary>
+        /// Restores only if nobody else wrote to the clipboard since `expecting`.
+        /// restored: the clipboard is back as it was. skipped: some content was too large or
+        /// not safe to hold, so part of the clipboard is gone. partial: some promised content
+        /// could not be re-rendered. user-changed: someone else wrote to it meanwhile.
+        /// </summary>
         public string Restore(uint? expecting)
         {
             if (expecting.HasValue && Native.GetClipboardSequenceNumber() != expecting.Value) return "user-changed";
@@ -491,6 +564,7 @@ namespace DoodleNote.DictationHelper
                 }
             }
             finally { Native.CloseClipboard(); }
+            if (skipped) return "skipped";
             return ok && complete ? "restored" : "partial";
         }
     }

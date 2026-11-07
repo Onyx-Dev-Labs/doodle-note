@@ -58,8 +58,10 @@ namespace DoodleNote.DictationHelper
                 string line;
                 while ((line = reader.ReadLine()) != null)
                 {
+                    if (line.Trim().Length == 0) continue;
                     Dictionary<string, object> request = Wire.Parse(line);
                     if (request != null) Handle(request);
+                    else Wire.Send(Wire.Fields("event", "parse-error"));
                 }
             }
             catch (IOException) { }
@@ -84,11 +86,12 @@ namespace DoodleNote.DictationHelper
             switch (op)
             {
                 case "status":
-                    work.Async(delegate
+                    work.Async(id, delegate
                     {
                         bool hooks = Ui.Invoke(delegate { return HoldWatcher.Shared.HooksAllowed(); }, 1000, false);
                         bool holdActive = Ui.Invoke(delegate { return HoldWatcher.Shared.Active; }, 500, false);
                         bool mouseActive = Ui.Invoke(delegate { return HoldWatcher.Shared.MouseActive; }, 500, false);
+                        bool hooksLive = Ui.Invoke(delegate { return HoldWatcher.Shared.HooksLive; }, 500, true);
                         Wire.Reply(id, true, Wire.Fields(
                             // Windows has no Accessibility permission: UI Automation and synthetic input need none.
                             "accessibility", true,
@@ -99,6 +102,7 @@ namespace DoodleNote.DictationHelper
                             "conflicts", Target.ConflictingDictationApps(),
                             "holdActive", holdActive,
                             "mouseActive", mouseActive,
+                            "hooksLive", hooksLive,
                             "platform", "win32"));
                     });
                     break;
@@ -107,7 +111,7 @@ namespace DoodleNote.DictationHelper
                     Wire.Reply(id, true, Wire.Fields("trusted", true));
                     break;
                 case "request-input-monitoring":
-                    Ui.Post(delegate
+                    Ui.Post(id, delegate
                     {
                         bool granted = HoldWatcher.Shared.HooksAllowed();
                         Wire.Reply(id, true, Wire.Fields("granted", granted, "state", granted ? "granted" : "denied"));
@@ -116,7 +120,7 @@ namespace DoodleNote.DictationHelper
                 case "input-state":
                     {
                         string uid = Wire.Str(request, "uid");
-                        audio.Async(delegate
+                        audio.Async(id, delegate
                         {
                             IMMDevice device = Microphone.Device(uid);
                             if (device == null) Wire.Reply(id, false, Wire.Fields("reason", "no-input-device"));
@@ -126,15 +130,15 @@ namespace DoodleNote.DictationHelper
                     break;
                 case "mute-output":
                     // Serial with restore-output on the audio queue, so the two can never cross.
-                    audio.Async(delegate { Wire.Reply(id, true, Wire.Fields("outcome", OutputAudio.Mute())); });
+                    audio.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("outcome", OutputAudio.Mute())); });
                     break;
                 case "restore-output":
-                    audio.Async(delegate { Wire.Reply(id, true, Wire.Fields("outcome", OutputAudio.Restore())); });
+                    audio.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("outcome", OutputAudio.Restore())); });
                     break;
                 case "app-icon":
                     {
                         string path = Wire.Str(request, "path") ?? "";
-                        work.Async(delegate
+                        work.Async(id, delegate
                         {
                             byte[] png = AppInfo.Png(path, 64);
                             if (png == null) Wire.Reply(id, false, Wire.Fields("reason", "no-icon"));
@@ -146,7 +150,7 @@ namespace DoodleNote.DictationHelper
                     {
                         List<string> ids = Wire.Strings(request, "bundleIds");
                         if (ids.Count > AppInfo.MaxBatch) ids = ids.GetRange(0, AppInfo.MaxBatch);
-                        work.Async(delegate
+                        work.Async(id, delegate
                         {
                             Dictionary<string, string> known = AppInfo.InstalledPrograms(ids.ConvertAll(x => x.ToLowerInvariant()));
                             List<object> apps = ids.ConvertAll(x => (object)AppInfo.Lookup(x, known));
@@ -157,7 +161,7 @@ namespace DoodleNote.DictationHelper
                 case "snapshot":
                     {
                         string snapshotId = Wire.Str(request, "snapshotId") ?? id;
-                        work.Async(delegate
+                        work.Async(id, delegate
                         {
                             TargetSnapshot snapshot = Target.Capture(snapshotId);
                             if (snapshot == null)
@@ -176,7 +180,9 @@ namespace DoodleNote.DictationHelper
                         string text = Wire.Str(request, "text") ?? "";
                         DeliveryGuards guards = new DeliveryGuards(Wire.Str(request, "expectSelection"), Wire.Str(request, "replace"));
                         bool watch = Wire.Bool(request, "watch") == true;
-                        work.Async(delegate
+                        // Elapsed-ms budget from Delivery start; past it, no paste or type is begun.
+                        int deadlineMs = (int)(Wire.Num(request, "deadlineMs") ?? 0);
+                        work.Async(id, delegate
                         {
                             if (text.Length == 0)
                             {
@@ -189,7 +195,7 @@ namespace DoodleNote.DictationHelper
                                 Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Refused, "no-target").Fields());
                                 return;
                             }
-                            DeliveryResult result = Delivery.Deliver(snapshot, text, guards);
+                            DeliveryResult result = Delivery.Deliver(snapshot, text, guards, deadlineMs);
                             // A snapshot is single-use: a second deliver can never re-insert.
                             snapshots.Drop(snapshotId);
                             // Keep the field for read-backs only when asked, only after a confirmed
@@ -204,7 +210,7 @@ namespace DoodleNote.DictationHelper
                 case "watch-read":
                     {
                         string watchId = Wire.Str(request, "watchId") ?? "";
-                        work.Async(delegate
+                        work.Async(id, delegate
                         {
                             FieldWatches.Watch watch = watches.Get(watchId);
                             Wire.Reply(id, true, watch == null ? Wire.Fields("state", "gone") : FieldRead.Read(watch));
@@ -223,7 +229,7 @@ namespace DoodleNote.DictationHelper
                         // The text selected in the snapshot's field, so a transform can work on it.
                         // Never read from a secure field.
                         string snapshotId = Wire.Str(request, "snapshotId") ?? "";
-                        work.Async(delegate
+                        work.Async(id, delegate
                         {
                             TargetSnapshot snapshot = snapshots.Get(snapshotId);
                             if (snapshot == null || snapshot.Element == null)
@@ -258,7 +264,7 @@ namespace DoodleNote.DictationHelper
                     {
                         string key = Wire.Str(request, "key") ?? "";
                         int minHold = (int)(Wire.Num(request, "minHoldMs") ?? 150);
-                        Ui.Post(delegate
+                        Ui.Post(id, delegate
                         {
                             string failure = HoldWatcher.Shared.Start(key, minHold);
                             if (failure != null) Wire.Reply(id, false, Wire.Fields("reason", failure));
@@ -267,7 +273,7 @@ namespace DoodleNote.DictationHelper
                     }
                     break;
                 case "hold-stop":
-                    Ui.Post(delegate { HoldWatcher.Shared.Stop(); Wire.Reply(id); });
+                    Ui.Post(id, delegate { HoldWatcher.Shared.Stop(); Wire.Reply(id); });
                     break;
                 case "mouse-start":
                     {
@@ -275,7 +281,7 @@ namespace DoodleNote.DictationHelper
                         bool swallow = Wire.Bool(request, "swallow") == true;
                         int minHold = (int)(Wire.Num(request, "minHoldMs") ?? 150);
                         bool click = Wire.Str(request, "mode") == "click";
-                        Ui.Post(delegate
+                        Ui.Post(id, delegate
                         {
                             string failure = HoldWatcher.Shared.StartMouse(button, swallow, minHold, click);
                             if (failure != null) Wire.Reply(id, false, Wire.Fields("reason", failure));
@@ -284,12 +290,12 @@ namespace DoodleNote.DictationHelper
                     }
                     break;
                 case "mouse-stop":
-                    Ui.Post(delegate { HoldWatcher.Shared.StopMouse(); Wire.Reply(id); });
+                    Ui.Post(id, delegate { HoldWatcher.Shared.StopMouse(); Wire.Reply(id); });
                     break;
                 case "mouse-capture":
                     {
                         double seconds = Wire.Num(request, "seconds") ?? 10;
-                        Ui.Post(delegate
+                        Ui.Post(id, delegate
                         {
                             // The watched button must not be swallowed while the user picks a new one.
                             HoldWatcher.Shared.SetMousePaused(true);
@@ -301,6 +307,21 @@ namespace DoodleNote.DictationHelper
                             });
                         });
                     }
+                    break;
+                case "__throw":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                        work.Async(id, delegate { throw new InvalidOperationException("boom"); });
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    break;
+                case "__drop-hooks":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                        Ui.Post(id, delegate { HoldWatcher.Shared.DropKeyHookForTest(); Wire.Reply(id); });
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    break;
+                case "__watchdog-tick":
+                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                        Ui.Post(id, delegate { HoldWatcher.Shared.WatchdogTick(); Wire.Reply(id); });
+                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
                     break;
                 default:
                     Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));

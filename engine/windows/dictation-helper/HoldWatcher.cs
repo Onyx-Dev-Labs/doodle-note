@@ -38,10 +38,25 @@ namespace DoodleNote.DictationHelper
         readonly HoldArbiter arbiter = new HoldArbiter();
         /// <summary>Hold ids keep counting across restarts, so a late "up" never pairs with a newer hold.</summary>
         int lastHoldId;
+        /// <summary>The key name the watcher was started with, so a lost hook can be re-installed.</summary>
+        string keyName;
+        bool clickMode;
+        /// <summary>Set by the keyboard hook when it sees the watchdog's own injected mask key.</summary>
+        bool keyProbeSeen;
+        Ui.Cancelable watchdog;
+        /// <summary>False only while a probe has found the keyboard hook removed and not yet re-installed.</summary>
+        bool hooksLive = true;
+        /// <summary>Test hook (DICTATION_HELPER_TEST): drop the key hook so the watchdog re-installs it.</summary>
+        int dropKeyHookForTest;
 
         public bool Active { get { return keyHook != IntPtr.Zero; } }
         public bool MouseActive { get { return mouseHook != IntPtr.Zero; } }
         public bool MouseSwallowing { get { return mouseSwallowing; } }
+        /// <summary>Whether the low-level hooks are known to be installed (false during a detected loss).</summary>
+        public bool HooksLive { get { return hooksLive; } }
+
+        /// <summary>Test only: ask the watchdog to drop the keyboard hook on its next tick.</summary>
+        public void DropKeyHookForTest() { dropKeyHookForTest = 1; }
 
         /// <summary>Whether a low-level hook can be installed at all (blocked by policy or security software otherwise).</summary>
         public bool HooksAllowed()
@@ -69,8 +84,11 @@ namespace DoodleNote.DictationHelper
             }
             keyHook = hook;
             keySpec = spec;
+            keyName = key;
             keyMachine = HoldMachine.ForKey(0);
             minHoldMs = HoldDelay(minHold);
+            RaiseHookThreadPriority();
+            StartWatchdog();
             return null;
         }
 
@@ -82,6 +100,7 @@ namespace DoodleNote.DictationHelper
             keyMachine = null;
             keySpec = null;
             UpdatePoll();
+            MaybeStopWatchdog();
         }
 
         /// <summary>Middle (2), back (3) and forward (4): the buttons Windows hooks can tell apart. Never left or right click.</summary>
@@ -102,8 +121,11 @@ namespace DoodleNote.DictationHelper
             mouseButton = (int)button;
             // A low-level mouse hook may consume events without any extra permission.
             mouseSwallowing = wantSwallow;
+            clickMode = click;
             mouseMachine = HoldMachine.ForMouse((int)button, click, 0);
             minHoldMs = HoldDelay(minHold);
+            RaiseHookThreadPriority();
+            StartWatchdog();
             return null;
         }
 
@@ -118,6 +140,7 @@ namespace DoodleNote.DictationHelper
             mousePaused = false;
             mouseButton = -1;
             UpdatePoll();
+            MaybeStopWatchdog();
         }
 
         public void SetMousePaused(bool paused)
@@ -157,6 +180,12 @@ namespace DoodleNote.DictationHelper
 
         IntPtr OnKey(int code, IntPtr wParam, IntPtr lParam)
         {
+            if (code >= 0)
+            {
+                Native.KBDLLHOOKSTRUCT info = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
+                // The watchdog injects a marked mask key to prove the hook is still installed.
+                if (info.vkCode == Native.VK_MASK && IsOwn(info.dwExtraInfo)) keyProbeSeen = true;
+            }
             if (code >= 0 && keyMachine != null)
             {
                 Native.KBDLLHOOKSTRUCT info = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
@@ -282,6 +311,80 @@ namespace DoodleNote.DictationHelper
                 }
             }
             UpdatePoll();
+        }
+
+        /// <summary>
+        /// Windows silently removes a low-level hook whose callback runs past
+        /// LowLevelHooksTimeout, which is most likely right after a key release while Parakeet
+        /// is decoding at full CPU. The hook thread runs at the highest priority to make that
+        /// rare, and a watchdog proves the keyboard hook is still there (by injecting a marked
+        /// mask key it alone would see) and re-installs both hooks if it is gone.
+        /// </summary>
+        static void RaiseHookThreadPriority()
+        {
+            // The hooks are serviced on this (the main/UI) thread; nothing slow runs on it.
+            Native.SetThreadPriority(Native.GetCurrentThread(), Native.THREAD_PRIORITY_HIGHEST);
+        }
+
+        void StartWatchdog()
+        {
+            if (watchdog == null) watchdog = Ui.Every(4000, WatchdogTick);
+        }
+
+        void MaybeStopWatchdog()
+        {
+            if (watchdog != null && keyHook == IntPtr.Zero && mouseHook == IntPtr.Zero)
+            {
+                watchdog.Cancel();
+                watchdog = null;
+                hooksLive = true;
+            }
+        }
+
+        /// <summary>Verify the keyboard hook and re-install on loss. Runs on the hook thread.</summary>
+        public void WatchdogTick()
+        {
+            if (keyHook == IntPtr.Zero) return;
+            if (System.Threading.Interlocked.Exchange(ref dropKeyHookForTest, 0) == 1)
+            {
+                Native.UnhookWindowsHookEx(keyHook);
+                keyHook = IntPtr.Zero; // simulate a hook Windows removed
+            }
+            keyProbeSeen = false;
+            if (keyHook != IntPtr.Zero)
+            {
+                Native.Send(new[] { Native.Key(Native.VK_MASK, false, false), Native.Key(Native.VK_MASK, true, false) });
+                // The hook runs on this thread; let its message pump deliver the injected key.
+                for (int i = 0; i < 8 && !keyProbeSeen; i++) System.Windows.Forms.Application.DoEvents();
+            }
+            if (keyProbeSeen) return;
+            // The hook is gone (or never delivered the probe): re-install it and the mouse hook.
+            hooksLive = false;
+            Wire.Send(Wire.Fields("event", "hooks", "phase", "lost"));
+            bool ok = ReinstallKey();
+            if (mouseHook != IntPtr.Zero) ok = ReinstallMouse() && ok;
+            hooksLive = ok;
+            Wire.Send(Wire.Fields("event", "hooks", "phase", ok ? "restored" : "failed"));
+        }
+
+        bool ReinstallKey()
+        {
+            if (keySpec == null) return false;
+            if (keyHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(keyHook); keyHook = IntPtr.Zero; }
+            IntPtr hook = Native.SetWindowsHookEx(Native.WH_KEYBOARD_LL, keyProc, Native.GetModuleHandle(null), 0);
+            if (hook == IntPtr.Zero) return false;
+            keyHook = hook;
+            return true;
+        }
+
+        bool ReinstallMouse()
+        {
+            if (mouseMachine == null) return false;
+            if (mouseHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
+            IntPtr hook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, mouseProc, Native.GetModuleHandle(null), 0);
+            if (hook == IntPtr.Zero) return false;
+            mouseHook = hook;
+            return true;
         }
 
         void SetPending(HoldArbiter.Source source, Ui.Cancelable work)

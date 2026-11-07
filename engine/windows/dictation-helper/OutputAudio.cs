@@ -115,19 +115,41 @@ namespace DoodleNote.DictationHelper
             finally { PropVariantClear(ref value); }
         }
 
-        /// <summary>The active capture endpoint whose name matches (Chromium labels microphones by it).</summary>
+        /// <summary>
+        /// The active capture endpoint whose friendly name matches. Chromium appends a
+        /// "(vid:pid)" suffix the Windows name lacks, so an exact match is tried first, then a
+        /// normalized match, then a prefix match. Null when none matches (never a wrong device).
+        /// </summary>
         public static IMMDevice CaptureByName(string name)
         {
             IMMDeviceCollection devices;
             if (Enumerator().EnumAudioEndpoints(EDataFlow.Capture, DEVICE_STATE_ACTIVE, out devices) != 0) return null;
             int count;
             devices.GetCount(out count);
+            string wanted = Normalize(name);
+            IMMDevice exact = null, normalized = null, prefix = null;
             for (int i = 0; i < count; i++)
             {
                 IMMDevice device;
-                if (devices.Item(i, out device) == 0 && string.Equals(Name(device), name, StringComparison.OrdinalIgnoreCase)) return device;
+                if (devices.Item(i, out device) != 0) continue;
+                string deviceName = Name(device) ?? "";
+                if (string.Equals(deviceName, name, StringComparison.OrdinalIgnoreCase)) { exact = device; break; }
+                string normDevice = Normalize(deviceName);
+                if (normDevice == wanted) { if (normalized == null) normalized = device; }
+                else if (normDevice.Length > 0 && (wanted.StartsWith(normDevice) || normDevice.StartsWith(wanted)))
+                { if (prefix == null) prefix = device; }
             }
-            return null;
+            return exact ?? normalized ?? prefix;
+        }
+
+        /// <summary>Lower case, trimmed, with a trailing "(vid:pid)"-style suffix removed.</summary>
+        static string Normalize(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            string value = name.Trim();
+            int paren = value.LastIndexOf('(');
+            if (paren > 0) value = value.Substring(0, paren).Trim();
+            return value.ToLowerInvariant();
         }
 
         public static IAudioEndpointVolume Volume(IMMDevice device)
@@ -377,11 +399,13 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         public static IMMDevice Device(string uid)
         {
-            IMMDevice device = null;
-            if (uid == "communications") device = CoreAudio.Default(EDataFlow.Capture, ERole.Communications);
-            else if (uid != null && uid.StartsWith("name:")) device = CoreAudio.CaptureByName(uid.Substring(5));
-            else if (!string.IsNullOrEmpty(uid) && uid != "default") device = CoreAudio.ById(uid);
-            return device ?? CoreAudio.Default(EDataFlow.Capture, ERole.Console);
+            if (uid == "communications") return CoreAudio.Default(EDataFlow.Capture, ERole.Communications);
+            // A named microphone that is not found returns null, not the default: input-state then
+            // reports "unknown" rather than the mute/volume of the wrong device.
+            if (uid != null && uid.StartsWith("name:")) return CoreAudio.CaptureByName(uid.Substring(5));
+            if (!string.IsNullOrEmpty(uid) && uid != "default")
+                return CoreAudio.ById(uid) ?? CoreAudio.Default(EDataFlow.Capture, ERole.Console);
+            return CoreAudio.Default(EDataFlow.Capture, ERole.Console);
         }
 
         public static Dictionary<string, object> State(IMMDevice device)

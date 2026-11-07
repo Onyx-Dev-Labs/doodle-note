@@ -29,6 +29,12 @@ namespace DoodleNote.DictationHelper
             context.Post(delegate { Guard(action); }, null);
         }
 
+        /// <summary>Run on the main thread; an unexpected throw still answers the request.</summary>
+        public static void Post(string replyId, Action action)
+        {
+            context.Post(delegate { Guard(replyId, action); }, null);
+        }
+
         /// <summary>Run on the main thread and wait for the answer (or the default after the timeout).</summary>
         public static T Invoke<T>(Func<T> work, int timeoutMs, T fallback)
         {
@@ -78,6 +84,16 @@ namespace DoodleNote.DictationHelper
             catch (Exception error) { Wire.Log("ui: " + error.GetType().Name + ": " + error.Message); }
         }
 
+        static void Guard(string replyId, Action action)
+        {
+            try { action(); }
+            catch (Exception error)
+            {
+                Wire.Log("ui op " + replyId + ": " + error.GetType().Name + ": " + error.Message);
+                Wire.Reply(replyId, false, Wire.Fields("reason", "internal-error"));
+            }
+        }
+
         internal sealed class Cancelable
         {
             System.Windows.Forms.Timer timer;
@@ -110,6 +126,20 @@ namespace DoodleNote.DictationHelper
         }
 
         public void Async(Action action) { try { items.Add(action); } catch (InvalidOperationException) { } }
+
+        /// <summary>Queue work for one request; an unexpected throw still answers it.</summary>
+        public void Async(string replyId, Action action)
+        {
+            Async(delegate
+            {
+                try { action(); }
+                catch (Exception error)
+                {
+                    Wire.Log(thread.Name + " op " + replyId + ": " + error.GetType().Name + ": " + error.Message);
+                    Wire.Reply(replyId, false, Wire.Fields("reason", "internal-error"));
+                }
+            });
+        }
 
         /// <summary>Run now on this queue and wait, up to the timeout.</summary>
         public void Sync(Action action, int timeoutMs)

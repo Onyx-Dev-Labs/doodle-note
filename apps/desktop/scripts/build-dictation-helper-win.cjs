@@ -6,7 +6,8 @@
 //   node scripts/build-dictation-helper-win.cjs           -> engine/.build/windows/dictation-helper.exe
 //   node scripts/build-dictation-helper-win.cjs --tests   -> also engine/.build/windows/dictation-helper-tests.exe
 const { execFileSync } = require('node:child_process')
-const { existsSync, mkdirSync, readdirSync } = require('node:fs')
+const { createHash } = require('node:crypto')
+const { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
 
 const repo = path.resolve(__dirname, '..', '..', '..')
@@ -59,7 +60,18 @@ if (process.platform !== 'win32') {
   process.exit(1)
 }
 mkdirSync(out, { recursive: true })
-compile(path.join(out, 'dictation-helper.exe'), sources(source))
+const helperExe = path.join(out, 'dictation-helper.exe')
+compile(helperExe, sources(source))
+
+// A manifest beside the helper lets the app tell a damaged helper (hash mismatch) from one
+// Windows refused to run (a launch failure) or one that is simply missing (dev without a build).
+const version = JSON.parse(readFileSync(path.join(repo, 'apps', 'desktop', 'package.json'), 'utf8')).version
+const sha256 = createHash('sha256').update(readFileSync(helperExe)).digest('hex')
+writeFileSync(
+  path.join(out, 'dictation-helper.manifest.json'),
+  JSON.stringify({ name: 'dictation-helper.exe', version, sha256 }, null, 2) + '\n'
+)
+console.log(`manifest sha256=${sha256.slice(0, 12)}… version=${version}`)
 if (process.argv.includes('--tests')) {
   compile(path.join(out, 'dictation-helper-tests.exe'), [
     ...sources(source, ['Program.cs']),

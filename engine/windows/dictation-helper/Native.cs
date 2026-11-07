@@ -124,6 +124,11 @@ namespace DoodleNote.DictationHelper
         public static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
         [DllImport("kernel32.dll")]
         public static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr GetCurrentThread();
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetThreadPriority(IntPtr thread, int priority);
+        public const int THREAD_PRIORITY_HIGHEST = 2;
 
         // Clipboard.
         [DllImport("user32.dll", SetLastError = true)]
@@ -144,6 +149,8 @@ namespace DoodleNote.DictationHelper
         public static extern uint GetClipboardSequenceNumber();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern uint RegisterClipboardFormat(string name);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetClipboardFormatName(uint format, StringBuilder name, int max);
         [DllImport("kernel32.dll")]
         public static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
         [DllImport("kernel32.dll")]

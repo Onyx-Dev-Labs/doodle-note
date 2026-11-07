@@ -49,11 +49,12 @@ namespace DoodleNote.DictationHelper
 
         public static string Serialize(object value) { return json.Serialize(value); }
 
+        /// <summary>Parse one request line; null (never a throw) when it is not a JSON object.</summary>
         public static Dictionary<string, object> Parse(string line)
         {
+            // A bad \uXXXX escape throws FormatException; any malformed input must not kill the reader.
             try { return json.DeserializeObject(line) as Dictionary<string, object>; }
-            catch (ArgumentException) { return null; }
-            catch (InvalidOperationException) { return null; }
+            catch (Exception) { return null; }
         }
 
         public static void Send(Dictionary<string, object> payload) { outbox.Add(Serialize(payload)); }
