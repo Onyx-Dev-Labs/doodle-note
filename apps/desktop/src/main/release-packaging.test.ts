@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
 
 const builderConfig = readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8')
@@ -21,6 +22,9 @@ const ciWorkflow = readFileSync(
 )
 const modelsView = readFileSync(new URL('../renderer/src/ModelsView.tsx', import.meta.url), 'utf8')
 const desktopPackage = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-package.cjs') as {
+  problemsFor(files: string[]): string[]
+}
 const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
 function pngMetadata(url: URL): { width: number; height: number; colorType: number } {
@@ -112,6 +116,58 @@ test('the Mac package excludes the Windows-only Koffi DLL loader', () => {
   )
   const win = /^win:\n((?:[ \t].*\n|\n)*)/m.exec(builderConfig.replace(/\r\n/g, '\n'))?.[1] ?? ''
   assert.doesNotMatch(win, /node_modules\/(koffi|@koromix)\/\*\*|koffi-win32-x64/)
+})
+
+/** The `win.files` patterns, which replace the shared allowlist on Windows too. */
+function winFilePatterns(config: string): string[] {
+  const win = /^win:\n((?:[ \t].*\n|\n)*)/m.exec(config.replace(/\r\n/g, '\n'))?.[1] ?? ''
+  const files = /^ {2}files:\n((?: {4}.*\n)*)/m.exec(win)?.[1] ?? ''
+  return files
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2).replace(/^(['"])(.*)\1$/, '$2'))
+}
+
+test('the Windows app.asar is limited to the built app, like the Mac one', () => {
+  // Without an explicit allowlist the platform exclusions alone shipped src/,
+  // scripts/, docs/ and editor/tooling files inside app.asar.
+  assert.equal(winFilePatterns(builderConfig)[0], 'out/**')
+  assert.ok(
+    winFilePatterns(builderConfig)
+      .slice(1)
+      .every((pattern) => pattern.startsWith('!'))
+  )
+  assert.equal(macFilePatterns(builderConfig)[0], 'out/**')
+  assert.match(
+    ciWorkflow,
+    /node apps\/desktop\/scripts\/test-windows-package\.cjs apps\/desktop\/release\/win-unpacked/
+  )
+})
+
+test('the packaged-content check rejects source, tooling, tests and sourcemaps', () => {
+  const { problemsFor } = packageCheck
+  assert.deepEqual(
+    problemsFor([
+      'package.json',
+      'out/main/index.js',
+      'out/renderer/assets/index-abc.js',
+      'node_modules/electron-updater/out/main.js.map',
+      'node_modules/some-lib/test/helper.js'
+    ]),
+    []
+  )
+  const flagged = problemsFor([
+    'src/main/index.ts',
+    'scripts/build-windows-icons.cjs',
+    'docs/calendar-accounts.md',
+    '.eslintcache',
+    'tsconfig.json',
+    'out/main/index.js.map',
+    'out/main/updater.test.js',
+    'out/renderer/__tests__/a.js'
+  ])
+  assert.equal(flagged.length, 8)
 })
 
 test('only the platform-guarded Windows speech worker loads Koffi', () => {

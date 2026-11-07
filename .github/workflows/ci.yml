@@ -142,6 +142,12 @@ jobs:
       - name: Build Windows installer
         run: pnpm --filter desktop package:win
 
+      # app.asar must hold only out/** and runtime node_modules: no src/,
+      # scripts/, docs/, tooling, tests or app sourcemaps.
+      - name: Check Windows app.asar contents
+        timeout-minutes: 5
+        run: node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release/win-unpacked
+
       - name: Test recorder with packaged Electron runtime
         run: node apps/desktop/scripts/test-electron-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
 

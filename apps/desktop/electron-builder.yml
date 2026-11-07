@@ -128,6 +128,10 @@ win:
   # Ship CPU + Vulkan llama binaries (Vulkan covers most Windows GPUs for
   # local note generation); CUDA variants add >500MB for little test value.
   files:
+    # Platform files replace the shared allowlist (as on mac): without out/**
+    # here the exclusions alone shipped src/, scripts/, docs/ and tooling.
+    # scripts/test-windows-package.cjs fails CI if they return.
+    - out/**
     - "!**/node_modules/@node-llama-cpp/mac-*/**"
     - "!**/node_modules/@node-llama-cpp/linux-*/**"
     - "!**/node_modules/@node-llama-cpp/win-arm64/**"
