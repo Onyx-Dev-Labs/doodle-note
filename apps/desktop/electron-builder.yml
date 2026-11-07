@@ -123,6 +123,8 @@ win:
     # by scripts/build-dictation-helper-win.cjs with the .NET Framework 4.8 compiler.
     - from: ../../engine/.build/windows/dictation-helper.exe
       to: engine/dictation-helper.exe
+    - from: ../../engine/.build/windows/dictation-helper.manifest.json
+      to: engine/dictation-helper.manifest.json
   # Ship CPU + Vulkan llama binaries (Vulkan covers most Windows GPUs for
   # local note generation); CUDA variants add >500MB for little test value.
   files:

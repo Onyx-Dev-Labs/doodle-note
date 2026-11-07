@@ -121,6 +121,7 @@ jobs:
       # Bark's Windows helper is C# built with the .NET Framework 4.8 compiler that
       # ships with Windows (no SDK). Its logic tests run before packaging.
       - name: Build and test the Windows dictation helper
+        timeout-minutes: 10
         run: |
           pnpm --filter desktop helper:win
           engine/.build/windows/dictation-helper-tests.exe
@@ -153,6 +154,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Windows window chrome behavior check failed" }
 
       - name: Smoke packaged Windows dictation helper
+        timeout-minutes: 5
         shell: pwsh
         run: |
           $helper = "apps/desktop/release/win-unpacked/resources/engine/dictation-helper.exe"
