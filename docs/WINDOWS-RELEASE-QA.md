@@ -71,13 +71,20 @@ setup, or starting a recording, restarts an engine that died while loading.
   an utterance's start is kept until decoded. At the cap the utterance is cut
   at the quietest 100 ms of the last 3 s; the part after the cut is decoded
   from 1 s before it, and its words near the cut are aligned with the words
-  the first part committed in its last 1.5 s (a longest common subsequence of
-  words heard the same way, within 1 s of each other: words of up to four
-  letters must match exactly, longer ones may differ by a quarter of their
-  letters, such as "Priya" and "Pria"). The part resumes after its last
-  aligned word; if nothing aligns it keeps the words after the last committed
-  one, and after a cut in silence it keeps everything. Padding never reaches
-  into audio already decoded. Silero's own buffer of the speech in progress is
+  the first part committed in its last 2 s (words heard the same way, within
+  1 s of each other: compared without case or punctuation, with number words
+  as digits and "OK" as "okay"; words of up to four letters must match
+  exactly, longer ones may differ by a quarter of their letters, such as
+  "Priya" and "Pria"; a split word such as "follow up" matches "follow-up").
+  The alignment keeps the most matches and pays for every second-decode word
+  it skips before a match, so it does not jump ahead to a repeated word. The
+  part resumes after its last aligned word, also skipping words that start
+  with (within 0.4 s) and mostly overlap a committed word left unaligned (the
+  same word heard differently, such as "Siobhan" and "Shivon"); if nothing
+  aligns it keeps the words after the last committed one, and after a cut in
+  silence it keeps everything. This is a best effort: a word both decodes got
+  wrong differently at shifted times can still be doubled or lost at a cut.
+  Padding never reaches into audio already decoded. Silero's own buffer of the speech in progress is
   reset (at a cut) after 60 s of continuous detection, so hours of continuous
   audio such as music cannot grow it without limit. While someone speaks, the utterance in progress is
   re-decoded after 1 s and then each time it grows by half, up to the cut, so
@@ -131,10 +138,14 @@ setup, or starting a recording, restarts an engine that died while loading.
 - **Memory**: the loaded live worker uses about 765 MB while idle. After
   5 minutes without a recording it is closed; the next recording starts
   capture at once, buffers its audio (up to 2 minutes) while the model reloads
-  (about 4.7 s to the first decode on Dev04) and loses nothing. The reload
+  (about 4.7 s to the first decode on Dev04) and loses nothing. A reload
+  slower than that still records everything, but the audio past 2 minutes is
+  given to the transcriber as silence (so later words keep their time in the
+  saved audio) and is not transcribed live; Re-transcribe covers it. The reload
   reuses the first calibration and does not count as lag. If the reload fails
-  (for example the model cannot be prepared) the recording ends at once with
-  that error, and its audio is still merged and saved for Re-transcribe.
+  (for example the model cannot be prepared) or the worker crashes while
+  reloading, the recording ends at once with that error, and its audio is
+  still merged and saved for Re-transcribe.
   `WinEngineHost.setKeepWarm` keeps the worker loaded for features that need
   instant starts.
 - **Capture**: the renderer pumps microphone and loopback audio through an

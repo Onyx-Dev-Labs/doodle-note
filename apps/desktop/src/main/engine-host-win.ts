@@ -28,6 +28,8 @@ export const IDLE_UNLOAD_MS = 5 * 60_000
 
 /** At most this much audio (both channels) waits for a reloading worker: 2 minutes. */
 const MAX_PENDING_SAMPLES = 2 * 2 * 60 * 16_000
+/** Silence standing in for audio past that cap is handed over a second at a time. */
+const SILENCE_FRAME_SAMPLES = 16_000
 
 export interface WinEngineHostOptions {
   idleUnloadMs?: number
@@ -76,6 +78,8 @@ export class WinEngineHost {
   private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
   private startAfterReload = false
   private pendingSamples = 0
+  /** Per channel, audio past the buffer cap: saved, and stood in for by silence. */
+  private droppedSamples = new Map<string, number>()
   /** The first live calibration, reused when the worker reloads. */
   private calibration: { calibrationRtf: number; captionMode: string } | null = null
   private stopAfterReload = false
@@ -171,6 +175,18 @@ export class WinEngineHost {
         return
       }
       this.backgroundDownload = false
+      if (this.sessionActive && this.startAfterReload) {
+        // Crashed while reloading for this recording: finish it the same way
+        // as a reload error, merging its audio now. The next recording
+        // starts a fresh worker, which verifies (and repairs) the model.
+        this.child = null
+        this.ready = false
+        this.unloaded = true
+        this.failReloadDuringSession(
+          `the speech engine stopped while loading its model (exit code ${String(code)}).`
+        )
+        return
+      }
       const failedDuringWarmup = !this.ready && !this.sessionActive && !this.warmupResult?.ok
       this.child = null
       this.ready = false
@@ -366,6 +382,8 @@ export class WinEngineHost {
     this.sessionActive = true
     this.captureState = 'starting'
     this.pendingFrames = []
+    this.pendingSamples = 0
+    this.droppedSamples.clear()
     this.startAfterReload = false
     this.stopAfterReload = false
     if (reloading) this.reload()
@@ -449,10 +467,13 @@ export class WinEngineHost {
     }
     if (this.startAfterReload) {
       this.recorder?.write(channel, samples)
-      // Bounded: a reload takes seconds; beyond this the audio is still saved.
+      // Bounded: a reload takes seconds. Past the cap audio is still saved,
+      // and silence stands in for it when the worker is ready.
       if (this.pendingSamples < MAX_PENDING_SAMPLES) {
         this.pendingFrames.push({ channel, samples, sentAt: Date.now() })
         this.pendingSamples += samples.length
+      } else {
+        this.droppedSamples.set(channel, (this.droppedSamples.get(channel) ?? 0) + samples.length)
       }
       return
     }
@@ -505,6 +526,7 @@ export class WinEngineHost {
     this.stopAfterReload = false
     this.pendingFrames = []
     this.pendingSamples = 0
+    this.droppedSamples.clear()
     if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
     this.workerFinishTimer = null
     this.emit({
@@ -531,8 +553,20 @@ export class WinEngineHost {
     for (const frame of this.pendingFrames) {
       this.child.postMessage({ t: 'audio', sessionId, ...frame, sentAt })
     }
+    // Audio past the cap is in the recording but not in the transcript: the
+    // worker hears silence for it, so later words keep their place in time.
+    for (const [channel, dropped] of this.droppedSamples) {
+      console.warn(
+        `[win-asr] ${channel}: ${(dropped / 16_000).toFixed(1)} s recorded during a slow model load are not transcribed`
+      )
+      for (let left = dropped; left > 0; left -= SILENCE_FRAME_SAMPLES) {
+        const samples = new Float32Array(Math.min(left, SILENCE_FRAME_SAMPLES))
+        this.child.postMessage({ t: 'audio', sessionId, channel, samples, sentAt })
+      }
+    }
     this.pendingFrames = []
     this.pendingSamples = 0
+    this.droppedSamples.clear()
     if (this.stopAfterReload) {
       this.stopAfterReload = false
       this.child.postMessage({ t: 'stop', sessionId })

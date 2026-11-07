@@ -15,8 +15,10 @@ import { DEFAULT_SEGMENTER_CONFIG } from './segmenter'
  * its threshold past its maximum and can run on for minutes. When an
  * utterance reaches `maxSpeechSec`, it is cut at the quietest 100 ms of the
  * last few seconds; the next part is decoded from a second before the cut and
- * aligned on text with the words already committed (stitchSeam), so a forced
- * cut neither drops nor doubles a word even when the two decodes disagree.
+ * aligned on text with the words already committed (stitchSeam). That
+ * alignment handles the usual disagreements (re-timed, respelled, split or
+ * dropped words) but is a best effort: a word both decodes misheard in
+ * different ways can still be doubled or lost at a cut.
  * Every sample from an utterance's start is retained until it is decoded, so
  * no speech is ever dropped. Padding before an utterance never reaches back
  * into audio that was already decoded.
@@ -288,7 +290,7 @@ interface OpenWord {
 /** The words committed just before a forced cut, to stitch the next part. */
 interface Seam {
   cutSec: number
-  words: Array<{ norm: string; startSec: number }>
+  words: Array<{ norm: string; startSec: number; endSec: number }>
 }
 
 interface Utterance {
@@ -332,8 +334,47 @@ export function keepWords(
   return kept
 }
 
-function wordNorm(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9']/g, '')
+const NUMBER_WORDS: Record<string, string> = {
+  zero: '0',
+  one: '1',
+  two: '2',
+  three: '3',
+  four: '4',
+  five: '5',
+  six: '6',
+  seven: '7',
+  eight: '8',
+  nine: '9',
+  ten: '10',
+  eleven: '11',
+  twelve: '12',
+  thirteen: '13',
+  fourteen: '14',
+  fifteen: '15',
+  sixteen: '16',
+  seventeen: '17',
+  eighteen: '18',
+  nineteen: '19',
+  twenty: '20',
+  thirty: '30',
+  forty: '40',
+  fifty: '50',
+  sixty: '60',
+  seventy: '70',
+  eighty: '80',
+  ninety: '90',
+  hundred: '100',
+  ok: 'okay'
+}
+
+/**
+ * A word as two decodes might both write it: lower case, letters and digits
+ * only ("it's" / "its", "follow-up" / "followup"), number words as digits
+ * ("ten" / "10") and "ok" as "okay".
+ */
+export function wordNorm(text: string): string {
+  const plain = text.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return NUMBER_WORDS[plain] ?? plain
 }
 
 /** Words as token runs (a leading space starts one). */
@@ -361,10 +402,10 @@ function editDistance(a: string, b: string): number {
 }
 
 /**
- * Whether two decodes heard the same word: words of up to four letters must
- * match exactly ("the" is not "there", "this" is not "thus"); longer ones may
- * differ by a quarter of their letters ("Priya" / "Pria", "redesign" /
- * "redesigned").
+ * Whether two decodes heard the same word (both given as wordNorm): words of
+ * up to four letters must match exactly ("the" is not "there", "this" is not
+ * "thus"); longer ones may differ by a quarter of their letters ("Priya" /
+ * "Pria", "redesign" / "redesigned").
  */
 export function sameWord(a: string, b: string): boolean {
   if (!a || !b) return false
@@ -377,65 +418,150 @@ export function sameWord(a: string, b: string): boolean {
 const SEAM_MATCH_SEC = 1
 /** Second-decode words starting this soon after the cut are compared with the first part. */
 const SEAM_WINDOW_SEC = 1.5
+/** The part before a cut contributes its words from this long before the cut. */
+export const SEAM_PRIOR_SEC = 2
+/**
+ * Cost of a second-decode word left unmatched before a match: an alignment
+ * may not claim that words the first part never wrote were already committed
+ * just to reach a repeated word ("signed the | contract with the bank" must
+ * not match the second "the"). Committed words the second decode dropped
+ * cost nothing.
+ */
+const SEAM_GAP_COST = 0.6
+
+/** Two decodes of one word start this close together, once their shift is allowed for. */
+const SEAM_SAME_START_SEC = 0.4
+
+interface SeamWord {
+  norm: string
+  startSec: number
+  endSec: number
+}
+
+/** The seam a forced cut at `cutSec` leaves for the next part. */
+export function seamFrom(committed: EngineTokenTiming[], cutSec: number): Seam {
+  return {
+    cutSec,
+    words: groupWords(committed)
+      .filter((word) => word[0]!.startSec >= cutSec - SEAM_PRIOR_SEC)
+      .map((word) => ({
+        norm: wordNorm(word.map((t) => t.token).join('')),
+        startSec: word[0]!.startSec,
+        endSec: word[word.length - 1]!.endSec
+      }))
+  }
+}
+
+/** How much of `word` lies inside [startSec, endSec), as a fraction of it. */
+function overlapFraction(word: SeamWord, startSec: number, endSec: number): number {
+  const length = word.endSec - word.startSec
+  if (length <= 0) return word.startSec >= startSec && word.startSec < endSec ? 1 : 0
+  return Math.max(0, Math.min(word.endSec, endSec) - Math.max(word.startSec, startSec)) / length
+}
 
 /**
  * Two decodes around a forced cut disagree at the seam: timestamps move by up
- * to a second with context, and words can be spelled differently or dropped.
- * The part after a cut is decoded from a second before the cut, and its
- * words near the cut are aligned with the words the part before committed in
- * its last 1.5 s: a longest common subsequence over words that sound the same
- * (sameWord) and lie within a second of each other, ties broken by time.
- * Matched words and anything between them were already committed; the part
- * resumes after its last matched word. With no match it keeps words that
- * start after the last committed word. Words beyond the window are always new.
+ * to a second with context, and words can be spelled differently, split
+ * ("follow-up" / "follow up") or dropped. The part after a cut is decoded
+ * from a second before the cut, and its words near the cut are aligned with
+ * the words the part before committed in its last two seconds: matches are
+ * words that sound the same (sameWord on wordNorm, or one word spelled
+ * exactly as two joined) within a second of each other; the best alignment maximises
+ * matches, ties broken by time, and pays SEAM_GAP_COST for each second-decode
+ * word skipped before a match. Matched words and anything between them
+ * were already committed; the part resumes after its last match. Then any
+ * second-decode word that starts with, and mostly overlaps, a committed word
+ * left unmatched after that match (allowing for the time shift seen at the
+ * match) is the same word written differently ("Siobhan" / "Shivon") and is
+ * skipped too.
+ * Words beyond the window are always new.
+ *
+ * This is a best effort, not a guarantee: a word both decodes got wrong in
+ * different ways, at shifted times, can still be doubled or dropped.
  */
 export function stitchSeam(tokens: EngineTokenTiming[], seam: Seam): EngineTokenTiming[] {
   const words = groupWords(tokens)
+  const all: SeamWord[] = words.map((word) => ({
+    norm: wordNorm(word.map((t) => t.token).join('')),
+    startSec: word[0]!.startSec,
+    endSec: word[word.length - 1]!.endSec
+  }))
   const prior = seam.words
-  const head = words.filter((word) => word[0]!.startSec < seam.cutSec + SEAM_WINDOW_SEC)
-  const norms = head.map((word) => wordNorm(word.map((t) => t.token).join('')))
+  const n = all.filter((word) => word.startSec < seam.cutSec + SEAM_WINDOW_SEC).length
+  const head = all.slice(0, n)
   let resume = 0
-  if (prior.length === 0) {
-    // Nothing committed near the cut: everything this part heard is new.
-    resume = 0
-  } else {
-    // score[i][j]: best alignment of prior[0..i) with head[0..j).
+  if (prior.length > 0) {
     const m = prior.length
-    const n = head.length
-    const score = Array.from({ length: m + 1 }, () => new Float64Array(n + 1))
-    const close = (i: number, j: number): number =>
-      Math.abs(prior[i]!.startSec - head[j]![0]!.startSec)
+    // best[i][j]: best alignment whose last match ends at prior i and head j.
+    const best = Array.from({ length: m + 1 }, () => new Float64Array(n + 1).fill(-Infinity))
+    // The first prior and head word of that last match, for the time shift there.
+    const anchor = Array.from({ length: m + 1 }, () => new Array<[number, number]>(n + 1))
+    const shapes: Array<[number, number]> = [
+      [1, 1],
+      [1, 2],
+      [2, 1]
+    ]
+    const gain = (i: number, j: number, a: number, b: number): number => {
+      const p = prior.slice(i - a, i)
+      const h = head.slice(j - b, j)
+      const dt = Math.abs(p[0]!.startSec - h[0]!.startSec)
+      if (dt > SEAM_MATCH_SEC) return -Infinity
+      const pn = p.map((w) => w.norm).join('')
+      const hn = h.map((w) => w.norm).join('')
+      // A word split in two must join back exactly: fuzzy matching would let
+      // "message" absorb the "or" after it.
+      if (a + b > 2 ? pn !== hn : !sameWord(pn, hn)) return -Infinity
+      // A split word covers more of both decodes than its first half alone.
+      return (a + b) / 2 - dt / 100
+    }
+    let top = -Infinity
+    let end: [number, number] | null = null
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
-        let best = Math.max(score[i - 1]![j]!, score[i]![j - 1]!)
-        if (close(i - 1, j - 1) <= SEAM_MATCH_SEC && sameWord(prior[i - 1]!.norm, norms[j - 1]!)) {
-          best = Math.max(best, score[i - 1]![j - 1]! + 1 - close(i - 1, j - 1) / 100)
+        for (const [a, b] of shapes) {
+          if (i < a || j < b) continue
+          const g = gain(i, j, a, b)
+          if (g === -Infinity) continue
+          // A first match, or one after an earlier match; skipped head words cost.
+          let score = g - SEAM_GAP_COST * (j - b)
+          for (let pi = 1; pi <= i - a; pi++) {
+            for (let pj = 1; pj <= j - b; pj++) {
+              if (best[pi]![pj] === -Infinity) continue
+              score = Math.max(score, best[pi]![pj]! + g - SEAM_GAP_COST * (j - b - pj))
+            }
+          }
+          if (score > best[i]![j]!) {
+            best[i]![j] = score
+            anchor[i]![j] = [i - a, j - b]
+          }
         }
-        score[i]![j] = best
+        if (best[i]![j]! > top + 1e-9) {
+          top = best[i]![j]!
+          end = [i, j]
+        }
       }
     }
-    // The last head word that is part of a best alignment.
-    let lastMatched = -1
-    let i = m
-    let j = n
-    while (i > 0 && j > 0) {
-      const matched =
-        close(i - 1, j - 1) <= SEAM_MATCH_SEC &&
-        sameWord(prior[i - 1]!.norm, norms[j - 1]!) &&
-        Math.abs(score[i]![j]! - (score[i - 1]![j - 1]! + 1 - close(i - 1, j - 1) / 100)) < 1e-9
-      if (matched) {
-        lastMatched = Math.max(lastMatched, j - 1)
-        i--
-        j--
-      } else if (score[i - 1]![j]! >= score[i]![j - 1]!) i--
-      else j--
+    // Committed words left unmatched after the alignment, and the time shift there.
+    let unmatched: SeamWord[]
+    let shift = 0
+    if (end) {
+      resume = end[1]
+      unmatched = prior.slice(end[0])
+      const [pa, ha] = anchor[end[0]]![end[1]]!
+      shift = head[ha]!.startSec - prior[pa]!.startSec
+    } else {
+      const lastStart = prior[m - 1]!.startSec
+      resume = all.findIndex((word) => word.startSec > lastStart + 0.05)
+      if (resume < 0) resume = all.length
+      unmatched = prior.slice(-1)
     }
-    if (lastMatched >= 0) resume = lastMatched + 1
-    else {
-      const lastStart = prior[prior.length - 1]!.startSec
-      resume = words.findIndex((word) => word[0]!.startSec > lastStart + 0.05)
-      if (resume < 0) resume = words.length
-    }
+    // The same word heard differently starts where the committed one did and
+    // lies mostly inside it. (Word ends alone are unreliable: a word before a
+    // pause can be timed to run on through it.)
+    const sameSpot = (word: SeamWord, committed: SeamWord): boolean =>
+      Math.abs(word.startSec - (committed.startSec + shift)) <= SEAM_SAME_START_SEC &&
+      overlapFraction(word, committed.startSec + shift, committed.endSec + shift) >= 0.5
+    while (resume < n && unmatched.some((word) => sameSpot(all[resume]!, word))) resume++
   }
   const kept = words.slice(resume).flat()
   if (kept.length > 0 && !kept[0]!.token.startsWith(' ')) {
@@ -656,15 +782,7 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     this.utterance = {
       keepFrom: cut,
       decodeFrom: cut - this.overlapSamples,
-      seam: {
-        cutSec,
-        words: groupWords(committed)
-          .filter((word) => word[0]!.startSec >= cutSec - 1.5)
-          .map((word) => ({
-            norm: wordNorm(word.map((t) => t.token).join('')),
-            startSec: word[0]!.startSec
-          }))
-      }
+      seam: seamFrom(committed, cutSec)
     }
     this.nextInterimLength = this.interimSamples
   }

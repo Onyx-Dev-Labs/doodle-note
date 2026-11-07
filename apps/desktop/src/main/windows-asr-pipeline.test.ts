@@ -11,7 +11,9 @@ import {
   VAD_WINDOW_SAMPLES,
   keepWords,
   sameWord,
+  seamFrom,
   stitchSeam,
+  wordNorm,
   tokensFromResult,
   type OfflineRecognizerLike,
   type TdtResult,
@@ -214,26 +216,22 @@ test('words timed on either side of a forced cut by the two decodes are kept exa
 
 /** The seam cases from review: the two decodes disagree in text or timing. */
 function seamCase(
-  committed: Array<[string, number]>,
+  committed: Array<[string, number, number?]>,
   cutSec: number,
-  second: Array<[string, number]>
+  second: Array<[string, number, number?]>
 ): string {
-  const norm = (text: string): string => text.toLowerCase().replace(/[^a-z0-9']/g, '')
-  const kept = stitchSeam(
-    second.map(([text, startSec]) => ({
+  const tokens = (words: Array<[string, number, number?]>): EngineTokenTiming[] =>
+    words.map(([text, startSec, endSec]) => ({
       token: ` ${text}`,
       startSec,
-      endSec: startSec + 0.25,
+      endSec: endSec ?? startSec + 0.25,
       confidence: 0.9
-    })),
-    {
-      cutSec,
-      words: committed
-        .filter(([, startSec]) => startSec >= cutSec - 1.5)
-        .map(([text, startSec]) => ({ norm: norm(text), startSec }))
-    }
+    }))
+  // The seam is built the way a forced cut builds it.
+  const kept = stitchSeam(tokens(second), seamFrom(tokens(committed), cutSec))
+  return [...committed.map(([text]) => text), '|', ...kept.map((token) => token.token.trim())].join(
+    ' '
   )
-  return [...committed.map(([text]) => text), ...kept.map((token) => token.token.trim())].join(' ')
 }
 
 test('a forced-cut seam survives spelling variants, dropped and repeated words, and silence', () => {
@@ -254,7 +252,7 @@ test('a forced-cut seam survives spelling variants, dropped and repeated words, 
         ['Friday', 10.5]
       ]
     ),
-    'notes to Priya before Friday'
+    'notes to Priya | before Friday'
   )
   // It drops a short function word; "the" is not "there".
   assert.equal(
@@ -272,7 +270,7 @@ test('a forced-cut seam survives spelling variants, dropped and repeated words, 
         ['today', 11.1]
       ]
     ),
-    'signed the contract over there today'
+    'signed the | contract over there today'
   )
   // A repeated word next to the cut is not swallowed.
   assert.equal(
@@ -289,7 +287,7 @@ test('a forced-cut seam survives spelling variants, dropped and repeated words, 
         ['way', 10.6]
       ]
     ),
-    'said no no way'
+    'said no | no way'
   )
   // The cut landed in silence: nothing committed nearby, so every word is new.
   assert.equal(
@@ -297,7 +295,7 @@ test('a forced-cut seam survives spelling variants, dropped and repeated words, 
       ['budget', 9.6],
       ['review', 10.1]
     ]),
-    'okay budget review'
+    'okay | budget review'
   )
   // A word the first decode placed after the cut and the second before it.
   assert.equal(
@@ -314,11 +312,223 @@ test('a forced-cut seam survives spelling variants, dropped and repeated words, 
         ['expires', 10.3]
       ]
     ),
-    'the vendor contract expires'
+    'the vendor | contract expires'
   )
   assert.equal(sameWord('the', 'there'), false)
   assert.equal(sameWord('priya', 'pria'), true)
   assert.equal(sameWord('redesign', 'redesigned'), true)
+})
+
+test('a forced-cut seam survives variant spellings, split words and repeats near the cut', () => {
+  type W = Array<[string, number, number?]>
+  const cases: Array<[string, W, W, string]> = [
+    [
+      'digits vs words',
+      [
+        ['at', 9.2],
+        ['ten', 9.5]
+      ],
+      [
+        ['at', 9.25],
+        ['10', 9.55],
+        ['thirty', 10.1]
+      ],
+      'at ten | thirty'
+    ],
+    [
+      'OK vs okay',
+      [
+        ['that', 9.1],
+        ['sounds', 9.3],
+        ['OK', 9.7]
+      ],
+      [
+        ['that', 9.1],
+        ['sounds', 9.3],
+        ['okay', 9.75],
+        ['then', 10.3]
+      ],
+      'that sounds OK | then'
+    ],
+    [
+      "its vs it's",
+      [
+        ['and', 9.2],
+        ["it's", 9.6]
+      ],
+      [
+        ['and', 9.2],
+        ['its', 9.65],
+        ['fine', 10.1]
+      ],
+      "and it's | fine"
+    ],
+    [
+      'hyphen compound split',
+      [
+        ['the', 9.0],
+        ['follow-up', 9.3]
+      ],
+      [
+        ['the', 9.0],
+        ['follow', 9.3],
+        ['up', 9.55],
+        ['call', 10.2]
+      ],
+      'the follow-up | call'
+    ],
+    [
+      'compound joined',
+      [
+        ['the', 9.0],
+        ['follow', 9.3],
+        ['up', 9.55]
+      ],
+      [
+        ['the', 9.0],
+        ['follow-up', 9.3],
+        ['call', 10.2]
+      ],
+      'the follow up | call'
+    ],
+    [
+      'name very different',
+      [
+        ['ask', 9.0],
+        ['Siobhan', 9.4]
+      ],
+      [
+        ['ask', 9.0],
+        ['Shivon', 9.5],
+        ['tomorrow', 10.2]
+      ],
+      'ask Siobhan | tomorrow'
+    ],
+    [
+      'earlier word re-timed late',
+      [['budget', 8.4]],
+      [
+        ['budget', 9.1],
+        ['review', 10.1]
+      ],
+      'budget | review'
+    ],
+    [
+      'repeat across cut',
+      [
+        ['said', 9.2],
+        ['no', 9.6]
+      ],
+      [
+        ['said', 9.2],
+        ['no', 9.65],
+        ['no', 10.2],
+        ['way', 10.5]
+      ],
+      'said no | no way'
+    ],
+    [
+      'repeat, copy re-timed late',
+      [
+        ['said', 9.0],
+        ['no', 9.3]
+      ],
+      [
+        ['said', 9.3],
+        ['no', 9.95],
+        ['no', 10.25],
+        ['way', 10.5]
+      ],
+      'said no | no way'
+    ],
+    [
+      'first part dropped a word near the cut',
+      [
+        ['we', 9.0],
+        ['need', 9.3]
+      ],
+      [
+        ['we', 9.0],
+        ['need', 9.3],
+        ['it', 9.7],
+        ['now', 10.2]
+      ],
+      'we need | it now'
+    ],
+    [
+      'dropped "the", a later real "the" within 1 s',
+      [
+        ['signed', 9.3],
+        ['the', 9.7]
+      ],
+      [
+        ['signed', 9.3],
+        ['contract', 9.9],
+        ['with', 10.2],
+        ['the', 10.5],
+        ['bank', 10.7]
+      ],
+      'signed the | contract with the bank'
+    ],
+    [
+      'second decode inserts a filler',
+      [
+        ['we', 9.0],
+        ['need', 9.4],
+        ['to', 9.7]
+      ],
+      [
+        ['we', 9.0],
+        ['uh', 9.2],
+        ['need', 9.45],
+        ['to', 9.75],
+        ['go', 10.2]
+      ],
+      'we need to | go'
+    ]
+  ]
+  for (const [name, committed, second, expected] of cases) {
+    assert.equal(seamCase(committed, 10, second), expected, name)
+  }
+  // From the 30-minute meeting: a last word timed to run on through the pause
+  // after it does not swallow the new words that the pause ends with.
+  assert.equal(
+    seamCase(
+      [
+        ['we', 8.1, 8.2],
+        ['can', 8.2, 8.3],
+        ['get', 8.3, 10.6]
+      ],
+      10,
+      [
+        ['uh', 10.1, 10.7],
+        ['the', 10.7, 10.9],
+        ['T-shape', 10.9, 11.3]
+      ]
+    ),
+    'we can get | uh the T-shape'
+  )
+  // "has to be" / "has to look": a different word later in the gap is kept.
+  assert.equal(
+    seamCase(
+      [
+        ['has', 8.4, 8.5],
+        ['to', 8.5, 8.6],
+        ['be', 8.6, 9.3]
+      ],
+      9.1,
+      [
+        ['has', 8.55, 8.7],
+        ['to', 8.7, 9.4],
+        ['look', 9.4, 9.6],
+        ['really', 9.6, 9.9]
+      ]
+    ),
+    'has to be | look really'
+  )
+  assert.equal(wordNorm("It's"), 'its')
+  assert.equal(wordNorm('Ten'), '10')
+  assert.equal(wordNorm('OK'), 'okay')
 })
 
 /** Like gridRecognizer, but every other decode misspells words and drops "of". */

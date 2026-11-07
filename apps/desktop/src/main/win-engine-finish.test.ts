@@ -275,6 +275,101 @@ test('a reload that fails during a recording ends it cleanly and keeps its audio
   }
 })
 
+test('a worker that crashes while reloading for a recording ends it and merges its audio', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const controls: Array<Record<string, unknown>> = []
+  const events: EngineEvent[] = []
+  const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
+    idleUnloadMs: 1_000
+  })
+  host.onEvent((event) => events.push(event))
+  const audioDir = mkdtempSync(join(tmpdir(), 'doodlenote-reload-crash-'))
+  try {
+    host.startServe()
+    const first = workers.at(-1)!
+    first.event({
+      event: 'status',
+      stage: 'serve_ready',
+      calibrationRtf: 0.11,
+      captionMode: 'interim'
+    })
+    t.mock.timers.tick(1_001)
+    first.emit('exit', 0)
+    host.start('live', undefined, { source: 'mic', audioDir })
+    const second = workers.at(-1)!
+    const sessionId = controls.at(-1)!.sessionId as number
+    host.captureStatus({ type: 'ready', sessionId })
+    for (let i = 0; i < 200; i++) host.pushAudio(sessionId, 'mic', new Float32Array(4096))
+    second.emit('exit', 3221225477) // a native crash, with no error event first
+    for (let i = 0; i < 200 && !events.some((event) => event.event === 'exit'); i++) {
+      t.mock.timers.tick(50)
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    const names = events.map((event) => event.event)
+    assert.match(
+      String(events.find((event) => event.event === 'error')?.message),
+      /stopped while loading.*audio of this recording is saved/
+    )
+    assert.ok(names.includes('audio'), 'the recording is merged now, not at next launch')
+    assert.equal(names.at(-1), 'exit')
+    const count = workers.length
+    t.mock.timers.tick(60_000)
+    assert.equal(workers.length, count, 'no restart loop; the next recording reloads')
+    host.start('live', undefined, { source: 'mic' })
+    assert.equal(workers.length, count + 1)
+  } finally {
+    host.dispose()
+    rmSync(audioDir, { recursive: true, force: true })
+  }
+})
+
+test('audio past the reload buffer is replaced by silence so later words keep their time', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const controls: Array<Record<string, unknown>> = []
+  const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
+    idleUnloadMs: 1_000
+  })
+  try {
+    host.startServe()
+    const first = workers.at(-1)!
+    first.event({ event: 'status', stage: 'serve_ready' })
+    t.mock.timers.tick(1_001)
+    first.emit('exit', 0)
+    host.start('live', undefined, { source: 'both' })
+    const second = workers.at(-1)!
+    const sessionId = controls.at(-1)!.sessionId as number
+    host.captureStatus({ type: 'ready', sessionId })
+    // 2.6 minutes per channel against a 2-minute (both channels) buffer.
+    const frames = Math.ceil((2.6 * 60 * 16_000) / 4096)
+    for (let i = 0; i < frames; i++) {
+      host.pushAudio(sessionId, 'mic', new Float32Array(4096).fill(0.5))
+      host.pushAudio(sessionId, 'system', new Float32Array(4096).fill(0.25))
+    }
+    second.event({ event: 'status', stage: 'serve_ready' })
+    host.pushAudio(sessionId, 'mic', new Float32Array(4096).fill(0.75))
+    for (const [channel, level] of [
+      ['mic', 0.5],
+      ['system', 0.25]
+    ] as const) {
+      const sent = second.messages
+        .filter((message) => message.t === 'audio' && message.channel === channel)
+        .map((message) => message.samples as Float32Array)
+      const total = sent.reduce((sum, samples) => sum + samples.length, 0)
+      assert.equal(total, frames * 4096 + (channel === 'mic' ? 4096 : 0), `${channel} timeline`)
+      // Buffered audio first, then silence for the rest, then live audio.
+      const firstSilent = sent.findIndex((samples) => samples[0] === 0)
+      assert.ok(firstSilent > 0)
+      assert.ok(sent.slice(0, firstSilent).every((samples) => samples[0] === level))
+      const tail = channel === 'mic' ? sent.length - 1 : sent.length
+      assert.ok(sent.slice(firstSilent, tail).every((samples) => samples.every((v) => v === 0)))
+      const silent = sent.slice(firstSilent, tail).reduce((sum, samples) => sum + samples.length, 0)
+      assert.ok(silent > 30 * 16_000, `${channel}: ${silent} samples of silence`)
+    }
+  } finally {
+    host.dispose()
+  }
+})
+
 test('audio buffered across a reload is not counted as lag', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
   const controls: Array<Record<string, unknown>> = []

@@ -523,7 +523,7 @@ async function main(): Promise<void> {
             }
           }
         : {}),
-      hypothesis: fixture.set.startsWith('long') ? result.text.slice(0, 400) : result.text
+      hypothesis: fixture.set.startsWith('long') && !flag('full-text') ? result.text.slice(0, 400) : result.text
     }
     rows.push(row)
     write(row)
