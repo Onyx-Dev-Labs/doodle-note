@@ -92,6 +92,7 @@ import {
   type TransformChange
 } from './dictation-pipeline'
 import { conflictingShortcuts, diffWords } from '../shared/dictation-transforms'
+import { barkCopy, barkPlatform, type BarkCopy } from '../shared/dictation-platform'
 import type { OverlayAction } from './dictation-overlay'
 
 export interface EngineLike {
@@ -105,6 +106,8 @@ export interface EngineLike {
 
 export interface HelperLike {
   readonly available: boolean
+  /** Windows only: the helper exists but Windows would not start it. Absent or false on macOS. */
+  readonly blocked?: boolean
   status(): Promise<HelperStatus | null>
   snapshot(snapshotId: string): Promise<TargetDescription | null>
   /** An app bundle's icon as a small PNG data URL; null when it cannot be drawn. */
@@ -171,6 +174,8 @@ export type CleanupRunner = (
 export interface DictationDeps {
   channel: AppChannel
   supported: boolean
+  /** Picks the platform's words (see dictation-platform.ts). Defaults to macOS. */
+  platform?: NodeJS.Platform
   settings: {
     get(): DictationSettings
     update(patch: DictationSettingsUpdate): DictationSettings
@@ -341,8 +346,10 @@ export class DictationService {
   private readonly learner: DictationLearner
   private lastToggleAt = 0
   private readonly unsubscribe: Array<() => void> = []
+  private readonly copy: BarkCopy
 
   constructor(private readonly deps: DictationDeps) {
+    this.copy = barkCopy(deps.platform ?? 'darwin')
     this.learner = new DictationLearner({
       read: (id) => deps.helper.watchRead(id),
       stop: (id) => deps.helper.watchStop(id),
@@ -591,7 +598,13 @@ export class DictationService {
     const result = await this.deps.helper.captureMouseButton()
     return result.ok
       ? { ok: true, button: result.button }
-      : { ok: false, message: describeMouseCaptureFailure(result.failure) }
+      : {
+          ok: false,
+          message: describeMouseCaptureFailure(
+            result.failure,
+            barkPlatform(this.deps.platform ?? 'darwin')
+          )
+        }
   }
 
   private setToggleShortcut(accelerator: string): void {
@@ -945,6 +958,10 @@ export class DictationService {
       })
       return
     }
+    if (this.deps.helper.blocked) {
+      this.dispatch({ type: 'notice', level: 'error', message: this.copy.helperBlocked })
+      return
+    }
     const access = this.deps.microphoneAccess()
     if (access === 'not-determined') {
       // macOS has never been asked: show its dialog from here, so it appears from
@@ -956,8 +973,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message:
-          'Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone.'
+        message: this.copy.microphoneOff
       })
       return
     }
@@ -1038,7 +1054,7 @@ export class DictationService {
     this.dispatch({
       type: 'notice',
       level: 'info',
-      message: 'Choose Allow in the macOS dialog to let DoodleNote Dev use the microphone.'
+      message: this.copy.microphoneAsk
     })
     let allowed = false
     try {
@@ -1052,8 +1068,7 @@ export class DictationService {
       this.dispatch({
         type: 'notice',
         level: 'error',
-        message:
-          'Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone.'
+        message: this.copy.microphoneOff
       })
       return
     }
@@ -1081,6 +1096,8 @@ export class DictationService {
       case 'microphone': {
         const access = this.deps.microphoneAccess()
         if (access === 'granted') outcome = 'granted'
+        // Windows has no per-app microphone prompt; the switch is in Windows Settings.
+        else if (barkPlatform(this.deps.platform ?? 'darwin') === 'win32') outcome = 'open-settings'
         else if (access === 'not-determined')
           outcome = (await this.deps.requestMicrophone()) ? 'granted' : 'denied'
         else outcome = 'open-settings'
@@ -1888,7 +1905,7 @@ export class DictationService {
         message:
           model.path === 'needs-consent'
             ? `Allow sending text to ${model.label} in Settings, ${FEATURE_NAME}, Tidy-up, then try ${def.name} again.`
-            : 'Transforms need a notes model on this Mac or your own provider. Set one up under Notes model.'
+            : this.copy.transformsNeedModel
       })
       return
     }
@@ -2113,7 +2130,11 @@ export class DictationService {
       settings,
       phase: this.state.phase,
       permissions,
-      helper: this.deps.helper.available ? 'ready' : 'unavailable',
+      helper: !this.deps.helper.available
+        ? 'unavailable'
+        : this.deps.helper.blocked
+          ? 'blocked'
+          : 'ready',
       toggleShortcut: this.toggleState,
       pasteLastShortcut: this.actionKeys.paste.state,
       copyLastShortcut: this.actionKeys.copy.state,

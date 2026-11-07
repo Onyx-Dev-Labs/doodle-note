@@ -25,7 +25,19 @@ type Reply = { event: 'reply'; id: string; ok: boolean; reason?: string } & Reco
 export interface HelperLaunch {
   command: string
   args?: string[]
+  /** Defaults to the running platform; only changes behavior on win32. */
+  platform?: NodeJS.Platform
 }
+
+/**
+ * How long a Windows helper may take to leave after its stdin closes before it is
+ * ended. Windows cannot deliver a catchable signal, and a forced end would skip the
+ * helper's own clean-up (giving back muted sound, releasing hooks).
+ */
+export const WINDOWS_EXIT_GRACE_MS = 1_500
+
+/** spawn() error codes Windows reports when Application Control or Smart App Control blocks a program. */
+const WINDOWS_BLOCKED_CODES = new Set(['UNKNOWN', 'EACCES', 'EPERM'])
 
 export interface HelperTimeouts {
   status: number
@@ -68,6 +80,8 @@ export class DictationHelperClient {
   private readonly clickListeners = new Set<() => void>()
   private readonly exitListeners = new Set<() => void>()
   private lastExitAt = 0
+  /** The last spawn error code, cleared once a helper announces readiness. */
+  private launchError: string | null = null
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -76,6 +90,18 @@ export class DictationHelperClient {
 
   get available(): boolean {
     return existsSync(this.launch.command)
+  }
+
+  private get windows(): boolean {
+    return (this.launch.platform ?? process.platform) === 'win32'
+  }
+
+  /**
+   * Windows only: the helper exists but Windows would not start it (an unsigned
+   * program held back by Application Control or Smart App Control). Always false on macOS.
+   */
+  get blocked(): boolean {
+    return this.windows && this.launchError !== null && WINDOWS_BLOCKED_CODES.has(this.launchError)
   }
 
   onHold(listener: (event: HoldEvent) => void): () => void {
@@ -218,7 +244,9 @@ export class DictationHelperClient {
           ? outcome
           : 'failed',
       ...(typeof reply.reason === 'string' ? { reason: reply.reason } : {}),
-      ...(reply.method === 'ax' || reply.method === 'paste' ? { method: reply.method } : {}),
+      ...(reply.method === 'ax' || reply.method === 'paste' || reply.method === 'type'
+        ? { method: reply.method }
+        : {}),
       verified: reply.verified === true,
       clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
       ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
@@ -387,7 +415,7 @@ export class DictationHelperClient {
     const child = this.child
     if (child && child.exitCode === null) {
       child.stdin.end()
-      child.kill('SIGTERM')
+      this.end(child)
     }
   }
 
@@ -400,8 +428,23 @@ export class DictationHelperClient {
     this.child = null
     if (child && child.exitCode === null) {
       child.stdin.end()
-      child.kill('SIGTERM')
+      this.end(child)
     }
+  }
+
+  /**
+   * macOS: SIGTERM at once (the helper catches it and restores the sound). Windows:
+   * closing stdin already asks the helper to leave; it is ended only if it lingers.
+   */
+  private end(child: HelperChild): void {
+    if (!this.windows) {
+      child.kill('SIGTERM')
+      return
+    }
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill()
+    }, WINDOWS_EXIT_GRACE_MS)
+    timer.unref?.()
   }
 
   /* ---- plumbing ---- */
@@ -417,7 +460,8 @@ export class DictationHelperClient {
       child = spawn(this.launch.command, this.launch.args ?? [], {
         stdio: ['pipe', 'pipe', 'pipe']
       })
-    } catch {
+    } catch (error) {
+      this.launchError = (error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN'
       return Promise.resolve(false)
     }
     this.child = child
@@ -440,10 +484,16 @@ export class DictationHelperClient {
         for (let nl = this.buffer.indexOf('\n'); nl !== -1; nl = this.buffer.indexOf('\n')) {
           const line = this.buffer.slice(0, nl)
           this.buffer = this.buffer.slice(nl + 1)
-          if (this.handleLine(line)) settle(true)
+          if (this.handleLine(line)) {
+            this.launchError = null
+            settle(true)
+          }
         }
       })
-      child.on('error', () => settle(false))
+      child.on('error', (error: NodeJS.ErrnoException) => {
+        this.launchError = error.code ?? 'UNKNOWN'
+        settle(false)
+      })
       child.on('close', () => {
         settle(false)
         if (this.child !== child) return

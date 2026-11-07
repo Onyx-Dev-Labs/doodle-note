@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import {
   ENGINE_CAPTURE_CONTROL_CHANNEL,
+  type EngineCaptureControl,
   type EngineCaptureStatus,
   type EngineCommand,
   type EngineEvent,
@@ -84,6 +85,14 @@ export class WinEngineHost {
   private calibration: { calibrationRtf: number; captionMode: string } | null = null
   private stopAfterReload = false
   private readonly idleUnloadMs: number
+  /**
+   * Dictation's capture runs in its own hidden window (raw microphone, no meeting
+   * processing); its control messages go there instead of to every window.
+   */
+  private dictationSink: ((control: EngineCaptureControl) => void) | null = null
+  private sessionProfile: 'dictation' | null = null
+  /** The session asked for microphone `level` events (dictation's meter). */
+  private sessionLevels = false
 
   constructor(
     private readonly broadcast: (channel: string, payload: unknown) => void,
@@ -148,6 +157,44 @@ export class WinEngineHost {
 
   get running(): boolean {
     return this.sessionActive
+  }
+
+  /** True while the worker has its model loaded, so a start is immediate. */
+  get warm(): boolean {
+    return this.ready && this.child !== null && !this.unloaded
+  }
+
+  /** Where dictation's capture control messages go (the dictation capture window). */
+  setDictationCaptureSink(sink: ((control: EngineCaptureControl) => void) | null): void {
+    this.dictationSink = sink
+  }
+
+  /**
+   * Why a live start would be refused right now, in the words start() would use;
+   * null when it would go ahead. Lets callers that are not the recorder ask first.
+   */
+  liveStartRefusal(): string | null {
+    if (this.disposed) return 'The speech engine is shutting down.'
+    if (this.sessionActive) return 'The speech engine is busy with another session.'
+    const reloading = this.unloaded && !this.child
+    if (!reloading && !this.child && this.warmupResult && !this.warmupResult.ok)
+      return 'The speech engine is restarting to check its model. Try again in a moment.'
+    if (!reloading && (!this.child || !this.ready))
+      return 'The speech engine is still loading its model. Try again in a moment.'
+    return null
+  }
+
+  /**
+   * Start a live session only if nothing else is using the engine, the way
+   * EngineProcess.tryStartLive does on macOS. Never supersedes a meeting.
+   */
+  tryStartLive(
+    opts: EngineStartOptions = {}
+  ): { started: true } | { started: false; reason: string } {
+    const refusal = this.liveStartRefusal()
+    if (refusal) return { started: false, reason: refusal }
+    this.start('live', undefined, opts)
+    return { started: true }
   }
 
   /** Fork the engine and load models (call once, after app ready). */
@@ -391,16 +438,38 @@ export class WinEngineHost {
     this.workerStarted = false
     this.activeChannels = channels
     this.inputDevice = opts.inputDevice
+    this.sessionProfile = opts.captureProfile === 'dictation' ? 'dictation' : null
+    this.sessionLevels = opts.levels === true
     // Audio is written only when the session persists it; with no post-stop
     // refinement pass there is no temporary copy any more.
     this.recorder = opts.audioDir ? new WinSessionRecorder(opts.audioDir) : null
     this.emit({ event: 'started', command, filePath, binaryPath: 'sherpa-onnx (in-process)' })
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
+    this.sendCaptureControl({
       action: 'start',
       sessionId: this.activeSessionId,
       channels,
-      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
+      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {}),
+      ...(this.sessionProfile ? { profile: this.sessionProfile } : {})
     })
+  }
+
+  /** Meetings: every window, as before (the main window captures). Dictation: its own window. */
+  private sendCaptureControl(control: EngineCaptureControl): void {
+    if (this.sessionProfile === 'dictation' && this.dictationSink) {
+      this.dictationSink(control)
+      return
+    }
+    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, control)
+  }
+
+  /** Peak of one microphone frame, for the dictation meter. */
+  private emitLevel(samples: Float32Array): void {
+    let peak = 0
+    for (let i = 0; i < samples.length; i++) {
+      const value = Math.abs(samples[i] as number)
+      if (value > peak) peak = value
+    }
+    this.emit({ event: 'level', channel: 'mic', peak: Math.min(1, peak) })
   }
 
   stop(): void {
@@ -465,6 +534,7 @@ export class WinEngineHost {
     ) {
       return
     }
+    if (this.sessionLevels && channel === 'mic') this.emitLevel(samples)
     if (this.startAfterReload) {
       this.recorder?.write(channel, samples)
       // Bounded: a reload takes seconds. Past the cap audio is still saved,
@@ -588,10 +658,11 @@ export class WinEngineHost {
   setInputDevice(uid: string | null): void {
     this.inputDevice = uid ?? undefined
     if (!this.sessionActive || !this.activeChannels.includes('mic')) return
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, {
+    this.sendCaptureControl({
       action: 'switch-input',
-      sessionId: this.activeSessionId,
-      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {})
+      sessionId: this.activeSessionId as number,
+      ...(this.inputDevice ? { inputDevice: this.inputDevice } : {}),
+      ...(this.sessionProfile ? { profile: this.sessionProfile } : {})
     })
   }
 
@@ -655,7 +726,11 @@ export class WinEngineHost {
   }
 
   private stopCaptureInRenderer(sessionId: number): void {
-    this.broadcast(ENGINE_CAPTURE_CONTROL_CHANNEL, { action: 'stop', sessionId })
+    this.sendCaptureControl({
+      action: 'stop',
+      sessionId,
+      ...(this.sessionProfile ? { profile: this.sessionProfile } : {})
+    })
   }
 
   dispose(): void {

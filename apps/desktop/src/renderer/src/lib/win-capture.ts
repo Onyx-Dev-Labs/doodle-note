@@ -26,6 +26,21 @@ const PUMP_PROCESSOR = 'doodlenote-capture-pump'
 const FLUSH_TIMEOUT_MS = 250
 let workletUrl: string | null = null
 
+/**
+ * Per-session capture options. Meetings pass none and keep Chromium's voice
+ * processing. Dictation records the microphone raw, in smaller frames so its level
+ * meter moves, and a test build may substitute the microphone with a fixture.
+ */
+export interface WinCaptureOptions {
+  /** No echo cancellation, noise suppression or automatic gain control. */
+  raw?: boolean
+  /** Samples per frame posted by the worklet (default 4096, 256 ms). */
+  frameSamples?: number
+  /** Replaces navigator.mediaDevices.getUserMedia for the microphone. */
+  acquireMicrophone?: (constraints: MediaStreamConstraints) => Promise<MediaStream>
+}
+let activeOptions: WinCaptureOptions = {}
+
 /** The bundled worklet module URL (set once by the app; tests use a stub). */
 export function setWinCaptureWorkletUrl(url: string): void {
   workletUrl = url
@@ -38,14 +53,21 @@ let activeSessionId: number | null = null
 let sessionGeneration = 0
 let switchGeneration = 0
 
-function microphoneConstraints(inputDevice?: string): MediaTrackConstraints {
+function microphoneConstraints(inputDevice?: string, raw = false): MediaTrackConstraints {
   return {
     ...(inputDevice && inputDevice !== 'default' ? { deviceId: { exact: inputDevice } } : {}),
     channelCount: 1,
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true
+    echoCancellation: !raw,
+    noiseSuppression: !raw,
+    autoGainControl: !raw
   }
+}
+
+function acquireMicrophone(inputDevice?: string): Promise<MediaStream> {
+  const constraints = { audio: microphoneConstraints(inputDevice, activeOptions.raw === true) }
+  return activeOptions.acquireMicrophone
+    ? activeOptions.acquireMicrophone(constraints)
+    : navigator.mediaDevices.getUserMedia(constraints)
 }
 
 function current(sessionId: number, generation: number): boolean {
@@ -59,20 +81,20 @@ function stopStream(stream: MediaStream): void {
 export async function startWinCapture(
   sessionId: number,
   channels: string[],
-  inputDevice?: string
+  inputDevice?: string,
+  options: WinCaptureOptions = {}
 ): Promise<void> {
   cancelCapture()
   const generation = ++sessionGeneration
   activeSessionId = sessionId
   activeInputDevice = inputDevice
+  activeOptions = options
   const acquired: Array<{ channel: string; stream: MediaStream }> = []
   const prepared: ChannelCapture[] = []
 
   try {
     if (channels.includes('mic')) {
-      const mic = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneConstraints(inputDevice)
-      })
+      const mic = await acquireMicrophone(inputDevice)
       if (!current(sessionId, generation)) {
         stopStream(mic)
         return
@@ -153,7 +175,10 @@ async function pump(
     outputChannelCount: [1],
     channelCount: 1,
     channelCountMode: 'explicit',
-    channelInterpretation: 'speakers'
+    channelInterpretation: 'speakers',
+    ...(activeOptions.frameSamples
+      ? { processorOptions: { frameSamples: activeOptions.frameSamples } }
+      : {})
   })
   const mute = context.createGain()
   mute.gain.value = 0
@@ -212,9 +237,7 @@ export async function switchWinInputDevice(sessionId: number, inputDevice?: stri
   const generation = sessionGeneration
   const attempt = ++switchGeneration
   try {
-    const replacement = await navigator.mediaDevices.getUserMedia({
-      audio: microphoneConstraints(inputDevice)
-    })
+    const replacement = await acquireMicrophone(inputDevice)
     if (
       !current(sessionId, generation) ||
       switchGeneration !== attempt ||

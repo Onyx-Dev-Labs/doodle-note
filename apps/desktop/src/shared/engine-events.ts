@@ -25,6 +25,11 @@ export interface EngineCaptureControl {
   sessionId: number
   channels?: string[]
   inputDevice?: string
+  /**
+   * Windows: dictation captures the microphone raw (no echo cancellation, noise
+   * suppression or gain control) in its own hidden window. Absent for meetings.
+   */
+  profile?: 'dictation'
 }
 
 export type EngineCaptureStatus =
@@ -96,6 +101,11 @@ export interface EngineStartOptions {
   systemBackend?: 'sck' | 'tap'
   /** live only: stream throttled microphone `level` events (dictation's meter). */
   levels?: boolean
+  /**
+   * live only (Windows): 'dictation' records the microphone raw in the dictation
+   * capture window; meetings leave it unset and keep the renderer's capture defaults.
+   */
+  captureProfile?: 'dictation'
 }
 
 export interface EngineStartRequest {

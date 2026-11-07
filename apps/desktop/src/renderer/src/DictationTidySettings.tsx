@@ -30,6 +30,11 @@ import {
 } from '../../shared/dictation-transforms'
 import { appDisplayName, visibleApps } from '../../shared/dictation-app-names'
 import { acceleratorFrom } from './dictation-accelerator'
+import { barkCopy, barkPlatform } from '../../shared/dictation-platform'
+import { hostPlatform } from './lib/platform'
+
+/** "this Mac" or "this PC". */
+const device = (): string => barkCopy(hostPlatform()).device
 import { Toggle } from './ModelsView'
 
 interface Props {
@@ -37,7 +42,7 @@ interface Props {
   update: (patch: DictationSettingsUpdate) => Promise<void>
 }
 
-const TIDY_CARDS: Array<{ level: TidyLevel; title: string; blurb: string }> = [
+const tidyCards = (): Array<{ level: TidyLevel; title: string; blurb: string }> => [
   {
     level: 'off',
     title: 'Off',
@@ -46,8 +51,7 @@ const TIDY_CARDS: Array<{ level: TidyLevel; title: string; blurb: string }> = [
   {
     level: 'light',
     title: 'Light',
-    blurb:
-      'Instant and on this Mac, no model. Drops um and uh, stutters and repeats, applies "no, I mean", turns "first, second" into bullets, fixes capitals and the full stop.'
+    blurb: `Instant and on ${device()}, no model. Drops um and uh, stutters and repeats, applies "no, I mean", turns "first, second" into bullets, fixes capitals and the full stop.`
   },
   {
     level: 'full',
@@ -70,12 +74,12 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
   return (
     <SettingsFold title="Tidy-up" description="Off, Light, or Full cleanup of dictated text">
       <p className="models-sub">
-        Speech is recognised on this Mac. Tidy-up decides what happens to the words before they are
-        typed. If a model step fails or looks doubtful, the words as you said them are typed
+        Speech is recognised on {device()}. Tidy-up decides what happens to the words before they
+        are typed. If a model step fails or looks doubtful, the words as you said them are typed
         instead, and the pill says so. Nothing is lost.
       </p>
       <div role="radiogroup" aria-label="Tidy-up level" className="choice-grid">
-        {TIDY_CARDS.map((card) => (
+        {tidyCards().map((card) => (
           <button
             key={card.level}
             type="button"
@@ -101,7 +105,7 @@ export function DictationTidySettings({ status, update }: Props): React.JSX.Elem
             <span className="cal-row-label">Model for Full tidy-up and transforms</span>
             <span className="cal-row-sub">
               {model.path === 'local' &&
-                `Uses ${model.label} on this Mac, the quickest model you have installed. Nothing leaves it. The Fast model under Notes model is the quickest to download and run.`}
+                `Uses ${model.label} on ${device()}, the quickest model you have installed. Nothing leaves it. The Fast model under Notes model is the quickest to download and run.`}
               {model.path === 'byok' &&
                 `Uses your provider (${model.label}). Only the finished text is sent, never audio.`}
               {model.path === 'needs-consent' &&
@@ -189,7 +193,8 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
     asked: '',
     apps: {}
   })
-  const allApps = appsInCategory(category, settings.styleApps)
+  const windows = barkPlatform(hostPlatform()) === 'win32'
+  const allApps = appsInCategory(category, settings.styleApps, windows ? 'win32' : 'darwin')
   // Real names and icons for the apps, asked of the helper whenever the list changes.
   const wanted = allApps.map((app) => app.bundleId).join('\n')
   useEffect(() => {
@@ -310,8 +315,8 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
         {loaded && hidden > 0 && status.helper !== 'unavailable' && (
           <div className="cal-row">
             <span className="cal-row-sub">
-              {hidden} more built-in {hidden === 1 ? 'app is' : 'apps are'} not installed on this
-              Mac. {hidden === 1 ? 'It uses' : 'They use'} this style if you install{' '}
+              {hidden} more built-in {hidden === 1 ? 'app is' : 'apps are'} not installed on{' '}
+              {device()}. {hidden === 1 ? 'It uses' : 'They use'} this style if you install{' '}
               {hidden === 1 ? 'it' : 'them'}.
             </span>
           </div>
@@ -320,8 +325,9 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
           <span className="cal-row-main">
             <span className="cal-row-label">Add an app</span>
             <span className="cal-row-sub">
-              Pick one you dictated into lately, or type its bundle id (for example
-              com.tinyspeck.slackmacgap).
+              {windows
+                ? 'Pick one you dictated into lately, or type its program file name (for example slack.exe).'
+                : 'Pick one you dictated into lately, or type its bundle id (for example com.tinyspeck.slackmacgap).'}
             </span>
           </span>
           <select
@@ -345,7 +351,7 @@ export function DictationStyleSettings({ status, update }: Props): React.JSX.Ele
           <input
             aria-label="Bundle id"
             value={newApp}
-            placeholder="com.example.App"
+            placeholder={windows ? 'example.exe' : 'com.example.App'}
             onChange={(event) => setNewApp(event.target.value)}
           />
           <button

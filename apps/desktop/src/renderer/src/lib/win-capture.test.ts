@@ -196,3 +196,62 @@ test('Stop does not wait forever for a pump that never confirms its flush', asyn
   assert.ok(Date.now() - began < 2000)
   assert.deepEqual(events, ['ready:9', 'drained:9'])
 })
+
+test('meetings keep voice processing and 4096-sample frames; dictation records raw in small frames', async () => {
+  const constraints: MediaStreamConstraints[] = []
+  const { pumps } = installAudio()
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      mediaDevices: {
+        getUserMedia: async (c: MediaStreamConstraints) => {
+          constraints.push(c)
+          return testStream(() => undefined)
+        }
+      }
+    }
+  })
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { engine: { sendAudio: () => undefined, reportCaptureStatus: () => undefined } }
+  })
+  const { setWinCaptureWorkletUrl, startWinCapture, stopWinCapture } = await import('./win-capture')
+  setWinCaptureWorkletUrl('test://capture-worklet.js')
+  await startWinCapture(20, ['mic'], 'mic-1')
+  assert.deepEqual(constraints.at(-1), {
+    audio: {
+      deviceId: { exact: 'mic-1' },
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  })
+  assert.equal(pumps.at(-1)!.options.processorOptions, undefined)
+  await stopWinCapture(20)
+
+  await startWinCapture(21, ['mic'], undefined, { raw: true, frameSamples: 1024 })
+  assert.deepEqual(constraints.at(-1), {
+    audio: {
+      channelCount: 1,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    }
+  })
+  assert.deepEqual(pumps.at(-1)!.options.processorOptions, { frameSamples: 1024 })
+  await stopWinCapture(21)
+
+  // A substitute source (the test fixture) replaces getUserMedia and gets the same constraints.
+  const substituted: MediaStreamConstraints[] = []
+  await startWinCapture(22, ['mic'], undefined, {
+    raw: true,
+    acquireMicrophone: async (c) => {
+      substituted.push(c)
+      return testStream(() => undefined)
+    }
+  })
+  assert.equal(substituted.length, 1)
+  assert.equal(constraints.length, 2, 'the real microphone was not opened')
+  await stopWinCapture(22)
+})

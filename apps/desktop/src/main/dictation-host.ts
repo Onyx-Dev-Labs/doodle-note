@@ -28,6 +28,7 @@ import {
   type MicrophoneAccess
 } from '../shared/dictation-api'
 import type { PermissionPane } from '../shared/dictation-permissions'
+import { privacySettingsUrl } from '../shared/dictation-platform'
 import { CaptureOwnership } from './capture-ownership'
 import { DictationHelperClient } from './dictation-helper-client'
 import { DictationOverlay } from './dictation-overlay'
@@ -40,8 +41,17 @@ export interface DictationHostOptions {
   userData: string
   logsDir: string
   helperPath: string
-  /** The macOS sidecar host; dictation is unavailable without it. */
+  /** The speech engine (macOS sidecar, or Bark's Windows engine); dictation is unavailable without it. */
   engine: EngineLike | null
+  /** Defaults to the running platform. */
+  platform?: NodeJS.Platform
+  /**
+   * Windows: the helper reads a microphone by endpoint name, not Chromium's device id.
+   * Maps the id the session records from to what the helper's input-state expects.
+   */
+  inputStateUid?: (uid: string | null) => string | null
+  /** Called with whether Bark is on (now, and whenever its status changes): keeps the engine warm. */
+  onEnabled?: (enabled: boolean) => void
   notes: () => NotesService | null
   /** The meeting recorder, when it holds or is about to hold the microphone. */
   meetingBusy: () => boolean
@@ -51,12 +61,6 @@ export interface DictationHostOptions {
   isTrustedSender: (sender: WebContents) => boolean
   broadcast: (channel: string, payload: unknown) => void
 }
-
-const PRIVACY_PANES = {
-  microphone: 'Privacy_Microphone',
-  accessibility: 'Privacy_Accessibility',
-  'input-monitoring': 'Privacy_ListenEvent'
-} as const
 
 function isPermissionPane(value: unknown): value is PermissionPane {
   return value === 'microphone' || value === 'accessibility' || value === 'input-monitoring'
@@ -77,7 +81,20 @@ export function createDictationHost(options: DictationHostOptions): {
 } {
   const ownership = new CaptureOwnership()
   const settings = new DictationSettingsStore(options.userData)
-  const helper = new DictationHelperClient({ command: options.helperPath })
+  const platform = options.platform ?? process.platform
+  const client = new DictationHelperClient({ command: options.helperPath, platform })
+  const mapUid = options.inputStateUid
+  // Windows only: the same client, with the microphone named the way the helper reads it.
+  const helper = mapUid
+    ? new Proxy(client, {
+        get(target, property) {
+          if (property === 'inputState')
+            return (uid: string | null) => target.inputState(mapUid(uid))
+          const value = Reflect.get(target, property, target) as unknown
+          return typeof value === 'function' ? value.bind(target) : value
+        }
+      })
+    : client
 
   // The overlay callback fires only after construction, so the forward reference is safe.
   // The overlay is built before the service it reports to; actions arrive only after both exist.
@@ -109,6 +126,7 @@ export function createDictationHost(options: DictationHostOptions): {
   const service = new DictationService({
     channel: options.channel,
     supported: options.engine !== null,
+    platform,
     settings,
     // The meeting recorder holds the microphone before the sidecar session
     // exists; treat that handshake as busy too.
@@ -147,6 +165,8 @@ export function createDictationHost(options: DictationHostOptions): {
       options.notes()?.dictationCleanupOptions() ?? { localModelLabel: null, byok: null },
     microphoneAccess,
     requestMicrophone: async () => {
+      // Windows shows no per-app microphone prompt; the switch is in Windows Settings.
+      if (platform === 'win32') return microphoneAccess() === 'granted'
       try {
         return await systemPreferences.askForMediaAccess('microphone')
       } catch {
@@ -154,7 +174,10 @@ export function createDictationHost(options: DictationHostOptions): {
       }
     },
     writeClipboard: (text) => clipboard.writeText(text),
-    broadcast: (status) => options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status),
+    broadcast: (status) => {
+      options.onEnabled?.(status.supported && status.settings.enabled)
+      options.broadcast(DICTATION_STATUS_EVENT_CHANNEL, status)
+    },
     onMicHeld: options.setMicHeld,
     openSettings: () => {
       options.showMainWindow()
@@ -185,13 +208,18 @@ export function createDictationHost(options: DictationHostOptions): {
   })
 
   route.service = service
+  options.onEnabled?.(options.engine !== null && settings.get().enabled)
   const trusted = (event: { sender: WebContents }): boolean => options.isTrustedSender(event.sender)
   ipcMain.handle(DICTATION_GET_STATUS_CHANNEL, (event) =>
     trusted(event) ? service.status() : null
   )
-  ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, (event, update: DictationSettingsUpdate) =>
-    trusted(event) ? service.setSettings(update ?? {}) : null
-  )
+  ipcMain.handle(DICTATION_SET_SETTINGS_CHANNEL, async (event, update: DictationSettingsUpdate) => {
+    if (!trusted(event)) return null
+    const status = await service.setSettings(update ?? {})
+    // Turning Bark on or off from the page does not broadcast; report it here too.
+    options.onEnabled?.(status.supported && status.settings.enabled)
+    return status
+  })
   ipcMain.handle(DICTATION_APP_INFO_CHANNEL, (event, ids: unknown) =>
     trusted(event) ? service.appInfo(ids) : {}
   )
@@ -243,10 +271,9 @@ export function createDictationHost(options: DictationHostOptions): {
     if (trusted(event) && typeof gen === 'number') service.dismissRecovery(gen)
   })
   ipcMain.handle(DICTATION_OPEN_PRIVACY_CHANNEL, (event, pane: unknown) => {
-    if (trusted(event) && typeof pane === 'string' && pane in PRIVACY_PANES) {
-      void shell.openExternal(
-        `x-apple.systempreferences:com.apple.preference.security?${PRIVACY_PANES[pane as keyof typeof PRIVACY_PANES]}`
-      )
+    if (trusted(event) && isPermissionPane(pane)) {
+      const url = privacySettingsUrl(platform, pane)
+      if (url) void shell.openExternal(url)
     }
   })
 
