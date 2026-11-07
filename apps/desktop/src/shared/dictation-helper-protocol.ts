@@ -16,6 +16,11 @@ export interface HelperStatus {
    * the setting cannot be read.
    */
   fnKeyAction: number | null
+  /**
+   * Windows: whether the low-level hooks are currently installed (false during a
+   * detected loss, before the helper re-installs them). Null off Windows.
+   */
+  hooksLive?: boolean | null
 }
 
 export interface TargetDescription {

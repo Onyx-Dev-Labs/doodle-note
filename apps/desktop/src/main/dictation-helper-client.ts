@@ -34,7 +34,26 @@ export interface HelperLaunch {
  * ended. Windows cannot deliver a catchable signal, and a forced end would skip the
  * helper's own clean-up (giving back muted sound, releasing hooks).
  */
-export const WINDOWS_EXIT_GRACE_MS = 1_500
+export const WINDOWS_EXIT_GRACE_MS = 3_500
+
+/**
+ * How long to wait for a freshly started helper to announce itself. An unsigned .NET exe
+ * can be scanned on first launch and take several seconds, so this is generous.
+ */
+export const WINDOWS_READY_TIMEOUT_MS = 15_000
+
+/** Backoff between automatic helper restarts after a crash, capped. */
+const RESTART_BACKOFF_MS = [500, 1_000, 2_000, 5_000, 10_000]
+
+/**
+ * How long the client waits for a Windows delivery, and the elapsed-ms deadline it passes
+ * the helper, both sized from the text length: the typing fallback is ~8 ms/char plus 70 ms
+ * at each word boundary, so a long transcript must not time out and land later as doubled text.
+ */
+export function windowsDeliverBudget(text: string): { timeout: number; deadlineMs: number } {
+  const timeout = Math.min(60_000, 3_500 + text.length * 45)
+  return { timeout, deadlineMs: timeout - 800 }
+}
 
 /** spawn() error codes Windows reports when Application Control or Smart App Control blocks a program. */
 const WINDOWS_BLOCKED_CODES = new Set(['UNKNOWN', 'EACCES', 'EPERM'])
@@ -82,6 +101,11 @@ export class DictationHelperClient {
   private lastExitAt = 0
   /** The last spawn error code, cleared once a helper announces readiness. */
   private launchError: string | null = null
+  /** The sound output is silenced right now, so a crashed helper must be replaced to give it back. */
+  private mutedOutput = false
+  private restartTimer: NodeJS.Timeout | null = null
+  private restartAttempts = 0
+  private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -127,6 +151,12 @@ export class DictationHelperClient {
     return () => this.exitListeners.delete(listener)
   }
 
+  /** Windows: the low-level hooks were lost and re-installed (or could not be). */
+  onHooks(listener: (phase: 'lost' | 'restored' | 'failed') => void): () => void {
+    this.hookListeners.add(listener)
+    return () => this.hookListeners.delete(listener)
+  }
+
   async status(): Promise<HelperStatus | null> {
     const reply = await this.request('status', {}, this.timeouts.status)
     if (!reply?.ok) return null
@@ -145,7 +175,8 @@ export class DictationHelperClient {
         reply.inputMonitoringAccess === 'not-determined'
           ? reply.inputMonitoringAccess
           : null,
-      fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null
+      fnKeyAction: typeof reply.fnKeyAction === 'number' ? reply.fnKeyAction : null,
+      hooksLive: typeof reply.hooksLive === 'boolean' ? reply.hooksLive : null
     }
   }
 
@@ -170,12 +201,19 @@ export class DictationHelperClient {
   async muteOutput(): Promise<boolean> {
     if (!(await this.ensureRunning())) return false
     const reply = await this.request('mute-output', {}, this.timeouts.status)
-    return reply?.ok === true && reply.outcome === 'muted'
+    const muted = reply?.ok === true && reply.outcome === 'muted'
+    if (muted) this.mutedOutput = true
+    return muted
   }
 
-  /** Give back the sound muteOutput took. Safe to call when nothing was muted. */
+  /**
+   * Give back the sound muteOutput took. Safe to call when nothing was muted. If the helper
+   * crashed while the sound was muted, start a fresh one, which gives it back on launch.
+   */
   async restoreOutput(): Promise<void> {
-    if (!this.child) return
+    if (!this.child && !this.mutedOutput) return
+    this.mutedOutput = false
+    if (!this.child && !(await this.ensureRunning())) return
     await this.request('restore-output', {}, this.timeouts.status)
   }
 
@@ -215,6 +253,9 @@ export class DictationHelperClient {
         clipboard: 'untouched'
       }
     }
+    // Windows sizes the wait and the helper's deadline from the text length so a long
+    // typing fallback never times out and lands later; macOS keeps its fixed deliver timeout.
+    const budget = this.windows ? windowsDeliverBudget(text) : null
     const reply = await this.request(
       'deliver',
       {
@@ -224,9 +265,10 @@ export class DictationHelperClient {
           ? { expectSelection: guards.expectSelection }
           : {}),
         ...(guards.replace !== undefined ? { replace: guards.replace } : {}),
-        ...(guards.watch ? { watch: true } : {})
+        ...(guards.watch ? { watch: true } : {}),
+        ...(budget ? { deadlineMs: budget.deadlineMs } : {})
       },
-      this.timeouts.deliver,
+      budget ? budget.timeout : this.timeouts.deliver,
       false
     )
     if (!reply) {
@@ -423,6 +465,8 @@ export class DictationHelperClient {
     this.disposed = true
     this.holdKey = 'off'
     this.mouse = null
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    this.restartTimer = null
     this.failAll()
     const child = this.child
     this.child = null
@@ -473,7 +517,10 @@ export class DictationHelperClient {
     })
     child.stdin.on('error', () => {})
     this.ready = new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 3_000)
+      const timer = setTimeout(
+        () => resolve(false),
+        this.windows ? WINDOWS_READY_TIMEOUT_MS : 3_000
+      )
       const settle = (ok: boolean): void => {
         clearTimeout(timer)
         resolve(ok)
@@ -486,6 +533,7 @@ export class DictationHelperClient {
           this.buffer = this.buffer.slice(nl + 1)
           if (this.handleLine(line)) {
             this.launchError = null
+            this.restartAttempts = 0
             settle(true)
           }
         }
@@ -502,6 +550,7 @@ export class DictationHelperClient {
         this.lastExitAt = Date.now()
         this.failAll()
         for (const listener of this.exitListeners) listener()
+        this.scheduleRestart()
       })
     })
     // Re-arm the mouse button and the hold watch on the fresh process.
@@ -553,6 +602,15 @@ export class DictationHelperClient {
       for (const listener of this.tapListeners) listener()
       return false
     }
+    if (parsed.event === 'hooks') {
+      const phase =
+        parsed.phase === 'lost' || parsed.phase === 'restored' || parsed.phase === 'failed'
+          ? parsed.phase
+          : null
+      if (phase) for (const listener of this.hookListeners) listener(phase)
+      return false
+    }
+    if (parsed.event === 'parse-error') return false
     if (parsed.event === 'reply' && typeof parsed.id === 'string') {
       const entry = this.pending.get(parsed.id)
       if (entry) {
@@ -588,6 +646,25 @@ export class DictationHelperClient {
         resolve(null)
       }
     })
+  }
+
+  /**
+   * Windows: a crashed helper is replaced automatically with a growing backoff, so hold-to-talk
+   * and a muted sound do not stay broken until the next manual request. A fresh helper re-arms
+   * the triggers and, on launch, gives back any sound an earlier helper left muted.
+   */
+  private scheduleRestart(): void {
+    if (!this.windows || this.disposed || this.restartTimer) return
+    const wantsHelper = this.holdKey !== 'off' || this.mouse !== null || this.mutedOutput
+    if (!wantsHelper) return
+    const delay = RESTART_BACKOFF_MS[Math.min(this.restartAttempts, RESTART_BACKOFF_MS.length - 1)]
+    this.restartAttempts += 1
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      if (this.disposed || this.child) return
+      void this.ensureRunning()
+    }, delay)
+    this.restartTimer.unref?.()
   }
 
   private failAll(): void {
