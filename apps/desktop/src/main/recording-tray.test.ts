@@ -351,3 +351,46 @@ test('packaging ships the Windows tray icons and the Windows app icon has every 
     assert.deepEqual(sizes(join('resources/tray', name)), [16, 20, 24, 32, 40, 48])
   }
 })
+
+test('Windows hint wording follows the phase the recording is in', () => {
+  const titles: string[] = []
+  for (const phase of ['starting', 'recording', 'finishing'] as const) {
+    const s = setup('win32')
+    s.controller.update({ phase, eligible: true, meetingId: 'meeting' })
+    s.controller.showBackgroundHint()
+    titles.push(s.native.balloons[0].title)
+    assert.match(s.native.balloons[0].content, /closes when/)
+    s.controller.dispose()
+  }
+  assert.deepEqual(titles, [
+    'DoodleNote is starting the recording',
+    'DoodleNote is still recording',
+    'DoodleNote is saving the recording'
+  ])
+})
+
+test('Windows keeps the tray while Quit saves the recording; macOS ignores it', () => {
+  const s = setup('win32')
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'meeting' })
+  s.controller.showSavingBeforeQuit()
+  assert.equal(s.native.tooltip, 'DoodleNote — Saving recording…')
+  assert.deepEqual(
+    Array.from(s.native.menu, (item) => [item.label, item.enabled]),
+    [['Saving recording before quitting…', false]]
+  )
+  // Later recording-state updates do not bring back Record now / Quit meanwhile.
+  s.controller.update({ phase: 'finishing', eligible: true, meetingId: 'meeting' })
+  assert.equal(s.native.tooltip, 'DoodleNote — Saving recording…')
+  assert.equal(s.native.destroyed, false)
+  s.controller.dispose()
+  assert.equal(s.native.destroyed, true)
+
+  const mac = setup('darwin')
+  const before = Array.from(mac.native.menu, (item) => item.label ?? item.type)
+  mac.controller.showSavingBeforeQuit()
+  assert.deepEqual(
+    Array.from(mac.native.menu, (item) => item.label ?? item.type),
+    before
+  )
+  mac.controller.dispose()
+})

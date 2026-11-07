@@ -67,3 +67,19 @@ export function hidesToTrayOnClose(
 ): boolean {
   return (platform === 'darwin' || platform === 'win32') && recordingBusy && !quitting
 }
+
+/**
+ * Windows: the window was closed during a recording and stayed hidden. Once
+ * that recording is over, finish the close the person asked for and quit,
+ * as closing always did on Windows, unless they reopened the window meanwhile.
+ */
+export function quitsAfterBackgroundRecording(
+  platform: NodeJS.Platform,
+  closedWhileRecording: boolean,
+  phase: 'idle' | 'requested' | 'starting' | 'recording' | 'finishing'
+): boolean {
+  return platform === 'win32' && closedWhileRecording && phase === 'idle'
+}
+
+/** Windows ends a shutdown/log-off session quickly; finish the recording within this. */
+export const SESSION_END_FINISH_TIMEOUT_MS = 4_000

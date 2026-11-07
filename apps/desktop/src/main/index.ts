@@ -67,8 +67,10 @@ import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import { MAIN_WINDOW_SIZE } from './window-sizing'
 import {
+  SESSION_END_FINISH_TIMEOUT_MS,
   hasThemedTitleBarOverlay,
   hidesToTrayOnClose,
+  quitsAfterBackgroundRecording,
   titleBarOverlayFor,
   windowChromeOptions
 } from './window-chrome'
@@ -205,6 +207,10 @@ let mainWindow: BrowserWindow | null = null
 let recordingTray: RecordingTray | null = null
 let quitting = false
 let libraryReady = false
+/** Windows: the window was closed during a recording and has not been reopened. */
+let closedWhileRecording = false
+/** Windows: shutdown or log-off is ending this session. */
+let sessionEnding = false
 const recording = new RecordingStartCoordinator(
   (request: RecordingStartRequest) =>
     mainWindow?.webContents.send(RECORDING_DELIVER_CHANNEL, request),
@@ -212,6 +218,9 @@ const recording = new RecordingStartCoordinator(
     recordingTray?.update(state)
     mainWindow?.webContents.send(RECORDING_STATE_CHANNEL, state)
     calendarService?.setRecordingActive(state.phase !== 'idle')
+    // Windows: the close the person asked for during the recording happens now.
+    if (quitsAfterBackgroundRecording(process.platform, closedWhileRecording, state.phase))
+      app.quit()
   },
   (url) => shell.openExternal(url)
 )
@@ -297,13 +306,30 @@ function createWindow(): void {
       return
     }
     // Keep the document renderer alive while it owns a recording.
-    if (hidesToTrayOnClose(process.platform, recording.busy, quitting)) {
+    if (hidesToTrayOnClose(process.platform, recording.busy, quitting || sessionEnding)) {
       event.preventDefault()
       window.hide()
       // Windows has no Dock: point at the notification-area icon once.
-      if (process.platform === 'win32') recordingTray?.showBackgroundHint()
+      if (process.platform === 'win32') {
+        closedWhileRecording = true
+        recordingTray?.showBackgroundHint()
+      }
     }
   })
+  if (process.platform === 'win32') {
+    // Reopened from the tray (or a second launch): the person wants the app again.
+    window.on('show', () => {
+      closedWhileRecording = false
+    })
+    // Shutdown / log-off: do not hold the session open; stop and save, then quit.
+    window.on('query-session-end', () => {
+      sessionEnding = true
+    })
+    window.on('session-end', () => {
+      sessionEnding = true
+      app.quit()
+    })
+  }
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
     recording.rendererGone()
@@ -870,11 +896,19 @@ app.whenReady().then(async () => {
       acquire: () => libraryActivity.tryBeginShutdown(),
       cleanup: async () => {
         quitting = true
-        recordingTray?.dispose()
+        // Windows keeps the tray (showing "Saving recording…") until the wait below.
+        if (process.platform !== 'win32') recordingTray?.dispose()
         calendarService?.dispose()
         // Windows: stop and save an active recording first, as the macOS engine
         // does inside dispose(). The hidden renderer still owns the capture.
-        if (process.platform === 'win32') await finishRecordingBeforeQuit(engine)
+        if (process.platform === 'win32') {
+          if (engine.running) recordingTray?.showSavingBeforeQuit()
+          await finishRecordingBeforeQuit(
+            engine,
+            sessionEnding ? SESSION_END_FINISH_TIMEOUT_MS : undefined
+          )
+          recordingTray?.dispose()
+        }
         const results = await Promise.allSettled([engine.dispose(), micWatcher.dispose()])
         const failures = results.filter((result) => result.status === 'rejected')
         if (failures.length)

@@ -5,6 +5,7 @@ import {
   WINDOWS_TITLE_BAR_HEIGHT,
   hasThemedTitleBarOverlay,
   hidesToTrayOnClose,
+  quitsAfterBackgroundRecording,
   titleBarOverlayFor,
   windowChromeOptions
 } from './window-chrome'
@@ -83,7 +84,31 @@ test('close while recording hides to the tray on macOS (unchanged) and now on Wi
   assert.equal(hidesToTrayOnClose('linux', true, false), false)
   assert.match(
     indexSource,
-    /if \(hidesToTrayOnClose\(process\.platform, recording\.busy, quitting\)\) \{\n\s+event\.preventDefault\(\)\n\s+window\.hide\(\)\n\s+\/\/[^\n]*\n\s+if \(process\.platform === 'win32'\) recordingTray\?\.showBackgroundHint\(\)/
+    /if \(hidesToTrayOnClose\(process\.platform, recording\.busy, quitting \|\| sessionEnding\)\) \{\n\s+event\.preventDefault\(\)\n\s+window\.hide\(\)\n\s+\/\/[^\n]*\n\s+if \(process\.platform === 'win32'\) \{\n\s+closedWhileRecording = true\n\s+recordingTray\?\.showBackgroundHint\(\)/
+  )
+})
+
+test('Windows quits when a recording that outlived its window ends, unless reopened', () => {
+  assert.equal(quitsAfterBackgroundRecording('win32', true, 'idle'), true)
+  for (const phase of ['requested', 'starting', 'recording', 'finishing'] as const)
+    assert.equal(quitsAfterBackgroundRecording('win32', true, phase), false)
+  assert.equal(quitsAfterBackgroundRecording('win32', false, 'idle'), false, 'reopened')
+  // macOS keeps the app alive without windows, as before.
+  assert.equal(quitsAfterBackgroundRecording('darwin', true, 'idle'), false)
+  assert.match(
+    indexSource,
+    /if \(quitsAfterBackgroundRecording\(process\.platform, closedWhileRecording, state\.phase\)\)\n\s+app\.quit\(\)/
+  )
+  // Reopening clears it; shutdown / log-off stops and saves instead of holding the session.
+  const win =
+    /if \(process\.platform === 'win32'\) \{\n\s+\/\/ Reopened[\s\S]*?\n {2}\}\n/.exec(
+      indexSource
+    )?.[0] ?? ''
+  assert.match(win, /window\.on\('show', \(\) => \{\n\s+closedWhileRecording = false/)
+  assert.match(win, /window\.on\('query-session-end', \(\) => \{\n\s+sessionEnding = true/)
+  assert.match(
+    win,
+    /window\.on\('session-end', \(\) => \{\n\s+sessionEnding = true\n\s+app\.quit\(\)/
   )
 })
 
@@ -109,18 +134,12 @@ test('every Windows chrome rule is scoped to html[data-platform=win32], so macOS
   )
 })
 
-test('Windows chrome keeps headers, notices and Settings clear of the caption buttons', () => {
-  const css = read('assets/windows-chrome.css')
-  for (const selector of ['.home-topbar', '.editor-topbar']) {
-    assert.match(
-      css,
-      new RegExp(
-        `html\\[data-platform='win32'\\] \\${selector} \\{[^}]*padding-right: calc\\(var\\(--win-caption-inset\\) \\+ 16px\\)`
-      )
-    )
-  }
-  assert.match(css, /\.chrome::before \{[^}]*-webkit-app-region: drag/)
-  assert.match(css, /\.models\.settings-redesign::-webkit-scrollbar-track \{[^}]*margin-top/)
-  assert.match(css, /\.meeting-banner \{[^}]*--win-caption-inset/)
-  assert.match(css, /\.toast \{[^}]*--win-caption-inset/)
+test('the rendered Windows chrome is checked by a native behavior script in CI', () => {
+  // scripts/test-windows-chrome.cjs measures the real app (scrollbar width and
+  // offset, element under the cursor at the logo, headers clear of the overlay).
+  const ci = readFileSync(new URL('../../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  assert.match(
+    ci,
+    /node apps\/desktop\/scripts\/test-windows-chrome\.cjs apps\/desktop\/release\/win-unpacked\/DoodleNote\.exe/
+  )
 })

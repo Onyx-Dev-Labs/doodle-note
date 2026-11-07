@@ -104,9 +104,15 @@ test('a recording that cannot finish in time no longer blocks quit', async () =>
 test('only Windows quits wait for the recording; macOS keeps its engine-owned shutdown', () => {
   const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const cleanup = /cleanup: async \(\) => \{([\s\S]*?)\n {6}\},/.exec(index)?.[1] ?? ''
+  // macOS: the tray goes first and the engine owns the finishing wait, as before.
   assert.match(
     cleanup,
-    /if \(process\.platform === 'win32'\) await finishRecordingBeforeQuit\(engine\)\n\s+const results = await Promise\.allSettled\(\[engine\.dispose\(\), micWatcher\.dispose\(\)\]\)/
+    /quitting = true\n\s+\/\/[^\n]*\n\s+if \(process\.platform !== 'win32'\) recordingTray\?\.dispose\(\)\n\s+calendarService\?\.dispose\(\)/
+  )
+  // Windows: keep the tray saying "Saving recording…" until the bounded wait ends.
+  assert.match(
+    cleanup,
+    /if \(process\.platform === 'win32'\) \{\n\s+if \(engine\.running\) recordingTray\?\.showSavingBeforeQuit\(\)\n\s+await finishRecordingBeforeQuit\(\n\s+engine,\n\s+sessionEnding \? SESSION_END_FINISH_TIMEOUT_MS : undefined\n\s+\)\n\s+recordingTray\?\.dispose\(\)\n\s+\}\n\s+const results = await Promise\.allSettled\(\[engine\.dispose\(\), micWatcher\.dispose\(\)\]\)/
   )
   assert.equal(cleanup.match(/finishRecordingBeforeQuit/g)?.length, 1)
   // The tray's Quit item runs app.quit(), which reaches this before-quit cleanup.

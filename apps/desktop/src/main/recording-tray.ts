@@ -31,6 +31,8 @@ export class RecordingTray {
   private readonly windows = process.platform === 'win32'
   /** One "still recording" hint per recording, not per close. */
   private hintShown = false
+  /** Windows: Quit is waiting for the recording to be saved. */
+  private savingBeforeQuit = false
   private images: ReturnType<typeof nativeImage.createFromPath>[] = []
   private updateImage = (): void => {
     // App theme can differ from the menu bar; keep the recording body white.
@@ -92,13 +94,30 @@ export class RecordingTray {
   showBackgroundHint(): void {
     if (!this.windows || !this.tray || this.hintShown) return
     this.hintShown = true
+    const phase = this.state.phase
     this.tray.displayBalloon({
       iconType: 'info',
-      title: 'DoodleNote is still recording',
+      title:
+        phase === 'finishing'
+          ? 'DoodleNote is saving the recording'
+          : phase === 'recording'
+            ? 'DoodleNote is still recording'
+            : 'DoodleNote is starting the recording',
       content:
-        'Recording continues in the background. Click the DoodleNote icon in the notification area to return and stop it.',
+        phase === 'finishing'
+          ? 'DoodleNote closes when the recording is saved. Click the DoodleNote icon in the notification area to open it instead.'
+          : 'Recording continues in the background, and DoodleNote closes when it ends. Click the DoodleNote icon in the notification area to return and stop it.',
       noSound: true
     })
+  }
+  /**
+   * Windows: Quit waits (bounded) for the recording to be saved. Keep the icon
+   * and say so, instead of vanishing while the app is still finishing.
+   */
+  showSavingBeforeQuit(): void {
+    if (!this.windows || !this.tray) return
+    this.savingBeforeQuit = true
+    this.render()
   }
   private render(): void {
     if (!this.tray) return
@@ -142,6 +161,13 @@ export class RecordingTray {
   }
   private renderWindows(): void {
     if (!this.tray) return
+    if (this.savingBeforeQuit) {
+      this.tray.setToolTip('DoodleNote — Saving recording…')
+      this.tray.setContextMenu(
+        Menu.buildFromTemplate([{ label: 'Saving recording before quitting…', enabled: false }])
+      )
+      return
+    }
     const now = Date.now()
     const meetings = upcomingTrayEvents(this.calendar?.signedIn ? this.calendar.events : [], now, 3)
     const next = meetings[0] ? trayTitle(meetings[0], now) : ''
