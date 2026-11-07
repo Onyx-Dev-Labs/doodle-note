@@ -799,6 +799,8 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('textImporter', textImporterApi)
     contextBridge.exposeInMainWorld('wizard', wizardApi)
     contextBridge.exposeInMainWorld('exporter', exporterApi)
+    // Synchronous platform for presentation only (window chrome, shortcut labels).
+    contextBridge.exposeInMainWorld('appPlatform', process.platform)
   } catch (error) {
     console.error(error)
   }
@@ -836,5 +838,5 @@ if (process.contextIsolated) {
   window.wizard = wizardApi
   // @ts-ignore (defined in index.d.ts)
   window.exporter = exporterApi
-  Object.assign(window, { dictation: dictationApi })
+  Object.assign(window, { dictation: dictationApi, appPlatform: process.platform })
 }

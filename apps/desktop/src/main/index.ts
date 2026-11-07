@@ -66,6 +66,7 @@ import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import { MAIN_WINDOW_SIZE } from './window-sizing'
+import { hasThemedTitleBarOverlay, titleBarOverlayFor, windowChromeOptions } from './window-chrome'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -271,10 +272,10 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
     autoHideMenuBar: true,
-    // Mac-native feel: content extends under a hidden title bar; the renderer
-    // provides a drag strip and keeps clear of the traffic lights.
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 18, y: 16 },
+    // macOS: content extends under a hidden title bar; the renderer provides a
+    // drag strip and keeps clear of the traffic lights. Windows: hidden title bar
+    // with themed caption buttons (see window-chrome.ts).
+    ...windowChromeOptions(process.platform, nativeTheme.shouldUseDarkColors),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -884,7 +885,10 @@ app.whenReady().then(async () => {
   // floating prompt panel + native chrome) matches the in-app appearance.
   ipcMain.on(THEME_SET_SOURCE_CHANNEL, (_event, source: unknown) => {
     nativeTheme.themeSource = source === 'light' || source === 'dark' ? source : 'system'
+    applyTitleBarOverlay()
   })
+  // Windows caption buttons follow the app theme, and the system theme in 'system'.
+  if (hasThemedTitleBarOverlay(process.platform)) nativeTheme.on('updated', applyTitleBarOverlay)
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
   const syncService = new SyncService(
@@ -966,6 +970,15 @@ app.whenReady().then(async () => {
     focusMainWindow()
   })
 })
+
+/** Recolor the Windows caption-button overlay for the current light/dark theme. */
+function applyTitleBarOverlay(): void {
+  if (!hasThemedTitleBarOverlay(process.platform)) return
+  const window = mainWindow
+  if (!window || window.isDestroyed()) return
+  window.setTitleBarOverlay(titleBarOverlayFor(nativeTheme.shouldUseDarkColors))
+  window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee')
+}
 
 /** Bring the app forward for a notification click or sign-in, recreating the window if
  *  the user closed it (macOS keeps the app alive without windows). */

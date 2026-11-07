@@ -43,6 +43,8 @@ declare global {
     textImporter: TextImporterApi
     wizard: WizardApi
     exporter: ExporterApi
+    /** process.platform of the host, for presentation only. Absent in tests. */
+    appPlatform?: string
   }
 }
 
