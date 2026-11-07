@@ -25,6 +25,28 @@ import {
   jsonConfigWithoutServer
 } from './mcp-clients-logic'
 
+export interface McpRepointResult {
+  id: McpClientId
+  outcome: 'unchanged' | 'updated' | 'failed'
+  error?: string
+}
+
+/**
+ * A client config file's text, `absent` only when there is no such file, or the
+ * read error (locked, permission denied, a folder in its place).
+ */
+export function readConfigFile(
+  path: string
+): { state: 'absent' } | { state: 'read'; raw: string } | { state: 'error'; message: string } {
+  try {
+    return { state: 'read', raw: readFileSync(path, 'utf8') }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { state: 'absent' }
+    return { state: 'error', message: (error as Error).message }
+  }
+}
+
 interface McpClientDef {
   id: McpClientId
   name: string
@@ -185,26 +207,53 @@ export class AgentAccessService {
   /**
    * Re-register our server, with the current launch spec, in every client whose
    * entry runs a command `isStale` rejects (the Windows install folder moved).
-   * Other entries and clients are untouched. Returns the updated client ids.
+   * Other entries and clients are untouched. `only` limits the pass to clients
+   * not yet done. Each client reports `unchanged` (no config file, no entry of
+   * ours, or already current), `updated`, or `failed`: the file exists but could
+   * not be read, parsed or written, so the caller must try again later rather
+   * than treat it as nothing to do.
    */
-  repointStaleClients(isStale: (command: string) => boolean): McpClientId[] {
-    const updated: McpClientId[] = []
+  repointStaleClients(
+    isStale: (command: string) => boolean,
+    only?: readonly string[] | null
+  ): McpRepointResult[] {
+    const results: McpRepointResult[] = []
     for (const def of this.clients) {
-      const raw = this.tryRead(def.configPath)
-      if (raw === null) continue
-      const command =
-        def.dialect === 'json' ? jsonConfigServerCommand(raw) : codexConfigServerCommand(raw)
-      if (command === null || !isStale(command)) continue
-      const next =
-        def.dialect === 'json'
-          ? jsonConfigWithServer(raw, this.server, def.configPath)
-          : codexConfigWithServer(raw, this.server)
-      if (next !== raw) {
+      if (only && !only.includes(def.id)) continue
+      const read = readConfigFile(def.configPath)
+      if (read.state === 'absent') {
+        results.push({ id: def.id, outcome: 'unchanged' })
+        continue
+      }
+      if (read.state === 'error') {
+        results.push({ id: def.id, outcome: 'failed', error: read.message })
+        continue
+      }
+      try {
+        const raw = read.raw
+        const command =
+          def.dialect === 'json'
+            ? jsonConfigServerCommand(raw, def.configPath)
+            : codexConfigServerCommand(raw, def.configPath)
+        if (command === null || !isStale(command)) {
+          results.push({ id: def.id, outcome: 'unchanged' })
+          continue
+        }
+        const next =
+          def.dialect === 'json'
+            ? jsonConfigWithServer(raw, this.server, def.configPath)
+            : codexConfigWithServer(raw, this.server)
+        if (next === raw) {
+          results.push({ id: def.id, outcome: 'unchanged' })
+          continue
+        }
         writeFileSync(def.configPath, next)
-        updated.push(def.id)
+        results.push({ id: def.id, outcome: 'updated' })
+      } catch (error) {
+        results.push({ id: def.id, outcome: 'failed', error: (error as Error).message })
       }
     }
-    return updated
+    return results
   }
 
   private clientStatus(def: McpClientDef): McpClientStatus {

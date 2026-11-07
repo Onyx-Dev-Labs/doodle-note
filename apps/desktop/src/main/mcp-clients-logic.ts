@@ -73,15 +73,20 @@ export function jsonConfigHasServer(raw: string): boolean {
   }
 }
 
-/** The command our JSON-dialect entry launches, or null when absent or unreadable. */
-export function jsonConfigServerCommand(raw: string): string | null {
-  try {
-    const config = JSON.parse(raw) as JsonConfig
-    const entry = config?.mcpServers?.[MCP_SERVER_KEY] as { command?: unknown } | undefined
-    return typeof entry?.command === 'string' ? entry.command : null
-  } catch {
-    return null
+/**
+ * The command our JSON-dialect entry launches, or null when there is no entry.
+ * Throws ClientConfigError when the file cannot be parsed, so a caller can tell
+ * "nothing to do" from "could not tell" (and try again later).
+ */
+export function jsonConfigServerCommand(raw: string, path: string): string | null {
+  const config = parseJsonConfig(raw, path)
+  const servers = config.mcpServers
+  if (!servers || typeof servers !== 'object' || !(MCP_SERVER_KEY in servers)) return null
+  const entry = servers[MCP_SERVER_KEY] as { command?: unknown } | null
+  if (typeof entry?.command !== 'string') {
+    throw new ClientConfigError(`${path} has a ${MCP_SERVER_KEY} entry without a command.`)
   }
+  return entry.command
 }
 
 const CODEX_HEADER = `[mcp_servers.${MCP_SERVER_KEY}]`
@@ -134,20 +139,25 @@ export function codexConfigHasServer(raw: string): boolean {
   return raw.split('\n').some((line) => line.trim() === CODEX_HEADER)
 }
 
-/** The command our Codex table launches, or null when absent or unreadable. */
-export function codexConfigServerCommand(raw: string): string | null {
+/**
+ * The command our Codex table launches, or null when there is no table. Throws
+ * ClientConfigError when the table is there but its command cannot be read.
+ */
+export function codexConfigServerCommand(raw: string, path: string): string | null {
   const lines = raw.split('\n')
   const start = lines.findIndex((line) => line.trim() === CODEX_HEADER)
   if (start === -1) return null
   for (let i = start + 1; i < lines.length && !lines[i].trimStart().startsWith('['); i++) {
     const match = /^\s*command\s*=\s*(".*")\s*$/.exec(lines[i])
     if (!match) continue
+    let value: unknown
     try {
-      const value = JSON.parse(match[1]) as unknown
-      return typeof value === 'string' ? value : null
+      value = JSON.parse(match[1])
     } catch {
-      return null
+      value = null
     }
+    if (typeof value === 'string') return value
+    break
   }
-  return null
+  throw new ClientConfigError(`${path} has a ${CODEX_HEADER} table without a readable command.`)
 }

@@ -1143,7 +1143,7 @@ app.whenReady().then(async () => {
         },
         registerCurrent: (enabled) => app.setLoginItemSettings({ openAtLogin: true, enabled })
       },
-      repointMcpClients: (isStale) => agentAccessService.repointStaleClients(isStale),
+      repointMcpClients: (isStale, only) => agentAccessService.repointStaleClients(isStale, only),
       log: (message) => console.log(message)
     })
   }
