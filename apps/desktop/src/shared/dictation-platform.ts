@@ -99,7 +99,7 @@ export const BARK_COPY: Record<BarkPlatform, BarkCopy> = {
       'Windows does not ask for the microphone. Turn on "Let desktop apps access your microphone" in Windows Settings → Privacy & security → Microphone, then try again.',
     transformsNeedModel:
       'Transforms need a notes model on this PC or your own provider. Set one up under Notes model.',
-    helperBlocked: `Windows refused to run the ${FEATURE_NAME} helper because it is not signed, so nothing was typed. A signed build fixes this; meanwhile, ask whoever manages this PC to allow DoodleNote's dictation-helper.exe. (Application Control can also hold back a freshly built unsigned program for a while.)`,
+    helperBlocked: `Windows blocked the ${FEATURE_NAME} helper from starting, so nothing was typed. Your organization's app control policy may not allow it; a signed build, or an allow-list entry for DoodleNote's dictation-helper.exe, fixes this.`,
     helperDamaged: `The ${FEATURE_NAME} helper on disk does not match this build (it may be damaged). Reinstall DoodleNote; nothing was typed.`,
     permissionsDescription: 'Microphone, typing into apps, and the keyboard hook',
     permissionsIntro: `Windows asks no permission for typing into other apps. ${FEATURE_NAME} needs microphone access for desktop apps, and its small helper program, which watches the hold-to-talk key and types the text for you.`,
@@ -148,7 +148,7 @@ export function describeWindowsHelper(
     case 'ready':
       return 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
     case 'blocked':
-      return 'Windows refused to run it because it is unsigned. A signed build fixes this; or ask whoever manages this PC to allow it.'
+      return 'Windows blocked it from starting. Your organizations app control policy may not allow it; a signed build or an allow-list entry fixes this.'
     case 'damaged':
       return 'The file on disk does not match this build. Reinstall DoodleNote.'
     default:

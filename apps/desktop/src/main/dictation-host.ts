@@ -80,15 +80,56 @@ function microphoneAccess(): MicrophoneAccess {
  * 'absent' missing, 'damaged' a hash mismatch, 'ok' otherwise (including a dev build with no
  * manifest, which cannot be verified). Read once; the helper does not change under a running app.
  */
+/**
+ * Whether a PE file carries an Authenticode certificate table (security data directory, entry 4).
+ * A signed build is trusted as-is: signing rewrites the file, so its bytes no longer match the
+ * manifest hash, and Windows itself refuses to run a tampered signed exe (the blocked path). The
+ * manifest hash is only a dev-build check for an unsigned, possibly corrupt, helper.
+ */
+export function peIsAuthenticodeSigned(buffer: Buffer): boolean {
+  try {
+    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return false // 'MZ'
+    const pe = buffer.readUInt32LE(0x3c)
+    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return false // 'PE\0\0'
+    const optional = pe + 24
+    const magic = buffer.readUInt16LE(optional)
+    const dataDir = optional + (magic === 0x20b ? 112 : 96) // PE32+ vs PE32
+    const securityEntry = dataDir + 4 * 8 // data directory index 4
+    if (securityEntry + 8 > buffer.length) return false
+    const size = buffer.readUInt32LE(securityEntry + 4)
+    return size > 0
+  } catch {
+    return false
+  }
+}
+
+/** The integrity verdict from the three observable facts, for testing. */
+export function classifyHelperIntegrity(
+  exists: boolean,
+  signed: boolean,
+  hashMatches: boolean
+): 'ok' | 'damaged' | 'absent' {
+  if (!exists) return 'absent'
+  if (signed) return 'ok' // trust the signature; Windows enforces it, a broken one lands on 'blocked'
+  return hashMatches ? 'ok' : 'damaged'
+}
+
 function computeHelperIntegrity(helperPath: string): 'ok' | 'damaged' | 'absent' {
   if (!existsSync(helperPath)) return 'absent'
+  let buffer: Buffer
+  try {
+    buffer = readFileSync(helperPath)
+  } catch {
+    return 'ok'
+  }
+  if (peIsAuthenticodeSigned(buffer)) return 'ok'
   const manifestPath = join(dirname(helperPath), 'dictation-helper.manifest.json')
-  if (!existsSync(manifestPath)) return 'ok'
+  if (!existsSync(manifestPath)) return 'ok' // an unsigned dev build with no manifest cannot be checked
   try {
     const expected = JSON.parse(readFileSync(manifestPath, 'utf8')) as { sha256?: unknown }
     if (typeof expected.sha256 !== 'string') return 'ok'
-    const actual = createHash('sha256').update(readFileSync(helperPath)).digest('hex')
-    return actual === expected.sha256 ? 'ok' : 'damaged'
+    const actual = createHash('sha256').update(buffer).digest('hex')
+    return classifyHelperIntegrity(true, false, actual === expected.sha256)
   } catch {
     return 'ok'
   }

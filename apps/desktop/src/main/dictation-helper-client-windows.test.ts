@@ -102,7 +102,9 @@ test('the Windows deliver budget grows with the text so a long typing fallback n
   assert.ok(long.timeout > short.timeout)
   assert.ok(long.deadlineMs > 8_000)
   // Capped so a pathological length does not wait forever.
-  assert.equal(windowsDeliverBudget('x'.repeat(100_000)).timeout, 60_000)
+  const huge = windowsDeliverBudget('x'.repeat(100_000))
+  assert.equal(huge.deadlineMs, 60_000)
+  assert.ok(huge.timeout <= 90_000)
 })
 
 test('Windows: a deliver carries a length-sized deadline; macOS sends none', async () => {
@@ -232,6 +234,160 @@ process.stdin.on('data', (d) => {
     assert.equal(status?.hooksLive, true)
     await sleep(100)
     assert.deepEqual(phases, ['lost', 'restored'])
+  } finally {
+    await client.dispose()
+  }
+})
+
+import {
+  HELPER_DELIVER_MARGIN_MS,
+  helperDeliverEstimateMs
+} from '../shared/dictation-helper-protocol'
+
+test('the deliver budget clears the helper estimate for short and long text (D)', () => {
+  for (const text of [
+    'Hi.',
+    'Thank you.',
+    'hello',
+    'hello world',
+    'a'.repeat(300),
+    'word '.repeat(80)
+  ]) {
+    const estimate = helperDeliverEstimateMs(text)
+    const { timeout, deadlineMs } = windowsDeliverBudget(text)
+    // The deadline the helper enforces must leave room for its own worst-case estimate.
+    assert.ok(
+      deadlineMs >= estimate,
+      `deadline ${deadlineMs} < estimate ${estimate} for ${JSON.stringify(text)}`
+    )
+    assert.ok(deadlineMs <= estimate + HELPER_DELIVER_MARGIN_MS + 1)
+    assert.ok(timeout > deadlineMs, 'the wait clears the deadline plus the reply round trip')
+  }
+})
+
+test('macOS: a helper that dies after a mute is NOT relaunched by restoreOutput (G)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-mac-'))
+  const script = join(dir, 'helper.js')
+  const starts = join(dir, 'starts.txt')
+  writeFileSync(
+    script,
+    `
+const fs = require('node:fs')
+fs.appendFileSync(${JSON.stringify(starts)}, 'start\\n')
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid })
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op === 'mute-output') send({ event: 'reply', id: req.id, ok: true, outcome: 'muted' })
+    else send({ event: 'reply', id: req.id, ok: true })
+  }
+})
+`
+  )
+  const mac = new DictationHelperClient({
+    command: process.execPath,
+    args: [script],
+    platform: 'darwin'
+  })
+  try {
+    assert.equal(await mac.muteOutput(), true)
+    mac.restart() // the helper dies while the sound is muted
+    await sleep(300)
+    await mac.restoreOutput()
+    await sleep(300)
+    const count = (await read(starts)).split('\n').filter(Boolean).length
+    assert.equal(count, 1, 'darwin never relaunches the helper from restoreOutput')
+  } finally {
+    await mac.dispose()
+  }
+})
+
+test('Windows: a late ready (after the readiness window) is still honoured for the session', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-late-'))
+  const script = join(dir, 'helper.js')
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    send({ event: 'reply', id: req.id, ok: true, outcome: 'muted' })
+  }
+})
+// Announce readiness only after a delay that exceeds a (shortened) readiness window.
+setTimeout(() => send({ event: 'ready', pid: process.pid, platform: 'win32' }), 200)
+`
+  )
+  // The readiness window is shortened to 50 ms, well before the helper readies at 200 ms, so the
+  // ready that arrives afterwards is the 'late' case; the client must still honour it.
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script],
+    platform: 'win32',
+    readyTimeoutMs: 50
+  })
+  try {
+    const early = await client.muteOutput() // issued before ready: refused (null → false)
+    assert.equal(early, false, 'a request inside the unready window does not reach the helper')
+    await sleep(300) // the late ready has now arrived
+    const late = await client.muteOutput()
+    assert.equal(late, true, 'a request after the late ready reaches the helper')
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('short transcripts clear the deadline against a C#-faithful estimate helper (D)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-est-'))
+  const script = join(dir, 'helper.js')
+  // The fake helper applies the helper's own estimate (mirroring Delivery.cs) and refuses when the
+  // deadline cannot cover it — so an undersized client budget would surface as a real failure.
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+const PER_CHAR = 16, BOUNDARY = 70, OVERHEAD = 3000, PASTE = 1600
+function estimate(text) {
+  const n = text.replace(/\\r\\n/g, '\\n')
+  let b = 0
+  for (const u of n) if (/[\\s\\p{P}]/u.test(u)) b++
+  return Math.max(PASTE, n.length * PER_CHAR + b * BOUNDARY + OVERHEAD)
+}
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op === 'deliver') {
+      const est = estimate(req.text)
+      if (req.deadlineMs > 0 && est > req.deadlineMs) send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'deadline-exceeded', verified: false, clipboard: 'untouched' })
+      else send({ event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'type', verified: true, clipboard: 'untouched' })
+    } else send({ event: 'reply', id: req.id, ok: true })
+  }
+})
+`
+  )
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script],
+    platform: 'win32'
+  })
+  try {
+    for (const text of ['Hi.', 'Thank you.', 'hello', 'hello world']) {
+      const result = await client.deliver('s', text)
+      assert.equal(
+        result.outcome,
+        'delivered',
+        `${JSON.stringify(text)} should type, not be refused`
+      )
+    }
   } finally {
     await client.dispose()
   }

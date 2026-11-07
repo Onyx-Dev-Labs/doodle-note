@@ -149,3 +149,32 @@ export function micLooksMuted(state: InputState | null): boolean {
   if (!state) return false
   return state.muted === true || (state.volume !== null && state.volume <= 0)
 }
+
+/* ---- Windows delivery timing (must mirror engine/windows/dictation-helper/Delivery.cs) ---- */
+
+/** Per-character typing cost; matches Delivery.cs TypeText pacing and TypeEstimateMs. */
+export const HELPER_TYPE_PER_CHAR_MS = 16
+/** Extra pause at each word boundary (whitespace/punctuation). */
+export const HELPER_TYPE_BOUNDARY_MS = 70
+/** Fixed overhead for validation, confirm and settle in TypeEstimateMs. */
+export const HELPER_TYPE_OVERHEAD_MS = 3_000
+/** The helper's PasteEstimateMs (clipboard + Ctrl+V, start to settled). */
+export const HELPER_PASTE_ESTIMATE_MS = 1_600
+/** Allowance for the clipboard retry loop and the request's pipe/queue latency. */
+export const HELPER_DELIVER_MARGIN_MS = 2_500
+
+/**
+ * The helper's own worst-case estimate for delivering `text`, start to settled. The client sizes
+ * its wait and the deadline from this so a short transcript can still fall back to typing under
+ * clipboard contention rather than being refused `deadline-exceeded`.
+ */
+export function helperDeliverEstimateMs(text: string): number {
+  const normalized = text.replace(/\r\n/g, '\n')
+  let boundaries = 0
+  for (const unit of normalized) if (/[\s\p{P}]/u.test(unit)) boundaries++
+  const typing =
+    normalized.length * HELPER_TYPE_PER_CHAR_MS +
+    boundaries * HELPER_TYPE_BOUNDARY_MS +
+    HELPER_TYPE_OVERHEAD_MS
+  return Math.max(HELPER_PASTE_ESTIMATE_MS, typing)
+}

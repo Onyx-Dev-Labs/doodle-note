@@ -100,7 +100,7 @@ test('privacy buttons: the same macOS panes as before; Windows has a microphone 
 
 test('Windows helper and hook rows say what is going on', () => {
   assert.match(describeWindowsHelper('ready'), /starts with DoodleNote/)
-  assert.match(describeWindowsHelper('blocked'), /unsigned/)
+  assert.match(describeWindowsHelper('blocked'), /app control/)
   assert.match(describeWindowsHelper('unavailable'), /Missing/)
   assert.equal(describeWindowsHooks(null).label, 'Checking…')
   assert.equal(describeWindowsHooks(true).label, 'Working')
@@ -113,10 +113,10 @@ test('Windows helper and hook rows say what is going on', () => {
   )
 })
 
-test('the blocked helper copy is permanent (a signed build), not "try again in a few minutes"', () => {
-  assert.match(BARK_COPY.win32.helperBlocked, /not signed|unsigned/)
+test('the blocked helper copy is accurate for a signed helper too (app control, not "unsigned")', () => {
+  assert.match(BARK_COPY.win32.helperBlocked, /app control policy/)
   assert.match(BARK_COPY.win32.helperBlocked, /signed build/)
-  assert.doesNotMatch(BARK_COPY.win32.helperBlocked, /in a few minutes/)
+  assert.doesNotMatch(BARK_COPY.win32.helperBlocked, /because it is not signed|in a few minutes/)
   assert.ok(BARK_COPY.win32.helperDamaged.length > 0)
 })
 

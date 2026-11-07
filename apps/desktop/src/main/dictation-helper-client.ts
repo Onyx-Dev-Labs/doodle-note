@@ -18,6 +18,10 @@ import type {
   SelectionResult,
   TargetDescription
 } from '../shared/dictation-helper-protocol'
+import {
+  HELPER_DELIVER_MARGIN_MS,
+  helperDeliverEstimateMs
+} from '../shared/dictation-helper-protocol'
 
 type HelperChild = ChildProcessByStdio<Writable, Readable, Readable>
 type Reply = { event: 'reply'; id: string; ok: boolean; reason?: string } & Record<string, unknown>
@@ -27,6 +31,8 @@ export interface HelperLaunch {
   args?: string[]
   /** Defaults to the running platform; only changes behavior on win32. */
   platform?: NodeJS.Platform
+  /** Overrides the readiness timeout; for tests that exercise a late ready. */
+  readyTimeoutMs?: number
 }
 
 /**
@@ -44,6 +50,10 @@ export const WINDOWS_READY_TIMEOUT_MS = 15_000
 
 /** Backoff between automatic helper restarts after a crash, capped. */
 const RESTART_BACKOFF_MS = [500, 1_000, 2_000, 5_000, 10_000]
+/** A helper that stays up this long is considered healthy; the backoff resets only then. */
+const HELPER_HEALTHY_MS = 60_000
+/** A ceiling on automatic restarts per session, so a helper that always dies cannot spin forever. */
+const MAX_RESTARTS_PER_SESSION = 20
 
 /**
  * How long the client waits for a Windows delivery, and the elapsed-ms deadline it passes
@@ -51,8 +61,12 @@ const RESTART_BACKOFF_MS = [500, 1_000, 2_000, 5_000, 10_000]
  * at each word boundary, so a long transcript must not time out and land later as doubled text.
  */
 export function windowsDeliverBudget(text: string): { timeout: number; deadlineMs: number } {
-  const timeout = Math.min(60_000, 3_500 + text.length * 45)
-  return { timeout, deadlineMs: timeout - 800 }
+  // The deadline must clear the helper's own estimate plus a margin, or a short transcript would
+  // be refused instead of typed; the wait clears the deadline plus the reply's round trip.
+  const estimate = helperDeliverEstimateMs(text)
+  const deadlineMs = Math.min(60_000, estimate + HELPER_DELIVER_MARGIN_MS)
+  const timeout = Math.min(90_000, deadlineMs + 2_000)
+  return { timeout, deadlineMs }
 }
 
 /** spawn() error codes Windows reports when Application Control or Smart App Control blocks a program. */
@@ -105,6 +119,10 @@ export class DictationHelperClient {
   private mutedOutput = false
   private restartTimer: NodeJS.Timeout | null = null
   private restartAttempts = 0
+  private totalRestarts = 0
+  private aliveTimer: NodeJS.Timeout | null = null
+  /** True once the current child announced readiness (even if that arrived after the ready timeout). */
+  private helperReady = false
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
 
   constructor(
@@ -211,9 +229,15 @@ export class DictationHelperClient {
    * crashed while the sound was muted, start a fresh one, which gives it back on launch.
    */
   async restoreOutput(): Promise<void> {
-    if (!this.child && !this.mutedOutput) return
-    this.mutedOutput = false
-    if (!this.child && !(await this.ensureRunning())) return
+    // Windows: a helper that crashed while the sound was muted is replaced to give it back.
+    // macOS keeps the base behaviour exactly: if there is no helper, there is nothing to do.
+    if (!this.child) {
+      if (!this.windows || !this.mutedOutput) return
+      this.mutedOutput = false
+      if (!(await this.ensureRunning())) return
+    } else {
+      this.mutedOutput = false
+    }
     await this.request('restore-output', {}, this.timeouts.status)
   }
 
@@ -467,6 +491,8 @@ export class DictationHelperClient {
     this.mouse = null
     if (this.restartTimer) clearTimeout(this.restartTimer)
     this.restartTimer = null
+    if (this.aliveTimer) clearTimeout(this.aliveTimer)
+    this.aliveTimer = null
     this.failAll()
     const child = this.child
     this.child = null
@@ -495,6 +521,8 @@ export class DictationHelperClient {
 
   private ensureRunning(): Promise<boolean> {
     if (this.disposed) return Promise.resolve(false)
+    // A ready that arrived after the readiness timeout still counts for the rest of the session.
+    if (this.child && this.helperReady) return Promise.resolve(true)
     if (this.child && this.ready) return this.ready
     if (!this.available) return Promise.resolve(false)
     // Do not spin on a helper that dies immediately.
@@ -510,6 +538,7 @@ export class DictationHelperClient {
     }
     this.child = child
     this.buffer = ''
+    this.helperReady = false
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
@@ -519,7 +548,7 @@ export class DictationHelperClient {
     this.ready = new Promise<boolean>((resolve) => {
       const timer = setTimeout(
         () => resolve(false),
-        this.windows ? WINDOWS_READY_TIMEOUT_MS : 3_000
+        this.launch.readyTimeoutMs ?? (this.windows ? WINDOWS_READY_TIMEOUT_MS : 3_000)
       )
       const settle = (ok: boolean): void => {
         clearTimeout(timer)
@@ -533,7 +562,15 @@ export class DictationHelperClient {
           this.buffer = this.buffer.slice(nl + 1)
           if (this.handleLine(line)) {
             this.launchError = null
-            this.restartAttempts = 0
+            this.helperReady = true
+            // The backoff resets only once this helper has proved healthy (stayed up a while),
+            // so a helper that always crashes right after ready cannot restart every 0.5 s.
+            if (this.aliveTimer) clearTimeout(this.aliveTimer)
+            this.aliveTimer = setTimeout(() => {
+              this.restartAttempts = 0
+              this.totalRestarts = 0
+            }, HELPER_HEALTHY_MS)
+            this.aliveTimer.unref?.()
             settle(true)
           }
         }
@@ -547,6 +584,9 @@ export class DictationHelperClient {
         if (this.child !== child) return
         this.child = null
         this.ready = null
+        this.helperReady = false
+        if (this.aliveTimer) clearTimeout(this.aliveTimer)
+        this.aliveTimer = null
         this.lastExitAt = Date.now()
         this.failAll()
         for (const listener of this.exitListeners) listener()
@@ -656,9 +696,10 @@ export class DictationHelperClient {
   private scheduleRestart(): void {
     if (!this.windows || this.disposed || this.restartTimer) return
     const wantsHelper = this.holdKey !== 'off' || this.mouse !== null || this.mutedOutput
-    if (!wantsHelper) return
+    if (!wantsHelper || this.totalRestarts >= MAX_RESTARTS_PER_SESSION) return
     const delay = RESTART_BACKOFF_MS[Math.min(this.restartAttempts, RESTART_BACKOFF_MS.length - 1)]
     this.restartAttempts += 1
+    this.totalRestarts += 1
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null
       if (this.disposed || this.child) return
