@@ -1717,13 +1717,17 @@ export class DictationService {
     this.lastTranscript = text
     // Ask the helper to keep the field only when learning from corrections is on.
     const learn = context?.settings.learnFromEdits === true
+    let clipboardSkipped = false
     const outcome = await this.deliver(
       context,
       text,
       (stage) => {
         if (stage === 'sent') this.mark(gen, 'helperSent')
       },
-      learn ? { watch: true } : undefined
+      learn ? { watch: true } : undefined,
+      (clipboard) => {
+        clipboardSkipped = clipboard === 'skipped'
+      }
     )
     this.mark(gen, 'deliverEnd')
     if (context?.detail && outcome.helper) context.detail.helper = outcome.helper
@@ -1736,13 +1740,18 @@ export class DictationService {
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })
+    // The paste went in, but the user's own clipboard was too large to restore fully: tell them.
+    if (outcome.kind === 'delivered' && clipboardSkipped) {
+      this.setPanel({ kind: 'clipboard-skipped' }, NOTICE_MS)
+    }
   }
 
   private async deliver(
     context: Pick<SessionContext, 'snapshotId' | 'target'> | undefined,
     text: string,
     onStage?: (stage: 'sent') => void,
-    guards?: DeliveryGuards
+    guards?: DeliveryGuards,
+    onClipboard?: (clipboard: string) => void
   ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings }> {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
@@ -1752,6 +1761,7 @@ export class DictationService {
     if (target.secure) return { kind: 'recover', reason: 'secure-field' }
     onStage?.('sent')
     const result = await this.deps.helper.deliver(context.snapshotId, text, guards)
+    onClipboard?.(result.clipboard)
     this.deps.log(
       `delivery ${result.outcome}${result.reason ? ` (${result.reason})` : ''} via ${result.method ?? 'none'}, clipboard ${result.clipboard}`
     )

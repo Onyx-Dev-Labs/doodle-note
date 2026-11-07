@@ -123,6 +123,8 @@ export class DictationHelperClient {
   private aliveTimer: NodeJS.Timeout | null = null
   /** True once the current child announced readiness (even if that arrived after the ready timeout). */
   private helperReady = false
+  /** The child whose triggers have been re-armed, so re-arming runs once per process. */
+  private rearmedChild: HelperChild | null = null
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
 
   constructor(
@@ -521,8 +523,9 @@ export class DictationHelperClient {
 
   private ensureRunning(): Promise<boolean> {
     if (this.disposed) return Promise.resolve(false)
-    // A ready that arrived after the readiness timeout still counts for the rest of the session.
-    if (this.child && this.helperReady) return Promise.resolve(true)
+    // Windows only: a ready that arrived after the readiness timeout still counts for the session.
+    // macOS keeps the base behaviour exactly (no late-ready shortcut).
+    if (this.windows && this.child && this.helperReady) return Promise.resolve(true)
     if (this.child && this.ready) return this.ready
     if (!this.available) return Promise.resolve(false)
     // Do not spin on a helper that dies immediately.
@@ -539,6 +542,7 @@ export class DictationHelperClient {
     this.child = child
     this.buffer = ''
     this.helperReady = false
+    this.rearmedChild = null
     child.stdout.setEncoding('utf8')
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk: string) => {
@@ -563,12 +567,15 @@ export class DictationHelperClient {
           if (this.handleLine(line)) {
             this.launchError = null
             this.helperReady = true
-            // The backoff resets only once this helper has proved healthy (stayed up a while),
-            // so a helper that always crashes right after ready cannot restart every 0.5 s.
+            // Re-arm the remembered triggers on the actual ready event — not via the ready promise,
+            // which may already have resolved false after a slow (late) Windows readiness.
+            this.rearmTriggers(child)
+            // The backoff resets only once this helper has proved healthy (stayed up a while), so a
+            // helper that always crashes right after ready cannot restart every 0.5 s. Only the
+            // backoff is reset here, not the per-session total (which is a real ceiling).
             if (this.aliveTimer) clearTimeout(this.aliveTimer)
             this.aliveTimer = setTimeout(() => {
               this.restartAttempts = 0
-              this.totalRestarts = 0
             }, HELPER_HEALTHY_MS)
             this.aliveTimer.unref?.()
             settle(true)
@@ -585,6 +592,7 @@ export class DictationHelperClient {
         this.child = null
         this.ready = null
         this.helperReady = false
+        this.rearmedChild = null
         if (this.aliveTimer) clearTimeout(this.aliveTimer)
         this.aliveTimer = null
         this.lastExitAt = Date.now()
@@ -593,26 +601,24 @@ export class DictationHelperClient {
         this.scheduleRestart()
       })
     })
-    // Re-arm the mouse button and the hold watch on the fresh process.
-    void this.ready.then((ok) => {
-      if (ok && this.mouse && this.child === child) {
-        void this.request(
-          'mouse-start',
-          { ...this.mouse, minHoldMs: 150 },
-          this.timeouts.hold,
-          false
-        )
-      }
-      if (ok && this.holdKey !== 'off' && this.child === child) {
-        void this.request(
-          'hold-start',
-          { key: this.holdKey, minHoldMs: 150 },
-          this.timeouts.hold,
-          false
-        )
-      }
-    })
     return this.ready
+  }
+
+  /** Re-arm the remembered mouse button and hold key on a freshly ready helper (once per child). */
+  private rearmTriggers(child: HelperChild): void {
+    if (this.child !== child || this.rearmedChild === child) return
+    this.rearmedChild = child
+    if (this.mouse) {
+      void this.request('mouse-start', { ...this.mouse, minHoldMs: 150 }, this.timeouts.hold, false)
+    }
+    if (this.holdKey !== 'off') {
+      void this.request(
+        'hold-start',
+        { key: this.holdKey, minHoldMs: 150 },
+        this.timeouts.hold,
+        false
+      )
+    }
   }
 
   /** Returns true when the helper announced readiness. */

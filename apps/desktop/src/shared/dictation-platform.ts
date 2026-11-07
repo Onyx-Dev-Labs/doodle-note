@@ -148,7 +148,7 @@ export function describeWindowsHelper(
     case 'ready':
       return 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
     case 'blocked':
-      return 'Windows blocked it from starting. Your organizations app control policy may not allow it; a signed build or an allow-list entry fixes this.'
+      return "Windows blocked it from starting. Your organization's app control policy may not allow it; a signed build or an allow-list entry fixes this."
     case 'damaged':
       return 'The file on disk does not match this build. Reinstall DoodleNote.'
     default:
