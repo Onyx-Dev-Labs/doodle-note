@@ -83,7 +83,8 @@ export interface HelperDeliveryTimings {
 export interface HelperDelivery {
   outcome: HelperDeliveryOutcome
   reason?: string
-  method?: 'ax' | 'paste'
+  /** ax: macOS accessibility insertion. paste: clipboard and Cmd/Ctrl+V. type: Windows Unicode keystrokes. */
+  method?: 'ax' | 'paste' | 'type'
   verified: boolean
   /** untouched | restored | user-changed | partial */
   clipboard: string
