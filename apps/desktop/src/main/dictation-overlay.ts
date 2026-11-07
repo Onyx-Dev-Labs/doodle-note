@@ -66,7 +66,29 @@ export class DictationOverlay {
     private readonly onAction: (action: OverlayAction, gen: number | null, record?: string) => void,
     /** The pill was dropped near this edge. */
     private readonly onEdge: (edge: PillEdge) => void
-  ) {}
+  ) {
+    if (process.platform === 'win32') {
+      screen.on('display-metrics-changed', this.redock)
+      screen.on('display-added', this.redock)
+      screen.on('display-removed', this.redock)
+    }
+  }
+
+  /**
+   * Windows: scaling changed, or a display came or went: the cached bounds may no longer
+   * match what Windows did to the window (it rescales a window's pixels when its
+   * DPI changes), so place it again on the current work area.
+   */
+  private readonly redock = (): void => {
+    this.lastBounds = null
+    if (this.pinned && !screen.getAllDisplays().some((d) => d.id === this.pinned?.id)) {
+      this.pinned = null
+    }
+    const window = this.window
+    if (!this.drag && window && !window.isDestroyed() && this.lastView?.visible) {
+      this.position(window, this.lastView)
+    }
+  }
 
   render(view: OverlayView): void {
     this.lastView = view
@@ -90,6 +112,11 @@ export class DictationOverlay {
   }
 
   dispose(): void {
+    if (process.platform === 'win32') {
+      screen.off('display-metrics-changed', this.redock)
+      screen.off('display-added', this.redock)
+      screen.off('display-removed', this.redock)
+    }
     this.endDrag(false)
     this.stopFollowing()
     if (this.window && !this.window.isDestroyed()) this.window.destroy()
@@ -129,6 +156,11 @@ export class DictationOverlay {
     if (this.lastBounds && sameRect(this.lastBounds, bounds)) return
     this.lastBounds = bounds
     window.setBounds(bounds)
+    // Moving between displays with different scaling, Windows can apply the new
+    // DPI after the move and leave the pill a different size; set it once more.
+    if (process.platform !== 'win32') return
+    const actual = window.getBounds()
+    if (actual.width !== bounds.width || actual.height !== bounds.height) window.setBounds(bounds)
   }
 
   /** The resting pill goes to whichever screen the pointer is on. */

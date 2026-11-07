@@ -25,6 +25,7 @@ import {
   nativeTheme,
   Notification,
   protocol,
+  screen,
   session as electronSession
 } from 'electron'
 import { RecordingStartCoordinator } from './recording-start-coordinator'
@@ -69,7 +70,7 @@ import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
-import { MAIN_WINDOW_SIZE } from './window-sizing'
+import { fitIntoWorkArea, MAIN_WINDOW_SIZE, mainWindowBoundsFor } from './window-sizing'
 import {
   SESSION_END_CANCEL_RESET_MS,
   SESSION_END_FINISH_TIMEOUT_MS,
@@ -339,12 +340,44 @@ function broadcastEngineEvent(event: EngineEvent): void {
   broadcast(ENGINE_EVENT_CHANNEL, event)
 }
 
+/**
+ * Windows: keep the main window within the work area of the display it is on
+ * when it moves to another display or scaling changes (mixed-DPI setups, a
+ * laptop undocked from a monitor). See mainWindowBoundsFor.
+ */
+function keepMainWindowOnScreen(window: BrowserWindow): void {
+  const refit = (): void => {
+    if (window.isDestroyed() || window.isMaximized() || window.isFullScreen()) return
+    if (window.isMinimized()) return
+    const area = screen.getDisplayMatching(window.getBounds()).workArea
+    const limits = mainWindowBoundsFor(area)
+    window.setMinimumSize(limits.minWidth, limits.minHeight)
+    const next = fitIntoWorkArea(window.getBounds(), area)
+    if (next) window.setBounds(next)
+  }
+  screen.on('display-metrics-changed', refit)
+  screen.on('display-removed', refit)
+  window.on('moved', refit)
+  window.on('closed', () => {
+    screen.off('display-metrics-changed', refit)
+    screen.off('display-removed', refit)
+  })
+}
+
 function createWindow(): void {
+  // Windows opens on the display under the pointer, sized to fit its work area at
+  // any scale; macOS keeps its fixed default.
+  const bounds =
+    process.platform === 'win32'
+      ? mainWindowBoundsFor(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea)
+      : {
+          width: MAIN_WINDOW_SIZE.defaultWidth,
+          height: MAIN_WINDOW_SIZE.defaultHeight,
+          minWidth: MAIN_WINDOW_SIZE.minWidth,
+          minHeight: MAIN_WINDOW_SIZE.minHeight
+        }
   const window = new BrowserWindow({
-    width: MAIN_WINDOW_SIZE.defaultWidth,
-    height: MAIN_WINDOW_SIZE.defaultHeight,
-    minWidth: MAIN_WINDOW_SIZE.minWidth,
-    minHeight: MAIN_WINDOW_SIZE.minHeight,
+    ...bounds,
     // Matches the active palette so launch never flashes the wrong color.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
@@ -362,6 +395,7 @@ function createWindow(): void {
   })
 
   mainWindow = window
+  if (process.platform === 'win32') keepMainWindowOnScreen(window)
   window.on('close', (event) => {
     if (libraryActivity.moving) {
       event.preventDefault()

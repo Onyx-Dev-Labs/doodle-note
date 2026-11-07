@@ -402,6 +402,27 @@ use `DOODLENOTE_SIGN_TEST_CERT_SHA1` with a temporary CurrentUser\My
 certificate (refused when `CI` is set); delete it from CurrentUser\My and
 CurrentUser\CA afterwards. Such a build is not trusted by Code Integrity.
 
+## High DPI and multiple monitors
+
+All window geometry is in DIPs and follows the display: caption-button insets
+come from the `titlebar-area-*` environment variables, the dictation pill and
+the meeting prompt are placed inside the work area of the display they are on,
+and the notification-area icons carry 16, 20, 24, 32, 40 and 48 px images.
+The main window opens on the display under the pointer, sized to fit its work
+area (1080p at 200% leaves about 960x500 DIPs, less than the 1180x760 default
+and the 560 DIP minimum height), and is fitted back inside the work area when
+it moves to a display with less room or the scale changes. The pill is placed
+again whenever scaling changes or a display is added or removed.
+
+`apps/desktop/scripts/capture-windows-dpi.cjs <DoodleNote.exe> <out-dir>
+--profiles <isolated-profiles-dir>` launches the packaged app with
+`--force-device-scale-factor` 1.25, 1.5 and 2, each with a fresh profile,
+captures Home, Settings and (when Bark is enabled in that profile) the pill
+with their native caption buttons, and fails if the window exceeds the work
+area. It opens visible windows. The notification-area icon and its menu are
+drawn by the shell at the system scale, so check them by changing the display
+scale in Windows Settings or on a second monitor with another scale.
+
 ## Production gate
 
 ### Installer follow-up in 0.4.23
