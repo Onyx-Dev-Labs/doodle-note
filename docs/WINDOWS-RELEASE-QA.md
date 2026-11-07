@@ -334,6 +334,39 @@ exe, the profile and library are unchanged, the Run entry and client configs
 name the new exe. Repeat with the old app running and with a file in the old
 folder held open (the folder is kept and removed by the next run).
 
+## Automatic updates (off until activation)
+
+Windows builds ship with automatic updates OFF. `updateAvailability` in
+`apps/desktop/src/main/update-policy.ts` reports Windows as unsupported unless
+the build was made with `DOODLENOTE_WINDOWS_UPDATES=on`, which electron-vite
+bakes into the main bundle (`__DOODLENOTE_WINDOWS_UPDATES__`). Off means no
+launch check, no 6-hour check and no manual check (Settings shows "Automatic
+updates are not on for Windows yet"); nothing on an installed PC can turn it
+on. macOS is unaffected. Neither CI nor `package:win` sets the variable, and a
+test fails if either does.
+
+The rest of the updater is already wired the same way as on the Mac:
+electron-updater with the shared generic `publish` feed
+(`https://www.doodlenote.ai/updates`, single-range requests), the NSIS target
+writes `latest.yml` and a `.blockmap` (differential downloads, like the Mac
+ZIP), and the packaged app carries `resources/app-update.yml`. On Windows the
+policy reads the `beta` channel (`beta.yml`) without downgrades. The live
+`beta.yml` (0.4.37) and stale `latest.yml` (0.3.4) are older than this build, so
+nothing an existing 0.4.x tester receives changes until a new manifest is
+published, and CI only uploads its manifest as a workflow artifact.
+
+To activate, in one release change:
+
+1. Require a valid signature first (Artifact Signing, below); never publish an
+   unsigned build to a feed.
+2. Choose the channel: keep `beta` for testers, or change `applyUpdatePolicy`
+   to the default channel (`latest.yml`) for production.
+3. Build the release with `DOODLENOTE_WINDOWS_UPDATES=on` (for example in
+   `release:win`) and update the "default to off" test so CI still builds off.
+4. Publish with `pnpm release:win` (signature gate, `latest.yml`) or
+   `publish:win-beta` (`beta.yml`). Installed builds from before activation never
+   check, so their users install the first activated build by hand.
+
 ## Production gate
 
 ### Installer follow-up in 0.4.23

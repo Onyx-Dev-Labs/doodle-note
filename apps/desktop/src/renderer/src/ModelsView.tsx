@@ -411,7 +411,10 @@ export default function ModelsView({
   }
 
   const updateStatusLine = (u: UpdateState): string => {
-    if (!u.supported) return 'Updates apply to the installed app (not dev builds)'
+    if (!u.supported)
+      return u.unsupportedReason === 'windows-not-activated'
+        ? 'Automatic updates are not on for Windows yet. Get new versions from doodlenote.ai.'
+        : 'Updates apply to the installed app (not dev builds)'
     switch (u.status) {
       case 'checking':
         return 'Checking…'

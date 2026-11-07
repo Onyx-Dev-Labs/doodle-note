@@ -161,3 +161,17 @@ test('a timed-out metadata request cannot overwrite a newer check', async (t) =>
   assert.equal(controller.state.status, 'up-to-date')
   assert.equal(controller.state.latestVersion, undefined)
 })
+
+test('an unsupported build (Windows before activation) never contacts the feed, even manually', async () => {
+  const controller = new UpdateCoordinator(
+    {
+      checkForUpdates: async () => assert.fail('no feed request while unsupported'),
+      downloadUpdate: async () => assert.fail('no download while unsupported')
+    },
+    '0.5.0',
+    false,
+    () => assert.fail('no state change while unsupported')
+  )
+  assert.equal((await controller.check()).status, 'idle')
+  assert.equal(controller.beginInstall(), false)
+})

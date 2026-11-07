@@ -46,6 +46,10 @@ export default defineConfig({
         process.env.DOODLENOTE_CHANNEL === 'dev' ? 'dev' : 'release'
       ),
       __DOODLENOTE_HELPER_INTEGRITY__: helperIntegrity(),
+      // Windows automatic updates ship off; a release flips this (docs/WINDOWS-RELEASE-QA.md).
+      __DOODLENOTE_WINDOWS_UPDATES__: JSON.stringify(
+        process.env.DOODLENOTE_WINDOWS_UPDATES === 'on' ? 'on' : 'off'
+      ),
       __DOODLENOTE_GOOGLE_CLIENT_SECRET__: JSON.stringify(
         process.env.DOODLENOTE_GOOGLE_CLIENT_SECRET?.trim() ?? ''
       )
