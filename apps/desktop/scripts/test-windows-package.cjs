@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Packaged-content check for the Windows build: lists resources/app.asar and fails
-// if app source, build scripts, docs, tests or sourcemaps were bundled into it.
+// if app source, build scripts, docs, tests or sourcemaps were bundled into it, or
+// if app.asar.unpacked carries native binaries for another OS or CPU (they cannot
+// load, and cannot be Authenticode-signed).
 //
 //   node scripts/test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]
 //
@@ -68,7 +70,48 @@ function problemsFor(files) {
   return problems
 }
 
-module.exports = { readAsarHeader, listAsar, problemsFor }
+const NATIVE_EXTENSIONS = ['.node', '.dll', '.exe']
+const IMAGE_FILE_MACHINE_AMD64 = 0x8664
+
+/** 'x64', another PE machine as hex, or 'not-pe' (an ELF / Mach-O build for another OS). */
+function peMachine(file) {
+  const fd = fs.openSync(file, 'r')
+  try {
+    const head = Buffer.alloc(64)
+    if (fs.readSync(fd, head, 0, 64, 0) < 64 || head.toString('latin1', 0, 2) !== 'MZ')
+      return 'not-pe'
+    const peOffset = head.readUInt32LE(0x3c)
+    const pe = Buffer.alloc(6)
+    if (fs.readSync(fd, pe, 0, 6, peOffset) < 6 || pe.toString('latin1', 0, 4) !== 'PE\0\0')
+      return 'not-pe'
+    const machine = pe.readUInt16LE(4)
+    return machine === IMAGE_FILE_MACHINE_AMD64 ? 'x64' : `0x${machine.toString(16)}`
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/** Native binaries under app.asar.unpacked that cannot load in the x64 Windows app. */
+function foreignNativeBinaries(unpackedDir) {
+  const problems = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (NATIVE_EXTENSIONS.includes(path.extname(entry.name).toLowerCase())) {
+        const machine = peMachine(full)
+        if (machine !== 'x64')
+          problems.push(
+            `${path.relative(unpackedDir, full).replace(/\\/g, '/')}: ${machine === 'not-pe' ? 'not a Windows binary' : `PE machine ${machine}, not x64`}`
+          )
+      }
+    }
+  }
+  if (fs.existsSync(unpackedDir)) walk(unpackedDir)
+  return problems
+}
+
+module.exports = { readAsarHeader, listAsar, problemsFor, peMachine, foreignNativeBinaries }
 
 if (require.main === module) {
   const args = process.argv.slice(2)
@@ -89,11 +132,19 @@ if (require.main === module) {
   const problems = problemsFor(files)
   if (!files.includes('out/main/index.js')) problems.push('out/main/index.js is missing')
   if (!files.includes('package.json')) problems.push('package.json is missing')
+  const unpacked = `${asar}.unpacked`
+  const foreign = foreignNativeBinaries(unpacked)
+  problems.push(...foreign.map((problem) => `app.asar.unpacked/${problem}`))
+  console.log(
+    `  app.asar.unpacked: ${foreign.length} native binaries that cannot load on Windows x64`
+  )
   if (problems.length) {
     console.error(`FAIL: ${problems.length} file(s) must not ship in app.asar`)
     for (const problem of problems.slice(0, 40)) console.error(`  ${problem}`)
     if (problems.length > 40) console.error(`  … and ${problems.length - 40} more`)
     process.exit(1)
   }
-  console.log('Windows app.asar contains only the built app and its runtime dependencies')
+  console.log(
+    'Windows app.asar contains only the built app and its runtime dependencies; native binaries are all x64 Windows'
+  )
 }

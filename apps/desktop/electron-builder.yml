@@ -139,6 +139,12 @@ win:
     - "!**/node_modules/@node-llama-cpp/win-x64-cuda-ext/**"
     - "!**/node_modules/sherpa-onnx-darwin-*/**"
     - "!**/node_modules/sherpa-onnx-linux-*/**"
+    # Only the x64 Windows builds of other native modules can load (or be
+    # Authenticode-signed); macOS/Linux/ARM copies were shipping unpacked.
+    - "!**/node_modules/@koromix/koffi-{darwin,linux,freebsd,openbsd,android}-*/**"
+    - "!**/node_modules/@koromix/koffi-win32-{arm64,ia32}/**"
+    - "!**/node_modules/@reflink/reflink-{darwin,linux}-*/**"
+    - "!**/node_modules/@reflink/reflink-win32-arm64-msvc/**"
   # Unsigned for now (no Authenticode cert) — SmartScreen will warn on
   # install; testers click "More info → Run anyway".
 nsis:

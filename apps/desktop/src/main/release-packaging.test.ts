@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 const builderConfig = readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8')
@@ -24,6 +26,7 @@ const modelsView = readFileSync(new URL('../renderer/src/ModelsView.tsx', import
 const desktopPackage = readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-package.cjs') as {
   problemsFor(files: string[]): string[]
+  foreignNativeBinaries(unpackedDir: string): string[]
 }
 const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
@@ -195,6 +198,42 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   )
   // A /D=<folder> install is never redirected.
   assert.match(installer, /GetDParameter \$R0\s+\$\{if\} \$R0 == ""/)
+})
+
+test('only x64 Windows native binaries ship unpacked in the Windows package', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dn-unpacked-'))
+  try {
+    const pe = (machine: number): Buffer => {
+      const b = Buffer.alloc(0x90)
+      b.write('MZ', 0, 'latin1')
+      b.writeUInt32LE(0x80, 0x3c)
+      b.write('PE\0\0', 0x80, 'latin1')
+      b.writeUInt16LE(machine, 0x84)
+      return b
+    }
+    const files: Record<string, Buffer> = {
+      'node_modules/koffi/win32_x64/koffi.node': pe(0x8664),
+      'node_modules/@koromix/koffi-win32-arm64/koffi.node': pe(0xaa64),
+      'node_modules/@reflink/reflink-linux-x64-gnu/reflink.node': Buffer.from('\x7fELF....'),
+      'node_modules/sherpa-onnx-win-x64/onnxruntime.dll': pe(0x8664),
+      'node_modules/sherpa-onnx-node/README.md': Buffer.from('docs')
+    }
+    for (const [rel, bytes] of Object.entries(files)) {
+      mkdirSync(join(dir, rel, '..'), { recursive: true })
+      writeFileSync(join(dir, rel), bytes)
+    }
+    assert.deepEqual(packageCheck.foreignNativeBinaries(dir).sort(), [
+      'node_modules/@koromix/koffi-win32-arm64/koffi.node: PE machine 0xaa64, not x64',
+      'node_modules/@reflink/reflink-linux-x64-gnu/reflink.node: not a Windows binary'
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  const win = winFilePatterns(builderConfig)
+  assert.ok(
+    win.includes('!**/node_modules/@koromix/koffi-{darwin,linux,freebsd,openbsd,android}-*/**')
+  )
+  assert.ok(win.includes('!**/node_modules/@reflink/reflink-{darwin,linux}-*/**'))
 })
 
 test('only the platform-guarded Windows speech worker loads Koffi', () => {
