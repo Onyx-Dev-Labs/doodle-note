@@ -95,6 +95,7 @@ jobs:
   windows-package:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
@@ -134,6 +135,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Single-instance Windows smoke failed" }
           node apps/desktop/scripts/test-windows-asr-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
           if ($LASTEXITCODE -ne 0) { throw "Packaged Windows ASR initialization failed" }
+
+      - name: Check Windows window chrome behavior
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $env:DOODLE_PLAYWRIGHT_MODULE = Join-Path $env:RUNNER_TEMP "doodle-electron-qa/node_modules/playwright"
+          node apps/desktop/scripts/test-windows-chrome.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
+          if ($LASTEXITCODE -ne 0) { throw "Windows window chrome behavior check failed" }
 
       - name: Smoke packaged Windows native modules
         shell: pwsh

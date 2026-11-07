@@ -11,7 +11,8 @@ const PANEL_TTL_MS = 4 * 60_000
  * A small always-on-top "meeting is starting" card for when the main window
  * is closed or buried — the in-app banner can't be seen then, and macOS
  * notifications are best-effort on unsigned builds. Frameless, click-through
- * free, bottom-center of the active display on macOS.
+ * free, bottom-center of the active display on macOS and top-right on Windows
+ * (where it backs up the native toast), with the same branded card.
  *
  * Zero-preload design: the page is a data: URL and the buttons navigate to
  * doodle-panel://<action>, which will-navigate intercepts. No IPC surface.

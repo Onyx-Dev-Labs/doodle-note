@@ -34,16 +34,44 @@ describe('prompt panel content and placement', () => {
       }
     }
   })
-  it('preserves Windows top-right placement and legacy actions', () => {
+  it('keeps Windows top-right placement with the same branded card as macOS', () => {
     assert.deepEqual(panelBounds({ x: 0, y: 0, width: 1920, height: 1040 }, 'win32'), {
+      x: 1508,
+      y: 16,
+      width: 396,
+      height: 120
+    })
+    for (const dark of [false, true]) {
+      const mac = decodeURIComponent(panelDataUrl(prompt, dark, 'darwin', 'data:logo'))
+      const win = decodeURIComponent(panelDataUrl(prompt, dark, 'win32', 'data:logo'))
+      // Identical card apart from the entrance edge (Windows sits at the top).
+      assert.equal(win, mac.replace('translateY(28px)', 'translateY(-28px)'))
+      assert.match(win, /Record now/)
+      assert.match(win, /aria-label="Dismiss meeting prompt"/)
+      assert.doesNotMatch(win, /Take notes/)
+    }
+  })
+  it('pins the macOS card and bottom-center placement', () => {
+    const mac = decodeURIComponent(panelDataUrl(prompt, false, 'darwin'))
+    assert.match(mac, /translateY\(28px\)/)
+    assert.doesNotMatch(mac, /translateY\(-28px\)/)
+    assert.deepEqual(panelBounds({ x: 0, y: 0, width: 1920, height: 1040 }, 'darwin'), {
+      x: 762,
+      y: 904,
+      width: 396,
+      height: 120
+    })
+  })
+  it('keeps the legacy card on other platforms', () => {
+    const legacy = decodeURIComponent(panelDataUrl(prompt, false, 'linux'))
+    assert.match(legacy, /Take notes/)
+    assert.match(legacy, /Dismiss/)
+    assert.deepEqual(panelBounds({ x: 0, y: 0, width: 1920, height: 1040 }, 'linux'), {
       x: 1564,
       y: 16,
       width: 340,
       height: 108
     })
-    const legacy = decodeURIComponent(panelDataUrl(prompt, false, 'win32'))
-    assert.match(legacy, /Take notes/)
-    assert.match(legacy, /Dismiss/)
   })
   it('escapes untrusted calendar titles in both visible text and attributes', () => {
     const source = decodeURIComponent(

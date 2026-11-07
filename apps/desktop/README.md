@@ -189,7 +189,7 @@ reload returns to Home, so the fixture stops its retained capture through engine
 IPC after proving the join retry survives without another capture start; full
 editor/session restoration is not added by this feature.
 
-## Choose a Mac library location
+## Choose a library location (macOS and Windows)
 
 In **Settings → General → Library storage**, choose a folder. DoodleNote creates
 **DoodleNote Library** there, finishes pending saves, copies and verifies your
@@ -202,7 +202,7 @@ work does not finish within 30 seconds, the transfer does not start.
 Recordings, meeting JSON (notes/transcripts), pasted attachments, folders, Home
 chat and session recovery move together. AI models, sign-ins, cloud/calendar
 configuration, app preferences and caches remain in application support. **Open
-in Finder** opens the active library. Audio lives in
+in Finder** (**Open in File Explorer** on Windows) opens the active library. Audio lives in
 `audio/<meetingId>/<sessionEpochMs>/`; meeting documents in `meetings/<meetingId>.json`.
 Copy files out if needed. Manually moving managed files can break references.
 
@@ -219,7 +219,9 @@ begins, new library transfers and pending folder selections cannot start a move.
 On macOS, the host waits for its recorder and microphone-monitor helpers to exit
 before completing ordinary quit. If shutdown cannot confirm their exit, the app stays
 open and Quit can be retried. Forced termination does not guarantee recording
-finalization or recovery.
+finalization or recovery. On Windows, Quit (including Quit DoodleNote in the
+notification-area menu) first stops an active recording and waits up to 30 seconds
+for its transcript and audio to be saved.
 
 Keep external drives connected. A missing/replaced active root stops capture and
 blocks library operations with Retry/Quit, without silently creating an empty
@@ -231,7 +233,8 @@ The initial location is Electron's actual user-data profile, usually
 uses `desktop` or `DOODLE_USER_DATA`. Existing agent consent follows the new path
 without being enabled automatically; restart older MCP clients after updating
 the app to load the new server. Development profiles do not redirect another
-profile's agent configuration. Windows/mobile storage UI is unchanged.
+profile's agent configuration. On Windows the initial location is the app's
+user-data folder under `%APPDATA%`. Mobile storage UI is unchanged.
 
 Do not downgrade to a build without library-location support after transferring:
 it would open the stale original snapshot. Any rollback must preserve the latest

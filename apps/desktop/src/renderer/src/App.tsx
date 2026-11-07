@@ -1,6 +1,7 @@
 import { ImportProgressPanel } from './ImportProgressPanel'
 import type { RecordingState, RecordingJoinState } from '../../shared/recording-api'
 import { prepareRecordingMeeting } from './lib/recording-start'
+import { shortcutLabel } from './lib/platform'
 import { CloudNotesView } from './CloudNotesView'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -482,7 +483,7 @@ function App(): React.JSX.Element {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <span className="kbd">⌘K</span>
+            <span className="kbd">{shortcutLabel('K', ['mod'])}</span>
           </div>
 
           <div className="sidebar-section">Your desk</div>

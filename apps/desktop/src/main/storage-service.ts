@@ -10,7 +10,8 @@ import {
   STORAGE_CHOOSE_CHANNEL,
   STORAGE_OPEN_CHANNEL,
   STORAGE_STATUS_CHANNEL,
-  type StorageResult
+  type StorageResult,
+  fileManagerName
 } from '../shared/storage-api'
 
 /** No renderer, engine, sync, protocol or library store exists during transfer. */
@@ -22,7 +23,7 @@ export async function prepareLibrary(userData: string): Promise<LibraryStorage |
   } catch {
     dialog.showErrorBox(
       'Cannot open library',
-      'The library location setting could not be read. Restore library-location.json in DoodleNote application support before reopening. No library files were changed.'
+      `The library location setting could not be read. Restore library-location.json in ${process.platform === 'win32' ? 'the DoodleNote app data folder' : 'DoodleNote application support'} before reopening. No library files were changed.`
     )
     return null
   }
@@ -120,7 +121,7 @@ export function registerStorageIpc(
       storage.assertAvailable()
       if (await shell.openPath(storage.root))
         throw new Error(
-          'Finder could not open the library folder. Check its permissions and try again.'
+          `${fileManagerName(process.platform)} could not open the library folder. Check its permissions and try again.`
         )
     })
   )

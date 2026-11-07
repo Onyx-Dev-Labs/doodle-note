@@ -32,4 +32,5 @@ for size in 16 32 128 256 512; do
 done
 
 iconutil --convert icns --output "$DESKTOP_DIR/resources/icon.icns" "$ICONSET"
-sips -z 256 256 -s format ico "$MASTER" --out "$DESKTOP_DIR/resources/icon.ico" >/dev/null
+# Multi-size Windows icon (16–256 px) plus the Windows tray dogs, from the same master.
+node "$SCRIPT_DIR/build-windows-icons.cjs"

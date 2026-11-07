@@ -16,6 +16,10 @@ interface Fixture {
     destroyed: boolean
     image: { path: string; template: boolean }
     menu: Electron.MenuItemConstructorOptions[]
+    tooltip: string
+    titles: number
+    handlers: Record<string, () => void>
+    balloons: Electron.DisplayBalloonOptions[]
   }
   natives: unknown[]
   calendar: CalendarState
@@ -25,7 +29,7 @@ interface Fixture {
   advance(time: number): void
   counts(): { starts: number; opens: number; quits: number; timerCleared: boolean }
 }
-function setup(): Fixture {
+function setup(platform: NodeJS.Platform = 'darwin'): Fixture {
   let now = new Date(2026, 8, 9, 10).getTime()
   let tick = (): void => {}
   let timerCleared = false
@@ -37,13 +41,23 @@ function setup(): Fixture {
   class NativeTray {
     title = ''
     tooltip = ''
+    titles = 0
     destroyed = false
     menu: Electron.MenuItemConstructorOptions[] = []
+    handlers: Record<string, () => void> = {}
+    balloons: Electron.DisplayBalloonOptions[] = []
     constructor(public image: { path: string; template: boolean }) {
       natives.push(this)
     }
     setTitle(title: string): void {
       this.title = title
+      this.titles++
+    }
+    on(event: string, handler: () => void): void {
+      this.handlers[event] = handler
+    }
+    displayBalloon(options: Electron.DisplayBalloonOptions): void {
+      this.balloons.push(options)
     }
     setToolTip(tooltip: string): void {
       this.tooltip = tooltip
@@ -87,7 +101,7 @@ function setup(): Fixture {
       assert.ok(name in dependencies, `unexpected dependency: ${name}`)
       return dependencies[name]
     },
-    process: { platform: 'darwin' },
+    process: { platform },
     Date: class extends Date {
       static now(): number {
         return now
@@ -227,4 +241,189 @@ test('today ends without hiding the dog or changing the saved Full Island choice
   assert.equal(s.item('No calendar connected').enabled, false)
   assert.equal(s.natives.length, 1)
   s.controller.dispose()
+})
+
+test('macOS keeps the template menu-bar dog, title and Full Island items, with no Windows-only hooks', () => {
+  const s = setup('darwin')
+  assert.equal(s.native.image.path, join('/resources', 'dogTemplate.png'))
+  assert.equal(s.native.image.template, true)
+  assert.ok(s.native.titles > 0, 'macOS sets the menu-bar title')
+  assert.deepEqual(Object.keys(s.native.handlers), [], 'the menu opens natively on click')
+  assert.ok(s.item('Compact'))
+  assert.ok(s.item('Full Island'))
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'meeting' })
+  assert.equal(s.native.tooltip, 'DoodleNote — Recording')
+  s.controller.showBackgroundHint()
+  assert.deepEqual(s.native.balloons, [])
+  assert.deepEqual(
+    // Array.from: the menu array comes from the module's vm realm.
+    Array.from(s.native.menu, (item) => item.label ?? item.type),
+    [
+      'Recording…',
+      'separator',
+      'Open DoodleNote',
+      'separator',
+      'Today',
+      'No calendar connected',
+      'separator',
+      'Compact',
+      'Full Island',
+      'separator',
+      'Quit DoodleNote'
+    ]
+  )
+  s.controller.dispose()
+})
+
+test('Windows shows a notification-area dog with the same recording menu', () => {
+  const s = setup('win32')
+  assert.equal(s.native.image.path, join('/resources', 'dogWin.ico'))
+  assert.equal(s.native.titles, 0, 'Windows tray icons have no title')
+  s.controller.updateCalendar(s.calendar)
+  assert.equal(s.native.tooltip, 'DoodleNote\nDesign review in 30m')
+  assert.equal(
+    s.native.menu.some((item) => item.label === 'Compact' || item.label === 'Full Island'),
+    false
+  )
+  assert.equal(
+    s.native.menu.some((item) => item.label?.endsWith('— Design review')),
+    true
+  )
+  s.controller.update({ phase: 'idle', eligible: true, meetingId: null })
+  s.click('Record now')
+  s.native.handlers.click()
+  s.controller.update({ phase: 'starting', eligible: true, meetingId: 'meeting' })
+  assert.equal(s.item('Starting…').enabled, false)
+  assert.match(s.native.tooltip, /^DoodleNote — Starting…/)
+  assert.equal(s.native.image.path, join('/resources', 'dogWin.ico'))
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'meeting' })
+  assert.equal(s.item('Recording…').enabled, false)
+  assert.equal(s.native.image.path, join('/resources', 'dogWinRecording.ico'))
+  assert.match(s.native.tooltip, /^DoodleNote — Recording\n/)
+  s.controller.update({ phase: 'finishing', eligible: true, meetingId: 'meeting' })
+  assert.equal(s.item('Finishing…').enabled, false)
+  assert.equal(s.native.image.path, join('/resources', 'dogWin.ico'))
+  assert.match(s.native.tooltip, /^DoodleNote — Finishing…/)
+  s.click('Open DoodleNote')
+  s.click('Quit DoodleNote')
+  s.controller.dispose()
+  assert.equal(s.native.destroyed, true)
+  assert.deepEqual(s.counts(), { starts: 1, opens: 2, quits: 1, timerCleared: true })
+})
+
+test('Windows hints once per recording that capture continues in the tray', () => {
+  const s = setup('win32')
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'meeting' })
+  s.controller.showBackgroundHint()
+  s.controller.showBackgroundHint()
+  assert.equal(s.native.balloons.length, 1)
+  assert.equal(s.native.balloons[0].title, 'DoodleNote is still recording')
+  assert.match(s.native.balloons[0].content, /notification area/)
+  s.controller.update({ phase: 'finishing', eligible: true, meetingId: 'meeting' })
+  s.controller.update({ phase: 'idle', eligible: true, meetingId: null })
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'next' })
+  s.controller.showBackgroundHint()
+  assert.equal(s.native.balloons.length, 2)
+  s.controller.dispose()
+})
+
+test('Windows tooltips stay within the notification-area limit', () => {
+  const s = setup('win32')
+  s.controller.updateCalendar({
+    ...s.calendar,
+    events: [{ ...s.calendar.events[0], subject: 'x'.repeat(400) }]
+  })
+  assert.ok(s.native.tooltip.length <= 127)
+  s.controller.dispose()
+})
+
+test('packaging ships the Windows tray icons and the Windows app icon has every size', () => {
+  const config = readFileSync('electron-builder.yml', 'utf8').replace(/\r\n/g, '\n')
+  const win = /^win:\n((?:[ \t].*\n|\n)*)/m.exec(config)?.[1] ?? ''
+  assert.match(win, /extraResources:\s+- from: resources\/tray\s+to: tray\s+filter: \["\*\.ico"\]/)
+  const sizes = (file: string): number[] => {
+    const ico = readFileSync(file)
+    assert.equal(ico.readUInt16LE(2), 1, `${file} is an icon`)
+    return Array.from({ length: ico.readUInt16LE(4) }, (_, index) => ico[6 + index * 16] || 256)
+  }
+  assert.deepEqual(sizes('resources/icon.ico'), [16, 20, 24, 32, 40, 48, 64, 128, 256])
+  for (const name of ['dogWin.ico', 'dogWinRecording.ico']) {
+    assert.deepEqual(sizes(join('resources/tray', name)), [16, 20, 24, 32, 40, 48])
+  }
+})
+
+test('Windows hint wording follows the phase the recording is in', () => {
+  const titles: string[] = []
+  for (const phase of ['starting', 'recording', 'finishing'] as const) {
+    const s = setup('win32')
+    s.controller.update({ phase, eligible: true, meetingId: 'meeting' })
+    s.controller.showBackgroundHint()
+    titles.push(s.native.balloons[0].title)
+    assert.match(s.native.balloons[0].content, /closes when/)
+    s.controller.dispose()
+  }
+  assert.deepEqual(titles, [
+    'DoodleNote is starting the recording',
+    'DoodleNote is still recording',
+    'DoodleNote is saving the recording'
+  ])
+})
+
+test('Windows keeps the tray while Quit saves the recording; macOS ignores it', () => {
+  const s = setup('win32')
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'meeting' })
+  s.controller.showSavingBeforeQuit()
+  assert.equal(s.native.tooltip, 'DoodleNote — Saving recording…')
+  assert.deepEqual(
+    Array.from(s.native.menu, (item) => [item.label, item.enabled]),
+    [['Saving recording before quitting…', false]]
+  )
+  // Later recording-state updates do not bring back Record now / Quit meanwhile.
+  s.controller.update({ phase: 'finishing', eligible: true, meetingId: 'meeting' })
+  assert.equal(s.native.tooltip, 'DoodleNote — Saving recording…')
+  assert.equal(s.native.destroyed, false)
+  s.controller.dispose()
+  assert.equal(s.native.destroyed, true)
+
+  const mac = setup('darwin')
+  const before = Array.from(mac.native.menu, (item) => item.label ?? item.type)
+  mac.controller.showSavingBeforeQuit()
+  assert.deepEqual(
+    Array.from(mac.native.menu, (item) => item.label ?? item.type),
+    before
+  )
+  mac.controller.dispose()
+})
+
+test('Windows tray says notes are finishing, with Open and Quit still working; macOS ignores it', () => {
+  const s = setup('win32')
+  s.controller.update({ phase: 'idle', eligible: true, meetingId: null })
+  s.controller.showFinishingNotes(true)
+  assert.equal(s.native.tooltip, 'DoodleNote — Finishing notes…')
+  assert.deepEqual(
+    Array.from(s.native.menu, (item) => item.label ?? item.type),
+    [
+      'Finishing notes, then closing…',
+      'separator',
+      'Open DoodleNote',
+      'separator',
+      'Quit DoodleNote'
+    ]
+  )
+  s.click('Open DoodleNote')
+  s.click('Quit DoodleNote')
+  assert.deepEqual(s.counts(), { starts: 0, opens: 1, quits: 1, timerCleared: false })
+  s.controller.showFinishingNotes(false)
+  assert.equal(s.native.tooltip, 'DoodleNote')
+  assert.ok(s.item('Record now'))
+  s.controller.dispose()
+
+  const mac = setup('darwin')
+  const before = Array.from(mac.native.menu, (item) => item.label ?? item.type)
+  mac.controller.showFinishingNotes(true)
+  assert.deepEqual(
+    Array.from(mac.native.menu, (item) => item.label ?? item.type),
+    before
+  )
+  mac.controller.dispose()
 })

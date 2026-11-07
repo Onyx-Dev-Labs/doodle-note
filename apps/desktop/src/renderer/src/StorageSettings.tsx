@@ -1,7 +1,13 @@
 import { SettingsFold } from './SettingsFold'
 import { useEffect, useRef, useState } from 'react'
 import { flushLibrarySaves } from './lib/library-flush'
-import type { StorageProgress, StorageResult, StorageStatus } from '../../shared/storage-api'
+import {
+  fileManagerName,
+  type StorageProgress,
+  type StorageResult,
+  type StorageStatus
+} from '../../shared/storage-api'
+import { hostPlatform } from './lib/platform'
 
 export function StorageSettings(): React.JSX.Element {
   const [status, setStatus] = useState<StorageStatus | null>(null)
@@ -95,7 +101,7 @@ export function StorageSettings(): React.JSX.Element {
               disabled={busy || !status}
               onClick={() => void run(() => window.storage.open())}
             >
-              Open in Finder
+              Open in {fileManagerName(hostPlatform())}
             </button>
           </div>
           <div className="cal-row">
@@ -188,6 +194,7 @@ export function StorageSettings(): React.JSX.Element {
               ? 'Checking your files…'
               : 'Finishing current saves…'}
         </p>
+        {progress.detail && <p role="status">{progress.detail}</p>}
         {progress.phase === 'copying' && (
           <progress
             aria-label="Files copied"

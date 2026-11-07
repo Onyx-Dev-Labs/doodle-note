@@ -41,6 +41,38 @@ interface Config {
 }
 type FileEntry = { name: string; size: number; hash: string; directory: boolean }
 
+/** Antivirus scans, Search indexing and OneDrive briefly hold freshly copied files on Windows. */
+const WINDOWS_LOCK_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+/** Backoff before each retry: about 3 s in total before giving up. */
+export const WINDOWS_LOCK_RETRY_DELAYS_MS = [100, 200, 400, 800, 1600]
+export const WINDOWS_LOCK_RETRY_MESSAGE =
+  'Windows is still using files in the destination; retrying…'
+export const WINDOWS_LOCK_FAILURE_MESSAGE =
+  'Windows is still using files in the destination, for example while antivirus or indexing checks them. Nothing was switched and your original library is still active. Wait a moment, then choose Retry transfer.'
+
+/** Windows only: retry a filesystem step that a transient file lock refused. */
+export async function retryWindowsFileLock<T>(
+  operation: () => T | Promise<T>,
+  options: {
+    sleep?: (ms: number) => Promise<void>
+    onRetry?: (attempt: number, error: NodeJS.ErrnoException) => void
+  } = {}
+): Promise<T> {
+  const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)))
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (!code || !WINDOWS_LOCK_CODES.has(code)) throw error
+      if (attempt >= WINDOWS_LOCK_RETRY_DELAYS_MS.length)
+        throw new Error(WINDOWS_LOCK_FAILURE_MESSAGE, { cause: error })
+      options.onRetry?.(attempt + 1, error as NodeJS.ErrnoException)
+      await sleep(WINDOWS_LOCK_RETRY_DELAYS_MS[attempt])
+    }
+  }
+}
+
 function atomicJson(path: string, value: unknown): void {
   const temporary = `${path}.${randomUUID()}.tmp`
   const fd = openSync(temporary, 'wx', 0o600)
@@ -98,6 +130,11 @@ export class LibraryStorage {
     private readonly io: {
       copyFile?: typeof copyFile
       freeBytes?: (path: string) => Promise<number>
+      /** Test seams for the Windows lock retry; macOS always uses the plain calls. */
+      rename?: typeof renameSync
+      rm?: typeof rm
+      platform?: NodeJS.Platform
+      sleep?: (ms: number) => Promise<void>
     } = {}
   ) {
     this.defaultRoot = realpathSync(userData)
@@ -233,7 +270,12 @@ export class LibraryStorage {
             'The transfer staging folder cannot be verified. Choose another destination.'
           )
         }
-        await rm(stage, { recursive: true })
+        if ((this.io.platform ?? process.platform) === 'win32') {
+          await retryWindowsFileLock(() => (this.io.rm ?? rm)(stage, { recursive: true }), {
+            sleep: this.io.sleep,
+            onRetry: () => progress({ phase: 'verifying', detail: WINDOWS_LOCK_RETRY_MESSAGE })
+          })
+        } else await rm(stage, { recursive: true })
       }
       await mkdir(stage, { mode: 0o700 })
       atomicJson(join(stage, MARKER), { id: token })
@@ -272,7 +314,12 @@ export class LibraryStorage {
       }
       if (existsSync(target))
         throw new Error('The destination was created during transfer. Nothing was switched.')
-      renameSync(stage, target)
+      if ((this.io.platform ?? process.platform) === 'win32') {
+        await retryWindowsFileLock(() => (this.io.rename ?? renameSync)(stage, target), {
+          sleep: this.io.sleep,
+          onRetry: () => progress({ phase: 'verifying', detail: WINDOWS_LOCK_RETRY_MESSAGE })
+        })
+      } else renameSync(stage, target)
     }
     this.assertAvailable()
     this.save({ version: 1, active: { root: target, id: token }, recoveryPath: this.root })

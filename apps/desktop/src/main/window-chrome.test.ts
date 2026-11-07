@@ -1,0 +1,209 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { test } from 'node:test'
+import {
+  WINDOWS_TITLE_BAR_HEIGHT,
+  hasThemedTitleBarOverlay,
+  BACKGROUND_FINISH_LIMITS,
+  backgroundQuitDue,
+  hidesToTrayOnClose,
+  quitsAfterBackgroundRecording,
+  titleBarOverlayFor,
+  windowChromeOptions
+} from './window-chrome'
+
+const indexSource = readFileSync(new URL('./index.ts', import.meta.url), 'utf8').replace(
+  /\r\n/g,
+  '\n'
+)
+const read = (path: string): string =>
+  readFileSync(new URL(`../renderer/src/${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+
+test('macOS keeps the hidden-inset title bar and traffic-light position exactly', () => {
+  for (const dark of [false, true]) {
+    assert.deepEqual(windowChromeOptions('darwin', dark), {
+      titleBarStyle: 'hiddenInset',
+      trafficLightPosition: { x: 18, y: 16 }
+    })
+  }
+  assert.equal(hasThemedTitleBarOverlay('darwin'), false)
+  // Linux development runs keep the previous options too.
+  assert.deepEqual(windowChromeOptions('linux', false), windowChromeOptions('darwin', false))
+})
+
+test('Windows hides the title bar and themes the caption-button overlay', () => {
+  assert.deepEqual(windowChromeOptions('win32', false), {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#00000000',
+      symbolColor: '#26281f',
+      height: WINDOWS_TITLE_BAR_HEIGHT
+    }
+  })
+  assert.deepEqual(windowChromeOptions('win32', true), {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#00000000',
+      symbolColor: '#f0eee2',
+      height: WINDOWS_TITLE_BAR_HEIGHT
+    }
+  })
+  assert.equal(hasThemedTitleBarOverlay('win32'), true)
+  assert.notDeepEqual(titleBarOverlayFor(true), titleBarOverlayFor(false))
+  // The renderer's fallback height matches the overlay.
+  assert.match(
+    read('assets/windows-chrome.css'),
+    new RegExp(`env\\(titlebar-area-height, ${WINDOWS_TITLE_BAR_HEIGHT}px\\)`)
+  )
+})
+
+test('the main window takes its chrome from the platform helper and recolors on theme changes', () => {
+  assert.match(
+    indexSource,
+    /\.\.\.windowChromeOptions\(process\.platform, nativeTheme\.shouldUseDarkColors\)/
+  )
+  assert.doesNotMatch(indexSource, /titleBarStyle: 'hiddenInset'/)
+  assert.match(
+    indexSource,
+    /if \(hasThemedTitleBarOverlay\(process\.platform\)\) nativeTheme\.on\('updated', applyTitleBarOverlay\)/
+  )
+  assert.match(
+    indexSource,
+    /function applyTitleBarOverlay\(\): void \{\n {2}if \(!hasThemedTitleBarOverlay\(process\.platform\)\) return/
+  )
+  assert.match(
+    indexSource,
+    /setTitleBarOverlay\(titleBarOverlayFor\(nativeTheme\.shouldUseDarkColors\)\)/
+  )
+})
+
+test('close while recording hides to the tray on macOS (unchanged) and now on Windows', () => {
+  for (const platform of ['darwin', 'win32'] as const) {
+    assert.equal(hidesToTrayOnClose(platform, true, false), true)
+    assert.equal(hidesToTrayOnClose(platform, false, false), false)
+    assert.equal(hidesToTrayOnClose(platform, true, true), false)
+  }
+  assert.equal(hidesToTrayOnClose('linux', true, false), false)
+  assert.match(
+    indexSource,
+    /if \(hidesToTrayOnClose\(process\.platform, recording\.busy, quitting \|\| sessionEnding\)\) \{\n\s+event\.preventDefault\(\)\n\s+window\.hide\(\)\n\s+\/\/[^\n]*\n\s+if \(process\.platform === 'win32'\) \{\n\s+closedWhileRecording = true\n\s+recordingTray\?\.showBackgroundHint\(\)/
+  )
+})
+
+test('Windows quits when a recording that outlived its window ends, unless reopened', () => {
+  assert.equal(quitsAfterBackgroundRecording('win32', true, 'idle'), true)
+  for (const phase of ['requested', 'starting', 'recording', 'finishing'] as const)
+    assert.equal(quitsAfterBackgroundRecording('win32', true, phase), false)
+  assert.equal(quitsAfterBackgroundRecording('win32', false, 'idle'), false, 'reopened')
+  // macOS keeps the app alive without windows, as before.
+  assert.equal(quitsAfterBackgroundRecording('darwin', true, 'idle'), false)
+  assert.match(
+    indexSource,
+    /if \(quitsAfterBackgroundRecording\(process\.platform, closedWhileRecording, state\.phase\)\)\n\s+startBackgroundFinish\(\)\n\s+else if \(state\.phase !== 'idle'\) cancelBackgroundFinish\(\)/
+  )
+  // Reopening clears it; shutdown / log-off stops and saves instead of holding the session.
+  const win =
+    /if \(process\.platform === 'win32'\) \{\n\s+\/\/ Reopened[\s\S]*?\n {2}\}\n/.exec(
+      indexSource
+    )?.[0] ?? ''
+  assert.match(
+    win,
+    /window\.on\('show', \(\) => \{\n\s+closedWhileRecording = false\n\s+cancelBackgroundFinish\(\)\n\s+resetSessionEnding\(\)/
+  )
+  // A cancelled shutdown fires no event: focus or a timer resets it.
+  assert.match(win, /window\.on\('focus', resetSessionEnding\)/)
+  assert.match(
+    win,
+    /window\.on\('query-session-end', \(\) => \{\n\s+resetSessionEnding\(\)\n\s+sessionEnding = true\n\s+sessionEndingReset = setTimeout\(resetSessionEnding, SESSION_END_CANCEL_RESET_MS\)/
+  )
+  assert.match(
+    win,
+    /window\.on\('session-end', \(\) => \{[\s\S]*?sessionEnding = true\n\s+app\.quit\(\)/
+  )
+})
+
+test('every Windows chrome rule is scoped to html[data-platform=win32], so macOS CSS is untouched', () => {
+  const css = read('assets/windows-chrome.css').replace(/\/\*[\s\S]*?\*\//g, '')
+  const selectors = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap((match) =>
+    match[1].split(',').map((selector) => selector.trim())
+  )
+  assert.ok(selectors.length > 10)
+  for (const selector of selectors) {
+    assert.ok(selector.startsWith("html[data-platform='win32']"), `unscoped selector: ${selector}`)
+  }
+  const main = read('main.tsx')
+  assert.match(main, /import '\.\/assets\/windows-chrome\.css'/)
+  // The attribute is set before the first render, from the preload's platform.
+  assert.ok(
+    main.indexOf('applyPlatformAttribute(document.documentElement, hostPlatform())') <
+      main.indexOf('createRoot(')
+  )
+  assert.match(
+    readFileSync(new URL('../preload/index.ts', import.meta.url), 'utf8'),
+    /exposeInMainWorld\('appPlatform', process\.platform\)/
+  )
+})
+
+test('the rendered Windows chrome is checked by a native behavior script in CI', () => {
+  // scripts/test-windows-chrome.cjs measures the real app (scrollbar width and
+  // offset, element under the cursor at the logo, headers clear of the overlay).
+  const ci = readFileSync(
+    new URL('../../../../.github/workflows/ci.yml', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  assert.match(
+    ci,
+    /node apps\/desktop\/scripts\/test-windows-chrome\.cjs apps\/desktop\/release\/win-unpacked\/DoodleNote\.exe/
+  )
+  // Bounded: the check has its own step timeout and the job has one too.
+  assert.match(
+    ci,
+    /- name: Check Windows window chrome behavior\n\s+shell: pwsh\n\s+timeout-minutes: \d+/
+  )
+  assert.match(ci, /windows-package:\n(?:\s{4}.*\n)*?\s{4}timeout-minutes: \d+/)
+})
+
+test('the deferred Windows quit waits for automatic notes and their saves, bounded', () => {
+  const endedAt = 1_000_000
+  const at = (s: number): number => endedAt + s * 1000
+  const due = (now: number, notes: number, write: number): boolean =>
+    backgroundQuitDue(now, { endedAt, lastNotesActivityAt: notes, lastLibraryWriteAt: write })
+  // No notes job (turned off, or no model): wait out the start grace, then quit.
+  assert.equal(due(at(5), 0, 0), false)
+  assert.equal(due(at(14), 0, at(2)), false)
+  assert.equal(due(at(15), 0, at(2)), true)
+  // Notes start at 3 s with progress every second until 60 s, then the renderer saves at 61 s.
+  assert.equal(due(at(20), at(19.5), at(2)), false, 'notes are being written')
+  assert.equal(due(at(62), at(60), at(61)), false, 'the result is being saved')
+  assert.equal(due(at(65.9), at(60), at(61)), false)
+  assert.equal(due(at(66), at(60), at(61)), true, 'quiet for 5 s after the last save')
+  // Activity from before the recording ended does not count as a notes job.
+  assert.equal(due(at(6), endedAt - 10_000, 0), false)
+  const idleCap = BACKGROUND_FINISH_LIMITS.maxWaitMs / 1000
+  const absoluteCap = BACKGROUND_FINISH_LIMITS.notesMaxWaitMs / 1000
+  // A long local notes run that keeps reporting progress is not cut off at 5 minutes...
+  assert.equal(due(at(idleCap), at(idleCap - 1), 0), false)
+  assert.equal(due(at(20 * 60), at(20 * 60 - 0.5), at(10)), false)
+  // ...and quits 5 s after it finishes and saves.
+  assert.equal(due(at(20 * 60 + 6), at(20 * 60), at(20 * 60 + 1)), true)
+  // Past 5 minutes without notes progress (e.g. library writes alone keep coming), quit.
+  assert.equal(due(at(idleCap), 0, at(idleCap - 1)), true)
+  assert.equal(due(at(idleCap + 1), at(idleCap - 10), at(idleCap)), true)
+  // A job that never stops reporting is stopped at the absolute limit.
+  assert.equal(due(at(absoluteCap - 1), at(absoluteCap - 1), 0), false)
+  assert.equal(due(at(absoluteCap), at(absoluteCap), 0), true)
+})
+
+test('automatic notes progress and library writes feed the deferred quit', () => {
+  assert.match(
+    indexSource,
+    /if \(channel === NOTES_ENHANCE_PROGRESS_CHANNEL \|\| channel === NOTES_ENHANCE_TOKEN_CHANNEL\)\n\s+lastNotesActivityAt = Date\.now\(\)\n\s+broadcast\(channel, payload\)/
+  )
+  assert.match(
+    indexSource,
+    /meetingsService\.onDidWrite = \(change\) => \{\n\s+lastLibraryWriteAt = Date\.now\(\)/
+  )
+  // The tray says what is happening; reopening or Quit stop the wait.
+  assert.match(indexSource, /recordingTray\?\.showFinishingNotes\(true\)/)
+  assert.match(indexSource, /if \(quitting\) return cancelBackgroundFinish\(\)/)
+})

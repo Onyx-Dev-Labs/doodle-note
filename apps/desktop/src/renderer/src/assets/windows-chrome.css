@@ -1,0 +1,109 @@
+/* ==============================================================
+   Windows window chrome. Every rule is scoped to html[data-platform='win32']
+   (set by main.tsx from the preload), so macOS rendering is untouched.
+
+   Windows hides the title bar and draws its caption buttons (minimize,
+   maximize, close) in a Window Controls Overlay at the top right
+   (main/window-chrome.ts). Chromium reports that overlay through the
+   titlebar-area-* environment variables; without an overlay they fall back
+   to the full width, so the inset is 0.
+   ============================================================== */
+
+html[data-platform='win32'] {
+  /* Width taken by the caption buttons at the top right. */
+  --win-caption-inset: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+  /* Height of the caption buttons (WINDOWS_TITLE_BAR_HEIGHT). */
+  --win-titlebar-height: env(titlebar-area-height, 40px);
+}
+
+/* ---- drag regions and insets ---- */
+
+/* An invisible title band across the top of the main shell, so every view
+   (including Settings, which has no header) can move the window. It precedes
+   all content, so buttons, inputs and .no-drag elements keep their native
+   hit-test holes; pointer-events: none keeps it out of the page's own hit
+   testing, so content under it (the sidebar logo) still receives clicks. */
+html[data-platform='win32'] .chrome::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--win-titlebar-height);
+  -webkit-app-region: drag;
+  pointer-events: none;
+}
+
+/* No traffic lights to clear: the sidebar starts near the top. */
+html[data-platform='win32'] .redesigned-shell .sidebar-top {
+  padding-top: 20px;
+}
+
+/* Headers keep their controls left of the caption buttons. */
+html[data-platform='win32'] .home-topbar {
+  padding-right: calc(var(--win-caption-inset) + 16px);
+}
+html[data-platform='win32'] .editor-topbar {
+  padding-left: 32px;
+  padding-right: calc(var(--win-caption-inset) + 16px);
+}
+
+/* Settings has no header: start its content below the caption buttons and
+   keep its scrollbar out from under them. */
+html[data-platform='win32'] .models.settings-redesign {
+  padding-top: calc(var(--win-titlebar-height) + 4px);
+}
+html[data-platform='win32'] .models.settings-redesign::-webkit-scrollbar-track {
+  margin-top: var(--win-titlebar-height);
+}
+
+/* Top-centered notices (meeting prompt banner, editor toasts) stay centered as
+   on macOS but never extend under the caption buttons. */
+html[data-platform='win32'] .meeting-banner {
+  max-width: min(600px, calc(100vw - 2 * var(--win-caption-inset) - 32px));
+}
+html[data-platform='win32'] .toast {
+  max-width: min(560px, calc(100% - 2 * var(--win-caption-inset) - 32px));
+}
+
+/* ---- scrollbars ---- */
+
+/* Chromium ignores ::-webkit-scrollbar on elements that set the standard
+   scrollbar-width / scrollbar-color (the macOS-tuned Settings scroller does),
+   which left the stock Windows scrollbar, arrows included, under the Close
+   button. Reset them so the rules below apply. */
+html[data-platform='win32'] .models,
+html[data-platform='win32'] .settings-redesign .settings-nav {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+/* Thin, rounded, track-less scrollbars in the spirit of macOS overlay
+   scrollbars, instead of Chromium's default Windows scrollbars. */
+html[data-platform='win32'] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+html[data-platform='win32'] ::-webkit-scrollbar-track,
+html[data-platform='win32'] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+html[data-platform='win32'] ::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+html[data-platform='win32'] ::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--ink) 22%, transparent);
+}
+html[data-platform='win32'] ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+html[data-platform='win32'] ::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--ink) 52%, transparent);
+}

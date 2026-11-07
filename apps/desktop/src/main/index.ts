@@ -1,4 +1,4 @@
-import { createBeforeQuitHandler } from './engine-quit'
+import { createBeforeQuitHandler, finishRecordingBeforeQuit } from './engine-quit'
 import { APP_CHANNEL } from '../shared/app-channel'
 import { planProfile } from './profile-identity'
 import { createDictationHost } from './dictation-host'
@@ -67,6 +67,17 @@ import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
 import { MAIN_WINDOW_SIZE } from './window-sizing'
 import {
+  SESSION_END_CANCEL_RESET_MS,
+  SESSION_END_FINISH_TIMEOUT_MS,
+  backgroundQuitDue,
+  hasThemedTitleBarOverlay,
+  hidesToTrayOnClose,
+  quitsAfterBackgroundRecording,
+  titleBarOverlayFor,
+  windowChromeOptions
+} from './window-chrome'
+import { supportsLibraryLocation } from '../shared/storage-api'
+import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
   DETECT_SET_PREFS_CHANNEL,
@@ -74,6 +85,7 @@ import {
   type DetectState
 } from '../shared/detect-api'
 import { THEME_SET_SOURCE_CHANNEL } from '../shared/theme-api'
+import { NOTES_ENHANCE_PROGRESS_CHANNEL, NOTES_ENHANCE_TOKEN_CHANNEL } from '../shared/notes-api'
 import { TranscriptSession } from './transcript-session'
 import {
   ENGINE_AUDIO_CHANNEL,
@@ -198,6 +210,47 @@ let mainWindow: BrowserWindow | null = null
 let recordingTray: RecordingTray | null = null
 let quitting = false
 let libraryReady = false
+/** Windows: the window was closed during a recording and has not been reopened. */
+let closedWhileRecording = false
+/** Windows: shutdown or log-off is ending this session. */
+let sessionEnding = false
+let sessionEndingReset: ReturnType<typeof setTimeout> | null = null
+/** Windows: last automatic-notes progress and library write, for the deferred quit. */
+let lastNotesActivityAt = 0
+let lastLibraryWriteAt = 0
+let backgroundFinish: { endedAt: number; timer: ReturnType<typeof setInterval> } | null = null
+
+/**
+ * Windows: the recording that outlived its window has ended. Quit once the
+ * automatic notes and their saves have finished (bounded), as the close the
+ * person asked for. Reopening the window or a new recording cancels this.
+ */
+function startBackgroundFinish(): void {
+  if (backgroundFinish) return
+  const endedAt = Date.now()
+  recordingTray?.showFinishingNotes(true)
+  const timer = setInterval(() => {
+    if (quitting) return cancelBackgroundFinish()
+    if (backgroundQuitDue(Date.now(), { endedAt, lastNotesActivityAt, lastLibraryWriteAt })) {
+      cancelBackgroundFinish()
+      app.quit()
+    }
+  }, 1_000)
+  backgroundFinish = { endedAt, timer }
+}
+
+function cancelBackgroundFinish(): void {
+  if (!backgroundFinish) return
+  clearInterval(backgroundFinish.timer)
+  backgroundFinish = null
+  recordingTray?.showFinishingNotes(false)
+}
+
+function resetSessionEnding(): void {
+  sessionEnding = false
+  if (sessionEndingReset) clearTimeout(sessionEndingReset)
+  sessionEndingReset = null
+}
 const recording = new RecordingStartCoordinator(
   (request: RecordingStartRequest) =>
     mainWindow?.webContents.send(RECORDING_DELIVER_CHANNEL, request),
@@ -205,6 +258,11 @@ const recording = new RecordingStartCoordinator(
     recordingTray?.update(state)
     mainWindow?.webContents.send(RECORDING_STATE_CHANNEL, state)
     calendarService?.setRecordingActive(state.phase !== 'idle')
+    // Windows: the close the person asked for during the recording happens once
+    // its automatic notes have finished; a new recording puts that on hold.
+    if (quitsAfterBackgroundRecording(process.platform, closedWhileRecording, state.phase))
+      startBackgroundFinish()
+    else if (state.phase !== 'idle') cancelBackgroundFinish()
   },
   (url) => shell.openExternal(url)
 )
@@ -271,10 +329,10 @@ function createWindow(): void {
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee',
     show: false,
     autoHideMenuBar: true,
-    // Mac-native feel: content extends under a hidden title bar; the renderer
-    // provides a drag strip and keeps clear of the traffic lights.
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 18, y: 16 },
+    // macOS: content extends under a hidden title bar; the renderer provides a
+    // drag strip and keeps clear of the traffic lights. Windows: hidden title bar
+    // with themed caption buttons (see window-chrome.ts).
+    ...windowChromeOptions(process.platform, nativeTheme.shouldUseDarkColors),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -290,11 +348,38 @@ function createWindow(): void {
       return
     }
     // Keep the document renderer alive while it owns a recording.
-    if (process.platform === 'darwin' && recording.busy && !quitting) {
+    if (hidesToTrayOnClose(process.platform, recording.busy, quitting || sessionEnding)) {
       event.preventDefault()
       window.hide()
+      // Windows has no Dock: point at the notification-area icon once.
+      if (process.platform === 'win32') {
+        closedWhileRecording = true
+        recordingTray?.showBackgroundHint()
+      }
     }
   })
+  if (process.platform === 'win32') {
+    // Reopened from the tray (or a second launch): the person wants the app again.
+    window.on('show', () => {
+      closedWhileRecording = false
+      cancelBackgroundFinish()
+      resetSessionEnding()
+    })
+    // A cancelled shutdown fires no event: back to normal on focus or after a while.
+    window.on('focus', resetSessionEnding)
+    // Shutdown / log-off: do not hold the session open; stop and save, then quit.
+    window.on('query-session-end', () => {
+      resetSessionEnding()
+      sessionEnding = true
+      sessionEndingReset = setTimeout(resetSessionEnding, SESSION_END_CANCEL_RESET_MS)
+    })
+    window.on('session-end', () => {
+      if (sessionEndingReset) clearTimeout(sessionEndingReset)
+      sessionEndingReset = null
+      sessionEnding = true
+      app.quit()
+    })
+  }
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null
     recording.rendererGone()
@@ -339,9 +424,10 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   migrateDevUserData()
-  const storage =
-    process.platform === 'darwin' ? await prepareLibrary(app.getPath('userData')) : null
-  if (process.platform === 'darwin' && !storage) {
+  const storage = supportsLibraryLocation(process.platform)
+    ? await prepareLibrary(app.getPath('userData'))
+    : null
+  if (supportsLibraryLocation(process.platform) && !storage) {
     app.quit()
     return
   }
@@ -664,7 +750,12 @@ app.whenReady().then(async () => {
 
   notesService = new NotesService(
     app.getPath('userData'),
-    broadcast,
+    (channel, payload) => {
+      // The deferred Windows quit waits while automatic notes make progress.
+      if (channel === NOTES_ENHANCE_PROGRESS_CHANNEL || channel === NOTES_ENHANCE_TOKEN_CHANNEL)
+        lastNotesActivityAt = Date.now()
+      broadcast(channel, payload)
+    },
     meetingsService,
     libraryRoot,
     assertLibrary
@@ -860,8 +951,19 @@ app.whenReady().then(async () => {
       acquire: () => libraryActivity.tryBeginShutdown(),
       cleanup: async () => {
         quitting = true
-        recordingTray?.dispose()
+        // Windows keeps the tray (showing "Saving recording…") until the wait below.
+        if (process.platform !== 'win32') recordingTray?.dispose()
         calendarService?.dispose()
+        // Windows: stop and save an active recording first, as the macOS engine
+        // does inside dispose(). The hidden renderer still owns the capture.
+        if (process.platform === 'win32') {
+          if (engine.running) recordingTray?.showSavingBeforeQuit()
+          await finishRecordingBeforeQuit(
+            engine,
+            sessionEnding ? SESSION_END_FINISH_TIMEOUT_MS : undefined
+          )
+          recordingTray?.dispose()
+        }
         const results = await Promise.allSettled([engine.dispose(), micWatcher.dispose()])
         const failures = results.filter((result) => result.status === 'rejected')
         if (failures.length)
@@ -884,7 +986,10 @@ app.whenReady().then(async () => {
   // floating prompt panel + native chrome) matches the in-app appearance.
   ipcMain.on(THEME_SET_SOURCE_CHANNEL, (_event, source: unknown) => {
     nativeTheme.themeSource = source === 'light' || source === 'dark' ? source : 'system'
+    applyTitleBarOverlay()
   })
+  // Windows caption buttons follow the app theme, and the system theme in 'system'.
+  if (hasThemedTitleBarOverlay(process.platform)) nativeTheme.on('updated', applyTitleBarOverlay)
 
   // Cloud sync: opt-in one-way push of meetings/notes to the web dashboard.
   const syncService = new SyncService(
@@ -933,6 +1038,7 @@ app.whenReady().then(async () => {
 
   // Store writes fan out to cloud sync and local recording cleanup.
   meetingsService.onDidWrite = (change) => {
+    lastLibraryWriteAt = Date.now()
     sourceIndex.invalidate()
     syncService.onMeetingsChanged(change.deletedId)
     // A deleted meeting takes its recordings with it.
@@ -966,6 +1072,15 @@ app.whenReady().then(async () => {
     focusMainWindow()
   })
 })
+
+/** Recolor the Windows caption-button overlay for the current light/dark theme. */
+function applyTitleBarOverlay(): void {
+  if (!hasThemedTitleBarOverlay(process.platform)) return
+  const window = mainWindow
+  if (!window || window.isDestroyed()) return
+  window.setTitleBarOverlay(titleBarOverlayFor(nativeTheme.shouldUseDarkColors))
+  window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#1d1f19' : '#f7f5ee')
+}
 
 /** Bring the app forward for a notification click or sign-in, recreating the window if
  *  the user closed it (macOS keeps the app alive without windows). */

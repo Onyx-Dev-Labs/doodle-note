@@ -13,7 +13,14 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { LIBRARY_ENTRIES, LibraryStorage } from './library-storage'
+import {
+  LIBRARY_ENTRIES,
+  LibraryStorage,
+  WINDOWS_LOCK_FAILURE_MESSAGE,
+  WINDOWS_LOCK_RETRY_DELAYS_MS,
+  WINDOWS_LOCK_RETRY_MESSAGE,
+  retryWindowsFileLock
+} from './library-storage'
 
 function fixture(t: { after(fn: () => void): void }): {
   root: string
@@ -248,4 +255,118 @@ test('a corrupted copy fails verification and never switches the active library'
   assert.equal(storage.root, profile)
   assert.equal(readFileSync(join(profile, 'folders.json'), 'utf8'), '["original"]')
   assert.equal(existsSync(join(destination, 'DoodleNote Library')), false)
+})
+
+function lockedRename(
+  failures: number,
+  code = 'EPERM'
+): { rename: typeof renameSync; calls: number } {
+  const state = {
+    calls: 0,
+    rename: ((from: string, to: string) => {
+      state.calls++
+      if (state.calls <= failures)
+        throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code })
+      renameSync(from, to)
+    }) as typeof renameSync
+  }
+  return state
+}
+
+function seedLibrary(profile: string): void {
+  mkdirSync(join(profile, 'meetings'), { recursive: true })
+  writeFileSync(join(profile, 'meetings', 'm1.json'), JSON.stringify({ id: 'm1' }))
+}
+
+test('Windows retries a destination briefly locked by antivirus or indexing, then switches', async (t) => {
+  const { profile, destination } = fixture(t)
+  seedLibrary(profile)
+  const locked = lockedRename(2)
+  const sleeps: number[] = []
+  const details: string[] = []
+  const storage = new LibraryStorage(profile, {
+    platform: 'win32',
+    rename: locked.rename,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+    }
+  })
+  storage.schedule(destination)
+  await storage.finishPending((progress) => {
+    if (progress.detail) details.push(progress.detail)
+  })
+  assert.equal(locked.calls, 3)
+  assert.deepEqual(sleeps, [100, 200])
+  assert.deepEqual(details, [WINDOWS_LOCK_RETRY_MESSAGE, WINDOWS_LOCK_RETRY_MESSAGE])
+  assert.equal(storage.root, join(destination, 'DoodleNote Library'))
+  assert.equal(readFileSync(join(storage.root, 'meetings', 'm1.json'), 'utf8'), '{"id":"m1"}')
+})
+
+test('Windows gives a plain-language error when the lock persists, and keeps the original active', async (t) => {
+  const { profile, destination } = fixture(t)
+  seedLibrary(profile)
+  for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+    const locked = lockedRename(Infinity, code)
+    const storage = new LibraryStorage(profile, {
+      platform: 'win32',
+      rename: locked.rename,
+      sleep: async () => {}
+    })
+    if (!storage.status().pendingPath) storage.schedule(destination)
+    await assert.rejects(storage.finishPending(), (error: Error) => {
+      assert.equal(error.message, WINDOWS_LOCK_FAILURE_MESSAGE)
+      return true
+    })
+    assert.equal(locked.calls, WINDOWS_LOCK_RETRY_DELAYS_MS.length + 1)
+    assert.equal(storage.root, profile, 'the original library stays active')
+    assert.equal(storage.status().pendingPath, join(destination, 'DoodleNote Library'))
+  }
+  // Retry transfer then succeeds once the lock clears.
+  const storage = new LibraryStorage(profile, { platform: 'win32', sleep: async () => {} })
+  await storage.finishPending()
+  assert.equal(storage.root, join(destination, 'DoodleNote Library'))
+})
+
+test('macOS keeps the single rename with no retry, even if a lock seam is supplied', async (t) => {
+  const { profile, destination } = fixture(t)
+  seedLibrary(profile)
+  const locked = lockedRename(Infinity)
+  let slept = false
+  const storage = new LibraryStorage(profile, {
+    platform: 'darwin',
+    rename: locked.rename,
+    sleep: async () => {
+      slept = true
+    }
+  })
+  storage.schedule(destination)
+  await storage.finishPending()
+  assert.equal(locked.calls, 0, 'macOS calls renameSync directly')
+  assert.equal(slept, false)
+  assert.equal(storage.root, join(destination, 'DoodleNote Library'))
+})
+
+test('the lock retry passes other errors straight through and retries staging cleanup', async () => {
+  let calls = 0
+  await assert.rejects(
+    retryWindowsFileLock(
+      () => {
+        calls++
+        throw Object.assign(new Error('gone'), { code: 'ENOENT' })
+      },
+      { sleep: async () => {} }
+    ),
+    /gone/
+  )
+  assert.equal(calls, 1)
+  let rmCalls = 0
+  const retries: number[] = []
+  await retryWindowsFileLock(
+    async () => {
+      rmCalls++
+      if (rmCalls < 3) throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+    },
+    { sleep: async () => {}, onRetry: (attempt) => retries.push(attempt) }
+  )
+  assert.deepEqual(retries, [1, 2])
 })

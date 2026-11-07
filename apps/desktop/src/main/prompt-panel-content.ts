@@ -76,11 +76,20 @@ interface WorkArea {
   height: number
 }
 
-/** Electron work areas use logical pixels and already exclude the Dock/taskbar. */
+/** macOS and Windows show the same branded card; other platforms keep the legacy one. */
+function brandedPanel(platform: NodeJS.Platform): boolean {
+  return platform === 'darwin' || platform === 'win32'
+}
+
+/**
+ * Electron work areas use logical pixels and already exclude the Dock/taskbar.
+ * macOS: bottom-center above the Dock. Windows keeps its top-right placement,
+ * clear of the taskbar and of native toasts at the bottom right.
+ */
 export function panelBounds(area: WorkArea, platform: NodeJS.Platform): WorkArea {
   const inset = 16
-  const width = Math.min(platform === 'darwin' ? 396 : PANEL_WIDTH, area.width)
-  const height = Math.min(platform === 'darwin' ? 120 : PANEL_HEIGHT, area.height)
+  const width = Math.min(brandedPanel(platform) ? 396 : PANEL_WIDTH, area.width)
+  const height = Math.min(brandedPanel(platform) ? 120 : PANEL_HEIGHT, area.height)
   return {
     width,
     height,
@@ -111,7 +120,9 @@ export function panelDataUrl(
   platform: NodeJS.Platform,
   logoDataUrl = ''
 ): string {
-  if (platform !== 'darwin') return legacyPanelDataUrl(prompt, dark)
+  if (!brandedPanel(platform)) return legacyPanelDataUrl(prompt, dark)
+  // The card enters from the screen edge it sits on: bottom on macOS, top on Windows.
+  const enterFrom = platform === 'darwin' ? '28px' : '-28px'
   const heading = prompt.adHoc ? 'Meeting detected' : prompt.subject.trim() || 'Untitled meeting'
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
@@ -148,7 +159,7 @@ export function panelDataUrl(
     color: inherit; background: ${dark ? '#3a3e33' : '#eeece3'}; opacity: 0; }
   .card:hover .dismiss, .card:focus-within .dismiss { opacity: 1; }
   a:focus-visible { outline: 2px solid ${dark ? '#e0edbc' : '#344d26'}; outline-offset: 2px; }
-  @keyframes enter { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+  @keyframes enter { from { opacity: 0; transform: translateY(${enterFrom}); } to { opacity: 1; transform: none; } }
   @keyframes paw-step { 0%, 80%, 100% { opacity: 0; } 15%, 55% { opacity: .95; } }
   @media (prefers-reduced-motion: reduce) { .card { animation: none; } .paw { animation: none; opacity: .95; } }
   @media (hover: none) { .dismiss { opacity: 1; } }

@@ -1,6 +1,7 @@
 import { useEffect, useReducer } from 'react'
 import type { Editor } from '@tiptap/react'
 import { CheckSquareIcon, ImageIcon } from './icons'
+import { shortcutLabel } from './lib/platform'
 
 interface ToolButton {
   label: React.ReactNode
@@ -12,13 +13,13 @@ interface ToolButton {
 const TOOLS: ToolButton[] = [
   {
     label: 'B',
-    title: 'Bold (⌘B)',
+    title: `Bold (${shortcutLabel('B', ['mod'])})`,
     isOn: (e) => e.isActive('bold'),
     run: (e) => e.chain().focus().toggleBold().run()
   },
   {
     label: 'I',
-    title: 'Italic (⌘I)',
+    title: `Italic (${shortcutLabel('I', ['mod'])})`,
     isOn: (e) => e.isActive('italic'),
     run: (e) => e.chain().focus().toggleItalic().run()
   },
