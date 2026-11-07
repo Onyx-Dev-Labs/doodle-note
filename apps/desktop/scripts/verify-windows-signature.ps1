@@ -18,7 +18,8 @@ Write-Host "Authenticode valid: $($signature.SignerCertificate.Subject)"
 
 # Bark's helper ships beside the app as a separate exe; it must be signed too, or
 # Application Control / Smart App Control will refuse to run it on users' machines.
-$helper = Join-Path $releaseDir "win-unpacked\resources\engine\dictation-helper.exe"
+$appDir = Join-Path $releaseDir "win-unpacked"
+$helper = Join-Path $appDir "resources\engine\dictation-helper.exe"
 if (-not (Test-Path $helper)) {
   throw "The dictation helper is missing from the package: $helper"
 }
@@ -50,3 +51,21 @@ if (-not ($manifest.thumbprints -contains $helperSignature.SignerCertificate.Thu
   throw "Refusing to publish: the dictation helper signer certificate is not the one the build recorded"
 }
 Write-Host "Dictation helper digest and signer match the build ($signerCn)"
+
+# Every other portable executable the app ships (app exe, Electron DLLs, native
+# modules, ONNX/llama runtimes) is loaded under the same Code Integrity policy.
+# Vendor-signed files keep their vendor's valid signature; nothing may be unsigned.
+$pe = Get-ChildItem -LiteralPath $appDir -Recurse -File |
+  Where-Object { $_.Extension -in @(".exe", ".dll", ".node") }
+$invalid = @()
+foreach ($file in $pe) {
+  $status = (Get-AuthenticodeSignature -LiteralPath $file.FullName).Status
+  if ($status -ne "Valid") {
+    $invalid += "$($file.FullName.Substring($appDir.Length + 1)): $status"
+  }
+}
+if ($invalid.Count -gt 0) {
+  $invalid | ForEach-Object { Write-Host "  $_" }
+  throw "Refusing to publish: $($invalid.Count) of $($pe.Count) shipped PE files are not validly signed"
+}
+Write-Host "All $($pe.Count) shipped PE files (exe/dll/node) are validly signed"

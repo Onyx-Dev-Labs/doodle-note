@@ -357,8 +357,8 @@ published, and CI only uploads its manifest as a workflow artifact.
 
 To activate, in one release change:
 
-1. Require a valid signature first (Artifact Signing, below); never publish an
-   unsigned build to a feed.
+1. Require a valid signature first (Artifact Signing, below, including
+   `publisherName`); never publish an unsigned build to a feed.
 2. Choose the channel: keep `beta` for testers, or change `applyUpdatePolicy`
    to the default channel (`latest.yml`) for production.
 3. Build the release with `DOODLENOTE_WINDOWS_UPDATES=on` (for example in
@@ -366,6 +366,41 @@ To activate, in one release change:
 4. Publish with `pnpm release:win` (signature gate, `latest.yml`) or
    `publish:win-beta` (`beta.yml`). Installed builds from before activation never
    check, so their users install the first activated build by hand.
+
+## Code signing (Microsoft Artifact Signing)
+
+Signing for Onyx Dev Labs LLC uses Microsoft Artifact Signing (formerly Trusted
+Signing) through SignTool and the Artifact Signing dlib
+(`Microsoft.ArtifactSigning.Client` 1.0.151 from nuget.org, pinned by SHA-256 in
+CI, running on .NET 10). `apps/desktop/scripts/sign-windows.cjs` is
+electron-builder's `win.signtoolOptions.sign` hook (SHA-256 only, `signExts`
+adds `.dll` and `.node`), so it signs the app exe, Electron's DLLs, the unpacked
+native modules (sherpa/ONNX, llama, Koffi), the installer and the uninstaller;
+files that already carry a valid vendor signature (Microsoft's
+`d3dcompiler_47.dll`, `dxil.dll`) keep it. electron-builder never offers
+single-file `extraResources` to its signer, so `package:win` signs
+`engine\.build\windows\dictation-helper.exe` itself right after building it.
+Anything that records the helper's hash (its integrity manifest) must run after
+that step.
+
+CI secrets (none exist yet): `ARTIFACT_SIGNING_ENDPOINT` (for example
+`https://eus.codesigning.azure.net`, matching the account's region),
+`ARTIFACT_SIGNING_ACCOUNT`, `ARTIFACT_SIGNING_PROFILE`, and an Entra app
+registration with the Artifact Signing Certificate Profile Signer role:
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. Only the packaging
+step receives them. Without them CI logs `signing skipped: no credentials` and
+builds exactly the unsigned package it built before; a partial set fails the
+build. With them, CI runs `scripts/verify-windows-signature.ps1`, which now
+requires the installer, the helper and every shipped `.exe`, `.dll` and `.node`
+to be validly signed (the same check gates `release:win`).
+
+When the account is approved: add the six secrets, confirm a CI run signs and
+verifies, set `win.signtoolOptions.publisherName` to the certificate's subject
+CN (electron-updater then refuses an update installer signed by anyone else),
+and only then consider activating updates (above). Local plumbing checks can
+use `DOODLENOTE_SIGN_TEST_CERT_SHA1` with a temporary CurrentUser\My
+certificate (refused when `CI` is set); delete it from CurrentUser\My and
+CurrentUser\CA afterwards. Such a build is not trusted by Code Integrity.
 
 ## Production gate
 

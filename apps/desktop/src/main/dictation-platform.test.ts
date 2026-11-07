@@ -188,9 +188,10 @@ test('the Windows package ships the helper and CI builds it with the inbox compi
   const mac = /^mac:\n((?:[ \t].*\n|\n)*)/m.exec(builder.replace(/\r\n/g, '\n'))?.[1] ?? ''
   assert.doesNotMatch(mac, /dictation-helper\.exe/)
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+  // The helper is signed (sign-windows.cjs) right after it is built.
   assert.match(
     pkg.scripts['package:win'],
-    /node scripts\/build-dictation-helper-win\.cjs && .*node scripts\/write-dictation-helper-manifest\.cjs && electron-vite build/
+    /node scripts\/build-dictation-helper-win\.cjs && node scripts\/sign-windows\.cjs \S*dictation-helper\.exe && node scripts\/write-dictation-helper-manifest\.cjs && electron-vite build/
   )
   assert.doesNotMatch(pkg.scripts.package, /dictation-helper-win/)
   const script = readFileSync(

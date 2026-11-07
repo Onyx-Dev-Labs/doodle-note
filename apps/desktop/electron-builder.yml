@@ -145,8 +145,17 @@ win:
     - "!**/node_modules/@koromix/koffi-win32-{arm64,ia32}/**"
     - "!**/node_modules/@reflink/reflink-{darwin,linux}-*/**"
     - "!**/node_modules/@reflink/reflink-win32-arm64-msvc/**"
-  # Unsigned for now (no Authenticode cert) — SmartScreen will warn on
-  # install; testers click "More info → Run anyway".
+  # Signing: scripts/sign-windows.cjs signs every exe/dll/node electron-builder
+  # offers (app exe, Electron DLLs, unpacked native modules, installer and
+  # uninstaller) with Microsoft Artifact Signing when its CI secrets exist, and
+  # logs "signing skipped: no credentials" otherwise (unsigned, as before).
+  # package:win signs the Bark helper itself; electron-builder never offers it.
+  # Unsigned builds make SmartScreen warn on install.
+  signExts: [".dll", ".node"]
+  signtoolOptions:
+    sign: scripts/sign-windows.cjs
+    # Artifact Signing signs SHA-256 only; one call per file.
+    signingHashAlgorithms: [sha256]
 nsis:
   oneClick: true
   perMachine: false
