@@ -188,17 +188,122 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   for (const hook of ['customInit', 'customCheckAppRunning', 'customInstall']) {
     assert.match(installer, new RegExp(`!macro ${hook}\\b`))
   }
-  // The old folder is deleted only in customInstall, after the new copy is verified.
+  // The old folder is deleted only in customInstall, after the new copy is verified
+  // and the old folder has been checked again.
   const install = installer.slice(installer.indexOf('!macro customInstall'))
-  assert.equal(
-    installer.indexOf('RMDir'),
-    installer.indexOf('RMDir', installer.indexOf('!macro customInstall'))
-  )
+  assert.equal(installer.match(/Call dnRemoveLegacyDir/g)?.length, 1)
   assert.ok(
-    install.indexOf('FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') < install.indexOf('RMDir')
+    install.indexOf('FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') <
+      install.indexOf('Call dnCheckLegacyDir')
   )
+  assert.ok(install.indexOf('Call dnCheckLegacyDir') < install.indexOf('Call dnRemoveLegacyDir'))
   // A /D=<folder> install is never redirected.
   assert.match(installer, /GetDParameter \$R0\s+\$\{if\} \$R0 == ""/)
+})
+
+test('the install migration journal belongs to one app identity and is validated before use', () => {
+  const installer = readFileSync(
+    new URL('../../build/windows-installer.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  // Namespaced by APP_GUID (derived from appId), so a QA identity never reads it.
+  assert.match(installer, /!define DN_MIGRATION_KEY "Software\\\$\{APP_GUID\}\\InstallMigration"/)
+  assert.doesNotMatch(installer, /Software\\DoodleNote\\/)
+  assert.match(
+    installer,
+    /!define DN_MIGRATION_IDENTITY "\$\{APP_GUID\}\|\$\{APP_FILENAME\}\|\$\{PRODUCT_FILENAME\}"/
+  )
+  for (const value of ['Identity', 'SourceDir', 'DestDir', 'LegacyUninstallString']) {
+    assert.match(installer, new RegExp(`WriteRegStr HKCU "\\$\\{DN_MIGRATION_KEY\\}" "${value}"`))
+  }
+  const init = installer.slice(
+    installer.indexOf('!macro customInit'),
+    installer.indexOf('!macroend', installer.indexOf('!macro customInit'))
+  )
+  // Identity, destination and source are all checked before anything recorded is used.
+  const restore = init.indexOf('WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"')
+  assert.ok(restore > 0)
+  for (const check of [
+    '${if} $R5 != "${DN_MIGRATION_IDENTITY}"',
+    '${elseif} $R7 != $R8',
+    '${elseif} $R4 != ""',
+    '${if} $R7 == $R9'
+  ]) {
+    const at = init.indexOf(check)
+    assert.ok(at > 0 && at < restore, check)
+  }
+  // Only the old folder's own uninstaller, reconstructed, is ever put back or parked.
+  assert.match(installer, /StrCpy \$\{OUT\} '"\$\{DIR\}\\\$\{UNINSTALL_FILENAME\}" \/currentuser'/)
+  assert.doesNotMatch(installer, /\$\{if\} \$R4 != ""\s+\$\{andIf\} \$R5 == ""/)
+})
+
+test('the install migration never removes through a link and closes only its own exe', () => {
+  const installer = readFileSync(
+    new URL('../../build/windows-installer.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const both = `${installer}\n${guards}`
+  const code = both
+    .split('\n')
+    .filter((line) => !line.trim().startsWith(';'))
+    .join('\n')
+  // NSIS's RMDir /r follows junctions (verified on Dev04); our walk never does.
+  assert.doesNotMatch(code, /RMDir \/r/i)
+  assert.match(guards, /DN_ATTR_REPARSE_POINT 0x400/)
+  assert.match(guards, /GetFinalPathNameByHandleW/)
+  assert.match(guards, /GetLongPathNameW/)
+  assert.match(installer, /StrCpy \$dnProgramsRoot "\$LOCALAPPDATA\\Programs"/)
+  assert.match(installer, /StrCpy \$dnProfileDir "\$APPDATA\\\$\{APP_FILENAME\}"/)
+  for (const reason of [
+    'is a junction or link',
+    'has no ${DN_APP_EXE}',
+    'the old folder is not $2\\${APP_FILENAME}',
+    'the new folder is not $2\\${PRODUCT_FILENAME}',
+    'overlaps the app profile',
+    'the old and new folders overlap',
+    'resolve to the same place'
+  ]) {
+    assert.ok(guards.includes(reason), reason)
+  }
+  // The exe is deleted last, so a partly removed folder is still recognisable.
+  const remove = guards.slice(guards.indexOf('Function dnRemoveLegacyDir'))
+  assert.ok(remove.indexOf('Call dnRemoveTree') < remove.indexOf('Delete "$0\\${DN_APP_EXE}"'))
+  // electron-builder's prefix / image-name matching and taskkill fallback are never compiled in.
+  for (const stock of [
+    '_CHECK_APP_RUNNING',
+    'KILL_PROCESS',
+    'FIND_PROCESS',
+    'taskkill',
+    'StartsWith',
+    'getProcessInfo'
+  ]) {
+    assert.ok(!code.includes(stock), stock)
+  }
+  assert.match(guards, /\[IO\.Path\]::GetFullPath\(\$\$p\.ExecutablePath\) -eq \$\$want/)
+  // Paths reach PowerShell only through the environment.
+  assert.doesNotMatch(
+    guards.slice(guards.indexOf('!define DN_CLOSE_PS')).split('\n')[0],
+    /\$\{DIR\}|\$INSTDIR/
+  )
+  // A pending migration checks the old folder on its own, whatever exists in the new one.
+  const check = installer.slice(installer.indexOf('!macro dnMigrationCheckAppRunning'))
+  assert.match(
+    check,
+    /^\s+\$\{if\} \$dnLegacyDir != ""\n\s+;[^\n]*\n\s+;[^\n]*\n\s+!insertmacro dnCloseAppIn "\$dnLegacyDir"/m
+  )
+  assert.ok(
+    check.indexOf('dnCloseAppIn "$dnLegacyDir"') < check.indexOf('dnEnsureNotRunning "$INSTDIR"')
+  )
+  // Nothing is closed without consent: silent installs nobody asked for never close.
+  assert.match(guards, /\$\{elseif\} \$\{Silent\}\n\s+StrCpy \$\{OUT\} "never"/)
+  assert.match(
+    ciWorkflow.replace(/\r\n/g, '\n'),
+    /node apps\/desktop\/scripts\/test-windows-installer-guards\.cjs/
+  )
 })
 
 test('only x64 Windows native binaries ship unpacked in the Windows package', () => {

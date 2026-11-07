@@ -304,15 +304,45 @@ moves an existing install on upgrade:
 
 1. `customInit` redirects an install that would land in the `desktop` folder to
    the sibling `DoodleNote` folder (an install with `/D=<folder>` is left alone).
-2. `customCheckAppRunning` closes copies running from the old folder, then parks
-   the old uninstall command (journal: `HKCU\Software\DoodleNote\InstallMigration`)
+   It treats the old folder as an install to move only when the guards in
+   `apps/desktop/build/windows-install-guards.nsh` prove it is one: exactly
+   `%LocalAppData%\Programs\desktop` after normalising case, separators, `..`
+   and short names; a real folder (not a junction, symbolic link or mount
+   point) holding `DoodleNote.exe`; resolving (`GetFinalPathNameByHandle`) to
+   that same place and not onto or into the new folder; the new folder, if it
+   exists, a real folder too; neither overlapping the profile
+   (`%APPDATA%\desktop`). Anything else is upgraded in place, as before.
+2. `customCheckAppRunning` closes copies running from exactly the old exe and
+   exactly the new exe, each checked on its own, through `Win32_Process`
+   executable paths (never electron-builder's path-prefix match, which also
+   matched `Programs\DoodleNote QA`, or its `taskkill` by image name). It asks
+   each to close, waits, then stops only the PIDs that still match. It closes
+   only with consent: when the app started the update (`--updated`) or the user
+   says OK; a silent install nobody asked the app for closes nothing. If the old
+   folder's app cannot be closed, or which processes are ours cannot be
+   established (no PowerShell, or an unreadable process with the same name),
+   the new copy is installed and the old folder is kept for the next run. It
+   then parks the old uninstall command in the journal
+   `HKCU\Software\{APP_GUID}\InstallMigration` (the GUID derives from `appId`),
    so electron-builder's "uninstall old version" step does not delete the old
-   folder before the new one exists. An interrupted run restores the command
-   and finishes the move next time.
+   folder before the new one exists. The journal records the identity
+   (`APP_GUID`, the old and the new folder name) and both folders; a later run
+   uses it, to finish an interrupted move or to put back the parked command
+   for Apps & features, only when all of them match and the old folder still
+   passes the checks above, and only puts back exactly the old folder's own
+   uninstaller.
 3. `customInstall` verifies the new copy (exe, `app.asar`, uninstaller, and the
-   uninstall entry pointing at it), then removes the old folder, keeps the
-   user's desktop-shortcut choice and repoints a taskbar pin. If the new copy is
-   incomplete the old folder is kept.
+   uninstall entry pointing at it), checks the old folder again, then removes
+   it with a walk that deletes a junction or link but never what it points to
+   (NSIS's own `RMDir /r` follows junctions, verified on Dev04) and deletes
+   `DoodleNote.exe` last, so a folder that is only partly removed is still
+   recognised next time. It keeps the user's desktop-shortcut choice and
+   repoints a taskbar pin. If the new copy is incomplete the old folder is kept.
+
+`apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
+with electron-builder's makensis and runs them against real folders, junctions,
+a held file and real processes in a temporary sandbox (CI "Check Windows
+installer migration guards").
 
 `appId`, the shortcut name and so the uninstall key are unchanged, so Start and
 Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the

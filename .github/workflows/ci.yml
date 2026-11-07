@@ -192,6 +192,13 @@ jobs:
         timeout-minutes: 5
         run: node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release/win-unpacked
 
+      # The install folder migration's path and process guards, compiled with
+      # electron-builder's makensis and run against real junctions, a held file and
+      # real processes in a temporary sandbox.
+      - name: Check Windows installer migration guards
+        timeout-minutes: 5
+        run: node apps/desktop/scripts/test-windows-installer-guards.cjs
+
       - name: Test recorder with packaged Electron runtime
         run: node apps/desktop/scripts/test-electron-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
 
