@@ -94,20 +94,34 @@ export const SESSION_END_CANCEL_RESET_MS = 30_000
  * - startGraceMs: time for automatic notes to start after the recording ends
  *   (the renderer reads settings and saves rough notes first);
  * - quietMs: no notes progress and no library write for this long;
- * - maxWaitMs: quit regardless after this long.
+ * - maxWaitMs: quit after this long unless notes are still making progress
+ *   (a long local CPU/GPU run on a long meeting reports progress every second);
+ * - notesMaxWaitMs: absolute limit, for a job that never stops reporting.
  */
 export const BACKGROUND_FINISH_LIMITS = {
   startGraceMs: 15_000,
   quietMs: 5_000,
-  maxWaitMs: 5 * 60_000
+  maxWaitMs: 5 * 60_000,
+  notesMaxWaitMs: 30 * 60_000
 } as const
 
 export function backgroundQuitDue(
   now: number,
   activity: { endedAt: number; lastNotesActivityAt: number; lastLibraryWriteAt: number },
-  limits: { startGraceMs: number; quietMs: number; maxWaitMs: number } = BACKGROUND_FINISH_LIMITS
+  limits: {
+    startGraceMs: number
+    quietMs: number
+    maxWaitMs: number
+    notesMaxWaitMs: number
+  } = BACKGROUND_FINISH_LIMITS
 ): boolean {
-  if (now - activity.endedAt >= limits.maxWaitMs) return true
+  const waited = now - activity.endedAt
+  if (waited >= limits.notesMaxWaitMs) return true
+  const notesProgressing =
+    activity.lastNotesActivityAt >= activity.endedAt &&
+    now - activity.lastNotesActivityAt < limits.quietMs
+  if (notesProgressing) return false
+  if (waited >= limits.maxWaitMs) return true
   const latest = Math.max(
     activity.endedAt,
     activity.lastNotesActivityAt,

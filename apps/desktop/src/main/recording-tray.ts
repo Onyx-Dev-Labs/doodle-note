@@ -113,10 +113,6 @@ export class RecordingTray {
     })
   }
   /**
-   * Windows: Quit waits (bounded) for the recording to be saved. Keep the icon
-   * and say so, instead of vanishing while the app is still finishing.
-   */
-  /**
    * Windows: the recording ended with its window closed; automatic notes are
    * finishing before DoodleNote quits. Open and Quit stay available.
    */
@@ -125,6 +121,10 @@ export class RecordingTray {
     this.finishingNotes = active
     this.render()
   }
+  /**
+   * Windows: Quit waits (bounded) for the recording to be saved. Keep the icon
+   * and say so, instead of vanishing while the app is still finishing.
+   */
   showSavingBeforeQuit(): void {
     if (!this.windows || !this.tray) return
     this.savingBeforeQuit = true

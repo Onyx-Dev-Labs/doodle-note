@@ -179,10 +179,19 @@ test('the deferred Windows quit waits for automatic notes and their saves, bound
   assert.equal(due(at(66), at(60), at(61)), true, 'quiet for 5 s after the last save')
   // Activity from before the recording ended does not count as a notes job.
   assert.equal(due(at(6), endedAt - 10_000, 0), false)
-  // Never longer than the cap, even if notes keep running.
-  const max = BACKGROUND_FINISH_LIMITS.maxWaitMs / 1000
-  assert.equal(due(at(max - 1), at(max - 1), 0), false)
-  assert.equal(due(at(max), at(max), 0), true)
+  const idleCap = BACKGROUND_FINISH_LIMITS.maxWaitMs / 1000
+  const absoluteCap = BACKGROUND_FINISH_LIMITS.notesMaxWaitMs / 1000
+  // A long local notes run that keeps reporting progress is not cut off at 5 minutes...
+  assert.equal(due(at(idleCap), at(idleCap - 1), 0), false)
+  assert.equal(due(at(20 * 60), at(20 * 60 - 0.5), at(10)), false)
+  // ...and quits 5 s after it finishes and saves.
+  assert.equal(due(at(20 * 60 + 6), at(20 * 60), at(20 * 60 + 1)), true)
+  // Past 5 minutes without notes progress (e.g. library writes alone keep coming), quit.
+  assert.equal(due(at(idleCap), 0, at(idleCap - 1)), true)
+  assert.equal(due(at(idleCap + 1), at(idleCap - 10), at(idleCap)), true)
+  // A job that never stops reporting is stopped at the absolute limit.
+  assert.equal(due(at(absoluteCap - 1), at(absoluteCap - 1), 0), false)
+  assert.equal(due(at(absoluteCap), at(absoluteCap), 0), true)
 })
 
 test('automatic notes progress and library writes feed the deferred quit', () => {
