@@ -29,6 +29,8 @@ export interface StorageProgress {
   phase: 'waiting' | 'copying' | 'verifying'
   completedBytes?: number
   totalBytes?: number
+  /** Extra status, e.g. a Windows file-lock retry while the transfer finishes. */
+  detail?: string
 }
 
 /**

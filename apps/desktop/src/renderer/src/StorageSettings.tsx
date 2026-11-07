@@ -194,6 +194,7 @@ export function StorageSettings(): React.JSX.Element {
               ? 'Checking your files…'
               : 'Finishing current saves…'}
         </p>
+        {progress.detail && <p role="status">{progress.detail}</p>}
         {progress.phase === 'copying' && (
           <progress
             aria-label="Files copied"
