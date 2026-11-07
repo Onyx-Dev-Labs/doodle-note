@@ -77,28 +77,29 @@ export const FORCED_CUT_SEARCH_SEC = 3
 export const FORCED_CUT_OVERLAP_SEC = 1
 
 /**
- * Live: utterances end at a 0.5 s pause and are force-cut at 12 s. Measured on
- * the 30-minute AMI meeting (Unified): cap 8 s -> 16.9% WER, words committed
- * 4.4 s (p90 7.1 s) after they end; 12 s -> 15.7%, 5.9 s (p90 10.4 s);
- * 15 s -> 15.9%, 6.9 s (p90 12.7 s). Captions fill the gap with interims.
+ * Live: utterances end at a 0.5 s pause and are force-cut at 8 s. Measured on
+ * the 30-minute AMI meeting (Unified, final stitching): cap 8 s -> 14.6% WER,
+ * words committed 4.4 s (p90 7.1 s) after they end; 12 s -> 15.3%, 6.0 s
+ * (p90 10.4 s); 15 s -> 15.1%, 7.1 s (p90 12.8 s). Meeting clips: 10.1%,
+ * 10.3%, 10.6%. Captions fill the gap with interim decodes.
  */
 export const LIVE_VAD: VadSettings = {
   threshold: 0.5,
   minSilenceSec: 0.5,
   minSpeechSec: 0.25,
-  maxSpeechSec: 12
+  maxSpeechSec: 8
 }
 
 /**
  * Imports and Re-transcribe: no caption latency to protect, so utterances end
- * only at a 1 s pause and are cut at 20 s (30-minute meeting, TDT v2: 20 s ->
- * 14.9% WER, 30 s -> 15.7%, 45 s -> 16.0%; meeting clips 10.5% for all).
+ * only at a 1 s pause and are cut at 30 s (30-minute meeting: TDT v2 15.3%
+ * at 30 s vs 15.6% at 20 s; v3 17.3% vs 17.9%; meeting clips unchanged).
  */
 export const BATCH_VAD: VadSettings = {
   threshold: 0.5,
   minSilenceSec: 1,
   minSpeechSec: 0.25,
-  maxSpeechSec: 20
+  maxSpeechSec: 30
 }
 
 export interface PipelineOptions {

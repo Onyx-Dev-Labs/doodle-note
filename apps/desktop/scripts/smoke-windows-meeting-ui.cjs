@@ -70,7 +70,14 @@ async function main() {
     // The same path as New -> New meeting: opens the recorder and starts capture.
     await page.evaluate(() => window.recording.requestStart())
     const notice = page.locator('.saved-audio-warning', { hasText: 'running behind' })
-    await notice.waitFor({ state: 'visible', timeout: 30000 })
+    try {
+      await notice.waitFor({ state: 'visible', timeout: 30000 })
+    } catch (error) {
+      const events = await page.evaluate(() => window.__events)
+      fs.writeFileSync(path.join(evidence, 'events-at-failure.json'), JSON.stringify(events, null, 1))
+      await page.screenshot({ path: path.join(evidence, 'notice-missing.png') })
+      throw error
+    }
     const shownAfterMs = Date.now() - started
     await page.screenshot({ path: path.join(evidence, 'captions-delayed.png') })
     await notice.waitFor({ state: 'hidden', timeout: 30000 })

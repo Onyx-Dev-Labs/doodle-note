@@ -117,8 +117,11 @@ function withTestStall(
 
 /** Frames waiting longer than this make the recorder say captions are late... */
 const DELAYED_LAG_SEC = 5
-/** ...until every channel is back under this. */
+/** ...until every channel has stayed under this for CAUGHT_UP_HOLD_MS... */
 const CAUGHT_UP_LAG_SEC = 1
+const CAUGHT_UP_HOLD_MS = 5_000
+/** ...and the notice has been up at least this long (no flicker). */
+const DELAYED_MIN_SHOWN_MS = 10_000
 
 let sherpa: SherpaModule | null = null
 let recognizer: OfflineRecognizerLike<OfflineStreamLike> | null = null
@@ -132,6 +135,8 @@ let gate: EchoOrderGate | null = null
 let sessionActive = false
 let activeSessionId: number | null = null
 let captionsDelayed = false
+let delayedAt = 0
+let caughtUpSince: number | null = null
 /** Parakeet finished downloading during a legacy session; switch after it. */
 let pendingUpgrade: { asrDir: string; vadDir: string } | null = null
 
@@ -434,12 +439,24 @@ function ingest(data: AudioMessage): void {
   // Never fall behind silently: the recorder says captions are late while any
   // channel's frames wait more than 5 s, and clears it once all catch up.
   const lag = Math.max(...[...pipelines.values()].map((p) => p.lagSec()))
+  const now = Date.now()
   if (!captionsDelayed && lag > DELAYED_LAG_SEC) {
     captionsDelayed = true
+    delayedAt = now
+    caughtUpSince = null
     emit({ event: 'status', stage: 'captions_delayed', channel: data.channel })
-  } else if (captionsDelayed && lag < CAUGHT_UP_LAG_SEC) {
-    captionsDelayed = false
-    emit({ event: 'status', stage: 'captions_caught_up' })
+  } else if (captionsDelayed) {
+    if (lag >= CAUGHT_UP_LAG_SEC) caughtUpSince = null
+    else caughtUpSince ??= now
+    if (
+      caughtUpSince !== null &&
+      now - caughtUpSince >= CAUGHT_UP_HOLD_MS &&
+      now - delayedAt >= DELAYED_MIN_SHOWN_MS
+    ) {
+      captionsDelayed = false
+      caughtUpSince = null
+      emit({ event: 'status', stage: 'captions_caught_up' })
+    }
   }
 }
 
