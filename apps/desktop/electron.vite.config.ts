@@ -50,13 +50,32 @@ export default defineConfig({
       }
     }
   },
-  preload: {},
+  preload: {
+    build: {
+      rollupOptions: {
+        // dictation-capture: the preload of Bark's hidden Windows capture window.
+        input: {
+          index: resolve('src/preload/index.ts'),
+          'dictation-capture': resolve('src/preload/dictation-capture.ts')
+        }
+      }
+    }
+  },
   renderer: {
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [react()]
+    plugins: [react()],
+    build: {
+      rollupOptions: {
+        // dictation-capture.html: Bark's hidden Windows capture page.
+        input: {
+          index: resolve('src/renderer/index.html'),
+          'dictation-capture': resolve('src/renderer/dictation-capture.html')
+        }
+      }
+    }
   }
 })
