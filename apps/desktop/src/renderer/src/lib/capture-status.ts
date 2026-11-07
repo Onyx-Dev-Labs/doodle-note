@@ -10,6 +10,8 @@ interface CaptureStatusState {
   captionsDelayed?: boolean
   /** Windows only: this capture uses the previous speech model (new one downloading). */
   legacyModel?: boolean
+  /** Windows only: the new model's background download failed (retried later). */
+  legacyDownloadFailed?: boolean
 }
 
 /** Windows recorder notices for the live session, in display order. */
@@ -17,12 +19,15 @@ export function captureNotices(state: {
   phase: CaptureStatusState['phase']
   captionsDelayed?: boolean
   legacyModel?: boolean
+  legacyDownloadFailed?: boolean
 }): string[] {
   const live = state.phase === 'recording' || state.phase === 'starting'
   const notices: string[] = []
   if (live && state.legacyModel) {
     notices.push(
-      'Transcribing with the previous speech model while the new one downloads. This recording keeps that transcript; Re-transcribe it later for the new model.'
+      state.legacyDownloadFailed
+        ? 'Transcribing with the previous speech model. The new one could not be downloaded; DoodleNote tries again after this recording. This recording keeps the previous model’s transcript.'
+        : 'Transcribing with the previous speech model while the new one downloads. This recording keeps that transcript; Re-transcribe it later for the new model.'
     )
   }
   if (live && state.captionsDelayed) {
@@ -84,7 +89,9 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
     case 'captions_caught_up':
       return { ...state, captionsDelayed: false }
     case 'legacy_model':
-      return { ...state, legacyModel: true }
+      return { ...state, legacyModel: true, legacyDownloadFailed: ev.download === 'failed' }
+    case 'model_download_failed':
+      return state.legacyModel ? { ...state, legacyDownloadFailed: true } : state
     default:
       return state
   }

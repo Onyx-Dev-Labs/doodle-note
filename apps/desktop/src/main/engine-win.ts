@@ -72,7 +72,14 @@ interface AudioMessage {
 }
 
 type InMessage =
-  | { t: 'init'; modelsDir: string; quality?: 'live' | 'final'; parakeetModel?: 'v2' | 'v3' }
+  | {
+      t: 'init'
+      modelsDir: string
+      quality?: 'live' | 'final'
+      parakeetModel?: 'v2' | 'v3'
+      /** A reload after an idle close reuses the first calibration. */
+      calibration?: { calibrationRtf: number; captionMode: LiveCaptionMode }
+    }
   | { t: 'start'; channels: string[]; sessionId?: number }
   | AudioMessage
   | { t: 'stop'; sessionId?: number }
@@ -138,7 +145,10 @@ let captionsDelayed = false
 let delayedAt = 0
 let caughtUpSince: number | null = null
 /** Parakeet finished downloading during a legacy session; switch after it. */
+let knownCalibration: { calibrationRtf: number; captionMode: LiveCaptionMode } | null = null
 let pendingUpgrade: { asrDir: string; vadDir: string } | null = null
+/** Legacy mode only: the background Parakeet download. */
+let upgradeState: 'downloading' | 'failed' | 'done' = 'done'
 
 function loadingMarker(spec: WindowsAsrModelSpec): string {
   return join(modelsRoot, `.${spec.name}.loading`)
@@ -209,6 +219,12 @@ async function loadParakeet(
   )
   legacy = null
   if (quality !== 'live') return {}
+  if (knownCalibration) {
+    // Calibrating again while a recording waits on this reload would measure
+    // a busy machine and delay the first decode.
+    captionMode = knownCalibration.captionMode
+    return { calibrationRtf: knownCalibration.calibrationRtf }
+  }
   const calibrationRtf = calibrate(recognizer)
   captionMode = liveCaptionMode(calibrationRtf)
   return { calibrationRtf: Math.round(calibrationRtf * 1000) / 1000 }
@@ -304,6 +320,9 @@ async function init(
 
 /** Legacy mode: fetch Parakeet without blocking recording; switch between sessions. */
 async function upgradeInBackground(asr: WindowsAsrModelSpec, partialTag: string): Promise<void> {
+  upgradeState = 'downloading'
+  // The host keeps a downloading worker alive (no idle unload) until it ends.
+  emit({ event: 'status', stage: 'model_download', model: asr.name, progress: 0 })
   try {
     let last = -1
     const [asrDir, vadDir] = await ensureWindowsAsrModels(
@@ -318,10 +337,12 @@ async function upgradeInBackground(asr: WindowsAsrModelSpec, partialTag: string)
       { partialTag }
     )
     pendingUpgrade = { asrDir: asrDir!, vadDir: vadDir! }
+    upgradeState = 'done'
     if (!sessionActive) await activateUpgrade()
   } catch (err) {
     // Stay on the cached model; the next app start tries again (and resumes).
     console.error('[win-asr] background model download failed:', err)
+    upgradeState = 'failed'
     emit({ event: 'status', stage: 'model_download_failed', model: asr.name })
   }
 }
@@ -394,7 +415,14 @@ function startSession(channels: string[], sessionId = 0): void {
   )
   emit({ event: 'ready', mode: quality, channels })
   emit({ event: 'status', stage: 'transcribing' })
-  if (legacy) emit({ event: 'status', stage: 'legacy_model', model: LEGACY_ZIPFORMER.name })
+  if (legacy) {
+    emit({
+      event: 'status',
+      stage: 'legacy_model',
+      model: LEGACY_ZIPFORMER.name,
+      download: upgradeState === 'failed' ? 'failed' : 'in_progress'
+    })
+  }
 }
 
 function stopSession(sessionId = 0): void {
@@ -423,6 +451,9 @@ function stopSession(sessionId = 0): void {
   activeSessionId = null
   emit({ event: 'done' })
   if (pendingUpgrade) void activateUpgrade()
+  // A failed background download (offline, stalled) is retried, resuming its
+  // partial file, after each recording on the previous model.
+  else if (legacy && upgradeState === 'failed') void upgradeInBackground(PARAKEET_UNIFIED, 'live')
 }
 
 function ingest(data: AudioMessage): void {
@@ -434,7 +465,8 @@ function ingest(data: AudioMessage): void {
     emit({ event: 'error', channel: data.channel, message: `transcription failed: ${String(err)}` })
     return
   }
-  if (data.channel === 'system') gate?.release()
+  // Every frame (either channel) re-checks the hold, including its time bound.
+  gate?.release()
   if (quality !== 'live') return
   // Never fall behind silently: the recorder says captions are late while any
   // channel's frames wait more than 5 s, and clears it once all catch up.
@@ -464,6 +496,7 @@ port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
   switch (data.t) {
     case 'init':
+      knownCalibration = data.calibration ?? null
       void init(data.modelsDir, data.quality, data.parakeetModel)
       break
     case 'start':

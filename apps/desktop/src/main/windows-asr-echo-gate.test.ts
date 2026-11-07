@@ -92,3 +92,24 @@ test('held mic timings are released once the system channel is settled past them
   gate.push({ event: 'partial', channel: 'mic', text: 'x' })
   assert.equal(out.at(-1)?.event, 'partial')
 })
+
+test('a stalled system channel cannot hold mic text for more than the bound', () => {
+  const out: Array<Record<string, unknown>> = []
+  let clock = 0
+  // The system channel never settles (its frames stopped arriving).
+  const gate = new EchoOrderGate(
+    (event) => out.push(event),
+    () => 0,
+    () => clock
+  )
+  gate.push({ event: 'timings', channel: 'mic', tokens: words('are you still there', 5) })
+  // Held words stay in the mic caption meanwhile.
+  gate.push({ event: 'partial', channel: 'mic', text: 'hello' })
+  assert.equal(out.at(-1)?.text, 'are you still there hello')
+  clock = 1_999
+  gate.release()
+  assert.equal(out.filter((event) => event.event === 'timings').length, 0)
+  clock = 2_000
+  gate.release()
+  assert.equal(out.filter((event) => event.event === 'timings').length, 1)
+})

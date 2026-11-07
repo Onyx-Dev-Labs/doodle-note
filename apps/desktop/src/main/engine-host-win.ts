@@ -19,11 +19,15 @@ const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
 /** After Stop, the worker is killed only if it makes no progress for this long. */
 const WORKER_FINISH_IDLE_MS = 15_000
 /**
- * The live worker holds about 1 GB of model memory. With no recording for this
- * long it is closed, and reloaded (about 2.5 s on Dev04) when the next one
- * starts; capture begins at once and its first frames are buffered meanwhile.
+ * The live worker holds about 765 MB of model memory when idle. With no
+ * recording for this long it is closed, and reloaded (about 4.7 s to the first
+ * decode on Dev04) when the next one starts; capture begins at once and its
+ * frames are buffered meanwhile.
  */
 export const IDLE_UNLOAD_MS = 5 * 60_000
+
+/** At most this much audio (both channels) waits for a reloading worker: 2 minutes. */
+const MAX_PENDING_SAMPLES = 2 * 2 * 60 * 16_000
 
 export interface WinEngineHostOptions {
   idleUnloadMs?: number
@@ -66,9 +70,14 @@ export class WinEngineHost {
   private unloaded = false
   private unloading = false
   private keepWarm = false
+  /** The worker is downloading Parakeet in the background (upgrade fallback). */
+  private backgroundDownload = false
   /** Frames captured while a reloading worker loads its model. */
   private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
   private startAfterReload = false
+  private pendingSamples = 0
+  /** The first live calibration, reused when the worker reloads. */
+  private calibration: { calibrationRtf: number; captionMode: string } | null = null
   private stopAfterReload = false
   private readonly idleUnloadMs: number
 
@@ -97,6 +106,7 @@ export class WinEngineHost {
     this.idleTimer = null
     if (
       this.keepWarm ||
+      this.backgroundDownload ||
       this.disposed ||
       this.sessionActive ||
       !this.ready ||
@@ -105,7 +115,14 @@ export class WinEngineHost {
       return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      if (this.sessionActive || this.keepWarm || !this.child || !this.ready) return
+      if (
+        this.sessionActive ||
+        this.keepWarm ||
+        this.backgroundDownload ||
+        !this.child ||
+        !this.ready
+      )
+        return
       this.unloading = true
       this.ready = false
       this.child.kill()
@@ -153,6 +170,7 @@ export class WinEngineHost {
         this.child = null
         return
       }
+      this.backgroundDownload = false
       const failedDuringWarmup = !this.ready && !this.sessionActive && !this.warmupResult?.ok
       this.child = null
       this.ready = false
@@ -190,7 +208,11 @@ export class WinEngineHost {
   }
 
   private postInit(): void {
-    this.child?.postMessage({ t: 'init', modelsDir: join(app.getPath('userData'), 'asr-models') })
+    this.child?.postMessage({
+      t: 'init',
+      modelsDir: join(app.getPath('userData'), 'asr-models'),
+      ...(this.calibration ? { calibration: this.calibration } : {})
+    })
   }
 
   private handleEngineEvent(event: Record<string, unknown>): void {
@@ -200,10 +222,34 @@ export class WinEngineHost {
         `[win-asr] ready model=${String(event.model ?? '')} loadMs=${String(event.loadMs ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
       )
       this.ready = true
+      if (
+        !this.calibration &&
+        typeof event.calibrationRtf === 'number' &&
+        (event.captionMode === 'interim' || event.captionMode === 'utterance')
+      ) {
+        this.calibration = { calibrationRtf: event.calibrationRtf, captionMode: event.captionMode }
+      }
       this.finishWarmup({ ok: true, micGranted: false, screenGranted: false }, { stage: 'ready' })
       if (this.sessionActive) this.resumeAfterReload()
       else this.armIdleTimer()
       return
+    }
+    if (event.event === 'error' && this.sessionActive && this.startAfterReload) {
+      this.failReloadDuringSession(String(event.message ?? 'the speech model could not be loaded'))
+      return
+    }
+    if (event.event === 'status' && event.stage === 'model_download' && !this.backgroundDownload) {
+      // Closing the worker now would abort the download it is running.
+      this.backgroundDownload = true
+      if (this.idleTimer) clearTimeout(this.idleTimer)
+      this.idleTimer = null
+    }
+    if (
+      event.event === 'status' &&
+      (event.stage === 'model_upgraded' || event.stage === 'model_download_failed')
+    ) {
+      this.backgroundDownload = false
+      if (!this.sessionActive) this.armIdleTimer()
     }
     if (!this.ready && !this.sessionActive) {
       if (event.event === 'download' && typeof event.progress === 'number') {
@@ -403,7 +449,11 @@ export class WinEngineHost {
     }
     if (this.startAfterReload) {
       this.recorder?.write(channel, samples)
-      this.pendingFrames.push({ channel, samples, sentAt: Date.now() })
+      // Bounded: a reload takes seconds; beyond this the audio is still saved.
+      if (this.pendingSamples < MAX_PENDING_SAMPLES) {
+        this.pendingFrames.push({ channel, samples, sentAt: Date.now() })
+        this.pendingSamples += samples.length
+      }
       return
     }
     if (!this.child || !this.workerStarted) return
@@ -445,6 +495,30 @@ export class WinEngineHost {
     }
   }
 
+  /**
+   * The worker reloading for this recording reported an error (for example
+   * its model could not be prepared): end the capture cleanly, keeping and
+   * merging its audio, instead of waiting for a transcript that cannot come.
+   */
+  private failReloadDuringSession(reason: string): void {
+    this.startAfterReload = false
+    this.stopAfterReload = false
+    this.pendingFrames = []
+    this.pendingSamples = 0
+    if (this.workerFinishTimer) clearTimeout(this.workerFinishTimer)
+    this.workerFinishTimer = null
+    this.emit({
+      event: 'error',
+      message: `Transcription could not start: ${reason}${this.recorder ? ' The audio of this recording is saved; use Re-transcribe once the speech model is available.' : ''}`
+    })
+    // The next recording reloads a fresh worker.
+    if (this.child) {
+      this.unloading = true
+      this.child.kill()
+    }
+    void this.completeSession()
+  }
+
   /** A reloaded worker is ready mid-session: start it and hand over buffered audio. */
   private resumeAfterReload(): void {
     if (!this.startAfterReload || !this.child || this.activeSessionId === null) return
@@ -452,10 +526,13 @@ export class WinEngineHost {
     this.workerStarted = true
     const sessionId = this.activeSessionId
     this.child.postMessage({ t: 'start', sessionId, channels: this.activeChannels })
+    // Stamped now: the reload itself is not lag (it would show "running behind").
+    const sentAt = Date.now()
     for (const frame of this.pendingFrames) {
-      this.child.postMessage({ t: 'audio', sessionId, ...frame })
+      this.child.postMessage({ t: 'audio', sessionId, ...frame, sentAt })
     }
     this.pendingFrames = []
+    this.pendingSamples = 0
     if (this.stopAfterReload) {
       this.stopAfterReload = false
       this.child.postMessage({ t: 'stop', sessionId })

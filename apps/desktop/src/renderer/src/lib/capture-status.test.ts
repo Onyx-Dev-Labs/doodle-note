@@ -100,6 +100,16 @@ test('a capture on the previous speech model says so honestly', () => {
     captureNotices(legacy).join(' '),
     /previous speech model while the new one downloads/
   )
+  // After the background download fails, the notice no longer claims it is downloading.
+  const failed = applyCaptureStatus(legacy, { event: 'status', stage: 'model_download_failed' })
+  assert.doesNotMatch(captureNotices(failed).join(' '), /while the new one downloads/)
+  assert.match(captureNotices(failed).join(' '), /could not be downloaded/)
+  const startedFailed = applyCaptureStatus(recording, {
+    event: 'status',
+    stage: 'legacy_model',
+    download: 'failed'
+  })
+  assert.match(captureNotices(startedFailed).join(' '), /could not be downloaded/)
 })
 
 test('idle and completed sessions ignore delayed status events', () => {

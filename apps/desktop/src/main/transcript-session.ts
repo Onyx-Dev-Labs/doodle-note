@@ -41,6 +41,7 @@ export class TranscriptSession {
   private partials: Partial<Record<EngineChannel, string>> = {}
   private captionsDelayed = false
   private legacyModel = false
+  private legacyDownloadFailed = false
   private savedAudioFailures: SavedAudioFailures = {}
 
   bindMeeting(meetingId?: string): void {
@@ -60,7 +61,8 @@ export class TranscriptSession {
       savedAudioFailures: { ...this.savedAudioFailures },
       error: this.error,
       ...(this.captionsDelayed ? { captionsDelayed: true } : {}),
-      ...(this.legacyModel ? { legacyModel: true } : {})
+      ...(this.legacyModel ? { legacyModel: true } : {}),
+      ...(this.legacyDownloadFailed ? { legacyDownloadFailed: true } : {})
     }
   }
 
@@ -97,6 +99,7 @@ export class TranscriptSession {
         this.partials = {}
         this.captionsDelayed = false
         this.legacyModel = false
+        this.legacyDownloadFailed = false
         this.savedAudioFailures = {}
         return
       case 'ready':
@@ -115,7 +118,12 @@ export class TranscriptSession {
         }
         if (ev.stage === 'captions_delayed') this.captionsDelayed = true
         if (ev.stage === 'captions_caught_up') this.captionsDelayed = false
-        if (ev.stage === 'legacy_model') this.legacyModel = true
+        if (ev.stage === 'legacy_model') {
+          this.legacyModel = true
+          this.legacyDownloadFailed = ev.download === 'failed'
+        }
+        if (ev.stage === 'model_download_failed' && this.legacyModel)
+          this.legacyDownloadFailed = true
         if (['finishing', 'saving_audio'].includes(ev.stage ?? '')) this.phase = 'finishing'
         return
       case 'channel_start':

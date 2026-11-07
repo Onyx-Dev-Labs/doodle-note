@@ -14,11 +14,12 @@ import { DEFAULT_SEGMENTER_CONFIG } from './segmenter'
  * Utterance length is bounded here, not by the VAD: sherpa's VAD only raises
  * its threshold past its maximum and can run on for minutes. When an
  * utterance reaches `maxSpeechSec`, it is cut at the quietest 100 ms of the
- * last few seconds; both sides are decoded with overlapping context and each
- * word is kept by exactly one side (by its start time), so a forced cut can
- * neither drop nor double a word. Every sample from an utterance's start is
- * retained until it is decoded, so no speech is ever dropped. Padding before
- * an utterance never reaches back into audio that was already decoded.
+ * last few seconds; the next part is decoded from a second before the cut and
+ * aligned on text with the words already committed (stitchSeam), so a forced
+ * cut neither drops nor doubles a word even when the two decodes disagree.
+ * Every sample from an utterance's start is retained until it is decoded, so
+ * no speech is ever dropped. Padding before an utterance never reaches back
+ * into audio that was already decoded.
  *
  * Live captions additionally re-decode the utterance in progress on a
  * geometric schedule, under a load guard, to show a growing caption.
@@ -59,6 +60,8 @@ export interface VadLike {
   isEmpty(): boolean
   /** Drop sherpa's queued segments; the pipeline forms its own. */
   clear(): void
+  /** Forget all state, including Silero's buffer of the speech in progress. */
+  reset(): void
 }
 
 export interface VadSettings {
@@ -71,6 +74,14 @@ export interface VadSettings {
 
 /** Passed to sherpa so its own maximum-length behaviour never engages. */
 export const VAD_UNBOUNDED_SEC = 36_000
+/**
+ * Silero keeps every sample of the speech it is tracking (AMI meetings had
+ * 127-172 s runs; music could run for hours). After this much continuous
+ * detection the pipeline resets the VAD at its next forced cut, bounding that
+ * buffer; the utterance carries on through the reset.
+ */
+export const VAD_RESET_AFTER_SEC = 60
+const VAD_RESET_GRACE_SEC = 1
 /** A forced cut picks the quietest point in this many trailing seconds. */
 export const FORCED_CUT_SEARCH_SEC = 3
 /** Context shared by the two decodes around a forced cut. */
@@ -294,6 +305,7 @@ export interface PipelineStats {
   decodeMs: number
   utterances: number
   forcedCuts: number
+  vadResets: number
   /** Longest stretch of audio given to one decode, in seconds. */
   longestDecodeSec: number
   interimDecodes: number
@@ -334,49 +346,96 @@ function groupWords(tokens: EngineTokenTiming[]): EngineTokenTiming[][] {
   return words
 }
 
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = row[0]!
+    row[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const above = row[j]!
+      row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1))
+      diagonal = above
+    }
+  }
+  return row[b.length]!
+}
+
 /**
- * Two decodes around a forced cut can place the same word on either side of
- * it: timestamps move by up to a second with different context, so time alone
- * cannot decide ownership. The part after a cut is decoded from a second
- * before the cut and aligned on text: it resumes after its copy of the last
- * word the part before committed (the copy nearest in time, within 1.5 s).
- * Only when that word cannot be found does time decide (words after it).
+ * Whether two decodes heard the same word: words of up to four letters must
+ * match exactly ("the" is not "there", "this" is not "thus"); longer ones may
+ * differ by a quarter of their letters ("Priya" / "Pria", "redesign" /
+ * "redesigned").
+ */
+export function sameWord(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  if (Math.min(a.length, b.length) < 4 || Math.max(a.length, b.length) < 5) return false
+  return editDistance(a, b) <= Math.max(1, Math.floor(Math.max(a.length, b.length) / 4))
+}
+
+/** Two decodes may time the same word up to this far apart. */
+const SEAM_MATCH_SEC = 1
+/** Second-decode words starting this soon after the cut are compared with the first part. */
+const SEAM_WINDOW_SEC = 1.5
+
+/**
+ * Two decodes around a forced cut disagree at the seam: timestamps move by up
+ * to a second with context, and words can be spelled differently or dropped.
+ * The part after a cut is decoded from a second before the cut, and its
+ * words near the cut are aligned with the words the part before committed in
+ * its last 1.5 s: a longest common subsequence over words that sound the same
+ * (sameWord) and lie within a second of each other, ties broken by time.
+ * Matched words and anything between them were already committed; the part
+ * resumes after its last matched word. With no match it keeps words that
+ * start after the last committed word. Words beyond the window are always new.
  */
 export function stitchSeam(tokens: EngineTokenTiming[], seam: Seam): EngineTokenTiming[] {
   const words = groupWords(tokens)
-  const last = seam.words[seam.words.length - 1]
+  const prior = seam.words
+  const head = words.filter((word) => word[0]!.startSec < seam.cutSec + SEAM_WINDOW_SEC)
+  const norms = head.map((word) => wordNorm(word.map((t) => t.token).join('')))
   let resume = 0
-  if (last) {
-    let best = -1
-    let bestDistance = Number.POSITIVE_INFINITY
-    words.forEach((word, index) => {
-      const startSec = word[0]!.startSec
-      const distance = Math.abs(startSec - last.startSec)
-      if (startSec > seam.cutSec + 1.5 || distance > 1.5) return
-      const norm = wordNorm(word.map((t) => t.token).join(''))
-      const same =
-        norm.length > 0 &&
-        (norm === last.norm ||
-          (Math.min(norm.length, last.norm.length) >= 3 &&
-            (norm.startsWith(last.norm) || last.norm.startsWith(norm))))
-      if (same && distance < bestDistance) {
-        best = index
-        bestDistance = distance
-      }
-    })
-    resume =
-      best >= 0
-        ? best + 1
-        : Math.max(
-            0,
-            words.findIndex((word) => word[0]!.startSec > last.startSec + 0.05)
-          )
-    if (best < 0 && words.every((word) => word[0]!.startSec <= last.startSec + 0.05)) {
-      resume = words.length
-    }
+  if (prior.length === 0) {
+    // Nothing committed near the cut: everything this part heard is new.
+    resume = 0
   } else {
-    const first = words.findIndex((word) => word[0]!.startSec >= seam.cutSec - 0.3)
-    resume = first < 0 ? words.length : first
+    // score[i][j]: best alignment of prior[0..i) with head[0..j).
+    const m = prior.length
+    const n = head.length
+    const score = Array.from({ length: m + 1 }, () => new Float64Array(n + 1))
+    const close = (i: number, j: number): number =>
+      Math.abs(prior[i]!.startSec - head[j]![0]!.startSec)
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        let best = Math.max(score[i - 1]![j]!, score[i]![j - 1]!)
+        if (close(i - 1, j - 1) <= SEAM_MATCH_SEC && sameWord(prior[i - 1]!.norm, norms[j - 1]!)) {
+          best = Math.max(best, score[i - 1]![j - 1]! + 1 - close(i - 1, j - 1) / 100)
+        }
+        score[i]![j] = best
+      }
+    }
+    // The last head word that is part of a best alignment.
+    let lastMatched = -1
+    let i = m
+    let j = n
+    while (i > 0 && j > 0) {
+      const matched =
+        close(i - 1, j - 1) <= SEAM_MATCH_SEC &&
+        sameWord(prior[i - 1]!.norm, norms[j - 1]!) &&
+        Math.abs(score[i]![j]! - (score[i - 1]![j - 1]! + 1 - close(i - 1, j - 1) / 100)) < 1e-9
+      if (matched) {
+        lastMatched = Math.max(lastMatched, j - 1)
+        i--
+        j--
+      } else if (score[i - 1]![j]! >= score[i]![j - 1]!) i--
+      else j--
+    }
+    if (lastMatched >= 0) resume = lastMatched + 1
+    else {
+      const lastStart = prior[prior.length - 1]!.startSec
+      resume = words.findIndex((word) => word[0]!.startSec > lastStart + 0.05)
+      if (resume < 0) resume = words.length
+    }
   }
   const kept = words.slice(resume).flat()
   if (kept.length > 0 && !kept[0]!.token.startsWith(' ')) {
@@ -400,6 +459,9 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
   /** Samples given to the VAD (whole windows). */
   private fed = 0
   private utterance: Utterance | null = null
+  /** Where Silero's current detection began, and when it was last reset. */
+  private detectedSince: number | null = null
+  private vadResetAt: number | null = null
   /** End of the last decoded window; padding never reaches before it. */
   private decodedThrough = 0
   /** Utterance length (samples) at which the next interim decode runs. */
@@ -423,6 +485,7 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     decodeMs: 0,
     utterances: 0,
     forcedCuts: 0,
+    vadResets: 0,
     longestDecodeSec: 0,
     interimDecodes: 0,
     skippedInterims: 0
@@ -535,7 +598,16 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
 
   /** One VAD window: open, close or force-cut the current utterance. */
   private step(final: boolean): void {
-    const speaking = this.vad.isDetected()
+    const detected = this.vad.isDetected()
+    if (detected) {
+      this.vadResetAt = null
+      this.detectedSince ??= this.fed
+    } else this.detectedSince = null
+    // Right after a reset Silero needs its minimum speech again: not a pause.
+    const speaking =
+      detected ||
+      (this.vadResetAt !== null &&
+        this.fed - this.vadResetAt < VAD_RESET_GRACE_SEC * ASR_SAMPLE_RATE)
     // Segments are formed here; sherpa's own queue is not used.
     if (!this.vad.isEmpty()) this.vad.clear()
     if (speaking && !this.utterance) {
@@ -571,6 +643,15 @@ export class UtteranceTranscriber<S extends OfflineStreamLike = OfflineStreamLik
     // The first part sees `overlap` beyond the cut; words starting before it are its own.
     const committed = this.decodeUtterance(cut + this.overlapSamples, cut, final)
     this.stats.forcedCuts++
+    if (
+      this.detectedSince !== null &&
+      this.fed - this.detectedSince > VAD_RESET_AFTER_SEC * ASR_SAMPLE_RATE
+    ) {
+      this.vad.reset()
+      this.stats.vadResets++
+      this.vadResetAt = this.fed
+      this.detectedSince = null
+    }
     const cutSec = cut / ASR_SAMPLE_RATE
     this.utterance = {
       keepFrom: cut,

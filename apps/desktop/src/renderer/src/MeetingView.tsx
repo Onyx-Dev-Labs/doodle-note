@@ -68,6 +68,7 @@ interface SessionState {
   captionsDelayed?: boolean
   /** Windows: this capture uses the previous speech model. */
   legacyModel?: boolean
+  legacyDownloadFailed?: boolean
 }
 
 const initialSessionState: SessionState = {
@@ -114,6 +115,7 @@ function sessionReducer(state: SessionState, ev: EngineEvent): SessionState {
         error: snapshot.error ?? state.error,
         captionsDelayed: snapshot.captionsDelayed === true,
         legacyModel: snapshot.legacyModel === true,
+        legacyDownloadFailed: snapshot.legacyDownloadFailed === true,
         statusText: snapshot.phase === 'finishing' ? 'Finishing up…' : ''
       }
     }

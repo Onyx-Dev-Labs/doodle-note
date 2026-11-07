@@ -10,6 +10,8 @@ import {
   UtteranceTranscriber,
   VAD_WINDOW_SAMPLES,
   keepWords,
+  sameWord,
+  stitchSeam,
   tokensFromResult,
   type OfflineRecognizerLike,
   type TdtResult,
@@ -66,6 +68,9 @@ test('words are kept whole by their start time', () => {
  */
 class FakeVad implements VadLike {
   private fed = 0
+  resets = 0
+  /** After a reset, detection needs the minimum speech again. */
+  private resetAt = -1
   constructor(
     private readonly speech: Array<[number, number]>,
     private readonly settings: VadSettings = LIVE_VAD
@@ -77,10 +82,15 @@ class FakeVad implements VadLike {
   isDetected(): boolean {
     const onset = seconds(this.settings.minSpeechSec)
     const silence = seconds(this.settings.minSilenceSec)
+    if (this.resetAt >= 0 && this.fed < this.resetAt + onset) return false
     return this.speech.some(([start, end]) => this.fed >= start + onset && this.fed < end + silence)
   }
   isEmpty(): boolean {
     return true
+  }
+  reset(): void {
+    this.resets++
+    this.resetAt = this.fed
   }
   clear(): void {
     /* The fake keeps no segment queue. */
@@ -200,6 +210,200 @@ test('words timed on either side of a forced cut by the two decodes are kept exa
     const { words } = run(speech, seconds(83), LIVE_VAD, jitter)
     assert.deepEqual(words, expectedWords(speech), `jitter ${jitter}s`)
   }
+})
+
+/** The seam cases from review: the two decodes disagree in text or timing. */
+function seamCase(
+  committed: Array<[string, number]>,
+  cutSec: number,
+  second: Array<[string, number]>
+): string {
+  const norm = (text: string): string => text.toLowerCase().replace(/[^a-z0-9']/g, '')
+  const kept = stitchSeam(
+    second.map(([text, startSec]) => ({
+      token: ` ${text}`,
+      startSec,
+      endSec: startSec + 0.25,
+      confidence: 0.9
+    })),
+    {
+      cutSec,
+      words: committed
+        .filter(([, startSec]) => startSec >= cutSec - 1.5)
+        .map(([text, startSec]) => ({ norm: norm(text), startSec }))
+    }
+  )
+  return [...committed.map(([text]) => text), ...kept.map((token) => token.token.trim())].join(' ')
+}
+
+test('a forced-cut seam survives spelling variants, dropped and repeated words, and silence', () => {
+  // The second decode spells the committed name differently, a little later.
+  assert.equal(
+    seamCase(
+      [
+        ['notes', 9],
+        ['to', 9.35],
+        ['Priya', 9.6]
+      ],
+      10,
+      [
+        ['notes', 9.05],
+        ['to', 9.4],
+        ['Pria', 9.75],
+        ['before', 10.2],
+        ['Friday', 10.5]
+      ]
+    ),
+    'notes to Priya before Friday'
+  )
+  // It drops a short function word; "the" is not "there".
+  assert.equal(
+    seamCase(
+      [
+        ['signed', 9.3],
+        ['the', 9.7]
+      ],
+      10,
+      [
+        ['signed', 9.3],
+        ['contract', 9.9],
+        ['over', 10.4],
+        ['there', 10.8],
+        ['today', 11.1]
+      ]
+    ),
+    'signed the contract over there today'
+  )
+  // A repeated word next to the cut is not swallowed.
+  assert.equal(
+    seamCase(
+      [
+        ['said', 8.9],
+        ['no', 9.3]
+      ],
+      10,
+      [
+        ['said', 9.2],
+        ['no', 9.9],
+        ['no', 10.3],
+        ['way', 10.6]
+      ]
+    ),
+    'said no no way'
+  )
+  // The cut landed in silence: nothing committed nearby, so every word is new.
+  assert.equal(
+    seamCase([['okay', 7.8]], 10, [
+      ['budget', 9.6],
+      ['review', 10.1]
+    ]),
+    'okay budget review'
+  )
+  // A word the first decode placed after the cut and the second before it.
+  assert.equal(
+    seamCase(
+      [
+        ['the', 9.2],
+        ['vendor', 9.5]
+      ],
+      10,
+      [
+        ['the', 9.1],
+        ['vendor', 9.4],
+        ['contract', 9.8],
+        ['expires', 10.3]
+      ]
+    ),
+    'the vendor contract expires'
+  )
+  assert.equal(sameWord('the', 'there'), false)
+  assert.equal(sameWord('priya', 'pria'), true)
+  assert.equal(sameWord('redesign', 'redesigned'), true)
+})
+
+/** Like gridRecognizer, but every other decode misspells words and drops "of". */
+function noisyRecognizer(speech: Array<[number, number]>): OfflineRecognizerLike<{
+  samples: Float32Array
+  acceptWaveform(o: { samples: Float32Array }): void
+}> {
+  const vocabulary = [
+    'planning',
+    'review',
+    'of',
+    'billing',
+    'service',
+    'vendor',
+    'contract',
+    'the',
+    'budget',
+    'Priya'
+  ]
+  let decodes = 0
+  return {
+    createStream() {
+      const stream = {
+        samples: new Float32Array(0) as Float32Array,
+        acceptWaveform({ samples }: { samples: Float32Array }) {
+          stream.samples = samples
+        }
+      }
+      return stream
+    },
+    decode() {
+      decodes++
+    },
+    getResult(stream): TdtResult {
+      const noisy = decodes % 2 === 0
+      const start = Math.round(stream.samples[0]! * 1e7)
+      const end = start + stream.samples.length
+      const tokens: string[] = []
+      const timestamps: number[] = []
+      for (let at = Math.ceil(start / 4000) * 4000; at < end - 1600; at += 4000) {
+        if (!speech.some(([a, b]) => at >= a && at < b)) continue
+        let word = vocabulary[(at / 4000) % vocabulary.length]!
+        if (noisy && word === 'of') continue
+        if (noisy && word.length >= 5) word = word.slice(0, -1) // "Priy", "billin"
+        tokens.push(` ${word}`)
+        timestamps.push(Math.max(0, (at - start) / rate + (noisy ? 0.15 : -0.1)))
+      }
+      return { text: tokens.join(''), tokens, timestamps }
+    }
+  }
+}
+
+test('decodes that disagree in spelling and drop words never double or lose a word across cuts', () => {
+  const speech: Array<[number, number]> = [[seconds(1), seconds(61)]]
+  const events: Array<Record<string, unknown>> = []
+  const transcriber = new UtteranceTranscriber(
+    noisyRecognizer(speech) as never,
+    new FakeVad(speech),
+    {
+      channel: 'mic',
+      interim: false,
+      emit: (event) => events.push(event)
+    }
+  )
+  feed(transcriber, seconds(63))
+  transcriber.finish()
+  const words = events
+    .filter((event) => event.event === 'timings')
+    .flatMap((event) => (event.tokens as EngineTokenTiming[]).map((t) => t.token.trim()))
+  // One word per 0.25 s slot of speech, minus at most the "of"s a noisy part dropped.
+  const slots = expectedWords(speech).length
+  const ofs = expectedWords(speech).filter((slot) => slot % 10 === 2).length
+  assert.ok(words.length <= slots, `${words.length} words for ${slots} slots (doubles)`)
+  assert.ok(words.length >= slots - ofs, `${words.length} words for ${slots} slots (losses)`)
+  for (let i = 1; i < words.length; i++) {
+    assert.ok(!(words[i] === words[i - 1] && words[i] !== 'the'), `doubled "${words[i]}" at ${i}`)
+  }
+})
+
+test('the VAD buffer is bounded during hours-long speech without losing a word', () => {
+  const speech: Array<[number, number]> = [[seconds(1), seconds(181)]]
+  const { words, transcriber } = run(speech, seconds(183))
+  assert.deepEqual(words, expectedWords(speech))
+  // A 180 s run resets Silero at least twice (every 60 s of detection).
+  assert.ok(transcriber.stats.vadResets >= 2, `${transcriber.stats.vadResets} resets`)
 })
 
 test('imports bound utterances the same way with their own cap', () => {

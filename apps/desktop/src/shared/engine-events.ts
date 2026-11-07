@@ -116,6 +116,8 @@ export interface EngineStatusEvent {
   channel?: EngineChannel
   /** Present when stage === "requesting_permission". */
   permission?: string
+  /** Windows, stage === "legacy_model": state of the background model download. */
+  download?: 'in_progress' | 'failed'
 }
 
 export interface EngineDownloadEvent {
@@ -285,6 +287,7 @@ export interface EngineSessionSnapshot {
   captionsDelayed?: boolean
   /** Windows: this capture uses the previous speech model (see legacy_model). */
   legacyModel?: boolean
+  legacyDownloadFailed?: boolean
 }
 
 export type EngineLifecycleEvent =

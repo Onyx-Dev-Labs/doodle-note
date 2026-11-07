@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test, type TestContext } from 'node:test'
 import type { EngineEvent } from '../shared/engine-events'
@@ -198,6 +200,102 @@ test('Stop during a reload still transcribes the buffered audio before finishing
       second.messages.map((message) => message.t),
       ['init', 'start', 'audio', 'stop']
     )
+  } finally {
+    host.dispose()
+  }
+})
+
+test('a worker downloading the new model in the background is never closed as idle', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const host = new WinEngineHost(() => {}, { idleUnloadMs: 60_000 })
+  try {
+    host.startServe()
+    const worker = workers.at(-1)!
+    // Upgrade fallback: ready at once on the cached model, then downloading.
+    worker.event({ event: 'status', stage: 'serve_ready', captionMode: 'legacy' })
+    worker.event({ event: 'status', stage: 'model_download', progress: 0 })
+    t.mock.timers.tick(10 * 60_000)
+    assert.equal(worker.kills, 0, 'the download keeps its worker')
+    worker.event({ event: 'status', stage: 'model_download_failed' })
+    t.mock.timers.tick(60_001)
+    assert.equal(worker.kills, 1, 'idle close resumes once the download has ended')
+  } finally {
+    host.dispose()
+  }
+})
+
+test('a reload that fails during a recording ends it cleanly and keeps its audio', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const controls: Array<Record<string, unknown>> = []
+  const events: EngineEvent[] = []
+  const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
+    idleUnloadMs: 1_000
+  })
+  host.onEvent((event) => events.push(event))
+  const audioDir = mkdtempSync(join(tmpdir(), 'doodlenote-reload-fail-'))
+  try {
+    host.startServe()
+    const first = workers.at(-1)!
+    first.event({
+      event: 'status',
+      stage: 'serve_ready',
+      calibrationRtf: 0.11,
+      captionMode: 'interim'
+    })
+    t.mock.timers.tick(1_001)
+    first.emit('exit', 0)
+    host.start('live', undefined, { source: 'mic', audioDir })
+    const second = workers.at(-1)!
+    // The reload reuses the first calibration instead of measuring a busy PC.
+    assert.deepEqual(second.messages[0]!.calibration, {
+      calibrationRtf: 0.11,
+      captionMode: 'interim'
+    })
+    const sessionId = controls.at(-1)!.sessionId as number
+    host.captureStatus({ type: 'ready', sessionId })
+    for (let i = 0; i < 2_000; i++) host.pushAudio(sessionId, 'mic', new Float32Array(4096))
+    second.event({ event: 'error', message: 'The speech model could not be downloaded.' })
+    for (let i = 0; i < 200 && !events.some((event) => event.event === 'exit'); i++) {
+      t.mock.timers.tick(50)
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    const names = events.map((event) => event.event)
+    assert.ok(names.includes('error'))
+    assert.match(
+      String(events.find((event) => event.event === 'error')!.message),
+      /could not start.*audio of this recording is saved/
+    )
+    assert.ok(names.includes('audio'), 'the recording is merged now, not at next launch')
+    assert.equal(names.at(-1), 'exit')
+    assert.equal(second.kills, 1)
+    assert.equal(second.messages.filter((message) => message.t === 'audio').length, 0)
+  } finally {
+    host.dispose()
+    rmSync(audioDir, { recursive: true, force: true })
+  }
+})
+
+test('audio buffered across a reload is not counted as lag', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  const controls: Array<Record<string, unknown>> = []
+  const host = new WinEngineHost((_channel, payload) => controls.push(payload as never), {
+    idleUnloadMs: 1_000
+  })
+  try {
+    host.startServe()
+    const first = workers.at(-1)!
+    first.event({ event: 'status', stage: 'serve_ready' })
+    t.mock.timers.tick(1_001)
+    first.emit('exit', 0)
+    host.start('live', undefined, { source: 'mic' })
+    const second = workers.at(-1)!
+    const sessionId = controls.at(-1)!.sessionId as number
+    host.captureStatus({ type: 'ready', sessionId })
+    host.pushAudio(sessionId, 'mic', new Float32Array(4096))
+    t.mock.timers.tick(5_000) // the model takes 5 s to load
+    second.event({ event: 'status', stage: 'serve_ready' })
+    const frame = second.messages.find((message) => message.t === 'audio')!
+    assert.equal(frame.sentAt, Date.now())
   } finally {
     host.dispose()
   }

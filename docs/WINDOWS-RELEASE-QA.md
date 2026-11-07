@@ -64,19 +64,26 @@ the engine hashes every file and downloads a damaged model again. Retrying
 setup, or starting a recording, restarts an engine that died while loading.
 
 - **Live captions** (both channels): Silero VAD detects speech; the pipeline
-  forms utterances itself (end at a 0.5 s pause, hard cap 12 s) and NVIDIA
+  forms utterances itself (end at a 0.5 s pause, hard cap 8 s) and NVIDIA
   Parakeet Unified 0.6b (the Mac's live model; int8 full-context export)
   decodes each one with real token timestamps and confidences; casing and
   punctuation come from the model. No audio is ever dropped: every sample from
   an utterance's start is kept until decoded. At the cap the utterance is cut
-  at the quietest 100 ms of the last 3 s; both sides are decoded with 0.5 s of
-  shared context and each word is kept by exactly one side (by its start time),
-  so a cut neither loses nor doubles words. Padding never reaches into audio
-  already decoded. While someone speaks, the utterance in progress is
+  at the quietest 100 ms of the last 3 s; the part after the cut is decoded
+  from 1 s before it, and its words near the cut are aligned with the words
+  the first part committed in its last 1.5 s (a longest common subsequence of
+  words heard the same way, within 1 s of each other: words of up to four
+  letters must match exactly, longer ones may differ by a quarter of their
+  letters, such as "Priya" and "Pria"). The part resumes after its last
+  aligned word; if nothing aligns it keeps the words after the last committed
+  one, and after a cut in silence it keeps everything. Padding never reaches
+  into audio already decoded. Silero's own buffer of the speech in progress is
+  reset (at a cut) after 60 s of continuous detection, so hours of continuous
+  audio such as music cannot grow it without limit. While someone speaks, the utterance in progress is
   re-decoded after 1 s and then each time it grows by half, up to the cut, so
   captions keep growing. First-run download: 502 MB.
 - **Imports and Re-transcribe**: the same pipeline without interim captions
-  (1 s pause, 20 s cap) using the Mac's batch setting and models: Parakeet TDT
+  (1 s pause, 30 s cap) using the Mac's batch setting and models: Parakeet TDT
   0.6b v2 (English, default, 482 MB on first import) or v3 (Multilingual,
   487 MB on first use). An import depends only on its own model, not on the
   live model. Settings -> Recording transcription offers exactly these two
@@ -89,16 +96,24 @@ setup, or starting a recording, restarts an engine that died while loading.
   cached and Parakeet Unified is not yet installed, live captions use the
   Zipformer, so an offline or slow-link user can record at once and gets a
   transcript; the recorder says "Transcribing with the previous speech model
-  while the new one downloads". Parakeet downloads in the background and is
-  used from the next recording. These folders are never deleted (about
-  0.6 GB); the tiny.en folder is no longer used at all.
+  while the new one downloads". Parakeet downloads in the background (the
+  worker is not closed as idle while it does) and is used from the next
+  recording. If the download fails the notice says so, and it is retried,
+  resuming its partial file, after each recording on the previous model.
+  These folders are never deleted (about 0.6 GB); the tiny.en folder is no
+  longer used at all.
 - **No post-stop refinement**: like the Mac, the live transcript is final when
   Stop finishes. Saved Windows transcripts are put in time order at Stop, and
   the still-open segment's committed words are checkpointed (at most every 5 s)
-  so a crash keeps them.
+  so a crash keeps them. A crash can still lose the words not yet committed:
+  the utterance in progress (up to the 8 s cap) plus up to 2 s of mic words
+  held for echo ordering, so about 10 s; the saved audio keeps them for
+  Re-transcribe.
 - **Echo**: mic timings are held until the system channel has committed the
   same stretch of time, so the segmenter can flag speaker echo even when the
-  far side's longer utterance is decoded later.
+  far side's longer utterance is decoded later. The hold is bounded to 2 s of
+  wall time, so a stalled or ended system channel cannot keep mic text out of
+  the transcript, and held words stay in the mic caption meanwhile.
 - **Slow machines**: at startup the live engine decodes a fixed 4 s signal and
   measures its real-time factor. Above 0.2 (about twice this reference
   machine's cost) captions switch to utterance-only updates; committed text
@@ -109,15 +124,19 @@ setup, or starting a recording, restarts an engine that died while loading.
   interims, with the same 10.5% meeting WER. While recording, interim decodes
   are skipped whenever decoding used more than half of the last 10 s or a frame
   waited 1.5 s. While any channel's frames wait more than 5 s, the recorder
-  shows "Live captions are running behind on this PC"; it clears once every
-  channel is back under 1 s and can appear again. After Stop the worker may
+  shows "Live captions are running behind on this PC"; it stays at least 10 s,
+  clears once every channel has been under 1 s for 5 s, and can appear again. After Stop the worker may
   finish queued speech as long as it keeps producing text (it is ended only
   after 15 s without progress).
 - **Memory**: the loaded live worker uses about 765 MB while idle. After
   5 minutes without a recording it is closed; the next recording starts
-  capture at once, buffers its audio while the model reloads (about 4.7 s to
-  the first decode on Dev04) and loses nothing. `WinEngineHost.setKeepWarm`
-  keeps it loaded for features that need instant starts.
+  capture at once, buffers its audio (up to 2 minutes) while the model reloads
+  (about 4.7 s to the first decode on Dev04) and loses nothing. The reload
+  reuses the first calibration and does not count as lag. If the reload fails
+  (for example the model cannot be prepared) the recording ends at once with
+  that error, and its audio is still merged and saved for Re-transcribe.
+  `WinEngineHost.setKeepWarm` keeps the worker loaded for features that need
+  instant starts.
 - **Capture**: the renderer pumps microphone and loopback audio through an
   AudioWorklet (bundled as a same-origin script for the CSP), not the
   deprecated main-thread ScriptProcessorNode. On Stop each pump hands over its
@@ -175,9 +194,9 @@ Peak is the benchmark process's maximum resident memory.
 | Whisper tiny.en, 25 s windows, 2 threads | previous final/import | 7.7% | 19.1% | 23.0% | 0.074-0.088 | n/a | 744 MB |
 | Parakeet Unified streaming 1120 ms, 4 threads | Mac's live export | 5.0% | 17.5% | not run | 0.97-1.29 | 1.78 | 888 MB |
 | Parakeet Unified streaming 560 ms, 4 threads | Mac's live export | not run | 14.7% (12 clips) | not run | 3.03 | not run | 866 MB |
-| **VAD + Parakeet Unified per utterance (8 s cap), 2 threads** | **new live** | **3.6%** | **10.1%** | **14.6%** | 0.29 | 0.47-0.49 | 1.96 GB |
-| **VAD (1 s, 30 s cap) + Parakeet TDT v2, 4 threads** | **new import, English** | **5.2%** | **10.5%** | **15.3%** | 0.09 (long 0.12) | n/a | 1.53 GB |
-| **VAD (1 s, 30 s cap) + Parakeet TDT v3, 4 threads** | **new import, multilingual** | **3.8%** | **10.7%** | **17.3%** | 0.09 (long 0.13) | n/a | 1.92 GB |
+| **VAD + Parakeet Unified per utterance (8 s cap), 2 threads** | **new live** | **3.6%** | **10.1%** | **14.3%** | 0.29 | 0.47-0.49 | 1.96 GB |
+| **VAD (1 s, 30 s cap) + Parakeet TDT v2, 4 threads** | **new import, English** | **5.2%** | **10.5%** | **15.1%** | 0.09 (long 0.10) | n/a | 1.82 GB |
+| **VAD (1 s, 30 s cap) + Parakeet TDT v3, 4 threads** | **new import, multilingual** | **3.8%** | **10.7%** | **16.7%** | 0.09 (long 0.10) | n/a | 1.90 GB |
 
 Earlier candidates (measured before the utterance-bound fix, so their
 30-minute numbers are not comparable): VAD + TDT v2 for live 5.4% / 11.8%,
@@ -192,15 +211,16 @@ Parakeet paths produced casing and punctuation; the previous live path did not.
   step, so on this CPU they cannot keep up with one channel and are less
   accurate on meetings than the same weights decoded per utterance.
 - Live (Unified, per utterance) and batch (TDT v2) are within noise of each
-  other (10.1% vs 10.5% meeting, 14.6% vs 15.3% on the 30-minute meeting), so
+  other (10.1% vs 10.5% meeting, 14.3% vs 15.1% on the 30-minute meeting), so
   Windows matches the Mac with no post-stop refinement. The previous tiny.en
   refinement took 133 s after Stop for the 30-minute meeting; Stop now waits
   only for the last utterance (median 0.35-0.40 s, maximum 0.9 s on clips).
 - Utterance cap versus delay (30-minute meeting, live, words committed after
-  they end): 8 s -> 14.6% WER, mean 4.4 s, p90 7.1 s; 12 s -> 15.3%, 6.0 s,
-  10.4 s; 15 s -> 15.1%, 7.1 s, 12.8 s. Shorter cuts did not cost accuracy
-  once words were stitched by text, so live uses 8 s. Imports: TDT v2 15.6%
-  at 20 s and 15.3% at 30 s; v3 17.9% and 17.3%.
+  they end; measured with single-word stitching): 8 s -> 14.6% WER, mean
+  4.4 s, p90 7.1 s; 12 s -> 15.3%, 6.0 s, 10.4 s; 15 s -> 15.1%, 7.1 s,
+  12.8 s, so live uses 8 s. With the final alignment-based stitching the 8 s
+  cap gives 14.3% with the same delay (4.4 s, p90 7.05 s). Imports (30 s cap):
+  TDT v2 15.1%, v3 16.7%.
 - First text appears after a median 1.02 s (read) / 1.28 s (meeting) of audio,
   versus 1.02 / 1.54 s for Zipformer and 1.79 s for Unified streaming.
 - Timestamps do not drift: against AMI word times the live median offset is
@@ -215,15 +235,15 @@ Parakeet paths produced casing and punctuation; the previous live path did not.
 app ships (the AMI IS1009c mix and its speaker-A headset as two simultaneous
 channels, Unified, 2 threads, shipped session options and caps):
 
-- Kept up for the whole session: 1.06 logical CPUs busy on average (of 16),
-  decode time 0.49 s per second of audio for both channels together. Queue
-  lag stayed under 1 s in 54 of 61 samples (maximum 1.8 s; the warning needs
+- Kept up for the whole session: 1.05 logical CPUs busy on average (of 16),
+  decode time 0.47 s per second of audio for both channels together. Queue
+  lag stayed under 1 s in 56 of 61 samples (maximum 2.0 s; the warning needs
   5 s).
-- Memory was flat: resident 983-1043 MB from the first to the last minute
-  (peak 1.12 GB).
-- WER 14.6% on the mix channel, identical to the unpaced run; 212 forced cuts,
+- Memory was flat: resident 983-1042 MB from the first to the last minute
+  (peak 1.11 GB). Silero was reset 6 times across 127-172 s speech runs.
+- WER 14.3% on the mix channel, identical to the unpaced run; 209 forced cuts,
   longest decode 9.0 s; timestamp offset constant (above).
-- Committed words trailed speech by 4.4 s on average (p90 7.1 s). Captions in
+- Committed words trailed speech by 4.4 s on average (p90 7.05 s). Captions in
   between come from interim decodes; under this load (both channels speaking
   continuously) the guard skipped 51% of scheduled interims.
 
