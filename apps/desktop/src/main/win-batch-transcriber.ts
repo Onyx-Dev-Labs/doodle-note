@@ -8,13 +8,14 @@ import {
   ENGINE_BATCH_READ_CHANNEL,
   type EngineBatchMessage,
   type EngineChannel,
-  type EngineTokenTiming,
-  type TranscriptSegment
+  type EngineTokenTiming
 } from '../shared/engine-events'
-import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
-import type { BatchOptions, BatchProgress, BatchTranscription } from './import-logic'
-import { SegmentAssembler } from './segmenter'
-import { reconcileRefinedTranscript } from './transcript-refinement'
+import {
+  assembleBatchTokens,
+  type BatchOptions,
+  type BatchProgress,
+  type BatchTranscription
+} from './import-logic'
 
 import { checkImportCanceled, ImportCanceledError } from './import-jobs'
 
@@ -27,9 +28,10 @@ interface ActiveJob {
   filePath: string
   rendererId: number | null
   child: UtilityProcess
-  assembler: SegmentAssembler
-  segments: TranscriptSegment[]
-  finals: Map<EngineChannel, { text: string; audioSeconds: number }>
+  /** Raw token timings per channel, assembled once at the end like the Mac. */
+  tokens: Record<EngineChannel, EngineTokenTiming[]>
+  /** Split only for saved DoodleNote parts whose channels are mic/system. */
+  channelMode: 'mixed' | 'split'
   audioSeconds: number
   started: boolean
   settled: boolean
@@ -50,19 +52,15 @@ interface ActiveJob {
 /**
  * Windows imported-audio transcription without an extra media binary.
  * Chromium decodes WAV/MP3/M4A/MP4 in the renderer, resamples it to 16 kHz, and
- * streams PCM here. A dedicated sherpa utility process transcribes the file,
- * so importing never interrupts the persistent live-meeting engine.
+ * streams PCM here. A dedicated sherpa utility process transcribes the file
+ * with Parakeet TDT (v2 English or v3 multilingual, from the same batch
+ * setting the Mac uses), cut at voice-activity boundaries, so importing never
+ * interrupts the persistent live-meeting engine. External stereo is mixed to
+ * one neutral speaker; only saved DoodleNote parts keep mic/system channels.
  */
 export class WinBatchTranscriber {
   private active: ActiveJob | null = null
   private preparing = false
-
-  constructor(
-    private readonly ensureEngineReady: (
-      onEvent?: (event: WizardPreflightEvent) => void,
-      signal?: AbortSignal
-    ) => Promise<WizardPreflightResult>
-  ) {}
 
   registerIpc(): void {
     ipcMain.handle(ENGINE_BATCH_READ_CHANNEL, (event, jobId: unknown) => {
@@ -115,17 +113,9 @@ export class WinBatchTranscriber {
       reject(new Error(`Could not read that audio file: ${String(error)}`))
       return
     }
+    // Imports depend only on their own batch model: the worker below downloads
+    // or loads it (with progress), independent of the live engine.
     checkImportCanceled(options.signal)
-    const readiness = await this.ensureEngineReady((event) => {
-      if (event.stage === 'download') {
-        onProgress?.({ stage: 'downloading_model', progress: event.progress })
-      }
-    }, options.signal)
-    checkImportCanceled(options.signal)
-    if (!readiness.ok) {
-      reject(new Error(readiness.error ?? 'The Windows transcription engine is not ready.'))
-      return
-    }
 
     let child: UtilityProcess
     try {
@@ -142,9 +132,8 @@ export class WinBatchTranscriber {
       filePath,
       rendererId: null,
       child,
-      assembler: new SegmentAssembler(),
-      segments: [],
-      finals: new Map(),
+      tokens: { mic: [], system: [] },
+      channelMode: options.channels ?? 'mixed',
       audioSeconds: 0,
       started: false,
       settled: false,
@@ -191,7 +180,8 @@ export class WinBatchTranscriber {
     child.postMessage({
       t: 'init',
       modelsDir: join(app.getPath('userData'), 'asr-models'),
-      quality: 'final'
+      quality: 'final',
+      parakeetModel: options.settings?.parakeetModel === 'v3' ? 'v3' : 'v2'
     })
   }
 
@@ -207,7 +197,11 @@ export class WinBatchTranscriber {
         return
       }
       job.rendererId = window.webContents.id
-      window.webContents.send(ENGINE_BATCH_CONTROL_CHANNEL, { action: 'decode', jobId: job.id })
+      window.webContents.send(ENGINE_BATCH_CONTROL_CHANNEL, {
+        action: 'decode',
+        jobId: job.id,
+        channels: job.channelMode
+      })
       return
     }
     if (event.event === 'status' && event.stage === 'transcribing') {
@@ -216,28 +210,10 @@ export class WinBatchTranscriber {
     }
     if (
       event.event === 'timings' &&
-      typeof event.channel === 'string' &&
+      (event.channel === 'mic' || event.channel === 'system') &&
       Array.isArray(event.tokens)
     ) {
-      job.segments.push(
-        ...job.assembler.addTimings(
-          event.channel as EngineChannel,
-          event.tokens as EngineTokenTiming[]
-        )
-      )
-      return
-    }
-    if (event.event === 'final' && typeof event.channel === 'string') {
-      job.segments.push(...job.assembler.flush(event.channel as EngineChannel))
-      const channel = event.channel as EngineChannel
-      const text = typeof event.text === 'string' ? event.text.trim() : ''
-      if (text) {
-        job.finals.set(channel, {
-          text,
-          audioSeconds:
-            typeof event.audioSeconds === 'number' ? event.audioSeconds : job.audioSeconds
-        })
-      }
+      job.tokens[event.channel].push(...(event.tokens as EngineTokenTiming[]))
       return
     }
     if (event.event === 'error') {
@@ -303,15 +279,10 @@ export class WinBatchTranscriber {
         job.reject(error)
         return
       }
-      job.segments.push(...job.assembler.flush())
-      if (job.finals.size > 0) {
-        job.segments = reconcileRefinedTranscript(
-          job.segments,
-          [...job.finals].map(([channel, result]) => ({ channel, ...result }))
-        )
-      }
-      job.segments.sort((a, b) => a.startMs - b.startMs)
-      job.resolve({ segments: job.segments, audioSeconds: job.audioSeconds })
+      job.resolve({
+        segments: assembleBatchTokens(job.tokens, job.channelMode),
+        audioSeconds: job.audioSeconds
+      })
     }
     if (job.exited) complete()
     else {

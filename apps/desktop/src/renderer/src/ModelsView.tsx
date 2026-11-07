@@ -1423,6 +1423,33 @@ export default function ModelsView({
                   )}
                 </section>
               )}
+              {detect?.platform === 'win32' && (
+                <section className="keys-section">
+                  <h3>Recording transcription</h3>
+                  <p className="models-sub">
+                    Choose the local Parakeet model for imported audio and Re-transcribe. Live
+                    captions use Parakeet Unified (English).
+                  </p>
+                  <label className="models-sub">
+                    Parakeet language
+                    <select
+                      aria-label="Parakeet batch language"
+                      value={settings?.batchTranscription?.parakeetModel ?? 'v2'}
+                      onChange={(event) =>
+                        void chooseBatch({ parakeetModel: event.target.value as 'v2' | 'v3' })
+                      }
+                    >
+                      <option value="v2">English</option>
+                      <option value="v3">Multilingual</option>
+                    </select>
+                  </label>
+                  <p className="models-sub">
+                    The first import with each choice downloads a verified model (English 482 MB,
+                    Multilingual 487 MB). You can cancel or retry from import progress. Once
+                    downloaded, it works offline. Audio stays on this PC.
+                  </p>
+                </section>
+              )}
 
               <section className="keys-section calendar-section">
                 <h3>Meeting detection</h3>

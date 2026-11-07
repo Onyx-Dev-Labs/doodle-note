@@ -48,7 +48,14 @@ test('a native startup crash settles setup and does not enter a restart loop', a
     const count = workers.length
     t.mock.timers.tick(10_000)
     assert.equal(workers.length, count, 'a broken native startup must not repeatedly crash')
-    assert.equal((await host.preflight()).ok, false, 'late setup subscribers see the failure')
+    // A later setup request (a person retrying) starts exactly one new worker,
+    // which verifies and repairs the model; a second crash is reported again.
+    const retry = host.preflight()
+    assert.equal(workers.length, count + 1)
+    workers.at(-1)!.emit('exit', -36861)
+    assert.equal((await retry).ok, false, 'a repeated failure is reported, not retried in a loop')
+    t.mock.timers.tick(10_000)
+    assert.equal(workers.length, count + 1)
   } finally {
     host.dispose()
   }

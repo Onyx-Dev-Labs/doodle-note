@@ -19,7 +19,14 @@ import mascotUrl from './assets/mascot-square.png'
 import './assets/sidebar-redesign.css'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
-import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
+import {
+  setWinCaptureWorkletUrl,
+  startWinCapture,
+  stopWinCapture,
+  switchWinInputDevice
+} from './lib/win-capture'
+// Bundled as its own script file: the CSP allows only same-origin scripts.
+import captureWorkletUrl from './lib/win-capture-worklet.ts?worker&url'
 import { decodeWinBatchAudio, cancelWinBatchAudio } from './lib/win-batch-decode'
 import {
   CalendarIcon,
@@ -34,6 +41,8 @@ import {
 } from './icons'
 
 type ViewId = 'home' | 'editor' | 'settings' | 'dev' | 'cloud'
+
+setWinCaptureWorkletUrl(captureWorkletUrl)
 
 /** The "meeting is starting" banner disappears 10 min past the start. */
 const BANNER_TTL_PAST_START_MS = 10 * 60_000
@@ -146,14 +155,14 @@ function App(): React.JSX.Element {
       } else if (control.action === 'switch-input') {
         void switchWinInputDevice(control.sessionId, control.inputDevice)
       } else {
-        stopWinCapture(control.sessionId)
+        void stopWinCapture(control.sessionId)
       }
     })
   }, [])
 
   useEffect(() => {
     return window.engine.onBatchControl((control) => {
-      if (control.action === 'decode') void decodeWinBatchAudio(control.jobId)
+      if (control.action === 'decode') void decodeWinBatchAudio(control.jobId, control.channels)
       else cancelWinBatchAudio(control.jobId)
     })
   }, [])

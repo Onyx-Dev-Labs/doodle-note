@@ -30,11 +30,16 @@ export default function FirstRunWizard({
 }): React.JSX.Element {
   const [step, setStep] = useState<Step>('welcome')
   const [isWindows, setIsWindows] = useState(false)
+  // Read by the preflight listener, which subscribes once.
+  const isWindowsRef = useRef(false)
 
   useEffect(() => {
     void window.detect
       .getState()
-      .then((state) => setIsWindows(state.platform === 'win32'))
+      .then((state) => {
+        isWindowsRef.current = state.platform === 'win32'
+        setIsWindows(state.platform === 'win32')
+      })
       .catch(() => {})
   }, [])
 
@@ -65,7 +70,9 @@ export default function FirstRunWizard({
           case 'download':
             return {
               ...prev,
-              detail: 'Downloading the transcription engine (~440 MB)…',
+              detail: isWindowsRef.current
+                ? 'Downloading the speech model (~502 MB, one time)…'
+                : 'Downloading the transcription engine (~440 MB)…',
               progress: ev.progress ?? prev.progress
             }
           case 'ready':

@@ -263,7 +263,14 @@ async function main() {
     await expect(page.locator('.saved-audio-warning')).toHaveCount(0)
     assert.deepEqual(await page.evaluate(() => window.engine.snapshot('qa-empty')), emptySnapshot)
     // A delayed accepted checkpoint must keep A's destination and base while B is pending.
-    await emit({ event: 'refined', captureId: emptySnapshot.captureId, transcripts: [] })
+    // Late committed words for A (Windows commits per utterance) still checkpoint to A.
+    await emit({
+      event: 'timings',
+      captureId: emptySnapshot.captureId,
+      channel: 'mic',
+      tokens: [{ token: ' Late', startSec: 1, endSec: 1.2, confidence: 0.9 }]
+    })
+    await emit({ event: 'final', captureId: emptySnapshot.captureId, channel: 'mic', text: 'Late' })
     assert.deepEqual(
       await page.evaluate(async () => (await window.meetings.get('qa-empty')).savedAudioFailures),
       { mic: true }
@@ -309,7 +316,11 @@ async function main() {
     await allowStart()
     await page.evaluate(() => window.engine.start('transcribe', 'synthetic.wav'))
     await expect.poll(() => page.evaluate(() => window.engine.snapshot('qa-next'))).toBe(null)
-    await emit({ event: 'refined', transcripts: [] })
+    await emit({
+      event: 'timings',
+      channel: 'mic',
+      tokens: [{ token: ' Stray', startSec: 1, endSec: 1.2, confidence: 0.9 }]
+    })
     await emit({ event: 'done' })
     await emit({ event: 'exit', code: 0, signal: null })
     assert.deepEqual(await page.evaluate(() => window.meetings.get('qa-next')), nextMeeting)

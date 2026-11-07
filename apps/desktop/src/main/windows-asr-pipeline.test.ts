@@ -1,0 +1,883 @@
+import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
+import { test } from 'node:test'
+import type { EngineTokenTiming } from '../shared/engine-events'
+import {
+  ASR_SAMPLE_RATE,
+  DecodeLoadMonitor,
+  FORCED_CUT_OVERLAP_SEC,
+  LIVE_VAD,
+  UtteranceTranscriber,
+  VAD_WINDOW_SAMPLES,
+  keepWords,
+  sameWord,
+  seamFrom,
+  stitchSeam,
+  wordNorm,
+  tokensFromResult,
+  type OfflineRecognizerLike,
+  type TdtResult,
+  type VadLike,
+  type VadSettings
+} from './windows-asr-pipeline'
+import { calibrationSignal, liveCaptionMode } from './windows-asr-guard'
+
+const rate = ASR_SAMPLE_RATE
+const seconds = (s: number): number => Math.round(s * rate)
+
+test('TDT tokens become absolute timings with real ends and confidences', () => {
+  const timings = tokensFromResult(
+    {
+      text: 'Hi, there.',
+      tokens: ['Hi', ',', ' there', '.'],
+      timestamps: [0.1, 0.3, 0.4, 0.9],
+      durations: [0.2, 0, 0.32, 0],
+      ys_log_probs: [Math.log(0.5), -0.01, Math.log(0.9), Number.NaN]
+    },
+    10,
+    10.95
+  )
+  assert.deepEqual(timings, [
+    { token: ' Hi', startSec: 10.1, endSec: 10.3, confidence: 0.5 },
+    { token: ',', startSec: 10.3, endSec: 10.4, confidence: 0.99 },
+    { token: ' there', startSec: 10.4, endSec: 10.72, confidence: 0.9 },
+    { token: '.', startSec: 10.9, endSec: 10.95, confidence: 0.9 }
+  ])
+})
+
+test('words are kept whole by their start time', () => {
+  const t = (token: string, startSec: number): EngineTokenTiming => ({
+    token,
+    startSec,
+    endSec: startSec + 0.1,
+    confidence: 1
+  })
+  const tokens = [t(' one', 0.9), t('s', 1.05), t(' two', 1.1), t(',', 1.3), t(' three', 2)]
+  assert.deepEqual(
+    keepWords(tokens, 1, 2).map((token) => token.token),
+    [' two', ',']
+  )
+  // A word that starts before the cut belongs to the left side, suffix included.
+  assert.deepEqual(
+    keepWords(tokens, 0, 1).map((token) => token.token),
+    [' one', 's']
+  )
+})
+
+/**
+ * Scripted VAD with Silero's timing: detection turns on `minSpeech` after a
+ * speech range starts and off `minSilence` after it ends.
+ */
+class FakeVad implements VadLike {
+  private fed = 0
+  resets = 0
+  /** After a reset, detection needs the minimum speech again. */
+  private resetAt = -1
+  constructor(
+    private readonly speech: Array<[number, number]>,
+    private readonly settings: VadSettings = LIVE_VAD
+  ) {}
+  acceptWaveform(samples: Float32Array): void {
+    assert.equal(samples.length, VAD_WINDOW_SAMPLES)
+    this.fed += samples.length
+  }
+  isDetected(): boolean {
+    const onset = seconds(this.settings.minSpeechSec)
+    const silence = seconds(this.settings.minSilenceSec)
+    if (this.resetAt >= 0 && this.fed < this.resetAt + onset) return false
+    return this.speech.some(([start, end]) => this.fed >= start + onset && this.fed < end + silence)
+  }
+  isEmpty(): boolean {
+    return true
+  }
+  reset(): void {
+    this.resets++
+    this.resetAt = this.fed
+  }
+  clear(): void {
+    /* The fake keeps no segment queue. */
+  }
+}
+
+/**
+ * Audio carries its own absolute sample index (value = index / 1e7), so the
+ * fake recognizer knows where each window lies and "hears" one word every
+ * 0.25 s of absolute time inside speech ranges, like a model would.
+ */
+function gridRecognizer(
+  speech: Array<[number, number]>,
+  windows: Array<[number, number]>,
+  jitterSec = 0
+): OfflineRecognizerLike<{
+  samples: Float32Array
+  acceptWaveform(o: { samples: Float32Array }): void
+}> {
+  return {
+    createStream() {
+      const stream = {
+        samples: new Float32Array(0) as Float32Array,
+        acceptWaveform({ samples }: { samples: Float32Array }) {
+          stream.samples = samples
+        }
+      }
+      return stream
+    },
+    decode(stream) {
+      const start = Math.round(stream.samples[0]! * 1e7)
+      windows.push([start, start + stream.samples.length])
+    },
+    getResult(stream): TdtResult {
+      // Context moves a model's timestamps a little; alternate the shift.
+      const shift = windows.length % 2 === 0 ? jitterSec : -jitterSec
+      const start = Math.round(stream.samples[0]! * 1e7)
+      const end = start + stream.samples.length
+      const tokens: string[] = []
+      const timestamps: number[] = []
+      for (let at = Math.ceil(start / 4000) * 4000; at < end - 1600; at += 4000) {
+        if (!speech.some(([a, b]) => at >= a && at < b)) continue
+        tokens.push(` w${at / 4000}`)
+        timestamps.push(Math.max(0, (at - start) / rate + shift))
+      }
+      return {
+        text: tokens.join(''),
+        tokens,
+        timestamps,
+        durations: tokens.map(() => 0.1),
+        ys_log_probs: tokens.map(() => 0)
+      }
+    }
+  }
+}
+
+function feed(
+  transcriber: { ingest(samples: Float32Array): void },
+  totalSamples: number,
+  frame = 4096
+): void {
+  for (let offset = 0; offset < totalSamples; offset += frame) {
+    const chunk = new Float32Array(Math.min(frame, totalSamples - offset))
+    for (let i = 0; i < chunk.length; i++) chunk[i] = (offset + i) / 1e7
+    transcriber.ingest(chunk)
+  }
+}
+
+function run(
+  speech: Array<[number, number]>,
+  totalSamples: number,
+  settings: VadSettings = LIVE_VAD,
+  jitterSec = 0
+): {
+  words: number[]
+  windows: Array<[number, number]>
+  events: Array<Record<string, unknown>>
+  transcriber: UtteranceTranscriber
+} {
+  const events: Array<Record<string, unknown>> = []
+  const windows: Array<[number, number]> = []
+  const transcriber = new UtteranceTranscriber(
+    gridRecognizer(speech, windows, jitterSec) as never,
+    new FakeVad(speech, settings),
+    { channel: 'mic', interim: false, vadSettings: settings, emit: (event) => events.push(event) }
+  )
+  feed(transcriber, totalSamples)
+  transcriber.finish()
+  const words = events
+    .filter((event) => event.event === 'timings')
+    .flatMap((event) => (event.tokens as EngineTokenTiming[]).map((t) => Number(t.token.slice(2))))
+  return { words, windows, events, transcriber }
+}
+
+function expectedWords(speech: Array<[number, number]>): number[] {
+  const words: number[] = []
+  for (const [a, b] of speech) {
+    for (let at = Math.ceil(a / 4000) * 4000; at < b; at += 4000) words.push(at / 4000)
+  }
+  return words
+}
+
+test('a 100 s utterance with no pause is cut, fully decoded and never doubled', () => {
+  const speech: Array<[number, number]> = [[seconds(2), seconds(102)]]
+  const { words, windows, transcriber } = run(speech, seconds(105))
+  // Every word heard exactly once: nothing lost at the buffer edge or a cut.
+  assert.deepEqual(words, expectedWords(speech))
+  // The bound is real: no decode is longer than the cap plus context.
+  const cap = LIVE_VAD.maxSpeechSec + 2 * FORCED_CUT_OVERLAP_SEC + 0.2
+  for (const [a, b] of windows) assert.ok((b - a) / rate <= cap, `${(b - a) / rate}s decode`)
+  assert.ok(transcriber.stats.forcedCuts >= 100 / LIVE_VAD.maxSpeechSec - 1)
+})
+
+test('words timed on either side of a forced cut by the two decodes are kept exactly once', () => {
+  const speech: Array<[number, number]> = [[seconds(2), seconds(80)]]
+  for (const jitter of [0.05, 0.12, 0.2]) {
+    const { words } = run(speech, seconds(83), LIVE_VAD, jitter)
+    assert.deepEqual(words, expectedWords(speech), `jitter ${jitter}s`)
+  }
+})
+
+/** The seam cases from review: the two decodes disagree in text or timing. */
+function seamCase(
+  committed: Array<[string, number, number?]>,
+  cutSec: number,
+  second: Array<[string, number, number?]>
+): string {
+  const tokens = (words: Array<[string, number, number?]>): EngineTokenTiming[] =>
+    words.map(([text, startSec, endSec]) => ({
+      token: ` ${text}`,
+      startSec,
+      endSec: endSec ?? startSec + 0.25,
+      confidence: 0.9
+    }))
+  // The seam is built the way a forced cut builds it.
+  const kept = stitchSeam(tokens(second), seamFrom(tokens(committed), cutSec))
+  return [...committed.map(([text]) => text), '|', ...kept.map((token) => token.token.trim())].join(
+    ' '
+  )
+}
+
+test('a forced-cut seam survives spelling variants, dropped and repeated words, and silence', () => {
+  // The second decode spells the committed name differently, a little later.
+  assert.equal(
+    seamCase(
+      [
+        ['notes', 9],
+        ['to', 9.35],
+        ['Priya', 9.6]
+      ],
+      10,
+      [
+        ['notes', 9.05],
+        ['to', 9.4],
+        ['Pria', 9.75],
+        ['before', 10.2],
+        ['Friday', 10.5]
+      ]
+    ),
+    'notes to Priya | before Friday'
+  )
+  // It drops a short function word; "the" is not "there".
+  assert.equal(
+    seamCase(
+      [
+        ['signed', 9.3],
+        ['the', 9.7]
+      ],
+      10,
+      [
+        ['signed', 9.3],
+        ['contract', 9.9],
+        ['over', 10.4],
+        ['there', 10.8],
+        ['today', 11.1]
+      ]
+    ),
+    'signed the | contract over there today'
+  )
+  // A repeated word next to the cut is not swallowed.
+  assert.equal(
+    seamCase(
+      [
+        ['said', 8.9],
+        ['no', 9.3]
+      ],
+      10,
+      [
+        ['said', 9.2],
+        ['no', 9.9],
+        ['no', 10.3],
+        ['way', 10.6]
+      ]
+    ),
+    'said no | no way'
+  )
+  // The cut landed in silence: nothing committed nearby, so every word is new.
+  assert.equal(
+    seamCase([['okay', 7.8]], 10, [
+      ['budget', 9.6],
+      ['review', 10.1]
+    ]),
+    'okay | budget review'
+  )
+  // A word the first decode placed after the cut and the second before it.
+  assert.equal(
+    seamCase(
+      [
+        ['the', 9.2],
+        ['vendor', 9.5]
+      ],
+      10,
+      [
+        ['the', 9.1],
+        ['vendor', 9.4],
+        ['contract', 9.8],
+        ['expires', 10.3]
+      ]
+    ),
+    'the vendor | contract expires'
+  )
+  assert.equal(sameWord('the', 'there'), false)
+  assert.equal(sameWord('priya', 'pria'), true)
+  assert.equal(sameWord('redesign', 'redesigned'), true)
+})
+
+test('a forced-cut seam survives variant spellings, split words and repeats near the cut', () => {
+  type W = Array<[string, number, number?]>
+  const cases: Array<[string, W, W, string]> = [
+    [
+      'digits vs words',
+      [
+        ['at', 9.2],
+        ['ten', 9.5]
+      ],
+      [
+        ['at', 9.25],
+        ['10', 9.55],
+        ['thirty', 10.1]
+      ],
+      'at ten | thirty'
+    ],
+    [
+      'OK vs okay',
+      [
+        ['that', 9.1],
+        ['sounds', 9.3],
+        ['OK', 9.7]
+      ],
+      [
+        ['that', 9.1],
+        ['sounds', 9.3],
+        ['okay', 9.75],
+        ['then', 10.3]
+      ],
+      'that sounds OK | then'
+    ],
+    [
+      "its vs it's",
+      [
+        ['and', 9.2],
+        ["it's", 9.6]
+      ],
+      [
+        ['and', 9.2],
+        ['its', 9.65],
+        ['fine', 10.1]
+      ],
+      "and it's | fine"
+    ],
+    [
+      'hyphen compound split',
+      [
+        ['the', 9.0],
+        ['follow-up', 9.3]
+      ],
+      [
+        ['the', 9.0],
+        ['follow', 9.3],
+        ['up', 9.55],
+        ['call', 10.2]
+      ],
+      'the follow-up | call'
+    ],
+    [
+      'compound joined',
+      [
+        ['the', 9.0],
+        ['follow', 9.3],
+        ['up', 9.55]
+      ],
+      [
+        ['the', 9.0],
+        ['follow-up', 9.3],
+        ['call', 10.2]
+      ],
+      'the follow up | call'
+    ],
+    [
+      'name very different',
+      [
+        ['ask', 9.0],
+        ['Siobhan', 9.4]
+      ],
+      [
+        ['ask', 9.0],
+        ['Shivon', 9.5],
+        ['tomorrow', 10.2]
+      ],
+      'ask Siobhan | tomorrow'
+    ],
+    [
+      'earlier word re-timed late',
+      [['budget', 8.4]],
+      [
+        ['budget', 9.1],
+        ['review', 10.1]
+      ],
+      'budget | review'
+    ],
+    [
+      'repeat across cut',
+      [
+        ['said', 9.2],
+        ['no', 9.6]
+      ],
+      [
+        ['said', 9.2],
+        ['no', 9.65],
+        ['no', 10.2],
+        ['way', 10.5]
+      ],
+      'said no | no way'
+    ],
+    [
+      'repeat, copy re-timed late',
+      [
+        ['said', 9.0],
+        ['no', 9.3]
+      ],
+      [
+        ['said', 9.3],
+        ['no', 9.95],
+        ['no', 10.25],
+        ['way', 10.5]
+      ],
+      'said no | no way'
+    ],
+    [
+      'first part dropped a word near the cut',
+      [
+        ['we', 9.0],
+        ['need', 9.3]
+      ],
+      [
+        ['we', 9.0],
+        ['need', 9.3],
+        ['it', 9.7],
+        ['now', 10.2]
+      ],
+      'we need | it now'
+    ],
+    [
+      'dropped "the", a later real "the" within 1 s',
+      [
+        ['signed', 9.3],
+        ['the', 9.7]
+      ],
+      [
+        ['signed', 9.3],
+        ['contract', 9.9],
+        ['with', 10.2],
+        ['the', 10.5],
+        ['bank', 10.7]
+      ],
+      'signed the | contract with the bank'
+    ],
+    [
+      'second decode inserts a filler',
+      [
+        ['we', 9.0],
+        ['need', 9.4],
+        ['to', 9.7]
+      ],
+      [
+        ['we', 9.0],
+        ['uh', 9.2],
+        ['need', 9.45],
+        ['to', 9.75],
+        ['go', 10.2]
+      ],
+      'we need to | go'
+    ],
+    [
+      'dropped "to", a later "to" after one new word',
+      [
+        ['want', 9.2],
+        ['to', 9.5]
+      ],
+      [
+        ['want', 9.2],
+        ['go', 9.8],
+        ['to', 10.1],
+        ['the', 10.3],
+        ['store', 10.5]
+      ],
+      'want to | go to the store'
+    ],
+    [
+      'dropped "the", a later "the" after one new word',
+      [
+        ['at', 9.3],
+        ['the', 9.6]
+      ],
+      [
+        ['at', 9.3],
+        ['end', 9.8],
+        ['the', 10.1],
+        ['day', 10.3]
+      ],
+      'at the | end the day'
+    ],
+    [
+      'two new words, then the committed pair again',
+      [
+        ['in', 9.2],
+        ['the', 9.5]
+      ],
+      [
+        ['in', 9.2],
+        ['fact', 9.8],
+        ['in', 10.05],
+        ['the', 10.3],
+        ['end', 10.5]
+      ],
+      'in the | fact in the end'
+    ],
+    [
+      'a new word right after a long committed word',
+      [['unfortunately', 9.0, 9.9]],
+      [
+        ['unfortunately', 9.05, 9.65],
+        ['we', 9.7],
+        ['lost', 10.0]
+      ],
+      'unfortunately | we lost'
+    ],
+    [
+      'a committed word timed through the pause, a new word inside its span',
+      [['okay', 9.0, 9.95]],
+      [
+        ['okay', 9.0, 9.3],
+        ['so', 9.35],
+        ['next', 9.8]
+      ],
+      'okay | so next'
+    ]
+  ]
+  for (const [name, committed, second, expected] of cases) {
+    assert.equal(seamCase(committed, 10, second), expected, name)
+  }
+  // From the 30-minute meeting: a last word timed to run on through the pause
+  // after it does not swallow the new words that the pause ends with.
+  assert.equal(
+    seamCase(
+      [
+        ['we', 8.1, 8.2],
+        ['can', 8.2, 8.3],
+        ['get', 8.3, 10.6]
+      ],
+      10,
+      [
+        ['uh', 10.1, 10.7],
+        ['the', 10.7, 10.9],
+        ['T-shape', 10.9, 11.3]
+      ]
+    ),
+    'we can get | uh the T-shape'
+  )
+  // "has to be" / "has to look": a different word later in the gap is kept.
+  assert.equal(
+    seamCase(
+      [
+        ['has', 8.4, 8.5],
+        ['to', 8.5, 8.6],
+        ['be', 8.6, 9.3]
+      ],
+      9.1,
+      [
+        ['has', 8.55, 8.7],
+        ['to', 8.7, 9.4],
+        ['look', 9.4, 9.6],
+        ['really', 9.6, 9.9]
+      ]
+    ),
+    'has to be | look really'
+  )
+  assert.equal(wordNorm("It's"), 'its')
+  assert.equal(wordNorm('Ten'), '10')
+  assert.equal(wordNorm('OK'), 'okay')
+})
+
+/** Like gridRecognizer, but every other decode misspells words and drops "of". */
+function noisyRecognizer(speech: Array<[number, number]>): OfflineRecognizerLike<{
+  samples: Float32Array
+  acceptWaveform(o: { samples: Float32Array }): void
+}> {
+  const vocabulary = [
+    'planning',
+    'review',
+    'of',
+    'billing',
+    'service',
+    'vendor',
+    'contract',
+    'the',
+    'budget',
+    'Priya'
+  ]
+  let decodes = 0
+  return {
+    createStream() {
+      const stream = {
+        samples: new Float32Array(0) as Float32Array,
+        acceptWaveform({ samples }: { samples: Float32Array }) {
+          stream.samples = samples
+        }
+      }
+      return stream
+    },
+    decode() {
+      decodes++
+    },
+    getResult(stream): TdtResult {
+      const noisy = decodes % 2 === 0
+      const start = Math.round(stream.samples[0]! * 1e7)
+      const end = start + stream.samples.length
+      const tokens: string[] = []
+      const timestamps: number[] = []
+      for (let at = Math.ceil(start / 4000) * 4000; at < end - 1600; at += 4000) {
+        if (!speech.some(([a, b]) => at >= a && at < b)) continue
+        let word = vocabulary[(at / 4000) % vocabulary.length]!
+        if (noisy && word === 'of') continue
+        if (noisy && word.length >= 5) word = word.slice(0, -1) // "Priy", "billin"
+        tokens.push(` ${word}`)
+        timestamps.push(Math.max(0, (at - start) / rate + (noisy ? 0.15 : -0.1)))
+      }
+      return { text: tokens.join(''), tokens, timestamps }
+    }
+  }
+}
+
+test('decodes that disagree in spelling and drop words never double or lose a word across cuts', () => {
+  const speech: Array<[number, number]> = [[seconds(1), seconds(61)]]
+  const events: Array<Record<string, unknown>> = []
+  const transcriber = new UtteranceTranscriber(
+    noisyRecognizer(speech) as never,
+    new FakeVad(speech),
+    {
+      channel: 'mic',
+      interim: false,
+      emit: (event) => events.push(event)
+    }
+  )
+  feed(transcriber, seconds(63))
+  transcriber.finish()
+  const words = events
+    .filter((event) => event.event === 'timings')
+    .flatMap((event) => (event.tokens as EngineTokenTiming[]).map((t) => t.token.trim()))
+  // One word per 0.25 s slot of speech, minus at most the "of"s a noisy part dropped.
+  const slots = expectedWords(speech).length
+  const ofs = expectedWords(speech).filter((slot) => slot % 10 === 2).length
+  assert.ok(words.length <= slots, `${words.length} words for ${slots} slots (doubles)`)
+  assert.ok(words.length >= slots - ofs, `${words.length} words for ${slots} slots (losses)`)
+  for (let i = 1; i < words.length; i++) {
+    assert.ok(!(words[i] === words[i - 1] && words[i] !== 'the'), `doubled "${words[i]}" at ${i}`)
+  }
+})
+
+test('the VAD buffer is bounded during hours-long speech without losing a word', () => {
+  const speech: Array<[number, number]> = [[seconds(1), seconds(181)]]
+  const { words, transcriber } = run(speech, seconds(183))
+  assert.deepEqual(words, expectedWords(speech))
+  // A 180 s run resets Silero at least twice (every 60 s of detection).
+  assert.ok(transcriber.stats.vadResets >= 2, `${transcriber.stats.vadResets} resets`)
+})
+
+test('imports bound utterances the same way with their own cap', () => {
+  const settings: VadSettings = { ...LIVE_VAD, minSilenceSec: 1, maxSpeechSec: 30 }
+  const speech: Array<[number, number]> = [[seconds(1), seconds(99)]]
+  const { words, windows } = run(speech, seconds(102), settings)
+  assert.deepEqual(words, expectedWords(speech))
+  for (const [a, b] of windows) assert.ok((b - a) / rate <= 31.5)
+})
+
+test('adjacent utterances with tiny gaps are decoded without overlap or loss', () => {
+  // Gaps of 0.074 s, 0.3 s and 0.6 s, the shortest seen in the AMI meeting,
+  // with a VAD that really ends utterances at gaps that short.
+  const settings: VadSettings = { ...LIVE_VAD, minSilenceSec: 0.05 }
+  const speech: Array<[number, number]> = [
+    [seconds(1), seconds(4)],
+    [seconds(4.074), seconds(6)],
+    [seconds(6.3), seconds(9)],
+    [seconds(9.6), seconds(12)]
+  ]
+  const { words, windows } = run(speech, seconds(15), settings)
+  assert.ok(windows.length >= 4, 'each utterance decoded separately')
+  assert.deepEqual(words, expectedWords(speech))
+  const sorted = [...windows].sort((a, b) => a[0] - b[0])
+  for (let i = 1; i < sorted.length; i++) {
+    assert.ok(sorted[i]![0] >= sorted[i - 1]![1], 'padding must not decode audio twice')
+  }
+})
+
+test('a first word the model times inside the start padding is kept', () => {
+  const events: Array<Record<string, unknown>> = []
+  const speech: Array<[number, number]> = [[seconds(1), seconds(3)]]
+  const transcriber = new UtteranceTranscriber(
+    {
+      createStream: () => {
+        const stream = { acceptWaveform: () => {} }
+        return stream
+      },
+      decode: () => {},
+      // TDT often places the first token a little before the VAD's start.
+      getResult: () => ({ text: 'Early', tokens: [' Early'], timestamps: [0.05], durations: [0.2] })
+    },
+    new FakeVad(speech),
+    { channel: 'mic', interim: false, emit: (event) => events.push(event) }
+  )
+  feed(transcriber, seconds(5))
+  transcriber.finish()
+  assert.deepEqual(events.at(-1), { event: 'final', channel: 'mic', text: 'Early' })
+})
+
+test('captions keep growing through a long utterance instead of freezing', () => {
+  const events: Array<Record<string, unknown>> = []
+  const speech: Array<[number, number]> = [[seconds(0.5), seconds(60)]]
+  const transcriber = new UtteranceTranscriber(
+    gridRecognizer(speech, []) as never,
+    new FakeVad(speech),
+    { channel: 'system', interim: true, emit: (event) => events.push(event) }
+  )
+  feed(transcriber, seconds(40))
+  const partialTimes = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.event === 'partial' && event.text)
+  assert.ok(transcriber.stats.interimDecodes >= 8, `${transcriber.stats.interimDecodes} interims`)
+  // Committed text arrives at each forced cut, well before the utterance ends.
+  assert.ok(events.filter((event) => event.event === 'timings').length >= 2)
+  assert.ok(partialTimes.length > 0)
+})
+
+test('interim decodes stop when the shared load guard is saturated', () => {
+  const clock = 0
+  const load = new DecodeLoadMonitor(10_000, 0.5, () => clock)
+  const speech: Array<[number, number]> = [[seconds(0.5), seconds(20)]]
+  const transcriber = new UtteranceTranscriber(
+    gridRecognizer(speech, []) as never,
+    new FakeVad(speech),
+    {
+      channel: 'system',
+      interim: true,
+      emit: () => {},
+      load,
+      now: () => clock
+    }
+  )
+  feed(transcriber, seconds(4))
+  const interims = transcriber.stats.interimDecodes
+  assert.ok(interims >= 2)
+  load.record(9_000)
+  feed(transcriber, seconds(4))
+  assert.equal(transcriber.stats.interimDecodes, interims)
+  assert.ok(transcriber.stats.skippedInterims > 0)
+})
+
+test('live lag is the queueing delay of the latest frame, and anchors the channel start', () => {
+  let clock = 50_000
+  const events: Array<Record<string, unknown>> = []
+  const transcriber = new UtteranceTranscriber(gridRecognizer([], []) as never, new FakeVad([]), {
+    channel: 'mic',
+    interim: true,
+    realtime: true,
+    emit: (event) => events.push(event),
+    now: () => clock
+  })
+  const before = Date.now()
+  transcriber.ingest(new Float32Array(4096), clock - 3000)
+  assert.ok(Math.abs(transcriber.lagSec() - 3) < 1e-9)
+  // The channel starts when its first frame was sent, not when it was processed.
+  const epochMs = events[0]!.epochMs as number
+  assert.ok(epochMs <= before - 2900 && epochMs >= before - 3100, `${before - epochMs} ms`)
+  clock += 30_000
+  transcriber.ingest(new Float32Array(4096), clock - 10)
+  assert.ok(transcriber.lagSec() < 0.05)
+})
+
+test('settled time trails only the utterance still being spoken', () => {
+  const speech: Array<[number, number]> = [[seconds(1), seconds(3)]]
+  const transcriber = new UtteranceTranscriber(
+    gridRecognizer(speech, []) as never,
+    new FakeVad(speech),
+    {
+      channel: 'system',
+      interim: false,
+      emit: () => {}
+    }
+  )
+  feed(transcriber, seconds(2))
+  assert.ok(transcriber.settledThroughSec() <= 1)
+  feed(transcriber, seconds(3))
+  assert.ok(transcriber.settledThroughSec() > 3)
+})
+
+test('slow machines get utterance captions; the calibration signal is deterministic', () => {
+  assert.equal(liveCaptionMode(0.1), 'interim')
+  assert.equal(liveCaptionMode(0.6), 'utterance')
+  assert.equal(liveCaptionMode(Number.NaN), 'utterance')
+  assert.deepEqual(calibrationSignal(0.01), calibrationSignal(0.01))
+  assert.equal(calibrationSignal().length, 4 * rate)
+})
+
+// Optional: the real Silero VAD on real long speech (set both paths to run).
+const sileroModel = process.env.DOODLE_TEST_SILERO_VAD
+const longSpeech = process.env.DOODLE_TEST_LONG_SPEECH_WAV
+test(
+  'real Silero VAD on a long meeting channel: every speech sample reaches a bounded decode',
+  { skip: !(sileroModel && longSpeech && existsSync(sileroModel) && existsSync(longSpeech)) },
+  async () => {
+    const { loadSherpa, sileroVadConfig, vadBufferSeconds } =
+      await import('./windows-asr-recognizers')
+    const sherpa = loadSherpa()
+    const wav = readFileSync(longSpeech!)
+    const dataAt = wav.indexOf('data') + 8
+    const samples = new Float32Array((wav.length - dataAt) / 2)
+    for (let i = 0; i < samples.length; i++) samples[i] = wav.readInt16LE(dataAt + i * 2) / 32768
+    // A reference VAD pass records where Silero hears speech.
+    const reference = new sherpa.Vad(sileroVadConfig(sileroModel!, LIVE_VAD), 60)
+    const speech: Array<[number, number]> = []
+    let open = -1
+    for (let i = 0; i + 512 <= samples.length; i += 512) {
+      reference.acceptWaveform(samples.slice(i, i + 512))
+      if (reference.isDetected() && open < 0) open = i
+      if (!reference.isDetected() && open >= 0) {
+        speech.push([open, i])
+        open = -1
+      }
+      reference.clear()
+    }
+    if (open >= 0) speech.push([open, samples.length])
+    const windows: Array<[number, number]> = []
+    const transcriber = new UtteranceTranscriber(
+      {
+        createStream: () => {
+          const stream = {
+            n: 0,
+            start: 0,
+            acceptWaveform: (o: { samples: Float32Array }) => (stream.n = o.samples.length)
+          }
+          return stream
+        },
+        decode: (stream: { n: number }) => windows.push([0, stream.n]),
+        getResult: () => ({ text: '', tokens: [], timestamps: [] })
+      } as never,
+      new sherpa.Vad(sileroVadConfig(sileroModel!, LIVE_VAD), vadBufferSeconds(LIVE_VAD)),
+      { channel: 'mic', interim: false, emit: () => {} }
+    )
+    for (let i = 0; i < samples.length; i += 4096) transcriber.ingest(samples.slice(i, i + 4096))
+    transcriber.finish()
+    const longest = Math.max(...speech.map(([a, b]) => b - a)) / rate
+    const decoded = windows.reduce((sum, [, n]) => sum + n, 0) / rate
+    const spoken = speech.reduce((sum, [a, b]) => sum + b - a, 0) / rate
+    console.log(
+      JSON.stringify({
+        longestSpeechSec: longest,
+        spokenSec: spoken,
+        decodedSec: decoded,
+        decodes: windows.length,
+        forcedCuts: transcriber.stats.forcedCuts,
+        longestDecodeSec: transcriber.stats.longestDecodeSec
+      })
+    )
+    assert.ok(transcriber.stats.longestDecodeSec <= LIVE_VAD.maxSpeechSec + 1.5)
+    // Decoded audio covers all detected speech (plus context).
+    assert.ok(decoded >= spoken, `${decoded}s decoded for ${spoken}s of speech`)
+  }
+)

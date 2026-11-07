@@ -509,7 +509,9 @@ app.whenReady().then(async () => {
         ended,
         savedAudioFailures
       )
-    }
+    },
+    // Windows commits per utterance: checkpoint open text, save in time order.
+    process.platform === 'win32' ? { checkpointOpenText: true, sortOnFinish: true } : {}
   )
 
   ipcMain.handle(ENGINE_SNAPSHOT_CHANNEL, (event, meetingId: unknown) => {
@@ -702,13 +704,8 @@ app.whenReady().then(async () => {
   registerRecipes(recipeRunner)
 
   if (engine instanceof WinEngineHost) {
-    winBatchTranscriber = new WinBatchTranscriber((onEvent, signal) =>
-      engine.preflight(onEvent, signal)
-    )
+    winBatchTranscriber = new WinBatchTranscriber()
     winBatchTranscriber.registerIpc()
-    engine.setFinalRefiner((filePath, onProgress) =>
-      winBatchTranscriber!.transcribe(filePath, onProgress)
-    )
   }
 
   // Audio import + re-transcription: batch engine runs in its own process,
@@ -734,12 +731,15 @@ app.whenReady().then(async () => {
                 options
               )
             : transcribeFileToSegments(resolveEngineBinary(), filePath, onProgress, options),
-    () =>
-      notesService?.batchTranscriptionSettings() ?? {
+    () => {
+      const settings = notesService?.batchTranscriptionSettings() ?? {
         backend: 'parakeet',
         parakeetModel: 'v2',
         language: 'auto'
       }
+      // Windows batch transcription is Parakeet only; Whisper is a Mac backend.
+      return winBatchTranscriber ? { ...settings, backend: 'parakeet' } : settings
+    }
   )
   importService.setCaptureGuard(
     (meetingId) => recording.busy && recording.snapshot().meetingId === meetingId

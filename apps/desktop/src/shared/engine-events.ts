@@ -34,6 +34,8 @@ export type EngineCaptureStatus =
 export interface EngineBatchControl {
   action: 'decode' | 'cancel'
   jobId: string
+  /** Split only for recordings with known microphone/system provenance. */
+  channels?: 'mixed' | 'split'
 }
 
 export type EngineBatchMessage =
@@ -114,6 +116,10 @@ export interface EngineStatusEvent {
   channel?: EngineChannel
   /** Present when stage === "requesting_permission". */
   permission?: string
+  /** Windows, stage === "legacy_model": state of the background model download. */
+  download?: 'in_progress' | 'failed'
+  /** Windows, stage === "audio_not_transcribed": recorded seconds missing from the live transcript. */
+  seconds?: number
 }
 
 export interface EngineDownloadEvent {
@@ -168,12 +174,6 @@ export interface EngineFinalEvent {
   tokens?: EngineTokenTiming[]
 }
 
-/** Windows: high-accuracy local text for each channel after live capture stops. */
-export interface EngineRefinedEvent {
-  event: 'refined'
-  transcripts: Array<{ channel: EngineChannel; text: string; audioSeconds?: number }>
-}
-
 export interface EngineErrorEvent {
   event: 'error'
   message: string
@@ -216,7 +216,6 @@ export type EngineSidecarEvent =
   | EnginePartialEvent
   | EngineTimingsEvent
   | EngineFinalEvent
-  | EngineRefinedEvent
   | EngineErrorEvent
   | EngineDoneEvent
   | EngineChannelStartEvent
@@ -286,6 +285,13 @@ export interface EngineSessionSnapshot {
   segments: TranscriptSegment[]
   partials: Partial<Record<EngineChannel, string>>
   error?: string
+  /** Windows: live captions currently lag real time (see captions_delayed). */
+  captionsDelayed?: boolean
+  /** Windows: this capture uses the previous speech model (see legacy_model). */
+  legacyModel?: boolean
+  legacyDownloadFailed?: boolean
+  /** Windows: seconds of this capture saved but not transcribed live (see audio_not_transcribed). */
+  untranscribedSec?: number
 }
 
 export type EngineLifecycleEvent =

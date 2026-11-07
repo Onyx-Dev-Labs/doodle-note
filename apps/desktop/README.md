@@ -3,7 +3,9 @@
 The Electron desktop app is DoodleNote's primary capture and notes experience. It combines a React/TipTap renderer with platform-native local transcription:
 
 - macOS spawns the Swift engine in `engine/` for microphone and system-audio capture;
-- Windows captures locally and transcribes with packaged sherpa-onnx models;
+- Windows captures locally and transcribes on the CPU with the Mac's NVIDIA
+  Parakeet models through sherpa-onnx (Unified for live captions, TDT v2/v3 for
+  imports; see [docs/WINDOWS-RELEASE-QA.md](../../docs/WINDOWS-RELEASE-QA.md));
 - both platforms store meetings locally, generate notes with local or bring-your-own AI, and can opt into sync and agent access.
 
 ## Run locally

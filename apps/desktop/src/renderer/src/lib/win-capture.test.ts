@@ -1,53 +1,104 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+interface TestNode {
+  connect(): void
+  disconnect(): void
+}
+
+type PortListener = ((event: { data: unknown }) => void) | null
+
+/** Minimal AudioWorklet stand-ins: the test plays the audio thread's part. */
+function installAudio(): {
+  contexts: Array<{ closed: boolean; modules: string[] }>
+  pumps: Array<{
+    options: Record<string, unknown>
+    fromWorklet(data: unknown): void
+    toWorklet: unknown[]
+    onFlush?: () => void
+  }>
+} {
+  const contexts: Array<{ closed: boolean; modules: string[] }> = []
+  const pumps: ReturnType<typeof installAudio>['pumps'] = []
+  const node = (): TestNode => ({ connect: () => undefined, disconnect: () => undefined })
+
+  class TestAudioContext {
+    destination = {}
+    closed = false
+    modules: string[] = []
+    audioWorklet = {
+      addModule: async (url: string): Promise<void> => {
+        this.modules.push(url)
+      }
+    }
+    constructor() {
+      contexts.push(this)
+    }
+    createMediaStreamSource(): TestNode {
+      return node()
+    }
+    createGain(): TestNode & { gain: { value: number } } {
+      return { ...node(), gain: { value: 1 } }
+    }
+    async close(): Promise<void> {
+      this.closed = true
+    }
+  }
+
+  class TestAudioWorkletNode {
+    readonly port: { onmessage: PortListener; postMessage(data: unknown): void }
+    constructor(_context: unknown, name: string, options: Record<string, unknown>) {
+      assert.equal(name, 'doodlenote-capture-pump')
+      const pump: ReturnType<typeof installAudio>['pumps'][number] = {
+        options,
+        toWorklet: [],
+        fromWorklet: (data) => this.port.onmessage?.({ data })
+      }
+      this.port = {
+        onmessage: null,
+        postMessage: (data: unknown) => {
+          pump.toWorklet.push(data)
+          pump.onFlush?.()
+        }
+      }
+      pumps.push(pump)
+    }
+    connect(): void {
+      /* The test drives the pump directly. */
+    }
+    disconnect(): void {
+      /* Nothing to release in the stand-in. */
+    }
+  }
+
+  Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: TestAudioContext })
+  Object.defineProperty(globalThis, 'AudioWorkletNode', {
+    configurable: true,
+    value: TestAudioWorkletNode
+  })
+  return { contexts, pumps }
+}
+
+function testStream(onStop: () => void): MediaStream {
+  return {
+    getTracks: () => [{ stop: onStop }],
+    getAudioTracks: () => [{}],
+    getVideoTracks: () => [],
+    removeTrack: () => {}
+  } as unknown as MediaStream
+}
+
 test('a microphone permission result cannot reopen capture after Stop', async () => {
   let resolveMicrophone!: (stream: MediaStream) => void
   const microphone = new Promise<MediaStream>((resolve) => {
     resolveMicrophone = resolve
   })
   let stoppedTracks = 0
-  const stream = {
-    getTracks: () => [{ stop: () => stoppedTracks++ }],
-    getAudioTracks: () => [{}],
-    getVideoTracks: () => [],
-    removeTrack: () => {}
-  } as unknown as MediaStream
-  const contexts: Array<{ closed: boolean }> = []
+  const { contexts } = installAudio()
   const statuses: Array<{ type: string; sessionId: number }> = []
-
-  class TestAudioContext {
-    destination = {}
-    closed = false
-
-    constructor() {
-      contexts.push(this)
-    }
-
-    createMediaStreamSource(): { connect(): void } {
-      return { connect: () => undefined }
-    }
-
-    createScriptProcessor(): { connect(): void; onaudioprocess: unknown } {
-      return { connect: () => undefined, onaudioprocess: null }
-    }
-
-    createGain(): { connect(): void; gain: { value: number } } {
-      return { connect: () => undefined, gain: { value: 1 } }
-    }
-
-    async close(): Promise<void> {
-      this.closed = true
-    }
-  }
-
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: { mediaDevices: { getUserMedia: () => microphone } }
-  })
-  Object.defineProperty(globalThis, 'AudioContext', {
-    configurable: true,
-    value: TestAudioContext
   })
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -61,10 +112,11 @@ test('a microphone permission result cannot reopen capture after Stop', async ()
     }
   })
 
-  const { startWinCapture, stopWinCapture } = await import('./win-capture')
+  const { setWinCaptureWorkletUrl, startWinCapture, stopWinCapture } = await import('./win-capture')
+  setWinCaptureWorkletUrl('test://capture-worklet.js')
   const starting = startWinCapture(7, ['mic'])
-  stopWinCapture(7)
-  resolveMicrophone(stream)
+  await stopWinCapture(7)
+  resolveMicrophone(testStream(() => stoppedTracks++))
   await starting
 
   assert.equal(stoppedTracks, 1)
@@ -72,60 +124,20 @@ test('a microphone permission result cannot reopen capture after Stop', async ()
   assert.deepEqual(statuses, [{ type: 'drained', sessionId: 7 }])
 })
 
-test('ready, PCM, and drained acknowledgements preserve renderer IPC order', async () => {
+test('the worklet pump keeps ready, PCM, final partial frame and drained in IPC order', async () => {
   const events: string[] = []
   let stoppedTracks = 0
-  const stream = {
-    getTracks: () => [{ stop: () => stoppedTracks++ }],
-    getAudioTracks: () => [{}],
-    getVideoTracks: () => [],
-    removeTrack: () => {}
-  } as unknown as MediaStream
-  type AudioCallback = (event: { inputBuffer: { getChannelData(): Float32Array } }) => void
-  interface TestNode {
-    connect(): void
-    disconnect(): void
-  }
-  interface TestProcessor extends TestNode {
-    onaudioprocess: AudioCallback | null
-  }
-  let processor: TestProcessor | undefined
-  const node = (): TestNode => ({
-    connect: () => undefined,
-    disconnect: () => undefined
-  })
-
-  class TestAudioContext {
-    destination = {}
-    createMediaStreamSource(): TestNode {
-      return node()
-    }
-    createScriptProcessor(): TestProcessor {
-      processor = { ...node(), onaudioprocess: null }
-      return processor
-    }
-    createGain(): TestNode & { gain: { value: number } } {
-      return { ...node(), gain: { value: 1 } }
-    }
-    async close(): Promise<void> {
-      await Promise.resolve()
-    }
-  }
-
+  const { contexts, pumps } = installAudio()
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
-    value: { mediaDevices: { getUserMedia: async () => stream } }
-  })
-  Object.defineProperty(globalThis, 'AudioContext', {
-    configurable: true,
-    value: TestAudioContext
+    value: { mediaDevices: { getUserMedia: async () => testStream(() => stoppedTracks++) } }
   })
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
       engine: {
-        sendAudio(sessionId: number) {
-          events.push(`audio:${sessionId}`)
+        sendAudio(sessionId: number, channel: string, samples: Float32Array) {
+          events.push(`audio:${sessionId}:${channel}:${samples.length}`)
         },
         reportCaptureStatus(status: { type: string; sessionId: number }) {
           events.push(`${status.type}:${status.sessionId}`)
@@ -134,14 +146,53 @@ test('ready, PCM, and drained acknowledgements preserve renderer IPC order', asy
     }
   })
 
-  const { startWinCapture, stopWinCapture } = await import('./win-capture')
+  const { setWinCaptureWorkletUrl, startWinCapture, stopWinCapture } = await import('./win-capture')
+  setWinCaptureWorkletUrl('test://capture-worklet.js')
   await startWinCapture(8, ['mic'])
-  const staleCallback = processor?.onaudioprocess
-  assert.ok(staleCallback)
-  staleCallback({ inputBuffer: { getChannelData: () => new Float32Array([0.5]) } })
-  stopWinCapture(8)
-  staleCallback({ inputBuffer: { getChannelData: () => new Float32Array([0.75]) } })
+  assert.deepEqual(contexts[0]!.modules, ['test://capture-worklet.js'])
+  const pump = pumps[0]!
+  // Same mono down-mix as the former ScriptProcessorNode(4096, 1, 1).
+  assert.equal(pump.options.channelCount, 1)
+  assert.equal(pump.options.channelCountMode, 'explicit')
+  assert.equal(pump.options.channelInterpretation, 'speakers')
+  pump.fromWorklet({ type: 'pcm', samples: new Float32Array(4096) })
+  // On Stop the audio thread hands over its final partial frame, then confirms.
+  pump.onFlush = () => {
+    pump.fromWorklet({ type: 'pcm', samples: new Float32Array(100) })
+    pump.fromWorklet({ type: 'flushed' })
+  }
+  await stopWinCapture(8)
+  pump.fromWorklet({ type: 'pcm', samples: new Float32Array(7) })
 
-  assert.deepEqual(events, ['ready:8', 'audio:8', 'drained:8'])
+  assert.deepEqual(pump.toWorklet, [{ type: 'flush' }])
+  assert.deepEqual(events, ['ready:8', 'audio:8:mic:4096', 'audio:8:mic:100', 'drained:8'])
   assert.equal(stoppedTracks, 1)
+  assert.equal(contexts[0]!.closed, true)
+})
+
+test('Stop does not wait forever for a pump that never confirms its flush', async () => {
+  const events: string[] = []
+  installAudio()
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { mediaDevices: { getUserMedia: async () => testStream(() => undefined) } }
+  })
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      engine: {
+        sendAudio: () => undefined,
+        reportCaptureStatus(status: { type: string; sessionId: number }) {
+          events.push(`${status.type}:${status.sessionId}`)
+        }
+      }
+    }
+  })
+  const { setWinCaptureWorkletUrl, startWinCapture, stopWinCapture } = await import('./win-capture')
+  setWinCaptureWorkletUrl('test://capture-worklet.js')
+  await startWinCapture(9, ['mic'])
+  const began = Date.now()
+  await stopWinCapture(9)
+  assert.ok(Date.now() - began < 2000)
+  assert.deepEqual(events, ['ready:9', 'drained:9'])
 })

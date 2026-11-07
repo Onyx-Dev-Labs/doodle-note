@@ -6,6 +6,44 @@ interface CaptureStatusState {
   phase: 'idle' | 'starting' | 'recording' | 'finishing' | 'ended'
   statusText: string
   transcribing: boolean
+  /** Windows only: the engine is behind real time; set and cleared by status events. */
+  captionsDelayed?: boolean
+  /** Windows only: this capture uses the previous speech model (new one downloading). */
+  legacyModel?: boolean
+  /** Windows only: the new model's background download failed (retried later). */
+  legacyDownloadFailed?: boolean
+  /** Windows only: seconds of this capture saved but not transcribed live. */
+  untranscribedSec?: number
+}
+
+/** Windows recorder notices for the live session, in display order. */
+export function captureNotices(state: {
+  phase: CaptureStatusState['phase']
+  captionsDelayed?: boolean
+  legacyModel?: boolean
+  legacyDownloadFailed?: boolean
+  untranscribedSec?: number
+}): string[] {
+  const live = state.phase === 'recording' || state.phase === 'starting'
+  const notices: string[] = []
+  if (live && state.legacyModel) {
+    notices.push(
+      state.legacyDownloadFailed
+        ? 'Transcribing with the previous speech model. The new one could not be downloaded; DoodleNote tries again after this recording. This recording keeps the previous model’s transcript.'
+        : 'Transcribing with the previous speech model while the new one downloads. This recording keeps that transcript; Re-transcribe it later for the new model.'
+    )
+  }
+  if (live && state.untranscribedSec) {
+    notices.push(
+      `About ${state.untranscribedSec} s of this recording, captured while the speech model was loading, was not transcribed live. The audio is saved; use Re-transcribe after the recording to include it.`
+    )
+  }
+  if (live && state.captionsDelayed) {
+    notices.push(
+      'Live captions are running behind on this PC. Everything is still being transcribed and will appear shortly.'
+    )
+  }
+  return notices
 }
 
 /** Only deliberate lifecycle copy belongs in the recorder, never raw engine diagnostics. */
@@ -52,8 +90,21 @@ export function applyCaptureStatus<T extends CaptureStatusState>(
     case 'finishing':
     case 'saving_audio':
       return { ...state, phase: 'finishing', statusText: 'Finishing up…' }
-    case 'refining_transcript':
-      return { ...state, phase: 'finishing', statusText: 'Improving transcript locally…' }
+    case 'captions_delayed':
+      // Windows only: this PC is decoding slower than real time. Every word is
+      // still transcribed; captions just lag until it catches up.
+      return { ...state, captionsDelayed: true }
+    case 'captions_caught_up':
+      return { ...state, captionsDelayed: false }
+    case 'audio_not_transcribed':
+      return {
+        ...state,
+        untranscribedSec: (state.untranscribedSec ?? 0) + Math.max(1, Math.round(ev.seconds ?? 0))
+      }
+    case 'legacy_model':
+      return { ...state, legacyModel: true, legacyDownloadFailed: ev.download === 'failed' }
+    case 'model_download_failed':
+      return state.legacyModel ? { ...state, legacyDownloadFailed: true } : state
     default:
       return state
   }

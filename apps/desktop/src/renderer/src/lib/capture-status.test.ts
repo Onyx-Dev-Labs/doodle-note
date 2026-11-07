@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { applyCaptureStatus } from './capture-status'
+import { applyCaptureStatus, captureNotices } from './capture-status'
 
 const starting = (): Parameters<typeof applyCaptureStatus>[0] => ({
   phase: 'starting' as const,
@@ -74,12 +74,56 @@ test('Windows model preparation and refinement remain explicit without macOS ter
   const transcribing = applyCaptureStatus(recording, { event: 'status', stage: 'transcribing' })
   assert.equal(transcribing.transcribing, true)
   assert.equal(transcribing.statusText, '')
-  const refined = applyCaptureStatus(transcribing, {
+})
+
+test('the Windows captions-delayed warning is shown while late and cleared when caught up', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  assert.deepEqual(captureNotices(recording), [])
+  const delayed = applyCaptureStatus(recording, { event: 'status', stage: 'captions_delayed' })
+  assert.equal(delayed.phase, 'recording')
+  // The recorder shows the clock, not statusText, while recording: the warning
+  // must come from captureNotices or it is invisible.
+  assert.equal(delayed.statusText, '')
+  assert.match(captureNotices(delayed).join(' '), /running behind/)
+  const caughtUp = applyCaptureStatus(delayed, { event: 'status', stage: 'captions_caught_up' })
+  assert.deepEqual(captureNotices(caughtUp), [])
+  // Re-arms: a second slow stretch shows it again.
+  const again = applyCaptureStatus(caughtUp, { event: 'status', stage: 'captions_delayed' })
+  assert.match(captureNotices(again).join(' '), /running behind/)
+  assert.deepEqual(captureNotices({ ...again, phase: 'ended' }), [])
+})
+
+test('audio saved but not transcribed live is announced with Re-transcribe advice', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  const missing = applyCaptureStatus(recording, {
     event: 'status',
-    stage: 'refining_transcript'
+    stage: 'audio_not_transcribed',
+    seconds: 96
   })
-  assert.equal(refined.phase, 'finishing')
-  assert.equal(refined.statusText, 'Improving transcript locally…')
+  assert.equal(missing.statusText, '')
+  const text = captureNotices(missing).join(' ')
+  assert.match(text, /About 96 s of this recording.*not transcribed live/)
+  assert.match(text, /audio is saved; use Re-transcribe/)
+  assert.deepEqual(captureNotices({ ...missing, phase: 'ended' }), [])
+})
+
+test('a capture on the previous speech model says so honestly', () => {
+  const recording = { phase: 'recording' as const, statusText: '', transcribing: true }
+  const legacy = applyCaptureStatus(recording, { event: 'status', stage: 'legacy_model' })
+  assert.match(
+    captureNotices(legacy).join(' '),
+    /previous speech model while the new one downloads/
+  )
+  // After the background download fails, the notice no longer claims it is downloading.
+  const failed = applyCaptureStatus(legacy, { event: 'status', stage: 'model_download_failed' })
+  assert.doesNotMatch(captureNotices(failed).join(' '), /while the new one downloads/)
+  assert.match(captureNotices(failed).join(' '), /could not be downloaded/)
+  const startedFailed = applyCaptureStatus(recording, {
+    event: 'status',
+    stage: 'legacy_model',
+    download: 'failed'
+  })
+  assert.match(captureNotices(startedFailed).join(' '), /could not be downloaded/)
 })
 
 test('idle and completed sessions ignore delayed status events', () => {
@@ -116,7 +160,7 @@ test('channel warnings survive lifecycle copy without stopping transcription or 
     assert.equal(state.transcribing, true)
     assert.equal(state.savedAudioFailures?.[channel], true)
   }
-  for (const stage of ['transcribing', 'saving_audio', 'refining_transcript', 'audio_saved']) {
+  for (const stage of ['transcribing', 'saving_audio', 'captions_delayed', 'audio_saved']) {
     state = applyCaptureStatus(state, { event: 'status', stage, captureId: 'current' })
     assert.deepEqual(state.savedAudioFailures, { mic: true, system: true })
   }
