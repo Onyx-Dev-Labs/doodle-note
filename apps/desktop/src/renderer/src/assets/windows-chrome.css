@@ -20,7 +20,9 @@ html[data-platform='win32'] {
 
 /* An invisible title band across the top of the main shell, so every view
    (including Settings, which has no header) can move the window. It precedes
-   all content, so buttons, inputs and .no-drag elements keep their clicks. */
+   all content, so buttons, inputs and .no-drag elements keep their native
+   hit-test holes; pointer-events: none keeps it out of the page's own hit
+   testing, so content under it (the sidebar logo) still receives clicks. */
 html[data-platform='win32'] .chrome::before {
   content: '';
   position: fixed;
@@ -29,6 +31,7 @@ html[data-platform='win32'] .chrome::before {
   right: 0;
   height: var(--win-titlebar-height);
   -webkit-app-region: drag;
+  pointer-events: none;
 }
 
 /* No traffic lights to clear: the sidebar starts near the top. */
@@ -64,6 +67,16 @@ html[data-platform='win32'] .toast {
 }
 
 /* ---- scrollbars ---- */
+
+/* Chromium ignores ::-webkit-scrollbar on elements that set the standard
+   scrollbar-width / scrollbar-color (the macOS-tuned Settings scroller does),
+   which left the stock Windows scrollbar, arrows included, under the Close
+   button. Reset them so the rules below apply. */
+html[data-platform='win32'] .models,
+html[data-platform='win32'] .settings-redesign .settings-nav {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
 
 /* Thin, rounded, track-less scrollbars in the spirit of macOS overlay
    scrollbars, instead of Chromium's default Windows scrollbars. */

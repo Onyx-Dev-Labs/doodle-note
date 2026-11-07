@@ -134,6 +134,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Single-instance Windows smoke failed" }
           node apps/desktop/scripts/test-windows-asr-runtime.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
           if ($LASTEXITCODE -ne 0) { throw "Packaged Windows ASR initialization failed" }
+          node apps/desktop/scripts/test-windows-chrome.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
+          if ($LASTEXITCODE -ne 0) { throw "Windows window chrome behavior check failed" }
 
       - name: Smoke packaged Windows native modules
         shell: pwsh
