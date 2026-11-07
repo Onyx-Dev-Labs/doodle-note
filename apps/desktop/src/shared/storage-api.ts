@@ -30,3 +30,17 @@ export interface StorageProgress {
   completedBytes?: number
   totalBytes?: number
 }
+
+/**
+ * Where the library location can be chosen and transferred. The controller
+ * (library-storage.ts) is platform-neutral and its transfer tests run on
+ * macOS and Windows; other platforms keep the library in the app profile.
+ */
+export function supportsLibraryLocation(platform: string | undefined): boolean {
+  return platform === 'darwin' || platform === 'win32'
+}
+
+/** The system file manager's name, for "Open in …" actions. */
+export function fileManagerName(platform: string | undefined): string {
+  return platform === 'win32' ? 'File Explorer' : 'Finder'
+}

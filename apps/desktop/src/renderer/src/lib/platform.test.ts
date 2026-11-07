@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { test } from 'node:test'
 import { applyPlatformAttribute, hostPlatform, shortcutLabel } from './platform'
+import { fileManagerName, supportsLibraryLocation } from '../../../shared/storage-api'
 
 test('macOS shortcut labels keep their glyphs exactly', () => {
   assert.equal(shortcutLabel('K', ['mod'], 'darwin'), '⌘K')
@@ -46,4 +47,18 @@ test('the platform attribute is set only when the preload provides one', () => {
   applyPlatformAttribute(root, 'win32')
   assert.equal(root.dataset['platform'], 'win32')
   assert.equal(hostPlatform(), undefined, 'no window in unit tests')
+})
+
+test('library location is offered on macOS and Windows, with the right file manager', () => {
+  assert.equal(supportsLibraryLocation('darwin'), true)
+  assert.equal(supportsLibraryLocation('win32'), true)
+  assert.equal(supportsLibraryLocation('linux'), false)
+  assert.equal(supportsLibraryLocation(undefined), false)
+  assert.equal(fileManagerName('darwin'), 'Finder')
+  assert.equal(fileManagerName('win32'), 'File Explorer')
+  const models = readFileSync(new URL('../ModelsView.tsx', import.meta.url), 'utf8')
+  assert.match(models, /\{supportsLibraryLocation\(detect\?\.platform\) && <StorageSettings \/>\}/)
+  const index = readFileSync(new URL('../../../main/index.ts', import.meta.url), 'utf8')
+  assert.match(index, /const storage = supportsLibraryLocation\(process\.platform\)/)
+  assert.doesNotMatch(index, /process\.platform === 'darwin' \? await prepareLibrary/)
 })

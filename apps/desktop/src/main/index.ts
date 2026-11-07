@@ -72,6 +72,7 @@ import {
   titleBarOverlayFor,
   windowChromeOptions
 } from './window-chrome'
+import { supportsLibraryLocation } from '../shared/storage-api'
 import {
   DETECT_GET_STATE_CHANNEL,
   DETECT_MEETING_ENDED_CHANNEL,
@@ -347,9 +348,10 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   migrateDevUserData()
-  const storage =
-    process.platform === 'darwin' ? await prepareLibrary(app.getPath('userData')) : null
-  if (process.platform === 'darwin' && !storage) {
+  const storage = supportsLibraryLocation(process.platform)
+    ? await prepareLibrary(app.getPath('userData'))
+    : null
+  if (supportsLibraryLocation(process.platform) && !storage) {
     app.quit()
     return
   }

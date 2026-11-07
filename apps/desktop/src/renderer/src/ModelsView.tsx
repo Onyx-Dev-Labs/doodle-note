@@ -4,6 +4,7 @@ import {
   type BatchTranscriptionSettings
 } from '../../shared/batch-transcription'
 import { StorageSettings } from './StorageSettings'
+import { supportsLibraryLocation } from '../../shared/storage-api'
 import CloudModelPicker from './CloudModelPicker'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
@@ -1537,7 +1538,7 @@ export default function ModelsView({
 
           {section === 'storage' && (
             <>
-              {detect?.platform === 'darwin' && <StorageSettings />}
+              {supportsLibraryLocation(detect?.platform) && <StorageSettings />}
               <section className="keys-section">
                 <h3>Saved meeting audio</h3>
                 <p className="models-sub">
