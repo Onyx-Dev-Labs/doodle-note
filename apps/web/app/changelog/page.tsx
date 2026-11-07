@@ -13,6 +13,7 @@ const RELEASES: Array<{
     date: "Unreleased",
     highlights: [
       "DoodleNote 1.0: a security-hardening release across the app and the website",
+      "Join our community: a new link in the sidebar and in Settings opens the DoodleNote Discord for help, updates, and early testing",
       "Shared links stop working when you turn sharing off or move a note to Trash, and new links no longer include the transcript unless you choose to",
       "Linking a Mac to your account now confirms the request came from your own browser session",
       "Phone calling requires an active subscription and a phone number only you have verified",

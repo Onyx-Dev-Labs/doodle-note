@@ -17,12 +17,14 @@ import ModelsView, { type SettingsSection } from './ModelsView'
 import OnboardingTour from './OnboardingTour'
 import mascotUrl from './assets/mascot-square.png'
 import './assets/sidebar-redesign.css'
+import { COMMUNITY_LABEL, openCommunity } from './lib/community'
 import { isOnboardingDone, isSetupWizardDone, markSetupWizardDone } from './lib/onboarding'
 import FirstRunWizard from './FirstRunWizard'
 import { startWinCapture, stopWinCapture, switchWinInputDevice } from './lib/win-capture'
 import { decodeWinBatchAudio, cancelWinBatchAudio } from './lib/win-batch-decode'
 import {
   CalendarIcon,
+  CommunityIcon,
   FolderIcon,
   GearIcon,
   HomeIcon,
@@ -651,6 +653,17 @@ function App(): React.JSX.Element {
             <div className="privacy-badge">
               <LockIcon size={12} /> Local &amp; private
             </div>
+            <button
+              type="button"
+              className="nav-item"
+              title="Help, updates and early testing on Discord"
+              onClick={openCommunity}
+            >
+              <span className="nav-icon">
+                <CommunityIcon size={14} />
+              </span>
+              {COMMUNITY_LABEL}
+            </button>
             <button
               type="button"
               className={view === 'settings' ? 'nav-item on' : 'nav-item'}
