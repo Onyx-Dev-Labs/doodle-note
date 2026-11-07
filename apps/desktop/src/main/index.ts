@@ -3,6 +3,7 @@ import { APP_CHANNEL } from '../shared/app-channel'
 import { planProfile } from './profile-identity'
 import { createDictationHost } from './dictation-host'
 import { WinDictationCapture } from './win-dictation-capture'
+import { onlyDictationWindowsRemain } from './dictation-windows'
 import { windowsInputStateUid, winDictationEngine } from './win-dictation-engine'
 import type { DictationService } from './dictation-service'
 import { SourceIndexService } from './source-index-service'
@@ -74,7 +75,6 @@ import {
   backgroundQuitDue,
   hasThemedTitleBarOverlay,
   hidesToTrayOnClose,
-  onlyDictationWindowsRemain,
   quitsAfterBackgroundRecording,
   titleBarOverlayFor,
   windowChromeOptions
@@ -406,16 +406,9 @@ function createWindow(): void {
     // window-all-closed never fires on its own. When a real close (not hide-to-tray)
     // leaves only those, quit — preserving step 3's "close quits unless recording".
     if (process.platform === 'win32' && !quitting && !recording.busy) {
-      const remaining = BrowserWindow.getAllWindows()
-        .filter((other) => other !== window && !other.isDestroyed())
-        .map((other) => {
-          try {
-            return other.webContents.getURL()
-          } catch {
-            return ''
-          }
-        })
-      if (onlyDictationWindowsRemain(remaining)) app.quit()
+      const remaining = BrowserWindow.getAllWindows().filter((other) => !other.isDestroyed())
+      // The pill and hidden capture window are tagged, so they never keep the app alive.
+      if (onlyDictationWindowsRemain(remaining, null)) app.quit()
     }
   })
   window.webContents.on('did-start-loading', () => {

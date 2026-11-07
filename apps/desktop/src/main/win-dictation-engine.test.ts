@@ -15,7 +15,13 @@ test('Bark asks the Windows engine for a raw dictation capture, and only that', 
       stop: () => void stopped++,
       running: false,
       warm: true,
-      dictationModelState: () => ({ ready: true, downloadProgress: null, usingFallback: false })
+      dictationModelState: () => ({
+        ready: true,
+        downloadProgress: null,
+        usingFallback: false,
+        downloadFailed: false
+      }),
+      retryDictationModel: () => {}
     },
     {
       listInputDevices: async () => [
@@ -41,7 +47,8 @@ test('Bark asks the Windows engine for a raw dictation capture, and only that', 
   assert.deepEqual(engine.dictationModelState?.(), {
     ready: true,
     downloadProgress: null,
-    usingFallback: false
+    usingFallback: false,
+    downloadFailed: false
   })
 })
 
@@ -55,7 +62,13 @@ test('a refusal from the engine is passed on unchanged', () => {
       stop: () => {},
       running: true,
       warm: false,
-      dictationModelState: () => ({ ready: false, downloadProgress: 0.5, usingFallback: true })
+      dictationModelState: () => ({
+        ready: false,
+        downloadProgress: 0.5,
+        usingFallback: true,
+        downloadFailed: false
+      }),
+      retryDictationModel: () => {}
     },
     { listInputDevices: async () => [] }
   )

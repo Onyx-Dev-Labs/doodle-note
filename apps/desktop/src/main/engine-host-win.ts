@@ -80,6 +80,8 @@ export class WinEngineHost {
   private liveModelName: string | null = null
   /** Background Parakeet download progress 0..1 while the worker runs on the fallback model. */
   private parakeetDownloadProgress: number | null = null
+  /** The background Parakeet download failed; dictation shows a failure and a retry is offered. */
+  private parakeetDownloadFailed = false
   /** Frames captured while a reloading worker loads its model. */
   private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
   private startAfterReload = false
@@ -179,14 +181,32 @@ export class WinEngineHost {
     ready: boolean
     downloadProgress: number | null
     usingFallback: boolean
+    downloadFailed: boolean
   } {
     const onParakeet = this.liveModelName === PARAKEET_UNIFIED.name
     const usingFallback = this.liveModelName !== null && !onParakeet
     return {
       ready: this.warm && onParakeet,
       downloadProgress: this.parakeetDownloadProgress,
-      usingFallback
+      usingFallback,
+      downloadFailed: this.parakeetDownloadFailed
     }
+  }
+
+  /**
+   * Retry the background Parakeet download (after a failure) when dictation is attempted, not only
+   * after a recording: reload the idle worker so it re-checks and re-downloads the model.
+   */
+  retryDictationModel(): void {
+    if (!this.parakeetDownloadFailed || this.sessionActive || this.disposed) return
+    this.parakeetDownloadFailed = false
+    if (this.child && this.ready && !this.unloaded) {
+      this.unloading = true
+      this.ready = false
+      this.child.kill() // the exit handler marks it unloaded; reload re-runs the model check
+    }
+    this.unloaded = true
+    this.reload()
   }
 
   /** Where dictation's capture control messages go (the dictation capture window). */
@@ -329,6 +349,7 @@ export class WinEngineHost {
     }
     if (event.event === 'status' && event.stage === 'model_download') {
       if (typeof event.progress === 'number') this.parakeetDownloadProgress = event.progress
+      this.parakeetDownloadFailed = false
       if (!this.backgroundDownload) {
         // Closing the worker now would abort the download it is running.
         this.backgroundDownload = true
@@ -343,6 +364,7 @@ export class WinEngineHost {
       this.backgroundDownload = false
       // On a successful upgrade the next serve_ready reports Parakeet; a failure leaves the fallback.
       if (event.stage === 'model_upgraded') this.liveModelName = PARAKEET_UNIFIED.name
+      if (event.stage === 'model_download_failed') this.parakeetDownloadFailed = true
       this.parakeetDownloadProgress = null
       if (!this.sessionActive) this.armIdleTimer()
     }

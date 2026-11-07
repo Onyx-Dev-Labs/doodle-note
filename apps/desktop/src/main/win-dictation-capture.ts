@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, ipcMain, type IpcMainEvent } from 'electron'
+import { tagDictationWindow } from './dictation-windows'
 import {
   DICTATION_CAPTURE_CONTROL_CHANNEL,
   DICTATION_CAPTURE_DEVICES_REPLY_CHANNEL,
@@ -130,6 +131,7 @@ export class WinDictationCapture {
         additionalArguments: this.options.testHooks ? [DICTATION_CAPTURE_TEST_HOOKS_ARG] : []
       }
     })
+    tagDictationWindow(window)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event) => event.preventDefault())
     const lost = (): void => {

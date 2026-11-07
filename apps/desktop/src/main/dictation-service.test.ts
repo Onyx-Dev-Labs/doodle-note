@@ -94,7 +94,13 @@ function harness(
     /** Windows: how the helper on disk compares with its manifest. */
     helperIntegrity?: 'ok' | 'damaged' | 'absent'
     /** Windows: the dictation model readiness the engine reports. */
-    modelState?: { ready: boolean; downloadProgress: number | null; usingFallback: boolean }
+    modelState?: {
+      ready: boolean
+      downloadProgress: number | null
+      usingFallback: boolean
+      downloadFailed: boolean
+    }
+    retryModel?: () => void
     warm?: () => void
     modelOptions?: {
       localModelLabel: string | null
@@ -201,7 +207,8 @@ function harness(
       },
       warm: true,
       listInputDevices: async () => devices.list,
-      ...(options.modelState ? { dictationModelState: () => options.modelState! } : {})
+      ...(options.modelState ? { dictationModelState: () => options.modelState! } : {}),
+      ...(options.retryModel ? { retryDictationModel: options.retryModel } : {})
     },
     ownership,
     helper: {
@@ -2493,10 +2500,7 @@ test('Windows: a blocked helper says so and never opens the microphone', async (
   const h = harness({ platform: 'win32', helperBlocked: true })
   h.service.toggle()
   await tick()
-  assert.match(
-    JSON.stringify(h.overlay.at(-1)),
-    /Windows refused to run the Bark helper because it is not signed/
-  )
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Windows blocked the Bark helper from starting/)
   assert.deepEqual(h.engineCalls, [])
   assert.equal(h.ownership.owner, null)
   assert.equal((await h.service.status()).helper, 'blocked')
@@ -2556,7 +2560,7 @@ test('Windows: a Right Ctrl hold dictates and delivers through the same path', a
 test('Windows: Bark refuses to dictate on the weaker fallback model and shows the download percent', async () => {
   const h = harness({
     platform: 'win32',
-    modelState: { ready: false, downloadProgress: 0.42, usingFallback: true }
+    modelState: { ready: false, downloadProgress: 0.42, usingFallback: true, downloadFailed: false }
   })
   h.service.toggle()
   await tick()
@@ -2568,7 +2572,7 @@ test('Windows: Bark refuses to dictate on the weaker fallback model and shows th
 test('Windows: once Parakeet is ready, dictation starts normally', async () => {
   const h = harness({
     platform: 'win32',
-    modelState: { ready: true, downloadProgress: null, usingFallback: false }
+    modelState: { ready: true, downloadProgress: null, usingFallback: false, downloadFailed: false }
   })
   await speak(h, 'hello windows')
   assert.deepEqual(h.delivered, ['hello windows'])
@@ -2611,4 +2615,20 @@ test('a specific "no microphone" engine error reaches the user unchanged', async
   h.emit({ event: 'error', message: 'No microphone was found.' })
   await tick()
   assert.match(JSON.stringify(h.overlay.at(-1)), /No microphone was found\./)
+})
+
+test('Windows: a failed model download shows a failure and retries when dictation is attempted', async () => {
+  let retried = 0
+  const h = harness({
+    platform: 'win32',
+    modelState: { ready: false, downloadProgress: null, usingFallback: true, downloadFailed: true },
+    retryModel: () => {
+      retried += 1
+    }
+  })
+  h.service.toggle()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /could not be downloaded/)
+  assert.equal(retried, 1, 'attempting dictation re-triggers the download')
+  assert.deepEqual(h.engineCalls, [])
 })

@@ -110,7 +110,10 @@ export interface EngineLike {
     ready: boolean
     downloadProgress: number | null
     usingFallback: boolean
+    downloadFailed: boolean
   }
+  /** Windows: retry a failed background model download when dictation is attempted. */
+  retryDictationModel?(): void
 }
 
 export interface HelperLike {
@@ -990,6 +993,16 @@ export class DictationService {
     if (model && !model.ready) {
       // A fresh install serves a weaker model while Parakeet downloads; do not dictate on it
       // (the Mac never dictates on a weaker model either).
+      if (model.downloadFailed) {
+        // Attempting dictation re-triggers the download, rather than waiting for a recording.
+        this.deps.engine.retryDictationModel?.()
+        this.dispatch({
+          type: 'notice',
+          level: 'error',
+          message: `The ${FEATURE_NAME} speech model could not be downloaded. Check your connection; retrying now.`
+        })
+        return
+      }
       const percent =
         model.downloadProgress !== null ? ` ${Math.round(model.downloadProgress * 100)}%` : ''
       this.dispatch({

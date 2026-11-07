@@ -131,17 +131,3 @@ export function backgroundQuitDue(
   const notesStarted = activity.lastNotesActivityAt >= activity.endedAt
   return notesStarted || now - activity.endedAt >= limits.startGraceMs
 }
-
-/**
- * Bark keeps two windows alive for the app's lifetime on Windows: the dictation pill
- * overlay (a `data:` page) and the hidden microphone-capture window
- * (`dictation-capture.html`). They must not keep the app running once the main window
- * is gone, or closing the window would no longer quit. True when every still-open
- * window is one of these utility windows, so the app can quit.
- */
-export function onlyDictationWindowsRemain(remainingWindowUrls: readonly string[]): boolean {
-  if (remainingWindowUrls.length === 0) return true
-  return remainingWindowUrls.every(
-    (url) => url.startsWith('data:text/html') || url.includes('dictation-capture.html')
-  )
-}

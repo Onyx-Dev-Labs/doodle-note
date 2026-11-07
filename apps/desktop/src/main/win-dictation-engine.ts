@@ -8,7 +8,13 @@ export interface WinDictationEngineHost {
   stop(): void
   readonly running: boolean
   readonly warm: boolean
-  dictationModelState(): { ready: boolean; downloadProgress: number | null; usingFallback: boolean }
+  dictationModelState(): {
+    ready: boolean
+    downloadProgress: number | null
+    usingFallback: boolean
+    downloadFailed: boolean
+  }
+  retryDictationModel(): void
 }
 
 export interface WinDictationDevices {
@@ -36,6 +42,7 @@ export function winDictationEngine(
       return host.warm
     },
     dictationModelState: () => host.dictationModelState(),
+    retryDictationModel: () => host.retryDictationModel(),
     listInputDevices: async () => {
       known = await devices.listInputDevices()
       return known

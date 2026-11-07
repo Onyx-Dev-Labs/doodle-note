@@ -12,6 +12,7 @@ import {
 } from '../shared/dictation-pill'
 import { overlaySize, type OverlayView } from './dictation-overlay-view'
 import { overlayHtml } from './dictation-overlay-page'
+import { tagDictationWindow } from './dictation-windows'
 
 export type OverlayAction =
   'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu' | 'view' | 'undo'
@@ -204,6 +205,7 @@ export class DictationOverlay {
         autoplayPolicy: 'no-user-gesture-required'
       }
     })
+    tagDictationWindow(window)
     window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
