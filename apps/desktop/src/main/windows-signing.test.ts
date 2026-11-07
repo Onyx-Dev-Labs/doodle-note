@@ -21,7 +21,9 @@ const signing = createRequire(import.meta.url)(signScript) as {
   artifactSigningMetadata(plan: object): { ExcludeCredentials: string[]; [key: string]: unknown }
   unsignedByBuilder(appOutDir: string): string[]
 }
-const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), 'utf8')
+// Windows CI checks files out with CRLF line endings.
+const read = (relative: string): string =>
+  readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const builderConfig = read('../../electron-builder.yml')
 const ci = read('../../../../.github/workflows/ci.yml')
 const desktopPackage = JSON.parse(read('../../package.json')) as { scripts: Record<string, string> }

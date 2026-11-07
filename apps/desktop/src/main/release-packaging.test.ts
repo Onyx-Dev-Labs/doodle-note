@@ -178,12 +178,13 @@ test('Windows installs move to a DoodleNote folder without forking the install o
     new URL('../../build/windows-installer.nsh', import.meta.url),
     'utf8'
   )
-  assert.match(builderConfig, /^nsis:\n(?: {2}.*\n)*? {2}include: build\/windows-installer\.nsh$/m)
+  const config = builderConfig.replace(/\r\n/g, '\n')
+  assert.match(config, /^nsis:\n(?: {2}.*\n)*? {2}include: build\/windows-installer\.nsh$/m)
   // The uninstall key derives from appId and the profile (%APPDATA%\desktop, which
   // holds the library location, settings and accounts) from the package name.
-  assert.match(builderConfig, /^appId: com\.doodlenote\.desktop$/m)
+  assert.match(config, /^appId: com\.doodlenote\.desktop$/m)
   assert.equal(JSON.parse(desktopPackage).name, 'desktop')
-  assert.doesNotMatch(builderConfig, /extraMetadata|^ {2}guid:/m)
+  assert.doesNotMatch(config, /extraMetadata|^ {2}guid:/m)
   for (const hook of ['customInit', 'customCheckAppRunning', 'customInstall']) {
     assert.match(installer, new RegExp(`!macro ${hook}\\b`))
   }
