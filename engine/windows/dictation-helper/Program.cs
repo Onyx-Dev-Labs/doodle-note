@@ -60,7 +60,11 @@ namespace DoodleNote.DictationHelper
                 {
                     if (line.Trim().Length == 0) continue;
                     Dictionary<string, object> request = Wire.Parse(line);
-                    if (request != null) Handle(request);
+                    if (request != null)
+                    {
+                        request["__receiptTick"] = Environment.TickCount;
+                        Handle(request);
+                    }
                     else Wire.Send(Wire.Fields("event", "parse-error"));
                 }
             }
@@ -180,8 +184,9 @@ namespace DoodleNote.DictationHelper
                         string text = Wire.Str(request, "text") ?? "";
                         DeliveryGuards guards = new DeliveryGuards(Wire.Str(request, "expectSelection"), Wire.Str(request, "replace"));
                         bool watch = Wire.Bool(request, "watch") == true;
-                        // Elapsed-ms budget from Delivery start; past it, no paste or type is begun.
+                        // Elapsed-ms budget measured from when the request was received (below).
                         int deadlineMs = (int)(Wire.Num(request, "deadlineMs") ?? 0);
+                        int receiptTick = (int)(Wire.Num(request, "__receiptTick") ?? Environment.TickCount);
                         work.Async(id, delegate
                         {
                             if (text.Length == 0)
@@ -195,7 +200,8 @@ namespace DoodleNote.DictationHelper
                                 Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Refused, "no-target").Fields());
                                 return;
                             }
-                            DeliveryResult result = Delivery.Deliver(snapshot, text, guards, deadlineMs);
+                            int queuedMs = unchecked(Environment.TickCount - receiptTick);
+                            DeliveryResult result = Delivery.Deliver(snapshot, text, guards, deadlineMs, queuedMs);
                             // A snapshot is single-use: a second deliver can never re-insert.
                             snapshots.Drop(snapshotId);
                             // Keep the field for read-backs only when asked, only after a confirmed

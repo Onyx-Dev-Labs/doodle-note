@@ -30,9 +30,11 @@ namespace DoodleNote.DictationHelper
         /// <summary>paste (clipboard and Ctrl+V) or type (synthetic Unicode keystrokes).</summary>
         public string Method;
         public bool Verified;
-        /// <summary>untouched | restored | user-changed | partial</summary>
+        /// <summary>untouched | restored | user-changed | partial | skipped</summary>
         public string Clipboard = "untouched";
         public DeliveryTimings Timings;
+        /// <summary>Characters typed before a mid-type abort; -1 when not applicable.</summary>
+        public int CharsDelivered = -1;
 
         public DeliveryResult(DeliveryOutcome outcome, string reason) { Outcome = outcome; Reason = reason; }
 
@@ -42,6 +44,7 @@ namespace DoodleNote.DictationHelper
             if (Reason != null) output["reason"] = Reason;
             if (Method != null) output["method"] = Method;
             if (Timings != null) output["timings"] = Timings.Fields();
+            if (CharsDelivered >= 0) output["charsDelivered"] = CharsDelivered;
             return output;
         }
     }
@@ -103,10 +106,10 @@ namespace DoodleNote.DictationHelper
         static int Ms(Stopwatch watch) { return (int)watch.ElapsedMilliseconds; }
 
         /// <summary>Validate the target immediately before inserting, then insert once.</summary>
-        public static DeliveryResult Deliver(TargetSnapshot snapshot, string text, DeliveryGuards guards, int deadlineMs = 0)
+        public static DeliveryResult Deliver(TargetSnapshot snapshot, string text, DeliveryGuards guards, int deadlineMs = 0, int alreadyElapsedMs = 0)
         {
             DeliveryTimings timings = new DeliveryTimings();
-            DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs);
+            DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs, alreadyElapsedMs);
             result.Timings = timings;
             return result;
         }
@@ -124,9 +127,12 @@ namespace DoodleNote.DictationHelper
             return normalized.Length * 16 + boundaries * 70 + 3000;
         }
 
-        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs)
+        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs, int alreadyElapsedMs)
         {
+            // The deadline is measured from when the request was received, not from here: a
+            // deliver stuck behind a slow UIA call must not begin after the app gave up.
             Stopwatch began = Stopwatch.StartNew();
+            Func<long> elapsed = () => began.ElapsedMilliseconds + alreadyElapsedMs;
             if (!snapshot.HasElement || snapshot.Facts == null) return new DeliveryResult(DeliveryOutcome.Refused, "no-target");
             AutomationElement current;
             if (!Target.StillFocused(snapshot, out current)) return new DeliveryResult(DeliveryOutcome.Refused, "focus-changed");
@@ -163,18 +169,18 @@ namespace DoodleNote.DictationHelper
             bool forceType = Environment.GetEnvironmentVariable("DICTATION_HELPER_STRATEGY") == "type";
             // The client sized its wait from the text length; never begin an insertion it has
             // already given up on, or doubled text could land after the user pastes from the card.
-            if (deadlineMs > 0 && !forceType && began.ElapsedMilliseconds + PasteEstimateMs > deadlineMs
-                && began.ElapsedMilliseconds + TypeEstimateMs(text) > deadlineMs)
+            if (deadlineMs > 0 && !forceType && elapsed() + PasteEstimateMs > deadlineMs
+                && elapsed() + TypeEstimateMs(text) > deadlineMs)
                 return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
             if (!forceType)
             {
-                if (deadlineMs == 0 || began.ElapsedMilliseconds + PasteEstimateMs <= deadlineMs)
+                if (deadlineMs == 0 || elapsed() + PasteEstimateMs <= deadlineMs)
                 {
                     DeliveryResult pasted = Paste(text, current, snapshot, before, timings);
                     if (pasted != null) return pasted;
                 }
             }
-            if (deadlineMs > 0 && began.ElapsedMilliseconds + TypeEstimateMs(text) > deadlineMs)
+            if (deadlineMs > 0 && elapsed() + TypeEstimateMs(text) > deadlineMs)
                 return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
             return TypeText(text, current, snapshot, before, timings);
         }
@@ -188,10 +194,12 @@ namespace DoodleNote.DictationHelper
             uint ours;
             if (!ClipboardText.Write(text, out ours))
             {
-                saved.Restore(null);
+                // Only recover if our write actually opened and emptied the clipboard (ours != 0);
+                // and only if nobody else has written since, which Restore checks under the lock.
+                if (ours != 0) saved.Restore(ours);
                 return null;
             }
-            if (!ReleaseModifiers() || !StillOurs(snapshot))
+            if (!ReleaseModifiers() || !TargetStillSafe(snapshot))
             {
                 DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, "focus-changed");
                 moved.Method = "paste";
@@ -229,6 +237,12 @@ namespace DoodleNote.DictationHelper
                 // Seen in the field; give a slow reader a moment before the old clipboard returns.
                 Thread.Sleep(60);
             }
+            if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+            {
+                int extra;
+                string raw = Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST_RESTORE_DELAY_MS");
+                if (raw != null && int.TryParse(raw, out extra) && extra > 0) Thread.Sleep(extra);
+            }
             string clipboard = saved.Restore(ours);
             DeliveryResult result = verified
                 ? new DeliveryResult(DeliveryOutcome.Delivered, null)
@@ -242,7 +256,7 @@ namespace DoodleNote.DictationHelper
         static DeliveryResult TypeText(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings)
         {
             Stopwatch insert = Stopwatch.StartNew();
-            if (!ReleaseModifiers() || !StillOurs(snapshot))
+            if (!ReleaseModifiers() || !TargetStillSafe(snapshot))
             {
                 DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, "focus-changed");
                 moved.Method = "type";
@@ -253,8 +267,22 @@ namespace DoodleNote.DictationHelper
             string normalized = text.Replace("\r\n", "\n");
             int expected = 0;
             uint sent = 0;
+            int charsTyped = 0;
+            bool aborted = false;
+            string abortReason = null;
+            Stopwatch sinceCheck = Stopwatch.StartNew();
             for (int i = 0; i < normalized.Length; i++)
             {
+                // Before every character, a cheap identity check (foreground window/pid, Win32 focus)
+                // so that if the user moves to another window — a password box, say — not one more
+                // keystroke is sent. A fuller UIA check (including the secure-field state of the same
+                // window's focused control) runs at least every 24 characters or 100 ms.
+                if (!FastStillOurs(snapshot)) { aborted = true; abortReason = "focus-changed"; break; }
+                if (i == 0 || charsTyped % 24 == 0 || sinceCheck.ElapsedMilliseconds >= 100)
+                {
+                    sinceCheck.Restart();
+                    if (!TargetStillSafe(snapshot)) { aborted = true; abortReason = "focus-changed"; break; }
+                }
                 char unit = normalized[i];
                 Native.INPUT[] pair;
                 if (unit == '\n') pair = new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) };
@@ -269,11 +297,21 @@ namespace DoodleNote.DictationHelper
                 uint count = Native.Send(pair);
                 sent += count;
                 if (count != pair.Length) break;
+                charsTyped = i + 1;
                 // Word boundaries are where editors run spelling and suggestions; keystrokes
                 // that arrive meanwhile were seen to be dropped (Windows 11 Notepad).
                 Thread.Sleep(char.IsWhiteSpace(unit) || char.IsPunctuation(unit) ? 70 : 8);
             }
             timings.InsertMs += Ms(insert);
+            if (aborted)
+            {
+                // The target changed (or became secure) mid-type: some characters already went in,
+                // so the host keeps the text and must not resend.
+                DeliveryResult stopped = new DeliveryResult(sent == 0 ? DeliveryOutcome.Refused : DeliveryOutcome.Uncertain, sent == 0 ? abortReason : "insertion-unverifiable");
+                stopped.Method = "type";
+                stopped.CharsDelivered = charsTyped;
+                return stopped;
+            }
             if (sent == 0)
             {
                 DeliveryResult failed = new DeliveryResult(DeliveryOutcome.Failed, "keystroke-unavailable");
@@ -284,6 +322,7 @@ namespace DoodleNote.DictationHelper
             {
                 DeliveryResult partial = new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable");
                 partial.Method = "type";
+                partial.CharsDelivered = charsTyped;
                 return partial;
             }
             Stopwatch confirm = Stopwatch.StartNew();
@@ -305,11 +344,37 @@ namespace DoodleNote.DictationHelper
             return result;
         }
 
-        /// <summary>The foreground app and control are still the snapshot's, right before the keystroke.</summary>
-        static bool StillOurs(TargetSnapshot snapshot)
+        /// <summary>
+        /// The foreground app and control are still the snapshot's AND not a secure/password field,
+        /// checked right before a paste keystroke and repeatedly while typing. A field that turned
+        /// into a password field since the snapshot must never be typed or pasted into.
+        /// </summary>
+        /// <summary>
+        /// A cheap identity check with no UIA call: the same foreground app and, for a Win32-focus
+        /// target, the same focused window. It catches a move to another window (where a password
+        /// box would be) at once; same-window control changes are caught by the fuller check.
+        /// </summary>
+        static bool FastStillOurs(TargetSnapshot snapshot)
         {
-            AutomationElement ignored;
-            return Target.StillFocused(snapshot, out ignored);
+            IntPtr foreground = Native.GetForegroundWindow();
+            if (foreground == IntPtr.Zero || Native.WindowPid(foreground) != snapshot.Pid) return false;
+            if (snapshot.Element == null && snapshot.FocusWindow != IntPtr.Zero)
+            {
+                uint pid;
+                uint thread = Native.GetWindowThreadProcessId(foreground, out pid);
+                Native.GUITHREADINFO gui = Target.GuiInfo(thread);
+                if (gui.hwndFocus != snapshot.FocusWindow) return false;
+            }
+            return true;
+        }
+
+        static bool TargetStillSafe(TargetSnapshot snapshot)
+        {
+            if (snapshot.AboveUs) return false;
+            AutomationElement current;
+            if (!Target.StillFocused(snapshot, out current)) return false;
+            ElementFacts now = ElementFacts.Of(current, Target.CurrentGui());
+            return !now.Secure;
         }
 
         /// <summary>
@@ -391,24 +456,47 @@ namespace DoodleNote.DictationHelper
             return false;
         }
 
-        /// <summary>Put text on the clipboard, marked so clipboard history and sync skip it.</summary>
+        /// <summary>
+        /// Put text on the clipboard, marked so clipboard history and sync skip it. `sequence` is
+        /// sampled while the clipboard is still held, so the restore can tell our own write apart
+        /// from a newer copy by another app. Non-zero even on a partial failure (the clipboard was
+        /// emptied), so the caller can still recover; zero only when the clipboard never opened.
+        /// </summary>
         public static bool Write(string text, out uint sequence)
         {
             sequence = 0;
             if (!Open()) return false;
+            bool ok = false;
             try
             {
-                if (!Native.EmptyClipboard()) return false;
-                if (!SetBytes(CF_UNICODETEXT, System.Text.Encoding.Unicode.GetBytes(text + "\0"))) return false;
-                // Windows' own clipboard history and cloud clipboard, and clipboard
-                // managers that honor it, leave entries with these formats alone.
-                SetBytes(Native.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing"), new byte[] { 0 });
-                SetBytes(Native.RegisterClipboardFormat("CanIncludeInClipboardHistory"), BitConverter.GetBytes(0));
-                SetBytes(Native.RegisterClipboardFormat("CanUploadToCloudClipboard"), BitConverter.GetBytes(0));
+                if (Native.EmptyClipboard())
+                {
+                    ok = SetBytes(CF_UNICODETEXT, System.Text.Encoding.Unicode.GetBytes(text + "\0"));
+                    // Windows' own clipboard history and cloud clipboard, and clipboard
+                    // managers that honor it, leave entries with these formats alone.
+                    SetConservativeMarkers();
+                }
             }
             finally { Native.CloseClipboard(); }
+            // Sampled just after our close so it reflects the finalized change count; the restore
+            // re-reads it under its own lock, so a writer in this tiny window is caught there.
             sequence = Native.GetClipboardSequenceNumber();
-            return true;
+            return ok;
+        }
+
+        public static readonly string[] MarkerNames =
+        {
+            "ExcludeClipboardContentFromMonitorProcessing",
+            "CanIncludeInClipboardHistory",
+            "CanUploadToCloudClipboard"
+        };
+
+        /// <summary>Set the three privacy markers to "do not record" on the current clipboard (must be open).</summary>
+        public static void SetConservativeMarkers()
+        {
+            SetBytes(Native.RegisterClipboardFormat(MarkerNames[0]), new byte[] { 0 });
+            SetBytes(Native.RegisterClipboardFormat(MarkerNames[1]), BitConverter.GetBytes(0));
+            SetBytes(Native.RegisterClipboardFormat(MarkerNames[2]), BitConverter.GetBytes(0));
         }
 
         public static bool SetBytes(uint format, byte[] bytes)
@@ -446,12 +534,18 @@ namespace DoodleNote.DictationHelper
             CF_ENHMETAFILE = 14, CF_HDROP = 15, CF_LOCALE = 16, CF_UNICODETEXT = 13, CF_DIBV5 = 17;
         /// <summary>At most this many bytes are copied across all formats.</summary>
         const int MaxBytes = 16 * 1024 * 1024;
+        /// <summary>At most this many bytes for one format before it is dropped without copying.</summary>
+        const int MaxFormatBytes = 8 * 1024 * 1024;
         /// <summary>At most this long is spent copying the clipboard.</summary>
         const int MaxMs = 300;
         readonly List<KeyValuePair<uint, byte[]>> items = new List<KeyValuePair<uint, byte[]>>();
         IntPtr metafile = IntPtr.Zero;
         bool complete = true;
-        bool skipped;
+        /// <summary>True only when a user-visible format was dropped by the byte or time cap; drops of private formats are silent.</summary>
+        bool reportedSkip;
+        /// <summary>A privacy marker was on the clipboard but could not be read, so set it conservatively on restore.</summary>
+        bool forceMarkers;
+        static readonly HashSet<string> Markers = new HashSet<string>(ClipboardText.MarkerNames, StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Standard formats worth saving by number.</summary>
         static readonly HashSet<uint> SafeStandard = new HashSet<uint>
@@ -470,6 +564,18 @@ namespace DoodleNote.DictationHelper
             "dataobject", "ole private data", "object descriptor", "embed source", "embedded object",
             "link source", "native", "ownerlink", "objectlink"
         };
+
+        static byte[] ReadBytes(IntPtr data)
+        {
+            int size = (int)Native.GlobalSize(data).ToUInt64();
+            if (size <= 0) return null;
+            IntPtr source = Native.GlobalLock(data);
+            if (source == IntPtr.Zero) return null;
+            byte[] bytes = new byte[size];
+            Marshal.Copy(source, bytes, 0, size);
+            Native.GlobalUnlock(data);
+            return bytes;
+        }
 
         static string FormatName(uint format)
         {
@@ -490,7 +596,8 @@ namespace DoodleNote.DictationHelper
                 bool hasDib = Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5);
                 for (uint format = Native.EnumClipboardFormats(0); format != 0; format = Native.EnumClipboardFormats(format))
                 {
-                    if (watch.ElapsedMilliseconds > MaxMs) { saved.skipped = true; break; }
+                    // Deciding which formats are user-visible is cheap; only safe ones are read below.
+                    bool safe;
                     if (format == CF_BITMAP || format == CF_PALETTE)
                     {
                         // Windows rebuilds these from the device-independent bitmap.
@@ -504,33 +611,51 @@ namespace DoodleNote.DictationHelper
                         if (saved.metafile == IntPtr.Zero) saved.complete = false;
                         continue;
                     }
-                    bool safe;
                     if (format < 0xC000) safe = SafeStandard.Contains(format);
                     else
                     {
                         string name = FormatName(format);
-                        if (Unsafe.Contains(name)) { saved.skipped = true; continue; }
+                        // Privacy markers (exclude-from-history / cloud): preserve their presence and
+                        // value, so restoring a password manager's entry cannot republish it into
+                        // clipboard history or cloud sync. Unreadable → set conservatively on restore.
+                        if (Markers.Contains(name))
+                        {
+                            IntPtr markerData = Native.GetClipboardData(format);
+                            byte[] markerBytes = markerData != IntPtr.Zero ? ReadBytes(markerData) : null;
+                            if (markerBytes != null) saved.items.Add(new KeyValuePair<uint, byte[]>(format, markerBytes));
+                            else saved.forceMarkers = true;
+                            continue;
+                        }
+                        // Private/OLE formats are dropped silently (expected, not a loss).
+                        if (Unsafe.Contains(name)) continue;
                         safe = SafeRegistered.Contains(name);
                     }
-                    if (!safe) { saved.skipped = true; continue; }
+                    // An unknown format we do not restore is dropped silently too: it is almost always
+                    // a private format, and reporting it would make nearly every save look lossy.
+                    if (!safe) continue;
+                    // Reading a user-visible format renders delayed ones; cap total time so one huge
+                    // read cannot stall the delivery, and report the drop as a visible loss.
+                    if (watch.ElapsedMilliseconds > MaxMs) { saved.reportedSkip = true; continue; }
                     IntPtr data = Native.GetClipboardData(format);
                     if (data == IntPtr.Zero)
                     {
                         saved.complete = false; // promised data the owner did not render
                         continue;
                     }
-                    int size = (int)Native.GlobalSize(data).ToUInt64();
-                    if (size < 0 || total + size > MaxBytes) { saved.skipped = true; continue; }
+                    long size = (long)Native.GlobalSize(data).ToUInt64();
+                    // Oversized: skip without copying the bytes, so a large Excel/Photoshop clipboard
+                    // cannot blow the budget; the user is told a visible format was not kept.
+                    if (size <= 0 || size > MaxFormatBytes || total + size > MaxBytes) { saved.reportedSkip = true; continue; }
                     IntPtr source = Native.GlobalLock(data);
                     if (source == IntPtr.Zero)
                     {
                         saved.complete = false;
                         continue;
                     }
-                    byte[] bytes = new byte[size];
-                    Marshal.Copy(source, bytes, 0, size);
+                    byte[] bytes = new byte[(int)size];
+                    Marshal.Copy(source, bytes, 0, (int)size);
                     Native.GlobalUnlock(data);
-                    total += size;
+                    total += (int)size;
                     saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
                 }
             }
@@ -539,7 +664,8 @@ namespace DoodleNote.DictationHelper
         }
 
         public int Count { get { return items.Count; } }
-        public bool AnythingSkipped { get { return skipped; } }
+        /// <summary>A user-visible format was dropped by a cap (not a silent private-format drop).</summary>
+        public bool ReportedSkip { get { return reportedSkip; } }
 
         /// <summary>
         /// Restores only if nobody else wrote to the clipboard since `expecting`.
@@ -549,11 +675,13 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         public string Restore(uint? expecting)
         {
-            if (expecting.HasValue && Native.GetClipboardSequenceNumber() != expecting.Value) return "user-changed";
             if (!ClipboardText.Open()) return "partial";
             bool ok = true;
             try
             {
+                // Compare the sequence while holding the lock: an app that wrote between our paste
+                // and now owns a newer copy, which must not be clobbered.
+                if (expecting.HasValue && Native.GetClipboardSequenceNumber() != expecting.Value) return "user-changed";
                 Native.EmptyClipboard();
                 foreach (KeyValuePair<uint, byte[]> item in items)
                     if (!ClipboardText.SetBytes(item.Key, item.Value)) ok = false;
@@ -562,9 +690,11 @@ namespace DoodleNote.DictationHelper
                     if (Native.SetClipboardData(CF_ENHMETAFILE, metafile) == IntPtr.Zero) ok = false;
                     metafile = IntPtr.Zero;
                 }
+                // A marker was present but unreadable: keep the content out of history and cloud.
+                if (forceMarkers) ClipboardText.SetConservativeMarkers();
             }
             finally { Native.CloseClipboard(); }
-            if (skipped) return "skipped";
+            if (reportedSkip) return "skipped";
             return ok && complete ? "restored" : "partial";
         }
     }

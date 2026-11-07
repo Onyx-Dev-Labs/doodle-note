@@ -360,6 +360,17 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal("gone", muter.Restore(), "gone");
         }
 
+        public static void MicNameMatchingStripsOnlyTheChromiumHardwareSuffix()
+        {
+            // The Chromium "(vid:pid)" tail is dropped; device-name parentheses are kept, so two
+            // microphones that differ only by their "(USB A)/(USB B)" tail stay distinct.
+            Assert.Equal("microphone", CoreAudio.Normalize("Microphone (1234:5678)"), "hardware suffix stripped");
+            Assert.Equal("microphone", CoreAudio.Normalize("  Microphone  "), "trimmed, lower-cased");
+            Assert.True(CoreAudio.Normalize("Microphone (USB A)") != CoreAudio.Normalize("Microphone (USB B)"), "device-name parentheses kept distinct");
+            Assert.Equal("microphone (usb a)", CoreAudio.Normalize("Microphone (USB A) (0a1b:2c3d)"), "name kept, hardware tail removed");
+            Assert.Equal("", CoreAudio.Normalize(null), "null is empty");
+        }
+
         public static void ALeftoverSilenceIsAdoptedAndGivenBack()
         {
             FakeOutput device = new FakeOutput { Muted = true };

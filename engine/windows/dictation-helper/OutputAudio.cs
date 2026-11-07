@@ -127,29 +127,32 @@ namespace DoodleNote.DictationHelper
             int count;
             devices.GetCount(out count);
             string wanted = Normalize(name);
-            IMMDevice exact = null, normalized = null, prefix = null;
+            IMMDevice exact = null, normalized = null;
+            int normalizedMatches = 0;
             for (int i = 0; i < count; i++)
             {
                 IMMDevice device;
                 if (devices.Item(i, out device) != 0) continue;
                 string deviceName = Name(device) ?? "";
                 if (string.Equals(deviceName, name, StringComparison.OrdinalIgnoreCase)) { exact = device; break; }
-                string normDevice = Normalize(deviceName);
-                if (normDevice == wanted) { if (normalized == null) normalized = device; }
-                else if (normDevice.Length > 0 && (wanted.StartsWith(normDevice) || normDevice.StartsWith(wanted)))
-                { if (prefix == null) prefix = device; }
+                if (Normalize(deviceName) == wanted) { normalized = device; normalizedMatches++; }
             }
-            return exact ?? normalized ?? prefix;
+            // An exact name wins; otherwise accept a normalized match only when it is unambiguous.
+            // Two devices that differ only by a "(USB A)"/"(USB B)" tail must not be guessed.
+            if (exact != null) return exact;
+            return normalizedMatches == 1 ? normalized : null;
         }
 
-        /// <summary>Lower case, trimmed, with a trailing "(vid:pid)"-style suffix removed.</summary>
-        static string Normalize(string name)
+        /// <summary>
+        /// Lower case, trimmed, with only a trailing Chromium "(xxxx:xxxx)" hardware id removed.
+        /// Device-name parentheses like "Microphone (USB A)" are kept, so two such devices stay distinct.
+        /// </summary>
+        internal static string Normalize(string name)
         {
             if (string.IsNullOrEmpty(name)) return "";
             string value = name.Trim();
-            int paren = value.LastIndexOf('(');
-            if (paren > 0) value = value.Substring(0, paren).Trim();
-            return value.ToLowerInvariant();
+            value = System.Text.RegularExpressions.Regex.Replace(value, @"\s*\([0-9a-fA-F]{4}:[0-9a-fA-F]{4}\)\s*$", "");
+            return value.Trim().ToLowerInvariant();
         }
 
         public static IAudioEndpointVolume Volume(IMMDevice device)
@@ -302,6 +305,26 @@ namespace DoodleNote.DictationHelper
         /// <summary>If the app never asks for the sound back (it hung, or was killed), give it back anyway.</summary>
         public const int WatchdogSeconds = 15 * 60;
         static System.Threading.Timer watchdog;
+        /// <summary>A token unique to this helper instance, so one instance never clears another's record.</summary>
+        static readonly string Owner = Process.GetCurrentProcess().Id + ":" + Guid.NewGuid().ToString("N");
+        /// <summary>Owner of a record this instance has adopted (so it may clear it on restore).</summary>
+        static string adoptedOwner;
+
+        /// <summary>Serialize read/modify/write of the shared record across all helper instances.</summary>
+        static T WithStateLock<T>(Func<T> body, T fallback)
+        {
+            bool created;
+            using (System.Threading.Mutex mutex = new System.Threading.Mutex(false, "Global\\DoodleNote-Bark-output", out created))
+            {
+                bool held = false;
+                try { held = mutex.WaitOne(2000); }
+                catch (System.Threading.AbandonedMutexException) { held = true; }
+                try { return body(); }
+                finally { if (held) try { mutex.ReleaseMutex(); } catch (ApplicationException) { } }
+            }
+        }
+
+        static void WithStateLock(Action body) { WithStateLock<object>(() => { body(); return null; }, null); }
 
         /// <summary>
         /// Windows can end the helper without warning (the app is killed), so a silence in
@@ -335,51 +358,75 @@ namespace DoodleNote.DictationHelper
 
         static void WriteState()
         {
-            try
+            WithStateLock(() =>
             {
-                Dictionary<string, object> state = Wire.Fields("pid", Process.GetCurrentProcess().Id, "device", Shared.HeldDevice);
-                if (Shared.HeldVolume.HasValue) state["volume"] = (double)Shared.HeldVolume.Value;
-                File.WriteAllText(StatePath, Wire.Serialize(state));
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+                try
+                {
+                    Dictionary<string, object> state = Wire.Fields("pid", Process.GetCurrentProcess().Id, "owner", Owner, "device", Shared.HeldDevice);
+                    if (Shared.HeldVolume.HasValue) state["volume"] = (double)Shared.HeldVolume.Value;
+                    File.WriteAllText(StatePath, Wire.Serialize(state));
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            });
         }
 
+        /// <summary>Delete the record only if this instance owns it (wrote or adopted it).</summary>
         static void ClearState()
         {
-            try { if (File.Exists(StatePath)) File.Delete(StatePath); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            WithStateLock(() =>
+            {
+                try
+                {
+                    if (!File.Exists(StatePath)) return;
+                    Dictionary<string, object> state = Wire.Parse(File.ReadAllText(StatePath));
+                    string recordOwner = state != null ? Wire.Str(state, "owner") : null;
+                    if (recordOwner == null || recordOwner == Owner || recordOwner == adoptedOwner) File.Delete(StatePath);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            });
         }
 
         /// <summary>At start: a silence left by a helper that no longer runs is given back.</summary>
         public static void RecoverLeftover()
         {
-            Dictionary<string, object> state;
-            try
+            string device = null;
+            double? volume = null;
+            string owner = null;
+            bool adopt = WithStateLock(() =>
             {
-                if (!File.Exists(StatePath)) return;
-                state = Wire.Parse(File.ReadAllText(StatePath));
-            }
-            catch (IOException) { return; }
-            catch (UnauthorizedAccessException) { return; }
-            if (state == null) { ClearState(); return; }
-            double? pid = Wire.Num(state, "pid");
-            if (pid.HasValue && pid.Value != Process.GetCurrentProcess().Id)
-            {
+                Dictionary<string, object> state;
                 try
                 {
-                    using (Process other = Process.GetProcessById((int)pid.Value))
-                    {
-                        if (!other.HasExited && other.ProcessName.IndexOf("dictation-helper", StringComparison.OrdinalIgnoreCase) >= 0) return;
-                    }
+                    if (!File.Exists(StatePath)) return false;
+                    state = Wire.Parse(File.ReadAllText(StatePath));
                 }
-                catch (ArgumentException) { }
-                catch (InvalidOperationException) { }
-                catch (System.ComponentModel.Win32Exception) { }
-            }
-            string device = Wire.Str(state, "device");
-            double? volume = Wire.Num(state, "volume");
+                catch (IOException) { return false; }
+                catch (UnauthorizedAccessException) { return false; }
+                if (state == null) return false;
+                double? pid = Wire.Num(state, "pid");
+                owner = Wire.Str(state, "owner");
+                // A record owned by another helper that is still running belongs to it: leave it alone.
+                if (pid.HasValue && pid.Value != Process.GetCurrentProcess().Id && owner != Owner)
+                {
+                    try
+                    {
+                        using (Process other = Process.GetProcessById((int)pid.Value))
+                        {
+                            if (!other.HasExited && other.ProcessName.IndexOf("dictation-helper", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+                        }
+                    }
+                    catch (ArgumentException) { }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { }
+                }
+                device = Wire.Str(state, "device");
+                volume = Wire.Num(state, "volume");
+                adoptedOwner = owner; // we own it now, so ClearState below may delete it
+                return true;
+            }, false);
+            if (!adopt) return;
             if (device != null)
             {
                 Shared.Adopt(device, volume.HasValue ? (float?)(float)volume.Value : null);

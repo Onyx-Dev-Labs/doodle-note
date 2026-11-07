@@ -328,3 +328,34 @@ misrecognized a synthetic access-code digit. Current builds use the Parakeet
 models above with no refinement pass; the benchmark above replaces one-sentence
 acceptance, but physical microphones and real calls still need the checks in
 this document.
+
+## Bark (dictation) on Windows
+
+Bark is ported to Windows (off by default; Settings → Bark). Speech uses the shared
+Parakeet worker with a mic-only, raw dictation capture; a small C# helper (built with
+the inbox .NET Framework 4.8 compiler and shipped as `resources/engine/dictation-helper.exe`)
+watches the hold-to-talk key and types the text. Delivery is clipboard + Ctrl+V with the
+clipboard restored (privacy markers preserved; a newer copy made during delivery is never
+overwritten), falling back to paced Unicode typing when the clipboard cannot be opened.
+
+Known limitation — typing fallback and non-Latin scripts: the paste path handles all
+Unicode correctly (verified with accented Latin, a symbol, and an arbitrary binary
+clipboard). The **typing fallback** (used only when the clipboard cannot be opened) was
+exercised with Chinese, Hebrew and emoji and returned `uncertain`: the characters are sent
+with `KEYEVENTF_UNICODE` (surrogate pairs for astral emoji), but the post-insert
+verification via UIA `ValuePattern`/`TextPattern` could not confirm the result for
+right-to-left and some complex-script text (bidi reordering in the read-back), so the
+helper reports `uncertain` and the host keeps the text for pasting rather than claiming
+success. No characters are lost silently; the fallback is rare. Fixing confident
+verification for RTL/CJK on the typing path is a follow-up.
+
+Fresh install: while the preferred Parakeet model downloads in the background a fresh
+install serves the weaker legacy Zipformer; Bark refuses to dictate on it (matching the
+Mac) and the pill/Settings show the download percent, a failure message, and retry on the
+next attempt.
+
+Security review follow-ups verified natively on Dev04 (evidence/step4-fix-2): the hook
+watchdog injects no input (GetLastInputInfo unchanged across an armed-idle span); typing
+stops before a single character reaches a password field focused mid-type; clipboard
+privacy markers survive restore; a concurrent copy is not clobbered; and one helper never
+erases another's live mute-recovery record.
