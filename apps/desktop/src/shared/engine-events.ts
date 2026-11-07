@@ -34,6 +34,8 @@ export type EngineCaptureStatus =
 export interface EngineBatchControl {
   action: 'decode' | 'cancel'
   jobId: string
+  /** Split only for recordings with known microphone/system provenance. */
+  channels?: 'mixed' | 'split'
 }
 
 export type EngineBatchMessage =

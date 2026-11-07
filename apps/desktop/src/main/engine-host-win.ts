@@ -189,8 +189,8 @@ export class WinEngineHost {
           })
         }
       }
-    } catch (error) {
-      console.error('[win-audio] merge failed:', error)
+    } catch {
+      console.error('[win-audio] merge failed')
     }
 
     if (audioPath && this.finalRefiner && !this.disposed) {
@@ -213,14 +213,26 @@ export class WinEngineHost {
             .join(' ')
           return text ? [{ channel, text, audioSeconds: result.audioSeconds }] : []
         })
-        if (transcripts.length > 0) this.emit({ event: 'refined', transcripts })
+        if (this.disposed || !this.sessionActive || this.activeSessionId !== sessionId) return
+        if (transcripts.length === 0) throw new Error('No refined transcript')
+        this.emit({ event: 'refined', transcripts })
       } catch {
         console.error('[win-asr] final refinement failed')
-        this.emit({
-          event: 'error',
-          message: 'High-accuracy refinement could not finish; the live transcript was kept.'
-        })
+        if (!this.disposed && this.sessionActive && this.activeSessionId === sessionId)
+          this.emit({
+            event: 'error',
+            message: this.ephemeralAudioDir
+              ? 'High-accuracy refinement could not finish; the live transcript was kept. Enable saved audio before your next recording to retry later.'
+              : 'High-accuracy refinement could not finish; the live transcript was kept. Try Re-transcribe using the saved recording.'
+          })
       }
+    } else if (!this.disposed && this.sessionActive && this.activeSessionId === sessionId) {
+      this.emit({
+        event: 'error',
+        message: audioPath
+          ? 'High-accuracy refinement is unavailable; the live transcript was kept. Try Re-transcribe using the saved recording.'
+          : 'The recording could not be prepared for high-accuracy refinement; the live transcript was kept. Restart DoodleNote to recover any saved audio.'
+      })
     }
 
     this.removeEphemeralAudio()
@@ -282,7 +294,7 @@ export class WinEngineHost {
 
   stop(): void {
     if (!this.sessionActive || !this.child || this.activeSessionId === null) return
-    if (this.captureState === 'draining' || this.captureState === 'finishing') return
+    if (['draining', 'finishing', 'refining'].includes(this.captureState)) return
     this.captureState = 'draining'
     this.stopCaptureInRenderer(this.activeSessionId)
     this.drainTimer = setTimeout(() => {

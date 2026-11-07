@@ -5,7 +5,12 @@ const { resolve } = require('node:path')
 const executable = process.argv[2] ? resolve(process.argv[2]) : require('electron')
 const result = spawnSync(
   executable,
-  ['--import', 'tsx', '--test', 'src/main/win-audio-recorder.test.ts'],
+  [
+    '--import', 'tsx', '--test',
+    'src/main/win-audio-recorder.test.ts',
+    'src/main/win-refinement-outcome.test.ts',
+    'src/renderer/src/lib/win-batch-decode.test.ts'
+  ],
   {
     cwd: resolve(__dirname, '..'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
@@ -18,4 +23,4 @@ process.stdout.write(result.stdout ?? '')
 process.stderr.write(result.stderr ?? '')
 if (result.error) console.error(result.error.message)
 if (result.status !== 0 || result.error) process.exit(1)
-console.log('Electron recorder regression checks passed')
+console.log('Electron recorder and refinement regression checks passed')
