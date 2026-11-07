@@ -1,4 +1,5 @@
 import { FEATURE_NAME } from './dictation-brand'
+import { BARK_COPY } from './dictation-platform'
 /**
  * Pure helpers for the always-visible dictation pill: where it docks, when a
  * "hide for an hour" ends, which microphone a session uses, what the right-click
@@ -481,7 +482,16 @@ export function describeMouseButton(button: number): string {
 }
 
 /** Plain words for a capture that did not produce a usable button. */
-export function describeMouseCaptureFailure(failure: string): string {
+export function describeMouseCaptureFailure(
+  failure: string,
+  platform: 'darwin' | 'win32' = 'darwin'
+): string {
+  if (platform === 'win32') {
+    // Windows hooks can tell only the middle, back and forward buttons apart.
+    if (failure === 'primary-button')
+      return 'Left and right click cannot be used, because they are needed for everything else. Press the middle, back or forward button.'
+    if (failure === 'input-monitoring-denied') return BARK_COPY.win32.mouseCaptureDenied
+  }
   switch (failure) {
     case 'primary-button':
       return 'Left and right click cannot be used, because they are needed for everything else. Press the middle, back, forward or an extra button.'

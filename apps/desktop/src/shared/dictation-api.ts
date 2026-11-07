@@ -172,7 +172,8 @@ export interface DictationStatus {
   settings: DictationSettings
   phase: Phase
   permissions: DictationPermissions
-  helper: 'ready' | 'unavailable'
+  /** blocked (Windows only): the helper program exists but Windows would not start it. */
+  helper: 'ready' | 'blocked' | 'unavailable'
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState

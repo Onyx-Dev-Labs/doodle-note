@@ -87,6 +87,10 @@ function harness(
     cleanup?: CleanupRunner
     access?: 'granted' | 'denied' | 'not-determined'
     clipboardFails?: boolean
+    /** Run as on this platform (the copy and the permission flow); default macOS. */
+    platform?: NodeJS.Platform
+    /** Windows: the helper exists but Windows would not start it. */
+    helperBlocked?: boolean
     warm?: () => void
     modelOptions?: {
       localModelLabel: string | null
@@ -172,6 +176,7 @@ function harness(
   const deps: DictationDeps = {
     channel: 'dev',
     supported: true,
+    ...(options.platform ? { platform: options.platform } : {}),
     settings: {
       get: () => settings,
       update: (patch) => Object.assign(settings, patch),
@@ -195,6 +200,7 @@ function harness(
     ownership,
     helper: {
       available: true,
+      ...(options.helperBlocked ? { blocked: true } : {}),
       status: async (): Promise<HelperStatus> => ({
         accessibility: true,
         inputMonitoring: helper.inputMonitoring,
@@ -2452,4 +2458,88 @@ test('a recording that ends inside the tone never mutes at all', async () => {
   await tick()
   await new Promise((resolve) => setTimeout(resolve, 450))
   assert.deepEqual(h.helper.audio, ['restore'], 'nothing was muted, so nothing is left muted')
+})
+
+/* ---- Windows (same service, the platform's words; macOS stays the default) ---- */
+
+test('macOS keeps its exact microphone words when no platform is given', async () => {
+  const h = harness({ access: 'denied' })
+  h.service.toggle()
+  await tick()
+  assert.ok(
+    JSON.stringify(h.overlay.at(-1)).includes(
+      'Microphone access is off. Turn it on in System Settings → Privacy & Security → Microphone.'
+    )
+  )
+})
+
+test('Windows: a denied microphone points at Windows Settings, never System Settings', async () => {
+  const h = harness({ access: 'denied', platform: 'win32' })
+  h.service.toggle()
+  await tick()
+  const shown = JSON.stringify(h.overlay.at(-1))
+  assert.match(shown, /Windows Settings → Privacy & security → Microphone/)
+  assert.doesNotMatch(shown, /System Settings|macOS/)
+  assert.deepEqual(h.engineCalls, [])
+})
+
+test('Windows: a blocked helper says so and never opens the microphone', async () => {
+  const h = harness({ platform: 'win32', helperBlocked: true })
+  h.service.toggle()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Windows did not let the Bark helper start/)
+  assert.deepEqual(h.engineCalls, [])
+  assert.equal(h.ownership.owner, null)
+  assert.equal((await h.service.status()).helper, 'blocked')
+})
+
+test('macOS status never reports a blocked helper', async () => {
+  const h = harness()
+  assert.equal((await h.service.status()).helper, 'ready')
+})
+
+test('Windows: the microphone permission row opens Windows Settings instead of asking', async () => {
+  const h = harness({ access: 'not-determined', platform: 'win32' })
+  assert.equal(await h.service.requestPermission('microphone'), 'open-settings')
+  assert.equal(h.perms.micAsked, 0, 'Windows has no per-app microphone prompt')
+  const mac = harness({ access: 'not-determined' })
+  assert.equal(await mac.service.requestPermission('microphone'), 'granted')
+  assert.equal(mac.perms.micAsked, 1, 'macOS still shows its own dialog')
+})
+
+test('Windows: Accessibility is a no-op success from the helper', async () => {
+  const h = harness({ platform: 'win32' })
+  h.helper.accessibilityGrantedAfterAsk = true
+  assert.equal(await h.service.requestPermission('accessibility'), 'granted')
+})
+
+test('Windows: a refused mouse hook is explained in Windows words', async () => {
+  const h = harness({ platform: 'win32' })
+  h.helper.captureResult = { ok: false, failure: 'input-monitoring-denied' }
+  const result = await h.service.captureMouseButton()
+  assert.equal(result.ok, false)
+  assert.match(result.ok ? '' : result.message, /Windows did not let the helper watch the mouse/)
+  const mac = harness()
+  mac.helper.captureResult = { ok: false, failure: 'input-monitoring-denied' }
+  const macResult = await mac.service.captureMouseButton()
+  assert.equal(
+    macResult.ok ? '' : macResult.message,
+    'Allow Input Monitoring for DoodleNote Dev first, then try again.'
+  )
+})
+
+test('Windows: a Right Ctrl hold dictates and delivers through the same path', async () => {
+  const h = harness({ platform: 'win32', settings: { holdKey: 'rightControl' } })
+  await h.service.start()
+  assert.deepEqual(h.helper.holdKeys.at(-1), 'rightControl')
+  h.helper.holdListener?.({ phase: 'down', holdId: 1 })
+  await tick()
+  assert.deepEqual(h.startOpts.at(-1), { source: 'mic', levels: true })
+  h.emit({ event: 'ready', channels: ['mic'] })
+  h.emit({ event: 'level', channel: 'mic', peak: 0.4 })
+  h.clock.now += 1_000
+  h.helper.holdListener?.({ phase: 'up', holdId: 1 })
+  h.emit({ event: 'final', channel: 'mic', text: 'typed on windows' })
+  await tick()
+  assert.deepEqual(h.delivered, ['typed on windows'])
 })
