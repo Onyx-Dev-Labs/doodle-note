@@ -76,47 +76,55 @@ async function main() {
   console.log(`hooks allowed: ${status.inputMonitoring}`)
   if (checks.some(([, ok]) => !ok)) process.exit(1)
 
-  // Item 6: exercise the integrity path CI builds (unsigned + manifest). A signed release is
-  // trusted by its certificate table; an unsigned build must match the manifest hash.
-  const { createHash } = require('node:crypto')
+  // Exercise the integrity path CI ships: the manifest's signing-invariant Authenticode digest
+  // must match the file. The same value covers an unsigned build and a signed release, so this
+  // check does not depend on whether the CI runner signed the exe.
   const { readFileSync, existsSync } = require('node:fs')
   const path = require('node:path')
   const buffer = readFileSync(helper)
-  const signed = peIsAuthenticodeSigned(buffer)
   const manifestPath = path.join(path.dirname(helper), 'dictation-helper.manifest.json')
-  if (signed) {
-    console.log('ok - the shipped helper is Authenticode-signed; integrity trusts the signature')
-  } else {
-    if (!existsSync(manifestPath)) {
-      console.error('not ok - unsigned helper has no manifest to verify against')
-      process.exit(1)
-    }
-    const expected = JSON.parse(readFileSync(manifestPath, 'utf8'))
-    const actual = createHash('sha256').update(buffer).digest('hex')
-    if (actual !== expected.sha256) {
-      console.error(`not ok - unsigned helper hash ${actual} != manifest ${expected.sha256}`)
-      process.exit(1)
-    }
-    console.log('ok - unsigned helper matches its build manifest hash')
+  if (!existsSync(manifestPath)) {
+    console.error('not ok - helper has no manifest to verify against')
+    process.exit(1)
   }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  if (typeof manifest.authenticodeSha256 !== 'string') {
+    console.error('not ok - manifest has no authenticodeSha256 digest')
+    process.exit(1)
+  }
+  const digest = stableHelperDigest(buffer)
+  if (digest !== manifest.authenticodeSha256) {
+    console.error(`not ok - helper digest ${digest} != manifest ${manifest.authenticodeSha256}`)
+    process.exit(1)
+  }
+  console.log('ok - helper matches its manifest Authenticode digest (signing-invariant)')
 
   console.log('Windows dictation helper smoke passed')
 }
 
-/** Mirrors dictation-host.peIsAuthenticodeSigned: a non-empty certificate table (security dir). */
-function peIsAuthenticodeSigned(buffer) {
+/** Mirrors dictation-host.stableHelperDigest: the parts of the PE signing does not change. */
+function stableHelperDigest(buffer) {
+  const { createHash } = require('node:crypto')
   try {
-    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return false
+    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return null
     const pe = buffer.readUInt32LE(0x3c)
-    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return false
+    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return null
     const optional = pe + 24
     const magic = buffer.readUInt16LE(optional)
+    const checksumOffset = optional + 64
     const dataDir = optional + (magic === 0x20b ? 112 : 96)
-    const securityEntry = dataDir + 4 * 8
-    if (securityEntry + 8 > buffer.length) return false
-    return buffer.readUInt32LE(securityEntry + 4) > 0
+    const secEntry = dataDir + 4 * 8
+    if (secEntry + 8 > buffer.length) return null
+    const certVa = buffer.readUInt32LE(secEntry)
+    const certSize = buffer.readUInt32LE(secEntry + 4)
+    const certStart = certSize > 0 && certVa > 0 ? certVa : buffer.length
+    const hash = createHash('sha256')
+    hash.update(buffer.subarray(0, checksumOffset))
+    hash.update(buffer.subarray(checksumOffset + 4, secEntry))
+    hash.update(buffer.subarray(secEntry + 8, Math.min(certStart, buffer.length)))
+    return hash.digest('hex')
   } catch {
-    return false
+    return null
   }
 }
 main().catch((error) => {

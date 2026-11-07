@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { clipboard, globalShortcut, ipcMain, shell, systemPreferences } from 'electron'
 import type { WebContents } from 'electron'
@@ -75,46 +76,120 @@ function microphoneAccess(): MicrophoneAccess {
   }
 }
 
+/** The publisher subject an Authenticode-signed helper must carry (substring match). */
+export const EXPECTED_HELPER_PUBLISHER = 'Onyx Dev Labs'
+
 /**
- * How the helper on disk compares with the manifest written beside it at build time:
- * 'absent' missing, 'damaged' a hash mismatch, 'ok' otherwise (including a dev build with no
- * manifest, which cannot be verified). Read once; the helper does not change under a running app.
+ * A SHA-256 over the parts of a PE file that signing does NOT change: everything except the
+ * optional-header Checksum (4 bytes), the certificate-table data directory entry (8 bytes), and
+ * the attribute certificate table itself (appended at the end on signing). So the SAME digest is
+ * produced for an unsigned build and for that exact build after signing — a dev build and a signed
+ * release are checked by one value — while any other change to the code flips it. Null when the
+ * buffer is not a PE image.
  */
-/**
- * Whether a PE file carries an Authenticode certificate table (security data directory, entry 4).
- * A signed build is trusted as-is: signing rewrites the file, so its bytes no longer match the
- * manifest hash, and Windows itself refuses to run a tampered signed exe (the blocked path). The
- * manifest hash is only a dev-build check for an unsigned, possibly corrupt, helper.
- */
-export function peIsAuthenticodeSigned(buffer: Buffer): boolean {
+export function stableHelperDigest(buffer: Buffer): string | null {
   try {
-    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return false // 'MZ'
+    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return null // 'MZ'
     const pe = buffer.readUInt32LE(0x3c)
-    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return false // 'PE\0\0'
+    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return null // 'PE\0\0'
     const optional = pe + 24
     const magic = buffer.readUInt16LE(optional)
+    const checksumOffset = optional + 64
     const dataDir = optional + (magic === 0x20b ? 112 : 96) // PE32+ vs PE32
-    const securityEntry = dataDir + 4 * 8 // data directory index 4
-    if (securityEntry + 8 > buffer.length) return false
-    const size = buffer.readUInt32LE(securityEntry + 4)
-    return size > 0
+    const secEntry = dataDir + 4 * 8 // data directory index 4 (certificate table)
+    if (secEntry + 8 > buffer.length) return null
+    const certVa = buffer.readUInt32LE(secEntry)
+    const certSize = buffer.readUInt32LE(secEntry + 4)
+    const certStart = certSize > 0 && certVa > 0 ? certVa : buffer.length
+    const hash = createHash('sha256')
+    hash.update(buffer.subarray(0, checksumOffset))
+    hash.update(buffer.subarray(checksumOffset + 4, secEntry))
+    hash.update(buffer.subarray(secEntry + 8, Math.min(certStart, buffer.length)))
+    return hash.digest('hex')
+  } catch {
+    return null
+  }
+}
+
+/** Whether a PE file carries an Authenticode certificate table (security data directory, entry 4). */
+export function peHasCertificateTable(buffer: Buffer): boolean {
+  try {
+    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return false
+    const pe = buffer.readUInt32LE(0x3c)
+    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return false
+    const optional = pe + 24
+    const magic = buffer.readUInt16LE(optional)
+    const dataDir = optional + (magic === 0x20b ? 112 : 96)
+    const secEntry = dataDir + 4 * 8
+    if (secEntry + 8 > buffer.length) return false
+    return buffer.readUInt32LE(secEntry + 4) > 0
   } catch {
     return false
   }
 }
 
-/** The integrity verdict from the three observable facts, for testing. */
-export function classifyHelperIntegrity(
-  exists: boolean,
-  signed: boolean,
-  hashMatches: boolean
-): 'ok' | 'damaged' | 'absent' {
-  if (!exists) return 'absent'
-  if (signed) return 'ok' // trust the signature; Windows enforces it, a broken one lands on 'blocked'
-  return hashMatches ? 'ok' : 'damaged'
+/** A validated Authenticode signature with a signer we trust. */
+export interface SignatureVerdict {
+  valid: boolean
+  publisherOk: boolean
 }
 
-function computeHelperIntegrity(helperPath: string): 'ok' | 'damaged' | 'absent' {
+/**
+ * Verify the helper's Authenticode signature with Windows (Get-AuthenticodeSignature), requiring
+ * Status==Valid, the signer subject to contain EXPECTED_HELPER_PUBLISHER, and, when the manifest
+ * pins a thumbprint, that thumbprint. Runs once at startup; any failure (no PowerShell, timeout)
+ * returns a not-valid verdict so the caller falls back to the digest check.
+ */
+export function verifyHelperSignature(
+  helperPath: string,
+  thumbprint: string | null
+): SignatureVerdict {
+  try {
+    const script =
+      "$ErrorActionPreference='Stop';" +
+      `$s=Get-AuthenticodeSignature -LiteralPath ${JSON.stringify(helperPath)};` +
+      '$o=[pscustomobject]@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject;thumb=$s.SignerCertificate.Thumbprint};' +
+      '$o|ConvertTo-Json -Compress'
+    const out = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { timeout: 8000, windowsHide: true }
+    ).toString()
+    const parsed = JSON.parse(out) as { status?: string; subject?: string; thumb?: string }
+    const valid = parsed.status === 'Valid'
+    const subjectOk =
+      typeof parsed.subject === 'string' && parsed.subject.includes(EXPECTED_HELPER_PUBLISHER)
+    const thumbOk =
+      !thumbprint ||
+      (typeof parsed.thumb === 'string' && parsed.thumb.toUpperCase() === thumbprint.toUpperCase())
+    return { valid, publisherOk: subjectOk && thumbOk }
+  } catch {
+    return { valid: false, publisherOk: false }
+  }
+}
+
+interface HelperManifest {
+  sha256?: unknown
+  authenticodeSha256?: unknown
+  thumbprint?: unknown
+}
+
+/**
+ * How the helper on disk compares with the manifest written beside it at build time: 'absent'
+ * missing, 'damaged' tampered/replaced, 'ok' otherwise (including a dev build with no manifest).
+ *
+ * The stable Authenticode digest is the primary check and is unchanged by signing, so one value
+ * covers unsigned dev builds and signed releases. In addition, when the file carries a certificate
+ * table its signature chain and publisher are verified with Windows; a cert table present with an
+ * invalid signature or the wrong publisher is 'damaged' (it cannot just "look signed" to pass).
+ */
+export function computeHelperIntegrity(
+  helperPath: string,
+  verifySignature: (
+    path: string,
+    thumbprint: string | null
+  ) => SignatureVerdict = verifyHelperSignature
+): 'ok' | 'damaged' | 'absent' {
   if (!existsSync(helperPath)) return 'absent'
   let buffer: Buffer
   try {
@@ -122,17 +197,33 @@ function computeHelperIntegrity(helperPath: string): 'ok' | 'damaged' | 'absent'
   } catch {
     return 'ok'
   }
-  if (peIsAuthenticodeSigned(buffer)) return 'ok'
   const manifestPath = join(dirname(helperPath), 'dictation-helper.manifest.json')
-  if (!existsSync(manifestPath)) return 'ok' // an unsigned dev build with no manifest cannot be checked
+  if (!existsSync(manifestPath)) return 'ok' // a dev build with no manifest cannot be checked
+  let manifest: HelperManifest
   try {
-    const expected = JSON.parse(readFileSync(manifestPath, 'utf8')) as { sha256?: unknown }
-    if (typeof expected.sha256 !== 'string') return 'ok'
-    const actual = createHash('sha256').update(buffer).digest('hex')
-    return classifyHelperIntegrity(true, false, actual === expected.sha256)
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as HelperManifest
   } catch {
     return 'ok'
   }
+  // Primary: the signing-invariant digest. A match means the code is exactly the build's.
+  if (typeof manifest.authenticodeSha256 === 'string') {
+    const digest = stableHelperDigest(buffer)
+    if (digest !== manifest.authenticodeSha256) return 'damaged'
+  } else if (typeof manifest.sha256 === 'string') {
+    // Older manifest: fall back to the whole-file hash (only valid for unsigned builds).
+    if (!peHasCertificateTable(buffer)) {
+      const actual = createHash('sha256').update(buffer).digest('hex')
+      if (actual !== manifest.sha256) return 'damaged'
+    }
+  }
+  // Reinforcement: a file that carries a certificate table must actually be validly signed by us,
+  // so a tampered signed exe (or one signed by someone else) cannot pass on the digest alone.
+  if (peHasCertificateTable(buffer)) {
+    const thumbprint = typeof manifest.thumbprint === 'string' ? manifest.thumbprint : null
+    const verdict = verifySignature(helperPath, thumbprint)
+    if (!verdict.valid || !verdict.publisherOk) return 'damaged'
+  }
+  return 'ok'
 }
 
 /** Builds the real service from Electron pieces and registers its IPC. */
