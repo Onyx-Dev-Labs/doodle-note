@@ -40,7 +40,7 @@ not relicensed under DoodleNote's MIT License.
 | NVIDIA Parakeet Unified en 0.6b (Windows live captions, int8 ONNX export by k2-fsa) | k2-fsa sherpa-onnx `asr-models` release assets | NVIDIA Open Model License (`nvidia/parakeet-unified-en-0.6b` model card) |
 | NVIDIA Parakeet TDT 0.6b v2 and v3 (Windows imports, int8 ONNX export by k2-fsa) | k2-fsa sherpa-onnx `asr-models` release assets | CC BY 4.0 (`nvidia/parakeet-tdt-0.6b-v2`, `nvidia/parakeet-tdt-0.6b-v3` model cards) |
 | Silero VAD (Windows)                | k2-fsa sherpa-onnx `asr-models` release asset `silero_vad.onnx` | MIT (snakers4/silero-vad) |
-| sherpa-onnx Zipformer, Whisper tiny.en | Downloaded by earlier Windows builds; no longer downloaded, and existing copies are left in place | The upstream model archive and notices |
+| sherpa-onnx Zipformer, Whisper tiny.en | Downloaded by earlier Windows builds; no longer downloaded. A cached Zipformer is used for live captions only until Parakeet is installed; neither folder is deleted | The upstream model archive and notices |
 
 Windows speech models are attributed as: "Parakeet TDT 0.6b v2/v3 by NVIDIA,
 licensed under CC BY 4.0" and "Parakeet Unified en 0.6b, licensed by NVIDIA
