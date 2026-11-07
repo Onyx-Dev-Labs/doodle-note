@@ -170,6 +170,33 @@ test('the packaged-content check rejects source, tooling, tests and sourcemaps',
   assert.equal(flagged.length, 8)
 })
 
+test('Windows installs move to a DoodleNote folder without forking the install or profile', () => {
+  const installer = readFileSync(
+    new URL('../../build/windows-installer.nsh', import.meta.url),
+    'utf8'
+  )
+  assert.match(builderConfig, /^nsis:\n(?: {2}.*\n)*? {2}include: build\/windows-installer\.nsh$/m)
+  // The uninstall key derives from appId and the profile (%APPDATA%\desktop, which
+  // holds the library location, settings and accounts) from the package name.
+  assert.match(builderConfig, /^appId: com\.doodlenote\.desktop$/m)
+  assert.equal(JSON.parse(desktopPackage).name, 'desktop')
+  assert.doesNotMatch(builderConfig, /extraMetadata|^ {2}guid:/m)
+  for (const hook of ['customInit', 'customCheckAppRunning', 'customInstall']) {
+    assert.match(installer, new RegExp(`!macro ${hook}\\b`))
+  }
+  // The old folder is deleted only in customInstall, after the new copy is verified.
+  const install = installer.slice(installer.indexOf('!macro customInstall'))
+  assert.equal(
+    installer.indexOf('RMDir'),
+    installer.indexOf('RMDir', installer.indexOf('!macro customInstall'))
+  )
+  assert.ok(
+    install.indexOf('FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') < install.indexOf('RMDir')
+  )
+  // A /D=<folder> install is never redirected.
+  assert.match(installer, /GetDParameter \$R0\s+\$\{if\} \$R0 == ""/)
+})
+
 test('only the platform-guarded Windows speech worker loads Koffi', () => {
   const src = new URL('../', import.meta.url)
   const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })

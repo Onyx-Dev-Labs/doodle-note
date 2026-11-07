@@ -145,6 +145,10 @@ nsis:
   oneClick: true
   perMachine: false
   deleteAppDataOnUninstall: false
+  # Moves installs from the package-named Programs\desktop folder to
+  # Programs\DoodleNote. appId (and so the uninstall key) and the app profile
+  # (%APPDATA%\desktop) are deliberately unchanged.
+  include: build/windows-installer.nsh
   artifactName: ${productName}-${version}-setup.${ext}
 npmRebuild: false
 # Auto-update feed: electron-updater reads latest-mac.yml from here.

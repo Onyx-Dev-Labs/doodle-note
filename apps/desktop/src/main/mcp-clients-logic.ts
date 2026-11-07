@@ -73,6 +73,17 @@ export function jsonConfigHasServer(raw: string): boolean {
   }
 }
 
+/** The command our JSON-dialect entry launches, or null when absent or unreadable. */
+export function jsonConfigServerCommand(raw: string): string | null {
+  try {
+    const config = JSON.parse(raw) as JsonConfig
+    const entry = config?.mcpServers?.[MCP_SERVER_KEY] as { command?: unknown } | undefined
+    return typeof entry?.command === 'string' ? entry.command : null
+  } catch {
+    return null
+  }
+}
+
 const CODEX_HEADER = `[mcp_servers.${MCP_SERVER_KEY}]`
 
 /**
@@ -121,4 +132,22 @@ export function codexConfigWithoutServer(raw: string): string {
 
 export function codexConfigHasServer(raw: string): boolean {
   return raw.split('\n').some((line) => line.trim() === CODEX_HEADER)
+}
+
+/** The command our Codex table launches, or null when absent or unreadable. */
+export function codexConfigServerCommand(raw: string): string | null {
+  const lines = raw.split('\n')
+  const start = lines.findIndex((line) => line.trim() === CODEX_HEADER)
+  if (start === -1) return null
+  for (let i = start + 1; i < lines.length && !lines[i].trimStart().startsWith('['); i++) {
+    const match = /^\s*command\s*=\s*(".*")\s*$/.exec(lines[i])
+    if (!match) continue
+    try {
+      const value = JSON.parse(match[1]) as unknown
+      return typeof value === 'string' ? value : null
+    } catch {
+      return null
+    }
+  }
+  return null
 }

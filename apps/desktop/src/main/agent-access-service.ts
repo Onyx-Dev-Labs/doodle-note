@@ -16,9 +16,11 @@ import {
 } from '../shared/integrations-api'
 import {
   codexConfigHasServer,
+  codexConfigServerCommand,
   codexConfigWithServer,
   codexConfigWithoutServer,
   jsonConfigHasServer,
+  jsonConfigServerCommand,
   jsonConfigWithServer,
   jsonConfigWithoutServer
 } from './mcp-clients-logic'
@@ -178,6 +180,31 @@ export class AgentAccessService {
       writeFileSync(def.configPath, next)
     }
     return this.status()
+  }
+
+  /**
+   * Re-register our server, with the current launch spec, in every client whose
+   * entry runs a command `isStale` rejects (the Windows install folder moved).
+   * Other entries and clients are untouched. Returns the updated client ids.
+   */
+  repointStaleClients(isStale: (command: string) => boolean): McpClientId[] {
+    const updated: McpClientId[] = []
+    for (const def of this.clients) {
+      const raw = this.tryRead(def.configPath)
+      if (raw === null) continue
+      const command =
+        def.dialect === 'json' ? jsonConfigServerCommand(raw) : codexConfigServerCommand(raw)
+      if (command === null || !isStale(command)) continue
+      const next =
+        def.dialect === 'json'
+          ? jsonConfigWithServer(raw, this.server, def.configPath)
+          : codexConfigWithServer(raw, this.server)
+      if (next !== raw) {
+        writeFileSync(def.configPath, next)
+        updated.push(def.id)
+      }
+    }
+    return updated
   }
 
   private clientStatus(def: McpClientDef): McpClientStatus {

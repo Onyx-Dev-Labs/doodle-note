@@ -294,6 +294,46 @@ reproduce with the commands above.
   Interrupt the network during a download: after 90 seconds without new bytes,
   Settings should show a short error and offer Retry update.
 
+## Install folder
+
+Builds before this change installed per-user to `<UserProgramFiles>\desktop`
+(normally `%LocalAppData%\Programs\desktop`): electron-builder names a one-click
+per-user folder after the package (`desktop`). New installs go to
+`<UserProgramFiles>\DoodleNote`. `apps/desktop/build/windows-installer.nsh`
+moves an existing install on upgrade:
+
+1. `customInit` redirects an install that would land in the `desktop` folder to
+   the sibling `DoodleNote` folder (an install with `/D=<folder>` is left alone).
+2. `customCheckAppRunning` closes copies running from the old folder, then parks
+   the old uninstall command (journal: `HKCU\Software\DoodleNote\InstallMigration`)
+   so electron-builder's "uninstall old version" step does not delete the old
+   folder before the new one exists. An interrupted run restores the command
+   and finishes the move next time.
+3. `customInstall` verifies the new copy (exe, `app.asar`, uninstaller, and the
+   uninstall entry pointing at it), then removes the old folder, keeps the
+   user's desktop-shortcut choice and repoints a taskbar pin. If the new copy is
+   incomplete the old folder is kept.
+
+`appId`, the shortcut name and so the uninstall key are unchanged, so Start and
+Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the
+library location, settings and accounts; it is named after the app (package
+name `desktop`), not the install folder, and is not moved. Keep the package name
+and `appId` as they are unless a profile migration is written too. On the first
+launch from the new folder the app repoints the "Open at login" entry (keeping
+a Task Manager disable) and MCP client configs (Claude Desktop, Claude Code,
+Codex) that launched the old exe (`src/main/windows-install-migration.ts`).
+
+Upgrade test (isolated, never on a machine's real install): build the previous
+layout and this one with a QA identity (distinct `appId`, `productName` and
+package name, for example `-c.appId=com.doodlenote.desktop.qa -c.productName="DoodleNote QA"
+-c.extraMetadata.name=desktop-qa`), install the old one, enable Open at login and
+connect an MCP client, run the new installer (also with `/S --updated`), and check:
+the new folder exists and the old one is gone, one Apps & features entry whose
+uninstaller is in the new folder, Start menu and desktop shortcuts start the new
+exe, the profile and library are unchanged, the Run entry and client configs
+name the new exe. Repeat with the old app running and with a file in the old
+folder held open (the folder is kept and removed by the next run).
+
 ## Production gate
 
 ### Installer follow-up in 0.4.23

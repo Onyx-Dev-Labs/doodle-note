@@ -43,7 +43,7 @@ import {
 import type { CalendarStartMeetingEvent } from '../shared/calendar-api'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { appendFileSync, cpSync, existsSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path, { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -60,6 +60,7 @@ import { WinEngineHost } from './engine-host-win'
 import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
+import { isInsideFolder, runWindowsInstallMigration } from './windows-install-migration'
 import { MediaService } from './media-service'
 import { AgentAccessService } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
@@ -1090,6 +1091,28 @@ app.whenReady().then(async () => {
     }
   }
   agentAccessService.registerIpc()
+  // Windows: the installer moved Programs\desktop to Programs\DoodleNote. Repoint
+  // what still launches the old exe (login item, MCP clients); see the module.
+  if (process.platform === 'win32') {
+    const markerPath = join(app.getPath('userData'), 'install-migration.json')
+    runWindowsInstallMigration({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      execPath: process.execPath,
+      readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),
+      writeMarker: (contents) => writeFileSync(markerPath, contents),
+      loginItem: {
+        stateFor: (exe) => {
+          const settings = app.getLoginItemSettings({ path: exe })
+          const item = settings.launchItems?.find((entry) => isInsideFolder(entry.path, exe))
+          return { registered: settings.openAtLogin, enabled: item?.enabled ?? true }
+        },
+        registerCurrent: (enabled) => app.setLoginItemSettings({ openAtLogin: true, enabled })
+      },
+      repointMcpClients: (isStale) => agentAccessService.repointStaleClients(isStale),
+      log: (message) => console.log(message)
+    })
+  }
 
   const sourceIndex = new SourceIndexService(
     () => join(libraryRoot(), 'meetings'),
