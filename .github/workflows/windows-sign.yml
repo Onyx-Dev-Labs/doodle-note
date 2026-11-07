@@ -1,0 +1,116 @@
+name: Windows signed build
+
+# Builds a Windows installer signed with Microsoft Artifact Signing (Onyx Dev
+# Labs LLC). Does not publish anything or touch the update feed.
+#
+# The signing secrets live only in the `windows-signing` GitHub Environment,
+# which must be created with protection rules BEFORE any secret is added
+# (docs/WINDOWS-RELEASE-QA.md "Code signing"): required reviewers, and
+# deployment branches and tags limited to `main` and `v*`. A job only gets the
+# secrets after a reviewer approves the deployment for this exact commit, so
+# code from a pull request or another branch never runs with them. PR and
+# branch CI (ci.yml windows-package) stays unsigned and references no secrets.
+#
+# It rebuilds from the approved SHA because signing has to happen inside
+# electron-builder (the installer embeds the signed app and uninstaller). Run it
+# by hand (workflow_dispatch) on main or a v* tag; nothing triggers it otherwise.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-sign-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    # Belt and braces with the environment's deployment rules: main or a release tag only.
+    if: github.repository == 'Onyx-Dev-Labs/doodle-note' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: windows-signing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
+
+      - name: Install with Windows native dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Unlike PR CI, a missing secret here is an error, not "skipped".
+      - name: Check Artifact Signing configuration
+        shell: pwsh
+        env:
+          HAS_SIGNING: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT != '' && secrets.ARTIFACT_SIGNING_ACCOUNT != '' && secrets.ARTIFACT_SIGNING_PROFILE != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
+        run: |
+          if ($env:HAS_SIGNING -ne "true") { throw "The windows-signing environment is missing Artifact Signing secrets" }
+
+      # SignTool dlib, pinned by version and SHA-256 (nuget.org package).
+      - name: Prepare Artifact Signing client
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "artifact-signing"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $package = Join-Path $dir "client.zip"
+          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/1.0.151/microsoft.artifactsigning.client.1.0.151.nupkg" -OutFile $package
+          $hash = (Get-FileHash $package -Algorithm SHA256).Hash
+          if ($hash -ne "35375A4BC4E1102DA729FC3D8D9925F774C3BAAE6B8B7FF6398D948CA9AB0D8A") {
+            throw "Artifact Signing client hash mismatch: $hash"
+          }
+          Expand-Archive -Path $package -DestinationPath (Join-Path $dir "client")
+          $dlib = Join-Path $dir "client\bin\x64\Azure.CodeSigning.Dlib.dll"
+          if (-not (Test-Path $dlib)) { throw "Azure.CodeSigning.Dlib.dll is missing from the client package" }
+          "ARTIFACT_SIGNING_DLIB=$dlib" >> $env:GITHUB_ENV
+
+      # The dlib runs on .NET 10.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      # sign-windows.cjs runs only the pinned SDK SignTool, after checking that it is
+      # validly signed by Microsoft and new enough for the dlib.
+      - name: Pin SignTool
+        shell: pwsh
+        run: |
+          $signtool = "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+          if (-not (Test-Path $signtool)) { throw "Windows SDK 10.0.26100.0 SignTool is missing: $signtool" }
+          "SIGNTOOL_PATH=$signtool" >> $env:GITHUB_ENV
+
+      - name: Build signed Windows installer
+        # The secrets reach this step only.
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: pnpm --filter desktop package:win
+
+      - name: Check Windows app.asar contents
+        timeout-minutes: 5
+        run: node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release/win-unpacked
+
+      # Installer, helper and every shipped exe/dll/node must be validly signed.
+      - name: Verify every shipped PE is signed
+        shell: pwsh
+        run: '& apps/desktop/scripts/verify-windows-signature.ps1'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: doodlenote-windows-signed-${{ github.sha }}
+          path: |
+            apps/desktop/release/DoodleNote-*-setup.exe
+            apps/desktop/release/DoodleNote-*-setup.exe.blockmap
+            apps/desktop/release/latest.yml
+          retention-days: 7

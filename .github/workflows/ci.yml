@@ -87,18 +87,17 @@ jobs:
 
   # A Linux typecheck cannot prove that Electron packaged the Windows native
   # addons. Build the actual NSIS updater on every PR and retain it for native
-  # Windows smoke testing. CSC_LINK/CSC_KEY_PASSWORD sign it automatically
-  # once the repository's Authenticode certificate secrets are configured.
-  # Same-repo PRs and pushes to main only. Fork PRs still get the Ubuntu
-  # typecheck/test job; they must not produce a downloadable installer
-  # artifact from untrusted code.
+  # Windows smoke testing. Same-repo PRs and pushes to main only. Fork PRs still
+  # get the Ubuntu typecheck/test job; they must not produce a downloadable
+  # installer artifact from untrusted code.
+  #
+  # Always unsigned: this job runs PR-controlled scripts, so it references no
+  # secrets at all. Signing runs only in windows-sign.yml, on main or a release
+  # tag, inside the protected windows-signing environment.
   windows-package:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 45
-    env:
-      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -139,51 +138,9 @@ jobs:
           engine/.build/windows/dictation-helper-tests.exe
           if ($LASTEXITCODE -ne 0) { throw "Windows dictation helper tests failed" }
 
-      # Microsoft Artifact Signing for Onyx Dev Labs LLC. The secrets do not exist
-      # until the account is approved; until then this logs "signing skipped: no
-      # credentials" and the build stays unsigned exactly as before.
-      - name: Prepare Artifact Signing (skipped without credentials)
-        id: signing
-        timeout-minutes: 5
-        shell: pwsh
-        env:
-          HAS_SIGNING: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT != '' && secrets.ARTIFACT_SIGNING_ACCOUNT != '' && secrets.ARTIFACT_SIGNING_PROFILE != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' }}
-        run: |
-          if ($env:HAS_SIGNING -ne "true") {
-            Write-Host "signing skipped: no credentials"
-            "enabled=false" >> $env:GITHUB_OUTPUT
-            exit 0
-          }
-          # SignTool dlib, pinned by version and SHA-256 (nuget.org package).
-          $dir = Join-Path $env:RUNNER_TEMP "artifact-signing"
-          New-Item -ItemType Directory -Force $dir | Out-Null
-          $package = Join-Path $dir "client.zip"
-          Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/1.0.151/microsoft.artifactsigning.client.1.0.151.nupkg" -OutFile $package
-          $hash = (Get-FileHash $package -Algorithm SHA256).Hash
-          if ($hash -ne "35375A4BC4E1102DA729FC3D8D9925F774C3BAAE6B8B7FF6398D948CA9AB0D8A") {
-            throw "Artifact Signing client hash mismatch: $hash"
-          }
-          Expand-Archive -Path $package -DestinationPath (Join-Path $dir "client")
-          $dlib = Join-Path $dir "client\bin\x64\Azure.CodeSigning.Dlib.dll"
-          if (-not (Test-Path $dlib)) { throw "Azure.CodeSigning.Dlib.dll is missing from the client package" }
-          "ARTIFACT_SIGNING_DLIB=$dlib" >> $env:GITHUB_ENV
-          "enabled=true" >> $env:GITHUB_OUTPUT
-
-      # The dlib runs on .NET 10.
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        if: steps.signing.outputs.enabled == 'true'
-        with:
-          dotnet-version: "10.0.x"
-
+      # No credentials reach this job: sign-windows.cjs logs "signing skipped:
+      # no credentials" and the build is unsigned.
       - name: Build Windows installer
-        # Signing secrets reach only this step (scripts/sign-windows.cjs).
-        env:
-          ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
-          ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
-          ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: pnpm --filter desktop package:win
 
       # app.asar must hold only out/** and runtime node_modules: no src/,
@@ -293,16 +250,14 @@ jobs:
           if (-not $installer) { throw "Windows installer was not generated" }
           if (-not (Test-Path "$($installer.FullName).blockmap")) { throw "Updater blockmap was not generated" }
           $signature = Get-AuthenticodeSignature $installer.FullName
-          if ($env:CSC_LINK -and $signature.Status -ne "Valid") {
-            throw "Signing credentials were supplied but the installer signature is $($signature.Status)"
-          }
           Write-Host "Installer: $($installer.Name)"
           Write-Host "Authenticode: $($signature.Status)"
-          if ("${{ steps.signing.outputs.enabled }}" -eq "true") {
-            # Installer, helper and every shipped exe/dll/node must be validly signed.
+          if ($signature.Status -ne "NotSigned") {
+            # Whatever signed it, a signed installer means every shipped PE must be
+            # validly signed too (installer, helper, every exe/dll/node).
             & apps/desktop/scripts/verify-windows-signature.ps1
           } else {
-            Write-Host "signing skipped: no credentials (signature verification not applicable)"
+            Write-Host "signing skipped: no credentials (unsigned CI build; signature verification not applicable)"
           }
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

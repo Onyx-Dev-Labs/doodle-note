@@ -10,11 +10,16 @@
 //   ARTIFACT_SIGNING_PROFILE    the certificate profile name
 //   ARTIFACT_SIGNING_DLIB       path to bin\x64\Azure.CodeSigning.Dlib.dll
 //   AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
-//   SIGNTOOL_PATH               optional; else the newest Windows SDK x64 signtool
+//   SIGNTOOL_PATH               optional; else the pinned Windows SDK x64 signtool
+//                               (SIGNTOOL_SDK_VERSION). Either way it must be
+//                               validly signed by Microsoft and at least
+//                               SIGNTOOL_MIN_VERSION before it is used.
 //
 // Without them it logs "signing skipped: no credentials" and leaves every file
 // exactly as built, so unsigned CI builds are unchanged. A PFX supplied the
-// electron-builder way (CSC_LINK / WIN_CSC_LINK) is still honoured.
+// electron-builder way (CSC_LINK / WIN_CSC_LINK) is refused: this CLI never
+// receives electron-builder's certificate context, so the Bark helper would
+// ship unsigned while the files electron-builder offers were signed.
 //
 // DOODLENOTE_SIGN_TEST_CERT_SHA1 (local plumbing checks only, refused in CI)
 // signs with a CurrentUser\My certificate through Set-AuthenticodeSignature.
@@ -46,16 +51,28 @@ const EXCLUDED_CREDENTIALS = [
   'AzureDeveloperCliCredential',
   'InteractiveBrowserCredential'
 ]
+// SignTool is not fetched with the build, so pin which one runs: Windows SDK
+// 10.0.26100 (on GitHub's windows-latest image); Artifact Signing's dlib needs
+// 10.0.22621.755 or later.
+const SIGNTOOL_SDK_VERSION = '10.0.26100.0'
+const SIGNTOOL_MIN_VERSION = [10, 0, 22621, 755]
+const CERTIFICATE_FILE_VARS = ['CSC_LINK', 'WIN_CSC_LINK']
 /** PE files the app ships; electron-builder's own walk covers only *.exe (plus signExts). */
 const PE_EXTENSIONS = ['.exe', '.dll', '.node']
 
 /**
  * Which signer this environment selects. Pure, for tests.
  * @returns {{ mode: 'artifact-signing', endpoint: string, account: string, profile: string, dlib: string }
- *   | { mode: 'certificate-file' } | { mode: 'test-certificate', thumbprint: string }
- *   | { mode: 'none', missing: string[] }}
+ *   | { mode: 'test-certificate', thumbprint: string } | { mode: 'none', missing: string[] }}
  */
 function signingPlan(env, { hasCertificateFile = false } = {}) {
+  const pfx = CERTIFICATE_FILE_VARS.filter((name) => (env[name] ?? '').trim() !== '')
+  if (hasCertificateFile || pfx.length > 0) {
+    throw new Error(
+      `PFX signing (${pfx.join(', ') || 'a certificate file'}) is not supported: the Bark helper ` +
+        'would ship unsigned. Unset it and use Microsoft Artifact Signing (ARTIFACT_SIGNING_*).'
+    )
+  }
   const present = ARTIFACT_SIGNING_VARS.filter((name) => (env[name] ?? '').trim() !== '')
   if (present.length === ARTIFACT_SIGNING_VARS.length) {
     const endpoint = env.ARTIFACT_SIGNING_ENDPOINT.trim()
@@ -84,7 +101,6 @@ function signingPlan(env, { hasCertificateFile = false } = {}) {
     const missing = ARTIFACT_SIGNING_VARS.filter((name) => !present.includes(name))
     throw new Error(`Artifact Signing is partly configured; missing ${missing.join(', ')}`)
   }
-  if (hasCertificateFile) return { mode: 'certificate-file' }
   const thumbprint = (env.DOODLENOTE_SIGN_TEST_CERT_SHA1 ?? '').trim()
   if (thumbprint) {
     if (env.CI) throw new Error('DOODLENOTE_SIGN_TEST_CERT_SHA1 is for local plumbing checks only')
@@ -142,25 +158,72 @@ function unsignedByBuilder(appOutDir) {
   return found.sort()
 }
 
-function findSigntool(env) {
-  if (env.SIGNTOOL_PATH) return env.SIGNTOOL_PATH
-  const root = path.join(
+/** The SignTool to run: SIGNTOOL_PATH, else the pinned SDK version (never "newest found"). */
+function signtoolPath(env) {
+  const configured = (env.SIGNTOOL_PATH ?? '').trim()
+  if (configured) return configured
+  return path.join(
     env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)',
     'Windows Kits',
     '10',
-    'bin'
+    'bin',
+    SIGNTOOL_SDK_VERSION,
+    'x64',
+    'signtool.exe'
   )
-  const versions = fs.existsSync(root)
-    ? fs
-        .readdirSync(root)
-        .filter((name) => /^10\.\d+\.\d+\.\d+$/.test(name))
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    : []
-  for (const version of versions.reverse()) {
-    const candidate = path.join(root, version, 'x64', 'signtool.exe')
-    if (fs.existsSync(candidate)) return candidate
+}
+
+/** Why this SignTool must not be used, or null. Pure, for tests. */
+function signtoolProblem({ status, subject, version }) {
+  if (status !== 'Valid') return `it is not validly signed (${status})`
+  // Microsoft's two code-signing subjects; the chain is checked by Status above.
+  if (!/^CN=Microsoft (Corporation|Windows), O=Microsoft Corporation,/.test(subject ?? ''))
+    return `it is signed by ${subject}`
+  const parts = String(version ?? '')
+    .split('.')
+    .map((part) => Number.parseInt(part, 10))
+  for (let i = 0; i < SIGNTOOL_MIN_VERSION.length; i++) {
+    const part = Number.isFinite(parts[i]) ? parts[i] : 0
+    if (part > SIGNTOOL_MIN_VERSION[i]) return null
+    if (part < SIGNTOOL_MIN_VERSION[i])
+      return `version ${version} is older than ${SIGNTOOL_MIN_VERSION.join('.')}`
   }
-  throw new Error('signtool.exe not found; install the Windows SDK or set SIGNTOOL_PATH')
+  return null
+}
+
+let verifiedSigntool = null
+
+/** The pinned SignTool, after checking its Authenticode signature and version (once). */
+function findSigntool(env) {
+  const file = signtoolPath(env)
+  if (verifiedSigntool === file) return file
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `signtool.exe not found at ${file}; install Windows SDK ${SIGNTOOL_SDK_VERSION} or set SIGNTOOL_PATH`
+    )
+  }
+  const facts = signtoolFacts(file)
+  const problem = signtoolProblem(facts)
+  if (problem) throw new Error(`Refusing to run ${file}: ${problem}`)
+  console.log(`signtool: ${file} (${facts.version}, ${facts.status})`)
+  verifiedSigntool = file
+  return file
+}
+
+/** Authenticode status, signer subject and file version of an executable (Windows). */
+function signtoolFacts(file) {
+  const script =
+    '$s = Get-AuthenticodeSignature -LiteralPath $env:DN_SIGNTOOL; ' +
+    '$v = (Get-Item -LiteralPath $env:DN_SIGNTOOL).VersionInfo; ' +
+    '[pscustomobject]@{ status = [string]$s.Status; subject = [string]$s.SignerCertificate.Subject; ' +
+    'version = "$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)" } | ' +
+    'ConvertTo-Json -Compress'
+  return JSON.parse(
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      env: { ...process.env, DN_SIGNTOOL: file },
+      encoding: 'utf8'
+    })
+  )
 }
 
 let skipLogged = false
@@ -215,10 +278,6 @@ function signFile(file, configuration = {}, env = process.env) {
     return true
   }
   const signtool = findSigntool(env)
-  if (plan.mode === 'certificate-file') {
-    execFileSync(signtool, configuration.computeSignToolArgs(true), { stdio: 'inherit' })
-    return true
-  }
   if (alreadySigned(signtool, file)) {
     console.log(`already signed, kept: ${file}`)
     return true
@@ -244,6 +303,14 @@ async function sign(configuration) {
  * building it and before electron-builder runs. Anything that records the
  * helper's hash (its integrity manifest) must run after this step.
  *
+ * TODO(win/bark round 3): package:win runs helper build -> helper sign (here)
+ * -> electron-builder, but build-dictation-helper-win.cjs writes the helper
+ * manifest during the build, before this signature; it only verifies today
+ * because win/bark skips the hash check when a certificate table exists.
+ * win/bark round 3 replaces that with an Authenticode-digest manifest plus
+ * chain/publisher checks; once it lands, make sure its manifest step runs
+ * after this one.
+ *
  *   node scripts/sign-windows.cjs <file>...
  */
 function main(files) {
@@ -261,6 +328,10 @@ module.exports.signingPlan = signingPlan
 module.exports.artifactSigningArgs = artifactSigningArgs
 module.exports.artifactSigningMetadata = artifactSigningMetadata
 module.exports.unsignedByBuilder = unsignedByBuilder
+module.exports.signtoolPath = signtoolPath
+module.exports.signtoolProblem = signtoolProblem
+module.exports.signtoolFacts = signtoolFacts
+module.exports.SIGNTOOL_SDK_VERSION = SIGNTOOL_SDK_VERSION
 
 if (require.main === module) main(process.argv.slice(2))
 module.exports.ARTIFACT_SIGNING_VARS = ARTIFACT_SIGNING_VARS

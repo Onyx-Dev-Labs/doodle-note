@@ -456,26 +456,52 @@ files that already carry a valid vendor signature (Microsoft's
 single-file `extraResources` to its signer, so `package:win` signs
 `engine\.build\windows\dictation-helper.exe` itself right after building it.
 Anything that records the helper's hash (its integrity manifest) must run after
-that step.
+that step (today the order is helper build, which writes the manifest, then
+helper signing, then electron-builder; win/bark round 3 replaces the manifest
+hash with an Authenticode-digest check, see the TODO in `sign-windows.cjs`).
 
-CI secrets (none exist yet): `ARTIFACT_SIGNING_ENDPOINT` (for example
+A PFX supplied the electron-builder way (`CSC_LINK` / `WIN_CSC_LINK`) is refused
+with an error: the helper step never receives electron-builder's certificate,
+so the helper would ship unsigned while everything else was signed. SignTool is
+pinned: `SIGNTOOL_PATH`, else Windows SDK `10.0.26100.0`'s x64 `signtool.exe`
+(never "the newest one found"), and before first use the script checks that it
+is validly Authenticode-signed by Microsoft (`CN=Microsoft Corporation` or
+`CN=Microsoft Windows`, `O=Microsoft Corporation`) and at least
+10.0.22621.755 (the dlib's minimum).
+
+Where signing runs: never in PR or branch CI. The `windows-package` job in
+`ci.yml` runs PR-controlled scripts, so it references no secrets at all and
+always builds unsigned (`signing skipped: no credentials`); if an installer it
+built ever carried a signature, it runs the full verification below anyway.
+Signed builds come only from `.github/workflows/windows-sign.yml`, started by
+hand on `main` or a `v*` tag, in the GitHub Environment `windows-signing`. It
+rebuilds from the approved commit, signs, runs the package check and
+`scripts/verify-windows-signature.ps1` (installer, helper and every shipped
+`.exe`, `.dll` and `.node` validly signed; the same check gates `release:win`),
+and uploads the artifact. It publishes nothing.
+
+**Create the environment with its protection rules before adding any secret**
+(Settings > Environments > New environment `windows-signing`): required
+reviewers (the owner), "Prevent self-review" if available, deployment branches
+and tags limited to `main` and `v*`, and no admin bypass. Only then add the
+secrets to that environment (never as repository secrets, which any workflow
+could reference): `ARTIFACT_SIGNING_ENDPOINT` (for example
 `https://eus.codesigning.azure.net`, matching the account's region),
 `ARTIFACT_SIGNING_ACCOUNT`, `ARTIFACT_SIGNING_PROFILE`, and an Entra app
 registration with the Artifact Signing Certificate Profile Signer role:
-`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. Only the packaging
-step receives them. Without them CI logs `signing skipped: no credentials` and
-builds exactly the unsigned package it built before; a partial set fails the
-build. With them, CI runs `scripts/verify-windows-signature.ps1`, which now
-requires the installer, the helper and every shipped `.exe`, `.dll` and `.node`
-to be validly signed (the same check gates `release:win`).
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. A partial set
+fails the build. The old `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`
+repository secrets are no longer read by any workflow and should be deleted if
+they exist.
 
-When the account is approved: add the six secrets, confirm a CI run signs and
-verifies, set `win.signtoolOptions.publisherName` to the certificate's subject
-CN (electron-updater then refuses an update installer signed by anyone else),
-and only then consider activating updates (above). Local plumbing checks can
-use `DOODLENOTE_SIGN_TEST_CERT_SHA1` with a temporary CurrentUser\My
-certificate (refused when `CI` is set); delete it from CurrentUser\My and
-CurrentUser\CA afterwards. Such a build is not trusted by Code Integrity.
+When the account is approved: create the environment as above, add the six
+secrets, run the workflow on `main` and confirm it signs and verifies, set
+`win.signtoolOptions.publisherName` to the certificate's subject CN
+(electron-updater then refuses an update installer signed by anyone else), and
+only then consider activating updates (above). Local plumbing checks can use
+`DOODLENOTE_SIGN_TEST_CERT_SHA1` with a temporary CurrentUser\My certificate
+(refused when `CI` is set); delete it from CurrentUser\My and CurrentUser\CA
+afterwards. Such a build is not trusted by Code Integrity.
 
 ## High DPI and multiple monitors
 
