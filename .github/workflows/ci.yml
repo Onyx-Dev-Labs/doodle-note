@@ -118,6 +118,14 @@ jobs:
       - name: Desktop tests
         run: pnpm --filter desktop test
 
+      # Bark's Windows helper is C# built with the .NET Framework 4.8 compiler that
+      # ships with Windows (no SDK). Its logic tests run before packaging.
+      - name: Build and test the Windows dictation helper
+        run: |
+          pnpm --filter desktop helper:win
+          engine/.build/windows/dictation-helper-tests.exe
+          if ($LASTEXITCODE -ne 0) { throw "Windows dictation helper tests failed" }
+
       - name: Build Windows installer
         run: pnpm --filter desktop package:win
 
@@ -143,6 +151,14 @@ jobs:
           $env:DOODLE_PLAYWRIGHT_MODULE = Join-Path $env:RUNNER_TEMP "doodle-electron-qa/node_modules/playwright"
           node apps/desktop/scripts/test-windows-chrome.cjs apps/desktop/release/win-unpacked/DoodleNote.exe
           if ($LASTEXITCODE -ne 0) { throw "Windows window chrome behavior check failed" }
+
+      - name: Smoke packaged Windows dictation helper
+        shell: pwsh
+        run: |
+          $helper = "apps/desktop/release/win-unpacked/resources/engine/dictation-helper.exe"
+          if (-not (Test-Path $helper)) { throw "The dictation helper is missing from the package" }
+          node apps/desktop/scripts/test-dictation-helper-win.cjs $helper
+          if ($LASTEXITCODE -ne 0) { throw "Packaged dictation helper smoke failed" }
 
       - name: Smoke packaged Windows native modules
         shell: pwsh
