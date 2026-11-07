@@ -382,9 +382,10 @@ and its package name disagree, so a production bundle can never be packaged as
 QA or the reverse. `node scripts/package-win-qa.cjs --legacy-layout` builds the
 starting point: the same QA identity without the migration include, so it
 installs to `Programs\desktop-qa` exactly like builds from before the rename
-(output `release-qa-legacy\`). The Bark helper's `Global\DoodleNote-Bark-output`
-mutex is still shared by every identity (a coordination lock, not state; win/bark
-round 3 is moving it to `Local\`).
+(output `release-qa-legacy\`). The Bark helper's output-mute coordination is
+still shared by every identity in the session (`Local\DoodleNote-Bark-output`
+and `%TEMP%\DoodleNote-Bark-output.json`), so do not dictate with production and
+QA running at the same time.
 
 Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 `Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
@@ -456,9 +457,12 @@ files that already carry a valid vendor signature (Microsoft's
 single-file `extraResources` to its signer, so `package:win` signs
 `engine\.build\windows\dictation-helper.exe` itself right after building it.
 Anything that records the helper's hash (its integrity manifest) must run after
-that step (today the order is helper build, which writes the manifest, then
-helper signing, then electron-builder; win/bark round 3 replaces the manifest
-hash with an Authenticode-digest check, see the TODO in `sign-windows.cjs`).
+that step, or be signing-invariant. The order is helper build (which writes
+the manifest), helper signing, electron-builder; since win/bark `1949dcc` the
+manifest records the signing-invariant Authenticode digest and a signed helper
+must also pass the chain and publisher check, so this order holds for unsigned
+and signed builds alike (pinning the certificate thumbprint is a TODO in
+`sign-windows.cjs` for when the certificate exists).
 
 A PFX supplied the electron-builder way (`CSC_LINK` / `WIN_CSC_LINK`) is refused
 with an error: the helper step never receives electron-builder's certificate,

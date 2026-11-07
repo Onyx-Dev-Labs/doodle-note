@@ -303,13 +303,13 @@ async function sign(configuration) {
  * building it and before electron-builder runs. Anything that records the
  * helper's hash (its integrity manifest) must run after this step.
  *
- * TODO(win/bark round 3): package:win runs helper build -> helper sign (here)
- * -> electron-builder, but build-dictation-helper-win.cjs writes the helper
- * manifest during the build, before this signature; it only verifies today
- * because win/bark skips the hash check when a certificate table exists.
- * win/bark round 3 replaces that with an Authenticode-digest manifest plus
- * chain/publisher checks; once it lands, make sure its manifest step runs
- * after this one.
+ * Order in package:win: helper build (writes dictation-helper.manifest.json)
+ * -> helper sign (here) -> electron-builder. That is safe since win/bark
+ * 1949dcc: the manifest's authenticodeSha256 is the signing-invariant
+ * Authenticode digest, and a signed helper must also pass the chain and
+ * publisher check. TODO(win/bark 1949dcc follow-up): once the Artifact Signing
+ * certificate exists, pin its thumbprint in the manifest (the host already
+ * checks it when present) and keep this order.
  *
  *   node scripts/sign-windows.cjs <file>...
  */
