@@ -279,14 +279,18 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * is retried with a fresh one, then the base's write decides), and only a file
  * this write created is removed: never one another writer holds (round 12).
  *
- * What remains (the concurrency contract, tested): a change to the file's mode
- * bits made in the interval between the last fstat (the descriptor is released
- * there) and the rename lands on the replaced file, not the new one (the owner,
- * group and any ACL of the original are not carried over at all: disclosed); and
- * the temporary file remains whenever its removal fails (removeOwnTemporary: the
- * failure is not reported, the result stands), for example when the folder
- * became read-only before the rename. It is `.dn-<8 hex>.tmp` in the config's
- * folder.
+ * What remains (the concurrency contract, tested where it can be): a change to
+ * the file's mode bits made in the interval between the last fstat (the
+ * descriptor is released there) and the rename lands on the replaced file, not
+ * the new one (the owner, group and any ACL of the original are not carried over
+ * at all: disclosed). As with any replace by rename, another writer's content is
+ * lost when it lands meanwhile: another client's own atomic rewrite between the
+ * identity check (lstat) and the rename is replaced by ours, and another
+ * process's in-place write to the file between the open and the rename goes to
+ * the replaced file. And the temporary file remains whenever its removal fails
+ * (removeOwnTemporary: the failure is not reported, the result stands), for
+ * example when the folder became read-only before the rename or, for a new file,
+ * before the link. It is `.dn-<8 hex>.tmp` in the config's folder.
  */
 export function replaceConfigFileBase(path: string, next: string): void {
   const target = configWriteTarget(path)

@@ -734,6 +734,17 @@ test('round 11: the concurrency contract, a change during the write against the 
         change: (_path, folder) => chmodSync(folder, 0o555),
         before: false,
         expect: { leftovers: 1 }
+      },
+      {
+        // The same residual for a new file (round 12, Opus N1): the folder made
+        // read-only before the link: EACCES, as the base's create would fail, and the
+        // temporary file cannot be removed.
+        name: 'residual: no file; the folder made read-only before the link',
+        file: null,
+        at: (name) => name === 'linkSync',
+        change: (_path, folder) => chmodSync(folder, 0o555),
+        before: true,
+        expect: { leftovers: 1 }
       }
     ]
     for (const c of cases) {
