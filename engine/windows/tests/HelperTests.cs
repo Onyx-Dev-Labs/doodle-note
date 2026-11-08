@@ -627,13 +627,15 @@ namespace DoodleNote.DictationHelper.Tests
             Func<string, uint, RecordFacts> facts = (stage, atStage) => new RecordFacts { Stage = stage, SequenceAtStage = atStage, SequenceAfterWrite = 7 };
             Action<PendingClipboard.RecoveryVerdict, RecordFacts, ClipboardView, LogonMatch, string> expect = (want, f, v, logon, why) => Assert.Equal(want, PendingClipboard.Decide(f, v, logon), why);
             LogonMatch same = LogonMatch.Same, other = LogonMatch.Different, unknown = LogonMatch.Unknown;
-            // Provable, so it is restored on its own: (a) our complete write within our own operations, (b) empty at exactly our M, (c) our window for this transaction.
+            // Provable, so it is restored on its own: (a) our complete write within our own operations, (b) empty at exactly our M (ownership alone is no proof).
             foreach (string stage in new[] { "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied" })
                 expect(PendingClipboard.RecoveryVerdict.OursByWrite, facts(stage, 3), view(9, OurWrite.Complete, 8, false), same, stage + ": (a) our complete write, within our own operations");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptied", 4), view(4, OurWrite.None, 0, false), same, "(b) empty at exactly M (journaled under our lock)");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "restore-emptied", SequenceAtStage = 8, SequenceClosed = 9 }, view(9, OurWrite.None, 0, false), same, "(b) empty at the sequence confirmed after our close");
-            ClipboardView mine = view(12, OurWrite.None, 3, false); mine.OwnerIsUs = true; mine.OwnerAlive = true; mine.OwnedByThisTransaction = true;
-            expect(PendingClipboard.RecoveryVerdict.OursByOwner, facts("restore-emptied", 8), mine, same, "(c) our live window owns it, and our last empty was this transaction's");
+            ClipboardView mine = view(12, OurWrite.None, 3, true); mine.OwnerIsUs = true; mine.OwnerAlive = true; mine.OwnedByThisTransaction = true;
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), mine, same, "ownership alone is no proof any more (an app can add a format without emptying): offered");
+            ClipboardView added = view(12, OurWrite.None, 3, false); added.OwnerIsUs = true; added.OwnerAlive = true; added.OwnedByThisTransaction = true;
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), added, same, "(c) refused: our window owns it, but a foreign format was added without emptying");
             ClipboardView otherTxn = view(12, OurWrite.None, 3, false); otherTxn.OwnerIsUs = true; otherTxn.OwnerAlive = true; otherTxn.OwnedByThisTransaction = false;
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), otherTxn, same, "our window owns it for ANOTHER transaction: never ours for this one");
             // (a) needs continuity: a manager replaying every format (our sentinel too) after the crash, at a later sequence.
@@ -648,7 +650,9 @@ namespace DoodleNote.DictationHelper.Tests
             ClipboardView foreign = view(9, OurWrite.None, 3, false); foreign.OwnerAlive = true;
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), foreign, same, "a live foreign owner: offered, not deleted");
             // Deleted without writing, losing nothing.
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another boot: the clipboard did not survive it");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another boot: nothing proven, but offered (an offer writes only on the user's confirmation)");
+            ClipboardView exactAfterReboot = view(3, OurWrite.None, 5, true); exactAfterReboot.HoldsSavedExactly = true;
+            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exactAfterReboot, other, "another boot, the saved content already there: nothing to offer");
             expect(PendingClipboard.RecoveryVerdict.OtherSession, facts("restore-emptied", 8), view(10, OurWrite.None, 2, false), LogonMatch.OtherSession, "another session's record: left alone");
             expect(PendingClipboard.RecoveryVerdict.Untouched, facts("emptying", 3), view(3, OurWrite.None, 2, true), same, "nothing emptied yet");
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3), view(3, OurWrite.None, 2, false), unknown, "the same sequence after a relogin proves nothing (the numbers start over): pending, never deleted");
