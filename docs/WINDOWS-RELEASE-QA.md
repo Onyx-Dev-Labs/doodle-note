@@ -606,7 +606,10 @@ nothing): `AppMigrationReason`, `AppMigrationLastAttempt` (UTC) and, last,
 | `none` | `no-record`: an earlier `pending` / `read-failed` is over without a record | no |
 
 "Retried": again after 1, 5 and 30 minutes in the same session; every start tries
-once anyway. Nothing is repointed or cleared without a complete record. While the
+once anyway. A retry after the speech worker's 5-minute idle unload starts the
+worker again, which reloads the speech model (about 765 MB, unloaded again after
+another 5 idle minutes); accepted, since it happens only while something is
+pending or unreadable, at most twice per launch. Nothing is repointed or cleared without a complete record. While the
 state is `pending` or `read-failed`, Settings > Updates shows "Finishing the
 Windows upgrade…" or "Couldn't finish the Windows upgrade" with the reason, and
 says that Open at login and connected agents may still start DoodleNote from the

@@ -406,6 +406,13 @@ export class WinEngineHost {
    * PowerShell or reg.exe for them. Starts the worker if it is not running. A request fails with
    * `code` "reader-unavailable" (no worker, or it ended first), "reader-timeout", or the worker's
    * own code ("UNSUPPORTED", "SCOPE", "TYPE", "WIN32_<n>").
+   *
+   * A request after the idle unload (IDLE_UNLOAD_MS) starts the worker, which loads the speech
+   * model again (serve_ready -> init) and unloads it after another idle period. Accepted: the
+   * install move asks only at launch and, while something is still pending or unreadable, after
+   * 1, 5 and 30 minutes (INSTALL_MIGRATION_RETRY_MS), so at most twice per launch, and only on
+   * the launches that need it; a registry-only worker start would change the engine's lifecycle
+   * that dictation's helper hold shares (round 10, reviewed and left as is).
    */
   readonly registry: WindowsRegistry = {
     readString: async (subKey, name) => {
