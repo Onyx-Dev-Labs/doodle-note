@@ -1004,12 +1004,15 @@ test("CI proves the QA package ships exactly the production package's files", ()
   )
   assert.ok(qaStep > ciWorkflow.indexOf('run: pnpm --filter desktop package:win'))
   assert.ok(qaStep > ciWorkflow.indexOf('uses: actions/upload-artifact'))
-  const qa = ciWorkflow.slice(qaStep)
+  const qa = ciWorkflow.slice(qaStep).replace(/\r\n/g, '\n')
+  // The full QA package (round 8): only the NSIS target adds resources\elevate.exe.
+  const qaBuild = qa.indexOf('node apps/desktop/scripts/package-win-qa.cjs\n')
   assert.ok(
-    qa.indexOf('node apps/desktop/scripts/package-win-qa.cjs --dir') <
-      qa.indexOf(
-        'node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control'
-      )
+    qaBuild >= 0 &&
+      qaBuild <
+        qa.indexOf(
+          'node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control'
+        )
   )
 })
 

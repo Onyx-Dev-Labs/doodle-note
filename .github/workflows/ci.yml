@@ -288,11 +288,13 @@ jobs:
       # out/main/index.js, resources\mcp\cli.js, the exe and the helper (incl. one
       # inside each allowance's neighbourhood) and adds a feed file to the QA
       # package, and fails unless each is caught exactly (bytes put back).
-      # Built last: it rebuilds out/ with the QA identity.
+      # Built last: it rebuilds out/ with the QA identity. Built as the full
+      # installer, not --dir: the NSIS target is what adds resources\elevate.exe,
+      # and the QA installer is what the upgrade test installs.
       - name: Check the QA package ships exactly the production package's files
         timeout-minutes: 15
         run: |
-          node apps/desktop/scripts/package-win-qa.cjs --dir
+          node apps/desktop/scripts/package-win-qa.cjs
           if ($LASTEXITCODE -ne 0) { throw "QA package build failed" }
           node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control
           if ($LASTEXITCODE -ne 0) { throw "The QA package does not ship the production package's files" }
