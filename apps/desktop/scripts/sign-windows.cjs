@@ -197,11 +197,15 @@ function signtoolPath(env) {
 }
 
 /** Why this SignTool must not be used, or null. Pure, for tests. */
-function signtoolProblem({ status, subject, version }) {
+function signtoolProblem({ status, subject, version, originalFilename }) {
   if (status !== 'Valid') return `it is not validly signed (${status})`
   // Microsoft's two code-signing subjects; the chain is checked by Status above.
   if (!/^CN=Microsoft (Corporation|Windows), O=Microsoft Corporation,/.test(subject ?? ''))
     return `it is signed by ${subject}`
+  // Any Microsoft-signed binary passes the two checks above (ping.exe would); the
+  // version resource's original name, covered by the signature, must be SignTool's.
+  if (String(originalFilename ?? '').toLowerCase() !== 'signtool.exe')
+    return `it is not SignTool (original file name ${originalFilename || 'missing'})`
   const parts = String(version ?? '')
     .split('.')
     .map((part) => Number.parseInt(part, 10))
@@ -233,13 +237,14 @@ function findSigntool(env) {
   return file
 }
 
-/** Authenticode status, signer subject and file version of an executable (Windows). */
+/** Authenticode status, signer subject, file version and original file name of an executable (Windows). */
 function signtoolFacts(file) {
   const script =
     '$s = Get-AuthenticodeSignature -LiteralPath $env:DN_SIGNTOOL; ' +
     '$v = (Get-Item -LiteralPath $env:DN_SIGNTOOL).VersionInfo; ' +
     '[pscustomobject]@{ status = [string]$s.Status; subject = [string]$s.SignerCertificate.Subject; ' +
-    'version = "$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)" } | ' +
+    'version = "$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)"; ' +
+    'originalFilename = [string]$v.OriginalFilename } | ' +
     'ConvertTo-Json -Compress'
   return JSON.parse(
     execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {

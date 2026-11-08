@@ -501,12 +501,23 @@ and `dictation-platform.test.ts`. `pnpm package:win:qa` runs the same order
 
 A PFX supplied the electron-builder way (`CSC_LINK` / `WIN_CSC_LINK`) is refused
 with an error: the helper step never receives electron-builder's certificate,
-so the helper would ship unsigned while everything else was signed. SignTool is
+so the helper would ship unsigned while everything else was signed. This is
+deliberate and also applies to an otherwise unsigned build: with `CSC_LINK` or
+`WIN_CSC_LINK` set anywhere in the environment (a shell profile, a CI variable
+left from the old PFX setup), `pnpm package:win` fails at the helper-signing
+step instead of building; unset them. `pnpm package:win:qa` drops them, so a QA
+build is unaffected. SignTool is
 pinned: `SIGNTOOL_PATH`, else Windows SDK `10.0.26100.0`'s x64 `signtool.exe`
 (never "the newest one found"), and before first use the script checks that it
 is validly Authenticode-signed by Microsoft (`CN=Microsoft Corporation` or
-`CN=Microsoft Windows`, `O=Microsoft Corporation`) and at least
-10.0.22621.755 (the dlib's minimum).
+`CN=Microsoft Windows`, `O=Microsoft Corporation`), that its version resource's
+`OriginalFilename` is `signtool.exe` (case-insensitive; any other
+Microsoft-signed binary, `ping.exe` say, is refused) and that it is at least
+10.0.22621.755 (the dlib's minimum). Dev04 has no Windows SDK, so the exact
+signer subject of SDK 10.0.26100.0's SignTool (`CN=Microsoft Corporation` is
+expected) has not been seen natively yet: confirm it on the first
+`windows-sign.yml` run, or on any machine with the SDK, with
+`Get-AuthenticodeSignature` before relying on the check.
 
 Where signing runs: never in PR or branch CI. The `windows-package` job in
 `ci.yml` runs PR-controlled scripts, so it references no secrets at all and
@@ -517,12 +528,19 @@ hand on `main` or a `v*` tag, in the GitHub Environment `windows-signing`. It
 rebuilds from the approved commit, signs, runs the package check and
 `scripts/verify-windows-signature.ps1` (installer, helper and every shipped
 `.exe`, `.dll` and `.node` validly signed; the same check gates `release:win`),
-and uploads the artifact. It publishes nothing.
+and uploads the artifact. It publishes nothing. Before anything else it checks
+that the commit is on `main` (`git merge-base --is-ancestor $GITHUB_SHA
+origin/main`, full history fetched): the environment matches a `v*` tag by name
+only, so without this a tag pushed onto any commit would be signable.
 
 **Create the environment with its protection rules before adding any secret**
 (Settings > Environments > New environment `windows-signing`): required
 reviewers (the owner), "Prevent self-review" if available, deployment branches
-and tags limited to `main` and `v*`, and no admin bypass. Only then add the
+and tags limited to `main` and `v*`, and no admin bypass. Also restrict who can
+create release tags (Settings > Rules > Rulesets > New tag ruleset: target
+`v*`, restrict creations, updates and deletions, bypass list = release
+maintainers only), so a `v*` tag cannot be created by anyone with push access.
+Only then add the
 secrets to that environment (never as repository secrets, which any workflow
 could reference): `ARTIFACT_SIGNING_ENDPOINT` (for example
 `https://eus.codesigning.azure.net`, matching the account's region),

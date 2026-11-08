@@ -22,7 +22,12 @@ const signing = createRequire(import.meta.url)(signScript) as {
   artifactSigningMetadata(plan: object): { ExcludeCredentials: string[]; [key: string]: unknown }
   unsignedByBuilder(appOutDir: string): string[]
   signtoolPath(env: Record<string, string | undefined>): string
-  signtoolProblem(facts: { status: string; subject: string; version: string }): string | null
+  signtoolProblem(facts: {
+    status: string
+    subject: string
+    version: string
+    originalFilename?: string
+  }): string | null
   SIGNTOOL_SDK_VERSION: string
 }
 // Windows CI checks files out with CRLF line endings.
@@ -110,16 +115,30 @@ test('SignTool is pinned and must be a Microsoft-signed, new enough build', () =
   const microsoft =
     'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
   assert.equal(
-    signing.signtoolProblem({ status: 'Valid', subject: microsoft, version: '10.0.26100.4188' }),
+    signing.signtoolProblem({
+      status: 'Valid',
+      subject: microsoft,
+      version: '10.0.26100.4188',
+      originalFilename: 'signtool.exe'
+    }),
     null
   )
   assert.equal(
-    signing.signtoolProblem({ status: 'Valid', subject: microsoft, version: '10.0.22621.755' }),
+    signing.signtoolProblem({
+      status: 'Valid',
+      subject: microsoft,
+      version: '10.0.22621.755',
+      originalFilename: 'signtool.exe'
+    }),
     null
   )
   assert.match(
-    signing.signtoolProblem({ status: 'Valid', subject: microsoft, version: '10.0.22621.754' }) ??
-      '',
+    signing.signtoolProblem({
+      status: 'Valid',
+      subject: microsoft,
+      version: '10.0.22621.754',
+      originalFilename: 'signtool.exe'
+    }) ?? '',
     /older than 10\.0\.22621\.755/
   )
   assert.match(
@@ -130,22 +149,41 @@ test('SignTool is pinned and must be a Microsoft-signed, new enough build', () =
     signing.signtoolProblem({
       status: 'Valid',
       subject: 'CN=Microsoft Corporation Fake, O=Evil',
-      version: '10.0.26100.1'
+      version: '10.0.26100.1',
+      originalFilename: 'signtool.exe'
     }) ?? '',
     /signed by CN=Microsoft Corporation Fake/
   )
   const windows = 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
   assert.equal(
-    signing.signtoolProblem({ status: 'Valid', subject: windows, version: '10.0.26100.1' }),
+    signing.signtoolProblem({
+      status: 'Valid',
+      subject: windows,
+      version: '10.0.26100.1',
+      originalFilename: 'signtool.exe'
+    }),
     null
   )
   assert.match(
     signing.signtoolProblem({
       status: 'Valid',
       subject: 'CN=Microsoft Corporation, O=Someone Else',
-      version: '10.0.26100.1'
+      version: '10.0.26100.1',
+      originalFilename: 'signtool.exe'
     }) ?? '',
     /signed by/
+  )
+  // Any other Microsoft-signed binary (ping.exe) is refused; the name is case-insensitive.
+  const ping = { status: 'Valid', subject: windows, version: '10.0.26100.1' }
+  assert.match(
+    signing.signtoolProblem({ ...ping, originalFilename: 'ping.exe' }) ?? '',
+    /not SignTool \(original file name ping\.exe\)/
+  )
+  assert.match(signing.signtoolProblem(ping) ?? '', /not SignTool \(original file name missing\)/)
+  assert.equal(signing.signtoolProblem({ ...ping, originalFilename: 'SignTool.EXE' }), null)
+  assert.match(
+    readFileSync(signScript, 'utf8'),
+    /originalFilename = \[string\]\$v\.OriginalFilename/
   )
   // No "newest SDK found on the machine" fallback any more.
   assert.doesNotMatch(readFileSync(signScript, 'utf8'), /readdirSync\(root\)/)
@@ -302,6 +340,12 @@ test('signing runs only by hand on main or a tag, in the protected windows-signi
     /if: github\.repository == 'Onyx-Dev-Labs\/doodle-note' && \(github\.ref == 'refs\/heads\/main' \|\| startsWith\(github\.ref, 'refs\/tags\/v'\)\)/
   )
   assert.match(signWorkflow, /persist-credentials: false/)
+  // A v* tag (matched by name only) must point at a commit on main, checked before any secret.
+  const ancestry = signWorkflow.indexOf('git merge-base --is-ancestor $env:GITHUB_SHA origin/main')
+  assert.ok(ancestry > 0)
+  assert.ok(ancestry < signWorkflow.indexOf('- name: Check Artifact Signing configuration'))
+  assert.match(signWorkflow, /fetch-depth: 0/)
+  assert.match(signWorkflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw "\$env:GITHUB_REF/)
   assert.match(signWorkflow, /microsoft\.artifactsigning\.client\.1\.0\.151\.nupkg/)
   assert.match(signWorkflow, /35375A4BC4E1102DA729FC3D8D9925F774C3BAAE6B8B7FF6398D948CA9AB0D8A/)
   assert.match(signWorkflow, /actions\/setup-dotnet@[0-9a-f]{40} # v6\.0\.0/)

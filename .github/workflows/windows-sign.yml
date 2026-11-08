@@ -35,6 +35,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history and branches, for the ancestry check below.
+          fetch-depth: 0
+
+      # The environment's deployment rules match a tag by name only, and anyone who
+      # can push may create a v* tag on any commit (until the tag ruleset in
+      # docs/WINDOWS-RELEASE-QA.md exists). Sign only commits that are on main.
+      - name: The commit must be on main
+        shell: pwsh
+        run: |
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw "$env:GITHUB_REF ($env:GITHUB_SHA) is not on origin/main; refusing to sign it" }
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
