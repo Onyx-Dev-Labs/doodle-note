@@ -515,7 +515,12 @@ interface LinkCase {
   client: McpClientId
   /** Builds the tree under `root` (absolute link texts point inside it). */
   build: (root: string, link: (text: string, at: string) => void) => void
-  /** The file a write lands on, relative to root; null: the write fails. */
+  /**
+   * The file a write lands on, relative to root (null: the write fails), as the
+   * POSIX kernel resolves it (macOS, Linux). Windows resolves `..` before links
+   * (the Win32 path is normalised first), so there the writers must land where
+   * writeFileSync lands, whatever that is.
+   */
   lands: string | null
 }
 
@@ -731,14 +736,14 @@ test('darwin: every link topology, the base writer and the darwin writer change 
       const darwin = effectOf(homes.darwin, c, (path) => replaceConfigFileBase(path, TEXT))!
       // The base: in place (the same inode), on the expected file, or the expected failure.
       assert.deepEqual(base.stray, [], label)
-      if (c.lands === null) {
+      if (posix && c.lands === null) {
         assert.ok(base.error !== null, label)
         assert.deepEqual(base.changed, {}, label)
-      } else {
+      } else if (posix) {
         assert.equal(base.error, null, label)
         assert.deepEqual(Object.keys(base.changed), [c.lands], label)
-        assert.notEqual(base.changed[c.lands].inode, 'new', label)
       }
+      for (const e of Object.values(base.changed)) assert.notEqual(e.inode, 'new', label)
       // The darwin writer: the same error, the same file with the same bytes and
       // mode; that file's inode replaced (renamed over) instead of written in place.
       assert.equal(darwin.error, base.error, label)
@@ -778,7 +783,7 @@ test('darwin: every link topology through the services, as the base service', (t
       assert.equal(darwin.error, base.error, label)
       assert.deepEqual(darwin.stray, base.stray, label)
       assert.deepEqual(Object.keys(darwin.changed), Object.keys(base.changed), label)
-      if (c.lands !== null) assert.deepEqual(Object.keys(base.changed), [c.lands], label)
+      if (posix && c.lands !== null) assert.deepEqual(Object.keys(base.changed), [c.lands], label)
       for (const [rel, e] of Object.entries(base.changed)) {
         assert.equal(darwin.changed[rel].data, e.data, `${label}: ${rel}`)
         assert.equal(darwin.changed[rel].mode, e.mode, `${label}: ${rel}`)
@@ -804,15 +809,18 @@ test('every link topology, the Windows writer lands where writeFileSync lands (o
           throw new Error('changed meanwhile')
       })!
       assert.deepEqual(strict.stray, [], label)
-      if (c.lands === null) {
+      if (base.error !== null) {
         // Refused, nothing written.
         assert.ok(strict.error !== null, label)
         assert.deepEqual(strict.changed, {}, label)
       } else {
+        const lands = Object.keys(base.changed)
         assert.equal(strict.error, null, label)
-        assert.deepEqual(Object.keys(strict.changed), [c.lands], label)
-        assert.equal(strict.changed[c.lands].data, TEXT, label)
+        assert.deepEqual(Object.keys(strict.changed), lands, label)
+        assert.equal(strict.changed[lands[0]].data, TEXT, label)
       }
+      if (posix)
+        assert.equal(base.error === null ? Object.keys(base.changed)[0] : null, c.lands, label)
     }
   })
 })
