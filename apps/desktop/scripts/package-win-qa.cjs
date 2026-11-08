@@ -15,7 +15,7 @@ if (legacyLayout) env.DOODLENOTE_QA_LEGACY_LAYOUT = '1'
 else delete env.DOODLENOTE_QA_LEGACY_LAYOUT
 delete env.DOODLENOTE_WINDOWS_UPDATES
 for (const name of [
-  ...require('./sign-windows.cjs').ARTIFACT_SIGNING_VARS,
+  ...require('./sign-windows.cjs').SIGNING_ENV_VARS,
   'CSC_LINK',
   'WIN_CSC_LINK',
   'CSC_KEY_PASSWORD',

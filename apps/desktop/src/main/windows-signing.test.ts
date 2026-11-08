@@ -10,6 +10,7 @@ import { test } from 'node:test'
 const signScript = fileURLToPath(new URL('../../scripts/sign-windows.cjs', import.meta.url))
 const signing = createRequire(import.meta.url)(signScript) as {
   ARTIFACT_SIGNING_VARS: string[]
+  SIGNING_ENV_VARS: string[]
   signingPlan(
     env: Record<string, string | undefined>,
     options?: { hasCertificateFile?: boolean }
@@ -57,7 +58,8 @@ test('Artifact Signing is selected only when fully configured with a codesigning
     endpoint: configured.ARTIFACT_SIGNING_ENDPOINT,
     account: 'onyx-dev-labs',
     profile: 'doodlenote-public',
-    dlib: configured.ARTIFACT_SIGNING_DLIB
+    dlib: configured.ARTIFACT_SIGNING_DLIB,
+    credential: 'client-secret'
   })
   assert.throws(
     () => signing.signingPlan({ ...configured, AZURE_CLIENT_SECRET: '' }),
@@ -165,6 +167,40 @@ test('SignTool runs the Artifact Signing dlib with SHA-256 and an RFC 3161 times
   // Only the environment service principal; no browser or cached developer login.
   assert.ok(!metadata.ExcludeCredentials.includes('EnvironmentCredential'))
   assert.ok(metadata.ExcludeCredentials.includes('InteractiveBrowserCredential'))
+  assert.ok(metadata.ExcludeCredentials.includes('WorkloadIdentityCredential'))
+})
+
+test('an OIDC federated token (WorkloadIdentityCredential) can replace the client secret', () => {
+  const oidc: Record<string, string> = {
+    ...configured,
+    AZURE_FEDERATED_TOKEN_FILE: 'C:\\runner\\temp\\oidc-token'
+  }
+  delete oidc.AZURE_CLIENT_SECRET
+  const plan = signing.signingPlan(oidc) as { mode: string; credential?: string }
+  assert.equal(plan.mode, 'artifact-signing')
+  assert.equal(plan.credential, 'workload-identity')
+  const metadata = signing.artifactSigningMetadata(plan)
+  assert.ok(!metadata.ExcludeCredentials.includes('WorkloadIdentityCredential'))
+  // Then only that one: not the environment secret, and never the Azure CLI's session.
+  for (const name of [
+    'EnvironmentCredential',
+    'AzureCliCredential',
+    'InteractiveBrowserCredential'
+  ])
+    assert.ok(metadata.ExcludeCredentials.includes(name), name)
+  assert.throws(
+    () => signing.signingPlan({ ...oidc, AZURE_CLIENT_SECRET: 'secret' }),
+    /either AZURE_CLIENT_SECRET or AZURE_FEDERATED_TOKEN_FILE, not both/
+  )
+  assert.throws(
+    () => signing.signingPlan({ ...oidc, AZURE_CLIENT_ID: '' }),
+    /partly configured; missing AZURE_CLIENT_ID/
+  )
+  // A token file alone is a partial configuration, never silently "no credentials".
+  assert.throws(() => signing.signingPlan({ AZURE_FEDERATED_TOKEN_FILE: 'x' }), /partly configured/)
+  assert.ok(signing.SIGNING_ENV_VARS.includes('AZURE_FEDERATED_TOKEN_FILE'))
+  assert.match(qaDoc, /OIDC/)
+  assert.match(qaDoc, /AZURE_FEDERATED_TOKEN_FILE/)
 })
 
 test('the CLI leaves a file byte-identical and says why when there are no credentials', () => {

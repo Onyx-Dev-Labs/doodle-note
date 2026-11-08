@@ -522,7 +522,26 @@ could reference): `ARTIFACT_SIGNING_ENDPOINT` (for example
 `ARTIFACT_SIGNING_ACCOUNT`, `ARTIFACT_SIGNING_PROFILE`, and an Entra app
 registration with the Artifact Signing Certificate Profile Signer role:
 `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. A partial set
-fails the build. The old `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`
+fails the build.
+
+**Preferred credential once the Azure app registration exists: OIDC, no stored
+secret.** Add a federated credential to the app registration for GitHub Actions
+with subject `repo:Onyx-Dev-Labs/doodle-note:environment:windows-signing` and
+audience `api://AzureADTokenExchange`, so only jobs running in the protected
+environment can obtain a token. The signing job then gets `permissions:
+id-token: write`, requests a GitHub OIDC token for that audience, writes it to a
+file under `$RUNNER_TEMP` and passes `AZURE_FEDERATED_TOKEN_FILE` (with
+`AZURE_TENANT_ID` and `AZURE_CLIENT_ID`) instead of `AZURE_CLIENT_SECRET`.
+`sign-windows.cjs` accepts exactly one of the two (both set is an error), and
+tells the dlib's `DefaultAzureCredential` to try only the configured one
+(`WorkloadIdentityCredential` for the token file, `EnvironmentCredential` for
+the secret); the Azure CLI's session, managed identity, Visual Studio and
+browser logins stay excluded. GitHub's OIDC tokens are short-lived and SignTool
+runs once per file, so on the first OIDC run confirm the token lasts for the
+whole signing step (refresh the file before the packaging step if needed). The
+workflow change (`id-token: write`, the token step, dropping the secret) is made
+together with the app registration; until then the secret path above is what
+`windows-sign.yml` uses. The old `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`
 repository secrets are no longer read by any workflow and should be deleted if
 they exist.
 

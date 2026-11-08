@@ -9,7 +9,12 @@
 //   ARTIFACT_SIGNING_ACCOUNT    the Artifact Signing account name
 //   ARTIFACT_SIGNING_PROFILE    the certificate profile name
 //   ARTIFACT_SIGNING_DLIB       path to bin\x64\Azure.CodeSigning.Dlib.dll
-//   AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
+//   AZURE_TENANT_ID / AZURE_CLIENT_ID and exactly one credential:
+//   AZURE_CLIENT_SECRET         a service principal secret (EnvironmentCredential), or
+//   AZURE_FEDERATED_TOKEN_FILE  an OIDC federated token file (WorkloadIdentityCredential),
+//                               the preferred path once the Azure app registration
+//                               trusts the windows-signing environment
+//                               (docs/WINDOWS-RELEASE-QA.md "Code signing")
 //   SIGNTOOL_PATH               optional; else the pinned Windows SDK x64 signtool
 //                               (SIGNTOOL_SDK_VERSION). Either way it must be
 //                               validly signed by Microsoft and at least
@@ -37,12 +42,16 @@ const ARTIFACT_SIGNING_VARS = [
   'AZURE_CLIENT_ID',
   'AZURE_CLIENT_SECRET'
 ]
+/** The OIDC alternative to AZURE_CLIENT_SECRET. */
+const FEDERATED_TOKEN_VAR = 'AZURE_FEDERATED_TOKEN_FILE'
+/** Everything that can select or feed a signer (stripped from QA builds). */
+const SIGNING_ENV_VARS = [...ARTIFACT_SIGNING_VARS, FEDERATED_TOKEN_VAR]
 const TIMESTAMP_URL = 'http://timestamp.acs.microsoft.com'
-// Only the service principal in the environment; never a browser prompt or a
-// developer's cached login on a build machine.
+// Only the credential this environment configured (a service principal secret,
+// or an OIDC federated token); never a browser prompt, a developer's cached
+// login or the Azure CLI's session on a build machine.
 const EXCLUDED_CREDENTIALS = [
   'ManagedIdentityCredential',
-  'WorkloadIdentityCredential',
   'SharedTokenCacheCredential',
   'VisualStudioCredential',
   'VisualStudioCodeCredential',
@@ -62,7 +71,8 @@ const PE_EXTENSIONS = ['.exe', '.dll', '.node']
 
 /**
  * Which signer this environment selects. Pure, for tests.
- * @returns {{ mode: 'artifact-signing', endpoint: string, account: string, profile: string, dlib: string }
+ * @returns {{ mode: 'artifact-signing', endpoint: string, account: string, profile: string, dlib: string,
+ *     credential: 'client-secret' | 'workload-identity' }
  *   | { mode: 'test-certificate', thumbprint: string } | { mode: 'none', missing: string[] }}
  */
 function signingPlan(env, { hasCertificateFile = false } = {}) {
@@ -73,8 +83,19 @@ function signingPlan(env, { hasCertificateFile = false } = {}) {
         'would ship unsigned. Unset it and use Microsoft Artifact Signing (ARTIFACT_SIGNING_*).'
     )
   }
-  const present = ARTIFACT_SIGNING_VARS.filter((name) => (env[name] ?? '').trim() !== '')
-  if (present.length === ARTIFACT_SIGNING_VARS.length) {
+  const set = (name) => (env[name] ?? '').trim() !== ''
+  const base = ARTIFACT_SIGNING_VARS.filter((name) => name !== 'AZURE_CLIENT_SECRET')
+  const present = base.filter(set)
+  const secret = set('AZURE_CLIENT_SECRET')
+  const federated = set(FEDERATED_TOKEN_VAR)
+  if (present.length > 0 || secret || federated) {
+    // Half-configured signing must not quietly ship unsigned binaries.
+    const missing = base.filter((name) => !present.includes(name))
+    if (!secret && !federated) missing.push(`AZURE_CLIENT_SECRET (or ${FEDERATED_TOKEN_VAR})`)
+    if (missing.length > 0)
+      throw new Error(`Artifact Signing is partly configured; missing ${missing.join(', ')}`)
+    if (secret && federated)
+      throw new Error(`Set either AZURE_CLIENT_SECRET or ${FEDERATED_TOKEN_VAR}, not both`)
     const endpoint = env.ARTIFACT_SIGNING_ENDPOINT.trim()
     let host = ''
     try {
@@ -93,13 +114,9 @@ function signingPlan(env, { hasCertificateFile = false } = {}) {
       endpoint,
       account: env.ARTIFACT_SIGNING_ACCOUNT.trim(),
       profile: env.ARTIFACT_SIGNING_PROFILE.trim(),
-      dlib: env.ARTIFACT_SIGNING_DLIB.trim()
+      dlib: env.ARTIFACT_SIGNING_DLIB.trim(),
+      credential: secret ? 'client-secret' : 'workload-identity'
     }
-  }
-  if (present.length > 0) {
-    // Half-configured signing must not quietly ship unsigned binaries.
-    const missing = ARTIFACT_SIGNING_VARS.filter((name) => !present.includes(name))
-    throw new Error(`Artifact Signing is partly configured; missing ${missing.join(', ')}`)
   }
   const thumbprint = (env.DOODLENOTE_SIGN_TEST_CERT_SHA1 ?? '').trim()
   if (thumbprint) {
@@ -117,7 +134,13 @@ function artifactSigningMetadata(plan) {
     Endpoint: plan.endpoint,
     CodeSigningAccountName: plan.account,
     CertificateProfileName: plan.profile,
-    ExcludeCredentials: EXCLUDED_CREDENTIALS
+    // DefaultAzureCredential then tries only the one credential configured.
+    ExcludeCredentials: [
+      ...EXCLUDED_CREDENTIALS,
+      plan.credential === 'workload-identity'
+        ? 'EnvironmentCredential'
+        : 'WorkloadIdentityCredential'
+    ]
   }
 }
 
@@ -335,3 +358,4 @@ module.exports.SIGNTOOL_SDK_VERSION = SIGNTOOL_SDK_VERSION
 
 if (require.main === module) main(process.argv.slice(2))
 module.exports.ARTIFACT_SIGNING_VARS = ARTIFACT_SIGNING_VARS
+module.exports.SIGNING_ENV_VARS = SIGNING_ENV_VARS
