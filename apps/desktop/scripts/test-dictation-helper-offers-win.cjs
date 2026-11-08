@@ -149,6 +149,40 @@ if (opened) {
 `
   return spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
 }
+/** Another process opens the clipboard (no change), holds it ms, then adds a format and closes. */
+function holdThenAdd(ms) {
+  const code = `
+const koffi = require(${JSON.stringify(require.resolve('koffi'))})
+const user32 = koffi.load('user32.dll'), kernel32 = koffi.load('kernel32.dll')
+const OpenClipboard = user32.func('bool __stdcall OpenClipboard(void* h)')
+const CloseClipboard = user32.func('bool __stdcall CloseClipboard()')
+const SetClipboardData = user32.func('void* __stdcall SetClipboardData(uint32 f, void* h)')
+const RegisterClipboardFormatW = user32.func('uint32 __stdcall RegisterClipboardFormatW(str16 n)')
+const GlobalAlloc = kernel32.func('void* __stdcall GlobalAlloc(uint32 f, uintptr n)')
+const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
+const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
+const RtlMoveMemory = kernel32.func('void __stdcall RtlMoveMemory(void* dst, const uint8_t* src, uintptr n)')
+const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, t)
+let opened = false
+for (let i = 0; i < 150 && !(opened = OpenClipboard(null)); i++) block(20)
+if (opened) {
+  block(${ms})
+  const bytes = Buffer.from('held')
+  const g = GlobalAlloc(2, bytes.length); const p = GlobalLock(g); RtlMoveMemory(p, bytes, bytes.length); GlobalUnlock(g)
+  SetClipboardData(RegisterClipboardFormatW('DoodleNote.CI.Held'), g)
+  CloseClipboard()
+}
+`
+  return spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
+}
+/** Another process holds a file open with no sharing for ms (as an AV scan or an indexer can). */
+function lockFile(file, ms) {
+  const script = `$f = [System.IO.File]::Open($env:DN_LOCK, 'Open', 'ReadWrite', 'None'); Start-Sleep -Milliseconds ${ms}; $f.Close()`
+  return spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    stdio: 'ignore',
+    env: { ...process.env, DN_LOCK: file }
+  })
+}
 const waitExit = (child) =>
   new Promise((r) => (child.exitCode !== null ? r() : child.on('exit', r)))
 
@@ -552,7 +586,8 @@ async function main() {
     await h.stop()
   }
 
-  // 10. Our window still owns the clipboard, but an app added a format without emptying: kept as an offer.
+  // 10. Our window still owns the clipboard, but an app added a format without emptying AFTER our write's
+  // confirmation: kept as an offer.
   {
     copyMulti(user)
     const a = start(testops, { DICTATION_HELPER_TEST: '1' })
@@ -581,6 +616,171 @@ async function main() {
     )
     const offer = listed && listed.offers[0]
     if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 10b. B1 regression, the ORIGINAL timing of the first round-14 CI run (no delay: the addition lands while the
+  // write is being confirmed or right after). Whichever comes first, the product must keep the record and the
+  // addition (round 14's run 42505251118 reproduced the defect: restored, no record, the addition gone).
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text I2', holdMs: 2500 })
+    for (let i = 0; i < 200 && text() !== 'dictated text I2'; i++) await sleep(50)
+    addFormat()
+    const result = await reply
+    await a.stop()
+    check(
+      'B1 regression (original timing): an addition next to our write is never adopted: kept, the addition stays',
+      !!result &&
+        /^owned-but-changed\/unrestored\|/.test(String(result.result)) &&
+        recordFiles().length === 2 &&
+        names().includes('DoodleNote.CI.Added'),
+      `${JSON.stringify(result)}; ${recordFiles()}; ${names()}`
+    )
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 10c. Another process copies over our write (the owner changes) right before the keys: their content is left
+  // alone, and the user's saved clipboard is kept as an offer, never deleted on that guess.
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text I3', holdMs: 2500 })
+    for (let i = 0; i < 200 && text() !== 'dictated text I3'; i++) await sleep(50)
+    await sleep(700)
+    copyMulti('a copy by another app')
+    const theirs = names()
+    const result = await reply
+    await a.stop()
+    check(
+      'an owner change keeps the saved clipboard as an offer (user-changed, record kept, their copy untouched)',
+      !!result &&
+        /^user-changed\|/.test(String(result.result)) &&
+        recordFiles().length === 2 &&
+        names() === theirs,
+      `${JSON.stringify(result)}; ${recordFiles()}; ${names()}`
+    )
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check('and it is offered', !!listed && listed.offers.length === 1, JSON.stringify(listed))
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 11. The same addition BEFORE our write's confirmation (the confirmation is held open by a test hook, so the
+  // order is fixed, not timed): the confirmation must not adopt it. Kept as an offer, the addition stays.
+  {
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_CONFIRM_DELAY_MS: '2500'
+    })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text J', holdMs: 300 })
+    for (let i = 0; i < 200 && text() !== 'dictated text J'; i++) await sleep(50)
+    addFormat() // inside the confirmation's delay
+    const result = await reply
+    await a.stop()
+    check(
+      'an addition before the confirmation is not adopted: kept, not restored',
+      !!result &&
+        /^owned-but-changed\/unrestored\|/.test(String(result.result)) &&
+        recordFiles().length === 2 &&
+        names().includes('DoodleNote.CI.Added'),
+      `${JSON.stringify(result)}; ${recordFiles()}; ${names()}`
+    )
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'and it is offered by the release helper',
+      !!listed && listed.offers.length === 1,
+      JSON.stringify(listed)
+    )
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 12. After the paste, the restore finds the clipboard busy (another app holds it open, sequence unchanged), and
+  // that app then adds a format while our window still owns the clipboard: the retry must not restore on
+  // ownership alone. Offered, the addition stays.
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text K', holdMs: 2500 })
+    for (let i = 0; i < 200 && text() !== 'dictated text K'; i++) await sleep(50)
+    await sleep(1500)
+    const holder = holdThenAdd(1800) // opens now, holds through the restore attempt, then adds and closes
+    const result = await reply
+    await waitExit(holder)
+    await sleep(4500) // the helper's own retry (3 s) runs on the changed clipboard
+    const kept = recordFiles().length
+    await a.stop()
+    check(
+      'a busy restore keeps the record (unrestored)',
+      !!result && /^unrestored\|/.test(String(result.result)),
+      JSON.stringify(result)
+    )
+    check(
+      'and the retry does not restore on ownership alone (record kept, addition there)',
+      kept === 2 && names().includes('DoodleNote.CI.Held'),
+      `${kept}; ${names()}`
+    )
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check('and it is offered', !!listed && listed.offers.length === 1, JSON.stringify(listed))
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 13. Dismiss while a record file is held by another process (its .state.tmp locked): failure is reported and
+  // the record stays whole; once released, Dismiss deletes it.
+  {
+    copyMulti(user)
+    await keptRecord('dictated text L')
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    const offer = listed && listed.offers[0]
+    let first = null
+    let second = null
+    if (offer) {
+      const tmp = path.join(os.tmpdir(), `${recordPrefix}${offer.record}.state.tmp`)
+      fs.writeFileSync(tmp, '{}')
+      const lock = lockFile(tmp, 4000)
+      await sleep(800)
+      first = await h.req('clipboard-dismiss', { record: offer.record })
+      const whole = recordFiles().length
+      await waitExit(lock)
+      second = await h.req('clipboard-dismiss', { record: offer.record })
+      check(
+        'Dismiss with a locked record file reports failure and the record stays whole',
+        !!first && first.dismissed === false && whole === 2,
+        `${JSON.stringify(first)}; ${whole}`
+      )
+    }
+    check(
+      'once released, Dismiss deletes every file',
+      !!second &&
+        second.dismissed === true &&
+        recordFiles().length === 0 &&
+        !fs.existsSync(path.join(os.tmpdir(), `${recordPrefix}${offer && offer.record}.state.tmp`)),
+      `${JSON.stringify(second)}; ${recordFiles()}`
+    )
     await h.stop()
   }
 

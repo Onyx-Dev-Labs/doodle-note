@@ -109,7 +109,9 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'line-break-unsupported':
     "Pasting didn't work here, and DoodleNote won't type line breaks into this box, so nothing was typed. Use Copy text, then paste it yourself.",
   'keys-held':
-    'Keys were still held down, so nothing was pasted or typed. Your text is kept for copying.'
+    'Keys were still held down, so nothing was pasted or typed. Your text is kept for copying.',
+  'clipboard-changed':
+    'The clipboard changed just before pasting, so nothing was pasted. Your text is kept for copying.'
 }
 
 /** Copy for the heads-up line under the live pill. */

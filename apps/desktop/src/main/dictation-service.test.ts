@@ -2815,6 +2815,10 @@ test('Windows: why typing stopped, or never started, reaches the recovery card',
     ],
     // A modifier was down right before the keys would have gone out: nothing was sent.
     [{ outcome: 'refused', reason: 'keys-held', method: 'paste' }, /Keys were still held down/],
+    [
+      { outcome: 'refused', reason: 'clipboard-changed', method: 'paste' },
+      /The clipboard changed just before pasting/
+    ],
     // Typing stopped part-way: the specific reason is kept, the card says so.
     [
       {

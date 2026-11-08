@@ -2635,6 +2635,9 @@ function refusalReason(reason: string | undefined): RecoveryReason {
     // Windows: a modifier was down right before Ctrl+V or a typed key (never sent then).
     case 'keys-held':
       return 'keys-held'
+    // Windows: the clipboard changed right before Ctrl+V (nothing pasted; the saved clipboard is kept).
+    case 'clipboard-changed':
+      return 'clipboard-changed'
     case 'helper-busy':
       return 'helper-busy'
     // A delivery the helper refused because the client had already given up: keep the text.

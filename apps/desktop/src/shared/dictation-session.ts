@@ -64,6 +64,8 @@ export type RecoveryReason =
   | 'line-break-unsupported'
   /** Windows: Shift, Ctrl, Alt or Win was held down right before the keys would have gone out. */
   | 'keys-held'
+  /** Windows: the clipboard changed in the last moment before Ctrl+V, so nothing was pasted. */
+  | 'clipboard-changed'
   /** Windows: the helper stopped (stuck app) and no automatic restart is left this session. */
   | 'helper-stopped'
   /** Windows: the typing fallback stopped part-way because the field became a password field. */
