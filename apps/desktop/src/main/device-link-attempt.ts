@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { hostname } from 'node:os'
 
@@ -11,6 +12,12 @@ export class DeviceLinkAttempt {
   readonly result: Promise<DeviceLinkResult>
   private resolve!: (result: DeviceLinkResult) => void
   private settled = false
+  /**
+   * Binds the loopback callback to THIS attempt. The web page echoes it back,
+   * so a token minted for some other account cannot be injected by anything
+   * else that happens to reach the listener.
+   */
+  private readonly state = randomBytes(32).toString('base64url')
   private readonly server = createServer((req, res) => {
     if (this.settled) {
       res.writeHead(410).end()
@@ -29,6 +36,12 @@ export class DeviceLinkAttempt {
     }
     if (url.pathname !== '/callback') {
       res.writeHead(404).end()
+      return
+    }
+    if (!this.stateMatches(url.searchParams.get('state'))) {
+      // Not the browser we opened: refuse it without aborting the real attempt.
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Connection failed. Return to DoodleNote and try connecting again.')
       return
     }
     const token = url.searchParams.get('token') ?? ''
@@ -76,6 +89,7 @@ export class DeviceLinkAttempt {
       if (!address || typeof address === 'string') return
       const query = new URLSearchParams({
         port: String(address.port),
+        state: this.state,
         name: hostname().replace(/\.local$/, '') || 'Computer'
       })
       // Catch synchronous throws as well as Electron's rejected launch promise.
@@ -92,6 +106,12 @@ export class DeviceLinkAttempt {
 
   cancel(): void {
     this.finish({ kind: 'cancelled' })
+  }
+
+  private stateMatches(candidate: string | null): boolean {
+    const expected = Buffer.from(this.state)
+    const received = Buffer.from(candidate ?? '')
+    return expected.length === received.length && timingSafeEqual(expected, received)
   }
 
   private finish(result: DeviceLinkResult): void {

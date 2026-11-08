@@ -1,7 +1,8 @@
 name: Mac release candidate
 
 # Builds and verifies a signed/notarized candidate. Does not publish the feed.
-# Required repo secrets:
+# Required secrets, stored in the "mac-release" GitHub environment (not as
+# repository secrets) so that environment's reviewers and branch rules gate them:
 #   DOODLENOTE_GOOGLE_CLIENT_SECRET (Desktop client, not Web)
 #   MAC_CSC_LINK (base64 .p12) + MAC_CSC_KEY_PASSWORD
 #   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
@@ -42,6 +43,9 @@ jobs:
     if: github.repository == 'Onyx-Dev-Labs/doodle-note' && (inputs.operation == 'candidate' || inputs.operation == '')
     runs-on: macos-15
     timeout-minutes: 90
+    # Signing, notarization and Google credentials live here. Configure required
+    # reviewers and a deployment-branch rule on this environment in GitHub.
+    environment: mac-release
     env:
       DOODLENOTE_STAPLER_HELPER: ${{ github.workspace }}/apps/desktop/scripts/stapler.cjs
     steps:

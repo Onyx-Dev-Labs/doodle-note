@@ -8,7 +8,9 @@ function callback(
   browserUrl: string,
   query = 'token=dnsy_fixture&email=qa%40example.test'
 ): string {
-  return `http://127.0.0.1:${new URL(browserUrl).searchParams.get('port')}/callback?${query}`
+  const params = new URL(browserUrl).searchParams
+  const withState = query.includes('state=') ? query : `${query}&state=${params.get('state')}`
+  return `http://127.0.0.1:${params.get('port')}/callback?${withState}`
 }
 function request(url: string): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -51,6 +53,21 @@ test('invalid callback settles and permits recovery; unrelated paths do not sett
     message: 'The browser did not return a valid token'
   })
   await assert.rejects(request(callback(url)))
+})
+
+test("a callback without this attempt's state is refused and does not abort the real sign-in", async () => {
+  const { attempt, url } = await started()
+  const { searchParams } = new URL(url)
+  assert.equal(searchParams.get('state')?.length, 43)
+  const forged = 'token=dnsy_attacker&email=attacker%40example.test'
+  assert.equal(await request(callback(url, forged + '&state=wrong')), 400)
+  assert.equal(await request(callback(url, forged + '&state=')), 400)
+  const bare = `http://127.0.0.1:${searchParams.get('port')}/callback?${forged}`
+  assert.equal(await request(bare), 400)
+  assert.equal(await request(callback(url)), 302)
+  const result = await attempt.result
+  assert.equal(result.kind, 'linked')
+  assert.equal(result.kind === 'linked' && result.token, 'dnsy_fixture')
 })
 
 test('browser launch rejection is caught, sanitized, and closes its listener', async () => {

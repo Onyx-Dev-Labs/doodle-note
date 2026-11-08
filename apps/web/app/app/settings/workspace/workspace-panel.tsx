@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
+import { isPersonalWorkspaceSlug } from "@/lib/personal-workspace-slug";
 import { buttonPrimary, inputClass } from "../../../ui";
 
 interface Workspace {
@@ -42,7 +43,9 @@ export function WorkspacePanel({
     if (!workspaceName) return;
     setError(null);
     setPending(true);
-    const slugBase = workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 36) || "workspace";
+    let slugBase = workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 36) || "workspace";
+    // "personal-" is reserved for private Personal workspaces.
+    if (isPersonalWorkspaceSlug(`${slugBase}-`)) slugBase = `team-${slugBase}`;
     const result = await authClient.organization.create({
       name: workspaceName,
       slug: `${slugBase}-${crypto.randomUUID().slice(0, 6)}`,

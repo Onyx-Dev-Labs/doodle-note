@@ -27,6 +27,8 @@ export default async function SharePage({
       and(
         eq(meetings.shareToken, token),
         sql`(${meetings.shareExpiresAt} is null or ${meetings.shareExpiresAt} > current_timestamp)`,
+        // Sync v2 keeps the legacy row until purge; a trashed note must not stay public.
+        sql`not exists (select 1 from sync_notes sn where sn.id = ${meetings.id} and sn.state <> 'active')`,
       ),
     )
     .limit(1);

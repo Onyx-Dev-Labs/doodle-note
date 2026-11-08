@@ -35,6 +35,7 @@ import { FEATURE_NAME } from '../../shared/dictation-brand'
 import { DictationSettings } from './DictationSettings'
 import { BarkMark } from './BarkMark'
 import { SettingsFold } from './SettingsFold'
+import { COMMUNITY_LABEL, openCommunity } from './lib/community'
 
 function lastSyncLabel(iso: string): string {
   const ms = Date.now() - Date.parse(iso)
@@ -716,6 +717,17 @@ export default function ModelsView({
               </button>
             </Fragment>
           ))}
+          <button
+            type="button"
+            className="settings-nav-btn"
+            title="Help, updates and early testing on Discord"
+            onClick={openCommunity}
+          >
+            <span className="settings-nav-icon" aria-hidden="true">
+              <SettingsIcon name="community" />
+            </span>
+            {COMMUNITY_LABEL}
+          </button>
           <div className="settings-sidebar-bottom">
             <p className="settings-margin-note">
               A little space

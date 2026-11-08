@@ -1,5 +1,6 @@
 import { eq, getDb, verifiedCallerIds } from "@repo/db";
 
+import { entitlementFor } from "@/lib/billing";
 import { twilioConfig, validTwilioSignature } from "@/lib/twilio";
 
 /**
@@ -13,11 +14,16 @@ export async function POST(request: Request) {
     return new Response("Not configured", { status: 503 });
   }
 
+  // Fail closed: without the auth token the webhook cannot prove it is Twilio.
+  if (!config.authToken) {
+    console.error("[voice] TWILIO_AUTH_TOKEN is not set; refusing unsigned voice webhook requests.");
+    return new Response("Not configured", { status: 503 });
+  }
+
   const body = await request.text();
   const params = new URLSearchParams(body);
 
   if (
-    config.authToken &&
     !validTwilioSignature(
       config.authToken,
       request.url,
@@ -33,12 +39,21 @@ export async function POST(request: Request) {
     return twiml(`<Response><Say>Invalid number.</Say></Response>`);
   }
 
-  // Calls arrive as client:<userId>; a user with a Verified Caller ID gets
-  // their own number displayed instead of the shared workspace number.
-  let callerId = config.callerId;
+  // Calls arrive as client:<userId>, the identity of the access token we
+  // minted. A user with a Verified Caller ID gets their own number displayed
+  // instead of the shared workspace number.
   const from = params.get("From") ?? "";
-  if (from.startsWith("client:")) {
-    const userId = from.slice("client:".length);
+  if (!from.startsWith("client:")) {
+    return twiml(`<Response><Say>Calling is not available.</Say></Response>`);
+  }
+  const userId = from.slice("client:".length);
+  // Tokens live up to an hour, so re-check the subscription at call time.
+  if (!(await entitlementFor(userId)).entitled) {
+    return twiml(`<Response><Say>Calling needs an active DoodleNote subscription.</Say></Response>`);
+  }
+
+  let callerId = config.callerId;
+  {
     const [row] = await getDb()
       .select()
       .from(verifiedCallerIds)

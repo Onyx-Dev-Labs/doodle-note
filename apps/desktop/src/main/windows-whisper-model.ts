@@ -122,32 +122,44 @@ function extract(archive: string, destination: string): Promise<void> {
   })
 }
 
-/** Download, verify, and atomically install the int8 English final-pass model. */
-export async function ensureWindowsWhisperModel(
+interface PinnedModel {
+  name: string
+  url: string
+  sha256: string
+  files: Readonly<Record<string, number>>
+  /** Files in the extracted directory that are not needed and not worth keeping. */
+  discard?: readonly string[]
+}
+
+/**
+ * Download, verify against a pinned digest, extract into a private staging
+ * directory, check every file's size, and only then move it into place.
+ */
+async function ensurePinnedModel(
+  model: PinnedModel,
   modelsDir: string,
   onProgress: (progress: number) => void
 ): Promise<string> {
-  const target = join(modelsDir, WINDOWS_WHISPER_MODEL)
-  if (modelFilesMatch(target)) return target
+  const target = join(modelsDir, model.name)
+  if (modelFilesMatch(target, model.files)) return target
 
   mkdirSync(modelsDir, { recursive: true })
-  const partial = join(modelsDir, `${WINDOWS_WHISPER_MODEL}.tar.bz2.partial`)
-  await downloadResumable(MODEL_URL, partial, onProgress)
-  if ((await sha256(partial)) !== ARCHIVE_SHA256) {
+  const partial = join(modelsDir, `${model.name}.tar.bz2.partial`)
+  await downloadResumable(model.url, partial, onProgress)
+  if ((await sha256(partial)) !== model.sha256) {
     rmSync(partial, { force: true })
     throw new Error('The downloaded speech model failed verification. Please try again.')
   }
 
-  const staging = join(modelsDir, `.${WINDOWS_WHISPER_MODEL}-${randomUUID()}`)
+  const staging = join(modelsDir, `.${model.name}-${randomUUID()}`)
   mkdirSync(staging, { recursive: true })
   try {
     await extract(partial, staging)
-    const extracted = join(staging, WINDOWS_WHISPER_MODEL)
-    if (!modelFilesMatch(extracted)) {
+    const extracted = join(staging, model.name)
+    if (!modelFilesMatch(extracted, model.files)) {
       throw new Error('The speech model is incomplete. Please try again.')
     }
-    rmSync(join(extracted, 'tiny.en-decoder.onnx'), { force: true })
-    rmSync(join(extracted, 'tiny.en-encoder.onnx'), { force: true })
+    for (const name of model.discard ?? []) rmSync(join(extracted, name), { force: true })
     rmSync(target, { recursive: true, force: true })
     renameSync(extracted, target)
     rmSync(partial, { force: true })
@@ -155,4 +167,56 @@ export async function ensureWindowsWhisperModel(
   } finally {
     rmSync(staging, { recursive: true, force: true })
   }
+}
+
+/** Download, verify, and atomically install the int8 English final-pass model. */
+export function ensureWindowsWhisperModel(
+  modelsDir: string,
+  onProgress: (progress: number) => void
+): Promise<string> {
+  return ensurePinnedModel(
+    {
+      name: WINDOWS_WHISPER_MODEL,
+      url: MODEL_URL,
+      sha256: ARCHIVE_SHA256,
+      files: WINDOWS_WHISPER_FILES,
+      discard: ['tiny.en-decoder.onnx', 'tiny.en-encoder.onnx']
+    },
+    modelsDir,
+    onProgress
+  )
+}
+
+export const WINDOWS_LIVE_MODEL = 'sherpa-onnx-streaming-zipformer-en-2023-06-26'
+const LIVE_MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${WINDOWS_LIVE_MODEL}.tar.bz2`
+const LIVE_ARCHIVE_SHA256 = '639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282'
+
+export const WINDOWS_LIVE_FILES = {
+  'encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx': 70_108_816,
+  'decoder-epoch-99-avg-1-chunk-16-left-128.onnx': 2_093_080,
+  'joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx': 259_416,
+  'tokens.txt': 5_048
+} as const
+
+/** Download, verify, and atomically install the streaming (live) transcription model. */
+export function ensureWindowsLiveModel(
+  modelsDir: string,
+  onProgress: (progress: number) => void
+): Promise<string> {
+  return ensurePinnedModel(
+    {
+      name: WINDOWS_LIVE_MODEL,
+      url: LIVE_MODEL_URL,
+      sha256: LIVE_ARCHIVE_SHA256,
+      files: WINDOWS_LIVE_FILES,
+      // Unused variants and sample audio; the recognizer loads only the files above.
+      discard: [
+        'encoder-epoch-99-avg-1-chunk-16-left-128.onnx',
+        'decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx',
+        'joiner-epoch-99-avg-1-chunk-16-left-128.onnx'
+      ]
+    },
+    modelsDir,
+    onProgress
+  )
 }

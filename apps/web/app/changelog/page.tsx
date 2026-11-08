@@ -9,6 +9,19 @@ const RELEASES: Array<{
   highlights: string[];
 }> = [
   {
+    version: "1.0.0",
+    date: "Unreleased",
+    highlights: [
+      "DoodleNote 1.0: a security-hardening release across the app and the website",
+      "Join our community: a new link in the sidebar and in Settings opens the DoodleNote Discord for help, updates, and early testing",
+      "Shared links stop working when you turn sharing off or move a note to Trash, and new links no longer include the transcript unless you choose to",
+      "Linking a Mac to your account now confirms the request came from your own browser session",
+      "Phone calling requires an active subscription and a phone number only you have verified",
+      "The Windows speech model is verified against a pinned checksum before it is used",
+      "Removed team members lose access to agent tokens and synced devices right away",
+    ],
+  },
+  {
     version: "0.5.1",
     date: "November 6, 2026",
     highlights: [
