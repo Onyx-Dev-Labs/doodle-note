@@ -16,6 +16,7 @@ import {
   classifySignatureStatus,
   parseVerifyOutput,
   systemPowerShell,
+  verifierEnv,
   VERIFY_SCRIPT
 } from './win-authenticode'
 
@@ -315,6 +316,17 @@ test('signature statuses: Valid is good, chain and digest failures are bad, the 
     code: 'HashMismatch'
   })
   assert.equal(parseVerifyOutput('garbage').status, 'unavailable')
+})
+
+test('the verifier drops an inherited PowerShell 7 module path and carries the path as data', () => {
+  const env = verifierEnv(
+    { PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules', psmodulepath: 'x', PATH: 'p' },
+    'C:\\a $(evil)\\dictation-helper.exe'
+  )
+  assert.equal(env.PSModulePath, undefined)
+  assert.equal(env.psmodulepath, undefined)
+  assert.equal(env.PATH, 'p')
+  assert.equal(env.DN_HELPER_PATH, 'C:\\a $(evil)\\dictation-helper.exe')
 })
 
 test('the verifier passes the helper path as data and runs powershell.exe by its full path', () => {

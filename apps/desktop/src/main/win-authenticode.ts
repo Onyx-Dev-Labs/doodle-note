@@ -31,6 +31,21 @@ export function systemPowerShell(env: NodeJS.ProcessEnv = process.env): string {
   )
 }
 
+/**
+ * The verifier's environment: the helper path as data (DN_HELPER_PATH), and WITHOUT PSModulePath.
+ * A PSModulePath inherited from PowerShell 7 (an app started from a pwsh terminal) makes Windows
+ * PowerShell 5.1 load PowerShell 7's security module, where the Authenticode cmdlets and the Cert:
+ * drive are missing; 5.1 rebuilds its default module path when the variable is absent.
+ */
+export function verifierEnv(env: NodeJS.ProcessEnv, helperPath: string): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (key.toUpperCase() !== 'PSMODULEPATH') clean[key] = value
+  }
+  clean.DN_HELPER_PATH = helperPath
+  return clean
+}
+
 /** The script: reads the path from DN_HELPER_PATH (data), prints one JSON line. */
 export const VERIFY_SCRIPT =
   "$ErrorActionPreference = 'Stop';" +
@@ -87,7 +102,7 @@ export function verifyAuthenticode(path: string, timeoutMs = 10_000): Promise<Si
         systemPowerShell(),
         ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', VERIFY_SCRIPT],
         {
-          env: { ...process.env, DN_HELPER_PATH: path },
+          env: verifierEnv(process.env, path),
           timeout: timeoutMs,
           windowsHide: true,
           maxBuffer: 64 * 1024

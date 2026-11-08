@@ -140,6 +140,14 @@ async function main() {
  * certificate in the current user's store (removed in finally, from My and CA), never execute it,
  * and check the signing-invariant digest across signing and trailing bytes.
  */
+/** Windows PowerShell 5.1 must not inherit PowerShell 7's PSModulePath (Cert: drive / Authenticode cmdlets go missing). */
+function windowsPowerShellEnv(extra) {
+  const env = {}
+  for (const [key, value] of Object.entries(process.env))
+    if (key.toUpperCase() !== 'PSMODULEPATH') env[key] = value
+  return { ...env, ...extra }
+}
+
 function signingFixture(unsignedBytes) {
   const { mkdtempSync, writeFileSync, readFileSync, appendFileSync, rmSync } = require('node:fs')
   const os = require('node:os')
@@ -171,7 +179,7 @@ function signingFixture(unsignedBytes) {
   let info
   try {
     const out = execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], {
-      env: { ...process.env, DN_COPY: copy },
+      env: windowsPowerShellEnv({ DN_COPY: copy }),
       windowsHide: true
     }).toString()
     info = JSON.parse(out.trim().split(/\r?\n/).pop())
@@ -210,7 +218,7 @@ function signingFixture(unsignedBytes) {
       '-Command',
       `@(Get-ChildItem Cert:\\CurrentUser\\My, Cert:\\CurrentUser\\CA | Where-Object { $_.Subject -eq 'CN=${subject}' }).Count`
     ],
-    { windowsHide: true }
+    { windowsHide: true, env: windowsPowerShellEnv({}) }
   )
     .toString()
     .trim()

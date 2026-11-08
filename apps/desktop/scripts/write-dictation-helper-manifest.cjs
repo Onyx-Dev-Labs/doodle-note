@@ -29,6 +29,14 @@ const DEFAULT_PUBLISHER_CN = 'Onyx Dev Labs LLC'
 const repo = path.resolve(__dirname, '..', '..', '..')
 const defaultHelper = path.join(repo, 'engine', '.build', 'windows', 'dictation-helper.exe')
 
+/** Windows PowerShell 5.1 must not inherit PowerShell 7's PSModulePath (Cert: drive / Authenticode cmdlets go missing). */
+function windowsPowerShellEnv(extra) {
+  const env = {}
+  for (const [key, value] of Object.entries(process.env))
+    if (key.toUpperCase() !== 'PSMODULEPATH') env[key] = value
+  return { ...env, ...extra }
+}
+
 function signer(file) {
   // Get-AuthenticodeSignature with the path passed as DATA (an environment variable read inside the
   // script), never interpolated into the command, and powershell.exe by its full system path.
@@ -45,7 +53,7 @@ function signer(file) {
     '$c = $s.SignerCertificate;' +
     "[pscustomobject]@{ status = [string]$s.Status; cn = $(if ($c) { $c.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) } else { '' }); thumbprint = $(if ($c) { $c.Thumbprint } else { '' }) } | ConvertTo-Json -Compress"
   const out = execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], {
-    env: { ...process.env, DN_HELPER_PATH: file },
+    env: windowsPowerShellEnv({ DN_HELPER_PATH: file }),
     windowsHide: true
   }).toString()
   return JSON.parse(out)
