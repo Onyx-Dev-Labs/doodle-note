@@ -126,7 +126,8 @@ function deleteRunValue() {
 function qaUninstallEntries() {
   return JSON.parse(
     powershell(
-      "@(Get-ChildItem 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall' | Where-Object { ([string]$_.GetValue('DisplayName')).StartsWith($d.name) } | ForEach-Object { $_.PSChildName }) | ConvertTo-Json -Compress",
+      // -InputObject: piped, Windows PowerShell 5.1 turns a one-element array into a bare string.
+      "ConvertTo-Json -Compress -InputObject @(Get-ChildItem 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall' | Where-Object { ([string]$_.GetValue('DisplayName')).StartsWith($d.name) } | ForEach-Object { $_.PSChildName })",
       { name: qa.productName }
     ) || '[]'
   )
