@@ -129,7 +129,7 @@ test('the QA identity shares no identity-bearing name with production', () => {
   )
   assert.ok('reason' in legacyInstallFor(record, `${programs}\\DoodleNote\\DoodleNote.exe`, qa))
   // Each identity reads its own record key.
-  assert.equal(installStateKey(qa.appId), `HKEY_CURRENT_USER\\Software\\${nsisGuid(qa.appId)}`)
+  assert.equal(installStateKey(qa.appId), `Software\\${nsisGuid(qa.appId)}`)
 })
 
 test('the electron-builder QA overlay takes its names from the QA identity entry', () => {

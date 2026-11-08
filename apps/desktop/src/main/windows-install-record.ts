@@ -1,6 +1,5 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import type { InstallMigrationStatus } from '../shared/install-migration-api'
 import type { AppIdentity } from './app-identity'
 
 /**
@@ -27,10 +26,27 @@ export interface InstallMigrationRecord {
  * A record value that is there but not a complete record for this identity (cut
  * short, another identity's, a newer format). The app acts on nothing less than a
  * complete record and leaves this one where it is: a later installer run repairs
- * or replaces it from its recovery copy.
+ * or replaces it from its recovery copy. `code` is what the app's status records
+ * (AppMigrationReason, see writeInstallMigrationStatus).
  */
 export interface InstallRecordPending {
   pending: string
+  code: 'record-format' | 'record-incomplete' | 'record-foreign' | 'record-time'
+}
+
+/**
+ * HKEY_CURRENT_USER access for the record and the app's status. In the app the
+ * speech worker does it through the FFI it already loads (WinEngineHost.registry,
+ * windows-registry.ts), so no PowerShell or reg.exe is started. Keys are relative
+ * to HKEY_CURRENT_USER. A failed request rejects with an Error whose `code` says why.
+ */
+export interface WindowsRegistry {
+  /** A REG_SZ value's text, or null when the key or value is not there. */
+  readString(subKey: string, name: string): Promise<string | null>
+  /** Writes REG_SZ values in order (the key is created if needed). */
+  writeStrings(subKey: string, values: ReadonlyArray<readonly [string, string]>): Promise<void>
+  /** Deletes one value; resolves when it is gone or was never there. */
+  deleteValue(subKey: string, name: string): Promise<void>
 }
 
 export const INSTALL_RECORD_VALUE = 'MigrationRecord'
@@ -51,9 +67,17 @@ export function electronBuilderGuid(appId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** The per-identity installer state key, as reg.exe and the Registry:: provider name it. */
+/** The per-identity installer state key (HKCU\\Software\\<APP_GUID>), holding the record. */
 export function installStateKey(appId: string): string {
-  return `HKEY_CURRENT_USER\\Software\\${electronBuilderGuid(appId)}`
+  return `Software\\${electronBuilderGuid(appId)}`
+}
+
+/**
+ * The per-identity status key the installer records its decisions in (DN_STATUS_KEY,
+ * build/windows-installer.nsh), where the app adds its own AppMigration values.
+ */
+export function installStatusKey(appId: string): string {
+  return `Software\\DoodleNote-InstallStatus\\${electronBuilderGuid(appId)}`
 }
 
 /**
@@ -77,102 +101,65 @@ export function parseInstallRecordValue(
 ): InstallMigrationRecord | InstallRecordPending | null {
   if (!value) return null
   const parts = value.split('|')
-  if (parts[0] !== INSTALL_RECORD_VERSION) return { pending: 'not a record this app reads' }
-  if (parts.length !== 8 || parts[7] !== 'END') return { pending: 'incomplete' }
+  if (parts[0] !== INSTALL_RECORD_VERSION)
+    return { pending: 'not a record this app reads', code: 'record-format' }
+  if (parts.length !== 8 || parts[7] !== 'END')
+    return { pending: 'incomplete', code: 'record-incomplete' }
   if (parts.slice(1, 4).join('|').toLowerCase() !== identity.toLowerCase())
-    return { pending: 'for another app identity' }
+    return { pending: 'for another app identity', code: 'record-foreign' }
   const [from, to, at] = parts.slice(4, 7)
-  if (!from.trim() || !to.trim()) return { pending: 'incomplete' }
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at)) return { pending: 'no valid time' }
+  if (!from.trim() || !to.trim()) return { pending: 'incomplete', code: 'record-incomplete' }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at))
+    return { pending: 'no valid time', code: 'record-time' }
   return { from, to, at }
 }
 
-/** Parses the PowerShell reader's JSON line (READ_SCRIPT); see parseInstallRecordValue. */
-export function parseInstallRecord(
-  output: string,
-  identity: string
-): InstallMigrationRecord | InstallRecordPending | null {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(output.trim())
-  } catch {
-    return { pending: 'unreadable' }
-  }
-  if (!parsed || typeof parsed !== 'object') return { pending: 'unreadable' }
-  const { record } = parsed as Record<string, unknown>
-  if (record === null || record === undefined || record === '') return null
-  if (typeof record !== 'string') return { pending: 'unreadable' }
-  return parseInstallRecordValue(record, identity)
-}
-
-/** Windows PowerShell 5.1 from System32, never whichever powershell.exe is first on PATH. */
-function systemPowerShell(env: NodeJS.ProcessEnv = process.env): string {
-  return join(
-    env.SystemRoot || env.windir || 'C:\\Windows',
-    'System32',
-    'WindowsPowerShell',
-    'v1.0',
-    'powershell.exe'
-  )
-}
-
-/** Windows PowerShell 5.1 must not inherit PowerShell 7's module path (it fails to load its modules). */
-function powerShellEnv(key: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
-  for (const [name, value] of Object.entries(process.env)) {
-    if (name.toUpperCase() !== 'PSMODULEPATH') env[name] = value
-  }
-  env.DN_REG_KEY = key
-  return env
-}
-
-// The key reaches the script as data (DN_REG_KEY), never through its text. UTF-8
-// output, so a non-ASCII user folder survives (reg.exe prints the OEM code page).
-const READ_SCRIPT =
-  "$ErrorActionPreference = 'Stop';" +
-  '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;' +
-  "$p = Get-ItemProperty -LiteralPath ('Registry::' + $env:DN_REG_KEY);" +
-  '[pscustomobject]@{ record = [string]$p.MigrationRecord } | ConvertTo-Json -Compress'
-
-const run = (file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> =>
-  new Promise((resolve, reject) => {
-    execFile(file, args, { windowsHide: true, timeout: 10000, env }, (error, stdout) =>
-      error ? reject(error) : resolve(String(stdout))
-    )
-  })
-
-const regExe = (): string =>
-  join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'reg.exe')
-
 /**
- * Reads the record for `identity` (installMigrationIdentity), or null when there
- * is none. Most launches have none: a quick reg.exe presence check, and
- * PowerShell only when the value exists.
+ * Reads the record for `identity` (installMigrationIdentity) from `key`
+ * (installStateKey), or null when there is none. A value of another type than
+ * REG_SZ is not a record this app reads (pending, left alone).
  */
 export async function readInstallRecord(
+  registry: WindowsRegistry,
   key: string,
   identity: string
 ): Promise<InstallMigrationRecord | InstallRecordPending | null> {
+  let value: string | null
   try {
-    await run(regExe(), ['query', key, '/v', INSTALL_RECORD_VALUE])
+    value = await registry.readString(key, INSTALL_RECORD_VALUE)
   } catch (error) {
-    // reg.exe exits 1 when the key or value does not exist.
-    if ((error as { code?: unknown }).code === 1) return null
+    if ((error as { code?: unknown }).code === 'TYPE')
+      return { pending: 'not a record this app reads', code: 'record-format' }
     throw error
   }
-  const output = await run(
-    systemPowerShell(),
-    ['-NoProfile', '-NonInteractive', '-Command', READ_SCRIPT],
-    powerShellEnv(key)
-  )
-  return parseInstallRecord(output, identity)
+  return value === null ? null : parseInstallRecordValue(value, identity)
 }
 
 /** Removes the record once everything it asked for is done (the journal subkey is untouched). */
-export async function clearInstallRecord(key: string): Promise<void> {
-  try {
-    await run(regExe(), ['delete', key, '/v', INSTALL_RECORD_VALUE, '/f'])
-  } catch (error) {
-    if ((error as { code?: unknown }).code !== 1) throw error
-  }
+export async function clearInstallRecord(registry: WindowsRegistry, key: string): Promise<void> {
+  await registry.deleteValue(key, INSTALL_RECORD_VALUE)
+}
+
+/** The app's own status values in the identity's status key (installStatusKey). */
+export const APP_MIGRATION_VALUES = {
+  state: 'AppMigration',
+  at: 'AppMigrationLastAttempt',
+  reason: 'AppMigrationReason'
+} as const
+
+/**
+ * Records the app's side of the move beside the installer's LastStep/LastResult:
+ * AppMigrationReason and AppMigrationLastAttempt first, AppMigration (the state)
+ * last, so a state is never shown with an older attempt's reason.
+ */
+export async function writeInstallMigrationStatus(
+  registry: WindowsRegistry,
+  statusKey: string,
+  status: InstallMigrationStatus
+): Promise<void> {
+  await registry.writeStrings(statusKey, [
+    [APP_MIGRATION_VALUES.reason, status.reason],
+    [APP_MIGRATION_VALUES.at, status.at],
+    [APP_MIGRATION_VALUES.state, status.state]
+  ])
 }

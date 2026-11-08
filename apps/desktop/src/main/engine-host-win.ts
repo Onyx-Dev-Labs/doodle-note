@@ -18,6 +18,7 @@ import { ImportCanceledError } from './import-jobs'
 import type { HeldHelperLike, SignatureCheck } from './helper-integrity'
 import { speechWorkerEnv } from './speech-worker-env'
 import { APP_CHANNEL } from '../shared/app-channel'
+import type { WindowsRegistry } from './windows-install-record'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
@@ -30,6 +31,8 @@ const WORKER_FINISH_IDLE_MS = 15_000
  * frames are buffered meanwhile.
  */
 export const IDLE_UNLOAD_MS = 5 * 60_000
+/** A registry request waits this long for the worker (which may be loading its model first). */
+const REGISTRY_TIMEOUT_MS = 60_000
 
 /** At most this much audio (both channels) waits for a reloading worker: 2 minutes. */
 const MAX_PENDING_SAMPLES = 2 * 2 * 60 * 16_000
@@ -377,7 +380,7 @@ export class WinEngineHost {
   private helperRequest(
     child: UtilityProcess,
     id: number,
-    op: 'hold' | 'trust' | 'confirm',
+    op: 'hold' | 'trust' | 'confirm' | 'reg',
     message: Record<string, unknown>
   ): Promise<Record<string, unknown> | null> {
     return new Promise((resolve) => {
@@ -389,6 +392,59 @@ export class WinEngineHost {
         resolve(null)
       }
     })
+  }
+
+  /**
+   * The install folder move's HKEY_CURRENT_USER reads and writes (windows-install-record.ts), done by
+   * the speech worker through the FFI it already loads (windows-registry.ts), so the app starts no
+   * PowerShell or reg.exe for them. Starts the worker if it is not running. A request fails with
+   * `code` "reader-unavailable" (no worker, or it ended first), "reader-timeout", or the worker's
+   * own code ("UNSUPPORTED", "SCOPE", "TYPE", "WIN32_<n>").
+   */
+  readonly registry: WindowsRegistry = {
+    readString: async (subKey, name) => {
+      const reply = await this.registryRequest({ op: 'read', subKey, name })
+      return typeof reply.value === 'string' ? reply.value : null
+    },
+    writeStrings: async (subKey, values) => {
+      await this.registryRequest({ op: 'write', subKey, values: values.map(([n, d]) => [n, d]) })
+    },
+    deleteValue: async (subKey, name) => {
+      await this.registryRequest({ op: 'delete', subKey, name })
+    }
+  }
+
+  private async registryRequest(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const fail = (code: string, message: string): Error =>
+      Object.assign(new Error(message), { code })
+    if (this.disposed) throw fail('reader-unavailable', 'the speech engine is shutting down')
+    if (!this.child) {
+      if (this.unloaded) this.reload()
+      else this.startServe()
+    }
+    const child = this.child
+    if (!child) throw fail('reader-unavailable', 'the speech worker could not be started')
+    const id = this.nextHelperId++
+    let timer: NodeJS.Timeout | undefined
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), REGISTRY_TIMEOUT_MS)
+      timer.unref()
+    })
+    const reply = await Promise.race([
+      this.helperRequest(child, id, 'reg', { t: 'reg', id, ...body }),
+      timedOut
+    ])
+    clearTimeout(timer)
+    if (reply === 'timeout') {
+      this.helperPending.delete(`${id}:reg`)
+      throw fail('reader-timeout', 'the speech worker did not answer')
+    }
+    if (!reply) throw fail('reader-unavailable', 'the speech worker ended before answering')
+    if (reply.ok !== true) {
+      const code = String(reply.code ?? 'unknown')
+      throw fail(code, `the registry request failed (${code})`)
+    }
+    return reply
   }
 
   /**

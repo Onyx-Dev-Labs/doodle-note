@@ -2025,6 +2025,65 @@ async function main() {
       total += 1
     }
 
+    // Round 7 (P2): a launch that cannot read the record at all (the reader, the speech
+    // worker in the app, is unavailable) repoints nothing, leaves the record exactly as it
+    // is, and records AppMigration = read-failed in the identity's status key; the next
+    // launch with a working reader consumes it and records complete.
+    const p7Status = `${p6State}-appstatus`
+    registryKeys.push(p7Status)
+    const p7Set = [...p6Setup, ['lwrite', 'MigrationRecord', p6Rec, 'set']]
+    checkCases('p7-reader-setup', p7Set, phase('p7-reader-setup', p7Set).results)
+    const consumeWith = (extra) => {
+      try {
+        const out = execFileSync(
+          process.execPath,
+          [
+            require.resolve('tsx/cli', { paths: [desktop] }),
+            path.join(__dirname, 'consume-install-record.ts'),
+            `HKEY_CURRENT_USER\\${p6State}`,
+            path.join(p6To, 'DoodleNote.exe'),
+            IDENTITY,
+            ...extra
+          ],
+          { encoding: 'utf8', cwd: desktop, stdio: ['ignore', 'pipe', 'ignore'] }
+        )
+        return { status: 0, json: JSON.parse(out.trim().split(/\r?\n/).pop()) }
+      } catch (error) {
+        return {
+          status: error.status,
+          json: JSON.parse(String(error.stdout).trim().split(/\r?\n/).pop())
+        }
+      }
+    }
+    const appStatus = () =>
+      JSON.parse(
+        powershell(
+          "$k = Get-ItemProperty -LiteralPath ('HKCU:\\' + ($env:DN_DATA | ConvertFrom-Json)); ConvertTo-Json -Compress @($k.AppMigration, $k.AppMigrationReason, $k.AppMigrationLastAttempt)",
+          p7Status
+        )
+      )
+    const failedRead = consumeWith([p7Status, '--reader-fails'])
+    reports.push(`p7 reader unavailable: ${JSON.stringify(failedRead.json)}`)
+    assert.equal(failedRead.status, 1)
+    assert.equal(failedRead.json.result.ran, false)
+    assert.deepEqual(failedRead.json.result.status.state, 'read-failed')
+    assert.deepEqual(failedRead.json.after, failedRead.json.record, 'the record is untouched')
+    const [failedState, failedReason, failedAt] = appStatus()
+    assert.deepEqual([failedState, failedReason], ['read-failed', 'reader-unavailable'])
+    assert.match(failedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+    checkCases(
+      'p7-reader-kept',
+      [...p6Setup, ['record', '', '', p6Rec]],
+      phase('p7-reader-kept', [...p6Setup, ['record', '', '', p6Rec]]).results
+    )
+    const retried = consumeWith([p7Status])
+    reports.push(`p7 reader back: ${JSON.stringify(retried.json)}`)
+    assert.equal(retried.status, 0)
+    assert.equal(retried.json.result.ran, true)
+    assert.equal(retried.json.after, null)
+    assert.deepEqual(appStatus().slice(0, 2), ['complete', 'repointed'])
+    total += 1
+
     if (keep) write(path.join(keep, 'installer-guards-results.txt'), reports.join('\r\n') + '\r\n')
     console.log(`installer guards: ${total} cases passed`)
   } finally {

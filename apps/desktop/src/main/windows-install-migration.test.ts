@@ -16,23 +16,35 @@ import {
   legacyInstallFor,
   longPath,
   samePath,
+  readFailureReason,
   runWindowsInstallMigration,
+  runWithRetries,
+  statusTime,
   type InstallMigrationDeps,
+  type InstallMigrationResult,
   type LoginItemState,
   type McpRepointOutcome
 } from './windows-install-migration'
 import {
   electronBuilderGuid,
+  clearInstallRecord,
   installMigrationIdentity,
   installStateKey,
-  parseInstallRecord,
+  installStatusKey,
   parseInstallRecordValue,
+  readInstallRecord,
+  writeInstallMigrationStatus,
   type InstallMigrationRecord,
-  type InstallRecordPending
+  type InstallRecordPending,
+  type WindowsRegistry
 } from './windows-install-record'
 import { APP_IDENTITY, appIdentity } from './app-identity'
 import { createRequire } from 'node:module'
 import type { McpServerSpec } from '../shared/integrations-api'
+import {
+  installMigrationNotice,
+  type InstallMigrationStatus
+} from '../shared/install-migration-api'
 
 const programs = 'C:\\Users\\Pat\\AppData\\Local\\Programs'
 const newExe = `${programs}\\DoodleNote\\DoodleNote.exe`
@@ -183,7 +195,12 @@ test('APP_GUID and the record key match what electron-builder derives from the a
   )
   assert.equal(
     installStateKey(APP_IDENTITY.appId),
-    'HKEY_CURRENT_USER\\Software\\f85f8dcf-6782-5a3e-a989-3eae169d6efb'
+    'Software\\f85f8dcf-6782-5a3e-a989-3eae169d6efb'
+  )
+  // The installer's DN_STATUS_KEY (build/windows-installer.nsh), where the app adds AppMigration.
+  assert.equal(
+    installStatusKey(appIdentity('qa').appId),
+    'Software\\DoodleNote-InstallStatus\\320d0756-c91c-52c4-9287-55a7f514978d'
   )
 })
 
@@ -228,13 +245,77 @@ test('the install record is one value naming this identity, complete or pending'
     const parsed = parseInstallRecordValue(input, identity)
     assert.ok(parsed && 'pending' in parsed, `${label}: ${JSON.stringify(parsed)}`)
   }
-  // The PowerShell reader's JSON: absent/empty is none, anything unreadable is pending.
-  assert.deepEqual(parseInstallRecord(JSON.stringify({ record: value(whole) }), identity), record)
-  assert.equal(parseInstallRecord(JSON.stringify({ record: '' }), identity), null)
-  assert.equal(parseInstallRecord(JSON.stringify({ record: null }), identity), null)
-  assert.equal(parseInstallRecord(JSON.stringify({}), identity), null)
-  for (const output of ['not json', 'null', '42', JSON.stringify({ record: 7 })])
-    assert.ok('pending' in (parseInstallRecord(output, identity) as InstallRecordPending), output)
+  // Each pending record names why, for the app's status (AppMigrationReason).
+  const code = (input: string): string =>
+    (parseInstallRecordValue(input, identity) as InstallRecordPending).code
+  assert.equal(code(value(whole.slice(0, 5))), 'record-incomplete')
+  assert.equal(
+    code(value(['DNMR1', installMigrationIdentity(appIdentity('qa')), ...whole.slice(2)])),
+    'record-foreign'
+  )
+  assert.equal(code(value(['DNMR2', ...whole.slice(1)])), 'record-format')
+  assert.equal(
+    code(value(['DNMR1', identity, record.from, record.to, '2026-11-08', 'END'])),
+    'record-time'
+  )
+})
+
+test('the record is read, cleared and the status written through the registry, not a process', async () => {
+  const identity = installMigrationIdentity(APP_IDENTITY)
+  const key = installStateKey(APP_IDENTITY.appId)
+  const values = new Map<string, string>()
+  const writes: string[] = []
+  const registry: WindowsRegistry = {
+    readString: async (subKey, name) => values.get(`${subKey}|${name}`) ?? null,
+    writeStrings: async (subKey, pairs) => {
+      for (const [name, data] of pairs) {
+        writes.push(name)
+        values.set(`${subKey}|${name}`, data)
+      }
+    },
+    deleteValue: async (subKey, name) => {
+      values.delete(`${subKey}|${name}`)
+    }
+  }
+  assert.equal(await readInstallRecord(registry, key, identity), null)
+  values.set(
+    `${key}|MigrationRecord`,
+    ['DNMR1', identity, record.from, record.to, record.at, 'END'].join('|')
+  )
+  assert.deepEqual(await readInstallRecord(registry, key, identity), record)
+  await clearInstallRecord(registry, key)
+  assert.equal(await readInstallRecord(registry, key, identity), null)
+  // A MigrationRecord of another type (not REG_SZ) is not a record this app reads.
+  const typed: WindowsRegistry = {
+    ...registry,
+    readString: async () => {
+      throw Object.assign(new Error('type'), { code: 'TYPE' })
+    }
+  }
+  assert.deepEqual(await readInstallRecord(typed, key, identity), {
+    pending: 'not a record this app reads',
+    code: 'record-format'
+  })
+  // Any other failure is a failed read (the caller records read-failed).
+  const broken: WindowsRegistry = {
+    ...registry,
+    readString: async () => {
+      throw Object.assign(new Error('no worker'), { code: 'reader-unavailable' })
+    }
+  }
+  await assert.rejects(readInstallRecord(broken, key, identity), /no worker/)
+  // The state is written last, after its reason and time.
+  const statusKey = installStatusKey(APP_IDENTITY.appId)
+  await writeInstallMigrationStatus(registry, statusKey, {
+    state: 'read-failed',
+    at: '2026-11-08T01:02:03Z',
+    reason: 'reader-unavailable'
+  })
+  assert.deepEqual(writes, ['AppMigrationReason', 'AppMigrationLastAttempt', 'AppMigration'])
+  assert.equal(values.get(`${statusKey}|AppMigration`), 'read-failed')
+  // No child process anywhere in the record's path.
+  const source = readFileSync(new URL('./windows-install-record.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /node:child_process|execFile|spawn\(/)
 })
 
 test('folder containment follows Windows rules and does not match siblings', () => {
@@ -251,6 +332,7 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
   files: Set<string>
   logs: string[]
   registered: boolean[]
+  statuses: InstallMigrationStatus[]
 } {
   const deps = {
     platform: 'win32' as NodeJS.Platform,
@@ -261,6 +343,7 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
     files: new Set<string>([newExe]),
     logs: [] as string[],
     registered: [] as boolean[],
+    statuses: [] as InstallMigrationStatus[],
     readRecord: async () => deps.record,
     clearRecord: async () => {
       deps.record = null
@@ -277,6 +360,11 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
       }
     },
     repointMcpClients: (): McpRepointOutcome[] => [],
+    readStatus: () => deps.statuses.at(-1) ?? null,
+    writeStatus: async (status: InstallMigrationStatus) => {
+      deps.statuses.push(status)
+    },
+    now: () => new Date('2026-11-08T07:08:09.123Z'),
     log: (message: string) => {
       deps.logs.push(message)
     },
@@ -301,7 +389,9 @@ test('the first launch from the new folder moves the login item and MCP clients,
     ran: true,
     loginItem: true,
     mcpClients: ['claude-desktop'],
-    pending: []
+    pending: [],
+    status: { state: 'complete', at: '2026-11-08T07:08:09Z', reason: 'repointed' },
+    retry: false
   })
   assert.deepEqual(deps.registered, [true])
   assert.ok(seen!(oldExe))
@@ -328,7 +418,12 @@ test('without an installer record nothing is repointed, whatever the folder is c
 })
 
 test('a record that is there but incomplete is neither acted on nor cleared', async () => {
-  for (const reason of ['incomplete', 'for another app identity', 'unreadable']) {
+  for (const [reason, code] of [
+    ['incomplete', 'record-incomplete'],
+    ['for another app identity', 'record-foreign'],
+    ['not a record this app reads', 'record-format'],
+    ['no valid time', 'record-time']
+  ] as const) {
     let cleared = false
     const deps = fakeDeps({
       ...untouchable,
@@ -336,12 +431,18 @@ test('a record that is there but incomplete is neither acted on nor cleared', as
         cleared = true
       }
     })
-    deps.record = { pending: reason }
-    assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+    deps.record = { pending: reason, code }
+    const result = await runWindowsInstallMigration(deps)
+    assert.equal(result.ran, false)
     assert.equal(cleared, false)
     assert.equal(deps.marker, null)
-    assert.deepEqual(deps.record, { pending: reason })
+    assert.deepEqual(deps.record, { pending: reason, code })
     assert.match(deps.logs.join('\n'), new RegExp(`left for the installer: ${reason}`))
+    // Recorded durably: pending, with the reason; not retried in-session (the installer repairs it).
+    assert.deepEqual(deps.statuses, [
+      { state: 'pending', at: '2026-11-08T07:08:09Z', reason: code }
+    ])
+    assert.equal(result.retry, false)
   }
 })
 
@@ -488,11 +589,14 @@ test('a client whose config could not be read is retried on its own until it suc
   assert.equal(JSON.parse(deps.marker ?? '{}').complete, false)
   assert.match(deps.logs.join('\n'), /claude-code not repointed: EBUSY/)
   assert.deepEqual((await runWindowsInstallMigration(deps)).pending, ['claude-code'])
+  assert.deepEqual(deps.statuses.at(-1)?.reason, 'steps-pending:claude-code')
   assert.deepEqual(await runWindowsInstallMigration(deps), {
     ran: true,
     loginItem: false,
     mcpClients: ['claude-code'],
-    pending: []
+    pending: [],
+    status: { state: 'complete', at: '2026-11-08T07:08:09Z', reason: 'repointed' },
+    retry: false
   })
   assert.deepEqual(calls, [null, ['claude-code'], ['claude-code']])
   assert.equal((await runWindowsInstallMigration(deps)).ran, false)
@@ -693,4 +797,169 @@ test('AgentAccessService reports unreadable or malformed client configs as faile
     else process.env.APPDATA = previousAppData
     rmSync(home, { recursive: true, force: true })
   }
+})
+
+const at = '2026-11-08T07:08:09Z'
+
+test('every attempt that finds a record or cannot read it records a status', async () => {
+  // Complete: repointed and cleared.
+  const done = fakeDeps()
+  await runWindowsInstallMigration(done)
+  assert.deepEqual(done.statuses, [{ state: 'complete', at, reason: 'repointed' }])
+  // Complete, but the record could not be removed: recorded as such (the next launch removes it).
+  const sticky = fakeDeps({
+    clearRecord: async () => {
+      throw new Error('access denied')
+    }
+  })
+  await runWindowsInstallMigration(sticky)
+  assert.deepEqual(sticky.statuses, [{ state: 'complete', at, reason: 'record-not-cleared' }])
+  // A step left for later: pending with the steps, and retried in this session.
+  const partial = fakeDeps({
+    repointMcpClients: () => [{ id: 'codex', outcome: 'failed', error: 'EBUSY' }]
+  })
+  const partialResult = await runWindowsInstallMigration(partial)
+  assert.deepEqual(partial.statuses, [{ state: 'pending', at, reason: 'steps-pending:codex' }])
+  assert.equal(partialResult.retry, true)
+  // A record for another folder, or with the old exe still there: pending, not retried.
+  const elsewhere = fakeDeps({ ...untouchable, execPath: 'D:\\Copies\\DoodleNote\\DoodleNote.exe' })
+  const elsewhereResult = await runWindowsInstallMigration(elsewhere)
+  assert.deepEqual(elsewhere.statuses, [{ state: 'pending', at, reason: 'record-other-folder' }])
+  assert.equal(elsewhereResult.retry, false)
+  const oldThere = fakeDeps(untouchable)
+  oldThere.files.add(oldExe)
+  await runWindowsInstallMigration(oldThere)
+  assert.deepEqual(oldThere.statuses, [{ state: 'pending', at, reason: 'old-exe-present' }])
+  // No record and nothing recorded before: nothing is written (most launches).
+  const quiet = fakeDeps(untouchable)
+  quiet.record = null
+  assert.deepEqual(await runWindowsInstallMigration(quiet), {
+    ran: false,
+    loginItem: false,
+    mcpClients: [],
+    pending: [],
+    status: null,
+    retry: false
+  })
+  assert.deepEqual(quiet.statuses, [])
+  // No record after a pending or read-failed one: that state is ended ("none"), once.
+  for (const state of ['pending', 'read-failed'] as const) {
+    const ended = fakeDeps(untouchable)
+    ended.record = null
+    ended.statuses.push({ state, at: '2026-11-01T00:00:00Z', reason: 'x' })
+    await runWindowsInstallMigration(ended)
+    assert.deepEqual(ended.statuses.at(-1), { state: 'none', at, reason: 'no-record' })
+    await runWindowsInstallMigration(ended)
+    assert.equal(ended.statuses.length, 2)
+  }
+  // A status that cannot be written is logged; the migration itself still completes.
+  const unwritable = fakeDeps({
+    writeStatus: async () => {
+      throw new Error('registry denied')
+    }
+  })
+  assert.equal((await runWindowsInstallMigration(unwritable)).pending.length, 0)
+  assert.match(unwritable.logs.join('\n'), /status not recorded: registry denied/)
+})
+
+test('a record that cannot be read is recorded durably, left alone, and consumed on a retry', async () => {
+  // As when the reader (the speech worker) cannot start: nothing is known, nothing repointed.
+  let readerUp = false
+  let reads = 0
+  const deps = fakeDeps({
+    readRecord: async () => {
+      reads++
+      if (!readerUp)
+        throw Object.assign(new Error('the speech worker could not be started'), {
+          code: 'reader-unavailable'
+        })
+      return deps.record
+    }
+  })
+  const first = await runWindowsInstallMigration(deps)
+  assert.equal(first.ran, false)
+  assert.equal(first.retry, true)
+  assert.deepEqual(deps.statuses, [{ state: 'read-failed', at, reason: 'reader-unavailable' }])
+  assert.deepEqual(deps.record, record, 'the record is not consumed')
+  assert.deepEqual(deps.registered, [])
+  assert.equal(deps.marker, null)
+  // Settings says so.
+  assert.match(installMigrationNotice(deps.statuses[0])?.title ?? '', /Couldn't finish/)
+  // The reader is back: the retry consumes it.
+  readerUp = true
+  const second = await runWindowsInstallMigration(deps)
+  assert.equal(second.ran, true)
+  assert.deepEqual(deps.statuses.at(-1), { state: 'complete', at, reason: 'repointed' })
+  assert.equal(deps.record, null)
+  assert.deepEqual(deps.registered, [true])
+  assert.equal(installMigrationNotice(deps.statuses.at(-1)), null)
+  assert.equal(reads, 2)
+  // Reason codes from the reader's errors.
+  assert.equal(readFailureReason({ code: 'reader-timeout' }), 'reader-timeout')
+  assert.equal(readFailureReason({ code: 'UNSUPPORTED' }), 'reader-unsupported')
+  assert.equal(readFailureReason({ code: 'WIN32_5' }), 'reader-win32-5')
+  assert.equal(readFailureReason(new Error('x')), 'reader-error')
+  assert.equal(statusTime(new Date('2026-11-08T07:08:09.999Z')), at)
+})
+
+test('failed attempts are retried in the session with backoff, and stop once one succeeds', async () => {
+  const delays: number[] = []
+  const queue: Array<() => void> = []
+  const results: Array<Partial<InstallMigrationResult>> = [
+    { retry: true },
+    { retry: true },
+    { retry: false }
+  ]
+  let attempts = 0
+  await runWithRetries(
+    async () => ({ ...(results[attempts++] ?? { retry: false }) }) as InstallMigrationResult,
+    (run, ms) => {
+      delays.push(ms)
+      queue.push(run)
+    },
+    () => {},
+    [10, 20, 30]
+  )
+  while (queue.length) {
+    queue.shift()!()
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(attempts, 3)
+  assert.deepEqual(delays, [10, 20])
+  // Never more than the schedule, and a thrown attempt counts as a failure.
+  const capped: number[] = []
+  const pending: Array<() => void> = []
+  let thrown = 0
+  await runWithRetries(
+    async () => {
+      thrown++
+      throw new Error('boom')
+    },
+    (run, ms) => {
+      capped.push(ms)
+      pending.push(run)
+    },
+    () => {},
+    [1, 2]
+  )
+  while (pending.length) {
+    pending.shift()!()
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+  assert.equal(thrown, 3)
+  assert.deepEqual(capped, [1, 2])
+})
+
+test('Settings shows the move only while it is unfinished, with what to expect', () => {
+  assert.equal(installMigrationNotice(null), null)
+  assert.equal(installMigrationNotice({ state: 'complete', at, reason: 'repointed' }), null)
+  assert.equal(installMigrationNotice({ state: 'none', at, reason: 'no-record' }), null)
+  const failed = installMigrationNotice({ state: 'read-failed', at, reason: 'reader-unavailable' })
+  assert.match(failed?.title ?? '', /Couldn't finish the Windows upgrade/)
+  assert.match(failed?.detail ?? '', /reader-unavailable[\s\S]*tries again[\s\S]*Open at login/)
+  const steps = installMigrationNotice({ state: 'pending', at, reason: 'steps-pending:codex' })
+  assert.match(steps?.title ?? '', /Finishing the Windows upgrade/)
+  assert.match(steps?.detail ?? '', /tries again/)
+  const installer = installMigrationNotice({ state: 'pending', at, reason: 'record-incomplete' })
+  assert.match(installer?.detail ?? '', /running the DoodleNote installer again/)
 })

@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs'
 import { win32 } from 'node:path'
+import type { InstallMigrationStatus } from '../shared/install-migration-api'
 import { APP_IDENTITY, type AppIdentity } from './app-identity'
 import type { InstallMigrationRecord, InstallRecordPending } from './windows-install-record'
 
@@ -17,8 +18,12 @@ import type { InstallMigrationRecord, InstallRecordPending } from './windows-ins
  * Both are repointed at the running exe, but only on the installer's word: the
  * MigrationRecord it writes under HKCU\Software\<APP_GUID> after it really moved
  * this identity's install (windows-install-record.ts). A record that is there but
- * not complete for this identity is left alone, for the installer to repair. A copy of the exe started from any folder that
- * happens to be named DoodleNote (a DPI capture, a portable copy) finds no record
+ * not complete for this identity is left alone, for the installer to repair. Every
+ * attempt that finds a record (or cannot read it) is recorded where QA and support
+ * can see it: AppMigration / AppMigrationLastAttempt / AppMigrationReason in the
+ * identity's HKCU\Software\DoodleNote-InstallStatus\<APP_GUID> key, beside the
+ * installer's own LastStep, and in Settings (installMigrationNotice). A copy of the
+ * exe started from any folder that happens to be named DoodleNote (a DPI capture, a portable copy) finds no record
  * naming its folder and changes nothing. Nothing else depends on the folder: the
  * profile (%APPDATA%\desktop, which holds the library location, settings and
  * accounts) is named after the app, not the install folder, and is not moved.
@@ -162,6 +167,12 @@ export interface InstallMigrationDeps {
     isLegacyCommand: (command: string) => boolean,
     only: readonly string[] | null
   ): McpRepointOutcome[]
+  /** The status this profile recorded last (null: none), so a stale one can be ended. */
+  readStatus(): InstallMigrationStatus | null
+  /** Records a status (registry and profile); a failure is logged, never fatal. */
+  writeStatus(status: InstallMigrationStatus): Promise<void>
+  /** The attempt's time (tests pass a fixed one). */
+  now?(): Date
   log(message: string): void
 }
 
@@ -171,6 +182,22 @@ export interface InstallMigrationResult {
   mcpClients: string[]
   /** Steps or clients left for the next launch. */
   pending: string[]
+  /** What this attempt recorded; null when nothing (no record, nothing to end). */
+  status: InstallMigrationStatus | null
+  /** Worth trying again in this session (the record could not be read, or a step failed). */
+  retry: boolean
+}
+
+/** UTC to the second, the form the installer writes (YYYY-MM-DDTHH:MM:SSZ). */
+export function statusTime(date: Date): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+/** A reason code from an error's `code` (WinEngineHost.registry): "reader-…". */
+export function readFailureReason(error: unknown): string {
+  const code = String((error as { code?: unknown })?.code ?? 'error')
+  if (/^reader-[a-z0-9-]+$/.test(code)) return code
+  return `reader-${code.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 }
 
 /**
@@ -227,34 +254,72 @@ function readProgress(raw: string | null, execPath: string, migratedAt: string):
 export async function runWindowsInstallMigration(
   deps: InstallMigrationDeps
 ): Promise<InstallMigrationResult> {
-  const none = { ran: false, loginItem: false, mcpClients: [], pending: [] }
-  if (deps.platform !== 'win32' || !deps.isPackaged) return none
+  const nothing = { ran: false, loginItem: false, mcpClients: [], pending: [] }
+  if (deps.platform !== 'win32' || !deps.isPackaged)
+    return { ...nothing, status: null, retry: false }
+  const at = statusTime(deps.now?.() ?? new Date())
+  const recordStatus = async (
+    state: InstallMigrationStatus['state'],
+    reason: string
+  ): Promise<InstallMigrationStatus> => {
+    const status = { state, at, reason }
+    try {
+      await deps.writeStatus(status)
+    } catch (error) {
+      deps.log(`[install-migration] status not recorded: ${(error as Error).message}`)
+    }
+    return status
+  }
+  const stop = async (
+    state: InstallMigrationStatus['state'],
+    reason: string,
+    retry = false
+  ): Promise<InstallMigrationResult> => ({
+    ...nothing,
+    status: await recordStatus(state, reason),
+    retry
+  })
   let read: InstallMigrationRecord | InstallRecordPending | null
   try {
     read = await deps.readRecord()
   } catch (error) {
+    // Nothing is known, so nothing is repointed and nothing is cleared: the record (if
+    // any) stays for the next try, in a few minutes and at the next start.
     deps.log(`[install-migration] install record not read: ${(error as Error).message}`)
-    return none
+    return stop('read-failed', readFailureReason(error), true)
   }
-  if (!read) return none
+  if (!read) {
+    // Most launches. A pending or read-failed status left by an earlier attempt is ended.
+    let last: InstallMigrationStatus | null = null
+    try {
+      last = deps.readStatus()
+    } catch {
+      // An unreadable status file is treated as none.
+    }
+    if (last && (last.state === 'pending' || last.state === 'read-failed'))
+      return stop('none', 'no-record')
+    return { ...nothing, status: null, retry: false }
+  }
   if ('pending' in read) {
     deps.log(`[install-migration] install record left for the installer: ${read.pending}`)
-    return none
+    return stop('pending', read.code)
   }
   const record = read
   const legacy = legacyInstallFor(record, deps.execPath)
   if ('reason' in legacy) {
     deps.log(`[install-migration] ignoring the install record: ${legacy.reason}`)
-    return none
+    return stop('pending', 'record-other-folder')
   }
   if (deps.exists(legacy.exe)) {
     deps.log(`[install-migration] ${legacy.exe} still exists; nothing repointed`)
-    return none
+    return stop('pending', 'old-exe-present')
   }
+  let cleared = true
   const clear = async (): Promise<void> => {
     try {
       await deps.clearRecord()
     } catch (error) {
+      cleared = false
       deps.log(`[install-migration] install record not cleared: ${(error as Error).message}`)
     }
   }
@@ -267,7 +332,11 @@ export async function runWindowsInstallMigration(
   const progress = readProgress(raw, deps.execPath, record.at)
   if (progress?.complete) {
     await clear()
-    return none
+    return {
+      ...nothing,
+      status: await recordStatus('complete', cleared ? 'repointed' : 'record-not-cleared'),
+      retry: false
+    }
   }
 
   let loginItemDone = progress?.loginItemDone ?? false
@@ -329,5 +398,34 @@ export async function runWindowsInstallMigration(
     deps.log(`[install-migration] marker not written: ${(error as Error).message}`)
   }
   if (marker.complete) await clear()
-  return { ran: true, loginItem, mcpClients, pending }
+  const status = marker.complete
+    ? await recordStatus('complete', cleared ? 'repointed' : 'record-not-cleared')
+    : await recordStatus('pending', `steps-pending:${pending.join(',')}`)
+  return { ran: true, loginItem, mcpClients, pending, status, retry: !marker.complete }
+}
+
+/** In-session retries after a failed attempt (every launch also tries once). */
+export const INSTALL_MIGRATION_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000] as const
+
+/**
+ * Runs the migration now and, while an attempt asks for it (`retry`), again after
+ * each of `delays`. Never throws.
+ */
+export function runWithRetries(
+  attempt: () => Promise<InstallMigrationResult>,
+  schedule: (run: () => void, ms: number) => void,
+  log: (message: string) => void,
+  delays: readonly number[] = INSTALL_MIGRATION_RETRY_MS
+): Promise<void> {
+  const go = async (index: number): Promise<void> => {
+    let retry = false
+    try {
+      retry = (await attempt()).retry
+    } catch (error) {
+      log(`[install-migration] ${(error as Error).message}`)
+      retry = true
+    }
+    if (retry && index < delays.length) schedule(() => void go(index + 1), delays[index])
+  }
+  return go(0)
 }

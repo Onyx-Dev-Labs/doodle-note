@@ -497,7 +497,38 @@ as it is (logged `install record left for the installer`) for a later installer
 run to repair from its copy. When every step has succeeded the app deletes the
 record. A copy of the exe started from any folder
 that merely is named `DoodleNote` (a DPI capture, a portable copy) finds no
-record naming its folder and changes nothing. Client configs are replaced atomically
+record naming its folder and changes nothing. The app reads, writes and deletes
+these registry values through its speech worker (`src/main/windows-registry.ts`:
+`RegGetValueW`, `RegSetKeyValueW`, `RegDeleteKeyValueW` through the FFI the worker
+already loads), never through PowerShell or `reg.exe`: no child process, so an
+execution policy or AppLocker rule for PowerShell cannot stop it, and the record's
+folders read back exactly when the user folder is not ASCII (`reg.exe query`
+prints the console's OEM code page: `Jörg Ñandú 李雷 😀` comes back as `J�rg �and� ?? ??`
+under code page 437; `evidence/step5-fix-7/reg-unicode-probe.log`). The worker may
+read any value under `HKCU\Software`, write only `AppMigration*` values in the
+identity's status key, and delete only `MigrationRecord` in `Software\{APP_GUID}`.
+
+What the app did is recorded beside the installer's values, in the same
+`HKCU\Software\DoodleNote-InstallStatus\{APP_GUID}` key, and in
+`%APPDATA%\<package>\install-migration-status.json`, at every launch that finds a
+record or cannot read it (a launch with no record and nothing unfinished writes
+nothing): `AppMigrationReason`, `AppMigrationLastAttempt` (UTC) and, last,
+`AppMigration`:
+
+| `AppMigration` | `AppMigrationReason` | Retried |
+|---|---|---|
+| `complete` | `repointed`; `record-not-cleared` (the next launch deletes the record) | no |
+| `pending` | `steps-pending:<steps>` (`login-item`, `mcp-clients` or client ids that failed) | yes |
+| `pending` | `record-incomplete`, `record-foreign`, `record-format`, `record-time` (left for the installer), `record-other-folder` (a copy started elsewhere), `old-exe-present` | no (next start) |
+| `read-failed` | `reader-unavailable` (the speech worker could not start or ended first), `reader-timeout` (no answer in 60 s), `reader-unsupported` (the FFI did not load), `reader-<code>` | yes |
+| `none` | `no-record`: an earlier `pending` / `read-failed` is over without a record | no |
+
+"Retried": again after 1, 5 and 30 minutes in the same session; every start tries
+once anyway. Nothing is repointed or cleared without a complete record. While the
+state is `pending` or `read-failed`, Settings > Updates shows "Finishing the
+Windows upgrade…" or "Couldn't finish the Windows upgrade" with the reason, and
+says that Open at login and connected agents may still start DoodleNote from the
+old folder, which the installer removed, until it finishes. Client configs are replaced atomically
 (a temporary file in the same folder with the original's mode, then a rename;
 a symbolic link is followed), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new

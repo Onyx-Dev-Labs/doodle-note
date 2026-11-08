@@ -16,8 +16,9 @@
  *        {t:'stop'}                       — finish session (emit finals+done)
  *        {t:'helper-hold'|'helper-trust'|'helper-confirm'|'helper-release', id, path?}
  *                                         — Bark's helper check (windows-helper-check.ts)
+ *        {t:'reg', id, op, subKey, ...}   — the app's HKCU reads/writes (windows-registry.ts)
  *   out: {t:'event', event:{...}}         — engine event object
- *        {t:'helper', id, op, ...}        — the helper check's replies
+ *        {t:'helper', id, op, ...}        — the helper check's and registry replies
  *
  * An updated install whose Parakeet model is not downloaded yet uses the
  * cached streaming Zipformer from earlier builds for live captions (see
@@ -65,6 +66,7 @@ import {
 import { EchoOrderGate } from './windows-asr-echo-gate'
 import { HelperChecker, type FfiLike } from './windows-helper-check'
 import { boundedTestStallMs, MAX_ASR_STALL_MS, MAX_CONFIRM_STALL_MS } from './speech-worker-env'
+import { RegistryAccess, type RegistryFfi, type RegistryRequest } from './windows-registry'
 
 interface AudioMessage {
   t: 'audio'
@@ -91,6 +93,7 @@ type InMessage =
   | { t: 'stop'; sessionId?: number }
   | { t: 'helper-hold'; id: number; path: string }
   | { t: 'helper-trust' | 'helper-confirm' | 'helper-release'; id: number }
+  | ({ t: 'reg'; id: number } & RegistryRequest)
 
 interface ChannelTranscriber {
   readonly channel: string
@@ -519,6 +522,8 @@ const helperChecker = new HelperChecker(
   // A hold that expires is reported at once, so the app never counts on it afterwards.
   (id) => port.postMessage({ t: 'helper-expired', id })
 )
+/** The install folder move's registry reads and writes, for the app (see windows-registry.ts). */
+const registry = new RegistryAccess(() => windowsFfi() as unknown as RegistryFfi)
 
 port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
@@ -550,6 +555,9 @@ port.on('message', (message: Electron.MessageEvent) => {
       break
     case 'helper-release':
       helperChecker.release(data.id)
+      break
+    case 'reg':
+      port.postMessage({ t: 'helper', id: data.id, op: 'reg', ...registry.handle(data) })
       break
     case 'init':
       knownCalibration = data.calibration ?? null

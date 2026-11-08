@@ -898,6 +898,10 @@ test('only the platform-guarded Windows speech worker loads Koffi', () => {
   // Bark's helper check runs inside that same worker, through the FFI the worker already loads.
   assert.deepEqual(importing(/['"]\.\/windows-helper-check['"]/), ['main/engine-win.ts'])
   assert.doesNotMatch(read('main/windows-helper-check.ts'), /require\(|['"]koffi['"]/)
+  // So do the install folder move's registry reads and writes (the main process asks the worker).
+  assert.deepEqual(importing(/from ['"]\.\/windows-registry['"]/), ['main/engine-win.ts'])
+  assert.doesNotMatch(read('main/windows-registry.ts'), /require\(|['"]koffi['"]|child_process/)
+  assert.doesNotMatch(read('main/windows-install-record.ts'), /child_process|execFile/)
 })
 
 test('CI builds and retains a real Windows installer', () => {

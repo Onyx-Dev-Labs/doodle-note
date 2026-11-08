@@ -4,7 +4,10 @@ const assert = require('node:assert/strict')
 const { cpSync, mkdtempSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
+const { execFileSync } = require('node:child_process')
 const { _electron } = require(process.env.DOODLE_PLAYWRIGHT_MODULE || 'playwright')
+
+const REGISTRY_TEST_GUID = '00000000-0000-0000-0000-000000000000'
 
 async function main() {
   assert.equal(process.platform, 'win32', 'Run Windows acceptance in Windows')
@@ -79,9 +82,68 @@ async function main() {
     assert.equal(stream.serve.model, 'sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming')
     assert.ok(stream.serve.calibrationRtf > 0, JSON.stringify(stream.serve))
     assert.ok(['interim', 'utterance'].includes(stream.serve.captionMode))
-    console.log(JSON.stringify({ executablePath, profile, preflight: result, stream }))
+    // Round 7: the same packaged worker reads and writes the install folder move's registry
+    // values for the app (windows-registry.ts): no PowerShell or reg.exe in the app's path.
+    // A throwaway all-zero GUID identity, removed below.
+    const registry = await app.evaluate(async ({ utilityProcess, app }, guid) => {
+      const worker = utilityProcess.fork(`${app.getAppPath()}\\out\\main\\engine-win.js`)
+      let next = 1
+      const pending = new Map()
+      worker.on('message', (message) => {
+        if (message.t !== 'helper' || message.op !== 'reg') return
+        pending.get(message.id)?.(message)
+        pending.delete(message.id)
+      })
+      const ask = (body) =>
+        new Promise((resolve, reject) => {
+          const id = next++
+          const timer = setTimeout(() => reject(new Error('registry request timed out')), 60_000)
+          pending.set(id, (reply) => {
+            clearTimeout(timer)
+            resolve(reply)
+          })
+          worker.postMessage({ t: 'reg', id, ...body })
+        })
+      const status = `Software\\DoodleNote-InstallStatus\\${guid}`
+      try {
+        return {
+          absent: await ask({ op: 'read', subKey: `Software\\${guid}`, name: 'MigrationRecord' }),
+          write: await ask({
+            op: 'write',
+            subKey: status,
+            values: [
+              ['AppMigrationReason', 'ci Jörg 李'],
+              ['AppMigration', 'pending']
+            ]
+          }),
+          readBack: await ask({ op: 'read', subKey: status, name: 'AppMigrationReason' }),
+          refused: await ask({ op: 'write', subKey: status, values: [['LastResult', 'x']] }),
+          deleted: await ask({ op: 'delete', subKey: `Software\\${guid}`, name: 'MigrationRecord' })
+        }
+      } finally {
+        worker.kill()
+      }
+    }, REGISTRY_TEST_GUID)
+    assert.deepEqual(registry.absent.ok, true, JSON.stringify(registry))
+    assert.equal(registry.absent.value, null)
+    assert.equal(registry.write.ok, true, JSON.stringify(registry))
+    assert.equal(registry.readBack.value, 'ci Jörg 李')
+    assert.deepEqual([registry.refused.ok, registry.refused.code], [false, 'SCOPE'])
+    assert.equal(registry.deleted.ok, true)
+    console.log(JSON.stringify({ executablePath, profile, preflight: result, stream, registry }))
   } finally {
     await app?.close()
+    try {
+      execFileSync(
+        'reg.exe',
+        ['delete', `HKCU\\Software\\DoodleNote-InstallStatus\\${REGISTRY_TEST_GUID}`, '/f'],
+        {
+          stdio: 'ignore'
+        }
+      )
+    } catch {
+      // Not created.
+    }
   }
 }
 main().catch((error) => {

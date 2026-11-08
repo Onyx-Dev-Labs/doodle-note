@@ -62,13 +62,24 @@ import { WinEngineHost } from './engine-host-win'
 import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
-import { isInsideFolder, runWindowsInstallMigration } from './windows-install-migration'
+import {
+  isInsideFolder,
+  runWindowsInstallMigration,
+  runWithRetries
+} from './windows-install-migration'
 import {
   clearInstallRecord,
   installMigrationIdentity,
   installStateKey,
-  readInstallRecord
+  installStatusKey,
+  readInstallRecord,
+  writeInstallMigrationStatus
 } from './windows-install-record'
+import {
+  INSTALL_MIGRATION_GET_STATUS_CHANNEL,
+  INSTALL_MIGRATION_STATUS_EVENT_CHANNEL,
+  type InstallMigrationStatus
+} from '../shared/install-migration-api'
 import { MediaService } from './media-service'
 import { AgentAccessService, agentAccessRoots } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
@@ -1192,31 +1203,75 @@ app.whenReady().then(async () => {
   agentAccessService.registerIpc()
   // Windows: when the installer recorded that it moved Programs\desktop to
   // Programs\DoodleNote for this exe, repoint what still launches the old exe
-  // (login item, MCP clients); see the module. No record, nothing changes.
+  // (login item, MCP clients); see the module. No record, nothing changes. The
+  // record and the app's status are read and written by the speech worker
+  // (WinEngineHost.registry): no PowerShell or reg.exe. Each attempt that finds a
+  // record, or cannot read it, is recorded (AppMigration in the identity's
+  // InstallStatus key, install-migration-status.json, Settings), and retried in
+  // this session while it asks for it.
   if (process.platform === 'win32') {
+    const registry = (engine as WinEngineHost).registry
     const markerPath = join(app.getPath('userData'), 'install-migration.json')
+    const statusPath = join(app.getPath('userData'), 'install-migration-status.json')
     const recordKey = installStateKey(APP_IDENTITY.appId)
-    void runWindowsInstallMigration({
-      platform: process.platform,
-      isPackaged: app.isPackaged,
-      execPath: process.execPath,
-      readRecord: () => readInstallRecord(recordKey, installMigrationIdentity(APP_IDENTITY)),
-      clearRecord: () => clearInstallRecord(recordKey),
-      exists: existsSync,
-      readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),
-      writeMarker: (contents) => writeFileSync(markerPath, contents),
-      loginItem: {
-        stateFor: (exe) => {
-          const settings = app.getLoginItemSettings({ path: exe })
-          const item = settings.launchItems?.find((entry) => isInsideFolder(entry.path, exe))
-          return { registered: settings.openAtLogin, enabled: item?.enabled ?? true }
+    const statusKey = installStatusKey(APP_IDENTITY.appId)
+    const readStatusFile = (): InstallMigrationStatus | null => {
+      if (!existsSync(statusPath)) return null
+      const parsed = JSON.parse(readFileSync(statusPath, 'utf8')) as InstallMigrationStatus
+      return parsed && typeof parsed.state === 'string' ? parsed : null
+    }
+    let migrationStatus: InstallMigrationStatus | null = null
+    try {
+      migrationStatus = readStatusFile()
+    } catch {
+      migrationStatus = null
+    }
+    ipcMain.handle(INSTALL_MIGRATION_GET_STATUS_CHANNEL, () => migrationStatus)
+    const attempt = (): ReturnType<typeof runWindowsInstallMigration> =>
+      runWindowsInstallMigration({
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        execPath: process.execPath,
+        readRecord: () =>
+          readInstallRecord(registry, recordKey, installMigrationIdentity(APP_IDENTITY)),
+        clearRecord: () => clearInstallRecord(registry, recordKey),
+        exists: existsSync,
+        readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),
+        writeMarker: (contents) => writeFileSync(markerPath, contents),
+        loginItem: {
+          stateFor: (exe) => {
+            const settings = app.getLoginItemSettings({ path: exe })
+            const item = settings.launchItems?.find((entry) => isInsideFolder(entry.path, exe))
+            return { registered: settings.openAtLogin, enabled: item?.enabled ?? true }
+          },
+          registerCurrent: (enabled) =>
+            app.setLoginItemSettings({
+              openAtLogin: true,
+              enabled,
+              name: APP_IDENTITY.loginItemName
+            })
         },
-        registerCurrent: (enabled) =>
-          app.setLoginItemSettings({ openAtLogin: true, enabled, name: APP_IDENTITY.loginItemName })
-      },
-      repointMcpClients: (isStale, only) => agentAccessService.repointStaleClients(isStale, only),
-      log: (message) => console.log(message)
-    }).catch((error) => console.log(`[install-migration] ${(error as Error).message}`))
+        repointMcpClients: (isStale, only) => agentAccessService.repointStaleClients(isStale, only),
+        readStatus: readStatusFile,
+        writeStatus: async (status) => {
+          migrationStatus = status
+          broadcast(INSTALL_MIGRATION_STATUS_EVENT_CHANNEL, status)
+          let fileError: unknown = null
+          try {
+            writeFileSync(statusPath, JSON.stringify(status) + '\n')
+          } catch (error) {
+            fileError = error
+          }
+          await writeInstallMigrationStatus(registry, statusKey, status)
+          if (fileError) throw fileError
+        },
+        log: (message) => console.log(message)
+      })
+    void runWithRetries(
+      attempt,
+      (run, ms) => setTimeout(run, ms).unref(),
+      (message) => console.log(message)
+    )
   }
 
   const sourceIndex = new SourceIndexService(
