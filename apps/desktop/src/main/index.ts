@@ -63,6 +63,7 @@ import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { isInsideFolder, runWindowsInstallMigration } from './windows-install-migration'
+import { clearInstallRecord, installStateKey, readInstallRecord } from './windows-install-record'
 import { MediaService } from './media-service'
 import { AgentAccessService } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
@@ -1140,14 +1141,19 @@ app.whenReady().then(async () => {
     }
   }
   agentAccessService.registerIpc()
-  // Windows: the installer moved Programs\desktop to Programs\DoodleNote. Repoint
-  // what still launches the old exe (login item, MCP clients); see the module.
+  // Windows: when the installer recorded that it moved Programs\desktop to
+  // Programs\DoodleNote for this exe, repoint what still launches the old exe
+  // (login item, MCP clients); see the module. No record, nothing changes.
   if (process.platform === 'win32') {
     const markerPath = join(app.getPath('userData'), 'install-migration.json')
-    runWindowsInstallMigration({
+    const recordKey = installStateKey(APP_IDENTITY.appId)
+    void runWindowsInstallMigration({
       platform: process.platform,
       isPackaged: app.isPackaged,
       execPath: process.execPath,
+      readRecord: () => readInstallRecord(recordKey),
+      clearRecord: () => clearInstallRecord(recordKey),
+      exists: existsSync,
       readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),
       writeMarker: (contents) => writeFileSync(markerPath, contents),
       loginItem: {
@@ -1161,7 +1167,7 @@ app.whenReady().then(async () => {
       },
       repointMcpClients: (isStale, only) => agentAccessService.repointStaleClients(isStale, only),
       log: (message) => console.log(message)
-    })
+    }).catch((error) => console.log(`[install-migration] ${(error as Error).message}`))
   }
 
   const sourceIndex = new SourceIndexService(

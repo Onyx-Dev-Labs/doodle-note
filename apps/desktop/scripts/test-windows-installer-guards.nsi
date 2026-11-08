@@ -13,6 +13,8 @@
 ;   jkey|<key>                           sets $dnJournalKey (HKCU, a throwaway test key)
 ;   arm|<source>|<dest>[|<identity>]     writes a journal as the installer does (default identity: ours)
 ;   jstate                               armed | none
+;   skey|<key>                           sets $dnStateKey (HKCU, a throwaway test key)
+;   record                               MigratedFrom|MigratedTo|MigratedAt, or none
 ;   journal|<dest>                       dnTrustedJournal: the trusted source, or "none: <note>"
 ;   migclose|<legacy>|<new>|<policy>     dnMigrationClose: KEEP (1 | 0)
 ;   finish|<legacy>|<new>|<keep>         dnFinishMigration: removed | kept: <why>
@@ -133,6 +135,17 @@ Function .onInit
       WriteRegStr HKCU $dnJournalKey "SourceDir" $a
       WriteRegStr HKCU $dnJournalKey "DestDir" $b
       StrCpy $result "armed"
+    ${elseif} $kind == "skey"
+      StrCpy $dnStateKey $a
+      StrCpy $result "set"
+    ${elseif} $kind == "record"
+      ReadRegStr $0 HKCU $dnStateKey "MigratedFrom"
+      ReadRegStr $1 HKCU $dnStateKey "MigratedTo"
+      ReadRegStr $2 HKCU $dnStateKey "MigratedAt"
+      StrCpy $result "$0|$1|$2"
+      ${if} $result == "||"
+        StrCpy $result "none"
+      ${endif}
     ${elseif} $kind == "jstate"
       ReadRegStr $result HKCU $dnJournalKey "Identity"
       ${if} $result == ""

@@ -182,6 +182,8 @@ async function main() {
     const journalKey = `Software\\DoodleNoteGuardsTest-${path.basename(sandbox)}`
     registryKeys.push(journalKey)
     cases.push(['jkey', `${journalKey}\\InstallMigration`, ''])
+    cases.push(['skey', journalKey, ''])
+    cases.push(['record', '', '', 'none'])
 
     // L1: only <Programs>\desktop itself is redirected; any other folder named
     // desktop (an earlier /D=X\desktop) is upgraded in place, never moved or deleted.
@@ -224,6 +226,7 @@ async function main() {
       '0',
       /^kept: the old folder is not /
     ])
+    cases.push(['record', '', '', 'none'])
     cases.push(['root', fresh, path.join(sandbox, 'fresh', 'Roaming', 'desktop')])
     cases.push([
       'plan',
@@ -260,14 +263,32 @@ async function main() {
     cases.push(['migclose', l3Source, l3Dest, 'never', '1'])
     cases.push(['finish', l3Source, l3Dest, '1', /^kept: .* is still running/])
     cases.push(['jstate', '', '', 'armed'])
+    cases.push(['record', '', '', 'none'])
     cases.push(['journal', l3Dest, '', trusted])
     // --updated: the closer closes exactly the old app although the new exe exists.
     cases.push(['migclose', l3Source, l3Dest, 'close', '0'])
     // A file there is still held: removal refuses, the exe stays, the journal stays armed.
     cases.push(['finish', l3Source, l3Dest, '0', 'kept: a file is still in use'])
     cases.push(['jstate', '', '', 'armed'])
+    cases.push(['record', '', '', 'none'])
     cases.push(['journal', l3Dest, '', trusted])
     holds.push(path.join(l3, 'desktop', 'locked.dat'))
+
+    // H2: a real move (old folder removed) writes the MigratedFrom/To/At record the
+    // app requires before it repoints anything; the journal is cleared.
+    const migSource = path.join(mig, 'desktop')
+    const migDest = path.join(mig, 'DoodleNote')
+    const migRecord = `${lower(real(mig, 'desktop'))}|${lower(real(mig, 'DoodleNote'))}|`
+    cases.push(['root', mig, migProfile])
+    cases.push(['arm', migSource, migDest, '', 'armed'])
+    cases.push(['finish', migSource, migDest, '0', 'removed'])
+    cases.push(['jstate', '', '', 'none'])
+    cases.push([
+      'record',
+      '',
+      '',
+      (r) => lower(r).startsWith(migRecord) && /\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(r)
+    ])
     // 8.3 short names: the old folder exists, the new one does not yet. Runner TEMP
     // paths are short already (C:\\Users\\RUNNER~1); elsewhere use the short form.
     const shortRoot = execFileSync(
@@ -372,6 +393,9 @@ async function main() {
     assert.ok(fs.existsSync(path.join(l3, 'desktop', 'DoodleNote.exe')))
     assert.ok(fs.existsSync(path.join(l3, 'desktop', 'locked.dat')))
     assert.ok(fs.existsSync(path.join(l3, 'DoodleNote', 'DoodleNote.exe')))
+    // H2: the real move removed the old folder and kept the new one.
+    assert.ok(!fs.existsSync(migSource))
+    assert.ok(fs.existsSync(path.join(migDest, 'DoodleNote.exe')))
     console.log(`installer guards: ${cases.length} cases passed`)
   } finally {
     for (const child of started) {

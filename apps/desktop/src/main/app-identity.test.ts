@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import identities from '../shared/app-identities.json'
 import { APP_IDENTITY, appIdentity, identityMismatch } from './app-identity'
 import { MCP_SERVER_KEY } from './mcp-clients-logic'
+import { installStateKey } from './windows-install-record'
 import {
   INSTALL_FOLDER,
   LEGACY_INSTALL_FOLDER,
@@ -108,15 +109,26 @@ test('the QA identity shares no identity-bearing name with production', () => {
   // (production's, as compiled by electron-builder on Dev04).
   assert.equal(nsisGuid(production.appId), 'f85f8dcf-6782-5a3e-a989-3eae169d6efb')
   assert.notEqual(nsisGuid(qa.appId), nsisGuid(production.appId))
-  assert.match(read('build/windows-installer.nsh'), /"Software\\\$\{APP_GUID\}\\InstallMigration"/)
-  // A QA exe migrates its own folders.
+  assert.match(read('build/windows-installer.nsh'), /"Software\\\$\{APP_GUID\}"/)
+  assert.match(read('build/windows-installer.nsh'), /"\$\{DN_STATE_KEY\}\\InstallMigration"/)
+  // A QA exe migrates its own folders, and only on its own installer's record.
   const programs = 'C:\\Users\\Pat\\AppData\\Local\\Programs'
-  assert.deepEqual(legacyInstallFor(`${programs}\\DoodleNote QA\\DoodleNote QA.exe`, qa), {
+  const record = {
+    from: `${programs}\\desktop-qa`,
+    to: `${programs}\\DoodleNote QA`,
+    at: '2026-11-08T00:00:00Z'
+  }
+  assert.deepEqual(legacyInstallFor(record, `${programs}\\DoodleNote QA\\DoodleNote QA.exe`, qa), {
     dir: `${programs}\\desktop-qa`,
     exe: `${programs}\\desktop-qa\\DoodleNote QA.exe`
   })
-  assert.equal(legacyInstallFor(`${programs}\\DoodleNote QA\\DoodleNote QA.exe`, production), null)
-  assert.equal(legacyInstallFor(`${programs}\\DoodleNote\\DoodleNote.exe`, qa), null)
+  assert.ok(
+    'reason' in
+      legacyInstallFor(record, `${programs}\\DoodleNote QA\\DoodleNote QA.exe`, production)
+  )
+  assert.ok('reason' in legacyInstallFor(record, `${programs}\\DoodleNote\\DoodleNote.exe`, qa))
+  // Each identity reads its own record key.
+  assert.equal(installStateKey(qa.appId), `HKEY_CURRENT_USER\\Software\\${nsisGuid(qa.appId)}`)
 })
 
 test('the electron-builder QA overlay takes its names from the QA identity entry', () => {

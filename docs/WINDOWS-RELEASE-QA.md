@@ -302,9 +302,12 @@ per-user folder after the package (`desktop`). New installs go to
 `<UserProgramFiles>\DoodleNote`. `apps/desktop/build/windows-installer.nsh`
 moves an existing install on upgrade:
 
-1. `customInit` redirects an install that would land in the `desktop` folder to
-   the sibling `DoodleNote` folder (an install with `/D=<folder>` is left alone).
-   It treats the old folder as an install to move only when the guards in
+1. `customInit` redirects an install that would land in exactly
+   `%LocalAppData%\Programs\desktop` (after normalising case, a trailing
+   separator and short names) to the sibling `DoodleNote` folder. An install with
+   `/D=<folder>` is left alone, and so is one recorded in any other folder named
+   `desktop` (an earlier `/D=X\desktop`): it is upgraded in place, nothing is
+   moved or deleted. It treats the old folder as an install to move only when the guards in
    `apps/desktop/build/windows-install-guards.nsh` prove it is one: exactly
    `%LocalAppData%\Programs\desktop` after normalising case, separators, `..`
    and short names; a real folder (not a junction, symbolic link or mount
@@ -338,6 +341,8 @@ moves an existing install on upgrade:
    `DoodleNote.exe` last, so a folder that is only partly removed is still
    recognised next time. It keeps the user's desktop-shortcut choice and
    repoints a taskbar pin. If the new copy is incomplete the old folder is kept.
+   Only when the old folder is really gone does it write the record
+   `HKCU\Software\{APP_GUID}` `MigratedFrom` / `MigratedTo` / `MigratedAt`.
 
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
@@ -348,10 +353,15 @@ installer migration guards").
 Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the
 library location, settings and accounts; it is named after the app (package
 name `desktop`), not the install folder, and is not moved. Keep the package name
-and `appId` as they are unless a profile migration is written too. On the first
-launch from the new folder the app repoints the "Open at login" entry (keeping
-a Task Manager disable) and MCP client configs (Claude Desktop, Claude Code,
-Codex) that launched the old exe (`src/main/windows-install-migration.ts`).
+and `appId` as they are unless a profile migration is written too. On the next
+launch the app repoints the "Open at login" entry (keeping a Task Manager
+disable) and MCP client configs (Claude Desktop, Claude Code, Codex) that
+launched the old exe (`src/main/windows-install-migration.ts`), but only on the
+installer's record: it must exist for this identity, `MigratedTo` must be the
+running exe's own folder, and the old exe must be gone. When every step has
+succeeded the app deletes the record. A copy of the exe started from any folder
+that merely is named `DoodleNote` (a DPI capture, a portable copy) finds no
+record naming its folder and changes nothing.
 
 ### Upgrade test: QA identity only
 
@@ -372,6 +382,7 @@ every identity-bearing name from the one entry in
 | MCP entry in client configs | `doodle-note` | `doodle-note-qa` |
 | MCP opt-in file and client configs | the real home directory | a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`), like the dev channel |
 | Migration journal | `HKCU\Software\{f85f8dcf-...}\InstallMigration` | `HKCU\Software\{320d0756-...}\InstallMigration` |
+| Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\{f85f8dcf-...}` | `HKCU\Software\{320d0756-...}` |
 | Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
 
 `pnpm package:win:qa` builds it: the app code with `DOODLENOTE_QA_IDENTITY=1`
@@ -401,8 +412,10 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
    folder; Start menu and desktop shortcuts start the new exe; the profile and
    library are unchanged; the QA Run value and the sandboxed client configs name
    the new exe (`install-migration.json` in the profile says `complete`); the QA
-   journal key is gone; nothing of production changed (its folder, Run value,
-   uninstall key and real MCP configs).
+   journal key is gone; right after the installer and before the first launch
+   `HKCU\Software\{320d0756-...}` holds `MigratedFrom` / `MigratedTo` /
+   `MigratedAt`, and after the first launch they are gone; nothing of production
+   changed (its folder, Run value, uninstall key and real MCP configs).
 3. Repeat with the legacy QA app running (closed only after the OK prompt; with
    `/S` and no `--updated` it is left running and its folder kept), with a file
    in the old folder held open (the folder and its exe stay, the journal stays

@@ -204,6 +204,13 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   const finish = guards.slice(guards.indexOf('Function dnFinishMigration'))
   assert.equal(guards.match(/^\s+Call dnRemoveLegacyDir$/gm)?.length, 1)
   assert.ok(finish.indexOf('Call dnCheckLegacyDir') < finish.indexOf('Call dnRemoveLegacyDir'))
+  // The record the app needs before it repoints anything is written only after a real move.
+  const removed = finish.indexOf('${if} $3 == "removed"')
+  for (const value of ['MigratedFrom', 'MigratedTo', 'MigratedAt']) {
+    assert.equal(`${installer}\n${guards}`.split(`$dnStateKey "${value}"`).length, 2, value)
+    assert.ok(finish.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) > removed, value)
+  }
+  assert.ok(removed > finish.indexOf('Call dnRemoveLegacyDir'))
   // A /D=<folder> install is never redirected, and only <LocalAppData>\Programs\APP_FILENAME
   // itself is (an install recorded in another folder named desktop is upgraded in place).
   assert.match(
@@ -224,7 +231,8 @@ test('the install migration journal belongs to one app identity and is validated
     'utf8'
   ).replace(/\r\n/g, '\n')
   // Namespaced by APP_GUID (derived from appId), so a QA identity never reads it.
-  assert.match(installer, /!define DN_MIGRATION_KEY "Software\\\$\{APP_GUID\}\\InstallMigration"/)
+  assert.match(installer, /!define DN_STATE_KEY "Software\\\$\{APP_GUID\}"/)
+  assert.match(installer, /!define DN_MIGRATION_KEY "\$\{DN_STATE_KEY\}\\InstallMigration"/)
   assert.doesNotMatch(installer, /Software\\DoodleNote\\/)
   assert.match(
     installer,

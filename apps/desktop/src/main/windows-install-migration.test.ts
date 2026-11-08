@@ -19,6 +19,14 @@ import {
   type LoginItemState,
   type McpRepointOutcome
 } from './windows-install-migration'
+import {
+  electronBuilderGuid,
+  installStateKey,
+  parseInstallRecord,
+  type InstallMigrationRecord
+} from './windows-install-record'
+import { APP_IDENTITY, appIdentity } from './app-identity'
+import { createRequire } from 'node:module'
 import type { McpServerSpec } from '../shared/integrations-api'
 
 const programs = 'C:\\Users\\Pat\\AppData\\Local\\Programs'
@@ -31,13 +39,63 @@ const spec = (dir: string): McpServerSpec => ({
   env: { ELECTRON_RUN_AS_NODE: '1' }
 })
 
-test('the legacy install is the sibling desktop folder of a DoodleNote folder', () => {
-  assert.deepEqual(legacyInstallFor(newExe), { dir: `${programs}\\desktop`, exe: oldExe })
-  // Case-insensitive, as Windows paths are.
-  assert.deepEqual(legacyInstallFor(`${programs}\\doodlenote\\DoodleNote.exe`)?.exe, oldExe)
-  // Still in the old folder (not yet migrated), or a custom /D folder: nothing to do.
-  assert.equal(legacyInstallFor(oldExe), null)
-  assert.equal(legacyInstallFor('D:\\Apps\\Notes\\DoodleNote.exe'), null)
+const record: InstallMigrationRecord = {
+  from: `${programs}\\desktop`,
+  to: `${programs}\\DoodleNote`,
+  at: '2026-11-08T01:02:03Z'
+}
+
+test('the old install comes only from an installer record naming this exe folder', () => {
+  assert.deepEqual(legacyInstallFor(record, newExe), { dir: `${programs}\\desktop`, exe: oldExe })
+  // Case and trailing separators do not matter, as on Windows.
+  assert.deepEqual(
+    legacyInstallFor({ ...record, to: `${programs.toUpperCase()}\\DOODLENOTE\\` }, newExe),
+    { dir: `${programs}\\desktop`, exe: oldExe }
+  )
+  // A record for another folder (another copy, another user profile) does not apply.
+  assert.match(
+    (legacyInstallFor(record, 'D:\\Captures\\DoodleNote\\DoodleNote.exe') as { reason: string })
+      .reason,
+    /is for /
+  )
+  // Not the identity's sibling folders.
+  assert.ok('reason' in legacyInstallFor({ ...record, from: 'C:\\Elsewhere\\desktop' }, newExe))
+  assert.ok('reason' in legacyInstallFor({ ...record, from: `${programs}\\other` }, newExe))
+  const qa = appIdentity('qa')
+  assert.ok('reason' in legacyInstallFor(record, newExe, qa))
+})
+
+test('APP_GUID and the record key match what electron-builder derives from the appId', () => {
+  const require = createRequire(import.meta.url)
+  const runtime = createRequire(require.resolve('electron-updater'))('builder-util-runtime') as {
+    UUID: { v5(name: string, namespace: Buffer): string; parse(input: string): Buffer }
+  }
+  const ns = runtime.UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3')
+  for (const name of ['production', 'qa'] as const) {
+    const appId = appIdentity(name).appId
+    assert.equal(electronBuilderGuid(appId), runtime.UUID.v5(appId, ns))
+  }
+  // The values the packaged installers were built with (evidence/step5-fix/qa-nsis-defines.log).
+  assert.equal(
+    electronBuilderGuid('com.doodlenote.desktop'),
+    'f85f8dcf-6782-5a3e-a989-3eae169d6efb'
+  )
+  assert.equal(
+    electronBuilderGuid('com.doodlenote.desktop.qa'),
+    '320d0756-c91c-52c4-9287-55a7f514978d'
+  )
+  assert.equal(
+    installStateKey(APP_IDENTITY.appId),
+    'HKEY_CURRENT_USER\\Software\\f85f8dcf-6782-5a3e-a989-3eae169d6efb'
+  )
+})
+
+test('the install record is complete or nothing', () => {
+  assert.deepEqual(parseInstallRecord(JSON.stringify(record)), record)
+  assert.equal(parseInstallRecord(JSON.stringify({ ...record, at: '' })), null)
+  assert.equal(parseInstallRecord(JSON.stringify({ from: record.from, to: record.to })), null)
+  assert.equal(parseInstallRecord('not json'), null)
+  assert.equal(parseInstallRecord('null'), null)
 })
 
 test('folder containment follows Windows rules and does not match siblings', () => {
@@ -50,6 +108,8 @@ test('folder containment follows Windows rules and does not match siblings', () 
 
 function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrationDeps & {
   marker: string | null
+  record: InstallMigrationRecord | null
+  files: Set<string>
   logs: string[]
   registered: boolean[]
 } {
@@ -58,8 +118,15 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
     isPackaged: true,
     execPath: newExe,
     marker: null as string | null,
+    record: { ...record } as InstallMigrationRecord | null,
+    files: new Set<string>([newExe]),
     logs: [] as string[],
     registered: [] as boolean[],
+    readRecord: async () => deps.record,
+    clearRecord: async () => {
+      deps.record = null
+    },
+    exists: (path: string) => deps.files.has(path),
     readMarker: () => deps.marker,
     writeMarker: (contents: string) => {
       deps.marker = contents
@@ -79,7 +146,7 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
   return deps
 }
 
-test('the first launch from the new folder moves the login item and MCP clients, once', () => {
+test('the first launch from the new folder moves the login item and MCP clients, once', async () => {
   let seen: ((command: string) => boolean) | null = null
   const deps = fakeDeps({
     repointMcpClients: (isLegacy, only) => {
@@ -91,7 +158,7 @@ test('the first launch from the new folder moves the login item and MCP clients,
       ]
     }
   })
-  assert.deepEqual(runWindowsInstallMigration(deps), {
+  assert.deepEqual(await runWindowsInstallMigration(deps), {
     ran: true,
     loginItem: true,
     mcpClients: ['claude-desktop'],
@@ -101,33 +168,112 @@ test('the first launch from the new folder moves the login item and MCP clients,
   assert.ok(seen!(oldExe))
   assert.ok(!seen!(newExe))
   assert.equal(JSON.parse(deps.marker ?? '{}').complete, true)
-  // Second launch: the marker short-circuits.
-  assert.equal(runWindowsInstallMigration(deps).ran, false)
+  assert.equal(JSON.parse(deps.marker ?? '{}').migratedAt, record.at)
+  // Done: the installer's record is removed, and the next launch does nothing.
+  assert.equal(deps.record, null)
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
   assert.deepEqual(deps.registered, [true])
 })
 
-test('a login item the user disabled in Task Manager stays disabled', () => {
+const untouchable = {
+  loginItem: { stateFor: () => assert.fail(), registerCurrent: () => assert.fail() },
+  repointMcpClients: () => assert.fail()
+}
+
+test('without an installer record nothing is repointed, whatever the folder is called', async () => {
+  // e.g. a copy of the real exe started from a folder named DoodleNote for a DPI capture.
+  const deps = fakeDeps(untouchable)
+  deps.record = null
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+  assert.equal(deps.marker, null)
+})
+
+test('a record that names another folder changes nothing', async () => {
+  for (const execPath of [
+    'D:\\Captures\\DoodleNote\\DoodleNote.exe',
+    'C:\\Users\\Pat\\Desktop\\DoodleNote\\DoodleNote.exe'
+  ]) {
+    const deps = fakeDeps({ ...untouchable, execPath })
+    deps.files.add(execPath)
+    assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+    assert.equal(deps.marker, null)
+    assert.notEqual(deps.record, null)
+    assert.match(deps.logs.join('\n'), /ignoring the install record: it is for /)
+  }
+})
+
+test('a record whose old exe still exists changes nothing', async () => {
+  const deps = fakeDeps(untouchable)
+  deps.files.add(oldExe)
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+  assert.equal(deps.marker, null)
+  assert.notEqual(deps.record, null)
+  assert.match(deps.logs.join('\n'), /still exists; nothing repointed/)
+})
+
+test('an unreadable record changes nothing', async () => {
+  const deps = fakeDeps({
+    ...untouchable,
+    readRecord: async () => {
+      throw new Error('reg.exe blocked')
+    }
+  })
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+  assert.match(deps.logs.join('\n'), /install record not read: reg.exe blocked/)
+})
+
+test('a record that cannot be cleared is cleared on a later launch without redoing the work', async () => {
+  let clears = 0
+  let repoints = 0
+  const deps = fakeDeps({
+    clearRecord: async () => {
+      clears++
+      if (clears === 1) throw new Error('access denied')
+      deps.record = null
+    },
+    repointMcpClients: () => {
+      repoints++
+      return []
+    }
+  })
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, [])
+  assert.match(deps.logs.join('\n'), /install record not cleared: access denied/)
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+  assert.equal(deps.record, null)
+  assert.equal(repoints, 1)
+  assert.deepEqual(deps.registered, [true])
+})
+
+test('a later move (a new record) is new work even after a completed one', async () => {
+  const deps = fakeDeps()
+  await runWindowsInstallMigration(deps)
+  deps.record = { ...record, at: '2027-01-01T00:00:00Z' }
+  assert.equal((await runWindowsInstallMigration(deps)).ran, true)
+  assert.deepEqual(deps.registered, [true, true])
+})
+
+test('a login item the user disabled in Task Manager stays disabled', async () => {
   const deps = fakeDeps({
     loginItem: {
       stateFor: () => ({ registered: true, enabled: false }),
       registerCurrent: (enabled) => deps.registered.push(enabled)
     }
   })
-  runWindowsInstallMigration(deps)
+  await runWindowsInstallMigration(deps)
   assert.deepEqual(deps.registered, [false])
 })
 
-test('no login item is created when the old install had none', () => {
+test('no login item is created when the old install had none', async () => {
   const deps = fakeDeps({
     loginItem: {
       stateFor: () => ({ registered: false, enabled: false }),
       registerCurrent: () => assert.fail()
     }
   })
-  assert.equal(runWindowsInstallMigration(deps).loginItem, false)
+  assert.equal((await runWindowsInstallMigration(deps)).loginItem, false)
 })
 
-test('nothing runs on macOS, in unpackaged runs, or from the old folder', () => {
+test('nothing runs on macOS, in unpackaged runs, or from the old folder', async () => {
   for (const overrides of [
     { platform: 'darwin' as NodeJS.Platform },
     { isPackaged: false },
@@ -138,12 +284,12 @@ test('nothing runs on macOS, in unpackaged runs, or from the old folder', () => 
       loginItem: { stateFor: () => assert.fail(), registerCurrent: () => assert.fail() },
       repointMcpClients: () => assert.fail()
     })
-    assert.equal(runWindowsInstallMigration(deps).ran, false)
+    assert.equal((await runWindowsInstallMigration(deps)).ran, false)
     assert.equal(deps.marker, null)
   }
 })
 
-test('a failed step is retried on the next launch and does not block the other step', () => {
+test('a failed step is retried on the next launch and does not block the other step', async () => {
   let attempts = 0
   const deps = fakeDeps({
     repointMcpClients: () => {
@@ -152,19 +298,19 @@ test('a failed step is retried on the next launch and does not block the other s
       return []
     }
   })
-  const first = runWindowsInstallMigration(deps)
+  const first = await runWindowsInstallMigration(deps)
   assert.equal(first.loginItem, true)
   assert.deepEqual(first.pending, ['mcp-clients'])
   assert.equal(JSON.parse(deps.marker ?? '{}').complete, false)
   assert.match(deps.logs.join('\n'), /not repointed: EBUSY/)
   // The login item is done and is not redone.
-  assert.deepEqual(runWindowsInstallMigration(deps).pending, [])
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, [])
   assert.equal(attempts, 2)
   assert.deepEqual(deps.registered, [true])
   assert.equal(JSON.parse(deps.marker ?? '{}').complete, true)
 })
 
-test('a client whose config could not be read is retried on its own until it succeeds', () => {
+test('a client whose config could not be read is retried on its own until it succeeds', async () => {
   const calls: (readonly string[] | null)[] = []
   const outcomes: McpRepointOutcome[][] = [
     [
@@ -181,22 +327,22 @@ test('a client whose config could not be read is retried on its own until it suc
       return outcomes[calls.length - 1]
     }
   })
-  assert.deepEqual(runWindowsInstallMigration(deps).pending, ['claude-code'])
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, ['claude-code'])
   assert.equal(JSON.parse(deps.marker ?? '{}').complete, false)
   assert.match(deps.logs.join('\n'), /claude-code not repointed: EBUSY/)
-  assert.deepEqual(runWindowsInstallMigration(deps).pending, ['claude-code'])
-  assert.deepEqual(runWindowsInstallMigration(deps), {
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, ['claude-code'])
+  assert.deepEqual(await runWindowsInstallMigration(deps), {
     ran: true,
     loginItem: false,
     mcpClients: ['claude-code'],
     pending: []
   })
   assert.deepEqual(calls, [null, ['claude-code'], ['claude-code']])
-  assert.equal(runWindowsInstallMigration(deps).ran, false)
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
   assert.equal(calls.length, 3)
 })
 
-test('a login item that could not be read is retried without redoing the MCP clients', () => {
+test('a login item that could not be read is retried without redoing the MCP clients', async () => {
   let reads = 0
   let repoints = 0
   const deps = fakeDeps({
@@ -213,28 +359,43 @@ test('a login item that could not be read is retried without redoing the MCP cli
       return []
     }
   })
-  assert.deepEqual(runWindowsInstallMigration(deps).pending, ['login-item'])
-  assert.deepEqual(runWindowsInstallMigration(deps).pending, [])
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, ['login-item'])
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, [])
   assert.equal(reads, 2)
   assert.equal(repoints, 1)
   assert.deepEqual(deps.registered, [true])
 })
 
-test('a marker for another exe, a damaged or unreadable one, or a version 1 one re-runs it', () => {
+test('a marker for another exe or move, a damaged or unreadable one, or a version 1 one re-runs it', async () => {
   const deps = fakeDeps()
-  deps.marker = JSON.stringify({ version: 2, to: 'C:\\Elsewhere\\DoodleNote.exe', complete: true })
-  assert.equal(runWindowsInstallMigration(deps).ran, true)
-  deps.marker = '{oops'
-  assert.equal(runWindowsInstallMigration(deps).ran, true)
-  // Version 1 could say "done" after a config failed to read.
-  deps.marker = JSON.stringify({ version: 1, from: oldExe, to: newExe })
-  assert.equal(runWindowsInstallMigration(deps).ran, true)
+  const done = { version: 2, from: oldExe, to: newExe, loginItemDone: true, mcpPending: [] }
+  for (const marker of [
+    JSON.stringify({
+      ...done,
+      to: 'C:\\Elsewhere\\DoodleNote.exe',
+      migratedAt: record.at,
+      complete: true
+    }),
+    // Progress of an earlier move does not cover this one.
+    JSON.stringify({ ...done, migratedAt: '2025-01-01T00:00:00Z', complete: true }),
+    '{oops',
+    // Version 1 could say "done" after a config failed to read.
+    JSON.stringify({ version: 1, from: oldExe, to: newExe })
+  ]) {
+    deps.marker = marker
+    deps.record = { ...record }
+    assert.equal((await runWindowsInstallMigration(deps)).ran, true, marker)
+  }
+  // The marker of this very move short-circuits (and clears the leftover record).
+  deps.record = { ...record }
+  assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+  assert.equal(deps.record, null)
   const unreadable = fakeDeps({
     readMarker: () => {
       throw new Error('EACCES')
     }
   })
-  assert.equal(runWindowsInstallMigration(unreadable).ran, true)
+  assert.equal((await runWindowsInstallMigration(unreadable)).ran, true)
 })
 
 test('the MCP server command is read back from both client dialects', () => {

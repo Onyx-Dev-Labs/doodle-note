@@ -6,8 +6,8 @@
 ; PRODUCT_FILENAME (the new folder name), DN_APP_EXE (the app's exe name in
 ; both; electron-builder's APP_EXECUTABLE_FILENAME is defined only after this
 ; file is compiled) and DN_MIGRATION_IDENTITY (what a journal must name). The
-; installer and the harness set $dnProgramsRoot, $dnProfileDir and
-; $dnJournalKey (HKCU) before calling the functions below.
+; installer and the harness set $dnProgramsRoot, $dnProfileDir, $dnJournalKey
+; and $dnStateKey (both HKCU) before calling the functions below.
 
 !include LogicLib.nsh
 !include FileFunc.nsh
@@ -134,6 +134,7 @@ Var dnLocked
   Var dnProgramsRoot
   Var dnProfileDir
   Var dnJournalKey
+  Var dnStateKey
   Var dnPlanDir
   Var dnPlanLegacy
   Var dnPlanNote
@@ -662,6 +663,11 @@ Var dnLocked
   ; anything (the folders may have changed since the run started), then removes
   ; it without following links and clears the journal. RESULT: "removed", or
   ; "kept: <why>" with the journal left armed so the next run retries.
+  ;
+  ; Only after a real move (the old folder is gone) does it record MigratedFrom,
+  ; MigratedTo and MigratedAt under $dnStateKey. The app repoints its login item
+  ; and MCP client entries only when that record names its own folder
+  ; (src/main/windows-install-migration.ts), never because of a folder name.
   Function dnFinishMigration
     Exch $2
     Exch
@@ -669,6 +675,13 @@ Var dnLocked
     Exch 2
     Exch $0
     Push $3
+    Push $R0
+    Push $R1
+    Push $R2
+    Push $R3
+    Push $R4
+    Push $R5
+    Push $R6
     Push $0
     Push $1
     Call dnCheckLegacyDir
@@ -683,12 +696,35 @@ Var dnLocked
       Pop $3
       ${if} $3 == "removed"
         DeleteRegKey HKCU $dnJournalKey
+        Push $0
+        Call dnCanonical
+        Pop $2
+        WriteRegStr HKCU $dnStateKey "MigratedFrom" $2
+        Push $1
+        Call dnCanonical
+        Pop $2
+        WriteRegStr HKCU $dnStateKey "MigratedTo" $2
+        ; UTC, ISO 8601.
+        ${GetTime} "" "LS" $R0 $R1 $R2 $R3 $R4 $R5 $R6
+        IntFmt $R0 "%02u" $R0
+        IntFmt $R1 "%02u" $R1
+        IntFmt $R4 "%02u" $R4
+        IntFmt $R5 "%02u" $R5
+        IntFmt $R6 "%02u" $R6
+        WriteRegStr HKCU $dnStateKey "MigratedAt" "$R2-$R1-$R0T$R4:$R5:$R6Z"
       ${else}
         StrCpy $3 "kept: a file is still in use"
       ${endif}
     ${endif}
     DetailPrint "$0: $3"
     StrCpy $0 $3
+    Pop $R6
+    Pop $R5
+    Pop $R4
+    Pop $R3
+    Pop $R2
+    Pop $R1
+    Pop $R0
     Pop $3
     Exch $0
     Exch 2

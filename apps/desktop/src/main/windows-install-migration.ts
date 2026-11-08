@@ -1,5 +1,6 @@
 import { win32 } from 'node:path'
 import { APP_IDENTITY, type AppIdentity } from './app-identity'
+import type { InstallMigrationRecord } from './windows-install-record'
 
 /**
  * Windows install folder rename, app side. Builds before 0.5.x installed to
@@ -12,10 +13,14 @@ import { APP_IDENTITY, type AppIdentity } from './app-identity'
  * - MCP client configs (Claude Desktop, Claude Code, Codex) that launch the
  *   bundled MCP server through the old DoodleNote.exe.
  *
- * Both are repointed at the running exe on the first launch from the new
- * folder. Nothing else depends on the folder: the profile (%APPDATA%\desktop,
- * which holds the library location, settings and accounts) is named after the
- * app, not the install folder, and is not moved.
+ * Both are repointed at the running exe, but only on the installer's word: the
+ * MigratedFrom / MigratedTo / MigratedAt record it writes under
+ * HKCU\Software\<APP_GUID> after it really moved this identity's install
+ * (windows-install-record.ts). A copy of the exe started from any folder that
+ * happens to be named DoodleNote (a DPI capture, a portable copy) finds no record
+ * naming its folder and changes nothing. Nothing else depends on the folder: the
+ * profile (%APPDATA%\desktop, which holds the library location, settings and
+ * accounts) is named after the app, not the install folder, and is not moved.
  */
 
 /** Both folder names come from the app identity, so a QA build migrates its own folders. */
@@ -27,15 +32,39 @@ export interface LegacyInstall {
   exe: string
 }
 
-/** The pre-rename install this exe replaced, or null when not running from the new install folder. */
+/** Windows path equality: case-insensitive, separator- and trailing-separator-tolerant. */
+export function samePath(a: string, b: string): boolean {
+  const norm = (path: string): string =>
+    win32
+      .normalize(path)
+      .replace(/[\\/]+$/, '')
+      .toLowerCase()
+  return norm(a) === norm(b)
+}
+
+/**
+ * The old install the installer's record says this exe replaced, or why the record
+ * does not apply to this exe: it must name exactly the running exe's folder as
+ * MigratedTo, and the identity's two sibling folder names.
+ */
 export function legacyInstallFor(
+  record: InstallMigrationRecord,
   execPath: string,
   identity: Pick<AppIdentity, 'installFolder' | 'legacyInstallFolder'> = APP_IDENTITY
-): LegacyInstall | null {
+): LegacyInstall | { reason: string } {
   const dir = win32.dirname(win32.normalize(execPath))
-  if (win32.basename(dir).toLowerCase() !== identity.installFolder.toLowerCase()) return null
-  const legacyDir = win32.join(win32.dirname(dir), identity.legacyInstallFolder)
-  return { dir: legacyDir, exe: win32.join(legacyDir, win32.basename(execPath)) }
+  if (!samePath(record.to, dir)) return { reason: `it is for ${record.to}, not ${dir}` }
+  if (win32.basename(dir).toLowerCase() !== identity.installFolder.toLowerCase())
+    return { reason: `${dir} is not a ${identity.installFolder} folder` }
+  const from = win32.normalize(record.from).replace(/[\\/]+$/, '')
+  if (
+    win32.basename(from).toLowerCase() !== identity.legacyInstallFolder.toLowerCase() ||
+    !samePath(win32.dirname(from), win32.dirname(dir))
+  )
+    return {
+      reason: `${record.from} is not the ${identity.legacyInstallFolder} folder beside ${dir}`
+    }
+  return { dir: from, exe: win32.join(from, win32.basename(execPath)) }
 }
 
 /** Case-insensitive, separator-tolerant "is this path inside that folder" (Windows rules). */
@@ -63,6 +92,12 @@ export interface InstallMigrationDeps {
   platform: NodeJS.Platform
   isPackaged: boolean
   execPath: string
+  /** The installer's record of a completed move, or null when there is none. */
+  readRecord(): Promise<InstallMigrationRecord | null>
+  /** Removes the record once every step has succeeded. */
+  clearRecord(): Promise<void>
+  /** Whether a file exists (the old exe must be gone). */
+  exists(path: string): boolean
   /** Contents of the progress marker, or null when absent. */
   readMarker(): string | null
   writeMarker(contents: string): void
@@ -101,13 +136,15 @@ interface Marker {
   version: number
   from: string
   to: string
+  /** The record's MigratedAt: progress belongs to one move. */
+  migratedAt: string
   loginItemDone: boolean
   /** MCP clients still to repoint; "all" when the whole step failed. */
   mcpPending: string[] | 'all'
   complete: boolean
 }
 
-function readProgress(raw: string | null, execPath: string): Marker | null {
+function readProgress(raw: string | null, execPath: string, migratedAt: string): Marker | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as Partial<Marker>
@@ -115,6 +152,7 @@ function readProgress(raw: string | null, execPath: string): Marker | null {
       parsed.version !== MARKER_VERSION ||
       typeof parsed.to !== 'string' ||
       parsed.to.toLowerCase() !== execPath.toLowerCase() ||
+      parsed.migratedAt !== migratedAt ||
       typeof parsed.loginItemDone !== 'boolean' ||
       typeof parsed.complete !== 'boolean' ||
       !(
@@ -132,23 +170,52 @@ function readProgress(raw: string | null, execPath: string): Marker | null {
 }
 
 /**
- * Idempotent; runs after a move until every step has succeeded once (the marker
- * records progress). A step or client that fails is logged and retried on the
- * next launch; the others still run and are not redone.
+ * Runs only when the installer's record says it moved this exe's install, and the
+ * old exe is gone. Idempotent; runs until every step has succeeded once (the
+ * marker records progress per move), then clears the record. A step or client
+ * that fails is logged and retried on the next launch; the others still run and
+ * are not redone. Without a record nothing is read or written.
  */
-export function runWindowsInstallMigration(deps: InstallMigrationDeps): InstallMigrationResult {
+export async function runWindowsInstallMigration(
+  deps: InstallMigrationDeps
+): Promise<InstallMigrationResult> {
   const none = { ran: false, loginItem: false, mcpClients: [], pending: [] }
   if (deps.platform !== 'win32' || !deps.isPackaged) return none
-  const legacy = legacyInstallFor(deps.execPath)
-  if (!legacy) return none
+  let record: InstallMigrationRecord | null
+  try {
+    record = await deps.readRecord()
+  } catch (error) {
+    deps.log(`[install-migration] install record not read: ${(error as Error).message}`)
+    return none
+  }
+  if (!record) return none
+  const legacy = legacyInstallFor(record, deps.execPath)
+  if ('reason' in legacy) {
+    deps.log(`[install-migration] ignoring the install record: ${legacy.reason}`)
+    return none
+  }
+  if (deps.exists(legacy.exe)) {
+    deps.log(`[install-migration] ${legacy.exe} still exists; nothing repointed`)
+    return none
+  }
+  const clear = async (): Promise<void> => {
+    try {
+      await deps.clearRecord()
+    } catch (error) {
+      deps.log(`[install-migration] install record not cleared: ${(error as Error).message}`)
+    }
+  }
   let raw: string | null = null
   try {
     raw = deps.readMarker()
   } catch (error) {
     deps.log(`[install-migration] marker not read: ${(error as Error).message}`)
   }
-  const progress = readProgress(raw, deps.execPath)
-  if (progress?.complete) return none
+  const progress = readProgress(raw, deps.execPath, record.at)
+  if (progress?.complete) {
+    await clear()
+    return none
+  }
 
   let loginItemDone = progress?.loginItemDone ?? false
   let loginItem = false
@@ -198,6 +265,7 @@ export function runWindowsInstallMigration(deps: InstallMigrationDeps): InstallM
     version: MARKER_VERSION,
     from: legacy.exe,
     to: deps.execPath,
+    migratedAt: record.at,
     loginItemDone,
     mcpPending,
     complete: pending.length === 0
@@ -207,5 +275,6 @@ export function runWindowsInstallMigration(deps: InstallMigrationDeps): InstallM
   } catch (error) {
     deps.log(`[install-migration] marker not written: ${(error as Error).message}`)
   }
+  if (marker.complete) await clear()
   return { ran: true, loginItem, mcpClients, pending }
 }

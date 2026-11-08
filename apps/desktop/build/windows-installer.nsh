@@ -19,7 +19,10 @@
 ;      the old uninstall command in a journal so electron-builder's "uninstall
 ;      old version" step cannot delete the old folder before the new one exists.
 ;   3. customInstall verifies the new install, then dnFinishMigration checks the
-;      old folder again and only then removes it without following links.
+;      old folder again and only then removes it without following links. Only
+;      when the old folder is really gone does it write the MigratedFrom /
+;      MigratedTo / MigratedAt record (HKCU\Software\${APP_GUID}) that lets the
+;      app repoint its login item and MCP client entries.
 ;
 ; The journal, HKCU\Software\${APP_GUID}\InstallMigration, belongs to this app
 ; identity (APP_GUID derives from appId) and records the identity and both
@@ -34,7 +37,8 @@
 ; The app profile (%APPDATA%\<package name>: library location, settings,
 ; accounts) is keyed on the app name, not the folder; the installer never touches
 ; it. The app repoints references outside the installer's reach (login item, MCP
-; client configs) on first launch: src/main/windows-install-migration.ts.
+; client configs) on the next launch, only when the record names its own folder:
+; src/main/windows-install-migration.ts.
 ;
 ; An install with /D=<folder> is left alone.
 
@@ -70,7 +74,10 @@
 !endif
 
 !ifdef DN_MIGRATE_INSTALL_FOLDER
-  !define DN_MIGRATION_KEY "Software\${APP_GUID}\InstallMigration"
+  ; Per identity: the journal of a migration in progress, and (in the parent key)
+  ; the MigratedFrom/MigratedTo/MigratedAt record of one that was completed.
+  !define DN_STATE_KEY "Software\${APP_GUID}"
+  !define DN_MIGRATION_KEY "${DN_STATE_KEY}\InstallMigration"
   !define DN_TASKBAR_PINS "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
 
   Var dnLegacyDir
@@ -90,6 +97,7 @@
     StrCpy $dnProgramsRoot "$LOCALAPPDATA\Programs"
     StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
     StrCpy $dnJournalKey "${DN_MIGRATION_KEY}"
+    StrCpy $dnStateKey "${DN_STATE_KEY}"
     !insertmacro GetDParameter $R0
     ${if} $R0 == ""
       StrCpy $dnPlanDir "$INSTDIR"
