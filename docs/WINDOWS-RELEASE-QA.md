@@ -564,7 +564,10 @@ Windows upgrade…" or "Couldn't finish the Windows upgrade" with the reason, an
 says that Open at login and connected agents may still start DoodleNote from the
 old folder, which the installer removed, until it finishes. Client configs are replaced atomically
 (a temporary file in the same folder with the original's mode, then a rename;
-a symbolic link is followed), only when their content changes, and not at all if
+a symbolic link is followed to the file the file system itself reaches,
+`fs.realpathSync.native`, never by joining link texts lexically; a dangling link
+to the name inside its folder's real path, where `writeFileSync` would create it;
+where that cannot be determined, nothing is written), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new
 text).
 
@@ -575,8 +578,13 @@ order mark, an empty file read as none, a read error never treated as "no file",
 and mode 0600 for a new file, apply **on Windows only**. macOS (every platform but
 Windows) keeps the code of win/bark 9355b87 (`src/main/mcp-clients-logic-base.ts`,
 pinned by SHA-256) with one change: the write is a temporary file renamed over
-the config. `src/main/agent-access-darwin.test.ts` compares a darwin service
-with the base service, byte for byte, on Connect, Disconnect and the status.
+the config, in the file the base's `writeFileSync` wrote (the same resolution;
+where it cannot be determined, or the place holds no file, the base's in-place
+write). `src/main/agent-access-darwin.test.ts` compares a darwin service
+with the base service, byte for byte, on Connect, Disconnect and the status, and
+on 14 symbolic link topologies (a `..` after a folder link, dangling targets in
+linked folders, chains, loops) requires both writers to change the same file and
+nothing else.
 
 ### Where an install records what it decided
 

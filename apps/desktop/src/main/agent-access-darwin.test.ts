@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -16,7 +17,13 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test, type TestContext } from 'node:test'
-import { AgentAccessService, agentAccessRoots } from './agent-access-service'
+import {
+  AgentAccessService,
+  agentAccessRoots,
+  readConfigFile,
+  replaceConfigFile,
+  replaceConfigFileBase
+} from './agent-access-service'
 import {
   codexConfigHasServer,
   codexConfigWithServer,
@@ -420,6 +427,392 @@ test('darwin: a symbolic link is followed as writeFileSync followed it, dangling
       }
       assert.deepEqual(results[1], results[0])
       assert.equal(results[1]?.link, true)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Symbolic link topologies. writeFileSync opens the path, so the kernel resolves
+// every link and every `..` in order (a `..` after a folder link climbs from the
+// link's target). The darwin writer must land on the same file in each case,
+// and so must the Windows writer, which uses the same resolution.
+
+interface Entry {
+  kind: 'file' | 'dir' | 'link' | 'other'
+  ino: number
+  data: string
+  mode: number | null
+}
+
+/** Every entry under `root`, links not followed: kind, inode, content or link text, mode. */
+function snapshot(root: string): Map<string, Entry> {
+  const entries = new Map<string, Entry>()
+  const walk = (relative: string): void => {
+    for (const name of readdirSync(join(root, relative)).sort()) {
+      const rel = relative ? `${relative}/${name}` : name
+      const full = join(root, rel)
+      const stats = lstatSync(full)
+      const kind = stats.isSymbolicLink()
+        ? 'link'
+        : stats.isDirectory()
+          ? 'dir'
+          : stats.isFile()
+            ? 'file'
+            : 'other'
+      entries.set(rel, {
+        kind,
+        ino: stats.ino,
+        data:
+          kind === 'link'
+            ? readlinkSync(full)
+            : kind === 'file'
+              ? readFileSync(full, 'latin1')
+              : '',
+        mode: kind === 'file' ? stats.mode & 0o7777 : null
+      })
+      if (kind === 'dir') walk(rel)
+    }
+  }
+  walk('')
+  return entries
+}
+
+/**
+ * What a write changed: the entries whose content (or presence) changed, and,
+ * for each that existed before, whether it is still the same inode (written in
+ * place) or a new one (renamed over). Anything else that changed (kind, mode,
+ * link text, inode without content) is reported as a stray change.
+ */
+function writeEffect(
+  before: Map<string, Entry>,
+  after: Map<string, Entry>
+): {
+  changed: Record<string, { data: string; mode: number | null; inode: 'same' | 'new' | 'created' }>
+  stray: string[]
+} {
+  const changed: Record<
+    string,
+    { data: string; mode: number | null; inode: 'same' | 'new' | 'created' }
+  > = {}
+  const stray: string[] = []
+  for (const [rel, now] of after) {
+    const was = before.get(rel)
+    if (!was) {
+      if (now.kind === 'file') changed[rel] = { data: now.data, mode: now.mode, inode: 'created' }
+      else stray.push(`${rel}: new ${now.kind}`)
+    } else if (was.kind !== now.kind) stray.push(`${rel}: ${was.kind} -> ${now.kind}`)
+    else if (now.kind === 'file' && (was.data !== now.data || was.ino !== now.ino))
+      changed[rel] = { data: now.data, mode: now.mode, inode: was.ino === now.ino ? 'same' : 'new' }
+    else if (was.data !== now.data || was.mode !== now.mode || was.ino !== now.ino)
+      stray.push(`${rel}: changed`)
+  }
+  for (const rel of before.keys()) if (!after.has(rel)) stray.push(`${rel}: removed`)
+  return { changed, stray }
+}
+
+interface LinkCase {
+  name: string
+  client: McpClientId
+  /** Builds the tree under `root` (absolute link texts point inside it). */
+  build: (root: string, link: (text: string, at: string) => void) => void
+  /** The file a write lands on, relative to root; null: the write fails. */
+  lands: string | null
+}
+
+const write = (root: string, rel: string, text: string): void => {
+  mkdirSync(dirname(join(root, rel)), { recursive: true })
+  writeFileSync(join(root, rel), text)
+}
+
+const LINK_CASES: LinkCase[] = [
+  {
+    name: 'a link to a file',
+    client: 'claude-code',
+    build: (root, link) => {
+      write(root, 'dotfiles/claude.json', '{"a":1}')
+      link(join(root, 'dotfiles', 'claude.json'), 'home/.claude.json')
+    },
+    lands: 'dotfiles/claude.json'
+  },
+  {
+    name: 'a dangling link',
+    client: 'claude-code',
+    build: (root, link) => {
+      mkdirSync(join(root, 'dotfiles'), { recursive: true })
+      link(join(root, 'dotfiles', 'claude.json'), 'home/.claude.json')
+    },
+    lands: 'dotfiles/claude.json'
+  },
+  {
+    // The reported case: `..` after a folder link climbs from the link's target.
+    name: '.. after a folder link (both candidates exist)',
+    client: 'claude-code',
+    build: (root, link) => {
+      write(root, 'store/config.json', '{"store":1}')
+      write(root, 'home/config.json', '{"home":1}')
+      mkdirSync(join(root, 'store', 'nested'), { recursive: true })
+      link('../store/nested', 'home/dirlink')
+      link('dirlink/../config.json', 'home/.claude.json')
+    },
+    lands: 'store/config.json'
+  },
+  {
+    name: '.. after a folder link, dangling (the lexical candidate exists)',
+    client: 'claude-code',
+    build: (root, link) => {
+      write(root, 'home/config.json', '{"home":1}')
+      mkdirSync(join(root, 'store', 'nested'), { recursive: true })
+      link('../store/nested', 'home/dirlink')
+      link('dirlink/../config.json', 'home/.claude.json')
+    },
+    lands: 'store/config.json'
+  },
+  {
+    name: 'a dangling link into a linked folder',
+    client: 'claude-code',
+    build: (root, link) => {
+      mkdirSync(join(root, 'store', 'nested'), { recursive: true })
+      link('../store/nested', 'home/linkdir')
+      link('linkdir/claude.json', 'home/.claude.json')
+    },
+    lands: 'store/nested/claude.json'
+  },
+  {
+    name: 'a chain whose second link is relative inside a linked folder',
+    client: 'claude-code',
+    build: (root, link) => {
+      write(root, 'store/b.json', '{"store":1}')
+      write(root, 'home/b.json', '{"home":1}')
+      mkdirSync(join(root, 'store', 'nested'), { recursive: true })
+      link('../store/nested', 'home/dotfiles')
+      link('../b.json', 'store/nested/a.json')
+      link('dotfiles/a.json', 'home/.claude.json')
+    },
+    lands: 'store/b.json'
+  },
+  {
+    name: 'the same chain, dangling at the end',
+    client: 'claude-code',
+    build: (root, link) => {
+      write(root, 'home/b.json', '{"home":1}')
+      mkdirSync(join(root, 'store', 'nested'), { recursive: true })
+      link('../store/nested', 'home/dotfiles')
+      link('../b.json', 'store/nested/a.json')
+      link('dotfiles/a.json', 'home/.claude.json')
+    },
+    lands: 'store/b.json'
+  },
+  {
+    name: 'two .. after a folder link',
+    client: 'claude-code',
+    build: (root, link) => {
+      write(root, 'store/x.json', '{"store":1}')
+      write(root, 'x.json', '{"root":1}')
+      mkdirSync(join(root, 'store', 'nested', 'deeper'), { recursive: true })
+      link('../store/nested/deeper', 'home/deep')
+      link('deep/../../x.json', 'home/.claude.json')
+    },
+    lands: 'store/x.json'
+  },
+  {
+    name: "Codex: the config's folder is a link, the config a relative link with ..",
+    client: 'codex',
+    build: (root, link) => {
+      write(root, 'store/shared.toml', 'model = "store"\n')
+      write(root, 'home/shared.toml', 'model = "home"\n')
+      mkdirSync(join(root, 'store', 'codex'), { recursive: true })
+      link('../store/codex', 'home/.codex')
+      link('../shared.toml', 'store/codex/config.toml')
+    },
+    lands: 'store/shared.toml'
+  },
+  {
+    name: "Codex: the config's folder is a link, no config yet",
+    client: 'codex',
+    build: (root, link) => {
+      mkdirSync(join(root, 'store', 'codex'), { recursive: true })
+      link('../store/codex', 'home/.codex')
+    },
+    lands: 'store/codex/config.toml'
+  },
+  {
+    name: 'a dangling link into a missing folder',
+    client: 'claude-code',
+    build: (_root, link) => {
+      link('nowhere/claude.json', 'home/.claude.json')
+    },
+    lands: null
+  },
+  {
+    name: 'a dangling link through a dangling folder link',
+    client: 'claude-code',
+    build: (_root, link) => {
+      link('../missing', 'home/gone')
+      link('gone/claude.json', 'home/.claude.json')
+    },
+    lands: null
+  },
+  {
+    name: 'a loop',
+    client: 'claude-code',
+    build: (_root, link) => {
+      link('loop.json', 'home/.claude.json')
+      link('.claude.json', 'home/loop.json')
+    },
+    lands: null
+  },
+  {
+    name: 'a link to a folder',
+    client: 'claude-code',
+    build: (root, link) => {
+      mkdirSync(join(root, 'store', 'folder'), { recursive: true })
+      link('../store/folder', 'home/.claude.json')
+    },
+    lands: null
+  }
+]
+
+/** Builds `c` under `root`; false when symbolic links cannot be made here. */
+function buildCase(root: string, c: LinkCase): boolean {
+  rmSync(root, { recursive: true, force: true })
+  mkdirSync(join(root, 'home'), { recursive: true })
+  try {
+    c.build(root, (text, at) => {
+      mkdirSync(dirname(join(root, at)), { recursive: true })
+      symlinkSync(text, join(root, at))
+    })
+    return true
+  } catch (error) {
+    if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM')
+      return false
+    throw error
+  }
+}
+
+const clientPath = (root: string, id: McpClientId): string =>
+  CLIENTS.find((c) => c.id === id)!.path(join(root, 'home'))
+
+/**
+ * Runs `write` on a fresh copy of `c` and reports what it changed, plus its error
+ * code (null: it succeeded).
+ */
+function effectOf(
+  root: string,
+  c: LinkCase,
+  run: (path: string) => void
+): {
+  error: string | null
+  changed: ReturnType<typeof writeEffect>['changed']
+  stray: string[]
+} | null {
+  if (!buildCase(root, c)) return null
+  const before = snapshot(root)
+  let error: string | null = null
+  try {
+    run(clientPath(root, c.client))
+  } catch (e) {
+    error = (e as NodeJS.ErrnoException).code ?? (e as Error).message
+  }
+  return { error, ...writeEffect(before, snapshot(root)) }
+}
+
+const TEXT = '{"written":1}\n'
+
+test('darwin: every link topology, the base writer and the darwin writer change the same file', (t) => {
+  withHomes((homes) => {
+    let checked = 0
+    for (const c of LINK_CASES) {
+      const label = `${c.name} (${c.client})`
+      const base = effectOf(homes.base, c, (path) => writeFileSync(path, TEXT))
+      if (base === null) {
+        t.skip('symbolic links need a privilege on this machine')
+        return
+      }
+      const darwin = effectOf(homes.darwin, c, (path) => replaceConfigFileBase(path, TEXT))!
+      // The base: in place (the same inode), on the expected file, or the expected failure.
+      assert.deepEqual(base.stray, [], label)
+      if (c.lands === null) {
+        assert.ok(base.error !== null, label)
+        assert.deepEqual(base.changed, {}, label)
+      } else {
+        assert.equal(base.error, null, label)
+        assert.deepEqual(Object.keys(base.changed), [c.lands], label)
+        assert.notEqual(base.changed[c.lands].inode, 'new', label)
+      }
+      // The darwin writer: the same error, the same file with the same bytes and
+      // mode; that file's inode replaced (renamed over) instead of written in place.
+      assert.equal(darwin.error, base.error, label)
+      assert.deepEqual(darwin.stray, [], label)
+      const expected = Object.fromEntries(
+        Object.entries(base.changed).map(([rel, e]) => [
+          rel,
+          { ...e, inode: e.inode === 'same' ? 'new' : e.inode }
+        ])
+      )
+      assert.deepEqual(darwin.changed, expected, label)
+      const [rel] = Object.keys(base.changed)
+      t.diagnostic(
+        rel === undefined
+          ? `${label}: both fail with ${base.error}, nothing changed`
+          : `${label}: both write ${rel} (base: inode ${base.changed[rel].inode}, darwin: ${darwin.changed[rel].inode}), nothing else changed`
+      )
+      checked++
+    }
+    assert.equal(checked, LINK_CASES.length)
+  })
+})
+
+test('darwin: every link topology through the services, as the base service', (t) => {
+  withHomes((homes) => {
+    for (const c of LINK_CASES) {
+      const label = `${c.name} (${c.client})`
+      const dialect = CLIENTS.find((x) => x.id === c.client)!.dialect
+      const base = effectOf(homes.base, c, (path) => baseSetClientConnected(path, dialect, true))
+      if (base === null) {
+        t.skip('symbolic links need a privilege on this machine')
+        return
+      }
+      const darwin = effectOf(homes.darwin, c, () =>
+        darwinService(join(homes.darwin, 'home')).setClientConnected(c.client, true)
+      )!
+      assert.equal(darwin.error, base.error, label)
+      assert.deepEqual(darwin.stray, base.stray, label)
+      assert.deepEqual(Object.keys(darwin.changed), Object.keys(base.changed), label)
+      if (c.lands !== null) assert.deepEqual(Object.keys(base.changed), [c.lands], label)
+      for (const [rel, e] of Object.entries(base.changed)) {
+        assert.equal(darwin.changed[rel].data, e.data, `${label}: ${rel}`)
+        assert.equal(darwin.changed[rel].mode, e.mode, `${label}: ${rel}`)
+        assert.equal(darwin.changed[rel].inode, e.inode === 'same' ? 'new' : e.inode, label)
+      }
+    }
+  })
+})
+
+test('every link topology, the Windows writer lands where writeFileSync lands (or refuses)', (t) => {
+  withHomes((homes) => {
+    for (const c of LINK_CASES) {
+      const label = `${c.name} (${c.client})`
+      const base = effectOf(homes.base, c, (path) => writeFileSync(path, TEXT))
+      if (base === null) {
+        t.skip('symbolic links need a privilege on this machine')
+        return
+      }
+      const strict = effectOf(homes.darwin, c, (path) => {
+        const read = readConfigFile(path)
+        if (read.state === 'error') throw new Error(read.message)
+        if (!replaceConfigFile(path, read.state === 'read' ? read.raw : null, TEXT))
+          throw new Error('changed meanwhile')
+      })!
+      assert.deepEqual(strict.stray, [], label)
+      if (c.lands === null) {
+        // Refused, nothing written.
+        assert.ok(strict.error !== null, label)
+        assert.deepEqual(strict.changed, {}, label)
+      } else {
+        assert.equal(strict.error, null, label)
+        assert.deepEqual(Object.keys(strict.changed), [c.lands], label)
+        assert.equal(strict.changed[c.lands].data, TEXT, label)
+      }
     }
   })
 })

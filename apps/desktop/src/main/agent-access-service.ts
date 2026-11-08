@@ -15,7 +15,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
   AGENT_ACCESS_CONNECT_CLIENT_CHANNEL,
@@ -77,6 +77,63 @@ export function sameConfigContent(a: string, b: string, dialect: 'json' | 'toml'
   return text(a) === text(b)
 }
 
+/**
+ * Where a write to `path` lands, resolved as the file system resolves it: the
+ * real path of an existing file (fs.realpathSync.native: realpath(3) on macOS,
+ * GetFinalPathNameByHandle on Windows), or, when the chain ends in a name that
+ * does not exist yet (a dangling symbolic link, or no file), that name inside
+ * its folder's real path, which is where open(O_CREAT) creates it. A link's text
+ * is never joined and normalised lexically: `dirlink/../config.json` is the
+ * `config.json` beside dirlink's *target*, not beside dirlink. Null when the
+ * place cannot be determined this way (a missing or unreadable folder on the
+ * way, a loop, a name ending in `.` or `..`); the caller then writes in place
+ * (macOS: exactly the base's writeFileSync, which fails or succeeds as before)
+ * or refuses (Windows).
+ */
+export function configWriteTarget(path: string): string | null {
+  const separators = process.platform === 'win32' ? /[\\/]/ : /\//
+  let current = path
+  for (let hops = 0; hops <= 40; hops++) {
+    try {
+      const real = realpathSync.native(current)
+      // (Checked, not assumed: a realpath that accepted a missing last name.)
+      if (!lstatSync(real).isSymbolicLink()) return real
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null
+    }
+    // Something on the way does not exist: resolve the folder, then the last name.
+    let cut = -1
+    for (let i = current.length - 1; i >= 0; i--)
+      if (separators.test(current[i])) {
+        cut = i
+        break
+      }
+    const leaf = current.slice(cut + 1)
+    if (leaf === '' || leaf === '.' || leaf === '..') return null
+    let folder: string
+    try {
+      const head = cut < 0 ? '.' : current.slice(0, cut) || current[0]
+      // `C:` alone is the drive's current folder, not its root.
+      folder = realpathSync.native(/^[A-Za-z]:$/.test(head) ? head + sep : head)
+    } catch {
+      return null
+    }
+    const candidate = join(folder, leaf)
+    let link: boolean
+    try {
+      link = lstatSync(candidate).isSymbolicLink()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate
+      return null
+    }
+    if (!link) return candidate
+    // A dangling link: its text is relative to the link's real folder, taken verbatim.
+    const text = readlinkSync(candidate)
+    current = isAbsolute(text) ? text : `${folder}${sep}${text}`
+  }
+  return null
+}
+
 const sleep = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
@@ -88,12 +145,15 @@ const sleep = (ms: number): void => {
  * often, so the file is read again just before the rename; when it is no longer
  * `expected` (null: it did not exist) nothing is written and false is returned so
  * the caller starts over from the new content. A symbolic link is followed, so a
- * dotfile link keeps pointing at its target.
+ * dotfile link keeps pointing at its target (configWriteTarget, the same
+ * resolution as macOS); where it leads cannot be determined, nothing is written.
  */
 export function replaceConfigFile(path: string, expected: string | null, next: string): boolean {
-  const target = expected === null ? path : realpathSync(path)
+  if (expected === null) mkdirSync(dirname(path), { recursive: true })
+  const target = configWriteTarget(path)
+  if (target === null)
+    throw new Error(`${path}: could not tell where this file leads; not written.`)
   const mode = expected === null ? 0o600 : statSync(target).mode & 0o7777
-  mkdirSync(dirname(target), { recursive: true })
   const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
   writeFileSync(temporary, next, { flag: 'wx', mode })
   try {
@@ -136,34 +196,27 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * re-read before the write (the base wrote blind), the original's permission
  * bits kept (writeFileSync kept them), a new file created with the default mode
  * (0666 less the umask, as writeFileSync did), and a symbolic link followed, even
- * one whose target does not exist yet (writeFileSync created the target).
+ * one whose target does not exist yet (writeFileSync created the target), to
+ * the file the kernel's own resolution reaches (configWriteTarget). Where that
+ * cannot be determined, or the place holds no file, the base's in-place write.
  */
 export function replaceConfigFileBase(path: string, next: string): void {
-  let target = path
-  for (let hops = 0; hops < 40; hops++) {
-    let link: boolean
+  const target = configWriteTarget(path)
+  let stats: ReturnType<typeof statSync> | null = null
+  if (target !== null)
     try {
-      link = lstatSync(target).isSymbolicLink()
+      stats = statSync(target)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') break
-      throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    if (!link) break
-    target = resolve(dirname(target), readlinkSync(target))
+  // Not determinable (configWriteTarget), or a folder (or anything else that is
+  // not a file) in the config's place: written as the base wrote it, in place
+  // through the original path, so it fails (or succeeds) exactly as before.
+  if (target === null || (stats !== null && !stats.isFile())) {
+    writeFileSync(path, next)
+    return
   }
-  let mode: number | null = null
-  try {
-    const stats = statSync(target)
-    // A folder (or anything else that is not a file) in the config's place is
-    // written as the base wrote it, in place, so it fails exactly as before.
-    if (!stats.isFile()) {
-      writeFileSync(target, next)
-      return
-    }
-    mode = stats.mode & 0o7777
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
+  const mode = stats === null ? null : stats.mode & 0o7777
   const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
   writeFileSync(temporary, next, { flag: 'wx', mode: mode ?? 0o666 })
   try {
