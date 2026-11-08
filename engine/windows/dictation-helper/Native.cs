@@ -137,8 +137,42 @@ namespace DoodleNote.DictationHelper
         [DllImport("kernel32.dll")]
         public static extern ulong GetTickCount64();
 
-        /// <summary>When this boot started (UTC, from the tick count; equal within clock adjustments for one boot).</summary>
+        /// <summary>When this boot started (UTC, from the tick count). Diagnostics only: it moves with clock corrections.</summary>
         public static DateTime BootTimeUtc { get { return DateTime.UtcNow - TimeSpan.FromMilliseconds(GetTickCount64()); } }
+
+        /// <summary>
+        /// A random key for this logon, kept in a VOLATILE registry key (HKCU\Software\DoodleNote.Bark.Session,
+        /// one value per app identity): it lives as long as the user's hive is loaded, so it is gone after a
+        /// logoff or a reboot, and no wall clock is involved. Created once per logon under a mutex (two
+        /// helpers starting together agree on it). Empty when the registry cannot be used.
+        /// </summary>
+        public static string LogonSessionKey(string identity)
+        {
+            try
+            {
+                using (System.Threading.Mutex mutex = new System.Threading.Mutex(false, "Local\\DoodleNote-Bark-session-key-" + identity))
+                {
+                    bool held = false;
+                    try
+                    {
+                        try { held = mutex.WaitOne(2000); } catch (System.Threading.AbandonedMutexException) { held = true; }
+                        using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\DoodleNote.Bark.Session",
+                            Microsoft.Win32.RegistryKeyPermissionCheck.ReadWriteSubTree, Microsoft.Win32.RegistryOptions.Volatile))
+                        {
+                            if (key == null) return "";
+                            string existing = key.GetValue(identity) as string;
+                            if (existing != null && existing.Length == 32) return existing;
+                            if (!held) return ""; // could not agree with another helper: unknown, never a guess
+                            string fresh = Guid.NewGuid().ToString("N");
+                            key.SetValue(identity, fresh, Microsoft.Win32.RegistryValueKind.String);
+                            return fresh;
+                        }
+                    }
+                    finally { if (held) mutex.ReleaseMutex(); }
+                }
+            }
+            catch (Exception) { return ""; }
+        }
 
         /// <summary>This process's logon session (TokenStatistics.AuthenticationId); unique per logon until reboot. Empty when unreadable.</summary>
         public static string LogonId()

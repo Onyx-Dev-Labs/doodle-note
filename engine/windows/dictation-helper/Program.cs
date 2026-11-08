@@ -46,7 +46,7 @@ namespace DoodleNote.DictationHelper
                 // A terminal request: an exit already under way (a restart's long wait) is shortened, and
                 // this thread waits for it to finish its bounded steps instead of ending the process now.
                 DeliveriesInFlight.Shorten(QuitWaitMs);
-                if (Volatile.Read(ref exiting) == 1) { Thread.Sleep(QuitWaitMs + HooksStopMs + AudioRestoreMs + DrainMs + 1000); return; }
+                if (Volatile.Read(ref exiting) == 1) { WaitForExitInProgress(); return; }
                 Shutdown(ExitCrash, null, QuitWaitMs);
             };
             Wire.Start();
@@ -64,7 +64,15 @@ namespace DoodleNote.DictationHelper
             audio.Async(OutputAudio.RecoverLeftover);
 
             // Being asked to quit must never leave the user's sound muted.
-            ctrlHandler = delegate(int type) { DeliveriesInFlight.Shorten(QuitWaitMs); Shutdown(); return true; };
+            // A close or logoff event ends the process once this handler returns: an exit already under way
+            // (a restart's wait) is shortened and given the time to finish its bounded steps first.
+            ctrlHandler = delegate(int type)
+            {
+                DeliveriesInFlight.Shorten(QuitWaitMs);
+                if (Volatile.Read(ref exiting) == 1) { WaitForExitInProgress(); return true; }
+                Shutdown();
+                return true;
+            };
             Native.SetConsoleCtrlHandler(ctrlHandler, true);
 
             Thread reader = new Thread(ReadLoop);
@@ -123,6 +131,12 @@ namespace DoodleNote.DictationHelper
         public const int ExitCrash = 4;
 
         static void Shutdown() { Shutdown(0, null, QuitWaitMs); }
+
+        /// <summary>
+        /// Another thread is already leaving (Environment.Exit ends this one too): wait out its bounded steps,
+        /// so a crash handler or a close event does not end the process in the middle of them.
+        /// </summary>
+        static void WaitForExitInProgress() { Thread.Sleep(QuitWaitMs + HooksStopMs + AudioRestoreMs + DrainMs + 1000); }
 
         /// <summary>Leave to be replaced: only between deliveries (the running one finishes first).</summary>
         static void Restart(string reason, string why)
@@ -430,7 +444,17 @@ namespace DoodleNote.DictationHelper
                     {
                         string txnText = Wire.Str(request, "text") ?? "dictated";
                         int holdMs = (int)(Wire.Num(request, "holdMs") ?? 0);
-                        work.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("result", Delivery.TestTransaction(txnText, holdMs))); });
+                        work.Async(id, delegate
+                        {
+                            // Counted like a delivery: an exit waits for it, and none starts once the helper is leaving.
+                            if (!DeliveriesInFlight.Begin()) { Wire.Reply(id, true, Wire.Fields("result", "helper-busy")); return; }
+                            try
+                            {
+                                Delivery.CurrentRequestId = id;
+                                Wire.Reply(id, true, Wire.Fields("result", Delivery.TestTransaction(txnText, holdMs)));
+                            }
+                            finally { DeliveriesInFlight.End(); }
+                        });
                     }
 #endif
                     break;

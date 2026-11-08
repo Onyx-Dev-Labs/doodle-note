@@ -622,38 +622,90 @@ namespace DoodleNote.DictationHelper.Tests
 
         public static void RecoveryRestoresOnlyOnTransactionEvidence()
         {
-            Func<bool, bool, uint, bool, bool, int, bool, ClipboardView> view = (alive, us, seq, sentinel, markers, count, only) =>
-                new ClipboardView { OwnerAlive = alive, OwnerIsUs = us, Sequence = seq, SentinelMatches = sentinel, MarkersPresent = markers, FormatCount = count, OnlySavedFormats = only };
+            Func<bool, bool, uint, OurWrite, int, bool, ClipboardView> view = (alive, us, seq, write, count, only) =>
+                new ClipboardView { OwnerAlive = alive, OwnerIsUs = us, Sequence = seq, OurWrite = write, FormatCount = count, OnlySavedFormats = only, RestoreOps = 4 };
             Func<string, uint, uint, RecordFacts> facts = (stage, atStage, afterWrite) => new RecordFacts { Stage = stage, SequenceAtStage = atStage, SequenceAfterWrite = afterWrite };
-            Action<PendingClipboard.RecoveryVerdict, RecordFacts, ClipboardView, bool, string> expect = (want, f, v, same, why) => Assert.Equal(want, PendingClipboard.Decide(f, v, same), why);
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(true, false, 7, true, true, 5, false), true, "a live foreign owner: someone copied since");
-            expect(PendingClipboard.RecoveryVerdict.OursBySequence, facts("written", 7, 7), view(false, false, 7, false, false, 5, false), true, "the sequence right after our write, same boot and logon");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 7, false, false, 5, false), false, "the same sequence in another boot or logon proves nothing");
-            expect(PendingClipboard.RecoveryVerdict.OursBySentinel, facts("written", 7, 7), view(false, false, 9, true, true, 5, false), false, "our sentinel and markers prove it in any logon");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 9, false, false, 1, false), true, "the same text without our sentinel is not ours");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 9, true, false, 5, false), true, "a sentinel without our markers is not enough after a write");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptying", 3, 0), view(false, false, 4, false, false, 0, false), true, "emptied by us (exactly one step), then the helper ended");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptying", 3, 0), view(false, false, 5, false, false, 0, false), true, "emptied again by someone after us (a deliberate clear): stale");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptying", 3, 0), view(false, false, 4, false, false, 0, false), false, "another logon: no sequence verdict");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptying", 3, 0), view(false, false, 3, false, false, 2, false), true, "not emptied yet: the user's content is still there");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptied", 4, 0), view(false, false, 4, false, false, 0, false), true, "emptied stage, nothing since");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptied", 4, 0), view(false, false, 6, false, false, 0, false), true, "emptied stage, but changed since");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("restoring", 7, 7), view(false, false, 8, false, false, 0, false), true, "our restore emptied it, then the helper ended");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, facts("restoring", 7, 7), view(false, false, 11, true, false, 2, true), false, "our sentinel and only saved formats: a restore cut short");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restoring", 7, 7), view(false, false, 11, false, false, 2, true), true, "saved formats without our sentinel: not provably ours");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, facts("restoring", 7, 7), view(false, false, 9, true, false, 1, false), false, "only our sentinel: the restore died right after setting it");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restoring", 7, 7), view(false, false, 9, false, false, 1, false), true, "one foreign format and no sentinel: stale");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restoring", 7, 7), view(false, false, 11, true, false, 2, false), true, "other content (a screenshot) after a restore: stale");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("recovering-emptying", 9, 7), view(false, false, 10, false, false, 0, false), true, "a recovery that died after emptying is itself recoverable");
-            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, facts("recovering-restoring", 9, 7), view(false, false, 13, true, false, 1, true), true, "a recovery cut short is itself recoverable");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 3, false, false, 0, true), true, "empty after a complete write: someone emptied it");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("saved", 7, 7), view(false, false, 7, true, true, 1, true), true, "nothing was emptied");
-            RecordFacts here = new RecordFacts { Session = 1, Logon = "3e7", BootUtc = new DateTime(2026, 11, 8, 6, 0, 0, DateTimeKind.Utc) };
-            Assert.Equal(true, here.SameLogon(1, "3e7", here.BootUtc.AddSeconds(20)), "same boot within clock adjustments");
-            Assert.Equal(false, here.SameLogon(2, "3e7", here.BootUtc), "another session");
-            Assert.Equal(false, here.SameLogon(1, "4a1", here.BootUtc), "another logon");
-            Assert.Equal(false, here.SameLogon(1, "3e7", here.BootUtc.AddMinutes(10)), "another boot");
-            Assert.Equal(false, new RecordFacts { Session = 1 }.SameLogon(1, "", DateTime.UtcNow), "unknown logon never matches");
+            Action<PendingClipboard.RecoveryVerdict, RecordFacts, ClipboardView, LogonMatch, string> expect = (want, f, v, logon, why) => Assert.Equal(want, PendingClipboard.Decide(f, v, logon), why);
+            LogonMatch same = LogonMatch.Same, other = LogonMatch.Different, unknown = LogonMatch.Unknown;
+            // Identity first.
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(true, false, 7, OurWrite.None, 5, false), same, "a live foreign owner: someone copied since");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 7, OurWrite.Complete, 5, false), other, "another logon or boot: nothing is provable, even our sentinel (a replay)");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7, 7), view(false, false, 7, OurWrite.None, 5, false), unknown, "an unknown logon is never a reason to delete the only backup");
+            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("saved", 7, 7), view(false, false, 7, OurWrite.Complete, 1, true), same, "nothing was emptied");
+            // Our complete write proves itself at every stage after saved (D2).
+            foreach (string stage in new[] { "emptying", "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied" })
+                expect(PendingClipboard.RecoveryVerdict.OursByWrite, facts(stage, 3, 0), view(false, false, 40, OurWrite.Complete, 6, false), same, stage + ": our complete write (sentinel with our nonce, our markers, our text)");
+            // written: the sequence read inside our write's lock.
+            expect(PendingClipboard.RecoveryVerdict.OursBySequence, facts("written", 7, 7), view(false, false, 7, OurWrite.None, 5, false), same, "the sequence right after our write");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 9, OurWrite.None, 1, false), same, "the same text without our sentinel is not ours");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("written", 7, 7), view(false, false, 8, OurWrite.None, 0, false), same, "empty after a complete write: someone emptied it");
+            // Before our EmptyClipboard (emptying, N = 3): an empty clipboard at N+1 is ours OR a deliberate clear (Astra P1).
+            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("emptying", 3, 0), view(false, false, 3, OurWrite.None, 2, false), same, "not emptied yet: the user's content is still there");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3, 0), view(false, false, 4, OurWrite.None, 0, false), same, "empty at N+1 before the emptied journal: ambiguous, kept, never restored over");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptying", 3, 0), view(false, false, 5, OurWrite.None, 0, false), same, "emptied twice since: stale");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptying", 3, 0), view(false, false, 6, OurWrite.None, 2, false), same, "a new copy since: stale");
+            // After our EmptyClipboard (emptied, M = 4, read under the same lock).
+            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptied", 4, 0), view(false, false, 4, OurWrite.None, 0, false), same, "our empty, nothing since");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptied", 4, 0), view(false, false, 5, OurWrite.None, 0, false), same, "a deliberate clear after our empty: stale");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedWrite, facts("emptied", 4, 0), view(false, false, 6, OurWrite.Partial, 2, false), same, "our write cut short (no sentinel yet), within its operations");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("emptied", 4, 0), view(false, false, 4 + PendingClipboard.WriteOps + 1, OurWrite.Partial, 2, false), same, "more operations than our write has: someone else's");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, facts("emptied", 4, 0), view(false, false, 6, OurWrite.None, 2, true), same, "a late write's put-back cut short (only saved content)");
+            // restoring (N = 7, our write on the clipboard), restore-emptied (M = 8).
+            expect(PendingClipboard.RecoveryVerdict.OursBySequence, facts("restoring", 7, 7), view(false, false, 7, OurWrite.None, 5, false), same, "journaled before the restore's empty, nothing since: our write (D2)");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restoring", 7, 7), view(false, false, 8, OurWrite.None, 0, false), same, "empty at N+1 before restore-emptied: ambiguous");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("restore-emptied", 8, 7), view(false, false, 8, OurWrite.None, 0, false), same, "the restore's empty, nothing since");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, facts("restore-emptied", 8, 7), view(false, false, 10, OurWrite.None, 2, true), same, "only saved formats within the restore's operations: cut short");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8, 7), view(false, false, 13, OurWrite.None, 2, true), same, "the same content far later (a replay or a new copy of it): stale");
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8, 7), view(false, false, 10, OurWrite.None, 3, false), same, "other content (a screenshot) after a restore: stale");
+            // A recovery keeps what it found (D3).
+            RecordFacts found = new RecordFacts { Stage = "recovering", SequenceAtStage = 20, SequenceAfterWrite = 7, OriginStage = "restore-emptied", OriginSequenceAtStage = 18 };
+            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, found, view(false, false, 20, OurWrite.None, 2, true), same, "a recovery that died before its empty (or whose empty failed): judged by what it found");
+            expect(PendingClipboard.RecoveryVerdict.Pending, found, view(false, false, 21, OurWrite.None, 0, false), same, "empty right after the recovery journal: ambiguous");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "recovering-emptied", SequenceAtStage = 21, OriginStage = "restore-emptied", OriginSequenceAtStage = 18 }, view(false, false, 21, OurWrite.None, 0, false), same, "the recovery's empty, nothing since");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, new RecordFacts { Stage = "recovering-emptied", SequenceAtStage = 21 }, view(false, false, 23, OurWrite.None, 2, true), same, "a recovery's put-back cut short");
+            // Windows renders a synthesized format on its first read, which moves the sequence: one step each.
+            ClipboardView readText = new ClipboardView { Sequence = 8 + 4 + 3, OnlySavedFormats = true, FormatCount = 5, RestoreOps = 4, SynthesizedPresent = 3 };
+            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, facts("restore-emptied", 8, 7), readText, same, "a restore cut short, then its synthesized text formats were read");
+            readText.Sequence = 8 + 4 + 3 + 1;
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8, 7), readText, same, "one step past every operation and synthesis: someone else's");
+            expect(PendingClipboard.RecoveryVerdict.InterruptedRestore, found, view(false, false, 22, OurWrite.None, 2, true), same, "a recovery that died before its empty, read since: judged by what it found");
+            // Logon identity: no wall clock.
+            RecordFacts here = new RecordFacts { Session = 1, Logon = "3e7", SessionKey = "a1" };
+            Assert.Equal(LogonMatch.Same, here.Compare(1, "3e7", "a1"), "same session, LUID and per-logon key (a clock correction changes nothing)");
+            Assert.Equal(LogonMatch.Different, here.Compare(2, "3e7", "a1"), "another session");
+            Assert.Equal(LogonMatch.Different, here.Compare(1, "4a1", "a1"), "another logon");
+            Assert.Equal(LogonMatch.Different, here.Compare(1, "3e7", "b2"), "another boot or logon: the volatile key is new (the LUID repeated)");
+            Assert.Equal(LogonMatch.Unknown, here.Compare(1, "3e7", ""), "the key could not be read now: unknown, not different");
+            Assert.Equal(LogonMatch.Unknown, new RecordFacts { Session = 1, Logon = "3e7" }.Compare(1, "3e7", "a1"), "a record without a key: unknown");
+        }
+
+        public static void OurWriteIsRecognizedOnlyWhenExactlyOurs()
+        {
+            uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
+            uint[] markers = ClipboardText.MarkerNames.Select(n => Native.RegisterClipboardFormat(n)).ToArray();
+            string id = "0123456789abcdef0123456789abcdef", nonce = "fedcba9876543210fedcba9876543210";
+            byte[] hash = PendingClipboard.Hash("dictated");
+            var ours = new Dictionary<uint, byte[]>
+            {
+                { 13, System.Text.Encoding.Unicode.GetBytes("dictated\0") },
+                { markers[0], new byte[] { 0 } }, { markers[1], BitConverter.GetBytes(0) }, { markers[2], BitConverter.GetBytes(0) },
+                { sentinel, System.Text.Encoding.UTF8.GetBytes(id + ":" + nonce) }
+            };
+            Func<Dictionary<uint, byte[]>, Func<uint, int, byte[]>> reader = (now) => (f, cap) => now.ContainsKey(f) ? now[f].Take(Math.Min(cap, now[f].Length)).ToArray() : null;
+            Func<Dictionary<uint, byte[]>, uint[], OurWrite> classify = (now, extra) => ClipboardText.ClassifyOurWrite(now.Keys.Concat(extra).ToList(), reader(now), id, nonce, hash);
+            Assert.Equal(OurWrite.Complete, classify(ours, new uint[] { 1, 7, 16 }), "our text, markers and sentinel (and what Windows synthesizes from the text)");
+            var noSentinel = new Dictionary<uint, byte[]>(ours); noSentinel.Remove(sentinel);
+            Assert.Equal(OurWrite.Partial, classify(noSentinel, new uint[0]), "cut short before the sentinel (set last)");
+            Assert.Equal(OurWrite.None, ClipboardText.ClassifyOurWrite(ours.Keys.ToList(), reader(ours), id, "00000000000000000000000000000000", hash), "another nonce (a replayed older sentinel)");
+            var otherText = new Dictionary<uint, byte[]>(ours); otherText[13] = System.Text.Encoding.Unicode.GetBytes("dictatee\0");
+            Assert.Equal(OurWrite.None, classify(otherText, new uint[0]), "other text with our sentinel");
+            var otherMarker = new Dictionary<uint, byte[]>(ours); otherMarker[markers[1]] = BitConverter.GetBytes(1);
+            Assert.Equal(OurWrite.None, classify(otherMarker, new uint[0]), "a marker value that is not ours");
+            var foreign = new Dictionary<uint, byte[]>(ours); foreign[0xC333] = new byte[] { 1 };
+            Assert.Equal(OurWrite.None, classify(foreign, new uint[0]), "a format our write never sets");
+            var onlyMarkers = new Dictionary<uint, byte[]> { { markers[0], new byte[] { 0 } } };
+            Assert.Equal(OurWrite.None, classify(onlyMarkers, new uint[] { 1 }), "synthesized text without our text");
+            Assert.Equal(OurWrite.None, classify(new Dictionary<uint, byte[]>(), new uint[0]), "an empty clipboard is not a write");
         }
 
         public static void AnInterruptedRestoreHoldsOnlyWhatWeSaved()
@@ -661,21 +713,56 @@ namespace DoodleNote.DictationHelper.Tests
             var text = new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("old\0"));
             var mine = new KeyValuePair<uint, byte[]>(0xC123, new byte[] { 1, 2, 3 });
             var saved = new List<KeyValuePair<uint, byte[]>> { text, mine };
-            Func<Dictionary<uint, byte[]>, Func<uint, int, byte[]>> reader = (now) => (f, cap) => now.ContainsKey(f) ? now[f] : null;
+            Func<Dictionary<uint, byte[]>, Func<uint, int, byte[]>> reader = (now) => (f, cap) => now.ContainsKey(f) ? now[f].Take(Math.Min(cap, now[f].Length)).ToArray() : null;
             Func<byte[]> noEmf = () => null;
             Assert.Equal(true, SavedClipboard.ExplainsPresent(new uint[] { 13, 1, 7, 16 }, reader(new Dictionary<uint, byte[]> { { 13, text.Value } }), saved, null, noEmf), "our text (and what Windows synthesizes from it)");
             Assert.Equal(true, SavedClipboard.ExplainsPresent(new uint[] { 0xC123 }, reader(new Dictionary<uint, byte[]> { { 0xC123, mine.Value } }), saved, null, noEmf), "a restore cut short after one format");
+            Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 0xC123, 1 }, reader(new Dictionary<uint, byte[]> { { 0xC123, mine.Value } }), saved, null, noEmf), "text present without its saved source: not synthesized from what is there");
+            var locale = new List<KeyValuePair<uint, byte[]>> { new KeyValuePair<uint, byte[]>(16, new byte[] { 9, 4, 0, 0 }) };
+            Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 16, 13 }, reader(new Dictionary<uint, byte[]> { { 16, new byte[] { 9, 4, 0, 0 } }, { 13, System.Text.Encoding.Unicode.GetBytes("any\0") } }), locale, null, noEmf), "a saved CF_LOCALE alone explains no text (directed synthesis)");
+            Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 0xC123 }, reader(new Dictionary<uint, byte[]> { { 0xC123, new byte[] { 1, 2, 3, 4 } } }), saved, null, noEmf), "longer data that starts with our bytes is not ours");
             Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 8, 2, 17 }, reader(new Dictionary<uint, byte[]>()), saved, null, noEmf), "a screenshot (bitmap family we never saved)");
             Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 13 }, reader(new Dictionary<uint, byte[]> { { 13, System.Text.Encoding.Unicode.GetBytes("new\0") } }), saved, null, noEmf), "same format, other content");
             Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 15 }, reader(new Dictionary<uint, byte[]>()), saved, null, noEmf), "a file list we never saved");
             Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 1, 7 }, reader(new Dictionary<uint, byte[]>()), saved, null, noEmf), "only synthesized formats: nothing compared");
             var bitmap = new KeyValuePair<uint, byte[]>(8, new byte[] { 9, 9, 9 });
             Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 8, 2 }, reader(new Dictionary<uint, byte[]> { { 8, new byte[] { 7, 7, 7 } } }), new List<KeyValuePair<uint, byte[]>> { bitmap }, null, noEmf), "a different bitmap than the one we saved");
-            Assert.Equal(true, SavedClipboard.ExplainsPresent(new uint[] { 8, 2 }, reader(new Dictionary<uint, byte[]> { { 8, bitmap.Value } }), new List<KeyValuePair<uint, byte[]>> { bitmap }, null, noEmf), "our bitmap back");
+            Assert.Equal(true, SavedClipboard.ExplainsPresent(new uint[] { 8, 2, 9, 17 }, reader(new Dictionary<uint, byte[]> { { 8, bitmap.Value } }), new List<KeyValuePair<uint, byte[]>> { bitmap }, null, noEmf), "our bitmap back (and what Windows makes from a DIB)");
+            uint marker = Native.RegisterClipboardFormat(ClipboardText.MarkerNames[0]);
+            Assert.Equal(true, SavedClipboard.ExplainsPresent(new uint[] { 13, marker }, reader(new Dictionary<uint, byte[]> { { 13, text.Value }, { marker, new byte[] { 0 } } }), saved, null, noEmf, true), "conservative markers the save forced");
+            Assert.Equal(false, SavedClipboard.ExplainsPresent(new uint[] { 13, marker }, reader(new Dictionary<uint, byte[]> { { 13, text.Value }, { marker, new byte[] { 0 } } }), saved, null, noEmf, false), "markers the save did not force");
             Assert.Equal("unrestored", SavedClipboard.RestoreResult(false, true, false), "a format that could not be set back: failed, record kept");
             Assert.Equal("restored", SavedClipboard.RestoreResult(true, true, false), "complete");
             Assert.Equal("partial", SavedClipboard.RestoreResult(true, false, false), "what the save could not keep: settled");
             Assert.Equal("skipped", SavedClipboard.RestoreResult(true, true, true), "capped content: settled");
+        }
+
+        public static void ARecoveryReportsWhatTheSaveKept()
+        {
+            var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("user\0")) };
+            foreach (var c in new[] { Tuple.Create(true, false, "restored"), Tuple.Create(false, false, "partial"), Tuple.Create(true, true, "skipped") })
+            {
+                var stream = new System.IO.MemoryStream();
+                using (var writer = new System.IO.BinaryWriter(stream, System.Text.Encoding.UTF8, true)) SavedClipboard.ForTest(items, false, c.Item1, c.Item2).WriteTo(writer);
+                stream.Position = 0;
+                SavedClipboard back;
+                using (var reader = new System.IO.BinaryReader(stream, System.Text.Encoding.UTF8)) back = SavedClipboard.ReadFrom(reader);
+                Assert.Equal(c.Item3, back.PutBackResult(true), "a written-down save keeps its completeness: " + c.Item3);
+                Assert.Equal("unrestored", back.PutBackResult(false), "a failed set-back is never reported restored");
+            }
+        }
+
+        public static void RetriesMoveOnlyOnFailedAttemptsOrAmbiguousStates()
+        {
+            Assert.Equal(0, PendingClipboard.NextStep(false, 0, PendingClipboard.RetryKind.Check), "a first check schedules step 0");
+            Assert.Equal(PendingClipboard.KeepSchedule, PendingClipboard.NextStep(true, 2, PendingClipboard.RetryKind.Check), "a start or delivery check keeps the schedule (consumes nothing)");
+            Assert.Equal(3, PendingClipboard.NextStep(true, 2, PendingClipboard.RetryKind.Failed), "a failed restore attempt moves on");
+            Assert.Equal(3, PendingClipboard.NextStep(true, 2, PendingClipboard.RetryKind.Pending), "an ambiguous state moves on");
+            Assert.Equal(2, PendingClipboard.NextStep(true, 2, PendingClipboard.RetryKind.Busy), "a busy clipboard waits on its step");
+            Assert.Equal(PendingClipboard.RetryKind.Check, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Failed, false), "RecoverLeftover (start, delivery) never consumes a step");
+            Assert.Equal(PendingClipboard.RetryKind.Failed, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Failed, true), "the timer's failed attempt");
+            Assert.Equal(PendingClipboard.RetryKind.Busy, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Busy, true), "the timer finds the clipboard busy");
+            Assert.Equal(PendingClipboard.RetryKind.Pending, PendingClipboard.KindAfter(PendingClipboard.RecoverResult.Pending, true), "the timer finds it still ambiguous");
         }
 
         public static void ASettledTransactionIsNeverPublishedAndOrphansAreSwept()
@@ -697,11 +784,19 @@ namespace DoodleNote.DictationHelper.Tests
                 PendingClipboard.TestPayloadDelayMs = 0;
                 // Leftovers without a state file, and a round-8 record: deleted, never restored from.
                 string prefix = "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized;
-                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + "-0123456789abcdef.bin"), new byte[] { 1 });
-                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + "-fedcba9876543210.bin.tmp"), new byte[] { 1 });
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + "-0123456789abcdef0123456789abcdef.bin"), new byte[] { 1 });
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + "-fedcba9876543210fedcba9876543210.bin.tmp"), new byte[] { 1 });
                 System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + ".bin"), new byte[] { 1 });
+                // Another identity whose name starts with ours (X-foo for X): its records are never read or deleted.
+                string otherState = System.IO.Path.Combine(dir, prefix + "-foo-0123456789abcdef0123456789abcdef.state");
+                string otherPayload = System.IO.Path.Combine(dir, prefix + "-foo-0123456789abcdef0123456789abcdef.bin");
+                string otherOrphan = System.IO.Path.Combine(dir, prefix + "-foo-fedcba9876543210fedcba9876543210.bin");
+                System.IO.File.WriteAllText(otherState, "{\"stage\":\"written\"}");
+                System.IO.File.WriteAllBytes(otherPayload, new byte[] { 1 });
+                System.IO.File.WriteAllBytes(otherOrphan, new byte[] { 1 });
                 PendingClipboard.RecoverLeftover("test");
-                Assert.Equal(0, System.IO.Directory.GetFiles(dir).Length, "orphans and the legacy record are gone");
+                Assert.Equal(3, System.IO.Directory.GetFiles(dir).Length, "our orphans and the legacy record are gone; the other identity's three files stay");
+                Assert.Equal(true, System.IO.File.Exists(otherState) && System.IO.File.Exists(otherPayload) && System.IO.File.Exists(otherOrphan), "X-foo's record and payloads untouched");
             }
             finally
             {
