@@ -381,25 +381,48 @@ returns the late write puts the user's content back, never ours (and tells the a
 the warning it showed).
 
 Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
-user) and a journal of its stage (saved, emptying, emptied, written, restoring, unrestored; a recovery
-journals itself as recovering-emptying, recovering-restoring) in %TEMP% under the app identity. Each
-stage carries the clipboard sequence number that goes with it, and every record its boot, logon
-session and window-station session, because sequence numbers restart with a new boot or logon. A
-record is deleted only once a restore completed; a failed or partial put-back keeps it and retries
-with its own backoff (3 s, 10 s, 30 s, 60 s, 120 s), before the next delivery, and at the next helper
-start. Recovery acts only on evidence specific to that transaction: our record's sentinel format (set
-first by our write and by every restore) or the stage's sequence number within the same boot and
-logon. An empty clipboard counts as ours only when the sequence moved by exactly our own
-EmptyClipboard; a partly restored one only when it carries our sentinel and nothing but formats we
-saved, with identical content. A screenshot, a new copy, a deliberate clear, or matching text is never
-ours. Payloads without a journal (a transaction settled while its slow write finished) are deleted,
-never restored from, and a settled transaction is never published. **Content that carries any clipboard privacy
+user, with whether the save was complete, the transaction's random nonce and the dictated text's
+SHA-256) and a plain journal of its stage in %TEMP% under the app identity (record files are matched
+exactly: identity X never reads X-foo's). Stages journaled BEFORE an EmptyClipboard of ours carry the
+sequence number before it (emptying, restoring, recovering); stages AFTER one carry the sequence read
+under the same clipboard lock right after it returned (emptied, restore-emptied, recovering-emptied);
+"written" carries the sequence read inside our write's lock and is journaled right after the close. A
+transaction whose first stage cannot be journaled is not started (nothing is emptied). A recovery
+keeps the stage it found. Every record carries its logon identity: the window-station session, the
+logon session (LUID) and a per-logon random key in a volatile registry value
+(HKCU\Software\DoodleNote.Bark.Session, gone at logoff and reboot); the wall clock is not used, so a
+clock correction changes nothing. A record whose logon cannot be compared is kept (pending), never
+deleted for that reason.
+
+Recovery restores only on evidence specific to the transaction, within the same logon: our complete
+write (our sentinel format, set last, carrying the record id and the nonce; our exact marker values;
+our text by its hash; nothing else but the text formats Windows synthesizes from it), or the journaled
+sequence number with a clipboard that holds only our write or only the saved content (compared byte
+for byte, length included; synthesized formats only from a present, compared source), within the
+operations that could follow our EmptyClipboard (plus one per synthesized format, which Windows
+renders on a first read). An empty clipboard is ours only at exactly the sequence journaled after our
+EmptyClipboard. An empty clipboard right after a stage journaled before it is ours or a deliberate
+clear, which cannot be told apart: the record is kept, the app is told the clipboard may not have been
+put back, and nothing is restored over it (the user's next copy makes it stale). A screenshot, a new
+copy, a clear after our empty, or matching text is never ours. A restore never sets our sentinel, and
+a save never keeps one (an older one is ours, not the user's content), so a restored clipboard holds
+only the user's content. A record is deleted only once a restore completed (reported restored,
+partial or skipped from the save's own completeness), a verdict that it is stale, or proof that
+nothing was emptied; a failed or partial put-back keeps it, and so does an ambiguous state. Retries
+use the record's own backoff (3 s, 10 s, 30 s, 60 s, 120 s), and only a failed attempt or a check that
+is still ambiguous moves it on; the checks before a delivery and at the next helper start never use a
+step. Residual, stated plainly: a clipboard manager that replays every format of a state we produced
+(our sentinel included) cannot be told from that state; it holds either our write (which the
+transaction replaces with the user's content anyway) or the user's own saved content byte for byte,
+so restoring over it loses nothing of the user's. Payloads without a journal (a transaction settled
+while its slow write finished) are deleted, never restored from, and a settled transaction is never
+published. **Content that carries any clipboard privacy
 marker (as password managers set) is never written to disk**: that transaction stays in memory, so a
 helper killed between our write and the restore cannot give it back. The encrypted write runs in the
 background; a paste waits for it at most 250 ms (a large clipboard may go ahead before it is on disk).
 
 Leaving: the app asks the helper to quit by closing its stdin (there is no quit op). On every exit
-path (stdin closed, a restart, an unhandled exception) a delivery in progress finishes its restore and
+path (stdin closed, a restart, an unhandled exception, a console close or logoff event) a delivery in progress finishes its restore and
 reply first, and an abandoned clipboard write finishes its rollback: a quit waits up to 3 s for both;
 a restart waits for the delivery to end, and stdin closing meanwhile shortens that to 3 s. Past the
 wait, the transaction record is how the next helper finishes the job. The helper's worst-case exit

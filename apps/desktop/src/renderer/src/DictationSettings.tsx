@@ -280,7 +280,7 @@ export function DictationSettings(): React.JSX.Element {
             {infoRow(
               'Typing into other apps',
               'No permission needed',
-              'The text goes in through the clipboard and Ctrl+V, and your clipboard is put back afterwards. If pasting fails, DoodleNote can type the text into classic Windows text boxes, such as Notepad; browsers, Electron apps and other apps reachable only through UI Automation get paste only. Line breaks are typed only where the box accepts Enter; otherwise the text is kept so you can paste it yourself. Apps running as administrator cannot be typed into.'
+              'The text goes in through the clipboard and Ctrl+V, and your clipboard is put back afterwards. If pasting fails, DoodleNote can type the text into classic Windows text boxes, such as Notepad; browsers, Electron apps and other apps reachable only through UI Automation get paste only. Line breaks are typed only where the box asks for Enter; otherwise the text is kept so you can paste it yourself. Apps running as administrator cannot be typed into.'
             )}
             {infoRow(
               `${FEATURE_NAME} helper`,
