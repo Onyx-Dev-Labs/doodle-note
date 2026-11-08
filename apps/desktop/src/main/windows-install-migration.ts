@@ -278,6 +278,7 @@ export interface LoginItemState {
 }
 
 export type LoginItemStateSource = 'startup-approved' | 'electron'
+const LOGIN_ITEM_SOURCES: readonly LoginItemStateSource[] = ['startup-approved', 'electron']
 
 export interface McpRepointOutcome {
   id: string
@@ -399,7 +400,10 @@ function readProgress(
       )
     )
       return null
-    return parsed as Marker
+    // Round 12: a source other than the known ones (a damaged or foreign marker)
+    // counts as none recorded; the rest of the progress stands.
+    const source = LOGIN_ITEM_SOURCES.find((known) => known === parsed.loginItemSource) ?? null
+    return { ...parsed, loginItemSource: source } as Marker
   } catch {
     // A damaged marker only means the (idempotent) migration runs again.
     return null

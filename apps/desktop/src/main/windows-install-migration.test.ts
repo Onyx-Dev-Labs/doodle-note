@@ -1136,6 +1136,34 @@ test('a failed step is retried on the next launch and does not block the other s
   assert.equal(JSON.parse(deps.marker ?? '{}').complete, true)
 })
 
+test('round 12: a marker whose login item source is not a known one counts as none recorded', async () => {
+  for (const [source, kept] of [
+    ['startup-approved', 'startup-approved'],
+    ['electron', 'electron'],
+    ['registry', null],
+    [42, null],
+    [{ from: 'startup-approved' }, null],
+    [null, null]
+  ] as const) {
+    const deps = fakeDeps()
+    deps.marker = JSON.stringify({
+      version: 2,
+      from: oldExe,
+      to: newExe,
+      migratedAt: record.at,
+      loginItemDone: true,
+      loginItemSource: source,
+      mcpPending: 'all',
+      complete: false
+    })
+    const result = await runWindowsInstallMigration(deps)
+    // The rest of the progress stands: the login item is not redone.
+    assert.deepEqual(result.pending, [], String(source))
+    assert.deepEqual(deps.registered, [], String(source))
+    assert.equal(JSON.parse(deps.marker!).loginItemSource, kept, String(source))
+  }
+})
+
 test('a client whose config could not be read is retried on its own until it succeeds', async () => {
   const calls: (readonly string[] | null)[] = []
   const outcomes: McpRepointOutcome[][] = [
