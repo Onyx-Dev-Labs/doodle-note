@@ -296,3 +296,69 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "QA package build failed" }
           node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control
           if ($LASTEXITCODE -ne 0) { throw "The QA package does not ship the production package's files" }
+
+  # A real installer lifecycle of the QA identity on this throwaway runner: the
+  # legacy-layout QA package installed /S, the current QA package /S --updated over
+  # it, the app's first launch consuming the installer's record, uninstall /S; an
+  # upgrade killed right after electron-builder's "uninstall old version" and then
+  # recovered; /S without --updated while the legacy app runs (exit 2); a held file
+  # keeping the journal armed across two runs. Registry, folders, Run value,
+  # shortcuts and MCP configs are checked after each step (each step timed in the
+  # job summary). It stands in for the installer items of the desktop pass while
+  # Smart App Control blocks fresh unsigned executables on the QA machine
+  # (docs/WINDOWS-RELEASE-QA.md "Installer end-to-end in CI"). Never production.
+  # The legacy and kill-step installers are built from the same win-unpacked
+  # (--prepackaged, stored rather than compressed, to save time); the kill-step
+  # one includes build/windows-installer-test-steps.nsh, which no release uses.
+  windows-installer-e2e:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install --global pnpm@10.33.2
+
+      - name: Install with Windows native dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the QA installer
+        timeout-minutes: 15
+        run: |
+          node apps/desktop/scripts/package-win-qa.cjs
+          if ($LASTEXITCODE -ne 0) { throw "QA installer build failed" }
+
+      - name: Build the legacy-layout and kill-step QA installers
+        timeout-minutes: 8
+        working-directory: apps/desktop
+        env:
+          DOODLENOTE_QA_IDENTITY: '1'
+          npm_config_user_agent: pnpm
+        run: |
+          $env:DOODLENOTE_QA_LEGACY_LAYOUT = '1'
+          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never -c.compression=store
+          if ($LASTEXITCODE -ne 0) { throw "legacy-layout installer build failed" }
+          Remove-Item Env:DOODLENOTE_QA_LEGACY_LAYOUT
+          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never -c.compression=store -c.nsis.include=build/windows-installer-test-steps.nsh -c.directories.output=release-qa-steps
+          if ($LASTEXITCODE -ne 0) { throw "kill-step installer build failed" }
+          Get-ChildItem release-qa*/*-setup.exe | ForEach-Object { "$($_.FullName) $($_.Length)" }
+
+      - name: Installer lifecycle end to end (QA identity)
+        timeout-minutes: 25
+        run: |
+          $setup = { param($dir) (Get-ChildItem "apps/desktop/$dir/*-setup.exe" | Select-Object -First 1).FullName }
+          node apps/desktop/scripts/test-windows-installer-e2e.cjs --legacy (& $setup release-qa-legacy) --current (& $setup release-qa) --steps (& $setup release-qa-steps) --evidence "$env:RUNNER_TEMP/installer-e2e"
+          if ($LASTEXITCODE -ne 0) { throw "The installer end-to-end lifecycle failed" }
+
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-e2e-${{ github.sha }}
+          path: ${{ runner.temp }}/installer-e2e
+          if-no-files-found: ignore
+          retention-days: 7

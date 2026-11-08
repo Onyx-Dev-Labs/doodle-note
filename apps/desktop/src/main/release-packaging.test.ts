@@ -1432,3 +1432,66 @@ test('round 8 parity: version resources, byte ranges and GUIDs are read exactly'
     'resources/engine/dictation-helper.manifest.json'
   ])
 })
+
+test('round 8: the installer end-to-end job and its kill-step include stay test-only', () => {
+  const ci = ciWorkflow.replace(/\r\n/g, '\n')
+  const job = ci.slice(ci.indexOf('  windows-installer-e2e:'))
+  assert.ok(ci.indexOf('  windows-installer-e2e:') > 0)
+  assert.match(job, /^ {4}runs-on: windows-latest\n {4}timeout-minutes: 45\n/m)
+  assert.match(job, /node apps\/desktop\/scripts\/package-win-qa\.cjs\n/)
+  assert.match(job, /-c\.nsis\.include=build\/windows-installer-test-steps\.nsh/)
+  assert.match(job, /test-windows-installer-e2e\.cjs --legacy/)
+  assert.doesNotMatch(job, /secrets\.|DOODLENOTE_WINDOWS_UPDATES|ARTIFACT_SIGNING/)
+  // No release build includes the kill-step file; the installer itself has no test hook.
+  const qaConfig = readFileSync(new URL('../../electron-builder.qa.cjs', import.meta.url), 'utf8')
+  for (const text of [
+    builderConfig,
+    qaConfig,
+    desktopPackage,
+    publishScript,
+    windowsBetaPublishScript
+  ])
+    assert.doesNotMatch(text, /windows-installer-test-steps/)
+  const steps = readFileSync(
+    new URL('../../build/windows-installer-test-steps.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  assert.match(
+    steps,
+    /^!ifndef BUILD_UNINSTALLER\n {2}!define DN_TEST_STEPS\n!endif\n!include "\$\{__FILEDIR__\}\\windows-installer\.nsh"\n/m
+  )
+  // The kill point: electron-builder's last hook before customInstall (right after the
+  // stock "uninstall old version", the file copy and the uninstall entry), unused by
+  // this app otherwise; the stop name is read only there.
+  assert.match(
+    steps,
+    /!macro registerFileAssociations\n\s+ReadEnvStr \$dnTestStopAt DN_TEST_STOP_AT\n\s+!insertmacro dnTestStep "after-stock-uninstall"\n!macroend/
+  )
+  assert.doesNotMatch(builderConfig + qaConfig, /fileAssociations/)
+  const require = createRequire(import.meta.url)
+  const builder = join(require.resolve('electron-builder/package.json'), '..')
+  const lib = join(require.resolve('app-builder-lib/package.json', { paths: [builder] }), '..')
+  const installSection = readFileSync(
+    join(lib, 'templates', 'nsis', 'installSection.nsh'),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const order = [
+    '!insertmacro uninstallOldVersion SHELL_CONTEXT',
+    '!insertmacro installApplicationFiles',
+    '!insertmacro registryAddInstallInfo',
+    '!insertmacro registerFileAssociations',
+    '!insertmacro customInstall'
+  ].map((line) => installSection.indexOf(line))
+  assert.ok(
+    order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
+    String(order)
+  )
+  const e2e = readFileSync(
+    new URL('../../scripts/test-windows-installer-e2e.cjs', import.meta.url),
+    'utf8'
+  )
+  assert.match(
+    e2e,
+    /if \(!process\.env\.CI && process\.env\.DOODLENOTE_E2E_THROWAWAY_MACHINE !== '1'\)/
+  )
+})
