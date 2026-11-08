@@ -1363,7 +1363,8 @@ async function main() {
       assert.ok(fs.existsSync(path.join(d5bDir, 'DoodleNote.exe')), `${name}: the old exe is kept`)
       assert.ok(alive(d5bApp.pid), `${name}: the old app was not closed`)
       assert.match(
-        fs.readFileSync(path.join(sandbox, `${name}-install.log`), 'utf8'),
+        // The install log is UTF-16LE with a BOM (dnStatus).
+        fs.readFileSync(path.join(sandbox, `${name}-install.log`), 'utf16le'),
         /close-keep.*unknown-process/,
         `${name}: the install log records it`
       )
