@@ -196,7 +196,10 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   const guards = readFileSync(
     new URL('../../build/windows-install-guards.nsh', import.meta.url),
     'utf8'
-  ).replace(/\r\n/g, '\n')
+  )
+    .replace(/\r\n/g, '\n')
+    // Functions the uninstaller shares are named ${DN_FN}dnX (un.dnX there).
+    .replace(/\$\{DN_FN\}/g, '')
   const install = installer.slice(installer.indexOf('!macro customInstall'))
   assert.equal(installer.match(/Call dnRemoveLegacyDir/g), null)
   assert.equal(installer.match(/Call dnFinishMigration/g)?.length, 1)
@@ -205,13 +208,26 @@ test('Windows installs move to a DoodleNote folder without forking the install o
       install.indexOf('Call dnFinishMigration')
   )
   const finish = guards.slice(guards.indexOf('Function dnFinishMigration'))
-  assert.equal(guards.match(/^\s+Call dnRemoveLegacyDir$/gm)?.length, 1)
+  // dnFinishMigration and (uninstaller) dnUninstallLegacy, each after dnCheckLegacyDir.
+  assert.equal(guards.match(/^\s+Call dnRemoveLegacyDir$/gm)?.length, 2)
   assert.ok(finish.indexOf('Call dnCheckLegacyDir') < finish.indexOf('Call dnRemoveLegacyDir'))
-  // The record the app needs before it repoints anything is written only after a real move.
+  const uninstallLegacy = guards.slice(guards.indexOf('Function dnUninstallLegacy'))
+  assert.ok(
+    uninstallLegacy.indexOf('Call dnCheckLegacyDir') <
+      uninstallLegacy.indexOf('Call dnRemoveLegacyDir')
+  )
+  // The record the app needs before it repoints anything is written only after a
+  // real move, and otherwise only put back as it was saved (dnRestoreState).
   const removed = finish.indexOf('${if} $3 == "removed"')
+  const restoreState = guards.slice(guards.indexOf('Function dnRestoreState'))
   for (const value of ['MigratedFrom', 'MigratedTo', 'MigratedAt']) {
-    assert.equal(`${installer}\n${guards}`.split(`$dnStateKey "${value}"`).length, 2, value)
+    assert.equal(
+      `${installer}\n${guards}`.split(`WriteRegStr HKCU $dnStateKey "${value}"`).length,
+      3,
+      value
+    )
     assert.ok(finish.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) > removed, value)
+    assert.match(restoreState, new RegExp(`WriteRegStr HKCU \\$dnStateKey "${value}" \\$dnSaved`))
   }
   assert.ok(removed > finish.indexOf('Call dnRemoveLegacyDir'))
   // Shortcuts: what the user had deleted stays deleted; pins are repointed by target only.
@@ -254,9 +270,17 @@ test('the install migration journal belongs to one app identity and is validated
     installer,
     /!define DN_MIGRATION_IDENTITY "\$\{APP_GUID\}\|\$\{APP_FILENAME\}\|\$\{PRODUCT_FILENAME\}"/
   )
+  assert.match(installer, /StrCpy \$dnJournalKey "\$\{DN_MIGRATION_KEY\}"/)
+  const guardsText = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const park = guardsText.slice(guardsText.indexOf('Function dnParkUninstaller'))
   for (const value of ['Identity', 'SourceDir', 'DestDir', 'LegacyUninstallString']) {
-    assert.match(installer, new RegExp(`WriteRegStr HKCU "\\$\\{DN_MIGRATION_KEY\\}" "${value}"`))
+    assert.match(park, new RegExp(`WriteRegStr HKCU \\$dnJournalKey "${value}"`))
   }
+  // Parking checks every registered command first and writes nothing if one is foreign.
+  assert.ok(park.indexOf('Call dnCheckUninstallCommand') < park.indexOf('WriteRegStr'))
   const init = installer.slice(
     installer.indexOf('!macro customInit'),
     installer.indexOf('!macroend', installer.indexOf('!macro customInit'))
@@ -265,14 +289,22 @@ test('the install migration journal belongs to one app identity and is validated
   // anything recorded is used.
   const restore = init.indexOf('WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"')
   assert.ok(restore > 0)
-  for (const check of ['Call dnTrustedJournal', '${if} $R6 == ""', '${if} $R7 == $R9']) {
+  for (const check of [
+    'Call dnTrustedJournal',
+    '${if} $R6 == ""',
+    'Call dnUninstallerDir',
+    '${if} $R9 == $R6'
+  ]) {
     const at = init.indexOf(check)
     assert.ok(at > 0 && at < restore, check)
   }
   const guards = readFileSync(
     new URL('../../build/windows-install-guards.nsh', import.meta.url),
     'utf8'
-  ).replace(/\r\n/g, '\n')
+  )
+    .replace(/\r\n/g, '\n')
+    // Functions the uninstaller shares are named ${DN_FN}dnX (un.dnX there).
+    .replace(/\$\{DN_FN\}/g, '')
   const trust = guards.slice(
     guards.indexOf('Function dnTrustedJournal'),
     guards.indexOf('FunctionEnd', guards.indexOf('Function dnTrustedJournal'))
@@ -284,8 +316,19 @@ test('the install migration journal belongs to one app identity and is validated
   ]) {
     assert.ok(trust.includes(check), check)
   }
-  // Only the old folder's own uninstaller, reconstructed, is ever put back or parked.
+  // Only the old folder's own uninstaller, parsed and normalised, is ever put back or
+  // parked; a registered command that is neither the old nor the new folder's own
+  // means: upgrade in place (customInit), before anything is closed or parked.
   assert.match(installer, /StrCpy \$\{OUT\} '"\$\{DIR\}\\\$\{UNINSTALL_FILENAME\}" \/currentuser'/)
+  const ownUninstaller = guardsText.slice(guardsText.indexOf('Function dnUninstallerDir'))
+  assert.match(ownUninstaller, /\$\{if\} \$2 S== " \/currentuser"/)
+  assert.match(ownUninstaller, /\$\{if\} \$2 == "\$\{DN_UNINSTALLER_EXE\}"/)
+  assert.ok(ownUninstaller.indexOf('Call dnCanonical') > 0)
+  assert.match(installer, /!define DN_UNINSTALLER_EXE "Uninstall \$\{PRODUCT_FILENAME\}\.exe"/)
+  assert.match(
+    init,
+    /Call dnCheckUninstallCommand\s+Pop \$R6\s+\$\{if\} \$R6 != ""\s+DetailPrint "Not moving \$dnLegacyDir: \$R6"\s+StrCpy \$INSTDIR \$dnLegacyDir\s+StrCpy \$dnLegacyDir ""/
+  )
   assert.doesNotMatch(installer, /\$\{if\} \$R4 != ""\s+\$\{andIf\} \$R5 == ""/)
 })
 
@@ -297,7 +340,10 @@ test('the install migration never removes through a link and closes only its own
   const guards = readFileSync(
     new URL('../../build/windows-install-guards.nsh', import.meta.url),
     'utf8'
-  ).replace(/\r\n/g, '\n')
+  )
+    .replace(/\r\n/g, '\n')
+    // Functions the uninstaller shares are named ${DN_FN}dnX (un.dnX there).
+    .replace(/\$\{DN_FN\}/g, '')
   const both = `${installer}\n${guards}`
   const code = both
     .split('\n')
@@ -322,8 +368,42 @@ test('the install migration never removes through a link and closes only its own
     assert.ok(guards.includes(reason), reason)
   }
   // The exe is deleted last, so a partly removed folder is still recognisable.
-  const remove = guards.slice(guards.indexOf('Function dnRemoveLegacyDir'))
-  assert.ok(remove.indexOf('Call dnRemoveTree') < remove.indexOf('Delete "$0\\${DN_APP_EXE}"'))
+  const remove = guards.slice(
+    guards.indexOf('Function dnRemoveLegacyDir'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnRemoveLegacyDir'))
+  )
+  assert.ok(
+    remove.indexOf('Push "${DN_APP_EXE}"\n        Call dnRemoveTreeAt') <
+      remove.indexOf('Push ""\n          Call dnRemoveTreeAt')
+  )
+  // Removal is by verified handle only: no path-based Delete / RMDir in the deleter,
+  // entries opened without following links, checked by file ID and final path.
+  const tree = guards.slice(
+    guards.indexOf('Function dnRemoveTreeAt'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnRemoveLegacyDir'))
+  )
+  assert.doesNotMatch(tree, /^\s+(Delete|RMDir)\b/m)
+  assert.match(guards, /!define DN_OPEN_NO_FOLLOW 0x02200000/)
+  assert.match(guards, /GetFileInformationByHandleEx\(p r0, i 9,/)
+  assert.match(guards, /GetFileInformationByHandle\(p r0, p r1\)/)
+  assert.match(guards, /SetFileInformationByHandle\(p r0, i 21,/)
+  assert.ok(tree.includes('${orIf} $6 != "$9\\$4"'))
+  assert.ok(tree.includes('${orIf} $6 != $9'))
+  // Overlap with the profile is checked on resolved paths too (junctions followed).
+  const legacyCheck = guards.slice(
+    guards.indexOf('Function dnCheckLegacyDir'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnCheckLegacyDir'))
+  )
+  assert.match(legacyCheck, /Push \$dnProfileDir\n\s+Call dnResolved/)
+  assert.ok(legacyCheck.includes('the old folder really overlaps the app profile'))
+  assert.ok(legacyCheck.includes('the new folder really overlaps the app profile'))
+  // The closer cannot hang: CIM timeouts, a budget, and a watchdog instead of nsExec.
+  assert.doesNotMatch(code, /nsExec::/)
+  assert.match(guards, /Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10/)
+  assert.match(guards, /\$\$budget\.Elapsed\.TotalSeconds -gt 25/)
+  assert.match(guards, /WaitForSingleObject\(p r5, i r1\)/)
+  assert.match(guards, /TerminateProcess\(p r5, i 1\)/)
+  assert.equal(code.match(/Call dnRunHidden/g)?.length, 2)
   // electron-builder's prefix / image-name matching and taskkill fallback are never compiled in.
   for (const stock of [
     '_CHECK_APP_RUNNING',
@@ -349,8 +429,22 @@ test('the install migration never removes through a link and closes only its own
   )
   const close = guards.slice(guards.indexOf('Function dnMigrationClose'))
   assert.ok(close.indexOf('dnCloseAppIn "$0"') < close.indexOf('dnEnsureNotRunning "$1"'))
-  // Nothing is closed without consent: silent installs nobody asked for never close.
+  // Nothing is closed without consent: silent installs nobody asked for never close,
+  // and a pending move with the old app running then quits with exit code 2.
   assert.match(guards, /\$\{elseif\} \$\{Silent\}\n\s+StrCpy \$\{OUT\} "never"/)
+  assert.match(
+    close,
+    /\$\{elseif\} \$dnCloseResult == "running"\n\s+\$\{andIf\} \$dnClosePolicy == "never"\n(?:\s+;[^\n]*\n)*\s+DetailPrint [^\n]+\n\s+SetErrorLevel 2\n\s+Quit/
+  )
+  // The journal and record survive electron-builder's uninstaller deleting
+  // Software\{APP_GUID}: saved before "uninstall old version", restored first in customInstall.
+  assert.match(check, /Call dnSaveState\n\s+!macroend/)
+  assert.match(installer, /!macro customInstall\n(?:\s+;[^\n]*\n)*\s+Call dnRestoreState/)
+  // A user uninstall (not --updated) removes an old folder an unfinished move left.
+  assert.match(
+    installer,
+    /!macro customUnInstall\n\s+\$\{ifNot\} \$\{isUpdated\}[\s\S]*?Call un\.dnUninstallLegacy/
+  )
   assert.match(
     ciWorkflow.replace(/\r\n/g, '\n'),
     /node apps\/desktop\/scripts\/test-windows-installer-guards\.cjs/

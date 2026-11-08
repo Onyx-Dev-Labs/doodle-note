@@ -4,17 +4,44 @@
 ;
 ; Needs these defines: APP_FILENAME (the old folder name, the package name),
 ; PRODUCT_FILENAME (the new folder name), DN_APP_EXE (the app's exe name in
-; both; electron-builder's APP_EXECUTABLE_FILENAME is defined only after this
-; file is compiled) and DN_MIGRATION_IDENTITY (what a journal must name). The
-; installer and the harness set $dnProgramsRoot, $dnProfileDir, $dnJournalKey
-; and $dnStateKey (both HKCU) before calling the functions below.
+; both) and DN_UNINSTALLER_EXE (its uninstaller's; electron-builder's
+; APP_EXECUTABLE_FILENAME and UNINSTALL_FILENAME are defined only after this file
+; is compiled), and DN_MIGRATION_IDENTITY (what a journal must name). The
+; installer and the harness set $dnProgramsRoot, $dnProfileDir, $dnJournalKey,
+; $dnStateKey, $dnUninstallKey and $dnUninstallKey2 (all HKCU) before calling the
+; functions below.
+;
+; electron-builder compiles the installer and the uninstaller separately (the
+; uninstaller with BUILD_UNINSTALLER, where every function must be named un.*).
+; The uninstaller gets the closer and, with DN_WITH_UNINSTALL_LEGACY, the path and
+; removal functions for dnUninstallLegacy. A function that is compiled but never
+; called is a warning, which -WX makes an error, so each pass compiles only what
+; it calls.
 
 !include LogicLib.nsh
 !include FileFunc.nsh
 
+!ifdef BUILD_UNINSTALLER
+  !define DN_FN "un."
+  !ifdef DN_WITH_UNINSTALL_LEGACY
+    !define DN_PATH_FUNCTIONS
+  !endif
+!else
+  !define DN_FN ""
+  !define DN_PATH_FUNCTIONS
+!endif
+
 !define DN_ATTR_DIRECTORY 0x10
 !define DN_ATTR_REPARSE_POINT 0x400
+; FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT
+!define DN_OPEN_NO_FOLLOW 0x02200000
+; DELETE | FILE_READ_ATTRIBUTES
+!define DN_ACCESS_DELETE 0x10080
 !define DN_POWERSHELL "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+; Wall-clock limits for the closer (dnRunHidden); past them it is stopped and its
+; answer is "unknown", the conservative path.
+!define /ifndef DN_CLOSE_FIND_TIMEOUT_MS 30000
+!define /ifndef DN_CLOSE_TIMEOUT_MS 45000
 
 ; Finds the processes whose executable is exactly $env:DN_CLOSE_EXE (full path,
 ; case-insensitive; no prefix or image-name matching) through Win32_Process,
@@ -24,8 +51,13 @@
 ; with this image name in this session whose path cannot be read). With
 ; DN_CLOSE_MODE=close it asks each one to close (CloseMainWindow), waits up to
 ; 5 s, then stops only the PIDs that still match, and waits up to 5 s more.
-; Paths reach the script through the environment, never through its text.
-!define DN_CLOSE_PS `$$ErrorActionPreference='Stop'; try { $$want = [IO.Path]::GetFullPath($$env:DN_CLOSE_EXE); $$name = [IO.Path]::GetFileName($$want); $$session = (Get-Process -Id $$PID).SessionId; function ours { $$o = @(); foreach ($$p in @(Get-CimInstance -ClassName Win32_Process | Where-Object { $$_.Name -eq $$name })) { if (-not $$p.ExecutablePath) { if ($$p.SessionId -eq $$session) { throw 'unreadable' }; continue }; if ([IO.Path]::GetFullPath($$p.ExecutablePath) -eq $$want) { $$o += [int]$$p.ProcessId } }; ,$$o }; $$ids = ours; if ($$ids.Count -eq 0) { exit 0 }; if ($$env:DN_CLOSE_MODE -ne 'close') { exit 10 }; foreach ($$i in $$ids) { try { [void](Get-Process -Id $$i).CloseMainWindow() } catch { } }; for ($$t = 0; $$t -lt 20 -and (ours).Count; $$t++) { Start-Sleep -Milliseconds 250 }; foreach ($$i in (ours)) { Stop-Process -Id $$i -Force -ErrorAction SilentlyContinue }; for ($$t = 0; $$t -lt 20 -and (ours).Count; $$t++) { Start-Sleep -Milliseconds 250 }; if ((ours).Count) { exit 10 }; exit 0 } catch { exit 3 }`
+; Paths reach the script through the environment, never through its text. Every
+; CIM query has -OperationTimeoutSec 10 and the whole script a 25 s budget (then
+; exit 3: unknown); dnRunHidden also stops it after DN_CLOSE_FIND_TIMEOUT_MS /
+; DN_CLOSE_TIMEOUT_MS. The harness overrides DN_CLOSE_PS to simulate a stall.
+!ifndef DN_CLOSE_PS
+!define DN_CLOSE_PS `$$ErrorActionPreference='Stop'; try { $$budget = [Diagnostics.Stopwatch]::StartNew(); $$want = [IO.Path]::GetFullPath($$env:DN_CLOSE_EXE); $$name = [IO.Path]::GetFileName($$want); $$session = (Get-Process -Id $$PID).SessionId; function ours { if ($$budget.Elapsed.TotalSeconds -gt 25) { throw 'budget' }; $$o = @(); foreach ($$p in @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 10 | Where-Object { $$_.Name -eq $$name })) { if (-not $$p.ExecutablePath) { if ($$p.SessionId -eq $$session) { throw 'unreadable' }; continue }; if ([IO.Path]::GetFullPath($$p.ExecutablePath) -eq $$want) { $$o += [int]$$p.ProcessId } }; ,$$o }; $$ids = ours; if ($$ids.Count -eq 0) { exit 0 }; if ($$env:DN_CLOSE_MODE -ne 'close') { exit 10 }; foreach ($$i in $$ids) { try { [void](Get-Process -Id $$i).CloseMainWindow() } catch { } }; for ($$t = 0; $$t -lt 20 -and (ours).Count; $$t++) { Start-Sleep -Milliseconds 250 }; foreach ($$i in (ours)) { Stop-Process -Id $$i -Force -ErrorAction SilentlyContinue }; for ($$t = 0; $$t -lt 20 -and (ours).Count; $$t++) { Start-Sleep -Milliseconds 250 }; if ((ours).Count) { exit 10 }; exit 0 } catch { exit 3 }`
+!endif
 
 Var dnCloseResult
 Var dnClosePolicy
@@ -47,11 +79,14 @@ Var dnLocked
 
 ; Closes the app running from exactly DIR\DN_APP_EXE. RESULT: none,
 ; closed, running (still running: not allowed, or survived closing), unknown
-; (identity could not be established) or cancel (the user said no).
+; (identity could not be established, including a closer that timed out) or
+; cancel (the user said no).
 !macro dnCloseAppIn DIR POLICY RESULT
   System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_EXE", w "${DIR}\${DN_APP_EXE}")'
   System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_MODE", w "find")'
-  nsExec::Exec `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS}"`
+  Push `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS}"`
+  Push ${DN_CLOSE_FIND_TIMEOUT_MS}
+  Call ${DN_FN}dnRunHidden
   Pop ${RESULT}
   ${if} ${RESULT} == "0"
     StrCpy ${RESULT} "none"
@@ -69,7 +104,9 @@ Var dnLocked
     ${if} ${RESULT} == "close"
       DetailPrint "$(appClosing)"
       System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_MODE", w "close")'
-      nsExec::Exec `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS}"`
+      Push `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS}"`
+      Push ${DN_CLOSE_TIMEOUT_MS}
+      Call ${DN_FN}dnRunHidden
       Pop ${RESULT}
       ${if} ${RESULT} == "0"
         StrCpy ${RESULT} "closed"
@@ -86,6 +123,67 @@ Var dnLocked
   System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_MODE", p 0)'
   DetailPrint "${PRODUCT_NAME} in ${DIR}: ${RESULT}"
 !macroend
+
+; Push COMMANDLINE; Push TIMEOUT_MS; Call dnRunHidden; Pop RESULT: the exit code of
+; COMMANDLINE run without a window, "timeout" when it did not finish in TIMEOUT_MS
+; (it is then terminated: it is our own child process), or "error" when it could
+; not be started. Unlike nsExec, a stalled child (a WMI provider that never
+; answers) cannot hang the installer or uninstaller.
+Function ${DN_FN}dnRunHidden
+  Exch $1
+  Exch
+  Exch $0
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  ; STARTUPINFOW (cb only; 68 bytes for a 32-bit installer, 104 for 64-bit) and
+  ; PROCESS_INFORMATION, zero-filled.
+  System::Alloc 128
+  Pop $2
+  !if ${NSIS_PTR_SIZE} > 4
+    System::Call '*$2(i 104)'
+  !else
+    System::Call '*$2(i 68)'
+  !endif
+  System::Alloc 32
+  Pop $3
+  ; CREATE_NO_WINDOW; the child inherits this process's environment.
+  System::Call 'kernel32::CreateProcessW(p 0, w r0, p 0, p 0, i 0, i 0x08000000, p 0, p 0, p r2, p r3) i.r4'
+  ${if} $4 = 0
+    StrCpy $0 "error"
+  ${else}
+    System::Call '*$3(p .r5, p .r6)'
+    System::Call 'kernel32::CloseHandle(p r6)'
+    System::Call 'kernel32::WaitForSingleObject(p r5, i r1) i.r7'
+    ${if} $7 = 0
+      System::Call 'kernel32::GetExitCodeProcess(p r5, *i .r7) i.r4'
+      ${if} $4 = 0
+        StrCpy $0 "error"
+      ${else}
+        StrCpy $0 $7
+      ${endif}
+    ${else}
+      System::Call 'kernel32::TerminateProcess(p r5, i 1)'
+      System::Call 'kernel32::WaitForSingleObject(p r5, i 5000)'
+      StrCpy $0 "timeout"
+    ${endif}
+    System::Call 'kernel32::CloseHandle(p r5)'
+  ${endif}
+  System::Free $2
+  System::Free $3
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Exch $0
+  Exch
+  Pop $1
+FunctionEnd
 
 ; OUT = 1 when EXE exists and cannot be opened for writing (a running image is
 ; locked). Used only when the closer cannot tell; it never closes anything.
@@ -130,20 +228,17 @@ Var dnLocked
   ${loop}
 !macroend
 
-!ifndef BUILD_UNINSTALLER
+!ifdef DN_PATH_FUNCTIONS
   Var dnProgramsRoot
   Var dnProfileDir
   Var dnJournalKey
-  Var dnStateKey
-  Var dnPlanDir
-  Var dnPlanLegacy
   Var dnPlanNote
 
   ; Push PATH; Call dnCanonical; Pop RESULT: absolute, long-name form without a
   ; trailing separator ("" when the path is not valid). Links are not resolved.
   ; A path that does not exist yet gets its longest existing ancestor expanded
   ; (so C:\Users\RUNNER~1\...\New matches C:\Users\runneradmin\...\New).
-  Function dnCanonical
+  Function ${DN_FN}dnCanonical
     Exch $0
     Push $1
     Push $2
@@ -198,7 +293,7 @@ Var dnLocked
   FunctionEnd
 
   ; Push PATH; Call dnAttributes; Pop ATTRIBUTES (-1 when missing).
-  Function dnAttributes
+  Function ${DN_FN}dnAttributes
     Exch $0
     System::Call 'kernel32::GetFileAttributesW(w r0) i.r0'
     Exch $0
@@ -206,7 +301,7 @@ Var dnLocked
 
   ; Push PATH; Call dnFinalPath; Pop FINAL: the path with every junction and
   ; symbolic link resolved, as Windows itself opens it ("" when it cannot be opened).
-  Function dnFinalPath
+  Function ${DN_FN}dnFinalPath
     Exch $0
     Push $1
     Push $2
@@ -227,9 +322,167 @@ Var dnLocked
     Exch $0
   FunctionEnd
 
+  ; Push PATH; Call dnResolved; Pop RESOLVED: where PATH really is, every
+  ; junction and symbolic link resolved: its deepest existing folder (PATH itself
+  ; when it exists) named by handle (dnFinalPath), with the components that do not
+  ; exist yet appended. "" when a part that exists cannot be opened, so a caller
+  ; never compares an unresolved path.
+  Function ${DN_FN}dnResolved
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    Push $0
+    Call ${DN_FN}dnCanonical
+    Pop $0
+    ; $1: the part that does not exist yet, each component with a leading "\".
+    StrCpy $1 ""
+    StrCpy $3 ""
+    ${do}
+      ${if} $0 == ""
+        ${break}
+      ${endif}
+      Push $0
+      Call ${DN_FN}dnAttributes
+      Pop $2
+      ${if} $2 <> -1
+        Push $0
+        Call ${DN_FN}dnFinalPath
+        Pop $2
+        ${if} $2 != ""
+          ; A drive root comes back as "\\?\C:\".
+          StrCpy $3 $2 1 -1
+          ${if} $3 == "\"
+            StrCpy $2 $2 -1
+          ${endif}
+          StrCpy $3 "$2$1"
+        ${endif}
+        ${break}
+      ${endif}
+      ${GetFileName} $0 $2
+      StrCpy $1 "\$2$1"
+      ${GetParent} $0 $0
+      StrLen $2 $0
+      ${if} $2 < 2
+        StrCpy $0 ""
+      ${endif}
+    ${loop}
+    StrCpy $0 $3
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push HANDLE; Call dnHandleAttributes; Pop ATTRIBUTES of the object HANDLE
+  ; refers to (FileAttributeTagInfo), -1 when they cannot be read.
+  Function ${DN_FN}dnHandleAttributes
+    Exch $0
+    Push $1
+    Push $2
+    System::Alloc 8
+    Pop $1
+    System::Call 'kernel32::GetFileInformationByHandleEx(p r0, i 9, p r1, i 8) i.r2'
+    ${if} $2 = 0
+      StrCpy $0 -1
+    ${else}
+      System::Call '*$1(i .r0)'
+    ${endif}
+    System::Free $1
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push HANDLE; Call dnHandleIdentity; Pop "<volume serial>:<file index>" of the
+  ; object HANDLE refers to, "" when it cannot be read.
+  Function ${DN_FN}dnHandleIdentity
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    Push $4
+    System::Alloc 52
+    Pop $1
+    System::Call 'kernel32::GetFileInformationByHandle(p r0, p r1) i.r2'
+    ${if} $2 = 0
+      StrCpy $0 ""
+    ${else}
+      ; BY_HANDLE_FILE_INFORMATION: dwVolumeSerialNumber, nFileIndexHigh, nFileIndexLow.
+      System::Call '*$1(i, i, i, i, i, i, i, i .r2, i, i, i, i .r3, i .r4)'
+      StrCpy $0 "$2:$3:$4"
+    ${endif}
+    System::Free $1
+    Pop $4
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push HANDLE; Call dnHandlePath; Pop the full path of the object HANDLE refers
+  ; to, as Windows names it (GetFinalPathNameByHandle), "" when it cannot be read.
+  Function ${DN_FN}dnHandlePath
+    Exch $0
+    Push $1
+    Push $2
+    System::Call 'kernel32::GetFinalPathNameByHandleW(p r0, w .r1, i ${NSIS_MAX_STRLEN}, i 0) i.r2'
+    ${if} $2 = 0
+    ${orIf} $2 >= ${NSIS_MAX_STRLEN}
+      StrCpy $1 ""
+    ${endif}
+    StrCpy $0 $1
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push PATH; Push ACCESS; Push SHARE; Call dnOpenNoFollow; Pop HANDLE (0 when it
+  ; cannot be opened). Opens PATH itself, never what a junction or symbolic link
+  ; there points to (FILE_FLAG_OPEN_REPARSE_POINT); folders too (BACKUP_SEMANTICS).
+  Function ${DN_FN}dnOpenNoFollow
+    Exch $2
+    Exch
+    Exch $1
+    Exch 2
+    Exch $0
+    Push $3
+    System::Call 'kernel32::CreateFileW(w r0, i r1, i r2, p 0, i 3, i ${DN_OPEN_NO_FOLLOW}, p 0) p.r3'
+    ${if} $3 = -1
+      StrCpy $3 0
+    ${endif}
+    StrCpy $0 $3
+    Pop $3
+    Exch $0
+    Exch 2
+    Pop $1
+    Pop $2
+  FunctionEnd
+
+  ; Push HANDLE; Call dnDeleteHandle; Pop 1 when the object HANDLE refers to (opened
+  ; with DELETE access) is marked for deletion, else 0. For a junction or link
+  ; opened with dnOpenNoFollow that is the link itself, never its target.
+  Function ${DN_FN}dnDeleteHandle
+    Exch $0
+    Push $1
+    ; FileDispositionInfoEx: FILE_DISPOSITION_FLAG_DELETE | IGNORE_READONLY_ATTRIBUTE.
+    System::Call 'kernel32::SetFileInformationByHandle(p r0, i 21, *i 0x11, i 4) i.r1'
+    ${if} $1 = 0
+      ; Before Windows 10 1809: FileDispositionInfo.
+      System::Call 'kernel32::SetFileInformationByHandle(p r0, i 4, *i 1, i 4) i.r1'
+    ${endif}
+    ${if} $1 = 0
+      StrCpy $0 0
+    ${else}
+      StrCpy $0 1
+    ${endif}
+    Pop $1
+    Exch $0
+  FunctionEnd
+
   ; Push A; Push B; Call dnOverlaps; Pop 1 when A and B are the same folder or
   ; one is inside the other (case-insensitive, separator-bounded), else 0.
-  Function dnOverlaps
+  Function ${DN_FN}dnOverlaps
     Exch $1
     Exch
     Exch $0
@@ -265,8 +518,10 @@ Var dnLocked
   ; link or mount point) that holds DN_APP_EXE, and must resolve to
   ; that same place; NEW must be the sibling PRODUCT_FILENAME and, if it exists, a
   ; real folder that does not resolve onto or into LEGACY (or the reverse); and
-  ; neither may overlap the app profile.
-  Function dnCheckLegacyDir
+  ; neither may overlap the app profile, compared both as written and resolved
+  ; (dnResolved: junctions and links followed), equal or inside one another
+  ; either way.
+  Function ${DN_FN}dnCheckLegacyDir
     Exch $1
     Exch
     Exch $0
@@ -276,13 +531,13 @@ Var dnLocked
     Push $5
     StrCpy $5 ""
     Push $0
-    Call dnCanonical
+    Call ${DN_FN}dnCanonical
     Pop $0
     Push $1
-    Call dnCanonical
+    Call ${DN_FN}dnCanonical
     Pop $1
     Push $dnProgramsRoot
-    Call dnCanonical
+    Call ${DN_FN}dnCanonical
     Pop $2
     ${if} $0 == ""
     ${orIf} $1 == ""
@@ -296,7 +551,7 @@ Var dnLocked
     ${if} $5 == ""
       Push $0
       Push $1
-      Call dnOverlaps
+      Call ${DN_FN}dnOverlaps
       Pop $3
       ${if} $3 == "1"
         StrCpy $5 "the old and new folders overlap"
@@ -304,18 +559,18 @@ Var dnLocked
     ${endif}
     ${if} $5 == ""
       Push $dnProfileDir
-      Call dnCanonical
+      Call ${DN_FN}dnCanonical
       Pop $3
       ${if} $3 == ""
         StrCpy $5 "the profile path is not valid"
       ${else}
         Push $0
         Push $3
-        Call dnOverlaps
+        Call ${DN_FN}dnOverlaps
         Pop $4
         Push $1
         Push $3
-        Call dnOverlaps
+        Call ${DN_FN}dnOverlaps
         Pop $3
         ${if} $4 == "1"
         ${orIf} $3 == "1"
@@ -325,7 +580,7 @@ Var dnLocked
     ${endif}
     ${if} $5 == ""
       Push $0
-      Call dnAttributes
+      Call ${DN_FN}dnAttributes
       Pop $3
       IntOp $4 $3 & ${DN_ATTR_REPARSE_POINT}
       ${if} $3 = -1
@@ -341,7 +596,7 @@ Var dnLocked
     ${endif}
     ${if} $5 == ""
       Push "$0\${DN_APP_EXE}"
-      Call dnAttributes
+      Call ${DN_FN}dnAttributes
       Pop $3
       IntOp $4 $3 & 0x410
       ${if} $3 = -1
@@ -351,7 +606,7 @@ Var dnLocked
     ${endif}
     ${if} $5 == ""
       Push $1
-      Call dnAttributes
+      Call ${DN_FN}dnAttributes
       Pop $3
       ${if} $3 <> -1
         IntOp $4 $3 & 0x410
@@ -363,10 +618,10 @@ Var dnLocked
     ${if} $5 == ""
       ; Where Windows really opens them, whatever links lie above.
       Push $2
-      Call dnFinalPath
+      Call ${DN_FN}dnFinalPath
       Pop $2
       Push $0
-      Call dnFinalPath
+      Call ${DN_FN}dnFinalPath
       Pop $3
       ${if} $2 == ""
       ${orIf} $3 == ""
@@ -375,20 +630,67 @@ Var dnLocked
         StrCpy $5 "the old folder resolves to $3"
       ${else}
         Push $1
-        Call dnAttributes
+        Call ${DN_FN}dnAttributes
         Pop $4
         ${if} $4 <> -1
           Push $1
-          Call dnFinalPath
+          Call ${DN_FN}dnFinalPath
           Pop $4
           ${if} $4 == ""
             StrCpy $5 "the new folder cannot be opened"
           ${else}
             Push $3
             Push $4
-            Call dnOverlaps
+            Call ${DN_FN}dnOverlaps
             Pop $4
             ${if} $4 == "1"
+              StrCpy $5 "the old and new folders resolve to the same place"
+            ${endif}
+          ${endif}
+        ${endif}
+      ${endif}
+    ${endif}
+    ${if} $5 == ""
+      ; The overlap checks again on where the folders and the profile really are,
+      ; every junction and link resolved (a missing folder by its deepest existing
+      ; parent): the profile itself or a folder above it may be a junction into the
+      ; old install, or the reverse.
+      Push $0
+      Call ${DN_FN}dnResolved
+      Pop $3
+      Push $1
+      Call ${DN_FN}dnResolved
+      Pop $4
+      Push $dnProfileDir
+      Call ${DN_FN}dnResolved
+      Pop $2
+      ${if} $3 == ""
+      ${orIf} $4 == ""
+      ${orIf} $2 == ""
+        StrCpy $5 "a folder or the app profile cannot be resolved"
+      ${else}
+        Push $3
+        Push $2
+        Call ${DN_FN}dnOverlaps
+        Pop $2
+        ${if} $2 == "1"
+          StrCpy $5 "the old folder really overlaps the app profile"
+        ${else}
+          Push $dnProfileDir
+          Call ${DN_FN}dnResolved
+          Pop $2
+          Push $4
+          Push $2
+          Call ${DN_FN}dnOverlaps
+          Pop $2
+          ${if} $2 == "1"
+            StrCpy $5 "the new folder really overlaps the app profile"
+          ${else}
+            Push $3
+            Push $4
+            Call ${DN_FN}dnOverlaps
+            Pop $2
+            ${if} $2 == "1"
               StrCpy $5 "the old and new folders resolve to the same place"
             ${endif}
           ${endif}
@@ -405,128 +707,349 @@ Var dnLocked
     Pop $1
   FunctionEnd
 
-  ; Push DIR; Call dnRemoveTree: deletes DIR and everything in it without ever
-  ; entering a junction or symbolic link (NSIS's RMDir /r follows them and would
-  ; delete the target's contents); a link is removed, never what it points to.
-  ; Files that cannot be deleted stay; the caller checks what is left.
-  Function dnRemoveTree
+  ; Push DIR; Push PIN; Push SKIP; Call dnRemoveTreeAt; Pop STATUS. Empties DIR,
+  ; which PIN holds open (dnOpenNoFollow with DELETE, no FILE_SHARE_DELETE, so no
+  ; other process can rename, move or replace it meanwhile), except an entry named
+  ; SKIP. Everything is verified and deleted by handle, so a folder swapped for a
+  ; junction between a check and its use cannot lead outside:
+  ;   - before DIR is listed, the path DIR must still open as PIN's own object
+  ;     (same volume serial and file index) and not as a link;
+  ;   - each entry is opened without following links and must be DIR's own
+  ;     entry: its final path is PIN's final path plus "\<name>";
+  ;   - a file, junction or symbolic link is deleted through that handle (a link
+  ;     itself, never its target); a real folder is held open the same way, emptied
+  ;     the same way, then deleted through its handle.
+  ; STATUS: "ok" (all gone), "kept" (something could not be deleted, e.g. held
+  ; open, and stays) or "unsafe" (an identity check failed: removal stopped at
+  ; once; nothing that failed a check was touched).
+  Function ${DN_FN}dnRemoveTreeAt
+    Exch $2
+    Exch
+    Exch $1
+    Exch 2
     Exch $0
-    Push $1
-    Push $2
     Push $3
     Push $4
-    ClearErrors
-    FindFirst $1 $2 "$0\*.*"
-    ${doWhile} $2 != ""
-      ${if} $2 != "."
-      ${andIf} $2 != ".."
-        Push "$0\$2"
-        Call dnAttributes
-        Pop $3
-        ${if} $3 <> -1
-          IntOp $4 $3 & ${DN_ATTR_REPARSE_POINT}
-          ${if} $4 <> 0
-            IntOp $4 $3 & ${DN_ATTR_DIRECTORY}
-            ${if} $4 <> 0
-              RMDir "$0\$2"
-            ${else}
-              Delete "$0\$2"
-            ${endif}
+    Push $5
+    Push $6
+    Push $7
+    Push $8
+    Push $9
+    StrCpy $8 "ok"
+    ; FILE_READ_ATTRIBUTES, every share mode: a check only.
+    Push $0
+    Push 0x80
+    Push 7
+    Call ${DN_FN}dnOpenNoFollow
+    Pop $5
+    ${if} $5 = 0
+      StrCpy $8 "unsafe"
+    ${else}
+      Push $5
+      Call ${DN_FN}dnHandleIdentity
+      Pop $6
+      Push $5
+      Call ${DN_FN}dnHandleAttributes
+      Pop $7
+      System::Call 'kernel32::CloseHandle(p r5)'
+      Push $1
+      Call ${DN_FN}dnHandleIdentity
+      Pop $9
+      IntOp $7 $7 & ${DN_ATTR_REPARSE_POINT}
+      ${if} $6 == ""
+      ${orIf} $6 != $9
+      ${orIf} $7 <> 0
+        StrCpy $8 "unsafe"
+      ${endif}
+    ${endif}
+    ${if} $8 == "ok"
+      ClearErrors
+      FindFirst $3 $4 "$0\*.*"
+      ${doWhile} $4 != ""
+        ${if} $4 != "."
+        ${andIf} $4 != ".."
+        ${andIf} $4 != $2
+          Push "$0\$4"
+          Push ${DN_ACCESS_DELETE}
+          Push 3
+          Call ${DN_FN}dnOpenNoFollow
+          Pop $5
+          ${if} $5 = 0
+            ; Held open by another program (or not ours to delete): it stays.
+            StrCpy $8 "kept"
           ${else}
-            IntOp $4 $3 & ${DN_ATTR_DIRECTORY}
-            ${if} $4 <> 0
-              Push "$0\$2"
-              Call dnRemoveTree
+            Push $1
+            Call ${DN_FN}dnHandlePath
+            Pop $9
+            Push $5
+            Call ${DN_FN}dnHandlePath
+            Pop $6
+            Push $5
+            Call ${DN_FN}dnHandleAttributes
+            Pop $7
+            ${if} $9 == ""
+            ${orIf} $6 != "$9\$4"
+            ${orIf} $7 = -1
+              StrCpy $8 "unsafe"
             ${else}
-              Delete "$0\$2"
+              IntOp $6 $7 & ${DN_ATTR_REPARSE_POINT}
+              IntOp $7 $7 & ${DN_ATTR_DIRECTORY}
+              ${if} $6 = 0
+              ${andIf} $7 <> 0
+                Push "$0\$4"
+                Push $5
+                Push ""
+                Call ${DN_FN}dnRemoveTreeAt
+                Pop $6
+                ${if} $6 == "unsafe"
+                  StrCpy $8 "unsafe"
+                ${elseif} $6 == "kept"
+                  StrCpy $8 "kept"
+                ${else}
+                  Push $5
+                  Call ${DN_FN}dnDeleteHandle
+                  Pop $6
+                  ${if} $6 = 0
+                    StrCpy $8 "kept"
+                  ${endif}
+                ${endif}
+              ${else}
+                Push $5
+                Call ${DN_FN}dnDeleteHandle
+                Pop $6
+                ${if} $6 = 0
+                  StrCpy $8 "kept"
+                ${endif}
+              ${endif}
             ${endif}
+            System::Call 'kernel32::CloseHandle(p r5)'
           ${endif}
         ${endif}
-      ${endif}
-      ClearErrors
-      FindNext $1 $2
-    ${loop}
-    FindClose $1
-    RMDir "$0"
+        ${if} $8 == "unsafe"
+          ${break}
+        ${endif}
+        ClearErrors
+        FindNext $3 $4
+      ${loop}
+      FindClose $3
+    ${endif}
+    StrCpy $0 $8
+    Pop $9
+    Pop $8
+    Pop $7
+    Pop $6
+    Pop $5
     Pop $4
     Pop $3
-    Pop $2
+    Exch $0
+    Exch 2
     Pop $1
-    Pop $0
+    Pop $2
   FunctionEnd
 
-  ; Push DIR; Call dnRemoveLegacyDir; Pop "removed" or "kept". Removes everything
-  ; but DN_APP_EXE first and the exe last, so a folder that is only
-  ; partly removed (a file was held) still holds the exe, and the next run's
-  ; dnCheckLegacyDir still recognises it as the old install.
-  Function dnRemoveLegacyDir
+  ; Push DIR; Call dnRemoveLegacyDir; Pop "removed", "kept" or "unsafe". Holds
+  ; DIR open (dnOpenNoFollow) after checking that it is a real folder exactly where
+  ; its parent really is, then empties it with dnRemoveTreeAt: everything but
+  ; DN_APP_EXE first and the exe last, so a folder that is only partly removed (a
+  ; file was held) still holds the exe and the next run's dnCheckLegacyDir still
+  ; recognises it as the old install. "unsafe": an identity check failed and
+  ; removal stopped; what is left stays for the next run.
+  Function ${DN_FN}dnRemoveLegacyDir
     Exch $0
     Push $1
     Push $2
     Push $3
     Push $4
-    ClearErrors
-    FindFirst $1 $2 "$0\*.*"
-    ${doWhile} $2 != ""
-      ${if} $2 != "."
-      ${andIf} $2 != ".."
-      ${andIf} $2 != "${DN_APP_EXE}"
-        Push "$0\$2"
-        Call dnAttributes
-        Pop $3
-        ${if} $3 <> -1
-          IntOp $4 $3 & ${DN_ATTR_REPARSE_POINT}
-          ${if} $4 <> 0
-            IntOp $4 $3 & ${DN_ATTR_DIRECTORY}
-            ${if} $4 <> 0
-              RMDir "$0\$2"
-            ${else}
-              Delete "$0\$2"
-            ${endif}
-          ${else}
-            IntOp $4 $3 & ${DN_ATTR_DIRECTORY}
-            ${if} $4 <> 0
-              Push "$0\$2"
-              Call dnRemoveTree
-            ${else}
-              Delete "$0\$2"
-            ${endif}
-          ${endif}
+    StrCpy $3 "kept"
+    Push $0
+    Push ${DN_ACCESS_DELETE}
+    Push 3
+    Call ${DN_FN}dnOpenNoFollow
+    Pop $1
+    ${if} $1 <> 0
+      Push $1
+      Call ${DN_FN}dnHandlePath
+      Pop $4
+      ${GetParent} $0 $2
+      Push $2
+      Call ${DN_FN}dnFinalPath
+      Pop $2
+      ${GetFileName} $0 $3
+      StrCpy $2 "$2\$3"
+      StrCpy $3 "kept"
+      ${if} $4 == ""
+      ${orIf} $4 != $2
+        StrCpy $3 "unsafe"
+      ${else}
+        Push $1
+        Call ${DN_FN}dnHandleAttributes
+        Pop $2
+        IntOp $4 $2 & ${DN_ATTR_REPARSE_POINT}
+        IntOp $2 $2 & ${DN_ATTR_DIRECTORY}
+        ${if} $4 <> 0
+        ${orIf} $2 = 0
+          StrCpy $3 "unsafe"
         ${endif}
       ${endif}
-      ClearErrors
-      FindNext $1 $2
-    ${loop}
-    FindClose $1
-    ; Anything left besides the exe?
-    StrCpy $3 "0"
-    ClearErrors
-    FindFirst $1 $2 "$0\*.*"
-    ${doWhile} $2 != ""
-      ${if} $2 != "."
-      ${andIf} $2 != ".."
-      ${andIf} $2 != "${DN_APP_EXE}"
-        StrCpy $3 "1"
+      ${if} $3 != "unsafe"
+        Push $0
+        Push $1
+        Push "${DN_APP_EXE}"
+        Call ${DN_FN}dnRemoveTreeAt
+        Pop $2
+        ${if} $2 == "ok"
+          ; Only the exe is left: delete it last, then the folder.
+          Push $0
+          Push $1
+          Push ""
+          Call ${DN_FN}dnRemoveTreeAt
+          Pop $2
+          ${if} $2 == "ok"
+            Push $1
+            Call ${DN_FN}dnDeleteHandle
+            Pop $4
+          ${endif}
+        ${endif}
+        ${if} $2 == "unsafe"
+          StrCpy $3 "unsafe"
+        ${endif}
       ${endif}
-      ClearErrors
-      FindNext $1 $2
-    ${loop}
-    FindClose $1
-    ${if} $3 == "0"
-      Delete "$0\${DN_APP_EXE}"
-      RMDir "$0"
+      System::Call 'kernel32::CloseHandle(p r1)'
     ${endif}
-    ${if} ${FileExists} "$0\*.*"
-      StrCpy $0 "kept"
-    ${else}
-      StrCpy $0 "removed"
+    ${if} $3 != "unsafe"
+      ${if} ${FileExists} "$0\*.*"
+        StrCpy $3 "kept"
+      ${else}
+        StrCpy $3 "removed"
+      ${endif}
     ${endif}
+    StrCpy $0 $3
     Pop $4
     Pop $3
     Pop $2
     Pop $1
     Exch $0
   FunctionEnd
+
+  ; Push DEST; Call dnTrustedJournal; Pop SOURCE: the old folder an earlier,
+  ; unfinished run recorded in the journal at $dnJournalKey, or "" when there is
+  ; none or it is not trusted: it must name this identity and DEST, and its
+  ; source must still pass dnCheckLegacyDir. $dnPlanNote says why not.
+  Function ${DN_FN}dnTrustedJournal
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    StrCpy $dnPlanNote ""
+    ReadRegStr $1 HKCU $dnJournalKey "Identity"
+    ReadRegStr $2 HKCU $dnJournalKey "SourceDir"
+    ReadRegStr $3 HKCU $dnJournalKey "DestDir"
+    ${if} $1 == ""
+      StrCpy $0 ""
+    ${elseif} $1 != "${DN_MIGRATION_IDENTITY}"
+      StrCpy $dnPlanNote "the migration journal is for another app"
+      StrCpy $0 ""
+    ${else}
+      Push $0
+      Call ${DN_FN}dnCanonical
+      Pop $0
+      Push $3
+      Call ${DN_FN}dnCanonical
+      Pop $3
+      ${if} $3 != $0
+        StrCpy $dnPlanNote "the migration journal is for $3"
+        StrCpy $0 ""
+      ${else}
+        Push $2
+        Push $0
+        Call ${DN_FN}dnCheckLegacyDir
+        Pop $1
+        ${if} $1 != ""
+          StrCpy $dnPlanNote "the migration journal for $2: $1"
+          StrCpy $0 ""
+        ${else}
+          Push $2
+          Call ${DN_FN}dnCanonical
+          Pop $0
+        ${endif}
+      ${endif}
+    ${endif}
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+!endif
+
+!ifdef DN_WITH_UNINSTALL_LEGACY
+  ; Push DEST; Call dnUninstallLegacy; Pop RESULT. A user uninstall (not --updated)
+  ; of the copy in DEST while a move into DEST is unfinished (a trusted journal,
+  ; dnTrustedJournal) also removes the old folder that move left behind, after the
+  ; same checks and with the same handle-verified removal, because electron-builder's
+  ; uninstaller deletes the journal and nothing would ever finish the move. The app
+  ; there is closed only with consent ($dnClosePolicy). RESULT: "none" (no unfinished
+  ; move), "removed", or "kept: <why>": the old folder then stays as a stale copy
+  ; without an uninstall entry, which the next install of this app finds at the old
+  ; default folder and moves away (dnPlanMigration).
+  Function ${DN_FN}dnUninstallLegacy
+    Exch $0
+    Push $1
+    Push $2
+    Push $0
+    Call ${DN_FN}dnTrustedJournal
+    Pop $1
+    ${if} $1 == ""
+      StrCpy $0 "none"
+    ${else}
+      !insertmacro dnCloseAppIn "$1" $dnClosePolicy $dnCloseResult
+      ${if} $dnCloseResult != "none"
+      ${andIf} $dnCloseResult != "closed"
+        StrCpy $0 "kept: ${PRODUCT_NAME} there is $dnCloseResult"
+      ${else}
+        Push $1
+        Push $0
+        Call ${DN_FN}dnCheckLegacyDir
+        Pop $2
+        ${if} $2 != ""
+          StrCpy $0 "kept: $2"
+        ${else}
+          Push $1
+          Call ${DN_FN}dnRemoveLegacyDir
+          Pop $2
+          ${if} $2 == "removed"
+            DeleteRegKey HKCU $dnJournalKey
+            StrCpy $0 "removed"
+          ${elseif} $2 == "unsafe"
+            StrCpy $0 "kept: an identity check failed while removing it"
+          ${else}
+            StrCpy $0 "kept: a file is still in use"
+          ${endif}
+        ${endif}
+      ${endif}
+      DetailPrint "$1: $0"
+    ${endif}
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+!endif
+
+!ifndef BUILD_UNINSTALLER
+  Var dnStateKey
+  Var dnPlanDir
+  Var dnPlanLegacy
+  Var dnUninstallKey
+  Var dnUninstallKey2
+  Var dnSavedIdentity
+  Var dnSavedSource
+  Var dnSavedDest
+  Var dnSavedUninstall
+  Var dnSavedDesktop
+  Var dnSavedStartMenu
+  Var dnSavedFrom
+  Var dnSavedTo
+  Var dnSavedAt
+
   ; Where to install, from the folder electron-builder chose (no /D).
   ; In: $dnPlanDir. Out: $dnPlanDir, the folder to install to; $dnPlanLegacy, the
   ; old install to move from ("" for none); $dnPlanNote, why a folder named
@@ -580,62 +1103,14 @@ Var dnLocked
     Pop $0
   FunctionEnd
 
-  ; Push DEST; Call dnTrustedJournal; Pop SOURCE: the old folder an earlier,
-  ; unfinished run recorded in the journal at $dnJournalKey, or "" when there is
-  ; none or it is not trusted: it must name this identity and DEST, and its
-  ; source must still pass dnCheckLegacyDir. $dnPlanNote says why not.
-  Function dnTrustedJournal
-    Exch $0
-    Push $1
-    Push $2
-    Push $3
-    StrCpy $dnPlanNote ""
-    ReadRegStr $1 HKCU $dnJournalKey "Identity"
-    ReadRegStr $2 HKCU $dnJournalKey "SourceDir"
-    ReadRegStr $3 HKCU $dnJournalKey "DestDir"
-    ${if} $1 == ""
-      StrCpy $0 ""
-    ${elseif} $1 != "${DN_MIGRATION_IDENTITY}"
-      StrCpy $dnPlanNote "the migration journal is for another app"
-      StrCpy $0 ""
-    ${else}
-      Push $0
-      Call dnCanonical
-      Pop $0
-      Push $3
-      Call dnCanonical
-      Pop $3
-      ${if} $3 != $0
-        StrCpy $dnPlanNote "the migration journal is for $3"
-        StrCpy $0 ""
-      ${else}
-        Push $2
-        Push $0
-        Call dnCheckLegacyDir
-        Pop $1
-        ${if} $1 != ""
-          StrCpy $dnPlanNote "the migration journal for $2: $1"
-          StrCpy $0 ""
-        ${else}
-          Push $2
-          Call dnCanonical
-          Pop $0
-        ${endif}
-      ${endif}
-    ${endif}
-    Pop $3
-    Pop $2
-    Pop $1
-    Exch $0
-  FunctionEnd
-
   ; Push LEGACY; Push NEW; Call dnMigrationClose; Pop KEEP. A pending migration
   ; checks both folders, each on its own, with $dnClosePolicy: the app running
   ; from exactly LEGACY\DN_APP_EXE (a new exe that already exists never
   ; suppresses this), then exactly NEW\DN_APP_EXE, which must not run while its
   ; files are replaced (dnEnsureNotRunning). KEEP is "1" when the old app could
   ; not be closed or identified: the new copy is installed, the old folder and
-  ; the journal stay for the next run.
+  ; the journal stay for the next run. A silent run without --updated with the
+  ; old app running quits with exit code 2 and changes nothing.
   Function dnMigrationClose
     Exch $1
     Exch
@@ -644,6 +1119,15 @@ Var dnLocked
     StrCpy $2 "0"
     !insertmacro dnCloseAppIn "$0" $dnClosePolicy $dnCloseResult
     ${if} $dnCloseResult == "cancel"
+      Quit
+    ${elseif} $dnCloseResult == "running"
+    ${andIf} $dnClosePolicy == "never"
+      ; A silent install nobody asked the app for (/S without --updated) closes
+      ; nothing, and installing the new copy beside the running old one would leave
+      ; that one running, starting at login and holding the single-instance lock
+      ; the new exe needs. Quit before anything changed, like an in-place install.
+      DetailPrint `"${PRODUCT_NAME}" is running from $0 and a silent install without --updated does not close it; nothing was changed`
+      SetErrorLevel 2
       Quit
     ${elseif} $dnCloseResult != "none"
     ${andIf} $dnCloseResult != "closed"
@@ -661,7 +1145,7 @@ Var dnLocked
   ; Push LEGACY; Push NEW; Push KEEP; Call dnFinishMigration; Pop RESULT, once the
   ; new copy in NEW is verified. Checks LEGACY again right before deleting
   ; anything (the folders may have changed since the run started), then removes
-  ; it without following links and clears the journal. RESULT: "removed", or
+  ; it by verified handles (dnRemoveLegacyDir) and clears the journal. RESULT: "removed", or
   ; "kept: <why>" with the journal left armed so the next run retries.
   ;
   ; Only after a real move (the old folder is gone) does it record MigratedFrom,
@@ -712,6 +1196,8 @@ Var dnLocked
         IntFmt $R5 "%02u" $R5
         IntFmt $R6 "%02u" $R6
         WriteRegStr HKCU $dnStateKey "MigratedAt" "$R2-$R1-$R0T$R4:$R5:$R6Z"
+      ${elseif} $3 == "unsafe"
+        StrCpy $3 "kept: something in the old folder failed an identity check while it was being removed; removal stopped"
       ${else}
         StrCpy $3 "kept: a file is still in use"
       ${endif}
@@ -731,6 +1217,7 @@ Var dnLocked
     Pop $1
     Pop $2
   FunctionEnd
+
   ; Push NAME; Push PATH; Call dnShortcutState; Pop "1" | "0": whether the
   ; shortcut PATH existed when this migration started. The first run records the
   ; answer in the journal ($dnJournalKey, value NAME) before anything changes; a
@@ -874,5 +1361,213 @@ Var dnLocked
     Exch 2
     Pop $1
     Pop $2
+  FunctionEnd
+
+  ; Push COMMAND; Call dnUninstallerDir; Pop DIR: the folder whose own uninstaller
+  ; COMMAND runs, exactly as electron-builder registers a per-user install
+  ; ("<DIR>\DN_UNINSTALLER_EXE" /currentuser, nothing else), DIR normalised with
+  ; dnCanonical (an install registered through short names, C:\Users\LONGUS~1\...,
+  ; is recognised); "" when COMMAND is anything else.
+  Function dnUninstallerDir
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    StrCpy $3 ""
+    StrCpy $1 $0 1
+    ${if} $1 == '"'
+      StrCpy $2 1
+      ${do}
+        StrCpy $1 $0 1 $2
+        ${if} $1 == '"'
+        ${orIf} $1 == ""
+          ${break}
+        ${endif}
+        IntOp $2 $2 + 1
+      ${loop}
+      ${if} $1 == '"'
+        ; $1: the quoted exe path, $2: what follows the closing quote.
+        IntOp $1 $2 - 1
+        StrCpy $1 $0 $1 1
+        IntOp $2 $2 + 1
+        StrCpy $2 $0 "" $2
+        ${if} $2 S== " /currentuser"
+          ${GetFileName} $1 $2
+          ${if} $2 == "${DN_UNINSTALLER_EXE}"
+            ${GetParent} $1 $2
+            Push $2
+            Call dnCanonical
+            Pop $3
+          ${endif}
+        ${endif}
+      ${endif}
+    ${endif}
+    StrCpy $0 $3
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Call dnCheckUninstallCommand; Pop REASON: "" when every
+  ; uninstall command registered at $dnUninstallKey (and $dnUninstallKey2) is
+  ; absent or exactly LEGACY's or NEW's own uninstaller (dnUninstallerDir), else why
+  ; not. electron-builder's "uninstall old version" step runs whatever is
+  ; registered there with /S --updated before the new copy exists; a command that
+  ; cannot be parked would run the old uninstaller (and its broad process closer)
+  ; and delete the old folder first, so the move must not start.
+  Function dnCheckUninstallCommand
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    Push $3
+    Push $4
+    Push $0
+    Call dnCanonical
+    Pop $0
+    Push $1
+    Call dnCanonical
+    Pop $1
+    StrCpy $4 ""
+    ReadRegStr $2 HKCU $dnUninstallKey "UninstallString"
+    ${if} $2 != ""
+      Push $2
+      Call dnUninstallerDir
+      Pop $3
+      ${if} $3 != $0
+      ${andIf} $3 != $1
+        StrCpy $4 "the registered uninstall command is not the old folder's own uninstaller: $2"
+      ${endif}
+    ${endif}
+    ${if} $4 == ""
+    ${andIf} $dnUninstallKey2 != ""
+      ReadRegStr $2 HKCU $dnUninstallKey2 "UninstallString"
+      ${if} $2 != ""
+        Push $2
+        Call dnUninstallerDir
+        Pop $3
+        ${if} $3 != $0
+        ${andIf} $3 != $1
+          StrCpy $4 "the registered uninstall command is not the old folder's own uninstaller: $2"
+        ${endif}
+      ${endif}
+    ${endif}
+    StrCpy $0 $4
+    Pop $4
+    Pop $3
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Call dnParkUninstaller; Pop RESULT. Writes the journal
+  ; (identity, both folders) and parks every registered uninstall command that is
+  ; LEGACY's own uninstaller (the first one, verbatim, in LegacyUninstallString),
+  ; so "uninstall old version" finds nothing to run and cannot delete the old
+  ; folder before the new copy exists. Checks first (dnCheckUninstallCommand):
+  ; if any command could not be parked, nothing is written. RESULT: "parked",
+  ; "nothing to park" or "refused: <why>".
+  Function dnParkUninstaller
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    Push $3
+    Push $4
+    Push $0
+    Push $1
+    Call dnCheckUninstallCommand
+    Pop $4
+    ${if} $4 != ""
+      StrCpy $4 "refused: $4"
+    ${else}
+      WriteRegStr HKCU $dnJournalKey "Identity" "${DN_MIGRATION_IDENTITY}"
+      WriteRegStr HKCU $dnJournalKey "SourceDir" $0
+      WriteRegStr HKCU $dnJournalKey "DestDir" $1
+      Push $0
+      Call dnCanonical
+      Pop $0
+      StrCpy $4 "nothing to park"
+      ReadRegStr $2 HKCU $dnUninstallKey "UninstallString"
+      ${if} $2 != ""
+        Push $2
+        Call dnUninstallerDir
+        Pop $3
+        ${if} $3 == $0
+          WriteRegStr HKCU $dnJournalKey "LegacyUninstallString" $2
+          DeleteRegValue HKCU $dnUninstallKey "UninstallString"
+          StrCpy $4 "parked"
+        ${endif}
+      ${endif}
+      ${if} $dnUninstallKey2 != ""
+        ReadRegStr $2 HKCU $dnUninstallKey2 "UninstallString"
+        ${if} $2 != ""
+          Push $2
+          Call dnUninstallerDir
+          Pop $3
+          ${if} $3 == $0
+            DeleteRegValue HKCU $dnUninstallKey2 "UninstallString"
+            StrCpy $4 "parked"
+          ${endif}
+        ${endif}
+      ${endif}
+    ${endif}
+    StrCpy $0 $4
+    Pop $4
+    Pop $3
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Call dnSaveState / Call dnRestoreState. electron-builder's uninstaller, which
+  ; "uninstall old version" runs (with --updated) on every update once the uninstall
+  ; entry names an installed copy, deletes HKCU\Software\${APP_GUID}: the journal
+  ; ($dnJournalKey, a subkey) and the MigratedFrom / MigratedTo / MigratedAt record
+  ; ($dnStateKey). dnSaveState, called right before that step, remembers both;
+  ; dnRestoreState, first thing in customInstall (after it), writes back every value
+  ; that is now missing. So an unfinished move stays armed across any number of
+  ; runs, and a record the app has not consumed yet survives another update.
+  Function dnSaveState
+    ReadRegStr $dnSavedIdentity HKCU $dnJournalKey "Identity"
+    ReadRegStr $dnSavedSource HKCU $dnJournalKey "SourceDir"
+    ReadRegStr $dnSavedDest HKCU $dnJournalKey "DestDir"
+    ReadRegStr $dnSavedUninstall HKCU $dnJournalKey "LegacyUninstallString"
+    ReadRegStr $dnSavedDesktop HKCU $dnJournalKey "DesktopLink"
+    ReadRegStr $dnSavedStartMenu HKCU $dnJournalKey "StartMenuLink"
+    ReadRegStr $dnSavedFrom HKCU $dnStateKey "MigratedFrom"
+    ReadRegStr $dnSavedTo HKCU $dnStateKey "MigratedTo"
+    ReadRegStr $dnSavedAt HKCU $dnStateKey "MigratedAt"
+  FunctionEnd
+
+  !macro dnRestoreValue KEY NAME VALUE
+    ${if} ${VALUE} != ""
+      ReadRegStr $0 HKCU ${KEY} "${NAME}"
+      ${if} $0 == ""
+        WriteRegStr HKCU ${KEY} "${NAME}" ${VALUE}
+      ${endif}
+    ${endif}
+  !macroend
+
+  Function dnRestoreState
+    Push $0
+    !insertmacro dnRestoreValue $dnJournalKey "Identity" $dnSavedIdentity
+    !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $dnSavedSource
+    !insertmacro dnRestoreValue $dnJournalKey "DestDir" $dnSavedDest
+    !insertmacro dnRestoreValue $dnJournalKey "LegacyUninstallString" $dnSavedUninstall
+    !insertmacro dnRestoreValue $dnJournalKey "DesktopLink" $dnSavedDesktop
+    !insertmacro dnRestoreValue $dnJournalKey "StartMenuLink" $dnSavedStartMenu
+    ; The record is written only as a whole.
+    ReadRegStr $0 HKCU $dnStateKey "MigratedTo"
+    ${if} $0 == ""
+    ${andIf} $dnSavedTo != ""
+      WriteRegStr HKCU $dnStateKey "MigratedFrom" $dnSavedFrom
+      WriteRegStr HKCU $dnStateKey "MigratedTo" $dnSavedTo
+      WriteRegStr HKCU $dnStateKey "MigratedAt" $dnSavedAt
+    ${endif}
+    Pop $0
   FunctionEnd
 !endif

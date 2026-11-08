@@ -13,16 +13,21 @@
 ;      resolving onto the new folder or the profile. Anything else, including an
 ;      install recorded in another folder named APP_FILENAME (an earlier
 ;      /D=X\desktop), is upgraded in place as before: nothing moved or deleted.
+;      It also requires every registered uninstall command to be exactly the old
+;      (or new) folder's own uninstaller, compared normalised (short names, case);
+;      any other command could not be parked, so the install is upgraded in place.
 ;   2. customCheckAppRunning (dnMigrationClose) closes copies running from
 ;      exactly the old exe and exactly the new exe, each checked on its own
 ;      (never electron-builder's path-prefix or image-name matching), then parks
-;      the old uninstall command in a journal so electron-builder's "uninstall
-;      old version" step cannot delete the old folder before the new one exists.
+;      the old uninstall command in a journal (dnParkUninstaller) so
+;      electron-builder's "uninstall old version" step cannot delete the old folder
+;      before the new one exists. A silent install without --updated quits with
+;      exit code 2, changing nothing, if the old app is running.
 ;   3. customInstall verifies the new install, keeps the user's desktop and
 ;      Start menu shortcut choices (recorded before the old version was touched),
 ;      repoints taskbar pins that start exactly the old exe (dnRepointPins), then
 ;      dnFinishMigration checks the old folder again and only then removes it
-;      without following links. Only
+;      through handles verified to be inside it (never following links). Only
 ;      when the old folder is really gone does it write the MigratedFrom /
 ;      MigratedTo / MigratedAt record (HKCU\Software\${APP_GUID}) that lets the
 ;      app repoint its login item and MCP client entries.
@@ -33,7 +38,12 @@
 ; match and the old folder passes the same checks; it then finishes an
 ; interrupted migration. If the app cannot be closed, or which processes are ours
 ; cannot be established, the new install goes ahead, the old folder stays and the
-; journal stays armed.
+; journal stays armed. electron-builder's uninstaller deletes Software\${APP_GUID}
+; (journal and record) whenever "uninstall old version" runs it, so the journal
+; and the record are saved before that step and written back after it
+; (dnSaveState / dnRestoreState): the journal stays armed for as many runs as it
+; takes. A user uninstall of the new copy while a move is unfinished also removes
+; the old folder (customUnInstall, dnUninstallLegacy).
 ;
 ; Shortcut names, appId and so the uninstall registry key are unchanged, so the
 ; Start menu entry is replaced in place and Apps & features keeps one entry.
@@ -48,8 +58,15 @@
 ; electron-builder names the exe ${PRODUCT_FILENAME}.exe (APP_EXECUTABLE_FILENAME,
 ; defined after this file).
 !define DN_APP_EXE "${PRODUCT_FILENAME}.exe"
+!define DN_UNINSTALLER_EXE "Uninstall ${PRODUCT_FILENAME}.exe"
 ; What a journal must name to be trusted by this installer.
 !define DN_MIGRATION_IDENTITY "${APP_GUID}|${APP_FILENAME}|${PRODUCT_FILENAME}"
+!ifdef BUILD_UNINSTALLER
+!if "${APP_FILENAME}" != "${PRODUCT_FILENAME}"
+  ; The uninstaller removes an old folder left by an unfinished move.
+  !define DN_WITH_UNINSTALL_LEGACY
+!endif
+!endif
 !include "${__FILEDIR__}\windows-install-guards.nsh"
 
 ; Installer and uninstaller: our own exact-path closer replaces electron-builder's
@@ -104,6 +121,12 @@
     StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
     StrCpy $dnJournalKey "${DN_MIGRATION_KEY}"
     StrCpy $dnStateKey "${DN_STATE_KEY}"
+    StrCpy $dnUninstallKey "${UNINSTALL_REGISTRY_KEY}"
+    !ifdef UNINSTALL_REGISTRY_KEY_2
+      StrCpy $dnUninstallKey2 "${UNINSTALL_REGISTRY_KEY_2}"
+    !else
+      StrCpy $dnUninstallKey2 ""
+    !endif
     !insertmacro GetDParameter $R0
     ${if} $R0 == ""
       StrCpy $dnPlanDir "$INSTDIR"
@@ -137,37 +160,33 @@
         ${if} $dnLegacyDir == $R6
           ReadRegStr $R7 HKCU "${DN_MIGRATION_KEY}" "LegacyUninstallString"
           ReadRegStr $R8 HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
-          !insertmacro dnUninstallCommand "$R6" $R9
-          ${if} $R7 == $R9
+          Push $R7
+          Call dnUninstallerDir
+          Pop $R9
+          ${if} $R9 == $R6
           ${andIf} $R8 == ""
           ${andIf} ${FileExists} "$R6\${UNINSTALL_FILENAME}"
-            WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString" $R9
+            WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString" $R7
           ${endif}
+        ${endif}
+      ${endif}
+
+      ; Every registered uninstall command must be one we can park (the old
+      ; folder's own uninstaller, however its path is spelled) or the new one's;
+      ; anything else would run before the new copy exists: upgrade in place.
+      ${if} $dnLegacyDir != ""
+        Push $dnLegacyDir
+        Push $INSTDIR
+        Call dnCheckUninstallCommand
+        Pop $R6
+        ${if} $R6 != ""
+          DetailPrint "Not moving $dnLegacyDir: $R6"
+          StrCpy $INSTDIR $dnLegacyDir
+          StrCpy $dnLegacyDir ""
         ${endif}
       ${endif}
     ${endif}
 
-  !macroend
-
-  !macro dnParkLegacyUninstaller
-    WriteRegStr HKCU "${DN_MIGRATION_KEY}" "Identity" "${DN_MIGRATION_IDENTITY}"
-    WriteRegStr HKCU "${DN_MIGRATION_KEY}" "SourceDir" $dnLegacyDir
-    WriteRegStr HKCU "${DN_MIGRATION_KEY}" "DestDir" $INSTDIR
-    ; Park the uninstall command only while it is exactly the old folder's own
-    ; uninstaller (after an interrupted run it may already name the new one).
-    !insertmacro dnUninstallCommand "$dnLegacyDir" $R9
-    ReadRegStr $R6 HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
-    ${if} $R6 == $R9
-      WriteRegStr HKCU "${DN_MIGRATION_KEY}" "LegacyUninstallString" $R6
-      DeleteRegValue HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
-    ${endif}
-    !ifdef UNINSTALL_REGISTRY_KEY_2
-      ReadRegStr $R6 HKCU "${UNINSTALL_REGISTRY_KEY_2}" "UninstallString"
-      ${if} $R6 == $R9
-        DeleteRegValue HKCU "${UNINSTALL_REGISTRY_KEY_2}" "UninstallString"
-      ${endif}
-    !endif
-    DetailPrint "Moving ${PRODUCT_NAME} from $dnLegacyDir to $INSTDIR"
   !macroend
 
   !macro dnMigrationCheckAppRunning
@@ -176,7 +195,18 @@
       Push $INSTDIR
       Call dnMigrationClose
       Pop $dnKeepLegacy
-      !insertmacro dnParkLegacyUninstaller
+      Push $dnLegacyDir
+      Push $INSTDIR
+      Call dnParkUninstaller
+      Pop $R6
+      ${if} $R6 != "parked"
+      ${andIf} $R6 != "nothing to park"
+        ; Cannot happen after customInit's check; never let the old uninstaller run.
+        DetailPrint "Not moving $dnLegacyDir: $R6"
+        SetErrorLevel 2
+        Quit
+      ${endif}
+      DetailPrint "Moving ${PRODUCT_NAME} from $dnLegacyDir to $INSTDIR"
       ; Which shortcuts the user still had, before the old version is touched
       ; (setLinkVars has run: these are the old install's own shortcut paths).
       ; The new install recreates both (keepShortcuts is false: its exe is new),
@@ -192,9 +222,13 @@
     ${else}
       !insertmacro dnEnsureNotRunning "$INSTDIR"
     ${endif}
+    ; "uninstall old version" runs next and deletes Software\${APP_GUID}.
+    Call dnSaveState
   !macroend
 
   !macro customInstall
+    ; Put back the journal and record "uninstall old version" deleted.
+    Call dnRestoreState
     ${if} $dnLegacyDir != ""
       ; Verified = the new copy is complete and registered as the uninstall entry.
       ReadRegStr $R7 HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
@@ -230,6 +264,24 @@
       ${else}
         DetailPrint "The new install in $INSTDIR is incomplete; keeping $dnLegacyDir"
       ${endif}
+    ${endif}
+  !macroend
+!endif
+
+; Uninstaller: a user uninstall (not an update's --updated run) of the new copy
+; while a move into it is unfinished also removes the old folder that move left
+; behind (dnUninstallLegacy), before electron-builder deletes the journal with
+; Software\${APP_GUID}.
+!ifdef DN_WITH_UNINSTALL_LEGACY
+  !macro customUnInstall
+    ${ifNot} ${isUpdated}
+      !insertmacro dnClosePolicy $dnClosePolicy
+      StrCpy $dnProgramsRoot "$LOCALAPPDATA\Programs"
+      StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
+      StrCpy $dnJournalKey "Software\${APP_GUID}\InstallMigration"
+      Push $INSTDIR
+      Call un.dnUninstallLegacy
+      Pop $R0
     ${endif}
   !macroend
 !endif

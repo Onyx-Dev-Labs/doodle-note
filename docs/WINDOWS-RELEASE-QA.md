@@ -314,17 +314,37 @@ moves an existing install on upgrade:
    point) holding `DoodleNote.exe`; resolving (`GetFinalPathNameByHandle`) to
    that same place and not onto or into the new folder; the new folder, if it
    exists, a real folder too; neither overlapping the profile
-   (`%APPDATA%\desktop`). Anything else is upgraded in place, as before.
+   (`%APPDATA%\desktop`), compared both as written and resolved: every path in
+   the comparison (old, new, profile) is resolved by handle, a missing one through
+   its deepest existing parent, and equality or containment either way refuses
+   (so a profile that is a junction into the old install, a `Roaming` folder that
+   is one, or a `Programs` folder that is a junction into the profile all
+   refuse). Every registered uninstall command must also be exactly the old (or
+   new) folder's own uninstaller, `"<dir>\Uninstall DoodleNote.exe" /currentuser`
+   with the folder compared normalised (short names such as
+   `C:\Users\LONGUS~1\...` and case); any other command could not be parked and
+   electron-builder would run it before the new copy exists, so the install is
+   upgraded in place and the journal is left alone (the reason is in the install
+   log; the exit code stays 0, as for any in-place upgrade). Anything else is
+   upgraded in place, as before.
 2. `customCheckAppRunning` closes copies running from exactly the old exe and
    exactly the new exe, each checked on its own, through `Win32_Process`
    executable paths (never electron-builder's path-prefix match, which also
    matched `Programs\DoodleNote QA`, or its `taskkill` by image name). It asks
    each to close, waits, then stops only the PIDs that still match. It closes
    only with consent: when the app started the update (`--updated`) or the user
-   says OK; a silent install nobody asked the app for closes nothing. If the old
-   folder's app cannot be closed, or which processes are ours cannot be
-   established (no PowerShell, or an unreadable process with the same name),
-   the new copy is installed and the old folder is kept for the next run. It
+   says OK. A silent install nobody asked the app for (`/S` without `--updated`)
+   closes nothing: with the old app running it quits with exit code 2 and changes
+   nothing, exactly like an in-place upgrade whose app is running (installing the
+   new copy beside it would leave the old app running, starting at login and
+   holding the single-instance lock until it quit). Every CIM query has a 10 s
+   timeout, the closer script a 25 s budget, and the installer runs it through a
+   watchdog (`CreateProcess` + `WaitForSingleObject`, 30 s to find, 45 s to
+   close, then the child is terminated), so a stalled WMI provider cannot hang
+   the installer or uninstaller; a timeout counts as "cannot be established". If
+   the old folder's app cannot be closed, or which processes are ours cannot be
+   established (no PowerShell, a timeout, or an unreadable process with the same
+   name), the new copy is installed and the old folder is kept for the next run. It
    then parks the old uninstall command in the journal
    `HKCU\Software\{APP_GUID}\InstallMigration` (the GUID derives from `appId`),
    so electron-builder's "uninstall old version" step does not delete the old
@@ -333,13 +353,27 @@ moves an existing install on upgrade:
    uses it, to finish an interrupted move or to put back the parked command
    for Apps & features, only when all of them match and the old folder still
    passes the checks above, and only puts back exactly the old folder's own
-   uninstaller.
+   uninstaller. electron-builder's uninstaller, which "uninstall old version"
+   runs with `--updated` on every update once the uninstall entry names an
+   installed copy, deletes `HKCU\Software\{APP_GUID}` with the journal and the
+   `MigratedFrom/To/At` record in it; both are saved right before that step and
+   written back first thing in `customInstall`, so a move kept by a held file
+   stays armed for as many runs as it takes, and a record the app has not read
+   yet survives another update.
 3. `customInstall` verifies the new copy (exe, `app.asar`, uninstaller, and the
    uninstall entry pointing at it), checks the old folder again, then removes
    it with a walk that deletes a junction or link but never what it points to
    (NSIS's own `RMDir /r` follows junctions, verified on Dev04) and deletes
    `DoodleNote.exe` last, so a folder that is only partly removed is still
-   recognised next time. Before the old version is touched, `customCheckAppRunning`
+   recognised next time. The walk is handle-based: each folder is held open
+   (`FILE_FLAG_OPEN_REPARSE_POINT`, no `FILE_SHARE_DELETE`, so no other process
+   can rename or replace it meanwhile), must still be the folder it opened (volume
+   serial and file index) before it is listed, and each entry is opened without
+   following links and must be that folder's own entry (its final path is the
+   folder's plus its name) before it is deleted through that handle
+   (`SetFileInformationByHandle`); a folder swapped for a junction between a check
+   and its use is never entered. If any identity check fails, removal stops at
+   once, the rest stays and the journal stays armed. Before the old version is touched, `customCheckAppRunning`
    records (in the journal, so an interrupted run's leftovers cannot change the
    answer) whether the user still had the old desktop and Start menu shortcuts;
    electron-builder recreates both for the new exe, and `customInstall` deletes
@@ -351,11 +385,24 @@ moves an existing install on upgrade:
    old folder is kept.
    Only when the old folder is really gone does it write the record
    `HKCU\Software\{APP_GUID}` `MigratedFrom` / `MigratedTo` / `MigratedAt`.
+4. Uninstalling the new copy (not an update's `--updated` run) while a move is
+   unfinished also removes the old folder it left (same checks, same
+   handle-based removal; its app closed only with consent), since the
+   uninstaller deletes the journal. If that app keeps running or a file there is
+   held, the old folder stays as a stale copy without an uninstall entry; the
+   next install of the same identity finds it at the old default folder and
+   moves it away.
 
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
-a held file and real processes in a temporary sandbox (CI "Check Windows
-installer migration guards").
+held files and real processes in a temporary sandbox (CI "Check Windows
+installer migration guards"; 189 cases): the junction overlap cases above, a
+second process swapping folders for junctions to an outside folder while the
+old folder is removed (nothing outside is touched), short-name and foreign
+uninstall commands, a file held across two runs with the uninstaller's key
+deletion simulated each time and a third run finishing, the uninstall clean-up,
+a closer that never answers (`unknown` in about 4 s) and the silent
+quit-with-exit-code-2 case.
 
 `appId`, the shortcut name and so the uninstall key are unchanged, so Start and
 Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the
@@ -439,11 +486,15 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
    `MigratedAt`, and after the first launch they are gone; nothing of production
    changed (its folder, Run value, uninstall key and real MCP configs).
 3. Repeat with the legacy QA app running (closed only after the OK prompt; with
-   `/S` and no `--updated` it is left running and its folder kept), with a file
-   in the old folder held open (the folder and its exe stay, the journal stays
-   armed, the next run finishes), and with `Programs\DoodleNote QA` replaced by a
-   junction to `Programs\desktop-qa` before step 2 (nothing is moved or deleted;
-   the install is upgraded in place).
+   `/S` and no `--updated` the installer exits with code 2 and nothing changes),
+   with a file in the old folder held open across two runs (the folder and its
+   exe stay, the journal stays armed after each, a third run finishes), with
+   `Programs\DoodleNote QA` replaced by a junction to `Programs\desktop-qa`
+   before step 2 (nothing is moved or deleted; the install is upgraded in place),
+   with the QA uninstall entry's `UninstallString` rewritten in 8.3 form (still
+   moved; the parked command is put back verbatim if the run is cancelled), and
+   by uninstalling `DoodleNote QA` from Apps & features while a move is pending
+   (both folders are gone afterwards).
 
 ## Automatic updates (off until activation)
 

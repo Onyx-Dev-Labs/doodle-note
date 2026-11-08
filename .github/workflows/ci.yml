@@ -153,7 +153,7 @@ jobs:
       # electron-builder's makensis and run against real junctions, a held file and
       # real processes in a temporary sandbox.
       - name: Check Windows installer migration guards
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: node apps/desktop/scripts/test-windows-installer-guards.cjs
 
       - name: Test recorder with packaged Electron runtime

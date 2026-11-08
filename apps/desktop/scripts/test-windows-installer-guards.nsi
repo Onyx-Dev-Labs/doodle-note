@@ -20,12 +20,25 @@
 ;   finish|<legacy>|<new>|<keep>         dnFinishMigration: removed | kept: <why>
 ;   linkstate|<name>|<path>              dnShortcutState: 1 | 0 (recorded in the journal on first use)
 ;   pins|<dir>|<old>|<new>               dnRepointPins: number of shortcuts repointed
+;   removeat|<dir>|<pin dir>             dnRemoveTreeAt(dir) with <pin dir> held open as the pin: ok | kept | unsafe
+;   resolved|<path>                      dnResolved: the path with links resolved
+;   ukey|<key>|<key2>                    sets $dnUninstallKey / $dnUninstallKey2 (throwaway HKCU keys; key2 may be empty)
+;   ucmd|<command>|<1|2>                 writes UninstallString at key 1 (default) or 2; an empty command deletes it
+;   uread                                <key 1 UninstallString>|<key 2 UninstallString>
+;   uninstof|<command>                   dnUninstallerDir: the folder, or "none"
+;   ucheck|<legacy>|<new>                dnCheckUninstallCommand: ok or the reason
+;   park|<legacy>|<new>                  dnParkUninstaller: parked | nothing to park | refused: <why>
+;   jread|<value>                        the journal value, or "none"
+;   save / restore                       dnSaveState / dnRestoreState: done
+;   wipe                                 deletes $dnStateKey with its journal subkey, as electron-builder's uninstaller does
+;   unlegacy|<dest>|<policy>             dnUninstallLegacy: none | removed | kept: <why>
 Unicode true
 SilentInstall silent
 RequestExecutionLevel user
 OutFile "${OUT_FILE}"
 
 !define PRODUCT_NAME "DoodleNote test"
+!define DN_WITH_UNINSTALL_LEGACY
 !macro _isUpdated _a _b _t _f
   StrCmp "" "1" `${_t}` `${_f}`
 !macroend
@@ -47,6 +60,7 @@ Var a
 Var b
 Var c
 Var result
+Var pin
 
 Section
 SectionEnd
@@ -178,6 +192,87 @@ Function .onInit
       Push $b
       Push $c
       Call dnRepointPins
+      Pop $result
+    ${elseif} $kind == "removeat"
+      Push $b
+      Push ${DN_ACCESS_DELETE}
+      Push 3
+      Call dnOpenNoFollow
+      Pop $pin
+      ${if} $pin = 0
+        StrCpy $result "pin failed"
+      ${else}
+        Push $a
+        Push $pin
+        Push ""
+        Call dnRemoveTreeAt
+        Pop $result
+        System::Call 'kernel32::CloseHandle(p $pin)'
+      ${endif}
+    ${elseif} $kind == "resolved"
+      Push $a
+      Call dnResolved
+      Pop $result
+    ${elseif} $kind == "ukey"
+      StrCpy $dnUninstallKey $a
+      StrCpy $dnUninstallKey2 $b
+      StrCpy $result "set"
+    ${elseif} $kind == "ucmd"
+      StrCpy $0 $dnUninstallKey
+      ${if} $b == "2"
+        StrCpy $0 $dnUninstallKey2
+      ${endif}
+      ${if} $a == ""
+        DeleteRegValue HKCU $0 "UninstallString"
+      ${else}
+        WriteRegStr HKCU $0 "UninstallString" $a
+      ${endif}
+      StrCpy $result "set"
+    ${elseif} $kind == "uread"
+      ReadRegStr $0 HKCU $dnUninstallKey "UninstallString"
+      StrCpy $1 ""
+      ${if} $dnUninstallKey2 != ""
+        ReadRegStr $1 HKCU $dnUninstallKey2 "UninstallString"
+      ${endif}
+      StrCpy $result "$0|$1"
+    ${elseif} $kind == "uninstof"
+      Push $a
+      Call dnUninstallerDir
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "ucheck"
+      Push $a
+      Push $b
+      Call dnCheckUninstallCommand
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "ok"
+      ${endif}
+    ${elseif} $kind == "park"
+      Push $a
+      Push $b
+      Call dnParkUninstaller
+      Pop $result
+    ${elseif} $kind == "jread"
+      ReadRegStr $result HKCU $dnJournalKey $a
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "save"
+      Call dnSaveState
+      StrCpy $result "done"
+    ${elseif} $kind == "restore"
+      Call dnRestoreState
+      StrCpy $result "done"
+    ${elseif} $kind == "wipe"
+      DeleteRegKey HKCU $dnStateKey
+      StrCpy $result "done"
+    ${elseif} $kind == "unlegacy"
+      StrCpy $dnClosePolicy $b
+      Push $a
+      Call dnUninstallLegacy
       Pop $result
     ${elseif} $kind == "finish"
       Push $a
