@@ -128,7 +128,13 @@ export interface HelperLike {
   snapshot(snapshotId: string): Promise<TargetDescription | null>
   /** An app bundle's icon as a small PNG data URL; null when it cannot be drawn. */
   appIcon(appPath: string): Promise<string | null>
-  deliver(snapshotId: string, text: string, guards?: DeliveryGuards): Promise<HelperDelivery>
+  /** deliveryId (Windows): the service's name for this delivery; later clipboard results name it. */
+  deliver(
+    snapshotId: string,
+    text: string,
+    guards?: DeliveryGuards,
+    deliveryId?: string
+  ): Promise<HelperDelivery>
   /** The text selected in the snapshot's field; refused for secure fields. */
   selection(snapshotId: string): Promise<SelectionResult>
   /** The name and icon of each installed app among these bundle identifiers. */
@@ -148,8 +154,11 @@ export interface HelperLike {
   onClick(listener: () => void): () => void
   /** Replace the helper process (it re-arms its triggers when it comes back). */
   restart(): void
-  /** Windows: the last delivery's clipboard rollback finished after its reply (see the client). */
-  onClipboardLate?(listener: (clipboard: string) => void): () => void
+  /**
+   * Windows: a delivery's clipboard result arrived after its reply (a late rollback, a recovery of a kept
+   * transaction, or a kept one left pending); it names the delivery when known (see the client).
+   */
+  onClipboardLate?(listener: (clipboard: string, deliveryId?: string) => void): () => void
   /** Windows: whether a helper that leaves now is started again on its own (absent: assume yes). */
   willRestart?(): boolean
   /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
@@ -384,6 +393,8 @@ export class DictationService {
   private readonly windows: boolean
   /** Windows: the clipboard note for one recovery card (by generation). */
   private clipboardWarning: { gen: number; message: string } | null = null
+  /** Windows: the delivery the clipboard notice (warning line or panel) is about, when the helper named it. */
+  private clipboardDelivery: string | null = null
 
   constructor(private readonly deps: DictationDeps) {
     this.copy = barkCopy(deps.platform ?? 'darwin')
@@ -410,7 +421,9 @@ export class DictationService {
     // Windows: a hook loss/re-install changes what the permissions panel shows; refresh it.
     if (deps.helper.onClipboardLate) {
       this.unsubscribe.push(
-        deps.helper.onClipboardLate((clipboard) => this.clipboardLate(clipboard))
+        deps.helper.onClipboardLate((clipboard, deliveryId) =>
+          this.clipboardLate(clipboard, deliveryId)
+        )
       )
     }
     if (deps.helper.onHooks) {
@@ -1801,7 +1814,10 @@ export class DictationService {
     kind: string
     clipboard?: string
     clipboardHolds?: string
+    deliveryId?: string
   }): string | null {
+    // The newest delivery is the one a later clipboard result may still change.
+    if (this.windows) this.clipboardDelivery = outcome.deliveryId ?? null
     const problem = this.windows
       ? clipboardProblem(outcome.clipboard, outcome.clipboardHolds)
       : null
@@ -1823,9 +1839,16 @@ export class DictationService {
    * Windows: the warning for the last delivery said the clipboard could not be told; its rollback
    * finished later. The card's line and the panel now say what actually happened (or go away).
    */
-  private clipboardLate(clipboard: string): void {
+  private clipboardLate(clipboard: string, deliveryId?: string): void {
+    // Only the newest delivery's notice changes: a result for an older one never clears (or sets) it.
+    if (deliveryId && this.clipboardDelivery && deliveryId !== this.clipboardDelivery) {
+      this.deps.log(
+        `clipboard result for an earlier delivery (${clipboard}); the current notice stays`
+      )
+      return
+    }
     const problem = clipboardProblem(clipboard, undefined)
-    this.deps.log(`clipboard rollback finished after the reply: ${clipboard}`)
+    this.deps.log(`clipboard result after the reply: ${clipboard}`)
     if (this.clipboardWarning) {
       this.clipboardWarning = problem
         ? { gen: this.clipboardWarning.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
@@ -1834,6 +1857,15 @@ export class DictationService {
     }
     if (this.panel?.kind === 'clipboard')
       this.setPanel(problem ? { kind: 'clipboard', problem } : null, problem ? NOTICE_MS : 0)
+    // A problem nobody was told about yet (a kept transaction left pending, a rollback that failed later):
+    // the recovery card's warning line when that card shows, else the clipboard panel.
+    else if (problem && !this.clipboardWarning) {
+      const resting = this.state.resting
+      if (resting?.kind === 'recovery') {
+        this.clipboardWarning = { gen: resting.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+        this.render()
+      } else this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
+    }
   }
 
   private async deliver(
@@ -1846,6 +1878,7 @@ export class DictationService {
       helper?: HelperDeliveryTimings
       clipboard?: string
       clipboardHolds?: string
+      deliveryId?: string
     }
   > {
     if (!context) return { kind: 'recover', reason: 'no-target' }
@@ -1855,7 +1888,9 @@ export class DictationService {
     if (!target.hasElement) return { kind: 'recover', reason: 'no-target' }
     if (target.secure) return { kind: 'recover', reason: 'secure-field' }
     onStage?.('sent')
-    const result = await this.deps.helper.deliver(context.snapshotId, text, guards)
+    // Windows: named here, so a clipboard result that arrives later can be matched to this delivery.
+    const deliveryId = this.windows ? randomUUID() : undefined
+    const result = await this.deps.helper.deliver(context.snapshotId, text, guards, deliveryId)
     this.deps.log(
       `delivery ${result.outcome}${result.reason ? ` (${result.reason})` : ''} via ${result.method ?? 'none'}, clipboard ${result.clipboard}`
     )
@@ -1863,7 +1898,8 @@ export class DictationService {
     const helper = {
       ...(result.timings ? { helper: result.timings } : {}),
       clipboard: result.clipboard,
-      ...(result.clipboardHolds ? { clipboardHolds: result.clipboardHolds } : {})
+      ...(result.clipboardHolds ? { clipboardHolds: result.clipboardHolds } : {}),
+      ...(deliveryId ? { deliveryId } : {})
     }
     if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }
     if (result.outcome === 'uncertain') {

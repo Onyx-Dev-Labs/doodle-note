@@ -43,7 +43,8 @@ interface Harness {
     delivery: HelperDelivery
     /** Windows: false when the fake helper would not be restarted on its own. */
     willRestart?: boolean
-    clipboardLateListener?: (clipboard: string) => void
+    clipboardLateListener?: (clipboard: string, deliveryId?: string) => void
+    lastDeliveryId?: string
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     deliverGuards: DeliveryGuards[]
@@ -227,7 +228,7 @@ function harness(
     helper: {
       available: true,
       willRestart: () => helper.willRestart !== false,
-      onClipboardLate: (listener: (clipboard: string) => void) => {
+      onClipboardLate: (listener: (clipboard: string, deliveryId?: string) => void) => {
         helper.clipboardLateListener = listener
         return () => {}
       },
@@ -257,7 +258,8 @@ function harness(
         if (icons.fails) throw new Error('no icon')
         return icons.value
       },
-      deliver: async (_id, text, guards) => {
+      deliver: async (_id, text, guards, deliveryId) => {
+        helper.lastDeliveryId = deliveryId
         delivered.push(text)
         helper.deliverGuards.push(guards ?? {})
         return helper.deliveryFor?.(text, guards ?? {}) ?? helper.delivery
@@ -2846,6 +2848,48 @@ test('Windows: a late clipboard rollback updates the warning the reply caused', 
   const card = JSON.stringify(h.overlay.at(-1))
   assert.doesNotMatch(card, /could not be put back/)
   assert.equal(h.service.phase, 'recovery', 'the card itself stays')
+})
+
+test('Windows: a clipboard result for an earlier delivery never changes the current notice', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.delivery = {
+    verified: false,
+    clipboard: 'unrestored',
+    clipboardHolds: 'unknown',
+    outcome: 'refused',
+    reason: 'target-unverifiable'
+  }
+  await speak(h, 'some words')
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /could not tell what it holds/)
+  const current = h.helper.lastDeliveryId
+  assert.ok(current, 'the service names each Windows delivery')
+  // A recovery of an OLDER transaction: the current delivery's warning stays.
+  h.helper.clipboardLateListener!('restored', 'older')
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /could not tell what it holds/, 'still warned')
+  // The current delivery's own late result clears it.
+  h.helper.clipboardLateListener!('restored', current)
+  await tick()
+  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /could not be put back|could not tell/)
+})
+
+test('Windows: a kept transaction left pending for the newest delivery is surfaced', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.delivery = {
+    outcome: 'uncertain',
+    reason: 'helper-timeout',
+    verified: false,
+    clipboard: 'untouched'
+  }
+  await speak(h, 'some words')
+  await tick()
+  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /clipboard/i, 'nothing said yet')
+  // The next helper finds that delivery's transaction ambiguous (a clear or our empty): it says so.
+  h.helper.clipboardLateListener!('unrestored', h.helper.lastDeliveryId)
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /clipboard/i, 'the user is told')
 })
 
 test('Windows: paste last and a refused paste report the clipboard too', async () => {

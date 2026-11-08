@@ -32,6 +32,8 @@ export interface HelperLaunch {
   args?: string[]
   /** Defaults to the running platform; only changes behavior on win32. */
   platform?: NodeJS.Platform
+  /** The monotonic clock (ms) the spin guard reads; defaults to performance.now(). For tests. */
+  clock?: () => number
   /** Overrides the readiness timeout; for tests that exercise a late ready. */
   readyTimeoutMs?: number
   /**
@@ -111,8 +113,24 @@ export const WINDOWS_EXIT_GRACE_MS = 8_000
  */
 export const WINDOWS_READY_TIMEOUT_MS = 15_000
 
-/** Backoff between automatic helper restarts after a crash, capped. */
-const RESTART_BACKOFF_MS = [500, 1_000, 2_000, 5_000, 10_000]
+/** A helper is not started again within this long of its last exit, so one that dies at once cannot spin. */
+export const SPIN_GUARD_MS = 500
+/**
+ * How much later than the spin guard the first automatic restart is due. Timers can fire a little early
+ * against the clock the guard reads (they measure from the event loop's cached time), so a restart due
+ * exactly at the guard could be refused by it. A restart that still meets the guard waits out the rest.
+ */
+export const RESTART_MARGIN_MS = 100
+/** Late clipboard results kept for deliveries still awaiting their reply (normally one at a time). */
+const LATE_OUTCOMES_CAP = 16
+/** Backoff between automatic helper restarts after a crash, capped. Every step is past the spin guard. */
+export const RESTART_BACKOFF_MS: readonly number[] = [
+  SPIN_GUARD_MS + RESTART_MARGIN_MS,
+  1_000,
+  2_000,
+  5_000,
+  10_000
+]
 /** A helper that stays up this long is considered healthy; the backoff resets only then. */
 const HELPER_HEALTHY_MS = 60_000
 /** A ceiling on automatic restarts per session, so a helper that always dies cannot spin forever. */
@@ -175,7 +193,8 @@ export class DictationHelperClient {
   private readonly tapListeners = new Set<() => void>()
   private readonly clickListeners = new Set<() => void>()
   private readonly exitListeners = new Set<() => void>()
-  private lastExitAt = 0
+  /** When the last helper exited, on `clock` (null: none has). */
+  private lastExitAt: number | null = null
   /** The last spawn error code, cleared once a helper announces readiness. */
   private launchError: string | null = null
   /** The sound output is silenced right now, so a crashed helper must be replaced to give it back. */
@@ -201,11 +220,17 @@ export class DictationHelperClient {
   private gated: HelperChild | null = null
   private gatedChunks: string[] = []
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
-  private readonly clipboardLateListeners = new Set<(clipboard: string) => void>()
-  /** The last deliver request's id (a late clipboard rollback names the delivery it belongs to). */
-  private lastDeliverId: string | null = null
-  /** A late clipboard result that arrived before its delivery's reply: applied to that reply. */
-  private readonly lateBeforeReply = new Map<string, string>()
+  private readonly clipboardLateListeners = new Set<
+    (clipboard: string, deliveryId?: string) => void
+  >()
+  /**
+   * Windows: deliveries whose reply has not been consumed yet. A clipboard result for one of them (a late
+   * rollback, a recovery, a pending record) waits in lateOutcomes and is applied to that reply, whatever
+   * the order the reply and the event arrive in (even in one stdout chunk). Entries leave when the
+   * delivery settles: its reply, its timeout, or the helper's exit.
+   */
+  private readonly awaitingDeliver = new Set<string>()
+  private readonly lateOutcomes = new Map<string, string>()
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -255,7 +280,7 @@ export class DictationHelperClient {
    * Windows: the clipboard rollback of the LAST delivery finished after its reply (the reply said the
    * clipboard state was unknown); `clipboard` is what happened after all (restored, untouched, …).
    */
-  onClipboardLate(listener: (clipboard: string) => void): () => void {
+  onClipboardLate(listener: (clipboard: string, deliveryId?: string) => void): () => void {
     this.clipboardLateListeners.add(listener)
     return () => this.clipboardLateListeners.delete(listener)
   }
@@ -355,10 +380,15 @@ export class DictationHelperClient {
    * `uncertain`, never a silent failure: the text may already be in the target,
    * so the caller keeps it and must not resend.
    */
+  /**
+   * `deliveryId` (Windows: the caller's name for this delivery) becomes the request id, so later clipboard
+   * results (late, recovered, pending) can be matched to it (see onClipboardLate).
+   */
   async deliver(
     snapshotId: string,
     text: string,
-    guards: DeliveryGuards = {}
+    guards: DeliveryGuards = {},
+    deliveryId: string = randomUUID()
   ): Promise<HelperDelivery> {
     if (!(await this.ensureRunning())) {
       return {
@@ -371,7 +401,9 @@ export class DictationHelperClient {
     // Windows sizes the wait and the helper's deadline from the text length so a long
     // typing fallback never times out and lands later; macOS keeps its fixed deliver timeout.
     const budget = this.windows ? windowsDeliverBudget(text) : null
-    const reply = await this.request(
+    const id = deliveryId
+    if (this.windows) this.awaitingDeliver.add(id)
+    const pendingReply = this.request(
       'deliver',
       {
         snapshotId,
@@ -384,15 +416,38 @@ export class DictationHelperClient {
         ...(budget ? { deadlineMs: budget.deadlineMs } : {})
       },
       budget ? budget.timeout : this.timeouts.deliver,
-      false
+      false,
+      id
     )
+    let reply: Reply | null
+    try {
+      reply = await pendingReply
+    } finally {
+      this.awaitingDeliver.delete(id)
+    }
+    // The latest clipboard outcome known for this delivery wins over what the helper knew when it replied.
+    const late = this.lateOutcomes.get(id)
+    this.lateOutcomes.delete(id)
+    const lateFields =
+      late === undefined
+        ? null
+        : {
+            clipboard: late,
+            ...(late === 'unrestored' ? { clipboardHolds: 'unknown' as const } : {})
+          }
     if (!reply) {
       return {
         outcome: 'uncertain',
         reason: 'helper-timeout',
         verified: false,
-        clipboard: 'untouched'
+        clipboard: 'untouched',
+        ...(lateFields ?? {})
       }
+    }
+    if (lateFields) {
+      reply.clipboard = lateFields.clipboard
+      if (lateFields.clipboardHolds) reply.clipboardHolds = lateFields.clipboardHolds
+      else delete reply.clipboardHolds
     }
     const outcome = reply.outcome
     return {
@@ -631,7 +686,7 @@ export class DictationHelperClient {
     if (this.child && this.ready) return this.ready
     if (!this.available) return Promise.resolve(false)
     // Do not spin on a helper that dies immediately.
-    if (Date.now() - this.lastExitAt < 500) return Promise.resolve(false)
+    if (this.spinGuardLeft() > 0) return Promise.resolve(false)
     // Windows: verify the helper immediately before every spawn; a damaged helper never runs.
     if (this.windows && this.launch.verify) {
       const launch = this.launchVerified(HELPER_SPAWN_ATTEMPTS)
@@ -878,7 +933,7 @@ export class DictationHelperClient {
         this.rearmedChild = null
         if (this.aliveTimer) clearTimeout(this.aliveTimer)
         this.aliveTimer = null
-        this.lastExitAt = Date.now()
+        this.lastExitAt = this.now()
         this.failAll()
         for (const listener of this.exitListeners) listener()
         this.scheduleRestart()
@@ -954,21 +1009,32 @@ export class DictationHelperClient {
       )
       return false
     }
-    if (parsed.event === 'clipboard' && parsed.phase === 'late-restore') {
-      const clipboard = typeof parsed.clipboard === 'string' ? parsed.clipboard : 'unknown'
-      console.error(`[dictation] the clipboard's late rollback finished: ${clipboard}`)
+    if (
+      parsed.event === 'clipboard' &&
+      (parsed.phase === 'late-restore' ||
+        parsed.phase === 'recovered' ||
+        parsed.phase === 'pending')
+    ) {
+      // late-restore: an abandoned write's rollback finished; recovered: a kept transaction was put back
+      // later (a retry, or the next helper's start); pending: a kept one is ambiguous (left as it is).
+      const clipboard =
+        typeof parsed.clipboard === 'string'
+          ? parsed.clipboard
+          : parsed.phase === 'recovered'
+            ? 'restored'
+            : 'unknown'
       const id = typeof parsed.id === 'string' ? parsed.id : ''
-      // Before the reply (the typing fallback outlasted the stall): the reply carries it instead.
-      if (id && this.pending.has(id)) this.lateBeforeReply.set(id, clipboard)
-      else if (id === this.lastDeliverId)
-        for (const listener of this.clipboardLateListeners) listener(clipboard)
-      return false
-    }
-    if (parsed.event === 'clipboard' && parsed.phase === 'recovered') {
-      // A kept transaction was put back later (a retry, or the next helper's start): earlier warnings go.
-      const clipboard = typeof parsed.clipboard === 'string' ? parsed.clipboard : 'restored'
-      console.error(`[dictation] an earlier clipboard transaction was put back: ${clipboard}`)
-      for (const listener of this.clipboardLateListeners) listener(clipboard)
+      console.error(`[dictation] clipboard ${parsed.phase} for an earlier delivery: ${clipboard}`)
+      // Its delivery's reply is not consumed yet: that reply carries it (see deliver()).
+      if (id && this.awaitingDeliver.has(id)) {
+        this.lateOutcomes.delete(id)
+        this.lateOutcomes.set(id, clipboard)
+        // Bounded, oldest first (entries also leave when their delivery settles).
+        while (this.lateOutcomes.size > LATE_OUTCOMES_CAP)
+          this.lateOutcomes.delete(this.lateOutcomes.keys().next().value as string)
+        return false
+      }
+      for (const listener of this.clipboardLateListeners) listener(clipboard, id || undefined)
       return false
     }
     if (parsed.event === 'parse-error') return false
@@ -977,14 +1043,6 @@ export class DictationHelperClient {
       if (entry) {
         clearTimeout(entry.timer)
         this.pending.delete(parsed.id)
-        const late = this.lateBeforeReply.get(parsed.id)
-        if (late !== undefined) {
-          this.lateBeforeReply.delete(parsed.id)
-          // The latest known clipboard outcome wins over what the helper knew when it replied.
-          parsed.clipboard = late
-          if (late === 'unrestored') parsed.clipboardHolds = 'unknown'
-          else delete parsed.clipboardHolds
-        }
         entry.resolve(parsed as Reply)
       }
     }
@@ -995,13 +1053,12 @@ export class DictationHelperClient {
     op: string,
     fields: Record<string, unknown>,
     timeoutMs: number,
-    start = true
+    start = true,
+    id: string = randomUUID()
   ): Promise<Reply | null> {
     if (start && !(await this.ensureRunning())) return null
     const child = this.child
     if (!child || child.exitCode !== null) return null
-    const id = randomUUID()
-    if (op === 'deliver') this.lastDeliverId = id
     return new Promise<Reply | null>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
@@ -1030,12 +1087,35 @@ export class DictationHelperClient {
     const delay = RESTART_BACKOFF_MS[Math.min(this.restartAttempts, RESTART_BACKOFF_MS.length - 1)]
     this.restartAttempts += 1
     this.totalRestarts += 1
+    this.armRestart(delay)
+  }
+
+  /**
+   * The restart timer. When it fires while the spin guard still holds (a timer can fire a little early),
+   * the restart waits out the rest of the guard instead of being dropped; that uses no further attempt.
+   */
+  private armRestart(delay: number): void {
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null
       if (this.disposed || this.child) return
+      const left = this.spinGuardLeft()
+      if (left > 0) return this.armRestart(Math.ceil(left) + 1)
       void this.ensureRunning()
     }, delay)
     this.restartTimer.unref?.()
+  }
+
+  private now(): number {
+    return this.launch.clock ? this.launch.clock() : performance.now()
+  }
+
+  /** How long the spin guard still refuses a start (0: it does not). */
+  private spinGuardLeft(): number {
+    if (this.lastExitAt === null) return 0
+    const since = this.now() - this.lastExitAt
+    // A clock reading earlier than the exit (cannot happen with a monotonic clock) still ends the guard.
+    if (since < 0) return 0
+    return since < SPIN_GUARD_MS ? SPIN_GUARD_MS - since : 0
   }
 
   private failAll(): void {

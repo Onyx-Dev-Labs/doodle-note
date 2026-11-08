@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import {
   BARK_HELPER_IDENTITY,
   DictationHelperClient,
+  RESTART_BACKOFF_MS,
+  RESTART_MARGIN_MS,
+  SPIN_GUARD_MS,
   barkHelperIdentity,
   WINDOWS_EXIT_GRACE_MS,
   helperSpawnEnv,
@@ -96,8 +99,14 @@ test(
   }
 )
 
-/** A stand-in helper whose deliver sends the late clipboard result before or after its reply. */
-function lateClipboardHelper(order: 'before' | 'after'): { command: string; args: string[] } {
+/**
+ * A stand-in helper whose deliver sends the late clipboard result before its reply, after it, in the
+ * same stdout chunk as the reply, or before exiting without a reply.
+ */
+function lateClipboardHelper(order: 'before' | 'after' | 'chunk' | 'exit'): {
+  command: string
+  args: string[]
+} {
   const dir = mkdtempSync(join(tmpdir(), 'dictation-late-'))
   const script = join(dir, 'helper.js')
   writeFileSync(
@@ -113,7 +122,11 @@ process.stdin.on('data', (d) => {
     if (req.op !== 'deliver') { send({ event: 'reply', id: req.id, ok: true }); continue }
     const late = { event: 'clipboard', phase: 'late-restore', id: req.id, clipboard: 'restored' }
     const reply = { event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'type', verified: true, clipboard: 'unrestored', clipboardHolds: 'unknown' }
-    if (${JSON.stringify(order)} === 'before') { send(late); send(reply) } else { send(reply); setTimeout(() => { send(late); send({ event: 'clipboard', phase: 'recovered', clipboard: 'restored' }) }, 100) }
+    const order = ${JSON.stringify(order)}
+    if (order === 'before') { send(late); send(reply) }
+    else if (order === 'chunk') process.stdout.write(JSON.stringify(reply) + '\\n' + JSON.stringify(late) + '\\n')
+    else if (order === 'exit') { send(late); setTimeout(() => process.exit(1), 50) }
+    else { send(reply); setTimeout(() => { send(late); send({ event: 'clipboard', phase: 'recovered', id: 'an-older-delivery', clipboard: 'restored' }); send({ event: 'clipboard', phase: 'pending', id: 'another-delivery', clipboard: 'unrestored' }) }, 100) }
   }
 })
 process.stdin.on('end', () => process.exit(0))
@@ -122,28 +135,67 @@ process.stdin.on('end', () => process.exit(0))
   return { command: process.execPath, args: [script] }
 }
 
-test('Windows: a late clipboard result before the reply is carried by the reply; after it, it reaches the listeners', async () => {
+const lateOutcomesOf = (client: DictationHelperClient): number =>
+  (client as unknown as { lateOutcomes: Map<string, string> }).lateOutcomes.size
+
+test('Windows: a late clipboard result before the reply is carried by the reply; after it, it reaches the listeners with its delivery', async () => {
   const before = new DictationHelperClient({ ...lateClipboardHelper('before'), platform: 'win32' })
   const heardBefore: string[] = []
   before.onClipboardLate((clipboard) => heardBefore.push(clipboard))
   try {
-    const result = await before.deliver('s1', 'hello')
+    const result = await before.deliver('s1', 'hello', {}, 'd-before')
     assert.equal(result.clipboard, 'restored', 'the reply says the latest known outcome')
     assert.equal(result.clipboardHolds, undefined)
     assert.deepEqual(heardBefore, [], 'nothing left over to clear later')
+    assert.equal(lateOutcomesOf(before), 0, 'consumed with its reply')
   } finally {
     await before.dispose()
   }
   const after = new DictationHelperClient({ ...lateClipboardHelper('after'), platform: 'win32' })
-  const heardAfter: string[] = []
-  after.onClipboardLate((clipboard) => heardAfter.push(clipboard))
+  const heardAfter: Array<[string, string | undefined]> = []
+  after.onClipboardLate((clipboard, id) => heardAfter.push([clipboard, id]))
   try {
-    const result = await after.deliver('s1', 'hello')
+    const result = await after.deliver('s1', 'hello', {}, 'd-after')
     assert.equal(result.clipboard, 'unrestored')
-    assert.ok(await waitFor(() => heardAfter.length === 2))
-    assert.deepEqual(heardAfter, ['restored', 'restored'], 'the late result, then a later recovery')
+    assert.ok(await waitFor(() => heardAfter.length === 3))
+    assert.deepEqual(
+      heardAfter,
+      [
+        ['restored', 'd-after'],
+        ['restored', 'an-older-delivery'],
+        ['unrestored', 'another-delivery']
+      ],
+      "each result names its own delivery (the service changes only that delivery's notice)"
+    )
   } finally {
     await after.dispose()
+  }
+})
+
+test('Windows: a reply and its late result in ONE stdout chunk: the reply already carries the result', async () => {
+  const client = new DictationHelperClient({ ...lateClipboardHelper('chunk'), platform: 'win32' })
+  const heard: string[] = []
+  client.onClipboardLate((clipboard) => heard.push(clipboard))
+  try {
+    const result = await client.deliver('s1', 'hello')
+    assert.equal(result.clipboard, 'restored', 'no stale "unrestored" warning is ever created')
+    assert.equal(result.clipboardHolds, undefined)
+    assert.deepEqual(heard, [], 'the event was applied to the reply, not sent to listeners first')
+    assert.equal(lateOutcomesOf(client), 0)
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: a late result for a delivery that never got its reply leaves with that delivery', async () => {
+  const client = new DictationHelperClient({ ...lateClipboardHelper('exit'), platform: 'win32' })
+  try {
+    const result = await client.deliver('s1', 'hello')
+    assert.equal(result.reason, 'helper-timeout', 'the helper left without a reply')
+    assert.equal(result.clipboard, 'restored', 'but its latest clipboard result is still reported')
+    assert.equal(lateOutcomesOf(client), 0, 'nothing kept for it after it settled')
+  } finally {
+    await client.dispose()
   }
 })
 
@@ -756,7 +808,11 @@ test('Windows: a hold that keeps being lost stops after the attempt limit; nothi
   }
 })
 
-test('Windows: a helper that exits because its provider calls are stuck is restarted', async () => {
+/**
+ * A stand-in helper whose first run has every call stuck past the cap: it answers helper-busy, says it
+ * is restarting and exits with code 3. Later runs answer normally. Each start appends "started".
+ */
+function busyOnceHelper(): { command: string; args: string[]; log: string } {
   const dir = mkdtempSync(join(tmpdir(), 'dictation-busy-'))
   const script = join(dir, 'helper.js')
   const log = join(dir, 'log.txt')
@@ -773,7 +829,6 @@ process.stdin.on('data', (d) => {
   buf += d
   for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
     const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
-    // The first helper: every call is stuck past the cap, so it says so and restarts itself.
     if (starts === 1 && req.op === 'deliver') { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'helper-busy', verified: false, clipboard: 'untouched' }); send({ event: 'restarting', reason: 'helper-busy' }); setTimeout(() => process.exit(3), 50) }
     else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
   }
@@ -781,21 +836,98 @@ process.stdin.on('data', (d) => {
 process.stdin.on('end', () => process.exit(0))
 `
   )
+  return { command: process.execPath, args: [script, log], log }
+}
+
+const startsIn = async (log: string): Promise<number> =>
+  (await read(log)).split('started').length - 1
+
+/**
+ * The busy-helper restart with fake timers and a fake spin-guard clock, ordered by events (no real-time
+ * waits). Returns the client once the first helper's exit was handled (its exit handler schedules the
+ * restart right after the exit listeners); `launches` counts launches (verify runs synchronously at the
+ * start of every launch).
+ */
+async function busyHelperExited(
+  t: import('node:test').TestContext,
+  clock: { now: number },
+  launches: { count: number }
+): Promise<{ client: DictationHelperClient; log: string }> {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const fake = busyOnceHelper()
   const client = new DictationHelperClient({
-    command: process.execPath,
-    args: [script, log],
-    platform: 'win32'
+    command: fake.command,
+    args: fake.args,
+    platform: 'win32',
+    clock: () => clock.now,
+    verify: async () => {
+      launches.count += 1
+      return { ok: true }
+    }
   })
+  assert.equal(await client.setHoldKey('rightControl'), null)
+  const exited = new Promise<void>((resolve) => client.onExit(resolve))
+  const busy = await client.deliver('s1', 'x')
+  assert.equal(busy.reason, 'helper-busy')
+  await exited
+  assert.equal(client.restartsUsed, 1, 'the exit scheduled a restart')
+  assert.equal(launches.count, 1)
+  assert.equal(await startsIn(fake.log), 1)
+  return { client, log: fake.log }
+}
+
+test('Windows: every restart backoff step is past the spin guard', () => {
+  assert.ok(RESTART_BACKOFF_MS.length > 0)
+  for (const delay of RESTART_BACKOFF_MS)
+    assert.ok(delay > SPIN_GUARD_MS, `${delay} > ${SPIN_GUARD_MS}`)
+  assert.equal(RESTART_BACKOFF_MS[0], SPIN_GUARD_MS + RESTART_MARGIN_MS)
+  assert.ok(RESTART_MARGIN_MS > 0)
+})
+
+test('Windows: a helper that exits because its provider calls are stuck is restarted', async (t) => {
+  const clock = { now: 1_000_000 }
+  const launches = { count: 0 }
+  const { client, log } = await busyHelperExited(t, clock, launches)
   try {
-    assert.equal(await client.setHoldKey('rightControl'), null)
-    const busy = await client.deliver('s1', 'x')
-    assert.equal(busy.reason, 'helper-busy')
-    // The client's automatic restart brings a fresh helper (the hold key wants one).
-    assert.ok(
-      await waitFor(async () => (await read(log)).split('started').length - 1 >= 2),
-      'restarted'
-    )
+    // Just before the backoff: no restart yet.
+    clock.now += RESTART_BACKOFF_MS[0] - 1
+    t.mock.timers.tick(RESTART_BACKOFF_MS[0] - 1)
+    assert.equal(launches.count, 1, 'not before the backoff')
+    // At the backoff (past the spin guard): the client's automatic restart brings a fresh helper.
+    clock.now += 1
+    t.mock.timers.tick(1)
+    assert.equal(launches.count, 2, 'restarted at the backoff')
+    // status() joins that same launch (no second one) and is answered by the fresh helper.
     assert.ok(await client.status(), 'the fresh helper answers')
+    assert.equal(launches.count, 2)
+    assert.equal(await startsIn(log), 2)
+    assert.equal(client.restartsUsed, 1)
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: a restart timer that fires before the spin guard ends waits it out instead of being lost', async (t) => {
+  const clock = { now: 1_000_000 }
+  const launches = { count: 0 }
+  const { client, log } = await busyHelperExited(t, clock, launches)
+  try {
+    // The timer fires by its own measure, but the guard's clock has moved only 300 ms (an early fire):
+    // the guard still refuses a start for 200 ms.
+    clock.now += SPIN_GUARD_MS - 200
+    t.mock.timers.tick(RESTART_BACKOFF_MS[0])
+    assert.equal(launches.count, 1, 'no start inside the spin guard')
+    // The restart was re-armed for the rest of the guard, not dropped, and used no further attempt.
+    clock.now += 200
+    t.mock.timers.tick(200)
+    assert.equal(launches.count, 1, 'not yet: the re-armed timer waits one more millisecond')
+    clock.now += 1
+    t.mock.timers.tick(1)
+    assert.equal(launches.count, 2, 'restarted once the guard ended')
+    assert.equal(client.restartsUsed, 1, 'waiting out the guard used no further restart')
+    assert.ok(await client.status(), 'the fresh helper answers')
+    assert.equal(launches.count, 2)
+    assert.equal(await startsIn(log), 2)
   } finally {
     await client.dispose()
   }
