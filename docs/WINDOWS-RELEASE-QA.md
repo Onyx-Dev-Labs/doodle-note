@@ -421,13 +421,24 @@ Restore or Dismiss, by the retention, or when that loses nothing (the clipboard 
 saved content, or nothing was emptied); never because the clipboard moved on (the user's later copy, our
 own later dictation, another offer's restore, a live foreign owner). The logoff contract, stated plainly:
 **a kept record is deleted at reboot and 24 h after it was first offered** (measured on the tick count of
-the same boot, so a clock change never deletes anything; the helper checks every 30 minutes and the app
-every hour); across a relogin in the same boot it stays offered; another session of the same user leaves
-it alone. A state or payload file that cannot be read for the moment is kept and checked again (only a
+the same boot; a record is always offered before the retention can apply to it, and the wall clock is
+never used for it; the helper's own check every 30 minutes runs the full decision procedure, so a
+provable state is restored and another session's record is never touched); across a relogin in the same
+boot it stays offered; another session of the same user leaves it alone. Owner's decision item, stated
+plainly: after a crash followed by a reboot, the kept copy of the user's clipboard is deleted without
+being offered (the record is from another boot; the clipboard it belonged to did not survive the
+reboot). Offering it after a reboot would need proof that nothing newer replaced it, which no state
+after a reboot can give. A state or payload file that cannot be read for the moment is kept and checked again (only a
 file read in full that does not parse or decrypt is corrupt), and a payload is never deleted while its
 state file is kept. A target that reads the synthesized ANSI text formats was measured not to move the
-sequence; before a "user-changed" verdict the helper also checks whether our window owns the clipboard
-with our complete write on it. Retries use the record's own backoff (3 s, 10 s, 30 s, 60 s, 120 s): a failed attempt
+sequence. Right before Ctrl+V (and before a restore), "user-changed" (someone else's newer copy, left
+alone) is decided only when the clipboard's OWNER changed. If our window still owns it but it is not
+exactly our write (an app added a format without emptying), or the clipboard cannot be opened to look,
+nothing is pasted and nothing is settled: the record is kept and offered, and ownership no longer counts
+as proof for it. That look (it opens the clipboard and may wait) comes before the final checks, which
+stay the last step before Ctrl+V. Offers with Bark off: starting the helper for an offer runs the same
+integrity check as any start, which uses the speech worker (and so loads the speech model until it
+idles); this happens only when this identity has kept records on disk. Retries use the record's own backoff (3 s, 10 s, 30 s, 60 s, 120 s): a failed attempt
 or a check that is still pending advances it, a busy clipboard stays on its step, and the checks before
 a delivery and at the next helper start never use a step. Payloads without a journal are deleted, never
 restored from, and a settled transaction is never published. Records of earlier formats are removed

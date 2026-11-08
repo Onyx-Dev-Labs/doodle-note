@@ -163,7 +163,8 @@ export interface HelperLike {
   /** Windows: a kept clipboard transaction offered to the user, and its withdrawal (see the client). */
   onClipboardOffer?(listener: (offer: ClipboardOffer) => void): () => void
   onClipboardOfferGone?(listener: (record: string) => void): () => void
-  clipboardOffers?(): Promise<ClipboardOffer[]>
+  /** Null when no valid list came: the service keeps what it holds. */
+  clipboardOffers?(): Promise<ClipboardOffer[] | null>
   restoreClipboardOffer?(record: string, sequence: number): Promise<ClipboardOfferRestore>
   dismissClipboardOffer?(record: string): Promise<boolean>
   /** Windows: whether this identity has kept clipboard records on disk (a cheap check; no helper started). */
@@ -482,13 +483,14 @@ export class DictationService {
     if (!this.deps.helper.clipboardOffers || this.disposed) return
     const kept = this.deps.helper.hasKeptClipboard?.() ?? false
     if (!this.deps.settings.get().enabled && !kept && this.offers.size === 0) return
-    let list: ClipboardOffer[]
+    let list: ClipboardOffer[] | null
     try {
       list = await this.deps.helper.clipboardOffers()
     } catch {
-      return // no helper now; its next start sends its offers itself
+      list = null
     }
-    if (this.disposed) return
+    // Only an affirmative, valid list replaces what is held (a restart or a long delivery never clears offers).
+    if (this.disposed || list === null) return
     this.offers.clear()
     for (const offer of list) this.offers.set(offer.record, offer)
     this.refreshOfferPanel()

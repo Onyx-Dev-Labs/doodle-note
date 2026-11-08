@@ -57,6 +57,8 @@ interface Harness {
     /** What the fake helper answers to a dismiss (the real deletion result). */
     dismissResult: boolean
     keptOnDisk: boolean
+    /** The helper gave no valid list (restarting, a long delivery). */
+    offersUnavailable: boolean
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     deliverGuards: DeliveryGuards[]
@@ -171,6 +173,7 @@ function harness(
     dismissCalls: [],
     dismissResult: true,
     keptOnDisk: false,
+    offersUnavailable: false,
     statusCalls: 0,
     target: {
       snapshotId: 'x',
@@ -258,7 +261,7 @@ function harness(
         helper.offerGoneListener = listener
         return () => {}
       },
-      clipboardOffers: async () => helper.offers,
+      clipboardOffers: async () => (helper.offersUnavailable ? null : helper.offers),
       restoreClipboardOffer: async (record: string, sequence: number) => {
         helper.restoreCalls.push({ record, sequence })
         return helper.restoreAnswers.shift() ?? { result: 'restored' }
@@ -3050,6 +3053,22 @@ test('Windows: every outstanding offer is kept; the next shows after one resolve
   h.helper.offerGoneListener!('b'.repeat(32))
   await tick()
   assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+})
+
+test('Windows: a refresh without a valid list keeps the offers held', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.offers = [offer()]
+  await h.service.start()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  // A restart or a long delivery: the list request gets no valid answer.
+  h.helper.offersUnavailable = true
+  h.helper.restoreAnswers = [{ result: 'busy' }]
+  h.service.onOverlayAction('offer-restore', null)
+  await tick()
+  await (h.service as unknown as { loadClipboardOffers(): Promise<void> }).loadClipboardOffers()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/, 'the offer stays')
 })
 
 test("Windows: kept clipboards are offered with Bark off too (the data is the user's clipboard)", async () => {

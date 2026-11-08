@@ -176,7 +176,7 @@ test('Windows: a kept clipboard is offered (never sent as a late result), restor
   client.onClipboardOfferGone((record) => gone.push(record.slice(0, 4)))
   client.onClipboardLate((clipboard) => late.push(clipboard))
   try {
-    const offers = await client.clipboardOffers()
+    const offers = (await client.clipboardOffers()) ?? []
     assert.equal(offers.length, 1, 'a malformed entry is dropped')
     assert.deepEqual(offered, ['0123 2 1300 41'], 'the start-up offer reached the offer listeners')
     assert.deepEqual(late, [], 'and not the late-result listeners')
@@ -208,6 +208,63 @@ test('Windows: deliveries outstanding at once are bounded; a late result of an o
     assert.equal(refused.outcome, 'refused')
     assert.equal(refused.reason, 'helper-busy')
     void outstanding
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: offer requests never overlap (a refresh waits for a restore or a dismiss); no valid list is null', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-offer-serial-'))
+  const script = join(dir, 'helper.js')
+  const log = join(dir, 'log.txt')
+  writeFileSync(
+    script,
+    `
+const fs = require('node:fs')
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+let open = 0, lists = 0, buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (!req.op.startsWith('clipboard-')) { send({ event: 'reply', id: req.id, ok: true }); continue }
+    open += 1
+    fs.appendFileSync(process.argv[2], req.op + (open > 1 ? ' OVERLAP' : '') + '\\n')
+    setTimeout(() => {
+      open -= 1
+      if (req.op === 'clipboard-offers') { lists += 1; send(lists === 2 ? { event: 'reply', id: req.id, ok: false } : { event: 'reply', id: req.id, ok: true, offers: [] }) }
+      else if (req.op === 'clipboard-restore') send({ event: 'reply', id: req.id, ok: true, result: 'restored' })
+      else send({ event: 'reply', id: req.id, ok: true, dismissed: true })
+    }, 80)
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script, log],
+    platform: 'win32'
+  })
+  try {
+    assert.ok(await client.status())
+    const record = '0123456789abcdef0123456789abcdef'
+    const [first, restored, second, dismissed] = await Promise.all([
+      client.clipboardOffers(),
+      client.restoreClipboardOffer(record, 1),
+      client.clipboardOffers(),
+      client.dismissClipboardOffer(record)
+    ])
+    assert.deepEqual(first, [])
+    assert.equal(restored.result, 'restored')
+    assert.equal(second, null, 'no valid list: null, never an empty list')
+    assert.equal(dismissed, true)
+    assert.equal(
+      await read(log),
+      'clipboard-offers\nclipboard-restore\nclipboard-offers\nclipboard-dismiss\n',
+      'one at a time, in order (no OVERLAP)'
+    )
   } finally {
     await client.dispose()
   }

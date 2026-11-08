@@ -332,12 +332,31 @@ export class DictationHelperClient {
     return () => this.offerGoneListeners.delete(listener)
   }
 
-  /** Windows: the offers the helper's kept records stand for now (after a restart too). */
-  async clipboardOffers(): Promise<ClipboardOffer[]> {
+  /**
+   * Offer requests (list, restore, dismiss) run one at a time, in order: a refresh never overlaps a restore or a
+   * dismiss, so a list never reflects half of one.
+   */
+  private offerChain: Promise<unknown> = Promise.resolve()
+
+  private serialOffer<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.offerChain.then(run, run)
+    this.offerChain = next.catch(() => undefined)
+    return next
+  }
+
+  /**
+   * Windows: the offers the helper's kept records stand for now (after a restart too). Null when no valid list
+   * came (no helper, a timeout, a malformed reply): the caller keeps what it holds.
+   */
+  async clipboardOffers(): Promise<ClipboardOffer[] | null> {
     if (!this.windows) return []
-    const reply = await this.request('clipboard-offers', {}, this.timeouts.status)
-    const list = Array.isArray(reply?.offers) ? (reply.offers as unknown[]) : []
-    return list.map(toOffer).filter((offer): offer is ClipboardOffer => offer !== null)
+    return this.serialOffer(async () => {
+      const reply = await this.request('clipboard-offers', {}, this.timeouts.status)
+      if (!reply?.ok || !Array.isArray(reply.offers)) return null
+      return (reply.offers as unknown[])
+        .map(toOffer)
+        .filter((offer): offer is ClipboardOffer => offer !== null)
+    })
   }
 
   /**
@@ -347,10 +366,8 @@ export class DictationHelperClient {
    */
   async restoreClipboardOffer(record: string, sequence: number): Promise<ClipboardOfferRestore> {
     if (!this.windows) return { result: 'gone' }
-    const reply = await this.request(
-      'clipboard-restore',
-      { record, sequence },
-      this.timeouts.deliver
+    const reply = await this.serialOffer(() =>
+      this.request('clipboard-restore', { record, sequence }, this.timeouts.deliver)
     )
     if (!reply || typeof reply.result !== 'string') return { result: 'failed' }
     return {
@@ -369,12 +386,12 @@ export class DictationHelperClient {
    */
   hasKeptClipboard(): boolean {
     if (!this.windows) return false
-    const identity = sanitizeIdentity(this.launch.identity ?? BARK_HELPER_IDENTITY)
-    const name = new RegExp(
-      `^DoodleNote-Bark-clipboard-${identity.replace(/[.]/g, '\\.')}-[0-9a-f]{32}\\.state$`
-    )
+    // The exact prefix, then a 32-hex id: no pattern is built from the identity (nothing to escape).
+    const prefix = `DoodleNote-Bark-clipboard-${sanitizeIdentity(this.launch.identity ?? BARK_HELPER_IDENTITY)}-`
     try {
-      return readdirSync(tmpdir()).some((file) => name.test(file))
+      return readdirSync(tmpdir()).some(
+        (file) => file.startsWith(prefix) && /^[0-9a-f]{32}\.state$/.test(file.slice(prefix.length))
+      )
     } catch {
       return false
     }
@@ -383,7 +400,9 @@ export class DictationHelperClient {
   /** Windows: the user dismissed an offer; the helper deletes its record. */
   async dismissClipboardOffer(record: string): Promise<boolean> {
     if (!this.windows) return false
-    const reply = await this.request('clipboard-dismiss', { record }, this.timeouts.status)
+    const reply = await this.serialOffer(() =>
+      this.request('clipboard-dismiss', { record }, this.timeouts.status)
+    )
     return reply?.dismissed === true
   }
 

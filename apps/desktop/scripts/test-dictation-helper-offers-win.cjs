@@ -123,15 +123,46 @@ function replayAll() {
   return items.length
 }
 
+/** Another process adds a format WITHOUT emptying and then keeps the clipboard open for ms (a monitor holding it). */
+function holdAfterAdding(ms) {
+  const code = `
+const koffi = require(${JSON.stringify(require.resolve('koffi'))})
+const user32 = koffi.load('user32.dll'), kernel32 = koffi.load('kernel32.dll')
+const OpenClipboard = user32.func('bool __stdcall OpenClipboard(void* h)')
+const CloseClipboard = user32.func('bool __stdcall CloseClipboard()')
+const SetClipboardData = user32.func('void* __stdcall SetClipboardData(uint32 f, void* h)')
+const RegisterClipboardFormatW = user32.func('uint32 __stdcall RegisterClipboardFormatW(str16 n)')
+const GlobalAlloc = kernel32.func('void* __stdcall GlobalAlloc(uint32 f, uintptr n)')
+const GlobalLock = kernel32.func('void* __stdcall GlobalLock(void* h)')
+const GlobalUnlock = kernel32.func('bool __stdcall GlobalUnlock(void* h)')
+const RtlMoveMemory = kernel32.func('void __stdcall RtlMoveMemory(void* dst, const uint8_t* src, uintptr n)')
+const block = (t) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, t)
+let opened = false
+for (let i = 0; i < 150 && !(opened = OpenClipboard(null)); i++) block(20)
+if (opened) {
+  const bytes = Buffer.from('held')
+  const g = GlobalAlloc(2, bytes.length); const p = GlobalLock(g); RtlMoveMemory(p, bytes, bytes.length); GlobalUnlock(g)
+  SetClipboardData(RegisterClipboardFormatW('DoodleNote.CI.Held'), g)
+  block(${ms})
+  CloseClipboard()
+}
+`
+  return spawn(process.execPath, ['-e', code], { stdio: 'ignore' })
+}
+const waitExit = (child) =>
+  new Promise((r) => (child.exitCode !== null ? r() : child.on('exit', r)))
+
 // ---- helpers ----
 const identity = `qa.ci-offers-${crypto.randomBytes(4).toString('hex')}`
+const recordPrefix = `DoodleNote-Bark-clipboard-${identity}-`
 const recordFiles = () =>
   fs
     .readdirSync(os.tmpdir())
-    .filter((f) =>
-      new RegExp(
-        `^DoodleNote-Bark-clipboard-${identity.replace(/[.]/g, '\\.')}-[0-9a-f]{32}\\.(bin|state)$`
-      ).test(f)
+    // The exact prefix, then a 32-hex id: no pattern is built from the identity (nothing to escape).
+    .filter(
+      (f) =>
+        f.startsWith(recordPrefix) &&
+        /^[0-9a-f]{32}\.(bin|state)$/.test(f.slice(recordPrefix.length))
     )
 const stages = () =>
   recordFiles()
@@ -450,6 +481,104 @@ async function main() {
       !!restored && restored.result === 'restored' && names() === userFormats,
       `${JSON.stringify(restored)}; ${names()}`
     )
+    await h.stop()
+  }
+
+  // 8. A crash after journaling "restoring" but before its empty, then a replay of every format: offered. A restore
+  // that was only about to run establishes no continuity (Beyond counts only operations performed).
+  {
+    copyMulti(user)
+    const a = start(testops, {
+      DICTATION_HELPER_TEST: '1',
+      DICTATION_HELPER_TEST_RESTORE_STALL_BEFORE_EMPTY_MS: '15000'
+    })
+    await a.ready
+    void a.req('__clipboard-txn', { text: 'dictated text G', holdMs: 200 })
+    const reached = await waitStage('restoring')
+    await sleep(500)
+    await a.kill()
+    const replayed = replayAll()
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'crash before the restore empties, then a full replay: offered, not restored on its own',
+      reached &&
+        replayed > 0 &&
+        !!listed &&
+        listed.offers.length === 1 &&
+        text() === 'dictated text G',
+      `${reached}; ${JSON.stringify(listed)}; ${text()}`
+    )
+    const offer = listed && listed.offers[0]
+    const restored = offer ? await restoreConfirming(h, offer) : null
+    check(
+      'and the user Restore of it gives back the user clipboard',
+      !!restored && restored.result === 'restored' && names() === userFormats,
+      `${JSON.stringify(restored)}; ${names()}`
+    )
+    await h.stop()
+  }
+
+  // 9. Right before Ctrl+V the clipboard moved under our ownership and cannot be opened (another app holds it):
+  // no proof either way, so nothing is settled; the record is kept and offered (never "user-changed").
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text H', holdMs: 2500 })
+    for (let i = 0; i < 200 && text() !== 'dictated text H'; i++) await sleep(50)
+    const holder = holdAfterAdding(4000)
+    const result = await reply
+    await waitExit(holder)
+    await a.stop()
+    check(
+      'an uninspectable clipboard keeps the record (not user-changed)',
+      !!result &&
+        /^uninspectable\/unrestored\|/.test(String(result.result)) &&
+        recordFiles().length === 2,
+      `${JSON.stringify(result)}; ${recordFiles()}`
+    )
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'and it is offered, not restored over the added format',
+      !!listed && listed.offers.length === 1 && names().includes('DoodleNote.CI.Held'),
+      `${JSON.stringify(listed)}; ${names()}`
+    )
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
+    await h.stop()
+  }
+
+  // 10. Our window still owns the clipboard, but an app added a format without emptying: kept as an offer.
+  {
+    copyMulti(user)
+    const a = start(testops, { DICTATION_HELPER_TEST: '1' })
+    await a.ready
+    const reply = a.req('__clipboard-txn', { text: 'dictated text I', holdMs: 2500 })
+    for (let i = 0; i < 200 && text() !== 'dictated text I'; i++) await sleep(50)
+    addFormat()
+    const result = await reply
+    await a.stop()
+    check(
+      'owned but changed: kept, not user-changed',
+      !!result &&
+        /^owned-but-changed\/unrestored\|/.test(String(result.result)) &&
+        recordFiles().length === 2,
+      `${JSON.stringify(result)}; ${recordFiles()}`
+    )
+    const h = start(release)
+    await h.ready
+    const listed = await h.req('clipboard-offers')
+    check(
+      'and it is offered, not restored over the added format',
+      !!listed && listed.offers.length === 1 && names().includes('DoodleNote.CI.Added'),
+      `${JSON.stringify(listed)}; ${names()}`
+    )
+    const offer = listed && listed.offers[0]
+    if (offer) await h.req('clipboard-dismiss', { record: offer.record })
     await h.stop()
   }
 
