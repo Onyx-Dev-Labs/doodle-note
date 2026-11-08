@@ -1264,7 +1264,7 @@ async function main() {
     ).trim()
     assert.equal(leftover, '0', 'the stalled closer was terminated')
 
-    // D6: silent, no --updated, old app running: quit with exit code 2, nothing changed.
+    // D6: silent, no --updated, old app running: quit with exit code 2; no folder touched.
     const d6 = path.join(sandbox, 'd6', 'Local', 'Programs')
     const d6Profile = path.join(sandbox, 'd6', 'Roaming', 'desktop')
     fs.mkdirSync(d6Profile, { recursive: true })

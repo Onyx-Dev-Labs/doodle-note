@@ -1368,7 +1368,8 @@ FunctionEnd
   ; files are replaced (dnEnsureNotRunning). KEEP is "1" when the old app could
   ; not be closed or identified: the new copy is installed, the old folder and
   ; the journal stay for the next run. A silent run without --updated with the
-  ; old app running quits with exit code 2 and changes nothing.
+  ; old app running quits with exit code 2 before anything is closed, parked,
+  ; extracted or deleted (customInit's registry repairs may already have run).
   Function dnMigrationClose
     Exch $1
     Exch
@@ -1384,7 +1385,7 @@ FunctionEnd
       ; nothing, and installing the new copy beside the running old one would leave
       ; that one running, starting at login and holding the single-instance lock
       ; the new exe needs. Quit before anything changed, like an in-place install.
-      DetailPrint `"${PRODUCT_NAME}" is running from $0 and a silent install without --updated does not close it; nothing was changed`
+      DetailPrint `"${PRODUCT_NAME}" is running from $0 and a silent install without --updated does not close it; nothing was installed, moved or deleted`
       SetErrorLevel 2
       Quit
     ${elseif} $dnCloseResult != "none"

@@ -22,7 +22,10 @@
 ;      the old uninstall command in a journal (dnParkUninstaller) so
 ;      electron-builder's "uninstall old version" step cannot delete the old folder
 ;      before the new one exists. A silent install without --updated quits with
-;      exit code 2, changing nothing, if the old app is running.
+;      exit code 2 if the old app is running, before anything is closed, parked,
+;      extracted or deleted; only customInit's registry repairs (recovered
+;      journal/record, a parked uninstall command put back, an untrusted
+;      journal's shortcut answers dropped) may already have happened.
 ;   3. customInstall verifies the new install, keeps the user's desktop and
 ;      Start menu shortcut choices (recorded before the old version was touched),
 ;      repoints taskbar pins that start exactly the old exe (dnRepointPins), then

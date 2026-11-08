@@ -336,10 +336,19 @@ moves an existing install on upgrade:
    each to close, waits, then stops only the PIDs that still match. It closes
    only with consent: when the app started the update (`--updated`) or the user
    says OK. A silent install nobody asked the app for (`/S` without `--updated`)
-   closes nothing: with the old app running it quits with exit code 2 and changes
-   nothing, exactly like an in-place upgrade whose app is running (installing the
-   new copy beside it would leave the old app running, starting at login and
-   holding the single-instance lock until it quit). Every CIM query has a 10 s
+   closes nothing: with the old app running it quits with exit code 2, exactly
+   like an in-place upgrade whose app is running (installing the new copy beside
+   it would leave the old app running, starting at login and holding the
+   single-instance lock until it quit). It quits before anything is closed,
+   parked, extracted or deleted: no file, folder, shortcut or process is touched.
+   `customInit` has run by then, though, and may already have made these registry
+   repairs, each also made by any other run: (a) journal and record values
+   missing from `HKCU\Software\{APP_GUID}` written back from the recovery copy,
+   which is then deleted (only after an earlier run stopped mid-update; see below);
+   (b) the old folder's own uninstall command, parked by an earlier unfinished
+   run, put back as `UninstallString` when nothing is registered and that
+   uninstaller exists; (c) the `DesktopLink` / `StartMenuLink` answers of a journal
+   that is not trusted deleted. Every CIM query has a 10 s
    timeout, the closer script a 25 s budget, and the installer runs it through a
    watchdog (`CreateProcess` + `WaitForSingleObject`, 30 s to find, 45 s to
    close, then the child is terminated), so a stalled WMI provider cannot hang
