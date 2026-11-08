@@ -36,10 +36,17 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
   REQUIRED_RESOURCES: string[]
   peImports(file: string): string[]
   isSystemDll(name: string): boolean
+  mayImportVcRuntime(binary: string, dll: string): boolean
+  VC_RUNTIME_DLLS: Set<string>
   dependencyClosure(
     dir: string,
     absent?: string[]
-  ): { binaries: number; imports: number; missing: { binary: string; dll: string }[] }
+  ): {
+    binaries: number
+    imports: number
+    missing: { binary: string; dll: string }[]
+    vcRuntime: { binary: string; dll: string }[]
+  }
   closureNegativeControl(dir: string, rel: string): string[]
   ggmlBackendProblems(dir: string, absent?: string[]): string[]
   listTree(dir: string): string[]
@@ -1299,7 +1306,7 @@ test("the package check requires every bundled DLL a binary imports, and ggml's 
     for (const name of [
       'kernel32.dll',
       'api-ms-win-crt-heap-l1-1-0.dll',
-      'vcruntime140_1.dll',
+      'ucrtbase.dll',
       'vulkan-1.dll',
       'node.exe',
       'winspool.drv'
@@ -1314,9 +1321,52 @@ test("the package check requires every bundled DLL a binary imports, and ggml's 
       'ffmpeg.dll'
     ])
       assert.ok(!packageCheck.isSystemDll(name), name)
+    // Round 10: the Visual C++ runtime is not Windows' (a clean install may lack
+    // the redistributable); only the listed third-party prebuilt binaries may rely on it.
+    for (const name of [
+      'vcruntime140.dll',
+      'vcruntime140_1.dll',
+      'msvcp140.dll',
+      'msvcp140_2.dll',
+      'concrt140.dll',
+      'vcomp140.dll'
+    ]) {
+      assert.ok(!packageCheck.isSystemDll(name), name)
+      assert.ok(packageCheck.VC_RUNTIME_DLLS.has(name), name)
+    }
+    const unpacked = 'resources/app.asar.unpacked/node_modules'
+    for (const [binary, allowed] of [
+      [`${bins}/llama-addon.node`, true],
+      [`${bins}/ggml-cpu-zen4.dll`, true],
+      [`${unpacked}/@node-llama-cpp/win-x64-vulkan/bins/win-x64-vulkan/ggml-vulkan.dll`, true],
+      [
+        `${unpacked}/node-llama-cpp/node_modules/@node-llama-cpp/win-x64/bins/win-x64/llama-common.dll`,
+        true
+      ],
+      [`${unpacked}/@reflink/reflink-win32-x64-msvc/reflink.win32-x64-msvc.node`, true],
+      ['DoodleNote.exe', false],
+      ['ffmpeg.dll', false],
+      [`${unpacked}/koffi/build/koffi/win32_x64/koffi.node`, false],
+      [`${unpacked}/sherpa-onnx-win-x64/sherpa-onnx-c-api.dll`, false],
+      [`${unpacked}/@node-llama-cpp/win-x64/bins/win-x64/sub/other.dll`, false],
+      [`${unpacked}/@node-llama-cpp/linux-x64/bins/linux-x64/llama-addon.node`, false],
+      ['resources/engine/doodlenote-bark-helper.exe', false]
+    ] as const)
+      assert.equal(packageCheck.mayImportVcRuntime(binary, 'msvcp140.dll'), allowed, binary)
+    assert.equal(packageCheck.mayImportVcRuntime(`${bins}/llama-addon.node`, 'other.dll'), false)
     const whole = packageCheck.dependencyClosure(dir)
     assert.deepEqual(whole.missing, [])
+    assert.deepEqual(whole.vcRuntime, [
+      { binary: `${bins}/llama-addon.node`, dll: 'vcruntime140.dll' },
+      { binary: `${bins}/llama-common.dll`, dll: 'msvcp140.dll' }
+    ])
     assert.equal(whole.binaries, 13)
+    // The same import from a binary not on the list is reported (e.g. our own code).
+    put('vc-user.dll', fakePe(['kernel32.dll', 'VCRUNTIME140.dll']))
+    assert.deepEqual(packageCheck.dependencyClosure(dir).missing, [
+      { binary: 'vc-user.dll', dll: 'vcruntime140.dll' }
+    ])
+    rmSync(join(dir, 'vc-user.dll'))
     assert.deepEqual(packageCheck.ggmlBackendProblems(dir), [])
     // ggml-base.dll gone: every binary that imports it is reported, the negative control passes.
     const base = `${bins}/ggml-base.dll`

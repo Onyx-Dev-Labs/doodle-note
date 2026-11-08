@@ -1081,6 +1081,23 @@ dialog. Verify the actual installed upgrade and retain the exact dialog text
 plus update lifecycle log if it recurs. The 0.4.22-to-0.4.23 upgrade still runs
 the 0.4.22 updater; the new handoff behavior applies to subsequent updates.
 
+**Visual C++ runtime.** The package does not ship the Microsoft Visual C++
+runtime (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`), and it is
+not part of Windows: it comes with the Visual C++ Redistributable, which the CI
+runner and Dev04 have but a clean Windows 10/11 install may not. Electron, Koffi,
+the speech engine and the Bark helper do not need it. The package check's
+dependency closure lists who does (CI log, "Visual C++ redistributable … needed
+by"): node-llama-cpp's prebuilt `bins\win-x64`, `bins\win-x64-vulkan` (and the
+nested copy) and `@reflink/reflink-win32-x64-msvc`; any other binary importing
+it fails the check. Without the redistributable, local inference reports "Local
+inference is unavailable … No usable … runtime was found" (node-llama-cpp's
+`NoBinaryFoundError`; dictation, recording and cloud models are unaffected) and
+ipull's optional reflink clone falls back to a copy. Verify on a clean machine
+without the redistributable (e.g. a fresh VM; never uninstall it from a shared
+machine) before deciding between documenting it as a requirement, shipping the
+runtime app-local beside those binaries, or installing the redistributable from
+the installer.
+
 Outstanding production acceptance: code signing, first-attempt installed
 upgrades, varied physical microphones/system audio, long meetings, device
 interruptions, and fresh-machine model setup. Notes-generation speed is a

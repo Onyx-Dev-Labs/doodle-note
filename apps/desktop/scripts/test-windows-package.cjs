@@ -393,14 +393,6 @@ const SYSTEM_DLLS = new Set(
     'shdocvw',
     'devobj',
     'mfsensorgroup',
-    // VC++ runtime (the redistributable Windows Update installs) and OpenMP.
-    'vcruntime140',
-    'vcruntime140_1',
-    'msvcp140',
-    'msvcp140_1',
-    'msvcp140_2',
-    'concrt140',
-    'vcomp140',
     // GPU drivers: present only with the driver, loaded optionally by the GPU builds.
     'vulkan-1',
     'nvcuda',
@@ -411,6 +403,48 @@ const SYSTEM_DLLS = new Set(
     // Not .dll: the print spooler and Bluetooth control-panel libraries Chromium imports.
     .concat(['winspool.drv', 'bthprops.cpl'])
 )
+
+/**
+ * The Visual C++ runtime and OpenMP are not part of Windows: they come with the
+ * Microsoft Visual C++ Redistributable, which most machines (the CI runner,
+ * Dev04) have but a clean Windows 10/11 install may not, and the package does
+ * not ship them. Electron, Koffi, the speech engine and the Bark helper do not
+ * import them. Only the third-party prebuilt binaries in VC_RUNTIME_IMPORTERS
+ * may: without the redistributable they fail to load (node-llama-cpp's
+ * getLlama then throws NoBinaryFoundError and local inference reports itself
+ * unavailable; ipull's optional reflink clone is caught and falls back to a
+ * copy), which the on-desktop pass checks on a clean machine. Any other binary
+ * importing one is reported: it must link the runtime statically, or the
+ * package must ship the runtime beside it.
+ */
+const VC_RUNTIME_DLLS = new Set(
+  [
+    'vcruntime140',
+    'vcruntime140_1',
+    'msvcp140',
+    'msvcp140_1',
+    'msvcp140_2',
+    'msvcp140_atomic_wait',
+    'msvcp140_codecvt_ids',
+    'concrt140',
+    'vccorlib140',
+    'vcomp140'
+  ].map((name) => `${name}.dll`)
+)
+
+/** Package-relative binaries allowed to import VC_RUNTIME_DLLS (lower case). */
+const VC_RUNTIME_IMPORTERS = [
+  /^resources\/app\.asar\.unpacked\/node_modules\/(node-llama-cpp\/node_modules\/)?@node-llama-cpp\/win-x64(-vulkan)?\/bins\/win-x64(-vulkan)?\/[^/]+\.(dll|node)$/,
+  /^resources\/app\.asar\.unpacked\/node_modules\/@reflink\/reflink-win32-x64-msvc\/[^/]+\.node$/
+]
+
+/** `binary` (package-relative) may rely on the VC++ redistributable for `dll`. */
+function mayImportVcRuntime(binary, dll) {
+  return (
+    VC_RUNTIME_DLLS.has(dll) &&
+    VC_RUNTIME_IMPORTERS.some((pattern) => pattern.test(binary.toLowerCase()))
+  )
+}
 
 /** Imports that are not files at all: the host process (Electron's node.exe delay-load hook). */
 const HOST_IMPORTS = new Set(['node.exe', 'electron.exe'])
@@ -427,10 +461,12 @@ function isSystemDll(name) {
 /**
  * The bundled dependency closure of a win-unpacked package: every .node, .dll and
  * .exe in it (the app's own exe, Electron's DLLs, app.asar.unpacked, resources)
- * has its imports resolved. A system DLL (isSystemDll) is external; any other must
- * be a file of that name beside the importing binary or beside the app's exe.
- * Returns { binaries, imports, missing: [{ binary, dll }] }. `absent` (tests, and
- * the negative control) lists package-relative files to treat as not there.
+ * has its imports resolved. A system DLL (isSystemDll) is external, and so is the
+ * VC++ runtime for the binaries listed in VC_RUNTIME_IMPORTERS (counted in
+ * vcRuntime); any other must be a file of that name beside the importing binary or
+ * beside the app's exe. Returns { binaries, imports, missing: [{ binary, dll }],
+ * vcRuntime: [{ binary, dll }] }. `absent` (tests, and the negative control) lists
+ * package-relative files to treat as not there.
  */
 function dependencyClosure(packageDir, absent = []) {
   const gone = new Set(absent.map((rel) => rel.toLowerCase()))
@@ -446,16 +482,18 @@ function dependencyClosure(packageDir, absent = []) {
     NATIVE_EXTENSIONS.includes(path.extname(rel).toLowerCase())
   )
   const missing = []
+  const vcRuntime = []
   let imports = 0
   for (const binary of binaries) {
     const here = byDir.get(path.posix.dirname(binary).toLowerCase()) ?? new Set()
     for (const dll of peImports(path.join(packageDir, ...binary.split('/')))) {
       imports++
       if (isSystemDll(dll) || here.has(dll) || rootFiles.has(dll)) continue
-      missing.push({ binary, dll })
+      if (mayImportVcRuntime(binary, dll)) vcRuntime.push({ binary, dll })
+      else missing.push({ binary, dll })
     }
   }
-  return { binaries: binaries.length, imports, missing }
+  return { binaries: binaries.length, imports, missing, vcRuntime }
 }
 
 /**
@@ -536,6 +574,8 @@ module.exports = {
   REQUIRED_RESOURCES,
   peImports,
   isSystemDll,
+  mayImportVcRuntime,
+  VC_RUNTIME_DLLS,
   dependencyClosure,
   closureNegativeControl,
   ggmlBackendProblems,
@@ -1500,12 +1540,28 @@ if (require.main === module) {
     problems.push(
       ...closure.missing.map(
         ({ binary, dll }) =>
-          `${binary}: imports ${dll}, which is not in its folder or the app folder and is not a Windows DLL`
+          VC_RUNTIME_DLLS.has(dll)
+            ? `${binary}: imports ${dll} (Visual C++ runtime, not part of Windows and not in the package); only VC_RUNTIME_IMPORTERS may rely on the redistributable`
+            : `${binary}: imports ${dll}, which is not in its folder or the app folder and is not a Windows DLL`
       )
     )
     console.log(
       `  dependency closure: ${closure.binaries} binaries, ${closure.imports} imports, ${closure.missing.length} bundled DLLs missing`
     )
+    // Round 10: who needs the VC++ redistributable (not shipped; see VC_RUNTIME_DLLS).
+    const vcByFolder = new Map()
+    for (const { binary, dll } of closure.vcRuntime) {
+      const folder = path.posix.dirname(binary)
+      const entry = vcByFolder.get(folder) ?? { binaries: new Set(), dlls: new Set() }
+      entry.binaries.add(binary)
+      entry.dlls.add(dll)
+      vcByFolder.set(folder, entry)
+    }
+    console.log(
+      `  Visual C++ redistributable (not shipped, not part of Windows) needed by ${new Set(closure.vcRuntime.map((v) => v.binary)).size} third-party binaries in ${vcByFolder.size} folders:`
+    )
+    for (const [folder, { binaries, dlls }] of vcByFolder)
+      console.log(`    ${folder}: ${binaries.size} binaries, ${[...dlls].sort().join(', ')}`)
     const backends = ggmlBackendProblems(target)
     problems.push(...backends)
     console.log(`  ggml run-time backends: ${backends.length} missing`)
