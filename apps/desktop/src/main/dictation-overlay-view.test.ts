@@ -340,8 +340,13 @@ test('Windows: the clipboard offer card names formats and size only, with Restor
   assert.equal(view.title, CLIPBOARD_OFFER_COPY.title)
   assert.match(view.detail, /\(1 format, 900 bytes\)/)
   assert.deepEqual(
-    { restore: view.controls.restore, dismiss: view.controls.dismiss, copy: view.controls.copy },
-    { restore: true, dismiss: true, copy: false }
+    {
+      restore: view.controls.offerRestore,
+      offerDismiss: view.controls.offerDismiss,
+      dismiss: view.controls.dismiss,
+      copy: view.controls.copy
+    },
+    { restore: true, offerDismiss: true, dismiss: false, copy: false }
   )
   assert.deepEqual(overlaySize(view), { width: 460, height: 236 })
   assert.equal(describeClipboardSize(3, 2 * 1024 * 1024), '3 formats, 2.0 MB')

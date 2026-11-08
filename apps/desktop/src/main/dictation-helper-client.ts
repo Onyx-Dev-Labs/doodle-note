@@ -1,7 +1,8 @@
 import { DEV_BUNDLE_ID, type AppChannel } from '../shared/app-channel'
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import type { Readable, Writable } from 'node:stream'
 import type {
   AppInfoEntry,
@@ -183,6 +184,16 @@ export const DEFAULT_HELPER_TIMEOUTS: HelperTimeouts = {
  * the helper is started lazily and restarted on demand after a crash, with its
  * hold-key watch re-armed. It never receives a credential or provider key.
  */
+/** The helper's own rule for its identity in file names (HelperIdentity.Sanitize). */
+export function sanitizeIdentity(identity: string | null | undefined): string {
+  const trimmed = (identity ?? '').trim() || BARK_HELPER_IDENTITY
+  const clean = [...trimmed]
+    .slice(0, 64)
+    .map((c) => (/[A-Za-z0-9._-]/.test(c) ? c : '_'))
+    .join('')
+  return clean || BARK_HELPER_IDENTITY
+}
+
 /** A helper's offer (event or list entry), checked field by field; null when malformed. */
 function toOffer(value: unknown): ClipboardOffer | null {
   if (!value || typeof value !== 'object') return null
@@ -349,6 +360,23 @@ export class DictationHelperClient {
         ? { bytes: reply.bytes as number | null }
         : {}),
       ...(typeof reply.sequence === 'number' ? { sequence: reply.sequence } : {})
+    }
+  }
+
+  /**
+   * Windows: whether this identity has kept clipboard records in %TEMP% (file names only; nothing read and
+   * no helper started), so the app can offer them whether or not Bark is on.
+   */
+  hasKeptClipboard(): boolean {
+    if (!this.windows) return false
+    const identity = sanitizeIdentity(this.launch.identity ?? BARK_HELPER_IDENTITY)
+    const name = new RegExp(
+      `^DoodleNote-Bark-clipboard-${identity.replace(/[.]/g, '\\.')}-[0-9a-f]{32}\\.state$`
+    )
+    try {
+      return readdirSync(tmpdir()).some((file) => name.test(file))
+    } catch {
+      return false
     }
   }
 

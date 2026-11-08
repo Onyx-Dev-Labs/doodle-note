@@ -54,6 +54,9 @@ interface Harness {
     restoreAnswers: ClipboardOfferRestore[]
     restoreCalls: Array<{ record: string; sequence: number }>
     dismissCalls: string[]
+    /** What the fake helper answers to a dismiss (the real deletion result). */
+    dismissResult: boolean
+    keptOnDisk: boolean
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     deliverGuards: DeliveryGuards[]
@@ -166,6 +169,8 @@ function harness(
     restoreAnswers: [],
     restoreCalls: [],
     dismissCalls: [],
+    dismissResult: true,
+    keptOnDisk: false,
     statusCalls: 0,
     target: {
       snapshotId: 'x',
@@ -260,8 +265,9 @@ function harness(
       },
       dismissClipboardOffer: async (record: string) => {
         helper.dismissCalls.push(record)
-        return true
+        return helper.dismissResult
       },
+      hasKeptClipboard: () => helper.keptOnDisk,
       ...(options.helperBlocked ? { blocked: true } : {}),
       status: async (): Promise<HelperStatus> => {
         helper.statusCalls += 1
@@ -2949,10 +2955,11 @@ test('Windows: a kept clipboard is offered with Restore and Dismiss, formats and
   )
   assert.match(card.detail, /Dismiss deletes that copy and leaves your clipboard as it is/)
   assert.match(card.detail, /password manager marked private is never saved or offered/)
-  assert.equal(card.controls.restore, true)
-  assert.equal(card.controls.dismiss, true)
-  // Restore asks the helper with the offer's sequence; done, the card goes.
-  h.service.onOverlayAction('restore', null)
+  assert.equal(card.controls.offerRestore, true)
+  assert.equal(card.controls.offerDismiss, true)
+  assert.equal(card.controls.dismiss, false, 'never the shared dismiss')
+  h.helper.offers = [] // restored: the helper no longer lists it
+  h.service.onOverlayAction('offer-restore', null)
   await tick()
   assert.deepEqual(h.helper.restoreCalls, [{ record: offer().record, sequence: 41 }])
   assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
@@ -2967,7 +2974,7 @@ test('Windows: a clipboard that changed since the offer is shown and asked again
   ]
   await h.service.start()
   await tick()
-  h.service.onOverlayAction('restore', null)
+  h.service.onOverlayAction('offer-restore', null)
   await tick()
   const card = h.overlay.at(-1)!
   assert.equal(card.title, 'Your clipboard has changed since DoodleNote offered this.')
@@ -2975,34 +2982,83 @@ test('Windows: a clipboard that changed since the offer is shown and asked again
     card.detail,
     /replaces what is on your clipboard \(3 formats, 4\.0 KB\) with what you had copied before \(2 formats, 1\.3 KB\)/
   )
-  assert.equal(card.controls.restore, true)
-  h.service.onOverlayAction('restore', null)
+  h.service.onOverlayAction('offer-restore', null)
   await tick()
   assert.deepEqual(
     h.helper.restoreCalls.map((c) => c.sequence),
     [41, 44],
     'the second click confirms the state the card showed'
   )
-  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /changed since DoodleNote offered/)
 })
 
-test('Windows: Dismiss deletes the kept clipboard; a withdrawn offer leaves; an offer waits for another panel', async () => {
+test('Windows: Dismiss asks first, deletes only after the helper did, and keeps the card when it could not', async () => {
   const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.offers = [offer({ record: 'a'.repeat(32) })]
   await h.service.start()
-  h.helper.offerListener!(offer({ record: 'a'.repeat(32) }))
   await tick()
-  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  // The shared dismiss (another card's button) never touches the offer.
   h.service.onOverlayAction('dismiss', null)
   await tick()
-  assert.deepEqual(h.helper.dismissCalls, ['a'.repeat(32)])
-  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
-  // A new offer, withdrawn by the helper (restored by a retry, stale, expired): the card goes.
-  h.helper.offerListener!(offer({ record: 'b'.repeat(32) }))
+  assert.deepEqual(h.helper.dismissCalls, [])
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  // Dismiss: a second click is needed.
+  h.service.onOverlayAction('offer-dismiss', null)
+  await tick()
+  let card = h.overlay.at(-1)!
+  assert.equal(card.title, 'Delete the saved clipboard?')
+  assert.equal(card.controls.offerDelete, true)
+  assert.equal(card.controls.offerKeep, true)
+  assert.deepEqual(h.helper.dismissCalls, [], 'nothing deleted on the first click')
+  // Keep it: back to the offer.
+  h.service.onOverlayAction('offer-keep', null)
   await tick()
   assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  // The helper could not delete it: the card stays and says so.
+  h.helper.dismissResult = false
+  h.service.onOverlayAction('offer-dismiss', null)
+  h.service.onOverlayAction('offer-delete', null)
+  await tick()
+  card = h.overlay.at(-1)!
+  assert.equal(card.warning, 'The saved copy could not be deleted. Try again.')
+  assert.equal(card.controls.offerDelete, true)
+  // Now it can.
+  h.helper.dismissResult = true
+  h.helper.offers = []
+  h.service.onOverlayAction('offer-delete', null)
+  await tick()
+  assert.deepEqual(h.helper.dismissCalls, ['a'.repeat(32), 'a'.repeat(32)])
+  assert.doesNotMatch(
+    JSON.stringify(h.overlay.at(-1)),
+    /saved clipboard|Put back what you had copied/
+  )
+})
+
+test('Windows: every outstanding offer is kept; the next shows after one resolves; a withdrawn one leaves', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  const first = offer({ record: 'a'.repeat(32), formats: 1 })
+  const second = offer({ record: 'b'.repeat(32), formats: 7 })
+  h.helper.offers = [first, second]
+  await h.service.start()
+  await tick()
+  assert.match(h.overlay.at(-1)!.detail, /\(1 format,/)
+  // The first is restored; the helper lists the second only.
+  h.helper.offers = [second]
+  h.service.onOverlayAction('offer-restore', null)
+  await tick()
+  await tick()
+  assert.match(h.overlay.at(-1)!.detail, /\(7 formats,/, 'the next outstanding offer shows')
   h.helper.offerGoneListener!('b'.repeat(32))
   await tick()
   assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+})
+
+test("Windows: kept clipboards are offered with Bark off too (the data is the user's clipboard)", async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok', settings: { enabled: false } })
+  h.helper.keptOnDisk = true
+  h.helper.offers = [offer()]
+  await h.service.start()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
 })
 
 test('Windows: paste last and a refused paste report the clipboard too', async () => {

@@ -115,7 +115,10 @@ ${overlayFontCss}
       <a class="btn" id="view" href="doodle-dictation://view" role="button" hidden>View</a>
       <a class="btn primary" id="undo" href="doodle-dictation://undo" role="button" hidden>Undo</a>
       <a class="btn primary" id="copy" href="doodle-dictation://copy" role="button" hidden>Copy text</a>
-      <a class="btn primary" id="restore" href="doodle-dictation://restore" role="button" hidden>Restore</a>
+      <a class="btn primary" id="offerRestore" href="doodle-dictation://offer-restore" role="button" hidden>Restore</a>
+      <a class="btn" id="offerDismiss" href="doodle-dictation://offer-dismiss" role="button" hidden>Dismiss</a>
+      <a class="btn" id="offerKeep" href="doodle-dictation://offer-keep" role="button" hidden>Keep it</a>
+      <a class="btn primary" id="offerDelete" href="doodle-dictation://offer-delete" role="button" hidden>Delete saved copy</a>
       <a class="btn" id="dismiss" href="doodle-dictation://dismiss" role="button" hidden>Dismiss</a>
     </div>
   </div>
@@ -225,7 +228,7 @@ ${overlayFontCss}
       $('view').hidden = !next.controls.view
       $('undo').hidden = !next.controls.undo
       $('dismiss').hidden = !next.controls.dismiss
-      $('restore').hidden = !next.controls.restore
+      for (const id of ['offerRestore', 'offerDismiss', 'offerKeep', 'offerDelete']) $(id).hidden = !next.controls[id]
       const diff = $('diff')
       diff.hidden = !next.diff
       diff.textContent = ''

@@ -56,6 +56,10 @@ async function main() {
   send({ op: 'hold-start', id: 'f', key: 'fn', minHoldMs: 150 })
   send({ op: 'deliver', id: 'd', snapshotId: 'none', text: 'x' })
   send({ op: 'nope', id: 'u' })
+  // The production clipboard-offer ops must be in the shipped helper (round 12 compiled them out).
+  send({ op: 'clipboard-offers', id: 'co' })
+  send({ op: 'clipboard-restore', id: 'cr', record: '0'.repeat(32), sequence: 1 })
+  send({ op: 'clipboard-dismiss', id: 'cd', record: 'not-a-record' })
   for (const op of [
     '__boundary-table',
     '__drop-hooks',
@@ -70,6 +74,9 @@ async function main() {
   const fn = await wait((l) => l.id === 'f', 5_000)
   const deliver = await wait((l) => l.id === 'd', 5_000)
   const unknown = await wait((l) => l.id === 'u', 5_000)
+  const offers = await wait((l) => l.id === 'co', 10_000)
+  const restoreOffer = await wait((l) => l.id === 'cr', 10_000)
+  const dismissOffer = await wait((l) => l.id === 'cd', 10_000)
   const testOps = []
   for (const op of [
     '__boundary-table',
@@ -94,6 +101,18 @@ async function main() {
       deliver.outcome === 'refused' && deliver.reason === 'no-target'
     ],
     ['unknown op', unknown.ok === false && unknown.reason === 'unknown-op'],
+    [
+      'the shipped helper dispatches clipboard-offers (ok, a list)',
+      offers.ok === true && Array.isArray(offers.offers)
+    ],
+    [
+      'the shipped helper dispatches clipboard-restore (no such offer: gone)',
+      restoreOffer.ok === true && restoreOffer.result === 'gone'
+    ],
+    [
+      'the shipped helper dispatches clipboard-dismiss (a real result)',
+      dismissOffer.ok === true && dismissOffer.dismissed === false
+    ],
     [
       'the shipped helper has no test ops (even with DICTATION_HELPER_TEST=1)',
       testOps.every((r) => r.ok === false && r.reason === 'unknown-op')

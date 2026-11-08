@@ -1105,3 +1105,58 @@ test('the helper identity follows the build channel; an identity module can over
     await dev.dispose()
   }
 })
+
+/**
+ * The helper's dispatch table, read from Program.cs with its preprocessor regions: which ops the RELEASE
+ * build answers. A production op inside `#if DICTATION_TEST` would be "unknown-op" in the shipped helper
+ * (round 12 shipped the clipboard-offer ops that way; the C# unit-test build excludes Program.cs).
+ */
+function helperDispatch(): { production: string[]; testOnly: string[] } {
+  const source = readFileSync(
+    new URL('../../../../engine/windows/dictation-helper/Program.cs', import.meta.url),
+    'utf8'
+  )
+  const production: string[] = []
+  const testOnly: string[] = []
+  const stack: boolean[] = []
+  for (const line of source.split(/\r?\n/)) {
+    const directive = /^\s*#(if|else|endif)\b\s*(.*)$/.exec(line)
+    if (directive) {
+      if (directive[1] === 'if') stack.push(directive[2]!.trim() === 'DICTATION_TEST')
+      else if (directive[1] === 'else') stack.push(!stack.pop())
+      else stack.pop()
+      continue
+    }
+    const label = /^\s*case "([^"]+)":/.exec(line)
+    if (!label) continue
+    ;(stack.some(Boolean) ? testOnly : production).push(label[1]!)
+  }
+  return { production, testOnly }
+}
+
+test('Windows: every production helper op is compiled into the release helper; every test op is not', () => {
+  const { production, testOnly } = helperDispatch()
+  for (const op of [
+    'clipboard-offers',
+    'clipboard-restore',
+    'clipboard-dismiss',
+    'deliver',
+    'status'
+  ])
+    assert.ok(production.includes(op), `${op} is dispatched by the release build`)
+  assert.deepEqual(
+    production.filter((op) => op.startsWith('__')),
+    [],
+    'no test op outside DICTATION_TEST'
+  )
+  assert.deepEqual(
+    testOnly.filter((op) => !op.startsWith('__')),
+    [],
+    'no production op inside DICTATION_TEST'
+  )
+  // Every op the client sends is a production op.
+  const client = readFileSync(new URL('./dictation-helper-client.ts', import.meta.url), 'utf8')
+  const sent = [...client.matchAll(/this\.request\(\s*'([a-z-]+)'/g)].map((m) => m[1]!)
+  assert.ok(sent.includes('clipboard-offers') && sent.includes('deliver'))
+  for (const op of sent) assert.ok(production.includes(op), `the client sends ${op}: a release op`)
+})

@@ -34,8 +34,14 @@ export interface OverlayView {
     view: boolean
     /** Put the text from before the transform back. */
     undo: boolean
-    /** Windows: put back the clipboard a kept transaction offers (absent: hidden). */
-    restore?: boolean
+    /**
+     * Windows: the clipboard offer card's own buttons (absent: hidden). They have their own actions, never the
+     * shared dismiss: Restore, Dismiss (asks first), then Delete saved copy / Keep it.
+     */
+    offerRestore?: boolean
+    offerDismiss?: boolean
+    offerDelete?: boolean
+    offerKeep?: boolean
   }
   /** Before and after words, shown as a diff in a message card; null otherwise. */
   diff: DiffSegment[] | null
@@ -143,7 +149,8 @@ export function overlaySize(view: OverlayView): Size {
       height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
     }
   }
-  if (view.mode === 'message' && view.controls.restore) return { ...WINDOW.offer }
+  if (view.mode === 'message' && (view.controls.offerRestore || view.controls.offerDelete))
+    return { ...WINDOW.offer }
   if (view.mode === 'message')
     // A warning line on a card (Windows: the clipboard could not be fully put back) needs room.
     return view.warning
@@ -349,6 +356,10 @@ export type OverlayPanel =
       kind: 'clipboard-offer'
       offer: ClipboardOffer
       changed?: { formats: number; bytes: number | null }
+      /** Dismiss was clicked once: the card asks before the saved copy is deleted. */
+      confirmDelete?: boolean
+      /** The helper could not delete the saved copy: the card stays, with a line saying so. */
+      deleteFailed?: boolean
     }
 
 /** "2 formats, 1.2 KB": an offer describes formats and size only, never content. */
@@ -371,7 +382,11 @@ export const CLIPBOARD_OFFER_COPY = {
   detail: (saved: string): string =>
     `Restore puts back what you had copied (${saved}) in place of what is on your clipboard now. Dismiss deletes that copy and leaves your clipboard as it is. Content a password manager marked private is never saved or offered.`,
   changedDetail: (saved: string, now: string): string =>
-    `Restore now replaces what is on your clipboard (${now}) with what you had copied before (${saved}). Dismiss deletes the saved copy and leaves your clipboard as it is.`
+    `Restore now replaces what is on your clipboard (${now}) with what you had copied before (${saved}). Dismiss deletes the saved copy and leaves your clipboard as it is.`,
+  confirmTitle: 'Delete the saved clipboard?',
+  confirmDetail: (saved: string): string =>
+    `Delete saved copy removes what you had copied before the dictation (${saved}) for good; your clipboard stays as it is. Keep it brings the offer back.`,
+  deleteFailed: 'The saved copy could not be deleted. Try again.'
 } as const
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
@@ -424,6 +439,16 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
       }
     case 'clipboard-offer': {
       const saved = describeClipboardSize(panel.offer.formats, panel.offer.bytes)
+      if (panel.confirmDelete)
+        return {
+          ...common,
+          tone: 'warn',
+          title: CLIPBOARD_OFFER_COPY.confirmTitle,
+          detail: CLIPBOARD_OFFER_COPY.confirmDetail(saved),
+          warning: panel.deleteFailed ? CLIPBOARD_OFFER_COPY.deleteFailed : null,
+          controls: { ...NONE, offerDelete: true, offerKeep: true },
+          diff: null
+        }
       return {
         ...common,
         tone: 'warn',
@@ -434,7 +459,7 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
               describeClipboardSize(panel.changed.formats, panel.changed.bytes)
             )
           : CLIPBOARD_OFFER_COPY.detail(saved),
-        controls: { ...NONE, restore: true, dismiss: true },
+        controls: { ...NONE, offerRestore: true, offerDismiss: true },
         diff: null
       }
     }

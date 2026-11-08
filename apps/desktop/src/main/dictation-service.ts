@@ -166,6 +166,8 @@ export interface HelperLike {
   clipboardOffers?(): Promise<ClipboardOffer[]>
   restoreClipboardOffer?(record: string, sequence: number): Promise<ClipboardOfferRestore>
   dismissClipboardOffer?(record: string): Promise<boolean>
+  /** Windows: whether this identity has kept clipboard records on disk (a cheap check; no helper started). */
+  hasKeptClipboard?(): boolean
   /** Windows: whether a helper that leaves now is started again on its own (absent: assume yes). */
   willRestart?(): boolean
   /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
@@ -374,10 +376,20 @@ export class DictationService {
     after: string
   } | null = null
   private panel: OverlayPanel | null = null
-  /** Windows: the clipboard offer standing now (shown whenever no other panel is). */
-  private offer: ClipboardOffer | null = null
+  /** Windows: every clipboard offer standing now, by record id (the first is shown whenever no other panel is). */
+  private readonly offers = new Map<string, ClipboardOffer>()
   /** Windows: the clipboard changed since the offer; what a restore would overwrite, and the sequence to ask with. */
-  private offerChanged: { formats: number; bytes: number | null; sequence: number } | null = null
+  private offerChanged: {
+    record: string
+    formats: number
+    bytes: number | null
+    sequence: number
+  } | null = null
+  /** Windows: Dismiss was clicked once for this record (the card asks before deleting); and whether a delete failed. */
+  private offerConfirm: { record: string; failed: boolean } | null = null
+  private offerSweep: NodeJS.Timeout | null = null
+  /** Whether Bark was on at the last settings change (turning it on loads the offers). */
+  private barkWasOn = false
   private panelTimer: NodeJS.Timeout | null = null
   private transforming: AbortController | null = null
   private readonly transformKeys = new Map<
@@ -453,93 +465,141 @@ export class DictationService {
     await this.applySettings()
     // Off means idle: do not even list microphones until the person turns it on.
     if (this.deps.settings.get().enabled) void this.refreshDevices()
-    // Windows: a clipboard kept by an earlier session (a crash, a restart) is offered again.
-    if (this.windows && this.deps.settings.get().enabled) void this.loadClipboardOffers()
+    // Windows: a clipboard kept by an earlier session (a crash, a restart) is offered again, whether or not Bark is
+    // on: it is the user's clipboard, not a dictation feature. The helper is started for it only when this
+    // identity has kept records on disk (or Bark is on anyway). Also every hour (the retention runs in the helper).
+    if (this.windows) {
+      void this.loadClipboardOffers()
+      this.offerSweep = setInterval(() => void this.loadClipboardOffers(), 60 * 60 * 1000)
+      this.offerSweep.unref?.()
+    }
   }
 
   /* ---- clipboard offers (Windows) ---- */
 
+  /** The helper is the source of truth: the list it gives replaces what is held (an offer it no longer has goes). */
   private async loadClipboardOffers(): Promise<void> {
-    if (!this.deps.helper.clipboardOffers) return
+    if (!this.deps.helper.clipboardOffers || this.disposed) return
+    const kept = this.deps.helper.hasKeptClipboard?.() ?? false
+    if (!this.deps.settings.get().enabled && !kept && this.offers.size === 0) return
+    let list: ClipboardOffer[]
     try {
-      const [first] = await this.deps.helper.clipboardOffers()
-      if (first) this.showOffer(first)
+      list = await this.deps.helper.clipboardOffers()
     } catch {
-      // No helper: nothing to offer now; a later helper start sends its offers itself.
+      return // no helper now; its next start sends its offers itself
     }
+    if (this.disposed) return
+    this.offers.clear()
+    for (const offer of list) this.offers.set(offer.record, offer)
+    this.refreshOfferPanel()
   }
 
   private showOffer(offer: ClipboardOffer): void {
     if (this.disposed) return
-    if (this.offer?.record !== offer.record) this.offerChanged = null
-    this.offer = offer
+    this.offers.set(offer.record, offer)
     this.deps.log(
       `clipboard offer: a kept clipboard (${offer.formats} formats, ${offer.bytes} bytes) can be restored`
     )
-    // Shown now unless another panel is up (then when it closes, see setPanel).
-    if (!this.panel || this.panel.kind === 'clipboard' || this.panel.kind === 'clipboard-offer')
-      this.setPanel(this.offerPanel())
+    this.refreshOfferPanel()
+  }
+
+  private currentOffer(): ClipboardOffer | null {
+    return this.offers.values().next().value ?? null
+  }
+
+  /** Show the current offer unless another panel is up (then it comes when that one closes, see setPanel). */
+  private refreshOfferPanel(): void {
+    const panel = this.panel
+    if (!panel || panel.kind === 'clipboard' || panel.kind === 'clipboard-offer')
+      this.setPanel(null)
   }
 
   private offerPanel(): OverlayPanel | null {
-    if (!this.offer) return null
+    const offer = this.currentOffer()
+    if (!offer) return null
+    const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
+    const confirm = this.offerConfirm?.record === offer.record ? this.offerConfirm : null
     return {
       kind: 'clipboard-offer',
-      offer: this.offer,
-      ...(this.offerChanged
-        ? { changed: { formats: this.offerChanged.formats, bytes: this.offerChanged.bytes } }
-        : {})
+      offer,
+      ...(changed ? { changed: { formats: changed.formats, bytes: changed.bytes } } : {}),
+      ...(confirm ? { confirmDelete: true, deleteFailed: confirm.failed } : {})
     }
   }
 
   private offerGone(record: string): void {
-    if (this.offer?.record !== record) return
-    this.offer = null
-    this.offerChanged = null
-    if (this.panel?.kind === 'clipboard-offer') this.setPanel(null)
+    if (!this.offers.delete(record)) return
+    if (this.offerChanged?.record === record) this.offerChanged = null
+    if (this.offerConfirm?.record === record) this.offerConfirm = null
+    this.refreshOfferPanel()
+  }
+
+  /** One offer resolved: it leaves, and the list is asked for again (the next outstanding offer shows). */
+  private async offerResolved(record: string): Promise<void> {
+    this.offerGone(record)
+    await this.loadClipboardOffers()
   }
 
   /** The user's Restore: only while the clipboard is as it was offered (or as the "changed" card showed). */
   private async restoreOffer(): Promise<void> {
-    const offer = this.offer
+    const offer = this.currentOffer()
     if (!offer || !this.deps.helper.restoreClipboardOffer) return
-    const sequence = this.offerChanged?.sequence ?? offer.sequence
+    const changed = this.offerChanged?.record === offer.record ? this.offerChanged : null
+    const sequence = changed?.sequence ?? offer.sequence
     const done = await this.deps.helper.restoreClipboardOffer(offer.record, sequence)
     this.deps.log(`clipboard offer: restore ${done.result}`)
-    if (this.offer?.record !== offer.record) return
+    if (!this.offers.has(offer.record)) return
     if (done.result === 'changed' && typeof done.sequence === 'number') {
       // Ask again, showing what a restore would overwrite now (formats and size only).
       this.offerChanged = {
+        record: offer.record,
         formats: done.formats ?? 0,
         bytes: done.bytes ?? null,
         sequence: done.sequence
       }
-      this.setPanel(this.offerPanel())
+      this.refreshOfferPanel()
       return
     }
     if (done.result === 'restored' || done.result === 'partial' || done.result === 'skipped') {
-      this.offer = null
-      this.offerChanged = null
       const problem = clipboardProblem(done.result, undefined)
-      this.setPanel(problem ? { kind: 'clipboard', problem } : null, problem ? NOTICE_MS : 0)
+      await this.offerResolved(offer.record)
+      if (problem) this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
       return
     }
-    if (done.result === 'gone') {
-      this.offer = null
-      this.offerChanged = null
-      this.setPanel(null)
-    }
+    if (done.result === 'gone') await this.offerResolved(offer.record)
     // Otherwise (busy, failed): the offer stands; the card stays.
   }
 
-  /** The user's Dismiss: the saved copy is deleted and the clipboard left as it is. */
-  private async dismissOffer(): Promise<void> {
-    const offer = this.offer
-    this.offer = null
-    this.offerChanged = null
-    this.setPanel(null)
-    if (offer && this.deps.helper.dismissClipboardOffer)
-      await this.deps.helper.dismissClipboardOffer(offer.record)
+  /** Dismiss asks first; Delete saved copy then deletes it, and the card goes only once the helper did. */
+  private offerAction(action: 'offer-dismiss' | 'offer-delete' | 'offer-keep'): void {
+    const offer = this.currentOffer()
+    if (!offer) return
+    if (action === 'offer-dismiss') this.offerConfirm = { record: offer.record, failed: false }
+    else if (action === 'offer-keep') this.offerConfirm = null
+    else {
+      void this.deleteOffer(offer)
+      return
+    }
+    this.refreshOfferPanel()
+  }
+
+  private async deleteOffer(offer: ClipboardOffer): Promise<void> {
+    if (this.offerConfirm?.record !== offer.record) return // only after the confirmation
+    let deleted = false
+    try {
+      deleted = (await this.deps.helper.dismissClipboardOffer?.(offer.record)) === true
+    } catch {
+      deleted = false
+    }
+    this.deps.log(`clipboard offer: delete ${deleted ? 'done' : 'failed'}`)
+    if (deleted) {
+      this.offerConfirm = null
+      await this.offerResolved(offer.record)
+      return
+    }
+    // The card stays, saying so; the user can try again.
+    this.offerConfirm = { record: offer.record, failed: true }
+    this.refreshOfferPanel()
   }
 
   async dispose(): Promise<void> {
@@ -558,6 +618,8 @@ export class DictationService {
     }
     this.transformKeys.clear()
     this.transforming?.abort()
+    if (this.offerSweep) clearInterval(this.offerSweep)
+    this.offerSweep = null
     this.setPanel(null)
     this.lastTranscript = null
     this.lastChange = null
@@ -689,6 +751,7 @@ export class DictationService {
     const settings = this.deps.settings.get()
     if (!settings.enabled || !settings.learnFromEdits) this.learner.discard()
     if (!this.deps.supported || !settings.enabled) {
+      this.barkWasOn = false
       this.dispatch({ type: 'cancel' })
       this.setToggleShortcut('')
       this.setActionShortcut('paste', '', new Set())
@@ -708,6 +771,9 @@ export class DictationService {
     }
     // Windows: Bark is on, so the helper is about to be needed; verify it now (asynchronously).
     this.deps.checkHelperIntegrity?.()
+    // Windows: Bark turned (back) on: a clipboard kept meanwhile is offered now.
+    if (this.windows && !this.barkWasOn && this.offerSweep) void this.loadClipboardOffers()
+    this.barkWasOn = true
     this.setToggleShortcut(settings.toggleShortcut)
     const clashes = this.shortcutClashes(settings)
     this.setActionShortcut('paste', settings.pasteLastShortcut, clashes)
@@ -1067,12 +1133,18 @@ export class DictationService {
         if (gen !== null) void this.copyRecovery(gen)
         break
       case 'dismiss':
-        if (this.panel?.kind === 'clipboard-offer') void this.dismissOffer()
-        else if (this.panel) this.setPanel(null)
+        // The shared dismiss never touches a clipboard offer (it has its own actions, and Dismiss asks first).
+        if (this.panel?.kind === 'clipboard-offer') break
+        if (this.panel) this.setPanel(null)
         else this.dispatch({ type: 'dismiss' })
         break
-      case 'restore':
+      case 'offer-restore':
         if (this.panel?.kind === 'clipboard-offer') void this.restoreOffer()
+        break
+      case 'offer-dismiss':
+      case 'offer-delete':
+      case 'offer-keep':
+        if (this.panel?.kind === 'clipboard-offer') this.offerAction(action)
         break
       case 'view':
         this.viewLastChange()
@@ -1725,7 +1797,7 @@ export class DictationService {
     if (this.panelTimer) clearTimeout(this.panelTimer)
     this.panelTimer = null
     // A standing clipboard offer comes back whenever no other panel is shown (it never times out).
-    if (!panel && this.offer && !this.disposed) {
+    if (!panel && this.offers.size > 0 && !this.disposed) {
       panel = this.offerPanel()
       ms = 0
     }
