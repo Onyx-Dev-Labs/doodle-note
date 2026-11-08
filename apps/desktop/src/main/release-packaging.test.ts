@@ -281,11 +281,17 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   assert.equal(restored.at(-1), 'Identity')
   const park = fnBody('dnParkUninstaller')
   assert.ok(park.indexOf('"DestDir" $1') < park.indexOf('"Identity" "${DN_MIGRATION_IDENTITY}"'))
-  // The copy goes only after every value in it read back.
+  // The copy goes only after every value in it read back, then its parent if empty.
   const copyDeleted = recoverState.indexOf('DeleteRegKey HKCU $dnRecoveryKey')
   assert.ok(recoverState.lastIndexOf('dnMatchValue') < copyDeleted)
   assert.ok(recoverState.indexOf('StrCpy $5 "record-mismatch"') < copyDeleted)
   assert.ok(recoverState.indexOf('WriteRegStr HKCU $dnStateKey "MigrationRecord" $2') < copyDeleted)
+  assert.ok(copyDeleted < recoverState.indexOf('DeleteRegKey /ifempty HKCU $dnRecoveryParent'))
+  for (const at of [...recoverState.matchAll(/DeleteRegKey \/ifempty HKCU \$dnRecoveryParent/g)])
+    assert.match(
+      recoverState.slice(0, at.index),
+      /\$\{(?:else)?if\} \$dnRecoveryParent != ""\n(?:\s+;[^\n]*\n)*\s+$/
+    )
   // Test-only termination points compile to nothing in an installer.
   assert.match(
     guards,
@@ -304,13 +310,15 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   // The recovery copy lives outside Software\{APP_GUID}, which electron-builder's
   // uninstaller deletes; customInit restores from it before anything reads the
   // journal; a user uninstall (not --updated) deletes it.
-  assert.match(
-    installer,
-    /!define DN_RECOVERY_KEY "Software\\DoodleNote-InstallRecovery\\\$\{APP_GUID\}"/
-  )
+  assert.match(installer, /!define DN_RECOVERY_KEY "\$\{DN_RECOVERY_PARENT\}\\\$\{APP_GUID\}"/)
+  assert.match(installer, /!define DN_RECOVERY_PARENT "Software\\DoodleNote-InstallRecovery"/)
   const init = installer.slice(installer.indexOf('!macro customInit'))
   assert.ok(
     init.indexOf('StrCpy $dnRecoveryKey "${DN_RECOVERY_KEY}"') < init.indexOf('Call dnRecoverState')
+  )
+  assert.ok(
+    init.indexOf('StrCpy $dnRecoveryParent "${DN_RECOVERY_PARENT}"') <
+      init.indexOf('Call dnRecoverState')
   )
   assert.ok(init.indexOf('Call dnPlanMigration') < init.indexOf('Call dnJournalDone'))
   assert.ok(init.indexOf('Call dnRecoverState') < init.indexOf('Call dnPlanMigration'))

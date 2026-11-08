@@ -1573,7 +1573,7 @@ async function main() {
     // any registry write and is finished by the next run. The record is one value
     // (all of it or none); a journal is complete only with Identity, SourceDir and
     // DestDir (Identity written last); the recovery copy is deleted only once every
-    // value in it reads back from the live keys.
+    // value in it reads back from the live keys, then its parent if it is empty.
     // The steps build terminates the harness right after the named write
     // (dnTestStep; never compiled into an installer).
     const p6 = path.join(sandbox, 'p6', 'Local', 'Programs')
@@ -1599,7 +1599,7 @@ async function main() {
       ['jkey', p6Journal, ''],
       ['skey', p6State, ''],
       ['ukey', `${p6State}-uninstall`, ''],
-      ['rkey', p6Recovery, ''],
+      ['rkey', p6Recovery, p6Parent],
       ['stkey', p6Status, p6Log, 'set']
     ]
     const p6Rec = recordValue(p6From, p6To)
@@ -1623,7 +1623,8 @@ async function main() {
     const p6Clean = [
       ['wipe', '', '', 'done'],
       ['rwipe', '', '', 'done'],
-      ['recover', '', '', 'done']
+      ['recover', '', '', 'done'],
+      ['keyexists', p6Parent, '', 'none']
     ]
 
     // The checks: a record is complete for this identity and its two folders, or
@@ -1681,7 +1682,7 @@ async function main() {
     checkCases('p6-checks', p6Checks, phase('p6-checks', p6Checks).results)
 
     // Restoration killed right after each of its writes: the next run finishes it,
-    // every value comes back exactly, and only then does the copy go.
+    // every value comes back exactly, and only then do the copy and its parent go.
     const restoreSteps = [
       'recover-LegacyUninstallString',
       'recover-DesktopLink',
@@ -1712,11 +1713,13 @@ async function main() {
         ['jcheck', p6Journal, '', n < 3 ? 'none' : n < 5 ? 'incomplete' : 'ok'],
         ['record', '', '', n < 6 ? 'none' : p6Rec],
         ['keyexists', p6Recovery, '', n < 7 ? 'present' : 'none'],
+        ['keyexists', p6Parent, '', 'present'],
         ['recover', '', '', 'done'],
         ...p6IsLive,
         ['jcheck', p6Journal, '', 'ok'],
         ['rstate', '', '', 'none'],
         ['keyexists', p6Recovery, '', 'none'],
+        ['keyexists', p6Parent, '', 'none'],
         ['status', '', '', n < 7 ? status('recover', 'recovered', 'restored') : undefined]
       ]
       checkCases(`p6-${step}-next`, run2, phase(`p6-${step}-next`, run2).results)
@@ -1859,7 +1862,8 @@ async function main() {
         ['rread', 'MigrationRecord', '', p6Rec],
         ['wipe', '', '', 'done'],
         ['recover', '', '', 'done'],
-        ...p6IsLive
+        ...p6IsLive,
+        ['keyexists', p6Parent, '', 'none']
       ]
       checkCases(`p6-${step}-next`, run2, phase(`p6-${step}-next`, run2).results)
     }
@@ -1903,6 +1907,7 @@ async function main() {
       ['recover', '', '', 'done'],
       ['record', '', '', p6Rec],
       ['rstate', '', '', 'none'],
+      ['keyexists', p6Parent, '', 'none'],
       ['rwrite', 'MigrationRecord', p6Rec, 'set'],
       ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
       ['lwrite', 'MigrationRecord', p6Rec.replace('guards-test|', 'other-guid|'), 'set'],
@@ -1937,6 +1942,7 @@ async function main() {
       ['jread', 'StartMenuLink', '', 'none'],
       ['rstate', '', '', 'none'],
       ['status', '', '', status('recover', 'recovered', 'restored')],
+      ['keyexists', p6Parent, '', 'none'],
       // A kept copy is not replaced by a save whose live state is incomplete.
       ['wipe', '', '', 'done'],
       ['rwrite', 'MigrationRecord', p6Rec, 'set'],
@@ -1951,6 +1957,31 @@ async function main() {
       ...p6Clean
     ]
     checkCases('p6-tamper', p6Tamper, phase('p6-tamper', p6Tamper).results)
+
+    // The parent key goes only when no other identity's copy is in it.
+    const p6Sibling = `${p6Parent}\\other-guid`
+    const p6Parents = [
+      ...p6Setup,
+      ['rkey', p6Sibling, p6Parent],
+      ['rwrite', 'RecoveryFor', 'other-guid|desktop|DoodleNote', 'set'],
+      ['rkey', p6Recovery, p6Parent],
+      ...p6Live,
+      ['save', '', '', 'done'],
+      ['wipe', '', '', 'done'],
+      ['recover', '', '', 'done'],
+      ...p6IsLive,
+      ['keyexists', p6Recovery, '', 'none'],
+      ['keyexists', p6Sibling, '', 'present'],
+      ['keyexists', p6Parent, '', 'present'],
+      ['rkey', p6Sibling, p6Parent],
+      ['recover', '', '', 'done'],
+      ['rstate', '', '', 'present'],
+      ['status', '', '', status('recover', 'recovery-ignored', 'recovery-foreign')],
+      ['rwipe', '', '', 'done'],
+      ['rkey', p6Recovery, p6Parent],
+      ...p6Clean
+    ]
+    checkCases('p6-parent', p6Parents, phase('p6-parent', p6Parents).results)
 
     // The app leaves a record that is not complete for its identity where it is,
     // for a later installer run to repair, and acts on nothing.

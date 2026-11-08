@@ -381,8 +381,10 @@ moves an existing install on upgrade:
    Every journal value that is missing or empty is written (`Identity` last, so a
    journal cut short is incomplete and never trusted, and the next run fills in
    the rest); the record is one value, written whole. The copy is deleted only
-   once every value in it reads back from the live keys exactly. A copy that
-   fails its checks is left alone (and reported); a user uninstall deletes it. Every one of these writes can be cut short (the guard harness kills
+   once every value in it reads back from the live keys exactly, and then
+   `DoodleNote-InstallRecovery` itself if no other identity's copy is in it. A
+   copy that fails its checks is left alone (and reported); a user uninstall
+   deletes it. Every one of these writes can be cut short (the guard harness kills
    the installer right after each one) and the next run finishes the job. So a move kept by a held file stays armed for
    as many runs as it takes, and a record the app has not read yet survives
    another update, even an interrupted one (before this, an update interrupted
@@ -619,7 +621,8 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
    journal key is gone; right after the installer and before the first launch
    `HKCU\Software\320d0756-...` holds `MigrationRecord`
    (`DNMR1|320d0756-...|desktop-qa|DoodleNote QA|...\desktop-qa|...\DoodleNote QA|<UTC>|END`),
-   and after the first launch it is gone; nothing of production
+   and after the first launch it is gone; `HKCU\Software\DoodleNote-InstallRecovery`
+   does not exist (unless another identity's copy is in it); nothing of production
    changed (its folder, Run value, uninstall key and real MCP configs).
 3. Repeat with the legacy QA app running (closed only after the OK prompt; with
    `/S` and no `--updated` the installer exits with code 2 and nothing changes),

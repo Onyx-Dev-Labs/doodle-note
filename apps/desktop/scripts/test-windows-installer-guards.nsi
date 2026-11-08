@@ -39,7 +39,7 @@
 ;   park|<legacy>|<new>                  dnParkUninstaller: parked | nothing to park | refused: <why>
 ;   jread|<value>                        the journal value, or "none"
 ;   save / restore                       dnSaveState / dnRestoreState: done
-;   rkey|<key>                           sets $dnRecoveryKey (HKCU, a throwaway test key)
+;   rkey|<key>|<parent>                  sets $dnRecoveryKey / $dnRecoveryParent (HKCU, throwaway test keys; parent may be empty)
 ;   recover                              dnRecoverState (what customInit runs first): done
 ;   rstate                               present (the recovery key names an identity) | none
 ;   rread|<value> / rwrite|<value>|<data> reads ("none" when empty) / writes a recovery key value (data: the rest of the line)
@@ -369,6 +369,7 @@ Function .onInit
       StrCpy $result "done"
     ${elseif} $kind == "rkey"
       StrCpy $dnRecoveryKey $a
+      StrCpy $dnRecoveryParent $b
       StrCpy $result "set"
     ${elseif} $kind == "recover"
       Call dnRecoverState

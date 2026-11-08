@@ -1588,6 +1588,8 @@ FunctionEnd
   Var dnSavedStartMenu
   Var dnSavedRecord
   Var dnRecoveryKey
+  ; The key that holds every identity's recovery key ("": not deleted when empty).
+  Var dnRecoveryParent
   ; Why dnMigrationClose kept the old folder (app-running | unknown-process).
   Var dnKeepWhy
 
@@ -2400,8 +2402,9 @@ FunctionEnd
   ;   (dnJournalCheck, dnRecordCheck). It writes every journal value that is
   ;   missing or empty, Identity last, so a journal cut short is incomplete and
   ;   the next run fills the rest; the record is one value. It deletes the copy
-  ;   only once every value in it reads back from the live keys exactly. A copy
-  ;   that fails its checks is left alone (a user uninstall deletes it).
+  ;   only once every value in it reads back from the live keys exactly, and then
+  ;   the parent key if no other identity's copy is in it. A copy that fails its
+  ;   checks is left alone (a user uninstall deletes it).
   !macro dnCopyValue FROM TO NAME
     ReadRegStr $0 HKCU ${FROM} "${NAME}"
     ${if} $0 != ""
@@ -2563,6 +2566,10 @@ FunctionEnd
       ${if} $5 == ""
         DeleteRegKey HKCU $dnRecoveryKey
         !insertmacro dnTestStep "recover-deleted"
+        ${if} $dnRecoveryParent != ""
+          ; Only when no other identity's copy is in it.
+          DeleteRegKey /ifempty HKCU $dnRecoveryParent
+        ${endif}
         ${if} $4 != ""
           !insertmacro dnStatus recover recovered restored ""
         ${endif}
@@ -2575,6 +2582,9 @@ FunctionEnd
       ${endif}
     ${elseif} $0 != ""
       !insertmacro dnStatus recover recovery-ignored recovery-foreign ""
+    ${elseif} $dnRecoveryParent != ""
+      ; No copy: a run that stopped right after deleting one left the parent.
+      DeleteRegKey /ifempty HKCU $dnRecoveryParent
     ${endif}
     Pop $5
     Pop $4

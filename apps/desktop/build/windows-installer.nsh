@@ -118,7 +118,8 @@
   ; A copy of both, outside the Software\${APP_GUID} subtree electron-builder's
   ; uninstaller deletes, for an installer that stops between that step and
   ; customInstall (dnSaveState / dnRecoverState).
-  !define DN_RECOVERY_KEY "Software\DoodleNote-InstallRecovery\${APP_GUID}"
+  !define DN_RECOVERY_PARENT "Software\DoodleNote-InstallRecovery"
+  !define DN_RECOVERY_KEY "${DN_RECOVERY_PARENT}\${APP_GUID}"
   !define DN_TASKBAR_PINS "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
 
   Var dnLegacyDir
@@ -151,6 +152,7 @@
     StrCpy $dnJournalKey "${DN_MIGRATION_KEY}"
     StrCpy $dnStateKey "${DN_STATE_KEY}"
     StrCpy $dnRecoveryKey "${DN_RECOVERY_KEY}"
+    StrCpy $dnRecoveryParent "${DN_RECOVERY_PARENT}"
     StrCpy $dnUninstallKey "${UNINSTALL_REGISTRY_KEY}"
     !ifdef UNINSTALL_REGISTRY_KEY_2
       StrCpy $dnUninstallKey2 "${UNINSTALL_REGISTRY_KEY_2}"
@@ -375,6 +377,7 @@
       ; The installer's copy of the journal and record goes with them (an
       ; update's --updated run keeps it: the installer that started it needs it).
       DeleteRegKey HKCU "Software\DoodleNote-InstallRecovery\${APP_GUID}"
+      ; Only when no other identity's copy is in it.
       DeleteRegKey /ifempty HKCU "Software\DoodleNote-InstallRecovery"
     ${endif}
   !macroend
