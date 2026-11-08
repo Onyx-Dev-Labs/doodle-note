@@ -14,6 +14,8 @@ import {
 import {
   isInsideFolder,
   legacyInstallFor,
+  longPath,
+  samePath,
   runWindowsInstallMigration,
   type InstallMigrationDeps,
   type LoginItemState,
@@ -63,6 +65,98 @@ test('the old install comes only from an installer record naming this exe folder
   assert.ok('reason' in legacyInstallFor({ ...record, from: `${programs}\\other` }, newExe))
   const qa = appIdentity('qa')
   assert.ok('reason' in legacyInstallFor(record, newExe, qa))
+})
+
+test('8.3 short names are expanded on both sides before paths are compared', () => {
+  // A mocked GetFinalPathNameByHandle: what exists on this "disk", short names
+  // included, and the long form Windows reports for it.
+  const disk = new Map<string, string>()
+  for (const [short, long] of [
+    ['C:\\', 'C:\\'],
+    ['C:\\Users', 'C:\\Users'],
+    ['C:\\Users\\PATRIC~1', 'C:\\Users\\Patricia Long'],
+    ['C:\\Users\\Patricia Long', 'C:\\Users\\Patricia Long']
+  ])
+    disk.set(short.toLowerCase(), long)
+  const sub = ['AppData', 'Local', 'Programs']
+  for (const user of ['PATRIC~1', 'Patricia Long'])
+    for (let n = 1; n <= sub.length; n++)
+      disk.set(
+        `C:\\Users\\${user}\\${sub.slice(0, n).join('\\')}`.toLowerCase(),
+        `C:\\Users\\Patricia Long\\${sub.slice(0, n).join('\\')}`
+      )
+  const longPrograms = 'C:\\Users\\Patricia Long\\AppData\\Local\\Programs'
+  for (const [short, long] of [
+    ['DOODLE~1', 'DoodleNote'],
+    ['DoodleNote', 'DoodleNote'],
+    ['DOODLE~1\\DOODLE~1.EXE', 'DoodleNote\\DoodleNote.exe'],
+    ['DoodleNote\\DoodleNote.exe', 'DoodleNote\\DoodleNote.exe']
+  ])
+    for (const user of ['PATRIC~1', 'Patricia Long'])
+      disk.set(
+        `C:\\Users\\${user}\\AppData\\Local\\Programs\\${short}`.toLowerCase(),
+        `${longPrograms}\\${long}`
+      )
+  const realPath = (path: string): string => {
+    const found = disk.get(path.toLowerCase())
+    if (found === undefined) throw new Error(`ENOENT ${path}`)
+    return found
+  }
+  const shortPrograms = 'C:\\Users\\PATRIC~1\\AppData\\Local\\Programs'
+  const longRecord: InstallMigrationRecord = {
+    from: `${longPrograms}\\desktop`,
+    to: `${longPrograms}\\DoodleNote`,
+    at: '2026-11-08T01:02:03Z'
+  }
+  const expected = {
+    dir: `${longPrograms}\\desktop`,
+    exe: `${longPrograms}\\desktop\\DoodleNote.exe`
+  }
+  const production = appIdentity('production')
+
+  // The old folder is gone: only its existing parent is expanded.
+  assert.equal(
+    longPath(`${shortPrograms}\\desktop\\DoodleNote.exe`, realPath),
+    `${longPrograms}\\desktop\\DoodleNote.exe`
+  )
+  assert.equal(longPath('C:\\', realPath), 'C:\\')
+  assert.ok(samePath(`${shortPrograms}\\DOODLE~1\\`, `${longPrograms}\\DoodleNote`, realPath))
+  assert.ok(!samePath(`${shortPrograms}\\DOODLE~1`, `${longPrograms}\\desktop`, realPath))
+
+  // An exe started through a fully short path matches a record written long...
+  for (const exe of [
+    `${shortPrograms}\\DOODLE~1\\DOODLE~1.EXE`,
+    `${shortPrograms}\\DoodleNote\\DoodleNote.exe`,
+    `${longPrograms}\\DOODLE~1\\DoodleNote.exe`
+  ])
+    assert.deepEqual(legacyInstallFor(longRecord, exe, production, realPath), expected, exe)
+  // ...and a record written short matches the exe started long.
+  assert.deepEqual(
+    legacyInstallFor(
+      { ...longRecord, from: `${shortPrograms}\\desktop`, to: `${shortPrograms}\\DOODLE~1` },
+      `${longPrograms}\\DoodleNote\\DoodleNote.exe`,
+      production,
+      realPath
+    ),
+    expected
+  )
+  // Before the fix this compared the short form as written: the record was ignored for good.
+  assert.ok(
+    'reason' in
+      legacyInstallFor(longRecord, `${shortPrograms}\\DOODLE~1\\DOODLE~1.EXE`, production, () => {
+        throw new Error('no expansion')
+      })
+  )
+  // Expansion never makes another folder match.
+  assert.ok(
+    'reason' in
+      legacyInstallFor(
+        { ...longRecord, to: `${longPrograms}\\DoodleNote QA` },
+        `${shortPrograms}\\DOODLE~1\\DOODLE~1.EXE`,
+        production,
+        realPath
+      )
+  )
 })
 
 test('APP_GUID and the record key match what electron-builder derives from the appId', () => {

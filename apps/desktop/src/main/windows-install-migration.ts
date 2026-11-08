@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { win32 } from 'node:path'
 import { APP_IDENTITY, type AppIdentity } from './app-identity'
 import type { InstallMigrationRecord } from './windows-install-record'
@@ -32,11 +33,51 @@ export interface LegacyInstall {
   exe: string
 }
 
-/** Windows path equality: case-insensitive, separator- and trailing-separator-tolerant. */
-export function samePath(a: string, b: string): boolean {
+/** Resolves an existing path to the form Windows reports for it; throws when it does not exist. */
+export type RealPath = (path: string) => string
+
+/**
+ * fs.realpathSync.native: on Windows, GetFinalPathNameByHandle, so 8.3 short
+ * names come back long (junctions and links are resolved too; the installer
+ * never moves to or from such a folder). Nothing to expand elsewhere.
+ */
+function nativeRealPath(path: string): string {
+  if (process.platform !== 'win32') throw new Error('not Windows')
+  return realpathSync.native(path)
+}
+
+/**
+ * `path` with every 8.3 short name expanded: the deepest part that exists is
+ * resolved (`realPath`) and the rest appended as written. A short name in the
+ * part that does not exist (a removed folder) cannot be expanded and stays.
+ */
+export function longPath(path: string, realPath: RealPath = nativeRealPath): string {
+  const normalized = win32.normalize(path)
+  const root = win32.parse(normalized).root
+  let head = normalized.length > root.length ? normalized.replace(/[\\/]+$/, '') : normalized
+  const tail: string[] = []
+  for (;;) {
+    try {
+      return win32.join(realPath(head), ...tail)
+    } catch {
+      // Missing (or not on Windows): try the folder above it.
+    }
+    const parent = win32.dirname(head)
+    if (parent === head) return win32.join(head, ...tail)
+    tail.unshift(win32.basename(head))
+    head = parent
+  }
+}
+
+/**
+ * Windows path equality: case-insensitive, separator- and trailing-separator-
+ * tolerant, and with 8.3 short names expanded on both sides first, so an exe
+ * started as C:\Users\LONGUS~1\...\DOODLE~1\DoodleNote.exe still matches the record.
+ */
+export function samePath(a: string, b: string, realPath: RealPath = nativeRealPath): boolean {
   const norm = (path: string): string =>
     win32
-      .normalize(path)
+      .normalize(longPath(path, realPath))
       .replace(/[\\/]+$/, '')
       .toLowerCase()
   return norm(a) === norm(b)
@@ -45,26 +86,29 @@ export function samePath(a: string, b: string): boolean {
 /**
  * The old install the installer's record says this exe replaced, or why the record
  * does not apply to this exe: it must name exactly the running exe's folder as
- * MigratedTo, and the identity's two sibling folder names.
+ * MigratedTo, and the identity's two sibling folder names. Short names on either
+ * side are expanded first (`realPath`), and the folder names are checked long.
  */
 export function legacyInstallFor(
   record: InstallMigrationRecord,
   execPath: string,
-  identity: Pick<AppIdentity, 'installFolder' | 'legacyInstallFolder'> = APP_IDENTITY
+  identity: Pick<AppIdentity, 'installFolder' | 'legacyInstallFolder'> = APP_IDENTITY,
+  realPath: RealPath = nativeRealPath
 ): LegacyInstall | { reason: string } {
-  const dir = win32.dirname(win32.normalize(execPath))
-  if (!samePath(record.to, dir)) return { reason: `it is for ${record.to}, not ${dir}` }
+  const exe = longPath(execPath, realPath)
+  const dir = win32.dirname(exe)
+  if (!samePath(record.to, dir, realPath)) return { reason: `it is for ${record.to}, not ${dir}` }
   if (win32.basename(dir).toLowerCase() !== identity.installFolder.toLowerCase())
     return { reason: `${dir} is not a ${identity.installFolder} folder` }
-  const from = win32.normalize(record.from).replace(/[\\/]+$/, '')
+  const from = longPath(record.from, realPath)
   if (
     win32.basename(from).toLowerCase() !== identity.legacyInstallFolder.toLowerCase() ||
-    !samePath(win32.dirname(from), win32.dirname(dir))
+    !samePath(win32.dirname(from), win32.dirname(dir), realPath)
   )
     return {
       reason: `${record.from} is not the ${identity.legacyInstallFolder} folder beside ${dir}`
     }
-  return { dir: from, exe: win32.join(from, win32.basename(execPath)) }
+  return { dir: from, exe: win32.join(from, win32.basename(exe)) }
 }
 
 /** Case-insensitive, separator-tolerant "is this path inside that folder" (Windows rules). */
