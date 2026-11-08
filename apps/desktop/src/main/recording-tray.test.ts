@@ -7,6 +7,7 @@ import ts from 'typescript'
 import { DEFAULT_CALENDAR_PREFS, type CalendarState } from '../shared/calendar-api'
 import * as calendarEvents from './calendar-events'
 import * as recordingStart from './recording-start-coordinator'
+import { appIdentity, type AppIdentityName } from './app-identity'
 
 /** Exercise the real controller with only native OS objects and the clock faked. */
 interface Fixture {
@@ -29,7 +30,10 @@ interface Fixture {
   advance(time: number): void
   counts(): { starts: number; opens: number; quits: number; timerCleared: boolean }
 }
-function setup(platform: NodeJS.Platform = 'darwin'): Fixture {
+function setup(
+  platform: NodeJS.Platform = 'darwin',
+  identity: AppIdentityName = 'production'
+): Fixture {
   let now = new Date(2026, 8, 9, 10).getTime()
   let tick = (): void => {}
   let timerCleared = false
@@ -90,7 +94,8 @@ function setup(platform: NodeJS.Platform = 'darwin'): Fixture {
     },
     'node:path': { join },
     './calendar-events': calendarEvents,
-    './recording-start-coordinator': recordingStart
+    './recording-start-coordinator': recordingStart,
+    './app-identity': { APP_IDENTITY: appIdentity(identity) }
   }
   const source = ts.transpileModule(readFileSync('src/main/recording-tray.ts', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }
@@ -426,4 +431,15 @@ test('Windows tray says notes are finishing, with Open and Quit still working; m
     before
   )
   mac.controller.dispose()
+})
+
+test('a QA identity build names itself DoodleNote QA in the Windows tray', () => {
+  const s = setup('win32', 'qa')
+  assert.equal(s.native.tooltip, 'DoodleNote QA')
+  s.controller.update({ phase: 'recording', eligible: true, meetingId: 'meeting' })
+  assert.match(s.native.tooltip, /^DoodleNote QA — Recording/)
+  s.click('Open DoodleNote QA')
+  s.click('Quit DoodleNote QA')
+  assert.equal(s.native.menu.filter((item) => /DoodleNote(?! QA)/.test(item.label ?? '')).length, 0)
+  s.controller.dispose()
 })

@@ -26,7 +26,15 @@ function helperIntegrity(): string {
   }
 }
 
-// A QA identity build (src/main/app-identity.ts) never contacts an update feed.
+// The QA identity (src/main/app-identity.ts) exists for the Windows installer and
+// migration tests only: a macOS (or any non-Windows) build must never carry it, so
+// `pnpm package` with DOODLENOTE_QA_IDENTITY=1 set fails here, before anything is built.
+if (process.env.DOODLENOTE_QA_IDENTITY === '1' && process.platform !== 'win32') {
+  throw new Error(
+    'DOODLENOTE_QA_IDENTITY=1 is for Windows QA builds only (pnpm package:win:qa on Windows); unset it to build for this platform'
+  )
+}
+// A QA identity build never contacts an update feed.
 if (process.env.DOODLENOTE_QA_IDENTITY === '1' && process.env.DOODLENOTE_WINDOWS_UPDATES === 'on') {
   throw new Error('DOODLENOTE_QA_IDENTITY=1 builds cannot turn on DOODLENOTE_WINDOWS_UPDATES')
 }

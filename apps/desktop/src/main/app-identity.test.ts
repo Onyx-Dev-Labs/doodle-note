@@ -181,8 +181,14 @@ test('the app uses the identity for its AUMID, login item, agent access and upda
     /APP_CHANNEL === 'dev' \|\| APP_IDENTITY\.isolatesAgentAccess\s+\? \{\s+home: join\(app\.getPath\('userData'\), 'agent-access-home'\),\s+identity: APP_CHANNEL === 'dev' \? 'dev' : APP_IDENTITY\.name\s+\}/
   )
   // The client roots and the opt-in file come only from agentAccessRoots.
-  assert.match(index, /new AgentAccessService\(\s+\(\) => join\(libraryRoot\(\), 'meetings'\),\s+resolveMcpServerSpec\(\),\s+(?:\/\/[^\n]*\n\s+)*agentAccessRoots\(/)
-  assert.doesNotMatch(read('src/main/agent-access-service.ts'), /process\.env\.APPDATA|process\.env\.DOODLE_NOTE_MCP_CONFIG/)
+  assert.match(
+    index,
+    /new AgentAccessService\(\s+\(\) => join\(libraryRoot\(\), 'meetings'\),\s+resolveMcpServerSpec\(\),\s+(?:\/\/[^\n]*\n\s+)*agentAccessRoots\(/
+  )
+  assert.doesNotMatch(
+    read('src/main/agent-access-service.ts'),
+    /process\.env\.APPDATA|process\.env\.DOODLE_NOTE_MCP_CONFIG/
+  )
   assert.match(index, /enabled: profile\.updatesEnabled && APP_IDENTITY\.updatesAllowed/)
   // A QA profile never adopts the production profile's meetings or settings.
   assert.match(index, /planProfile\(\{\s+channel: APP_CHANNEL,\s+identity: APP_IDENTITY\.name,/)
@@ -202,6 +208,21 @@ test('the app uses the identity for its AUMID, login item, agent access and upda
     assert.doesNotMatch(source, /'com\.doodlenote\.desktop'/, file)
     assert.doesNotMatch(source, /'doodle-note'/, file)
   }
+  // The tray names the identity's product (DoodleNote QA), never a literal.
+  const tray = read('src/main/recording-tray.ts')
+    .split('\n')
+    .filter((line) => !/^\s*(\/\/|\/\*\*|\*)/.test(line))
+    .join('\n')
+  assert.doesNotMatch(tray, /['`"][^'`"\n]*DoodleNote/)
+  assert.match(tray, /const APP_NAME = APP_IDENTITY\.productName/)
+})
+
+test('nothing but a Windows build can carry the QA identity', () => {
+  const vite = read('electron.vite.config.ts')
+  assert.match(
+    vite,
+    /if \(process\.env\.DOODLENOTE_QA_IDENTITY === '1' && process\.platform !== 'win32'\) \{\s+throw new Error\(/
+  )
 })
 
 test('a package whose name does not match the code identity is refused', () => {
