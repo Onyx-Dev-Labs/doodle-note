@@ -38,7 +38,8 @@ Two more packaged smokes use the same setup:
 # Real recorder UI: a ~36 s utterance with no pause is transcribed completely
 # across forced cuts, the saved transcript is in time order, and a forced
 # engine backlog (DOODLENOTE_ASR_TEST_STALL_MS, a QA hook honoured only unpackaged or in a
-# DOODLENOTE_CHANNEL=dev package, and capped at 30 s) shows and
+# DOODLENOTE_CHANNEL=dev package, capped at 30 s; any dev-channel package honours it, and dev packages
+# are QA builds with no update feed and no publish target, electron-builder.dev.yml) shows and
 # then clears "Live captions are running behind on this PC".
 node apps/desktop/scripts/smoke-windows-meeting-ui.cjs <packaged-exe> <models> <long.wav> "<phrase>|<phrase>"
 # Model recovery: an updated profile with only the cached Zipformer records at
@@ -380,12 +381,19 @@ returns the late write puts the user's content back, never ours (and tells the a
 the warning it showed).
 
 Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
-user) and its stage (saved, emptied, written, restoring) in %TEMP% under the app identity, deleted
-only once a restore ran. A failed restore keeps the record and retries (3 s, 10 s, 30 s, 60 s, 120 s,
-before the next delivery, and at the next helper start). Recovery restores only when the clipboard is
-provably ours (the sequence number right after our write, or our transaction's sentinel format with
-our privacy markers) or provably the interrupted stage (emptied and left empty, or a restore cut
-short); text that merely matches is not ownership. **Content that carries any clipboard privacy
+user) and a journal of its stage (saved, emptying, emptied, written, restoring, unrestored; a recovery
+journals itself as recovering-emptying, recovering-restoring) in %TEMP% under the app identity. Each
+stage carries the clipboard sequence number that goes with it, and every record its boot, logon
+session and window-station session, because sequence numbers restart with a new boot or logon. A
+record is deleted only once a restore completed; a failed or partial put-back keeps it and retries
+with its own backoff (3 s, 10 s, 30 s, 60 s, 120 s), before the next delivery, and at the next helper
+start. Recovery acts only on evidence specific to that transaction: our record's sentinel format (set
+first by our write and by every restore) or the stage's sequence number within the same boot and
+logon. An empty clipboard counts as ours only when the sequence moved by exactly our own
+EmptyClipboard; a partly restored one only when it carries our sentinel and nothing but formats we
+saved, with identical content. A screenshot, a new copy, a deliberate clear, or matching text is never
+ours. Payloads without a journal (a transaction settled while its slow write finished) are deleted,
+never restored from, and a settled transaction is never published. **Content that carries any clipboard privacy
 marker (as password managers set) is never written to disk**: that transaction stays in memory, so a
 helper killed between our write and the restore cannot give it back. The encrypted write runs in the
 background; a paste waits for it at most 250 ms (a large clipboard may go ahead before it is on disk).
@@ -399,6 +407,11 @@ wait, the transaction record is how the next helper finishes the job. The helper
 are stuck, or because two clipboard readers wait on owners that never render, happens only between
 deliveries. Clipboard readers are never killed on exit; one still waiting in a render finishes it
 and leaves. Only the prune timer ends a reader, after 120 s on an owner reported hung.
+
+If the helper's UI thread itself crashes, the hooks may block input for up to 3 s while the bounded
+shutdown runs; a clipboard transaction in flight is then finished by the next helper from its record.
+Right before Ctrl+V and before each typed key the helper checks that no Shift, Ctrl, Alt or Win key is
+down (a held key would turn Ctrl+V into another shortcut); if one is, nothing is sent.
 
 Known limits of the typing fallback, stated plainly: a custom WinForms control that sets
 ES_WANTRETURN but handles Enter as a dialog key in its own code can still press its AcceptButton (no
@@ -425,11 +438,13 @@ right after it. Until that second answer comes back, the new helper is not used:
 it, its output is held back, and no hold key is armed. A worker that is busy (loading a model,
 decoding live captions) is waited for, never treated as a lost hold: a hold ends only by an explicit
 release, the worker's exit, or the worker's own 15 s expiry, each of which the app now sees at once.
-Only an answer confirms the hold: a worker that has not answered after 5 s leaves the spawn
+Only an answer confirms the hold: a worker that has not answered after 4 s leaves the spawn
 unconfirmed (it goes ahead, nothing is ended), the hold is reported locked:false and Settings says
-so, and a late positive answer brings locked:true back. The confirmation cap plus the worst-case spawn
-path (14 s) stays below the worker's expiry (15 s); both come from one module, which refuses to load
-otherwise. A helper ended because its hold was really lost counts against the
+so (one cautious line for both "unconfirmed" and "digest only"), and a late positive answer while the
+lease is still held brings locked:true back. The signature budget, the capped QA hold pause, both
+confirmation caps and the spawn allowance (14.5 s) stay below the worker's expiry (15 s); both come from
+one module, which refuses to load otherwise. That is configured arithmetic, not a wall-clock bound on
+process creation, IPC or the file system: the runtime "unconfirmed" path is the real safety net. A helper ended because its hold was really lost counts against the
 restart allowance, and the next attempt waits the normal backoff. Only a launch that goes all the
 way through (spawned, confirmed, its first status answered) clears the count of lost holds. Killing a helper whose confirmation failed
 cannot undo what it already ran. Creating the process inside the worker would close that gap, but

@@ -2411,6 +2411,9 @@ function refusalReason(reason: string | undefined): RecoveryReason {
     // Windows: a classic box that does not take a line break from dictation (nothing was typed).
     case 'line-break-unsupported':
       return 'line-break-unsupported'
+    // Windows: a modifier was down right before Ctrl+V or a typed key (never sent then).
+    case 'keys-held':
+      return 'keys-held'
     case 'helper-busy':
       return 'helper-busy'
     // A delivery the helper refused because the client had already given up: keep the text.
