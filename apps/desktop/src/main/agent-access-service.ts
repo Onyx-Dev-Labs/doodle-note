@@ -3,7 +3,6 @@ import { libraryIpc } from './library-ipc'
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
   accessSync,
-  chmodSync,
   closeSync,
   constants as fsConstants,
   existsSync,
@@ -155,10 +154,48 @@ export function temporaryBeside(target: string): string {
   return join(dirname(target), `.dn-${randomBytes(4).toString('hex')}.tmp`)
 }
 
+/** Names tried when a temporary name is already taken (32 random bits each). */
+export const TEMPORARY_ATTEMPTS = 8
+
+/**
+ * Creates a temporary file beside `target` (temporaryBeside; 'wx', so never one
+ * that exists) and returns its path and open descriptor. Only a file returned
+ * here belongs to the write, and only such a file is ever removed (round 12: a
+ * name that was taken is someone else's file). A taken name (EEXIST) is retried
+ * with a fresh one, TEMPORARY_ATTEMPTS names in all, then EEXIST is thrown; any
+ * other error is thrown at once. Nothing is created when it throws.
+ */
+export function createTemporaryBeside(target: string, mode: number): { path: string; fd: number } {
+  for (let attempt = 1; ; attempt++) {
+    const path = temporaryBeside(target)
+    try {
+      return { path, fd: openSync(path, 'wx', mode) }
+    } catch (error) {
+      const taken = (error as NodeJS.ErrnoException).code === 'EEXIST'
+      if (!taken || attempt >= TEMPORARY_ATTEMPTS) throw error
+    }
+  }
+}
+
+/**
+ * Removes a temporary file this write created (createTemporaryBeside), never
+ * another. A failure is not reported (the write's own result stands): the file
+ * then remains, `.dn-<8 hex>.tmp` in the config's folder.
+ */
+function removeOwnTemporary(path: string): void {
+  try {
+    unlinkSync(path)
+  } catch {
+    // Left behind (removed meanwhile, or the removal was refused).
+  }
+}
+
 /**
  * Windows: replaces a client config file atomically: the new text goes to a
  * temporary file beside it (same folder, so the rename stays on one volume; a short
- * name, temporaryBeside) with the original's mode (a new file: 0600), and is renamed over it. Clients such as Claude Code rewrite their file
+ * name, createTemporaryBeside: never an existing file, and only the file it created
+ * is removed) with the original's mode (a new file: 0600), and is renamed over it.
+ * A temporary file whose removal fails remains (removeOwnTemporary). Clients such as Claude Code rewrite their file
  * often, so the file is read again just before the rename; when it is no longer
  * `expected` (null: it did not exist) nothing is written and false is returned so
  * the caller starts over from the new content. A symbolic link is followed, so a
@@ -171,16 +208,21 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
   if (target === null)
     throw new Error(`${path}: could not tell where this file leads; not written.`)
   const mode = expected === null ? 0o600 : statSync(target).mode & 0o7777
-  const temporary = temporaryBeside(target)
-  writeFileSync(temporary, next, { flag: 'wx', mode })
+  // Throws when no temporary file could be created: nothing written, nothing removed.
+  const { path: temporary, fd } = createTemporaryBeside(target, mode)
   try {
-    // The file mode is subject to the umask on creation; set it exactly.
-    if (process.platform !== 'win32') chmodSync(temporary, mode)
+    try {
+      writeFileSync(fd, next)
+      // The file mode is subject to the umask on creation; set it exactly.
+      if (process.platform !== 'win32') fchmodSync(fd, mode)
+    } finally {
+      closeSync(fd)
+    }
     const current = readConfigFile(target)
     const now =
       current.state === 'read' ? current.raw : current.state === 'absent' ? null : undefined
     if (now !== expected) {
-      unlinkSync(temporary)
+      removeOwnTemporary(temporary)
       return false
     }
     // Windows refuses the rename while another process has the file open without
@@ -196,11 +238,8 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
       }
     }
   } catch (error) {
-    try {
-      unlinkSync(temporary)
-    } catch {
-      // already renamed or removed
-    }
+    // Not renamed (the rename is the last step): still this write's own file.
+    removeOwnTemporary(temporary)
     throw error
   }
 }
@@ -233,10 +272,18 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * and the base's in-place write decides: it succeeds or fails (same error)
  * exactly as it would have at that moment.
  *
- * What remains (the concurrency contract, tested): a mode, owner or ACL change
- * made in the microseconds between the last fstat (the descriptor is released
- * there) and the rename lands on the replaced file, not the new one; a temporary file the rename could not consume
- * is left behind only if the folder became read-only during the write.
+ * The temporary file is created exclusively (createTemporaryBeside: a taken name
+ * is retried with a fresh one, then the base's write decides), and only a file
+ * this write created is removed: never one another writer holds (round 12).
+ *
+ * What remains (the concurrency contract, tested): a change to the file's mode
+ * bits made in the interval between the last fstat (the descriptor is released
+ * there) and the rename lands on the replaced file, not the new one (the owner,
+ * group and any ACL of the original are not carried over at all: disclosed); and
+ * the temporary file remains whenever its removal fails (removeOwnTemporary: the
+ * failure is not reported, the result stands), for example when the folder
+ * became read-only before the rename. It is `.dn-<8 hex>.tmp` in the config's
+ * folder.
  */
 export function replaceConfigFileBase(path: string, next: string): void {
   const target = configWriteTarget(path)
@@ -265,13 +312,16 @@ export function replaceConfigFileBase(path: string, next: string): void {
       return
     }
   const replacing = authority !== null
+  // Set only once this write has created the file (round 12): a name that was
+  // taken (EEXIST) belongs to someone else and is never removed.
   let temporary: string | null = null
   let done = false
   try {
-    temporary = temporaryBeside(target)
     // A new file: the default mode (0666 less the umask), as writeFileSync created
     // it. A replacement: private until it takes the original's mode below.
-    const fd = openSync(temporary, 'wx', replacing ? 0o600 : 0o666)
+    const created = createTemporaryBeside(target, replacing ? 0o600 : 0o666)
+    temporary = created.path
+    const fd = created.fd
     try {
       writeFileSync(fd, next)
       if (authority !== null) {
@@ -295,12 +345,8 @@ export function replaceConfigFileBase(path: string, next: string): void {
     // The original is untouched: the base's write decides.
   } finally {
     if (authority !== null) closeSync(authority)
-    if (temporary !== null && !(done && replacing))
-      try {
-        unlinkSync(temporary)
-      } catch {
-        // never created, or already renamed
-      }
+    // Renamed into place: the name is free again and may be another writer's now.
+    if (temporary !== null && !(done && replacing)) removeOwnTemporary(temporary)
   }
   if (!done) writeFileSync(path, next)
 }

@@ -26,7 +26,8 @@ import {
   agentAccessRoots,
   readConfigFile,
   replaceConfigFile,
-  replaceConfigFileBase
+  replaceConfigFileBase,
+  TEMPORARY_ATTEMPTS
 } from './agent-access-service'
 import {
   codexConfigHasServer,
@@ -605,11 +606,11 @@ test('round 11: a 220-character target name, directly or through a link, as the 
 /**
  * Runs `run` with `hook` called before each of these fs functions (the writer's
  * calls go through the same module object), so a change can be made at an exact
- * point of the write.
+ * point of the write. A hook that throws stands for the call failing.
  */
 const fsModule = createRequire(import.meta.url)('node:fs') as Record<string, unknown>
 function withFsHook(hook: (name: string, args: unknown[]) => void, run: () => void): void {
-  const names = ['accessSync', 'openSync', 'writeFileSync', 'renameSync', 'linkSync']
+  const names = ['accessSync', 'openSync', 'writeFileSync', 'renameSync', 'linkSync', 'unlinkSync']
   const originals = names.map((name) => fsModule[name] as (...args: unknown[]) => unknown)
   names.forEach((name, i) => {
     fsModule[name] = (...args: unknown[]) => {
@@ -1292,4 +1293,174 @@ test('darwin never reaches the strict implementation (or its TOML scanner)', (t)
     )
   })
   assert.ok(poisoned.calls >= 2)
+})
+
+/** An fs error as Node raises it. */
+const fsError = (code: string): NodeJS.ErrnoException =>
+  Object.assign(new Error(`${code}: injected`), { code })
+
+const cryptoModule = createRequire(import.meta.url)('node:crypto') as Record<string, unknown>
+/** Runs `run` with randomBytes answered by `bytes` (the n-th call, from 0); returns the call count. */
+function withRandomBytes(bytes: (call: number) => number, run: () => void): number {
+  const original = cryptoModule.randomBytes
+  let calls = 0
+  cryptoModule.randomBytes = (size: number) => Buffer.alloc(size, bytes(calls++))
+  syncBuiltinESMExports()
+  try {
+    run()
+  } finally {
+    cryptoModule.randomBytes = original
+    syncBuiltinESMExports()
+  }
+  return calls
+}
+
+const WRITERS = ['darwin', 'windows'] as const
+type Writer = (typeof WRITERS)[number]
+/** Writes '{"b":2}' with `writer`; the Windows writer expects `before` ('{"a":1}' or none). */
+const writeWith = (writer: Writer, path: string, exists: boolean): void => {
+  if (writer === 'darwin') replaceConfigFileBase(path, '{"b":2}')
+  else assert.equal(replaceConfigFile(path, exists ? '{"a":1}' : null, '{"b":2}'), true)
+}
+/** The temporary files beside a config (the foreign one included). */
+const temporaries = (folder: string): string[] =>
+  readdirSync(folder)
+    .filter((f) => f.endsWith('.tmp'))
+    .sort()
+
+test('round 12: a temporary name another writer holds is never removed, both writers', (t) => {
+  // Astra NEW-1: `.dn-00000000.tmp` belongs to someone else; the name is drawn
+  // again (TEMPORARY_ATTEMPTS names in all). Round 11's darwin writer removed it.
+  const root = mkdtempSync(join(tmpdir(), 'dn-temp-collision-'))
+  try {
+    const foreign = '.dn-00000000.tmp'
+    let n = 0
+    for (const writer of WRITERS)
+      for (const exists of [true, false])
+        for (const taken of [1, TEMPORARY_ATTEMPTS]) {
+          const label = `${writer}, ${exists ? 'existing' : 'new'} config, ${taken} taken`
+          const folder = join(root, String(n++))
+          mkdirSync(folder)
+          const path = join(folder, 'config.json')
+          if (exists) writeFileSync(path, '{"a":1}')
+          writeFileSync(join(folder, foreign), 'another writer')
+          const ino = exists ? statSync(path).ino : null
+          let code: string | null = null
+          const calls = withRandomBytes(
+            (call) => (call < taken ? 0 : 0x11),
+            () => {
+              try {
+                writeWith(writer, path, exists)
+              } catch (error) {
+                code = (error as NodeJS.ErrnoException).code ?? null
+              }
+            }
+          )
+          t.diagnostic(`${label}: ${calls} names, ${code ?? 'written'}`)
+          assert.equal(calls, Math.min(taken + 1, TEMPORARY_ATTEMPTS), `${label}: names drawn`)
+          // The foreign file is never touched, and nothing of ours is left.
+          assert.equal(readFileSync(join(folder, foreign), 'utf8'), 'another writer', label)
+          assert.deepEqual(temporaries(folder), [foreign], label)
+          if (taken < TEMPORARY_ATTEMPTS) {
+            assert.equal(code, null, label)
+            assert.equal(readFileSync(path, 'utf8'), '{"b":2}', label)
+            if (posix && ino !== null)
+              assert.notEqual(statSync(path).ino, ino, `${label}: replaced`)
+          } else if (writer === 'darwin') {
+            // Every name taken: the base's in-place write decides (here: written).
+            assert.equal(code, null, label)
+            assert.equal(readFileSync(path, 'utf8'), '{"b":2}', label)
+            if (posix && ino !== null) assert.equal(statSync(path).ino, ino, `${label}: in place`)
+          } else {
+            // Windows: EEXIST is reported, the config untouched.
+            assert.equal(code, 'EEXIST', label)
+            assert.equal(
+              existsSync(path) ? readFileSync(path, 'utf8') : null,
+              exists ? '{"a":1}' : null
+            )
+          }
+        }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('round 12: a failed exclusive create removes nothing, both writers', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'dn-temp-create-'))
+  try {
+    let n = 0
+    for (const writer of WRITERS)
+      for (const code of ['EACCES', 'EEXIST']) {
+        const label = `${writer}, temporary file creation ${code}`
+        const folder = join(root, String(n++))
+        mkdirSync(folder)
+        const path = join(folder, 'config.json')
+        writeFileSync(path, '{"a":1}')
+        const removed: string[] = []
+        let thrown: string | null = null
+        withFsHook(
+          (name, args) => {
+            const temp = String(args[0]).endsWith('.tmp')
+            if (name === 'unlinkSync' && temp) removed.push(String(args[0]))
+            if (name === 'openSync' && temp) throw fsError(code)
+          },
+          () => {
+            try {
+              writeWith(writer, path, true)
+            } catch (error) {
+              thrown = (error as NodeJS.ErrnoException).code ?? null
+            }
+          }
+        )
+        t.diagnostic(`${label}: ${thrown ?? 'written'}, ${removed.length} removals`)
+        assert.deepEqual(removed, [], `${label}: no removal`)
+        assert.deepEqual(temporaries(folder), [], label)
+        // darwin: the base's write decides. Windows: every failure is thrown.
+        const baseDecides = writer === 'darwin'
+        assert.equal(thrown, baseDecides ? null : code, label)
+        assert.equal(readFileSync(path, 'utf8'), baseDecides ? '{"b":2}' : '{"a":1}', label)
+      }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('round 12: a temporary file whose removal fails remains; the result stands', (t) => {
+  // The disclosed rule: the temporary file remains whenever its removal fails
+  // (here an injected EPERM in a writable folder), and that failure is not reported.
+  const root = mkdtempSync(join(tmpdir(), 'dn-temp-unlink-'))
+  try {
+    let n = 0
+    for (const writer of WRITERS) {
+      const folder = join(root, String(n++))
+      mkdirSync(folder)
+      const path = join(folder, 'config.json')
+      writeFileSync(path, '{"a":1}')
+      let result: boolean | null = null
+      withFsHook(
+        (name, args) => {
+          if (name === 'unlinkSync' && String(args[0]).endsWith('.tmp')) throw fsError('EPERM')
+          // darwin: the rename refused (EXDEV) -> the base's write; Windows: the
+          // config changed meanwhile (the caller's expected text is stale) -> false.
+          if (name === 'renameSync') throw fsError('EXDEV')
+        },
+        () => {
+          if (writer === 'darwin') replaceConfigFileBase(path, '{"b":2}')
+          else result = replaceConfigFile(path, '{"stale":1}', '{"b":2}')
+        }
+      )
+      const left = temporaries(folder)
+      t.diagnostic(`${writer}: ${left.length} left (${left.join(', ')})`)
+      assert.equal(left.length, 1, writer)
+      assert.match(left[0], /^\.dn-[0-9a-f]{8}\.tmp$/)
+      assert.equal(readFileSync(join(folder, left[0]), 'utf8'), '{"b":2}', writer)
+      if (writer === 'darwin') assert.equal(readFileSync(path, 'utf8'), '{"b":2}')
+      else {
+        assert.equal(result, false)
+        assert.equal(readFileSync(path, 'utf8'), '{"a":1}')
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
