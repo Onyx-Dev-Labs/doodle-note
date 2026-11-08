@@ -28,6 +28,13 @@ const spec: McpServerSpec = {
   env: { ELECTRON_RUN_AS_NODE: '1' }
 }
 
+/**
+ * The strict client-config edits these tests cover run on Windows only; the
+ * roots say which platform they are for (macOS: agent-access-darwin.test.ts).
+ */
+const winRoots = (home: string): ReturnType<typeof agentAccessRoots> =>
+  agentAccessRoots({ platform: 'win32', env: {}, home, sandbox: { home, identity: '' } })
+
 function withHome(run: (home: string) => void): void {
   const home = mkdtempSync(join(tmpdir(), 'dn-agent-access-'))
   try {
@@ -98,7 +105,7 @@ test('connecting a client whose entry is already current does not rewrite the fi
     const raw = JSON.stringify({ projects: {}, mcpServers: { 'doodle-note': spec } })
     writeFileSync(file, raw)
     const before = statSync(file).mtimeMs
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, winRoots(home))
     service.setClientConnected('claude-code', true)
     assert.equal(readFileSync(file, 'utf8'), raw)
     assert.equal(statSync(file).mtimeMs, before)
@@ -114,7 +121,7 @@ test('connecting keeps everything else the client wrote and leaves no temporary 
   withHome((home) => {
     const file = join(home, '.claude.json')
     writeFileSync(file, JSON.stringify({ numStartups: 7, mcpServers: { other: { command: 'x' } } }))
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, winRoots(home))
     service.setClientConnected('claude-code', true)
     const config = JSON.parse(readFileSync(file, 'utf8'))
     assert.equal(config.numStartups, 7)
@@ -131,7 +138,7 @@ test('a config that exists but cannot be read is never replaced blind', () => {
   withHome((home) => {
     // A folder where the file should be: reading fails, it is not "absent".
     mkdirSync(join(home, '.claude.json'))
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, winRoots(home))
     assert.throws(() => service.setClientConnected('claude-code', true))
     assert.ok(statSync(join(home, '.claude.json')).isDirectory())
   })
@@ -243,7 +250,7 @@ test('repointing: an entry without a command, an empty file and a BOM are not fa
     mkdirSync(join(home, '.codex'))
     const codex = join(home, '.codex', 'config.toml')
     writeFileSync(codex, '')
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, winRoots(home))
     assert.deepEqual(
       service.repointStaleClients(() => true),
       [
@@ -282,7 +289,7 @@ test('codex: a config that cannot be read as TOML is never edited', () => {
       '[mcp_servers.doodle-note]\ncommand = "C:\\\\Programs\\\\desktop\\\\DoodleNote.exe"\n\n' +
       '[projects."C:/work/[demo]]\ntrust_level = "trusted"\n'
     writeFileSync(codex, raw)
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, winRoots(home))
     assert.throws(() => service.setClientConnected('codex', true), /could not be read as TOML/)
     assert.throws(() => service.setClientConnected('codex', false), /left unchanged/)
     const [result] = service.repointStaleClients(() => true, ['codex'])
@@ -302,7 +309,7 @@ test('codex: Connect, Disconnect and repointing keep a project table whose name 
       '[mcp_servers.doodle-note]\ncommand = "C:\\\\Programs\\\\desktop\\\\DoodleNote.exe"\n\n' +
         project
     )
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, winRoots(home))
     assert.deepEqual(
       service.repointStaleClients(() => true, ['codex']),
       [{ id: 'codex', outcome: 'updated' }]

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { AgentAccessService } from './agent-access-service'
+import { AgentAccessService, agentAccessRoots } from './agent-access-service'
 import {
   ClientConfigError,
   codexConfigServerCommand,
@@ -721,7 +721,11 @@ test('AgentAccessService repoints only stale DoodleNote entries and keeps the re
     writeFileSync(claudeCode, current)
     writeFileSync(codex, `model = "x"\n\n${codexConfigWithServer(null, spec('desktop'))}`)
 
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec('DoodleNote'), home)
+    const service = new AgentAccessService(
+      () => join(home, 'meetings'),
+      spec('DoodleNote'),
+      agentAccessRoots({ platform: 'win32', env: {}, home, sandbox: { home, identity: '' } })
+    )
     const results = service.repointStaleClients((command) =>
       isInsideFolder(command, `${programs}\\desktop`)
     )
@@ -770,7 +774,11 @@ test('AgentAccessService reports unreadable or malformed client configs as faile
     const brokenCodex = '[mcp_servers.doodle-note]\ncommand = "C:\\unterminated\n'
     writeFileSync(codex, brokenCodex)
 
-    const service = new AgentAccessService(() => join(home, 'meetings'), spec('DoodleNote'), home)
+    const service = new AgentAccessService(
+      () => join(home, 'meetings'),
+      spec('DoodleNote'),
+      agentAccessRoots({ platform: 'win32', env: {}, home, sandbox: { home, identity: '' } })
+    )
     const results = service.repointStaleClients(() => true)
     assert.deepEqual(
       results.map((result) => [result.id, result.outcome]),

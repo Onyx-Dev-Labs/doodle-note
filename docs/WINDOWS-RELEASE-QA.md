@@ -550,6 +550,16 @@ a symbolic link is followed), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new
 text).
 
+Those rules, and the strict Codex reading (a `config.toml` the TOML 1.0 statement
+scanner cannot read is refused and left unchanged; every definition of our server
+is removed; a definition inside another inline table is refused), the JSON byte
+order mark, an empty file read as none, a read error never treated as "no file",
+and mode 0600 for a new file, apply **on Windows only**. macOS (every platform but
+Windows) keeps the code of win/bark 9355b87 (`src/main/mcp-clients-logic-base.ts`,
+pinned by SHA-256) with one change: the write is a temporary file renamed over
+the config. `src/main/agent-access-darwin.test.ts` compares a darwin service
+with the base service, byte for byte, on Connect, Disconnect and the status.
+
 ### Where an install records what it decided
 
 A one-click installer runs without a details page and writes no log of its own

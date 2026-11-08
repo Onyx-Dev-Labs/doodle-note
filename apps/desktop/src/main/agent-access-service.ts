@@ -5,7 +5,9 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   statSync,
@@ -13,7 +15,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
   AGENT_ACCESS_CONNECT_CLIENT_CHANNEL,
@@ -25,16 +27,9 @@ import {
   type McpClientStatus,
   type McpServerSpec
 } from '../shared/integrations-api'
-import {
-  codexConfigHasServer,
-  codexConfigServerCommand,
-  codexConfigWithServer,
-  codexConfigWithoutServer,
-  jsonConfigHasServer,
-  jsonConfigServerCommand,
-  jsonConfigWithServer,
-  jsonConfigWithoutServer
-} from './mcp-clients-logic'
+import type { ClientConfigDialect } from './mcp-clients-common'
+import { BASE_CLIENT_CONFIGS } from './mcp-clients-logic-base'
+import { STRICT_CLIENT_CONFIGS } from './mcp-clients-logic'
 
 export interface McpRepointResult {
   id: McpClientId
@@ -87,9 +82,9 @@ const sleep = (ms: number): void => {
 }
 
 /**
- * Replaces a client config file atomically: the new text goes to a temporary file
- * beside it (same folder, so the rename stays on one volume) with the original's
- * mode, and is renamed over it. Clients such as Claude Code rewrite their file
+ * Windows: replaces a client config file atomically: the new text goes to a
+ * temporary file beside it (same folder, so the rename stays on one volume) with
+ * the original's mode (a new file: 0600), and is renamed over it. Clients such as Claude Code rewrite their file
  * often, so the file is read again just before the rename; when it is no longer
  * `expected` (null: it did not exist) nothing is written and false is returned so
  * the caller starts over from the new content. A symbolic link is followed, so a
@@ -133,6 +128,58 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
   }
 }
 
+/**
+ * Every other platform (macOS): the base's write (win/bark 9355b87 wrote in
+ * place with writeFileSync) with one change, the one disclosed for macOS: the
+ * text goes to a temporary file beside the target and is renamed over it, so a
+ * crash never leaves a half-written config. Everything else is the base's: no
+ * re-read before the write (the base wrote blind), the original's permission
+ * bits kept (writeFileSync kept them), a new file created with the default mode
+ * (0666 less the umask, as writeFileSync did), and a symbolic link followed, even
+ * one whose target does not exist yet (writeFileSync created the target).
+ */
+export function replaceConfigFileBase(path: string, next: string): void {
+  let target = path
+  for (let hops = 0; hops < 40; hops++) {
+    let link: boolean
+    try {
+      link = lstatSync(target).isSymbolicLink()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') break
+      throw error
+    }
+    if (!link) break
+    target = resolve(dirname(target), readlinkSync(target))
+  }
+  let mode: number | null = null
+  try {
+    const stats = statSync(target)
+    // A folder (or anything else that is not a file) in the config's place is
+    // written as the base wrote it, in place, so it fails exactly as before.
+    if (!stats.isFile()) {
+      writeFileSync(target, next)
+      return
+    }
+    mode = stats.mode & 0o7777
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
+  writeFileSync(temporary, next, { flag: 'wx', mode: mode ?? 0o666 })
+  try {
+    // The mode is subject to the umask on creation; an existing file's is kept exactly.
+    if (mode !== null) chmodSync(temporary, mode)
+    renameSync(temporary, target)
+  } catch (error) {
+    try {
+      unlinkSync(temporary)
+    } catch {
+      // already renamed or removed
+    }
+    throw error
+  }
+}
+
 interface McpClientDef {
   id: McpClientId
   name: string
@@ -157,6 +204,13 @@ export interface AgentAccessRoots {
    * server refuses any other file (packages/doodle-note-mcp/src/config.ts).
    */
   sandboxIdentity: string | null
+  /**
+   * The platform the roots are for. It also picks how client configs are
+   * edited: Windows uses the strict implementation (mcp-clients-logic.ts), every
+   * other platform the base's code (mcp-clients-logic-base.ts), so macOS
+   * behaves as before this PR apart from the atomic replace.
+   */
+  platform: NodeJS.Platform
 }
 
 /** Environment that binds the MCP server to a sandbox's opt-in file. */
@@ -191,7 +245,8 @@ export function agentAccessRoots(options: {
     appData,
     mcpConfigPath:
       sandboxHome === undefined ? (env.DOODLE_NOTE_MCP_CONFIG ?? defaultConfig) : defaultConfig,
-    sandboxIdentity: options.sandbox?.identity ?? null
+    sandboxIdentity: options.sandbox?.identity ?? null,
+    platform
   }
 }
 
@@ -244,6 +299,8 @@ export class AgentAccessService {
   private readonly configPath: string
   private readonly clients: McpClientDef[]
   private readonly sandboxIdentity: string | null
+  /** Windows: the strict client-config edits; otherwise the base's (see AgentAccessRoots.platform). */
+  private readonly strictClientConfigs: boolean
   /** The launch spec written into client configs and shown in Settings. */
   private readonly server: McpServerSpec
 
@@ -276,6 +333,7 @@ export class AgentAccessService {
     this.configPath = resolved.mcpConfigPath
     this.clients = clientDefs(resolved)
     this.sandboxIdentity = resolved.sandboxIdentity || null
+    this.strictClientConfigs = resolved.platform === 'win32'
     // A sandbox's server must read the sandbox's opt-in file, never the real
     // ~/.doodlenote/mcp.json (which would expose the production library).
     this.server = this.sandboxIdentity
@@ -358,23 +416,56 @@ export class AgentAccessService {
   setClientConnected(id: McpClientId, connected: boolean): AgentAccessStatus {
     const def = this.clients.find((c) => c.id === id)
     if (!def) throw new Error(`Unknown MCP client: ${id}`)
+    if (!this.strictClientConfigs) {
+      this.setClientConnectedBase(def, connected)
+      return this.status()
+    }
+    const dialect = this.strictDialect(def)
     this.updateClientConfig(def, (raw) => {
-      if (connected) {
-        return def.dialect === 'json'
-          ? jsonConfigWithServer(raw, this.server, def.configPath)
-          : codexConfigWithServer(raw, this.server, def.configPath)
-      }
+      if (connected) return dialect.withServer(raw, this.server, def.configPath)
       // Nothing to remove from a file that doesn't exist.
       if (raw === null) return null
-      return def.dialect === 'json'
-        ? jsonConfigWithoutServer(raw, def.configPath)
-        : codexConfigWithoutServer(raw, def.configPath)
+      return dialect.withoutServer(raw, def.configPath)
     })
     return this.status()
   }
 
   /**
-   * Read-modify-write of one client config: `change` gets the current text (null:
+   * macOS (every platform but Windows): win/bark 9355b87's setClientConnected,
+   * statement for statement, with its in-place write replaced by
+   * replaceConfigFileBase (temporary file + rename, the one disclosed change). So
+   * an unreadable config reads as none, an empty or blank one is edited as the
+   * base edited it, a JSON BOM is not accepted, and a write happens whenever the
+   * text differs.
+   */
+  private setClientConnectedBase(def: McpClientDef, connected: boolean): void {
+    const dialect = this.baseDialect(def)
+    const raw = this.tryRead(def.configPath)
+    let next: string | null
+    if (connected) {
+      next = dialect.withServer(raw, this.server, def.configPath)
+    } else {
+      // Nothing to remove from a file that doesn't exist.
+      next = raw === null ? null : dialect.withoutServer(raw, def.configPath)
+    }
+    if (next !== null && next !== raw) {
+      mkdirSync(dirname(def.configPath), { recursive: true })
+      replaceConfigFileBase(def.configPath, next)
+    }
+  }
+
+  // Looked up at every call, never cached: the darwin test replaces the strict
+  // functions with ones that throw and expects macOS never to reach them.
+  private strictDialect(def: McpClientDef): (typeof STRICT_CLIENT_CONFIGS)['json'] {
+    return def.dialect === 'json' ? STRICT_CLIENT_CONFIGS.json : STRICT_CLIENT_CONFIGS.codex
+  }
+
+  private baseDialect(def: McpClientDef): ClientConfigDialect {
+    return def.dialect === 'json' ? BASE_CLIENT_CONFIGS.json : BASE_CLIENT_CONFIGS.codex
+  }
+
+  /**
+   * Windows: read-modify-write of one client config: `change` gets the current text (null:
    * no file, or an empty one) and returns the new text, or null for no change. A
    * UTF-8 byte order mark is not part of the text `change` sees and is kept on
    * write. Nothing is written when the content would not change; the write is
@@ -412,20 +503,18 @@ export class AgentAccessService {
     isStale: (command: string) => boolean,
     only?: readonly string[] | null
   ): McpRepointResult[] {
+    // The install move it serves exists only on Windows.
+    if (!this.strictClientConfigs) throw new Error('MCP client repointing is Windows-only.')
     const results: McpRepointResult[] = []
     for (const def of this.clients) {
       if (only && !only.includes(def.id)) continue
       try {
+        const dialect = this.strictDialect(def)
         const outcome = this.updateClientConfig(def, (raw) => {
           if (raw === null) return null
-          const command =
-            def.dialect === 'json'
-              ? jsonConfigServerCommand(raw, def.configPath)
-              : codexConfigServerCommand(raw, def.configPath)
+          const command = dialect.serverCommand(raw, def.configPath)
           if (command === null || !isStale(command)) return null
-          return def.dialect === 'json'
-            ? jsonConfigWithServer(raw, this.server, def.configPath)
-            : codexConfigWithServer(raw, this.server, def.configPath)
+          return dialect.withServer(raw, this.server, def.configPath)
         })
         results.push({ id: def.id, outcome })
       } catch (error) {
@@ -436,10 +525,12 @@ export class AgentAccessService {
   }
 
   private clientStatus(def: McpClientDef): McpClientStatus {
-    const raw = configText(this.tryRead(def.configPath)).text
-    const connected =
-      raw !== null &&
-      (def.dialect === 'json' ? jsonConfigHasServer(raw) : codexConfigHasServer(raw))
+    // The base read the file as it is; Windows sets a BOM aside and reads an empty file as none.
+    const raw = this.strictClientConfigs
+      ? configText(this.tryRead(def.configPath)).text
+      : this.tryRead(def.configPath)
+    const dialect = this.strictClientConfigs ? this.strictDialect(def) : this.baseDialect(def)
+    const connected = raw !== null && dialect.hasServer(raw)
     return {
       id: def.id,
       name: def.name,

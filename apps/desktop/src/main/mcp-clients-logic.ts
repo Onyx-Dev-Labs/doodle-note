@@ -1,5 +1,9 @@
 import type { McpServerSpec } from '../shared/integrations-api'
-import { APP_IDENTITY } from './app-identity'
+import {
+  ClientConfigError,
+  MCP_SERVER_KEY,
+  type StrictClientConfigDialects
+} from './mcp-clients-common'
 import {
   TomlUncertain,
   tomlStatements,
@@ -14,12 +18,31 @@ import {
  * claude_desktop_config.json and Claude Code's ~/.claude.json) and Codex's
  * ~/.codex/config.toml. All functions take and return file text so the
  * fs boundary stays in AgentAccessService and this stays unit-testable.
+ *
+ * This is the strict implementation, used on Windows only (AgentAccessService
+ * picks by platform): Codex files are read with the TOML statement scanner, a
+ * file it cannot read is refused, every definition of our server is removed,
+ * and a JSON BOM is accepted. macOS keeps the base's code
+ * (mcp-clients-logic-base.ts).
  */
 
-/** The key our server is registered under in every client (doodle-note-qa for a QA build). */
-export const MCP_SERVER_KEY = APP_IDENTITY.mcpServerKey
+export { ClientConfigError, MCP_SERVER_KEY }
 
-export class ClientConfigError extends Error {}
+/** What AgentAccessService calls on Windows; read at call time (see the darwin test). */
+export const STRICT_CLIENT_CONFIGS: StrictClientConfigDialects = {
+  json: {
+    withServer: (raw, spec, path) => jsonConfigWithServer(raw, spec, path),
+    withoutServer: (raw, path) => jsonConfigWithoutServer(raw, path),
+    hasServer: (raw) => jsonConfigHasServer(raw),
+    serverCommand: (raw, path) => jsonConfigServerCommand(raw, path)
+  },
+  codex: {
+    withServer: (raw, spec, path) => codexConfigWithServer(raw, spec, path),
+    withoutServer: (raw, path) => codexConfigWithoutServer(raw, path),
+    hasServer: (raw) => codexConfigHasServer(raw),
+    serverCommand: (raw, path) => codexConfigServerCommand(raw, path)
+  }
+}
 
 interface JsonConfig {
   mcpServers?: Record<string, unknown>
