@@ -117,7 +117,7 @@ function setRunValue(value) {
 
 function deleteRunValue() {
   powershell(
-    "Remove-ItemProperty -LiteralPath ('HKCU:\\' + $d.key) -Name $d.name -ErrorAction SilentlyContinue",
+    "$p = 'HKCU:\\' + $d.key; if ((Test-Path -LiteralPath $p) -and ((Get-Item -LiteralPath $p).GetValueNames() -contains $d.name)) { Remove-ItemProperty -LiteralPath $p -Name $d.name }; exit 0",
     { key: KEYS.run, name: qa.appId }
   )
 }
@@ -323,7 +323,7 @@ function assertClean(label) {
 function resetIdentityState() {
   deleteRunValue()
   powershell(
-    "foreach ($k in $d.keys) { Remove-Item -LiteralPath ('HKCU:\\' + $k) -Recurse -Force -ErrorAction SilentlyContinue }",
+    "foreach ($k in $d.keys) { $p = 'HKCU:\\' + $k; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }; exit 0",
     { keys: [KEYS.status, KEYS.state, KEYS.recovery] }
   )
   fs.rmSync(PROFILE, { recursive: true, force: true })
