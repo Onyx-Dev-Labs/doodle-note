@@ -394,8 +394,15 @@ moves an existing install on upgrade:
    once every value in it reads back from the live keys exactly, and then
    `DoodleNote-InstallRecovery` itself if no other identity's copy is in it. A
    copy that fails its checks is left alone (and reported); a user uninstall
-   deletes it. Every one of these writes can be cut short (the guard harness kills
-   the installer right after each one) and the next run finishes the job. So a move kept by a held file stays armed for
+   deletes it. A run cut short at any of the harness's kill points (below) is
+   finished by the next run: during restoration after each of its writes
+   (`recover-<value>` for each journal value, `recover-MigrationRecord`,
+   `recover-deleted`); while saving the copy after its journal values as a group
+   (`save-journal`, after all seven) and after its record (`save-record`), not
+   after each single value; while arming the journal after `SourceDir` and
+   `DestDir` (`park-SourceDir`, `park-DestDir`); and around the removal
+   (`finish-removed`, `finish-record`). The CI end-to-end job adds two
+   installer-level points (`after-uninstall-old-version`, `after-stock-uninstall`). So a move kept by a held file stays armed for
    as many runs as it takes, and a record the app has not read yet survives
    another update, even an interrupted one (before this, an update interrupted
    before the first launch after a move lost the record, and with the old folder
@@ -496,9 +503,14 @@ answers (`unknown` in about 4 s) and the silent quit-with-exit-code-2 case, the
 recorded status of each outcome and the log (see "Where an install records what it
 decided"), a user uninstall that keeps the old folder dropping only this
 identity's login entry for it, and (a harness-only build, `DN_TEST_STEPS`, that
-terminates right after a named registry write) an installer killed after each
-write of the recovery, of the journal, of the recovery copy and between the
-removal and the record, each finished by the next run, mismatching and tampered
+terminates right after a named step) an installer killed at each of these
+points: after each write of the restoration (`recover-LegacyUninstallString`,
+`-DesktopLink`, `-StartMenuLink`, `-LegacyShortName`, `-SourceDir`, `-DestDir`,
+`-Identity`, `recover-MigrationRecord`, `recover-deleted`), after `SourceDir` and
+`DestDir` while arming the journal (`park-SourceDir`, `park-DestDir`), after the
+recovery copy's journal values as a group (`save-journal`) and its record
+(`save-record`), and between the removal and the record (`finish-removed`,
+`finish-record`), each finished by the next run, mismatching and tampered
 copies kept, the empty recovery parent removed, and the app leaving an
 incomplete or foreign record untouched. Round 7 adds: a record with any time
 in `src/main/fixtures/install-record-times.json` judged as the app judges it,
@@ -822,9 +834,20 @@ production `f85f8dcf-…` ones), `reg delete "<key>" /f` each that is still ther
 
 ### Installer end-to-end in CI (substitute for the desktop pass's installer items)
 
-Smart App Control on the QA machine (ODL-WIN-Dev04) blocks every freshly compiled
-unsigned executable, installers and uninstallers included (Code Integrity events
-3033 / 3077). It is never bypassed, excluded or disabled. Until the owner decides
+Smart App Control on the QA machine (ODL-WIN-Dev04) has blocked particular
+freshly compiled unsigned builds, by file hash and not predictably (Code Integrity
+events 3033 / 3077, policy `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`): the guard
+harness builds of rounds 4–6 (one `harness-pause.exe` in round 4; in round 5
+every harness build, held for over 90 minutes; in round 6 all four; the harness
+has only been compiled, not run, on Dev04 since), and in
+round 8 electron-builder's NSIS uninstaller-writer step of `package:win` and
+`package:win:qa` (`spawn UNKNOWN`). Other fresh builds ran: the round 1–3 harness
+builds, and in round 8 the `--prepackaged` legacy-layout and kill-step installer
+builds, whose writer step was allowed. The QA installers, uninstallers and the
+rcedited `DoodleNote QA.exe` have not been started on Dev04 since round 5, so whether
+they would be blocked is not known; each block also raises a Windows Security
+notification that holds the shared desktop. It is never bypassed, excluded or
+disabled. Until the owner decides
 about it on the test machine, or the builds are signed, the installer items of the
 desktop pass run on the throwaway GitHub Windows runner instead: CI job
 `windows-installer-e2e` (`.github/workflows/ci.yml`), script
