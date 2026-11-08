@@ -488,12 +488,16 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(true, near.Observe(true, false, false), "two suspects three ticks apart: lost");
         }
 
-        public static void ClassicTextBoxesAreEditAndRichEditOnly()
+        public static void ClassicTextBoxesAreAnExactAllowlist()
         {
-            string[] classic = { "Edit", "RICHEDIT50W", "RichEdit20W", "RichEdit20A", "RichEditD2DPT", "RichEdit",
+            string[] classic = { "Edit", "RICHEDIT50W", "RichEdit20W", "RichEdit20A", "RichEditD2DPT",
                 "WindowsForms10.EDIT.app.0.141b42a_r6_ad1", "WindowsForms10.RichEdit20W.app.0.141b42a_r6_ad1", "WindowsForms10.RICHEDIT50W.app.0.2bf8098_r6_ad1" };
             foreach (string name in classic) Assert.True(ClassicTextBox.IsClassicClass(name, ""), name + " is a classic text box");
-            Assert.True(ClassicTextBox.IsClassicClass("TMyMemo", "Edit"), "a superclassed Edit (RealGetWindowClass) counts");
+            Assert.Equal(ClassicTextBox.ClassKind.RichEdit, ClassicTextBox.Classify("WindowsForms10.RICHEDIT50W.app.0.2bf8098_r6_ad1", ""), "WinForms RichEdit is a RichEdit");
+            Assert.Equal(ClassicTextBox.ClassKind.Edit, ClassicTextBox.Classify("TMyMemo", "Edit"), "a superclassed Edit (RealGetWindowClass) counts");
+            string[] lookalikes = { "RichEditor", "RichEdit", "RichEdit20WX", "RichEditD2D", "EDIT.Custom", "MyEdit", "WindowsForms10.EDITOR.app.0.1",
+                "WindowsForms10.EDIT", "WindowsForms10.Window.8.app.0.141b42a_r6_ad1" };
+            foreach (string name in lookalikes) Assert.True(!ClassicTextBox.IsClassicClass(name, name), name + " is not on the allowlist (a superclass must prove itself by its replies)");
             string[] uiaOnly = { "Chrome_RenderWidgetHostHWND", "Chrome_WidgetWin_1", "MozillaWindowClass", "Windows.UI.Core.CoreWindow",
                 "Windows.UI.Input.InputSite.WindowClass", "SunAwtFrame", "SunAwtCanvas", "Qt5QWindowIcon", "Qt663QWindowIcon", "_WwG", "EXCEL7",
                 "OpusApp", "Intermediate D3D Window", "CefBrowserWindow", "WebView2", "DirectUIHWND", "Scintilla", "" };

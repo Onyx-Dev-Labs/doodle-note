@@ -104,6 +104,8 @@ namespace DoodleNote.DictationHelper
         public delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
         [DllImport("user32.dll")]
         public static extern bool EnumChildWindows(IntPtr parent, EnumProc fn, IntPtr lParam);
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
         [DllImport("user32.dll")]
@@ -169,6 +171,23 @@ namespace DoodleNote.DictationHelper
         // (WM_GETTEXTLENGTH would count bytes, not UTF-16 units) and returns EM_GETSEL truncated.
         [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
+        /// <summary>WM_GETTEXT into a buffer (the system marshals the text across processes).</summary>
+        [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, StringBuilder lParam, uint flags, uint timeoutMs, out IntPtr result);
+        public const uint WM_NULL = 0x0000;
+        [DllImport("user32.dll")]
+        public static extern bool IsHungAppWindow(IntPtr hwnd);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr GetStdHandle(int which);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+        public const uint HANDLE_FLAG_INHERIT = 0x1;
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetHandleInformation(IntPtr handle, out uint flags);
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern UIntPtr SetCoalescableTimer(IntPtr hwnd, UIntPtr id, uint elapseMs, IntPtr timerProc, uint toleranceMs);
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool KillTimer(IntPtr hwnd, UIntPtr id);
 
         // Clipboard.
         [DllImport("user32.dll", SetLastError = true)]

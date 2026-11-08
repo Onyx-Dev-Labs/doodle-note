@@ -33,8 +33,21 @@ namespace DoodleNote.DictationHelper
         {
             // The clipboard reader (see ClipboardReader): no hooks, no window, no protocol of its own.
             if (args.Length == 1 && args[0] == ClipboardReader.Argument) return ClipboardReader.Serve();
+            // The app's pipes are this helper's alone: a clipboard reader it starts must not inherit
+            // them, or a reader still waiting in a render would keep the app from seeing them close.
+            foreach (int which in new[] { -10, -11, -12 }) // STD_INPUT / STD_OUTPUT / STD_ERROR_HANDLE
+                Native.SetHandleInformation(Native.GetStdHandle(which), Native.HANDLE_FLAG_INHERIT, 0);
             Wire.Start();
             SelfImage.Hold();
+            // Provider calls stuck past the cap never come back: leave with ExitBusy so the app restarts
+            // a fresh helper (its replies "helper-busy" have gone out first).
+            Bounded.Saturated += delegate
+            {
+                Thread.Sleep(300);
+                Wire.Log("provider calls are stuck past the cap; restarting");
+                Wire.Send(Wire.Fields("event", "restarting", "reason", "helper-busy"));
+                Shutdown(ExitBusy);
+            };
             Ui.Install();
             work = new WorkQueue("dictation.work");
             audio = new WorkQueue("dictation.audio");
@@ -78,14 +91,19 @@ namespace DoodleNote.DictationHelper
             Shutdown();
         }
 
-        static void Shutdown()
+        /// <summary>Exit code when the helper leaves because provider calls are stuck (the app restarts it).</summary>
+        public const int ExitBusy = 3;
+
+        static void Shutdown() { Shutdown(0); }
+
+        static void Shutdown(int exitCode)
         {
             if (Interlocked.Exchange(ref exiting, 1) == 1) return;
             Ui.Invoke(delegate { HoldWatcher.Shared.StopAll(); MouseCapture.Shared.Cancel("stopped"); return true; }, 1000, false);
             ClipboardReaderClient.Shutdown();
             audio.Sync(delegate { OutputAudio.Restore(); }, 2000);
             Wire.Drain(500);
-            Environment.Exit(0);
+            Environment.Exit(exitCode);
         }
 
         static void Handle(Dictionary<string, object> request)
@@ -389,6 +407,20 @@ namespace DoodleNote.DictationHelper
                         int threads;
                         using (Process self = Process.GetCurrentProcess()) threads = self.Threads.Count;
                         Wire.Reply(id, true, Wire.Fields("abandoned", Bounded.Abandoned, "liveWorkers", Bounded.LiveThreads, "processThreads", threads));
+                    }
+                    break;
+                case "__std-inherit":
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    {
+                        List<object> handles = new List<object>();
+                        foreach (int which in new[] { -10, -11, -12 })
+                        {
+                            IntPtr h = Native.GetStdHandle(which);
+                            uint flags;
+                            bool ok = Native.GetHandleInformation(h, out flags);
+                            handles.Add(Wire.Fields("std", which, "handle", h.ToInt64(), "read", ok, "inherit", ok && (flags & Native.HANDLE_FLAG_INHERIT) != 0));
+                        }
+                        Wire.Reply(id, true, Wire.Fields("handles", handles));
                     }
                     break;
                 case "__state-lock-probe":

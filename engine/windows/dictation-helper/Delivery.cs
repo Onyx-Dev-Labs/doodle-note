@@ -266,8 +266,13 @@ namespace DoodleNote.DictationHelper
             if (snapshot.Incomplete != null) return new DeliveryResult(DeliveryOutcome.Refused, snapshot.Incomplete);
             if (!snapshot.HasElement || snapshot.Facts == null) return new DeliveryResult(DeliveryOutcome.Refused, "no-target");
             Validation v;
-            Bounded.Outcome validated = Bounded.Call(token => Validate(snapshot, guards, token), ValidateBudgetMs, out v);
+            bool selectionMayHaveChanged;
+            Bounded.Outcome validated = Bounded.Call(token => Validate(snapshot, guards, token), ValidateBudgetMs, out v, out selectionMayHaveChanged);
             if (validated == Bounded.Outcome.Busy) return new DeliveryResult(DeliveryOutcome.Refused, "helper-busy");
+            // The validation overran while selecting the text an undo replaces: that selection may land
+            // in the app after this refusal. Nothing is inserted, but the field may now show a selection,
+            // so the result is uncertain (the host keeps the text and never retries on its own).
+            if (validated != Bounded.Outcome.Ok && selectionMayHaveChanged) return new DeliveryResult(DeliveryOutcome.Uncertain, "selection-may-have-changed");
             if (validated != Bounded.Outcome.Ok) return new DeliveryResult(DeliveryOutcome.Refused, "target-unverifiable");
             if (v.Refusal != null) return new DeliveryResult(DeliveryOutcome.Refused, v.Refusal);
             AutomationElement current = v.Current;
@@ -328,6 +333,14 @@ namespace DoodleNote.DictationHelper
             // like), which can take arbitrarily long; it runs in the reader process, bounded per format.
             SavedClipboard saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
             if (saved == null) return null;
+            // Emptying the clipboard sends WM_DESTROYCLIPBOARD to its owner and waits for it, with no
+            // bound: an owner that does not answer would hold the delivery (and the clipboard) forever.
+            string ownerProblem = ClipboardText.OwnerUnresponsive();
+            if (ownerProblem != null)
+            {
+                Wire.Log("the clipboard's owner is not responding (" + ownerProblem + "); not pasting");
+                return null;
+            }
             ClipboardOwnership ours;
             if (!ClipboardText.Write(text, out ours, saved.Sequence))
             {
@@ -458,18 +471,23 @@ namespace DoodleNote.DictationHelper
         /// The typing fallback, for classic Win32 text boxes only (ClassicTextBox). Refused up front, with
         /// nothing sent, when the focused window is unknown (WebView2, CEF and Gecko hosts report a
         /// window the helper cannot attribute) or is not the snapshot's, when it is not a classic text box
-        /// (every UIA-only app: browsers, Electron, Firefox, Java, Qt, XAML/UWP, Office), or when the
-        /// pre-flight probe (text length, selection, ES_PASSWORD) does not answer in time. Then, for
-        /// EVERY key: the foreground app and focused window are still the snapshot's, ES_PASSWORD is
-        /// still clear (fresh GetWindowLong), the field still has the length the previous key left
-        /// (nothing else changed it), and after the key the length moves by exactly the units the key
-        /// adds minus the selection it replaces. Anything else stops typing at once (uncertain), with
-        /// the reason, the number of keys confirmed, and whether one key was sent but not confirmed.
+        /// (every UIA-only app: browsers, Electron, Firefox, Java, Qt, XAML/UWP, Office), when the
+        /// pre-flight probe does not answer in time, or when it would type over a RichEdit selection
+        /// (RichEdit positions and lengths count a paragraph break differently). For EVERY key, the
+        /// blocking queries come first (the field still has the length the previous key left, a readable
+        /// selection, no password character), and the cheap checks come LAST, immediately before
+        /// SendInput: the foreground process and focused window are still the snapshot's very box, and
+        /// ES_PASSWORD / ES_READONLY are clear (fresh GetWindowLong), so a change during a slow query is
+        /// caught before the key goes out. Line breaks go in as a Unicode CR, never as a Return key, so no
+        /// dialog's default button can fire. After the key the length must move by exactly the units the
+        /// key adds minus the selection it replaces; after the last key the whole text must read back as
+        /// expected. Anything else stops typing at once (uncertain), with the reason, the number of keys
+        /// confirmed, and whether one key was sent but not confirmed.
         /// </summary>
         static DeliveryResult TypeText(string text, TargetSnapshot snapshot, DeliveryTimings timings, int deadlineMs, Func<long> elapsed, BoundedStats stats)
         {
             Stopwatch insert = Stopwatch.StartNew();
-            string normalized = text.Replace("\r\n", "\n");
+            string normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
             string refusal = null;
             IntPtr focusWindow = FocusWindow();
             // Without a focused window there is nothing to read per keystroke: refuse, never guess.
@@ -477,12 +495,37 @@ namespace DoodleNote.DictationHelper
             else if (snapshot.FocusWindow == IntPtr.Zero || focusWindow != snapshot.FocusWindow) refusal = "focus-changed";
             ClassicTextBox box = null;
             if (refusal == null) box = ClassicTextBox.Probe(focusWindow, out refusal);
-            // A single-line box ignores Enter (or presses its dialog's default button).
-            if (refusal == null && normalized.IndexOf('\n') >= 0 && !box.Multiline) refusal = "typing-unsupported";
+            // Line breaks: a single-line box has nowhere to put one. A RichEdit only takes a real Return
+            // key, which a dialog or form could turn into its default button, so it is typed only when the
+            // box asks for Return itself (ES_WANTRETURN) or its window has no default button at all. An
+            // Edit takes a Unicode CR (no Return key exists then); a plain Win32 Edit without ES_WANTRETURN
+            // ignores it in a dialog, so text with a line break is refused there up front. WinForms text
+            // boxes take the CR (measured, with and without AcceptsReturn, AcceptButton never pressed).
+            bool hasBreak = normalized.IndexOf('\n') >= 0;
+            if (refusal == null && hasBreak)
+            {
+                if (!box.Multiline) refusal = "typing-unsupported";
+                else if (box.RichEdit) { if (!box.WantReturn && box.TopLevelHasDefaultButton()) refusal = "typing-unsupported"; }
+                else if (!box.WinFormsClass && !box.WantReturn) refusal = "typing-unsupported";
+                if (refusal != null) Wire.Log("typing: a line break cannot go into this box safely (refused before any key)");
+            }
+            // What the field holds before the first key, and where the text goes: the whole text must read
+            // back exactly as this plus what was typed (a same-length autocorrect cannot pass).
+            string before = refusal == null ? box.Text() : null;
+            int selStart = 0, selEnd = 0;
+            if (refusal == null && (before == null || !box.Selection(out selStart, out selEnd))) refusal = "target-unverifiable";
+            if (refusal == null && box.RichEdit && selEnd > selStart) refusal = "typing-unsupported";
             if (refusal == null && !ReleaseModifiers()) refusal = "focus-changed";
-            if (refusal == null) refusal = TypingGuard(snapshot, box);
             long confirmed = refusal == null ? box.Length() : -1;
             if (refusal == null && confirmed < 0) refusal = "target-unverifiable";
+            if (refusal == null) refusal = TypingGuard(snapshot, box);
+            string expectedText = null;
+            if (refusal == null)
+            {
+                int offset = box.OffsetInText(before, selStart), end = box.OffsetInText(before, selEnd);
+                if (offset < 0 || end < offset) refusal = "target-unverifiable";
+                else expectedText = before.Substring(0, offset) + normalized.Replace("\n", "\r\n") + before.Substring(end);
+            }
             if (refusal != null)
             {
                 DeliveryResult refused = new DeliveryResult(DeliveryOutcome.Refused, refusal);
@@ -501,39 +544,51 @@ namespace DoodleNote.DictationHelper
             for (int i = 0; i < normalized.Length; i++)
             {
                 long guardStart = Stopwatch.GetTimestamp();
-                string unsafeReason = TypingGuard(snapshot, box);
-                // Nothing may have changed the field since the previous key was confirmed.
-                long now = unsafeReason == null ? box.Length() : -1;
-                if (unsafeReason == null && now < 0) { unsafeReason = "target-unverifiable"; Wire.Log("typing: the field did not answer its length"); }
-                else if (unsafeReason == null && now != confirmed) { unsafeReason = "target-changed"; Wire.Log("typing: the field changed between keys (" + confirmed + " -> " + now + ")"); }
+                string unsafeReason = null;
+                // The blocking queries first. Nothing may have changed the field since the previous key.
+                long now = box.Length();
+                if (now < 0) { unsafeReason = "target-unverifiable"; Wire.Log("typing: the field did not answer its length"); }
+                else if (now != confirmed) { unsafeReason = "target-changed"; Wire.Log("typing: the field changed between keys (" + confirmed + " -> " + now + ")"); }
                 int selection = unsafeReason == null ? box.SelectionLength() : 0;
                 if (unsafeReason == null && selection < 0) { unsafeReason = "target-unverifiable"; Wire.Log("typing: the selection could not be read: " + box.LastSelectionError); }
-                guardStats.Add((Stopwatch.GetTimestamp() - guardStart) * 1000.0 / Stopwatch.Frequency);
-                if (unsafeReason != null) { abortReason = unsafeReason; break; }
-                if (deadlineMs > 0 && elapsed() > deadlineMs) { abortReason = "deadline-exceeded"; break; }
+                if (unsafeReason == null && box.RichEdit && selection > 0) { unsafeReason = "target-changed"; Wire.Log("typing: a selection appeared in the RichEdit"); }
+                if (unsafeReason == null)
+                {
+                    bool? password = box.PasswordCharSet();
+                    if (password == null) unsafeReason = "target-unverifiable";
+                    else if (password.Value) unsafeReason = "secure-field";
+                }
+                if (unsafeReason == null && deadlineMs > 0 && elapsed() > deadlineMs) unsafeReason = "deadline-exceeded";
                 // A target that processes keys slowly (but observably) would run past the deadline
                 // part-way through: once the rate is known from at least 10 keys, stop at once if the
                 // rest cannot finish in time, rather than typing most of the text and stopping late.
-                if (deadlineMs > 0 && rate != null && charsTyped >= 10)
+                if (unsafeReason == null && deadlineMs > 0 && rate != null && charsTyped >= 10)
                 {
                     double perChar = rate.ElapsedMilliseconds / (double)charsTyped;
-                    if (elapsed() + perChar * (normalized.Length - i) > deadlineMs) { abortReason = "deadline-exceeded"; break; }
+                    if (elapsed() + perChar * (normalized.Length - i) > deadlineMs) unsafeReason = "deadline-exceeded";
                 }
                 char unit = normalized[i];
                 Native.INPUT[] pair;
                 int start = i;
                 int units;
+                bool surrogate = false;
                 if (unit == '\n')
                 {
-                    pair = new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) };
-                    units = 2; // a multiline Edit or RichEdit stores CR LF (measured on Dev04 for all four classes)
+                    // CR LF in the text (two units, measured for Edit, RICHEDIT50W, RichEdit20W and
+                    // RichEditD2DPT). An Edit gets a Unicode CR (no Return key a dialog could act on); a
+                    // RichEdit ignores that and needs the Return key, allowed above only where it is safe.
+                    pair = box.RichEdit
+                        ? new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) }
+                        : new[] { Native.Unicode('\r', false), Native.Unicode('\r', true) };
+                    units = 2;
                 }
                 else if (char.IsHighSurrogate(unit) && i + 1 < normalized.Length)
                 {
                     // A surrogate pair goes as one call, so the character is never split.
-                    char low = normalized[++i];
+                    char low = normalized[i + 1];
                     pair = new[] { Native.Unicode(unit, false), Native.Unicode(low, false), Native.Unicode(unit, true), Native.Unicode(low, true) };
                     units = 2;
+                    surrogate = true;
                 }
                 else
                 {
@@ -543,7 +598,12 @@ namespace DoodleNote.DictationHelper
                 long expected = confirmed + units - selection;
                 // A key that would leave the length unchanged (it replaces a selection of its own size)
                 // could not be told apart from a key that was never processed.
-                if (expected == confirmed) { abortReason = "target-unverifiable"; Wire.Log("typing: a key replacing a selection of its own size cannot be confirmed"); break; }
+                if (unsafeReason == null && expected == confirmed) { unsafeReason = "target-unverifiable"; Wire.Log("typing: a key replacing a selection of its own size cannot be confirmed"); }
+                // The cheap checks LAST, immediately before the key: same foreground, same focused box,
+                // not a password box, not read-only (a change during the queries above is caught here).
+                if (unsafeReason == null) unsafeReason = TypingGuard(snapshot, box);
+                guardStats.Add((Stopwatch.GetTimestamp() - guardStart) * 1000.0 / Stopwatch.Frequency);
+                if (unsafeReason != null) { abortReason = unsafeReason; break; }
                 if (rate == null) rate = Stopwatch.StartNew();
                 uint count = Native.Send(pair);
                 if (count != pair.Length)
@@ -555,7 +615,7 @@ namespace DoodleNote.DictationHelper
                 }
                 long settleStart = Stopwatch.GetTimestamp();
                 long seen;
-                bool processed = box.WaitLength(confirmed, expected, KeySettleMs, out seen);
+                bool processed = box.WaitLength(confirmed, expected, KeySettleMs, surrogate, out seen);
                 settleStats.Add((Stopwatch.GetTimestamp() - settleStart) * 1000.0 / Stopwatch.Frequency);
                 if (!processed)
                 {
@@ -563,6 +623,7 @@ namespace DoodleNote.DictationHelper
                     abortReason = seen >= 0 && seen != confirmed ? "target-changed" : "target-unconfirmed";
                     break;
                 }
+                if (surrogate) i++;
                 confirmed = expected;
                 keysConfirmed++;
                 charsTyped = i + 1;
@@ -592,23 +653,31 @@ namespace DoodleNote.DictationHelper
                 return stamp(new DeliveryResult(anySent ? DeliveryOutcome.Uncertain : DeliveryOutcome.Refused, abortReason));
             }
             Stopwatch confirm = Stopwatch.StartNew();
-            // Every key was confirmed one by one; a last quiet look makes sure nothing (an autocomplete
-            // after the final key) changed the field afterwards.
+            // Every key was confirmed one by one; after a last quiet moment the whole text must read back
+            // exactly as expected (lengths alone cannot show a same-length autocorrect). Compared in memory
+            // only; the text is never logged.
             Thread.Sleep(60);
             long final = box.Length();
+            string after = final >= 0 ? box.Text() : null;
             timings.ConfirmMs += Ms(confirm);
-            bool verified = final == confirmed && !box.Secure;
-            DeliveryResult result = stamp(verified
+            string mismatch = null;
+            if (final < 0 || after == null) mismatch = "target-unconfirmed";
+            else if (final != confirmed) mismatch = "target-changed";
+            else if (!string.Equals(after, expectedText, StringComparison.Ordinal)) mismatch = "insertion-mismatch";
+            else if (box.StyleSecure) mismatch = "secure-field";
+            if (mismatch != null) Wire.Log("typing: the field does not read back as typed (" + mismatch + ")");
+            DeliveryResult result = stamp(mismatch == null
                 ? new DeliveryResult(DeliveryOutcome.Delivered, null)
-                : new DeliveryResult(DeliveryOutcome.Uncertain, final < 0 ? "target-unconfirmed" : "target-changed"));
-            result.Verified = verified;
+                : new DeliveryResult(DeliveryOutcome.Uncertain, mismatch));
+            result.Verified = mismatch == null;
             return result;
         }
 
         /// <summary>
-        /// The check before each typed key, with no provider call: the foreground process is the
-        /// snapshot's, its focused window is the very text box being typed into, and that box is not a
-        /// password box (ES_PASSWORD read fresh).
+        /// The last check before each typed key, with no message sent (GetForegroundWindow,
+        /// GetGUIThreadInfo, GetWindowLong only): the foreground process is the snapshot's, its focused
+        /// window is the very text box being typed into, and that box is neither a password box nor
+        /// read-only right now.
         /// </summary>
         static string TypingGuard(TargetSnapshot snapshot, ClassicTextBox box)
         {
@@ -619,7 +688,8 @@ namespace DoodleNote.DictationHelper
             if (pid != snapshot.Pid) return "focus-changed";
             Native.GUITHREADINFO gui = Target.GuiInfo(thread);
             if (gui.hwndFocus != box.Window) return "focus-changed";
-            if (box.Secure || Target.IsPasswordEdit(gui.hwndFocus)) return "secure-field";
+            if (box.StyleSecure || Target.IsPasswordEdit(gui.hwndFocus)) return "secure-field";
+            if (box.StyleReadOnly) return "not-editable";
             return null;
         }
 
@@ -672,6 +742,21 @@ namespace DoodleNote.DictationHelper
     internal static class ClipboardText
     {
         const uint CF_UNICODETEXT = 13;
+
+        /// <summary>
+        /// Null when the clipboard's current owner (if another app's window) answers a WM_NULL within
+        /// 200 ms; otherwise why not. Checked before EmptyClipboard, which waits on the owner unbounded.
+        /// </summary>
+        public static string OwnerUnresponsive()
+        {
+            IntPtr owner = Native.GetClipboardOwner();
+            if (owner == IntPtr.Zero || owner == Ui.ClipboardWindow) return null;
+            if (Native.IsHungAppWindow(owner)) return "hung";
+            IntPtr result;
+            int timeout = TestMode.Int("DICTATION_HELPER_TEST_OWNER_PING_MS", 200);
+            IntPtr ok = Native.SendMessageTimeout(owner, Native.WM_NULL, IntPtr.Zero, IntPtr.Zero, Native.SMTO_ABORTIFHUNG | Native.SMTO_BLOCK, (uint)timeout, out result);
+            return ok == IntPtr.Zero ? "no answer in " + timeout + " ms" : null;
+        }
 
         public static bool Open()
         {
@@ -919,7 +1004,8 @@ namespace DoodleNote.DictationHelper
         };
 
         /// <summary>
-        /// Wall-clock bound for reading one format (a render that takes longer ends the save). Each read
+        /// Wall-clock bound for reading one format (a render that takes longer abandons the reader and
+        /// gives up the save; see ClipboardReader for what happens to that reader). Each read
         /// is also bounded by what is left of the whole save's budget, so the clipboard is never held by
         /// the reader for longer than that budget (1.5 s): a user's copy meanwhile waits at most that.
         /// </summary>
@@ -928,8 +1014,9 @@ namespace DoodleNote.DictationHelper
         /// <summary>
         /// Save the clipboard through the reader process (ClipboardReader), one bounded request per
         /// format, within timeoutMs in total. The clipboard is open only inside each request, never
-        /// across the helper's own work, and a read that overruns (an owner slow to render) ends the
-        /// reader, which releases the clipboard at once. Null, and nothing is pasted, when the save
+        /// across the helper's own work, and other apps can still open it while a reader waits in a
+        /// render. A read that overruns (an owner slow to render) abandons that reader, which finishes
+        /// the render and exits on its own. Null, and nothing is pasted, when the save
         /// cannot complete: the clipboard cannot be opened, a read overran (the owner is stuck in a
         /// render, and the paste's own EmptyClipboard would wait for it too), or the clipboard changed
         /// while it was being saved (someone copied meanwhile).

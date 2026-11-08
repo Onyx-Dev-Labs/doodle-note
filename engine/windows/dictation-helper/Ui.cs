@@ -83,6 +83,46 @@ namespace DoodleNote.DictationHelper
             return handle;
         }
 
+        /// <summary>
+        /// A repeating coalescable timer (SetCoalescableTimer with a tolerance) on the main thread, so a
+        /// frequent sampler lets Windows batch wake-ups. Must be called on the main thread.
+        /// </summary>
+        public static Cancelable EveryCoalesced(int ms, int toleranceMs, Action action)
+        {
+            CoalescedTimer timer = new CoalescedTimer(action);
+            if (!timer.Start(ms, toleranceMs)) { timer.Stop(); return Every(ms, action); }
+            return new Cancelable(timer);
+        }
+
+        sealed class CoalescedTimer : NativeWindow, IDisposable
+        {
+            const int WM_TIMER = 0x0113;
+            readonly Action action;
+            public CoalescedTimer(Action action)
+            {
+                this.action = action;
+                CreateParams parameters = new CreateParams();
+                parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
+                CreateHandle(parameters);
+            }
+            public bool Start(int ms, int toleranceMs)
+            {
+                return Native.SetCoalescableTimer(Handle, (UIntPtr)1, (uint)Math.Max(1, ms), IntPtr.Zero, (uint)Math.Max(0, toleranceMs)) != UIntPtr.Zero;
+            }
+            public void Stop()
+            {
+                if (Handle == IntPtr.Zero) return;
+                Native.KillTimer(Handle, (UIntPtr)1);
+                DestroyHandle();
+            }
+            public void Dispose() { Stop(); }
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_TIMER) { Guard(action); return; }
+                base.WndProc(ref m);
+            }
+        }
+
         /// <summary>A repeating timer on the main thread. Must be called on the main thread.</summary>
         public static Cancelable Every(int ms, Action action)
         {
@@ -112,9 +152,12 @@ namespace DoodleNote.DictationHelper
         internal sealed class Cancelable
         {
             System.Windows.Forms.Timer timer;
+            IDisposable other;
             public Cancelable(System.Windows.Forms.Timer timer) { this.timer = timer; }
+            public Cancelable(IDisposable other) { this.other = other; }
             public void Cancel()
             {
+                if (other != null) { other.Dispose(); other = null; }
                 if (timer == null) return;
                 timer.Stop();
                 timer.Dispose();

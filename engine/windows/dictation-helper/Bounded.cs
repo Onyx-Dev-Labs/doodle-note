@@ -178,6 +178,7 @@ namespace DoodleNote.DictationHelper
                 if (abandoned >= MaxAbandoned)
                 {
                     if (tracking != null) tracking.Busy++;
+                    RaiseSaturated();
                     return Outcome.Busy;
                 }
                 if (current == null) current = new Worker();
@@ -205,6 +206,20 @@ namespace DoodleNote.DictationHelper
             if (job.Failed) return Outcome.Failed;
             result = (T)job.Result;
             return Outcome.Ok;
+        }
+
+        /// <summary>
+        /// Raised once when the cap is first hit: calls stuck in providers that never return do not come
+        /// back, so the helper restarts itself (Program) instead of refusing every call until it is.
+        /// </summary>
+        public static event Action Saturated;
+        static int saturatedRaised;
+
+        static void RaiseSaturated()
+        {
+            if (Interlocked.Exchange(ref saturatedRaised, 1) == 1) return;
+            Action handler = Saturated;
+            if (handler != null) ThreadPool.QueueUserWorkItem(delegate { handler(); });
         }
 
         static void Retire(Worker worker)

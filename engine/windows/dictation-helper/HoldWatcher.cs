@@ -58,8 +58,6 @@ namespace DoodleNote.DictationHelper
         /// <summary>Armed key down-state and callback counts seen on the previous tick, to spot a missed callback.</summary>
         bool prevArmedDown;
         long prevKeyCallbackCount, prevMouseCallbackCount;
-        Native.POINT prevCursor;
-        bool havePrevCursor;
         readonly HookLossDetector keyDetector = new HookLossDetector(1);
         /// <summary>
         /// Two suspect ticks for the mouse within MouseEvidenceWindowTicks (10 s): one stray cursor move
@@ -73,14 +71,15 @@ namespace DoodleNote.DictationHelper
         /// still seen. A transition with no hook callback across the surrounding samples is a suspect.
         /// </summary>
         public const int SampleMs = 40;
+        const int SampleTolerance = 20;
+        /// <summary>Transitions seen while the foreground ran above us (hooks legitimately see nothing then).</summary>
+        int keyAboveSamples, buttonAboveSamples;
         Ui.Cancelable sampler;
         bool sampledKeyDown, sampledButtonDown;
         /// <summary>Callback counts at the previous two samples (a callback always precedes the state change it causes).</summary>
         long keyCountAtSample1, keyCountAtSample2, mouseCountAtSample1, mouseCountAtSample2;
         /// <summary>Transitions of the armed key / button seen with no callback, since the last watchdog tick.</summary>
         int keySuspectSamples, buttonSuspectSamples;
-        /// <summary>The last-input tick at the previous watchdog tick: real input moves it, SetCursorPos does not.</summary>
-        uint prevLastInput;
         /// <summary>Per hook: when to retry re-installing it (4/8/16/30 s while re-installing fails).</summary>
         readonly RetryClock keyRetry = new RetryClock(WatchdogMs), mouseRetry = new RetryClock(WatchdogMs);
         /// <summary>The armed mouse button's async state on the previous tick (stationary-use evidence).</summary>
@@ -186,10 +185,8 @@ namespace DoodleNote.DictationHelper
             mouseMachine = HoldMachine.ForMouse((int)button, click, 0);
             minHoldMs = HoldDelay(minHold);
             prevMouseCallbackCount = mouseCallbackCount;
-            havePrevCursor = Native.GetCursorPos(out prevCursor);
             prevButtonDown = Native.IsDown(ButtonVk((int)button));
             ResetMouseSamples();
-            prevLastInput = Native.LastInputTick();
             mouseDetector.Reset();
             RaiseHookThreadPriority();
             StartWatchdog();
@@ -397,7 +394,8 @@ namespace DoodleNote.DictationHelper
 
         void StartWatchdog()
         {
-            if (sampler == null) sampler = Ui.Every(SampleMs, SampleTick);
+            // A coalescable timer (20 ms tolerance): the 25 Hz sampling lets Windows batch its wake-ups.
+            if (sampler == null) sampler = Ui.EveryCoalesced(SampleMs, SampleTolerance, SampleTick);
             if (watchdog != null) return;
             watchdog = Ui.Every(WatchdogMs, WatchdogTick);
         }
@@ -445,7 +443,13 @@ namespace DoodleNote.DictationHelper
                 bool down, pressed;
                 Native.KeyState(keySpec.Vk, out down, out pressed);
                 long count = keyCallbackCount;
-                if ((down != sampledKeyDown || pressed) && count == keyCountAtSample2) keySuspectSamples++;
+                if ((down != sampledKeyDown || pressed) && count == keyCountAtSample2)
+                {
+                    // Recorded with the moment it happened: a press in a higher-integrity window followed
+                    // by a switch back before the tick is never loss evidence.
+                    if (ForegroundRunsAboveUs()) keyAboveSamples++;
+                    else keySuspectSamples++;
+                }
                 sampledKeyDown = down;
                 keyCountAtSample2 = keyCountAtSample1;
                 keyCountAtSample1 = count;
@@ -455,7 +459,11 @@ namespace DoodleNote.DictationHelper
                 bool down, pressed;
                 Native.KeyState(ButtonVk(mouseButton), out down, out pressed);
                 long count = mouseCallbackCount;
-                if ((down != sampledButtonDown || pressed) && count == mouseCountAtSample2) buttonSuspectSamples++;
+                if ((down != sampledButtonDown || pressed) && count == mouseCountAtSample2)
+                {
+                    if (ForegroundRunsAboveUs()) buttonAboveSamples++;
+                    else buttonSuspectSamples++;
+                }
                 sampledButtonDown = down;
                 mouseCountAtSample2 = mouseCountAtSample1;
                 mouseCountAtSample1 = count;
@@ -485,7 +493,8 @@ namespace DoodleNote.DictationHelper
             if (System.Threading.Interlocked.Exchange(ref dropMouseHookForTest, 0) == 1 && mouseHook != IntPtr.Zero)
                 Native.UnhookWindowsHookEx(mouseHook);
 #endif
-            bool above = ForegroundRunsAboveUs();
+            bool above = ForegroundRunsAboveUs() || keyAboveSamples > 0 || buttonAboveSamples > 0;
+            keyAboveSamples = buttonAboveSamples = 0;
 
             if (wantKey && keyHook != IntPtr.Zero)
             {
@@ -507,16 +516,9 @@ namespace DoodleNote.DictationHelper
             }
             if (wantMouse && mouseHook != IntPtr.Zero)
             {
-                Native.POINT cursor;
-                bool haveCursor = Native.GetCursorPos(out cursor); // false on a secure desktop: no evidence
-                uint lastInput = Native.LastInputTick();
-                // A cursor move counts only with real input meanwhile: another app's SetCursorPos moves
-                // the cursor without input (and without a hook callback), and is never evidence.
-                bool realInput = lastInput != 0 && lastInput != prevLastInput;
-                prevLastInput = lastInput;
-                bool moved = haveCursor && havePrevCursor && realInput && (cursor.X != prevCursor.X || cursor.Y != prevCursor.Y);
-                if (haveCursor) { prevCursor = cursor; havePrevCursor = true; }
-                // The armed button's own state, read passively at the tick and every 40 ms in between:
+                // Mouse-specific evidence only: the armed button's own state, read passively at the tick and
+                // every 40 ms in between. Cursor movement is not evidence (another app's SetCursorPos moves
+                // it with no callback, and keyboard input moves the last-input time while it does).
                 // pressing it without moving the mouse is evidence too (a button the live hook swallows
                 // never changes this state).
                 bool buttonDown = Native.IsDown(ButtonVk(mouseButton));
@@ -526,9 +528,9 @@ namespace DoodleNote.DictationHelper
                 long count = mouseCallbackCount;
                 bool advanced = count != prevMouseCallbackCount;
                 prevMouseCallbackCount = count;
-                if (mouseDetector.Observe((moved || buttonMoved) && !advanced, advanced, above))
+                if (mouseDetector.Observe(buttonMoved && !advanced, advanced, above))
                 {
-                    Wire.Log("mouse hook loss detected (the cursor or the armed button moved with no callback)");
+                    Wire.Log("mouse hook loss detected (the armed button moved with no callback)");
                     Native.UnhookWindowsHookEx(mouseHook);
                     mouseHook = IntPtr.Zero;
                 }
@@ -569,11 +571,9 @@ namespace DoodleNote.DictationHelper
                 Wire.Log("mouse hook re-installed");
                 mouseRetry.Succeeded();
                 prevMouseCallbackCount = mouseCallbackCount;
-                havePrevCursor = Native.GetCursorPos(out prevCursor);
-                prevButtonDown = Native.IsDown(ButtonVk(mouseButton));
+                    prevButtonDown = Native.IsDown(ButtonVk(mouseButton));
                 ResetMouseSamples();
-                prevLastInput = Native.LastInputTick();
-                mouseDetector.Reset();
+                    mouseDetector.Reset();
                 if (mouseLostAnnounced) { mouseLostAnnounced = false; AnnounceHooks(); }
                 return;
             }
