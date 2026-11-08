@@ -559,6 +559,8 @@ async function main() {
     await a.ready
     const reply = a.req('__clipboard-txn', { text: 'dictated text I', holdMs: 2500 })
     for (let i = 0; i < 200 && text() !== 'dictated text I'; i++) await sleep(50)
+    // After our write's confirmation (it re-reads the clipboard right after the write): the change comes later.
+    await sleep(700)
     addFormat()
     const result = await reply
     await a.stop()
