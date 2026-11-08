@@ -118,6 +118,12 @@ async function main() {
           }),
           readBack: await ask({ op: 'read', subKey: status, name: 'AppMigrationReason' }),
           refused: await ask({ op: 'write', subKey: status, values: [['LastResult', 'x']] }),
+          // Round 8: the login item's Run value (a dotted name) is readable; absent here.
+          runValue: await ask({
+            op: 'read',
+            subKey: 'Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+            name: 'com.doodlenote.desktop.ci-absent'
+          }),
           deleted: await ask({ op: 'delete', subKey: `Software\\${guid}`, name: 'MigrationRecord' })
         }
       } finally {
@@ -129,6 +135,7 @@ async function main() {
     assert.equal(registry.write.ok, true, JSON.stringify(registry))
     assert.equal(registry.readBack.value, 'ci Jörg 李')
     assert.deepEqual([registry.refused.ok, registry.refused.code], [false, 'SCOPE'])
+    assert.deepEqual([registry.runValue.ok, registry.runValue.value], [true, null])
     assert.equal(registry.deleted.ok, true)
     console.log(JSON.stringify({ executablePath, profile, preflight: result, stream, registry }))
   } finally {

@@ -30,6 +30,15 @@ test('the app may read under Software, write only its status and delete only its
   assert.ok(!s.readable('SYSTEM\\CurrentControlSet', 'x'))
   assert.ok(!s.readable(`Software\\${guid}\\`, 'MigrationRecord'))
   assert.ok(!s.readable(`Software\\${guid}`, 'Migration\0Record'))
+  // The login item's Run value, whose name is the app id (round 8, LOW-3), and only there.
+  const run = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+  assert.ok(s.readable(run, 'com.doodlenote.desktop'))
+  assert.ok(s.readable(run, 'com.doodlenote.desktop.qa'))
+  assert.ok(!s.readable(run, 'com.doodlenote.desktop\0x'))
+  assert.ok(!s.readable(run, '..\\x'))
+  assert.ok(!s.readable(`Software\\${guid}`, 'com.doodlenote.desktop'))
+  assert.ok(!s.writable(run, 'com.doodlenote.desktop'))
+  assert.ok(!s.deletable(run, 'com.doodlenote.desktop'))
   assert.ok(s.writable(`Software\\DoodleNote-InstallStatus\\${guid}`, 'AppMigration'))
   assert.ok(s.writable(`Software\\DoodleNote-InstallStatus\\${guid}`, 'AppMigrationReason'))
   // Not the installer's own values, not another key.

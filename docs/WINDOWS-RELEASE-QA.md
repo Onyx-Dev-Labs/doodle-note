@@ -499,7 +499,15 @@ name `desktop`), not the install folder, and is not moved. Keep the package name
 and `appId` as they are unless a profile migration is written too. On the next
 launch the app repoints the "Open at login" entry (keeping a Task Manager
 disable) and MCP client configs (Claude Desktop, Claude Code, Codex) that
-launched the old exe (`src/main/windows-install-migration.ts`), but only on the
+launched the old exe (`src/main/windows-install-migration.ts`). "Launched the old
+exe" is decided with 8.3 short names expanded on both sides (`isInsideFolder`):
+an MCP command or Run value the old app wrote while it was started through a
+short path (`C:\Users\PATRIC~1\...\desktop\DoodleNote.exe`) still matches, since
+the old folder's parent exists and expands; in the old folder's own place an
+unexpanded alias of its name counts (`DESKTO~1` for `desktop-qa`; Windows' hashed
+form after `~4` does not). The Run value is read as written, through the speech
+worker's registry access, because Electron's own lookup compares plain strings;
+the progress marker's exe is compared the same way. This happens only on the
 installer's record: it must be complete and for this identity (version, the
 identity's `APP_GUID` and both folder names, both folders, a UTC time of exactly
 the shape `YYYY-MM-DDTHH:MM:SSZ` (ASCII digits; the installer's `dnRecordCheck`

@@ -116,11 +116,94 @@ export function legacyInstallFor(
   return { dir: from, exe: win32.join(from, win32.basename(exe)) }
 }
 
-/** Case-insensitive, separator-tolerant "is this path inside that folder" (Windows rules). */
-export function isInsideFolder(path: string, folder: string): boolean {
-  const a = win32.normalize(path).toLowerCase()
-  const b = win32.normalize(folder).replace(/\\+$/, '').toLowerCase()
-  return a === b || a.startsWith(`${b}\\`)
+/**
+ * Whether `alias` has the form Windows gives `longName` as an 8.3 short name
+ * (`DESKTO~1` for `desktop-qa`; a valid 8.3 name such as `desktop` has none): the first six characters of its name, upper
+ * case, with spaces and dots dropped and `+ , ; = [ ]` turned into `_`, then `~N`
+ * (one digit), then the first three characters of its extension. The hashed form
+ * Windows switches to after `~4` (`DE12AB~1`) is not recognised.
+ */
+export function isShortAliasOf(alias: string, longName: string): boolean {
+  // A name that is already a valid 8.3 name gets no alias.
+  if (/^[^ .+,;=[\]]{1,8}(\.[^ .+,;=[\]]{1,3})?$/.test(longName)) return false
+  const match = /^([^.~\\/]{1,6})~[1-9](?:\.([^.~\\/]{1,3}))?$/.exec(alias)
+  if (!match) return false
+  const clean = (text: string): string =>
+    text
+      .replace(/[ .]/g, '')
+      .replace(/[+,;=[\]]/g, '_')
+      .toUpperCase()
+  const dot = longName.lastIndexOf('.')
+  const stem = clean(dot > 0 ? longName.slice(0, dot) : longName)
+  const extension = dot > 0 ? clean(longName.slice(dot + 1)).slice(0, 3) : ''
+  return match[1].toUpperCase() === stem.slice(0, 6) && (match[2] ?? '').toUpperCase() === extension
+}
+
+/**
+ * Case-insensitive, separator-tolerant "is this path inside that folder"
+ * (Windows rules), with 8.3 short names expanded on both sides (`longPath`), so a
+ * command or Run value the old app wrote while it was started through a short
+ * path (C:\Users\PATRIC~1\...\desktop\DoodleNote.exe) is still recognised: the
+ * old folder is gone, but its parent exists and expands. The old folder's own
+ * short name cannot expand once it is removed; an unexpanded short name in that
+ * place counts when it is an alias of the folder's name (`isShortAliasOf`), which
+ * is safe because a folder that still existed would have expanded.
+ */
+export function isInsideFolder(
+  path: string,
+  folder: string,
+  realPath: RealPath = nativeRealPath
+): boolean {
+  const parts = (value: string): string[] =>
+    win32
+      .normalize(value)
+      .replace(/[\\/]+$/, '')
+      .toLowerCase()
+      .split('\\')
+  const inside = (a: string[], b: string[], aliases: boolean): boolean =>
+    a.length >= b.length &&
+    b.every(
+      (part, i) => part === a[i] || (aliases && i === b.length - 1 && isShortAliasOf(a[i], part))
+    )
+  if (inside(parts(path), parts(folder), false)) return true
+  return inside(parts(longPath(path, realPath)), parts(longPath(folder, realPath)), true)
+}
+
+/** Where Windows keeps the per-user "Open at login" entries (HKCU). */
+export const LOGIN_RUN_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+
+/**
+ * The program a Run value starts: the quoted path Electron writes
+ * (`"C:\\...\\DoodleNote.exe" --args`), or the first word of an unquoted one;
+ * null when there is none.
+ */
+export function runValueProgram(value: string): string | null {
+  const text = value.trim()
+  if (text.startsWith('"')) {
+    const end = text.indexOf('"', 1)
+    return end > 1 ? text.slice(1, end) : null
+  }
+  const program = text.split(/\s+/)[0]
+  return program ? program : null
+}
+
+/**
+ * The login item's state for the old install. The Run value is read as written
+ * (`readRunValue`, through the worker's registry access) and compared 8.3-aware
+ * (`isLegacyPath`); Electron's own lookup compares the path as a plain string, so
+ * a value written through a short path would never match it. The Task Manager
+ * enabled/disabled state comes from Electron, asked with the program exactly as
+ * written (`enabledFor`; undefined when it does not know: enabled).
+ */
+export async function loginItemStateFromRun(
+  readRunValue: () => Promise<string | null>,
+  enabledFor: (program: string) => boolean | undefined,
+  isLegacyPath: (path: string) => boolean
+): Promise<LoginItemState> {
+  const value = await readRunValue()
+  const program = value === null ? null : runValueProgram(value)
+  if (program === null || !isLegacyPath(program)) return { registered: false, enabled: true }
+  return { registered: true, enabled: enabledFor(program) ?? true }
 }
 
 export interface LoginItemState {
@@ -155,7 +238,11 @@ export interface InstallMigrationDeps {
   readMarker(): string | null
   writeMarker(contents: string): void
   loginItem: {
-    stateFor(exe: string): LoginItemState
+    /**
+     * Whether this app's Run value starts an exe for which `isLegacyPath` holds
+     * (inside the old folder, 8.3-aware), and whether it is enabled.
+     */
+    stateFor(isLegacyPath: (path: string) => boolean): LoginItemState | Promise<LoginItemState>
     /** Register the running exe, keeping the user's enabled/disabled choice. */
     registerCurrent(enabled: boolean): void
   }
@@ -173,6 +260,8 @@ export interface InstallMigrationDeps {
   writeStatus(status: InstallMigrationStatus): Promise<void>
   /** The attempt's time (tests pass a fixed one). */
   now?(): Date
+  /** Expands 8.3 short names (tests pass a mocked disk); fs.realpathSync.native by default. */
+  realPath?: RealPath
   log(message: string): void
 }
 
@@ -219,14 +308,19 @@ interface Marker {
   complete: boolean
 }
 
-function readProgress(raw: string | null, execPath: string, migratedAt: string): Marker | null {
+function readProgress(
+  raw: string | null,
+  execPath: string,
+  migratedAt: string,
+  realPath: RealPath
+): Marker | null {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw) as Partial<Marker>
     if (
       parsed.version !== MARKER_VERSION ||
       typeof parsed.to !== 'string' ||
-      parsed.to.toLowerCase() !== execPath.toLowerCase() ||
+      !samePath(parsed.to, execPath, realPath) ||
       parsed.migratedAt !== migratedAt ||
       typeof parsed.loginItemDone !== 'boolean' ||
       typeof parsed.complete !== 'boolean' ||
@@ -305,7 +399,8 @@ export async function runWindowsInstallMigration(
     return stop('pending', read.code)
   }
   const record = read
-  const legacy = legacyInstallFor(record, deps.execPath)
+  const realPath = deps.realPath ?? nativeRealPath
+  const legacy = legacyInstallFor(record, deps.execPath, APP_IDENTITY, realPath)
   if ('reason' in legacy) {
     deps.log(`[install-migration] ignoring the install record: ${legacy.reason}`)
     return stop('pending', 'record-other-folder')
@@ -329,7 +424,7 @@ export async function runWindowsInstallMigration(
   } catch (error) {
     deps.log(`[install-migration] marker not read: ${(error as Error).message}`)
   }
-  const progress = readProgress(raw, deps.execPath, record.at)
+  const progress = readProgress(raw, deps.execPath, record.at, realPath)
   if (progress?.complete) {
     await clear()
     return {
@@ -343,7 +438,9 @@ export async function runWindowsInstallMigration(
   let loginItem = false
   if (!loginItemDone) {
     try {
-      const state = deps.loginItem.stateFor(legacy.exe)
+      const state = await deps.loginItem.stateFor((path) =>
+        isInsideFolder(path, legacy.dir, realPath)
+      )
       if (state.registered) {
         deps.loginItem.registerCurrent(state.enabled)
         loginItem = true
@@ -361,7 +458,7 @@ export async function runWindowsInstallMigration(
   if (previouslyPending === 'all' || previouslyPending.length > 0) {
     try {
       const outcomes = deps.repointMcpClients(
-        (command) => isInsideFolder(command, legacy.dir),
+        (command) => isInsideFolder(command, legacy.dir, realPath),
         previouslyPending === 'all' ? null : previouslyPending
       )
       mcpPending = []

@@ -3,7 +3,8 @@
  * writes for the install folder move (windows-install-record.ts), so the main process never starts
  * PowerShell, reg.exe or anything else for them:
  *
- *  - read: one REG_SZ value (RegGetValueW), e.g. the installer's MigrationRecord;
+ *  - read: one REG_SZ value (RegGetValueW), e.g. the installer's MigrationRecord or the app's
+ *    own "Open at login" Run value;
  *  - write: REG_SZ values (RegSetKeyValueW, which creates the key), only under the identity's
  *    HKCU\Software\DoodleNote-InstallStatus\<APP_GUID> key (the app's AppMigration status);
  *  - delete: one value (RegDeleteKeyValueW), only MigrationRecord in HKCU\Software\<APP_GUID>.
@@ -41,10 +42,19 @@ export interface RegistryScope {
 const GUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/
 
-/** What the app itself may do: read under Software, write its status, delete its record. */
+/** The per-user Run key, whose value names are app ids (`com.doodlenote.desktop`). */
+const RUN_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+const RUN_NAME = /^[A-Za-z][A-Za-z0-9.-]{0,127}$/
+
+/**
+ * What the app itself may do: read under Software (and its own login item's Run
+ * value, whose name has dots), write its status, delete its record.
+ */
 export const APP_REGISTRY_SCOPE: RegistryScope = {
   readable: (subKey, name) =>
-    /^Software\\[^\\\0]+(\\[^\\\0]+)*$/.test(subKey) && subKey.length < 256 && NAME.test(name),
+    /^Software\\[^\\\0]+(\\[^\\\0]+)*$/.test(subKey) &&
+    subKey.length < 256 &&
+    (NAME.test(name) || (subKey.toLowerCase() === RUN_KEY.toLowerCase() && RUN_NAME.test(name))),
   writable: (subKey, name) =>
     new RegExp(`^Software\\\\DoodleNote-InstallStatus\\\\${GUID}$`, 'i').test(subKey) &&
     /^AppMigration[A-Za-z]*$/.test(name),

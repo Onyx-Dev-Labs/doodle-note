@@ -63,7 +63,8 @@ import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import {
-  isInsideFolder,
+  LOGIN_RUN_KEY,
+  loginItemStateFromRun,
   runWindowsInstallMigration,
   runWithRetries
 } from './windows-install-migration'
@@ -1239,11 +1240,18 @@ app.whenReady().then(async () => {
         readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),
         writeMarker: (contents) => writeFileSync(markerPath, contents),
         loginItem: {
-          stateFor: (exe) => {
-            const settings = app.getLoginItemSettings({ path: exe })
-            const item = settings.launchItems?.find((entry) => isInsideFolder(entry.path, exe))
-            return { registered: settings.openAtLogin, enabled: item?.enabled ?? true }
-          },
+          // The Run value is read as written and compared 8.3-aware; Electron's own
+          // lookup compares plain strings (see loginItemStateFromRun).
+          stateFor: (isLegacyPath) =>
+            loginItemStateFromRun(
+              () => registry.readString(LOGIN_RUN_KEY, APP_IDENTITY.loginItemName),
+              (program) =>
+                app
+                  .getLoginItemSettings({ path: program })
+                  .launchItems?.find((entry) => entry.path.toLowerCase() === program.toLowerCase())
+                  ?.enabled,
+              isLegacyPath
+            ),
           registerCurrent: (enabled) =>
             app.setLoginItemSettings({
               openAtLogin: true,

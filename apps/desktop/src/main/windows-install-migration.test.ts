@@ -13,7 +13,9 @@ import {
 } from './mcp-clients-logic'
 import {
   isInsideFolder,
+  isShortAliasOf,
   legacyInstallFor,
+  loginItemStateFromRun,
   longPath,
   samePath,
   readFailureReason,
@@ -328,6 +330,185 @@ test('folder containment follows Windows rules and does not match siblings', () 
   assert.ok(!isInsideFolder(newExe, `${programs}\\desktop`))
 })
 
+/**
+ * A mocked GetFinalPathNameByHandle after a move, for a profile reached through
+ * its short name (C:\Users\PATRIC~1): the old folders are gone, the new ones
+ * (production DoodleNote, QA "DoodleNote QA") exist with their short aliases.
+ */
+const SHORT_PROGRAMS = 'C:\\Users\\PATRIC~1\\AppData\\Local\\Programs'
+const LONG_PROGRAMS = 'C:\\Users\\Patricia Long\\AppData\\Local\\Programs'
+function movedDisk(): (path: string) => string {
+  const disk = new Map<string, string>()
+  const add = (short: string, long: string): void => void disk.set(short.toLowerCase(), long)
+  add('C:\\', 'C:\\')
+  add('C:\\Users', 'C:\\Users')
+  for (const user of ['PATRIC~1', 'Patricia Long']) {
+    add(`C:\\Users\\${user}`, 'C:\\Users\\Patricia Long')
+    for (const sub of ['AppData', 'AppData\\Local', 'AppData\\Local\\Programs'])
+      add(`C:\\Users\\${user}\\${sub}`, `C:\\Users\\Patricia Long\\${sub}`)
+    const programs = `C:\\Users\\${user}\\AppData\\Local\\Programs`
+    for (const [short, long] of [
+      ['DoodleNote', 'DoodleNote'],
+      ['DoodleNote\\DoodleNote.exe', 'DoodleNote\\DoodleNote.exe'],
+      ['DoodleNote\\DOODLE~1.EXE', 'DoodleNote\\DoodleNote.exe'],
+      ['DOODLE~1', 'DoodleNote QA'],
+      ['DoodleNote QA', 'DoodleNote QA'],
+      ['DOODLE~1\\DOODLE~1.EXE', 'DoodleNote QA\\DoodleNote QA.exe'],
+      ['DoodleNote QA\\DoodleNote QA.exe', 'DoodleNote QA\\DoodleNote QA.exe']
+    ])
+      add(`${programs}\\${short}`, `${LONG_PROGRAMS}\\${long}`)
+  }
+  return (path) => {
+    const found = disk.get(path.toLowerCase())
+    if (found === undefined) throw new Error(`ENOENT ${path}`)
+    return found
+  }
+}
+const noExpansion = (): string => {
+  throw new Error('no expansion')
+}
+
+test('8.3 aliases: the form Windows gives a long name, never the hashed one', () => {
+  assert.ok(isShortAliasOf('DESKTO~1', 'desktop-qa'))
+  assert.ok(isShortAliasOf('deskto~2', 'desktop-qa'))
+  assert.ok(isShortAliasOf('DOODLE~1.EXE', 'DoodleNote QA.exe'))
+  assert.ok(isShortAliasOf('MYAPP_~1', 'my app+x'))
+  assert.ok(!isShortAliasOf('DOODLE~1.EXE', 'DoodleNote QA.dll'))
+  assert.ok(!isShortAliasOf('DOODLE~1', 'DoodleNote QA.exe'))
+  assert.ok(!isShortAliasOf('DESKTO~1', 'deskto'))
+  assert.ok(!isShortAliasOf('DESK~1', 'desktop-qa'))
+  assert.ok(!isShortAliasOf('DE12AB~1', 'desktop-qa'))
+  assert.ok(!isShortAliasOf('DESKT~10', 'desktop-qa'))
+  assert.ok(!isShortAliasOf('desktop-qa', 'desktop-qa'))
+})
+
+test('stale-entry detection expands 8.3 names: MCP commands and Run values written through a short path', () => {
+  const realPath = movedDisk()
+  const legacy = `${LONG_PROGRAMS}\\desktop`
+  const legacyQa = `${LONG_PROGRAMS}\\desktop-qa`
+  // The old app was started through the profile's short name: its folder is gone,
+  // but the parent still exists, so it expands.
+  const shortOld = `${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe`
+  assert.ok(isInsideFolder(shortOld, legacy, realPath))
+  assert.ok(isInsideFolder(`${SHORT_PROGRAMS}\\desktop\\DOODLE~1.EXE`, legacy, realPath))
+  // Before the fix the strings were compared as written: never recognised.
+  assert.ok(!isInsideFolder(shortOld, legacy, noExpansion))
+  // QA: the old folder's own short name cannot expand any more; it is its alias.
+  assert.ok(isInsideFolder(`${SHORT_PROGRAMS}\\DESKTO~1\\DOODLE~1.EXE`, legacyQa, realPath))
+  assert.ok(isInsideFolder(`${SHORT_PROGRAMS}\\desktop-qa\\DoodleNote QA.exe`, legacyQa, realPath))
+  // The new folders exist, so their short names expand to themselves: never stale.
+  assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\DOODLE~1\\DOODLE~1.EXE`, legacyQa, realPath))
+  assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\DOODLE~1\\DOODLE~1.EXE`, legacy, realPath))
+  assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\DoodleNote\\DOODLE~1.EXE`, legacy, realPath))
+  assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\OTHERA~1\\x.exe`, legacyQa, realPath))
+  // An alias counts only in the old folder's own place.
+  assert.ok(!isInsideFolder(`C:\\DESKTO~1\\DoodleNote QA.exe`, legacyQa, realPath))
+})
+
+test('the login item: the Run value is read as written and matched 8.3-aware', async () => {
+  const realPath = movedDisk()
+  const legacy = `${LONG_PROGRAMS}\\desktop`
+  const isLegacy = (path: string): boolean => isInsideFolder(path, legacy, realPath)
+  const asked: string[] = []
+  const state = (value: string | null, enabled?: boolean): Promise<LoginItemState> =>
+    loginItemStateFromRun(
+      async () => value,
+      (program) => {
+        asked.push(program)
+        return enabled
+      },
+      isLegacy
+    )
+  const shortOld = `${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe`
+  assert.deepEqual(await state(`"${shortOld}"`, false), { registered: true, enabled: false })
+  // Electron is asked with the program exactly as the Run value has it.
+  assert.deepEqual(asked, [shortOld])
+  assert.deepEqual(await state(`"${shortOld}" --hidden`), { registered: true, enabled: true })
+  // Unquoted: the first word (Electron always quotes).
+  assert.deepEqual(await state(`${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe --hidden`), {
+    registered: true,
+    enabled: true
+  })
+  for (const value of [
+    null,
+    '',
+    '""',
+    `"${SHORT_PROGRAMS}\\DoodleNote\\DoodleNote.exe"`,
+    `"${SHORT_PROGRAMS}\\DOODLE~1\\DOODLE~1.EXE"`
+  ])
+    assert.deepEqual(await state(value), { registered: false, enabled: true }, String(value))
+  assert.equal(asked.length, 3)
+})
+
+test('a launch through the short path: the record is consumed, and the marker is recognised', async () => {
+  const realPath = movedDisk()
+  const shortNewExe = `${SHORT_PROGRAMS}\\DoodleNote\\DOODLE~1.EXE`
+  const longNewExe = `${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`
+  const longRecord: InstallMigrationRecord = {
+    from: `${LONG_PROGRAMS}\\desktop`,
+    to: `${LONG_PROGRAMS}\\DoodleNote`,
+    at: '2026-11-08T01:02:03Z'
+  }
+  const staleCommand = `${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe`
+  let seen: ((command: string) => boolean) | null = null
+  const deps = fakeDeps({
+    execPath: shortNewExe,
+    realPath,
+    loginItem: {
+      stateFor: (isLegacyPath) => ({ registered: isLegacyPath(staleCommand), enabled: true }),
+      registerCurrent: (enabled) => {
+        deps.registered.push(enabled)
+      }
+    },
+    repointMcpClients: (isLegacy) => {
+      seen = isLegacy
+      return [{ id: 'codex', outcome: 'updated' }]
+    }
+  })
+  deps.record = longRecord
+  deps.files = new Set([longNewExe])
+  const first = await runWindowsInstallMigration(deps)
+  assert.equal(first.loginItem, true)
+  assert.deepEqual(first.mcpClients, ['codex'])
+  assert.equal(first.status?.state, 'complete')
+  assert.ok(seen!(staleCommand))
+  assert.ok(!seen!(shortNewExe))
+
+  // The marker of a run started long is recognised by a run started short (and
+  // the reverse): progress is not redone, the record is only cleared.
+  for (const [written, running] of [
+    [longNewExe, shortNewExe],
+    [shortNewExe, longNewExe]
+  ]) {
+    const again = fakeDeps({
+      execPath: running,
+      realPath,
+      ...untouchableSteps
+    })
+    again.record = longRecord
+    again.files = new Set([longNewExe])
+    again.marker =
+      JSON.stringify({
+        version: 2,
+        from: `${LONG_PROGRAMS}\\desktop\\DoodleNote.exe`,
+        to: written,
+        migratedAt: longRecord.at,
+        loginItemDone: true,
+        mcpPending: [],
+        complete: true
+      }) + '\n'
+    const result = await runWindowsInstallMigration(again)
+    assert.equal(result.ran, false, `${written} -> ${running}`)
+    assert.equal(result.status?.reason, 'repointed')
+    assert.equal(again.record, null)
+  }
+})
+
+const untouchableSteps = {
+  loginItem: { stateFor: () => assert.fail(), registerCurrent: () => assert.fail() },
+  repointMcpClients: () => assert.fail()
+}
+
 function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrationDeps & {
   marker: string | null
   record: InstallMigrationRecord | InstallRecordPending | null
@@ -356,7 +537,10 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
       deps.marker = contents
     },
     loginItem: {
-      stateFor: (exe: string): LoginItemState => ({ registered: exe === oldExe, enabled: true }),
+      stateFor: (isLegacyPath: (path: string) => boolean): LoginItemState => ({
+        registered: isLegacyPath(oldExe) && !isLegacyPath(newExe),
+        enabled: true
+      }),
       registerCurrent: (enabled: boolean) => {
         deps.registered.push(enabled)
       }
