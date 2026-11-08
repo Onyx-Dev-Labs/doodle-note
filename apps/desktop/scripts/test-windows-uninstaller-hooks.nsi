@@ -36,6 +36,8 @@ LangString appCannotBeClosed ${LANG_ENGLISH} "cannot be closed"
 
 Function .onInit
   WriteUninstaller "${UNINSTALLER_OUT}"
+  ; electron-builder's quitSuccess: a bare Quit from .onInit exits with 2.
+  SetErrorLevel 0
   Quit
 FunctionEnd
 
