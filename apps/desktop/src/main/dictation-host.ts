@@ -211,6 +211,7 @@ export function createDictationHost(options: DictationHostOptions): {
     ...(integrity
       ? {
           helperIntegrity: () => integrity.state(),
+          helperLocked: () => integrity.lastLocked,
           checkHelperIntegrity: () => void integrity.ensure()
         }
       : {}),

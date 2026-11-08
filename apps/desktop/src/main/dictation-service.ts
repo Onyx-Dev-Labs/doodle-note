@@ -199,6 +199,11 @@ export interface DictationDeps {
    * the helper, 'checking' while verifying, then 'ok', 'damaged' or 'absent'. Absent on macOS.
    */
   helperIntegrity?(): HelperIntegrityState
+  /**
+   * Windows: whether the helper's last check held its file (false while it runs checked by digest
+   * only, e.g. after repeated lost holds); shown in the Settings status row. Absent on macOS.
+   */
+  helperLocked?(): boolean
   /** Windows: start (or join) the integrity check; it runs asynchronously. */
   checkHelperIntegrity?(): void
   settings: {
@@ -2287,6 +2292,7 @@ export class DictationService {
       phase: this.state.phase,
       permissions,
       helper: this.helperState(settings.enabled),
+      ...(this.deps.helperLocked ? { helperLocked: this.deps.helperLocked() } : {}),
       toggleShortcut: this.toggleState,
       pasteLastShortcut: this.actionKeys.paste.state,
       copyLastShortcut: this.actionKeys.copy.state,

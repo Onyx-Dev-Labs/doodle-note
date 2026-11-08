@@ -390,6 +390,7 @@ function integrity(
     cachePath?: string | null
     budgetMs?: number
     holdBudgetMs?: number
+    holdRetryCooldownMs?: number
     leaseMaxMs?: number
   } = {}
 ): HelperIntegrity {
@@ -400,6 +401,9 @@ function integrity(
     cachePath: extra.cachePath ?? null,
     ...(extra.budgetMs !== undefined ? { budgetMs: extra.budgetMs } : {}),
     ...(extra.holdBudgetMs !== undefined ? { holdBudgetMs: extra.holdBudgetMs } : {}),
+    ...(extra.holdRetryCooldownMs !== undefined
+      ? { holdRetryCooldownMs: extra.holdRetryCooldownMs }
+      : {}),
     ...(extra.leaseMaxMs !== undefined ? { leaseMaxMs: extra.leaseMaxMs } : {})
   })
 }
@@ -537,6 +541,32 @@ test('a hold lost before the spawn returns fails confirm(); after repeated losse
   assert.equal(last.locked, false, 'and says plainly that nothing is held')
   assert.equal(worker.holds(), holdsBefore, 'no further hold was attempted')
   assert.match(check.lastUnlockedReason ?? '', /digest only/)
+})
+
+test('digest-only after repeated lost holds is not sticky: the held path is tried again after the cooldown', async () => {
+  const buffer = fakePe()
+  const path = helperFile(buffer)
+  const expect = { digest: stableHelperDigest(buffer)!, publisherCn: CN, thumbprints: [] }
+  const worker = fakeHolder(valid(CN), { dies: 'before-confirm', dyingHolds: MAX_LOST_HOLDS })
+  const check = integrity(path, expect, worker.holder, { holdRetryCooldownMs: 60 })
+  const seen: boolean[] = []
+  check.onChange(() => seen.push(check.lastLocked))
+  for (let lost = 0; lost < MAX_LOST_HOLDS; lost++) {
+    const lease = await check.acquire()
+    await lease.confirm()
+    lease.release()
+  }
+  const fallback = await check.acquire()
+  assert.equal(fallback.locked, false, 'within the cooldown: digest only')
+  assert.equal(check.lastLocked, false, 'the status row can show it')
+  fallback.release()
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const again = await check.acquire()
+  assert.equal(again.locked, true, 'after the cooldown the worker holds the file again')
+  assert.equal(await again.confirm(), true)
+  again.release()
+  assert.equal(check.lastLocked, true)
+  assert.ok(seen.includes(false) && seen.at(-1) === true, 'listeners heard the locked state change')
 })
 
 test('the budgets: a worker that does not answer the hold, or the signature, is not waited for', async () => {

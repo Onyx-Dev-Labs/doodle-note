@@ -529,43 +529,127 @@ test('Windows: a verified helper starts, and the check runs again before a respa
   }
 })
 
-test('Windows: a hold lost before the spawn returned invalidates it; the helper is re-checked and re-spawned', async () => {
+test('Windows: a hold lost after the spawn: the helper is ended unseen, re-checked and re-spawned', async () => {
   const fake = recordingHelper(null)
   const events: string[] = []
   let checks = 0
+  let taps = 0
   const client = new DictationHelperClient({
     ...fake,
     platform: 'win32',
     verify: async () => {
       checks += 1
       const attempt = checks
+      let asked = 0
       events.push(`verify ${attempt}`)
       return {
         ok: true,
         locked: true,
-        // The first lease's holder ended before the spawn returned (a killed speech worker).
+        // The first lease is held before the spawn and lost after it (a killed speech worker).
         confirm: async () => {
-          events.push(`confirm ${attempt}`)
-          return attempt > 1
+          asked += 1
+          events.push(`confirm ${attempt}.${asked}`)
+          return attempt > 1 || asked === 1
         },
         release: () => events.push(`release ${attempt}`)
       }
     }
   })
+  client.onTap(() => {
+    taps += 1
+  })
   try {
     assert.ok(await client.status(), 'the second, confirmed spawn serves the request')
     assert.deepEqual(events, [
       'verify 1',
-      'confirm 1',
+      'confirm 1.1',
+      'confirm 1.2',
       'release 1',
       'verify 2',
-      'confirm 2',
+      'confirm 2.1',
+      'confirm 2.2',
       'release 2'
     ])
-    // The helper spawned under the invalid lease was ended at once and never asked anything: the
-    // one status request went to the confirmed helper.
+    // The first helper announced ready and a tap at once, but it was gated: nothing of it reached
+    // the app, and the one status request went to the confirmed helper.
+    assert.equal(taps, 1, "only the confirmed helper's tap was seen")
     const ops = (await read(fake.log)).split('\n').filter((line) => line.startsWith('op '))
     assert.deepEqual(ops, ['op status'])
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: nothing reaches the helper until the post-spawn hold confirmation returns', async () => {
+  const fake = recordingHelper(null)
+  const events: string[] = []
+  let checks = 0
+  let resolvePost: ((held: boolean) => void) | null = null
+  const client = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    verify: async () => {
+      checks += 1
+      let asked = 0
+      events.push('verify')
+      return {
+        ok: true,
+        locked: true,
+        confirm: () => {
+          asked += 1
+          events.push(`confirm ${asked}`)
+          if (asked === 1) return Promise.resolve(true)
+          return new Promise<boolean>((resolve) => {
+            resolvePost = resolve
+          })
+        },
+        release: () => events.push('release')
+      }
+    }
+  })
+  let taps = 0
+  client.onTap(() => {
+    taps += 1
+  })
+  try {
+    // Several callers at once: a status, a delivery, and arming the hold key (a trigger re-arm).
+    const status = client.status()
+    const delivery = client.deliver('s1', 'hello')
+    const hold = client.setHoldKey('rightControl')
+    assert.ok(await waitFor(() => resolvePost !== null), 'the post-spawn confirmation is pending')
+    // The helper process is running (it logged its start) but is gated.
+    assert.ok(
+      await waitFor(async () => /started/.test(await read(fake.log))),
+      'the helper process started'
+    )
+    await sleep(300)
+    const before = await read(fake.log)
+    assert.doesNotMatch(before, /op /, 'no request reached the unconfirmed helper')
+    assert.equal(taps, 0, 'its events were held back')
+    assert.deepEqual(
+      events,
+      ['verify', 'confirm 1', 'confirm 2'],
+      'one launch for every caller; the lease is not released'
+    )
+    resolvePost!(true)
+    assert.ok(await status)
+    assert.notEqual(
+      (await delivery).reason,
+      'helper-timeout',
+      'the delivery was answered by the confirmed helper'
+    )
+    assert.equal(await hold, null)
+    assert.deepEqual(
+      events,
+      ['verify', 'confirm 1', 'confirm 2', 'release'],
+      'released once, after the confirmation'
+    )
+    assert.equal(checks, 1)
+    assert.equal(taps, 1)
+    const ops = await read(fake.log)
+    assert.match(ops, /op status/)
+    assert.match(ops, /op deliver/)
+    assert.match(ops, /op hold-start/)
   } finally {
     await client.dispose()
   }
@@ -585,6 +669,56 @@ test('Windows: a hold that keeps being lost stops after the attempt limit; nothi
   try {
     assert.equal(await client.status(), null)
     assert.equal(checks, 3, 'three attempts, each with a fresh check')
+    assert.equal(
+      await read(fake.log),
+      '',
+      'the pre-spawn confirmation failed each time: never started'
+    )
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: a helper that exits because its provider calls are stuck is restarted', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-busy-'))
+  const script = join(dir, 'helper.js')
+  const log = join(dir, 'log.txt')
+  writeFileSync(
+    script,
+    `
+const fs = require('node:fs')
+fs.appendFileSync(process.argv[2], 'started\\n')
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+const starts = fs.readFileSync(process.argv[2], 'utf8').split('started').length - 1
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    // The first helper: every call is stuck past the cap, so it says so and restarts itself.
+    if (starts === 1 && req.op === 'deliver') { send({ event: 'reply', id: req.id, ok: true, outcome: 'refused', reason: 'helper-busy', verified: false, clipboard: 'untouched' }); send({ event: 'restarting', reason: 'helper-busy' }); setTimeout(() => process.exit(3), 50) }
+    else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  const client = new DictationHelperClient({
+    command: process.execPath,
+    args: [script, log],
+    platform: 'win32'
+  })
+  try {
+    assert.equal(await client.setHoldKey('rightControl'), null)
+    const busy = await client.deliver('s1', 'x')
+    assert.equal(busy.reason, 'helper-busy')
+    // The client's automatic restart brings a fresh helper (the hold key wants one).
+    assert.ok(
+      await waitFor(async () => (await read(log)).split('started').length - 1 >= 2),
+      'restarted'
+    )
+    assert.ok(await client.status(), 'the fresh helper answers')
   } finally {
     await client.dispose()
   }

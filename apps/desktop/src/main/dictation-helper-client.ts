@@ -183,8 +183,18 @@ export class DictationHelperClient {
   private helperReady = false
   /** The child whose triggers have been re-armed, so re-arming runs once per process. */
   private rearmedChild: HelperChild | null = null
-  /** Windows: the integrity check a spawn is waiting on. */
-  private verifying: Promise<HelperLaunchVerdict> | null = null
+  /**
+   * Windows: the ONE launch in progress (verify, confirm the hold, spawn, confirm the hold again).
+   * Every caller that needs the helper meanwhile awaits this same promise.
+   */
+  private launching: Promise<boolean> | null = null
+  /**
+   * Windows: a helper spawned under a lease whose post-spawn hold confirmation has not come back yet.
+   * It is not `child`: nothing can send it a request, and its output (ready, events) is held back
+   * in `gatedChunks` until it is confirmed (then replayed) or discarded unseen.
+   */
+  private gated: HelperChild | null = null
+  private gatedChunks: string[] = []
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
 
   constructor(
@@ -566,6 +576,7 @@ export class DictationHelperClient {
     if (this.aliveTimer) clearTimeout(this.aliveTimer)
     this.aliveTimer = null
     this.failAll()
+    if (this.gated) this.discardGated(this.gated)
     const child = this.child
     this.child = null
     if (child && child.exitCode === null) {
@@ -593,6 +604,8 @@ export class DictationHelperClient {
 
   private ensureRunning(): Promise<boolean> {
     if (this.disposed) return Promise.resolve(false)
+    // Windows: callers that arrive while a launch is in progress wait for that same launch.
+    if (this.windows && this.launching) return this.launching
     // Windows only: a ready that arrived after the readiness timeout still counts for the session.
     // macOS keeps the base behaviour exactly (no late-ready shortcut).
     if (this.windows && this.child && this.helperReady) return Promise.resolve(true)
@@ -601,26 +614,38 @@ export class DictationHelperClient {
     // Do not spin on a helper that dies immediately.
     if (Date.now() - this.lastExitAt < 500) return Promise.resolve(false)
     // Windows: verify the helper immediately before every spawn; a damaged helper never runs.
-    if (this.windows && this.launch.verify) return this.verifiedSpawn(HELPER_SPAWN_ATTEMPTS)
+    if (this.windows && this.launch.verify) {
+      const launch = this.launchVerified(HELPER_SPAWN_ATTEMPTS)
+      this.launching = launch
+      void launch.finally(() => {
+        if (this.launching === launch) this.launching = null
+      })
+      return launch
+    }
     return this.spawnChild()
   }
 
   /**
-   * Windows: verify, spawn, and only then confirm the file was still held when the process was
-   * created (CreateProcess runs inside spawn()). A lease whose hold was lost meanwhile is invalid: the
-   * helper just spawned is ended unused and the whole check runs again, with a fresh hold.
+   * Windows: the whole launch as one sequence, shared by every caller (see `launching`):
+   *  1. verify (the speech worker holds the file and checks it);
+   *  2. confirm the hold is still open immediately BEFORE the spawn;
+   *  3. spawn, with the new process gated: not yet `child`, no request can reach it, its output is
+   *     held back, and no trigger is re-armed;
+   *  4. confirm the hold again right AFTER the spawn (CreateProcess runs inside spawn());
+   *  5. only then release the lease and publish the helper (replaying its held-back output).
+   * A failed confirmation ends the gated process before anything observed it, and the whole check
+   * runs again with a fresh hold. Killing it cannot undo what it already ran if the bytes had been
+   * swapped; see the PR notes for why process creation is not moved into the worker.
    */
-  private verifiedSpawn(attempts: number): Promise<boolean> {
+  private async launchVerified(attempts: number): Promise<boolean> {
     const verify = this.launch.verify!
-    if (!this.verifying) {
-      this.verifying = verify().then(
-        (verdict) => verdict,
-        (): HelperLaunchVerdict => ({ ok: false })
-      )
-    }
-    const pending = this.verifying
-    return pending.then(async (verdict) => {
-      if (this.verifying === pending) this.verifying = null
+    for (let attempt = 0; attempt < attempts && !this.disposed; attempt++) {
+      let verdict: HelperLaunchVerdict
+      try {
+        verdict = await verify()
+      } catch {
+        verdict = { ok: false }
+      }
       if (!verdict.ok || this.disposed) {
         verdict.release?.()
         return false
@@ -629,43 +654,51 @@ export class DictationHelperClient {
         verdict.release?.()
         return this.ready
       }
-      let ready: Promise<boolean>
-      try {
-        ready = this.spawnChild()
-      } catch (error) {
-        verdict.release?.()
-        throw error
-      }
-      const spawned = this.child
-      if (verdict.locked && verdict.confirm) {
-        let held = false
+      const confirm = async (): Promise<boolean> => {
+        if (!verdict.locked || !verdict.confirm) return true
         try {
-          held = await verdict.confirm()
+          return await verdict.confirm()
         } catch {
-          held = false
-        }
-        if (!held) {
-          console.error(
-            '[dictation] the helper file was no longer held when the helper started; ending it and checking again'
-          )
-          verdict.release?.()
-          if (spawned) this.discardChild(spawned)
-          if (attempts > 1 && !this.disposed) return this.verifiedSpawn(attempts - 1)
           return false
         }
       }
+      if (!(await confirm())) {
+        console.error(
+          '[dictation] the helper file was no longer held before the spawn; checking again'
+        )
+        verdict.release?.()
+        continue
+      }
+      const ready = this.spawnChild(true)
+      const spawned = this.gated
+      if (!spawned) {
+        verdict.release?.()
+        return false
+      }
+      if (!(await confirm())) {
+        console.error(
+          '[dictation] the helper file was no longer held when the helper started; ending it unused and checking again'
+        )
+        verdict.release?.()
+        this.discardGated(spawned)
+        continue
+      }
       verdict.release?.()
+      if (this.disposed || spawned.exitCode !== null || spawned.signalCode !== null) {
+        this.discardGated(spawned)
+        return false
+      }
+      this.publish(spawned)
       return ready
-    })
+    }
+    return false
   }
 
-  /** End a helper spawned under a lease that turned out invalid; it is never used. */
-  private discardChild(child: HelperChild): void {
-    if (this.child === child) {
-      this.child = null
-      this.ready = null
-      this.helperReady = false
-      this.rearmedChild = null
+  /** End a gated helper whose lease turned out invalid; nothing ever saw it. */
+  private discardGated(child: HelperChild): void {
+    if (this.gated === child) {
+      this.gated = null
+      this.gatedChunks = []
     }
     try {
       child.stdin.end()
@@ -675,7 +708,20 @@ export class DictationHelperClient {
     child.kill()
   }
 
-  private spawnChild(): Promise<boolean> {
+  /** The gated helper was confirmed: it becomes `child`, and its held-back output is processed. */
+  private publish(child: HelperChild): void {
+    const chunks = this.gatedChunks
+    this.gated = null
+    this.gatedChunks = []
+    this.child = child
+    this.buffer = ''
+    for (const chunk of chunks) this.consume?.(child, chunk)
+  }
+
+  /** Processes a chunk of the current child's output (set per spawn, see spawnChild). */
+  private consume: ((child: HelperChild, chunk: string) => void) | null = null
+
+  private spawnChild(gate = false): Promise<boolean> {
     let child: HelperChild
     try {
       child = spawn(this.launch.command, this.launch.args ?? [], {
@@ -695,8 +741,14 @@ export class DictationHelperClient {
       this.launchError = (error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN'
       return Promise.resolve(false)
     }
-    this.child = child
-    this.buffer = ''
+    // Windows verified launch: gated until the post-spawn hold confirmation (launchVerified).
+    if (gate) {
+      this.gated = child
+      this.gatedChunks = []
+    } else {
+      this.child = child
+      this.buffer = ''
+    }
     this.helperReady = false
     this.rearmedChild = null
     child.stdout.setEncoding('utf8')
@@ -714,8 +766,8 @@ export class DictationHelperClient {
         clearTimeout(timer)
         resolve(ok)
       }
-      child.stdout.on('data', (chunk: string) => {
-        if (this.child !== child) return
+      const consume = (from: HelperChild, chunk: string): void => {
+        if (this.child !== from) return
         this.buffer += chunk
         for (let nl = this.buffer.indexOf('\n'); nl !== -1; nl = this.buffer.indexOf('\n')) {
           const line = this.buffer.slice(0, nl)
@@ -738,6 +790,14 @@ export class DictationHelperClient {
             settle(true)
           }
         }
+      }
+      this.consume = consume
+      child.stdout.on('data', (chunk: string) => {
+        if (this.gated === child) {
+          this.gatedChunks.push(chunk)
+          return
+        }
+        consume(child, chunk)
       })
       child.on('error', (error: NodeJS.ErrnoException) => {
         this.launchError = error.code ?? 'UNKNOWN'

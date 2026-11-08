@@ -99,6 +99,10 @@ export const HOLD_BUDGET_MS = 10_000
 export const LEASE_MAX_MS = 15_000
 /** After this many leases whose hold was lost before the spawn, the next check is digest-only. */
 export const MAX_LOST_HOLDS = 2
+/** In digest-only fallback, the held path is tried again on the next spawn after this long. */
+export const HOLD_RETRY_COOLDOWN_MS = 60_000
+/** A "still held?" round trip to the speech worker; it answers in milliseconds when it can. */
+export const CONFIRM_BUDGET_MS = 250
 
 /**
  * PE layout facts the digest needs, fully validated; null for a malformed or non-contiguous image
@@ -195,6 +199,7 @@ export interface HelperIntegrityOptions {
   cachePath: string | null
   budgetMs?: number
   holdBudgetMs?: number
+  holdRetryCooldownMs?: number
   leaseMaxMs?: number
   log?: (line: string) => void
 }
@@ -266,9 +271,13 @@ export class HelperIntegrity {
   private readonly listeners = new Set<(state: HelperIntegrityState) => void>()
   /** Leases in a row whose hold was lost before the spawn (worker ended); see MAX_LOST_HOLDS. */
   private lostHolds = 0
+  private lastLostAt = 0
   /** The branch that decided the last verdict, for diagnostics and evidence. */
   lastBranch: 'digest' | 'signature' | 'signature-unavailable' | 'none' = 'none'
-  /** Whether the last verdict was reached on bytes read through a hold (not by path). */
+  /**
+   * Whether the helper's last check held the file (false: checked by path, digest only, or a hold
+   * lost since). Shown in the Settings status row.
+   */
   lastLocked = false
   /** Why the last check could not hold the file, when it could not (diagnostics). */
   lastUnlockedReason: string | null = null
@@ -301,19 +310,41 @@ export class HelperIntegrity {
     if (this.current === 'unchecked') this.set('checking')
     let lease: HelperLease
     try {
-      lease = await this.check(this.lostHolds < MAX_LOST_HOLDS)
+      lease = await this.check(this.holdAllowed())
       if (lease.verdict === 'ok' && lease.locked && !this.stillHeld) {
         // The holder ended while the verdict was being reached: never hand out that lease.
         lease.release()
         this.noteLostHold('the hold ended before the verdict')
-        lease = await this.check(this.lostHolds < MAX_LOST_HOLDS)
+        lease = await this.check(this.holdAllowed())
       }
     } catch {
       lease = { verdict: 'damaged', locked: false, confirm: NOT_HELD, release: NO_RELEASE }
     }
-    this.lastLocked = lease.locked
     this.set(lease.verdict)
+    this.setLocked(lease.locked)
     return lease
+  }
+
+  /**
+   * Whether this check may use the worker's hold: not after MAX_LOST_HOLDS losses in a row, until
+   * HOLD_RETRY_COOLDOWN_MS has passed since the last one (then the held path is tried again).
+   */
+  private holdAllowed(): boolean {
+    if (
+      this.lostHolds >= MAX_LOST_HOLDS &&
+      Date.now() - this.lastLostAt >= (this.options.holdRetryCooldownMs ?? HOLD_RETRY_COOLDOWN_MS)
+    ) {
+      this.log('trying the held check again after the cooldown')
+      this.lostHolds = 0
+    }
+    return this.lostHolds < MAX_LOST_HOLDS
+  }
+
+  /** The Settings status row shows when the helper runs unheld; a change notifies like a state change. */
+  private setLocked(locked: boolean): void {
+    if (locked === this.lastLocked) return
+    this.lastLocked = locked
+    for (const listener of this.listeners) listener(this.current)
   }
 
   /** Set by check(): whether the hold behind the last lease is still alive. */
@@ -321,6 +352,8 @@ export class HelperIntegrity {
 
   private noteLostHold(reason: string): void {
     this.lostHolds++
+    this.lastLostAt = Date.now()
+    this.setLocked(false)
     this.log(`lease invalidated (${reason}); checking again`)
   }
 
@@ -386,7 +419,8 @@ export class HelperIntegrity {
     // The signature's own budget starts once the file is held.
     const signatureStarted = Date.now()
     const signatureRemaining = (): number => budget - (Date.now() - signatureStarted)
-    if (!useHolder) this.lastUnlockedReason = 'holds were lost repeatedly; digest only'
+    if (!useHolder)
+      this.lastUnlockedReason = 'holds were lost repeatedly; digest only until the cooldown ends'
     if (held) {
       const facts = held.facts
       if (facts.status === 'absent') {
@@ -443,7 +477,7 @@ export class HelperIntegrity {
           this.noteLostHold('the holder ended before the spawn returned')
           return false
         }
-        const ok = await within(holdOf.confirm(), 2_000, false)
+        const ok = await within(holdOf.confirm(), CONFIRM_BUDGET_MS, false)
         if (ok) this.lostHolds = 0
         else this.noteLostHold('the hold was gone when the spawn returned')
         return ok

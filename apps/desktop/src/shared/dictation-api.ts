@@ -180,6 +180,11 @@ export interface DictationStatus {
    */
   /** Windows adds checking (being verified before it may run) and off (Bark is off; not started). */
   helper: 'ready' | 'blocked' | 'damaged' | 'unavailable' | 'checking' | 'off'
+  /**
+   * Windows only: whether the helper's last check held its file while it started (false: checked by
+   * its digest only, because the speech worker could not hold it). Absent on macOS.
+   */
+  helperLocked?: boolean
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState
