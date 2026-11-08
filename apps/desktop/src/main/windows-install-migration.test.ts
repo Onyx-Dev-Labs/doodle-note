@@ -643,14 +643,23 @@ test('the login item: the Run value is read as written and matched 8.3-aware', a
       isLegacy
     )
   const shortOld = `${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe`
-  assert.deepEqual(await state(`"${shortOld}"`, false), { registered: true, enabled: false })
+  assert.deepEqual(await state(`"${shortOld}"`, false), {
+    registered: true,
+    enabled: false,
+    source: 'electron'
+  })
   // Electron is asked with the program exactly as the Run value has it.
   assert.deepEqual(asked, [shortOld])
-  assert.deepEqual(await state(`"${shortOld}" --hidden`), { registered: true, enabled: true })
+  assert.deepEqual(await state(`"${shortOld}" --hidden`), {
+    registered: true,
+    enabled: true,
+    source: 'electron'
+  })
   // Unquoted: the first word (Electron always quotes).
   assert.deepEqual(await state(`${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe --hidden`), {
     registered: true,
-    enabled: true
+    enabled: true,
+    source: 'electron'
   })
   for (const value of [
     null,
@@ -683,17 +692,28 @@ test('round 10: a login item turned off in Task Manager stays off, an unknown st
       () => electron,
       isLegacy
     )
+  // Round 11: the answer names what told it.
+  const approved = (enabled: boolean): LoginItemState => ({
+    registered: true,
+    enabled,
+    source: 'startup-approved'
+  })
+  const electron = (enabled: boolean): LoginItemState => ({
+    registered: true,
+    enabled,
+    source: 'electron'
+  })
   // The case the review found: Electron cannot match the 8.3 program (undefined), the
   // item is disabled: it stays disabled (before: undefined -> true, re-enabled).
-  assert.deepEqual(await state(async () => off, undefined), { registered: true, enabled: false })
+  assert.deepEqual(await state(async () => off, undefined), approved(false))
   // StartupApproved decides when it can be read, whatever Electron says.
-  assert.deepEqual(await state(async () => off, true), { registered: true, enabled: false })
-  assert.deepEqual(await state(async () => on, false), { registered: true, enabled: true })
+  assert.deepEqual(await state(async () => off, true), approved(false))
+  assert.deepEqual(await state(async () => on, false), approved(true))
   // No StartupApproved value: never toggled, enabled.
-  assert.deepEqual(await state(async () => null, undefined), { registered: true, enabled: true })
+  assert.deepEqual(await state(async () => null, undefined), approved(true))
   // Unreadable: Electron's answer, when it has one.
-  assert.deepEqual(await state(unreadable, false), { registered: true, enabled: false })
-  assert.deepEqual(await state(unreadable, true), { registered: true, enabled: true })
+  assert.deepEqual(await state(unreadable, false), electron(false))
+  assert.deepEqual(await state(unreadable, true), electron(true))
   // Neither knows (unreadable or an empty value, and no Electron match): never guessed.
   await assert.rejects(state(unreadable, undefined), LoginItemStateUnknown)
   await assert.rejects(
@@ -745,12 +765,60 @@ test('round 10: a login item turned off in Task Manager stays off, an unknown st
   assert.deepEqual(registered, [])
   assert.deepEqual((await runWindowsInstallMigration(deps)).pending, [])
   assert.deepEqual(registered, [false], 'registered again, still disabled')
+  // Round 11: what decided is logged and kept in the marker (the e2e asserts it).
+  assert.equal(JSON.parse(deps.marker!).loginItemSource, 'startup-approved')
+  assert.ok(
+    deps.logs.some((line) =>
+      /login item moved to .*\(disabled; state from startup-approved\)/.test(line)
+    ),
+    deps.logs.join('\n')
+  )
   // The app wires StartupApproved for its own login item name through the worker.
   const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
   assert.match(
     index,
     /\(\) => registry\.readBinary\(STARTUP_APPROVED_RUN_KEY, APP_IDENTITY\.loginItemName\)/
   )
+})
+
+test('round 11 (disclosed): an empty StartupApproved value and an 8.3 Run program stay pending, untouched', async () => {
+  const realPath = movedDisk()
+  const shortOld = `"${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe"`
+  const approved = { value: Buffer.alloc(0) }
+  const registered: boolean[] = []
+  const deps = fakeDeps({
+    execPath: `${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`,
+    realPath,
+    loginItem: {
+      stateFor: (isLegacyPath) =>
+        loginItemStateFromRun(
+          async () => shortOld,
+          async () => approved.value,
+          // Electron compares plain strings: an 8.3 program never matches.
+          () => undefined,
+          isLegacyPath
+        ),
+      registerCurrent: (enabled) => registered.push(enabled)
+    }
+  })
+  deps.record = { ...record, from: `${LONG_PROGRAMS}\\desktop`, to: `${LONG_PROGRAMS}\\DoodleNote` }
+  deps.files = new Set([`${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`])
+  // Every launch: pending, no login-item rewrite, the record kept; only the status
+  // and the progress marker are written.
+  for (let launch = 0; launch < 3; launch++) {
+    const result = await runWindowsInstallMigration(deps)
+    assert.deepEqual(result.pending, ['login-item'])
+    assert.equal(result.status?.reason, 'steps-pending:login-item')
+    assert.deepEqual(registered, [])
+    assert.notEqual(deps.record, null)
+    assert.equal(JSON.parse(deps.marker!).loginItemDone, false)
+  }
+  assert.equal(deps.statuses.length, 3)
+  // Toggled in Task Manager (Windows writes its 12 bytes): resolved, still off.
+  approved.value = Buffer.from('030000000102030405060708', 'hex')
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, [])
+  assert.deepEqual(registered, [false])
+  assert.equal(deps.record, null)
 })
 
 test('a launch through the short path: the record is consumed, and the marker is recognised', async () => {

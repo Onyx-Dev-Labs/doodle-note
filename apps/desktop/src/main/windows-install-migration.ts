@@ -230,6 +230,16 @@ export class LoginItemStateUnknown extends Error {}
  * Electron's answer for the program exactly as written (`enabledFor`). When
  * neither knows, it is never guessed (re-registering with "enabled" would turn
  * a disabled item back on): LoginItemStateUnknown, and the step stays pending.
+ * The answer names its source (round 11).
+ *
+ * Disclosed residual (round 11): an EMPTY StartupApproved value (Windows writes
+ * 12 bytes; what an empty one means is not documented, so it is not read as
+ * "enabled") with a Run program Electron cannot match (an 8.3 path) is unknown on
+ * every launch: the step stays pending, nothing is rewritten, and the Run value
+ * keeps naming the removed exe (Windows then starts nothing at login) until the
+ * user toggles the item in Task Manager (which rewrites the value) or turns Open
+ * at login on in Settings (which registers the new exe). Only the step's status
+ * and progress are written meanwhile.
  */
 export async function loginItemStateFromRun(
   readRunValue: () => Promise<string | null>,
@@ -246,12 +256,13 @@ export async function loginItemStateFromRun(
   } catch {
     enabled = undefined
   }
-  enabled ??= enabledFor(program)
+  if (enabled !== undefined) return { registered: true, enabled, source: 'startup-approved' }
+  enabled = enabledFor(program)
   if (enabled === undefined)
     throw new LoginItemStateUnknown(
       'its enabled state (Task Manager) could not be read; the login item is left as it is'
     )
-  return { registered: true, enabled }
+  return { registered: true, enabled, source: 'electron' }
 }
 
 export interface LoginItemState {
@@ -259,7 +270,14 @@ export interface LoginItemState {
   registered: boolean
   /** Not disabled in Task Manager / Settings > Startup. */
   enabled: boolean
+  /**
+   * What told `enabled` for a registered item (round 11, logged and kept in the
+   * marker so the e2e can tell): its StartupApproved\Run value, or Electron's lookup.
+   */
+  source?: LoginItemStateSource
 }
+
+export type LoginItemStateSource = 'startup-approved' | 'electron'
 
 export interface McpRepointOutcome {
   id: string
@@ -351,6 +369,8 @@ interface Marker {
   /** The record's MigratedAt: progress belongs to one move. */
   migratedAt: string
   loginItemDone: boolean
+  /** What told the moved login item's enabled state (absent: none moved, or before round 11). */
+  loginItemSource?: LoginItemStateSource | null
   /** MCP clients still to repoint; "all" when the whole step failed. */
   mcpPending: string[] | 'all'
   complete: boolean
@@ -490,6 +510,7 @@ export async function runWindowsInstallMigration(
   }
 
   let loginItemDone = progress?.loginItemDone ?? false
+  let loginItemSource = progress?.loginItemSource ?? null
   let loginItem = false
   if (!loginItemDone) {
     try {
@@ -500,7 +521,11 @@ export async function runWindowsInstallMigration(
       if (state.registered) {
         deps.loginItem.registerCurrent(state.enabled)
         loginItem = true
-        deps.log(`[install-migration] login item moved to ${deps.execPath}`)
+        loginItemSource = state.source ?? null
+        deps.log(
+          `[install-migration] login item moved to ${deps.execPath} ` +
+            `(${state.enabled ? 'enabled' : 'disabled'}; state from ${state.source ?? 'the caller'})`
+        )
       }
       loginItemDone = true
     } catch (error) {
@@ -543,6 +568,7 @@ export async function runWindowsInstallMigration(
     to: deps.execPath,
     migratedAt: record.at,
     loginItemDone,
+    loginItemSource,
     mcpPending,
     complete: pending.length === 0
   }

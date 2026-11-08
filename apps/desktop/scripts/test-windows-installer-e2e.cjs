@@ -219,7 +219,8 @@ function logSteps(from) {
 }
 
 /** A recovery that wrote back exactly `names` (the order dnRecoverState writes them). */
-const RECOVERED = (names) => `recover|recovered|restored|wrote=${names.length ? names.join(',') : 'none'}`
+const RECOVERED = (names) =>
+  `recover|recovered|restored|wrote=${names.length ? names.join(',') : 'none'}`
 
 /**
  * `steps` holds `order` as a subsequence, in that order (a string matches exactly,
@@ -524,9 +525,16 @@ async function firstLaunch(label) {
   const approved = approvedValue()
   console.log(`  StartupApproved after the repoint: ${approved}`)
   assert.ok(
-    approved !== null && /^[0-9a-f]{2}/.test(approved) && (parseInt(approved.slice(0, 2), 16) & 1) === 1,
+    approved !== null &&
+      /^[0-9a-f]{2}/.test(approved) &&
+      (parseInt(approved.slice(0, 2), 16) & 1) === 1,
     `${label}: the login item is still disabled in Task Manager (${approved})`
   )
+  // Round 11: and the app's own StartupApproved read decided it, not Electron's lookup
+  // (which cannot match the 8.3 seed): the progress marker names the source.
+  const progress = JSON.parse(fs.readFileSync(path.join(PROFILE, 'install-migration.json'), 'utf8'))
+  console.log(`  login item state from: ${progress.loginItemSource}`)
+  assert.equal(progress.loginItemSource, 'startup-approved', `${label}: login item state source`)
   const mcp = mcpCommands()
   const lower = (value) => (typeof value === 'string' ? value.toLowerCase() : value)
   const exe = path.join(NEW, EXE).toLowerCase()
@@ -797,7 +805,7 @@ async function scenarioD() {
       ],
       'D4'
     )
-    assert.equal(first, 0, 'D4: the recovery is the run\'s first decision (customInit)')
+    assert.equal(first, 0, "D4: the recovery is the run's first decision (customInit)")
     assert.ok(
       first < steps.findIndex((entry) => entry.startsWith('plan|')),
       'D4: the journal is recovered before the run plans'
@@ -831,7 +839,7 @@ async function scenarioD() {
     // First: the record D5's stock uninstaller deleted, written back from the copy,
     // before any plan.
     const [first] = assertOrder(steps, [RECOVERED(['MigrationRecord']), /^plan\|/], 'D6')
-    assert.equal(first, 0, 'D6: the recovery is the run\'s first decision (customInit)')
+    assert.equal(first, 0, "D6: the recovery is the run's first decision (customInit)")
     assert.equal(reg(KEYS.state)?.MigrationRecord, record, 'D6: the record is back exactly')
     assert.equal(reg(KEYS.recovery), null, 'D6: recovery copy gone')
     assert.equal(reg(KEYS.recoveryParent), null, 'D6: recovery parent gone')
