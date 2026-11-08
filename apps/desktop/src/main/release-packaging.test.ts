@@ -49,6 +49,11 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
     (here: Buffer, there: Buffer, dirs: { here: string; there: string }) => string | null
   >
   PACKAGE_DIFFERENCES: Record<string, unknown>
+  bundleSelfProblem(
+    text: string,
+    identity: { key: string },
+    helperDigest: string | null
+  ): string | null
   versionEntries(data: Buffer): [string, string][]
   equalExcept(a: Buffer, b: Buffer, start: number, end: number, holes?: [number, number][]): boolean
   guidText(bytes: Buffer): string
@@ -1072,15 +1077,37 @@ test('only the identity files may differ between the QA and production packages,
       main(bundle('qa', qaDigest, 'start(1);\n'), bundle('production', prodDigest), dirs)!,
       /outside the identity block and the helper digest/
     )
-    // ... a helper digest that is not the package's own helper's, ...
-    assert.match(
-      main(bundle('qa', prodDigest), bundle('production', prodDigest), dirs)!,
-      /is not this package's/
-    )
+    // (Round 9: whose digest each bundle pins is no longer the comparison's
+    // business; each package's own check below decides it, whatever the other holds.)
+    assert.equal(main(bundle('qa', prodDigest), bundle('production', prodDigest), dirs), null)
     // ... or a bundle without the identity block.
     assert.match(
       main(Buffer.from('start();\n'), bundle('production', prodDigest), dirs)!,
       /no identity block/
+    )
+    // Each package on its own (packageSelfProblems): its bundle is built for its
+    // identity and pins its own helper's digest.
+    const self = packageCheck.bundleSelfProblem
+    const text = (identity: string, digest: string): string => bundle(identity, digest).toString()
+    assert.equal(self(text('qa', qaDigest), { key: 'qa' }, qaDigest), null)
+    assert.equal(self(text('production', prodDigest), { key: 'production' }, prodDigest), null)
+    assert.match(
+      self(text('production', prodDigest), { key: 'qa' }, prodDigest)!,
+      /built for the production identity, not qa/
+    )
+    assert.match(
+      self(text('qa', prodDigest), { key: 'qa' }, qaDigest)!,
+      /helper digest b+ is not this package's helper's \(a+\)/
+    )
+    assert.match(self(text('qa', qaDigest), { key: 'qa' }, null)!, /is not this package's helper's/)
+    assert.match(self('start();\n', { key: 'qa' }, qaDigest)!, /no identity block/)
+    assert.match(
+      self(
+        text('qa', qaDigest).replace(/define_DOODLENOTE_HELPER[^\n]*\n/, ''),
+        { key: 'qa' },
+        qaDigest
+      )!,
+      /no helper digest/
     )
   } finally {
     rmSync(dir, { recursive: true, force: true })

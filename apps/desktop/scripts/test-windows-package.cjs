@@ -27,11 +27,21 @@
 // and ASAR integrity record, the Bark helper's csc.exe time stamp and module
 // version id, its manifest's digests, which must describe its own helper) and
 // resources\app-update.yml, which exactly the production package has.
+// Round 9: before any comparison, and also without --same-files-as, each package
+// is checked on its own (packageSelfProblems): its exe's product-name strings are
+// its identity's and its ASAR integrity record is its own app.asar header's hash,
+// its bundle was built for its identity and pins its own helper's digest, its
+// manifest describes its own helper, and its helper's class name carries its own
+// module version id. So a file copied from the other package (identical there,
+// never "a difference") is still caught. The comparison then allows only the
+// differences listed; it no longer validates them itself.
 // --negative-control (with --same-files-as) then changes one byte in an unpacked
 // file, an asar entry, out/main/index.js, resources\mcp\cli.js, the exe (code,
 // another version string, the integrity record) and the helper (code, module
-// version id), and adds an app-update.yml to a QA package; each must be reported
-// exactly, and every byte is put back.
+// version id), and adds an app-update.yml to a QA package; round 9 also copies the
+// other package's exe over this one's (under this one's name) and the other
+// package's helper manifest over this one's; each must be reported exactly, and
+// every byte is put back.
 //
 // Lists the asar from its header directly: the file starts with a Chromium pickle
 // holding the JSON directory tree.
@@ -591,6 +601,8 @@ function treeHashes(dir) {
  * difference is the expected one, else what is wrong). Everything else in
  * app.asar and app.asar.unpacked must be byte-identical.
  */
+const HELPER_DIGEST = /(define_DOODLENOTE_HELPER_INTEGRITY_default = \{ digest: ")([0-9a-f]{64})(")/
+
 const IDENTITY_DIFFERENCES = {
   // electron-builder writes the identity's package name (scripts/package-win-qa.cjs
   // packages QA as desktop-qa: profile %APPDATA%\desktop-qa, install folder);
@@ -611,32 +623,22 @@ const IDENTITY_DIFFERENCES = {
   // - the Bark helper's digest (__DOODLENOTE_HELPER_INTEGRITY__): each package
   //   build recompiles resources/engine/dictation-helper.exe with the inbox .NET
   //   Framework csc.exe, which has no /deterministic, so each bundle must carry
-  //   exactly its own package's helper digest (authenticodeSha256 in the
-  //   dictation-helper.manifest.json beside it).
-  // Both are cut out (after those checks) and the rest compared byte for byte.
+  //   exactly its own package's helper digest (its stable Authenticode digest,
+  //   checked by packageSelfProblems on each package).
+  // Both are cut out and the rest compared byte for byte.
   'app.asar/out/main/index.js': (here, there, dirs) => {
-    const cut = (text, resources) => {
+    const cut = (text) => {
       const from = ['const QA_DICTATION_SHORTCUTS', 'function appIdentity(']
         .map((marker) => text.indexOf(marker))
         .filter((at) => at >= 0)
       const call = text.indexOf('const APP_IDENTITY = appIdentity(')
       const to = call < 0 ? -1 : text.indexOf(');', call) + 2
       if (!from.length || to < 2) return { why: 'no identity block' }
-      let rest = `${text.slice(0, Math.min(...from))}<identity>${text.slice(to)}`
-      const digest = /(define_DOODLENOTE_HELPER_INTEGRITY_default = \{ digest: ")([0-9a-f]{64})(")/
-      const found = digest.exec(rest)
-      if (found) {
-        const manifest = path.join(resources, 'engine', 'dictation-helper.manifest.json')
-        const own = fs.existsSync(manifest)
-          ? JSON.parse(fs.readFileSync(manifest, 'utf8')).authenticodeSha256
-          : null
-        if (found[2] !== own)
-          return { why: `helper digest ${found[2]} is not this package's (${own})` }
-        rest = rest.replace(digest, '$1<helper digest>$3')
-      }
-      return { rest }
+      const rest = `${text.slice(0, Math.min(...from))}<identity>${text.slice(to)}`
+      // That each digest is its own package's helper's: packageSelfProblems.
+      return { rest: rest.replace(HELPER_DIGEST, '$1<helper digest>$3') }
     }
-    const [a, b] = [cut(here.toString('utf8'), dirs.here), cut(there.toString('utf8'), dirs.there)]
+    const [a, b] = [cut(here.toString('utf8')), cut(there.toString('utf8'))]
     if (a.why || b.why) return a.why ?? b.why
     return a.rest === b.rest ? null : 'differs outside the identity block and the helper digest'
   }
@@ -669,6 +671,16 @@ function sameFilesProblems(asar, files, otherDir, { log = console.log, asarApi, 
   const problems = []
   const otherAsar = path.join(otherDir, 'resources', 'app.asar')
   const api = asarApi ?? asarModule()
+  // Round 9: each package on its own first, unconditionally.
+  if (path.basename(path.dirname(asar)) === 'resources') {
+    const theirs = cache?.get(`self:${otherDir}`) ?? packageSelfProblems(otherDir, api)
+    cache?.set(`self:${otherDir}`, theirs)
+    const ours = packageSelfProblems(path.dirname(path.dirname(asar)), api)
+    problems.push(...ours, ...theirs)
+    log(
+      `  each package on its own (identity, integrity, helper digests): ${ours.length} problem(s) here, ${theirs.length} in ${otherDir}`
+    )
+  }
   const pairs = [
     ['app.asar', asarHashes(asar, api), asarHashes(otherAsar, api)],
     ['app.asar.unpacked', treeHashes(`${asar}.unpacked`), treeHashes(`${otherAsar}.unpacked`)]
@@ -683,10 +695,7 @@ function sameFilesProblems(asar, files, otherDir, { log = console.log, asarApi, 
     for (const { label, problem } of differences) {
       const check = IDENTITY_DIFFERENCES[label]
       if (problem === 'content differs' && check) {
-        const why = check(contents(asar, label), contents(otherAsar, label), {
-          here: path.dirname(asar),
-          there: path.dirname(otherAsar)
-        })
+        const why = check(contents(asar, label), contents(otherAsar, label))
         if (!why) {
           allowed++
           log(`  ${label}: differs as the identity allows`)
@@ -732,6 +741,25 @@ function withFlippedByte(file, offset, check) {
 }
 
 /**
+ * Puts a copy of `source` in `file`'s place (the original moved to `aside`, a
+ * folder outside the package on the same volume), runs `check`, and puts the
+ * original back (verified). Returns what `check` returned.
+ */
+function withFileFrom(file, source, aside, check) {
+  const before = sha256(fs.readFileSync(file))
+  const saved = path.join(aside, `.dn-negative-control-${path.basename(file)}`)
+  fs.renameSync(file, saved)
+  try {
+    fs.copyFileSync(source, file)
+    return check()
+  } finally {
+    fs.rmSync(file, { force: true })
+    fs.renameSync(saved, file)
+    if (sha256(fs.readFileSync(file)) !== before) throw new Error(`${file}: not restored`)
+  }
+}
+
+/**
  * The negative control for --same-files-as: one byte changed in one file under
  * app.asar.unpacked, in one asar entry (inside its data, not the header), and in
  * out/main/index.js outside what IDENTITY_DIFFERENCES lets differ (its last
@@ -771,7 +799,14 @@ function negativeControlProblems(asar, files, otherDir) {
   // Round 8: files outside app.asar: a plain one (the MCP server), the exe
   // outside its resource section, and the Bark helper outside csc's own bytes.
   const dir = path.dirname(path.dirname(asar))
-  const exe = packageIdentity(dir, asarModule()).exe
+  const hereIdentity = packageIdentity(dir, asarModule())
+  const exe = hereIdentity.exe
+  const helperManifestProblem = `win-unpacked/resources/engine/dictation-helper.manifest.json: ${exe}'s manifest does not describe its own helper`
+  // The bundle's pinned digest is the unchanged helper's, so it is reported too.
+  const staleBundle = (line) =>
+    line.startsWith(
+      `app.asar/out/main/index.js: the ${hereIdentity.key} package: helper digest `
+    ) && line.includes(" is not this package's helper's (")
   const exeBytes = fs.readFileSync(path.join(dir, exe))
   const text = peHeaders(exeBytes).sections.find((s) => s.name === '.text')
   const helper = path.join(dir, 'resources', 'engine', 'dictation-helper.exe')
@@ -791,10 +826,11 @@ function negativeControlProblems(asar, files, otherDir) {
       'win-unpacked/resources/engine/dictation-helper.exe',
       helper,
       Math.floor(fs.statSync(helper).size / 2),
-      // The changed helper no longer matches its own manifest either.
+      // The changed helper no longer matches its own bundle's pin or manifest either.
       [
-        'win-unpacked/resources/engine/dictation-helper.exe: differs beyond the time stamp and module version id',
-        `win-unpacked/resources/engine/dictation-helper.manifest.json: ${exe}'s manifest does not describe its own helper`
+        staleBundle,
+        helperManifestProblem,
+        'win-unpacked/resources/engine/dictation-helper.exe: differs beyond the time stamp and module version id'
       ]
     ]
   )
@@ -807,7 +843,6 @@ function negativeControlProblems(asar, files, otherDir) {
   const integrity = [...resources].find(([key]) => key.startsWith('INTEGRITY/'))
   const helperBytes = fs.readFileSync(helper)
   const mvid = clrStreams(helperBytes).get('#GUID')
-  const helperManifestProblem = `win-unpacked/resources/engine/dictation-helper.manifest.json: ${exe}'s manifest does not describe its own helper`
   cases.push(
     [
       `win-unpacked/${exe}`,
@@ -826,30 +861,74 @@ function negativeControlProblems(asar, files, otherDir) {
       helper,
       mvid[0] + 3,
       [
-        'win-unpacked/resources/engine/dictation-helper.exe: this package: <PrivateImplementationDetails> does not carry its own module version id',
-        helperManifestProblem
+        staleBundle,
+        helperManifestProblem,
+        `win-unpacked/resources/engine/dictation-helper.exe: the ${hereIdentity.key} package: <PrivateImplementationDetails> does not carry its own module version id`
       ]
     ]
   )
   if (company < 0) problems.push('negative control: no CompanyName in the exe version resource')
   const cache = new Map()
+  // Each expected line: the exact text, or a test for it.
+  const matches = (found, expected) =>
+    found.length === expected.length &&
+    expected.every((want, i) => (typeof want === 'function' ? want(found[i]) : want === found[i]))
   for (const [label, file, offset, why = 'content differs'] of cases) {
     const found = withFlippedByte(file, offset, () =>
       sameFilesProblems(asar, files, otherDir, { log: quiet, cache })
     )
     const expected = Array.isArray(why) ? why : [`${label}: ${why}`]
-    const ok = JSON.stringify(found) === JSON.stringify(expected)
-    const what = Array.isArray(why) ? why[0].slice(label.length + 2) : why
+    const ok = matches(found, expected)
+    const last = expected[expected.length - 1]
+    const what = Array.isArray(why) ? last.slice(last.indexOf(': ') + 2) : why
     console.log(
       `  negative control, one byte of ${label} (${what}): ${ok ? 'caught' : `NOT caught (${JSON.stringify(found)})`}`
     )
     if (!ok)
       problems.push(`negative control: one changed byte in ${label} was not reported exactly`)
   }
+  // Round 9: a file copied from the other package is identical there, so only the
+  // package's own checks can catch it: the other exe under this exe's name, and
+  // the other (for this helper, stale) helper manifest.
+  const otherIdentity = packageIdentity(otherDir, asarModule())
+  const copies = [
+    [
+      `the ${otherIdentity.key} exe as ${exe}`,
+      path.join(dir, exe),
+      path.join(otherDir, otherIdentity.exe),
+      [
+        (line) =>
+          line.startsWith(`win-unpacked/${exe}: version string(s) `) &&
+          line.includes(
+            ` not the ${hereIdentity.key} product name "${hereIdentity.productName}" (`
+          ),
+        `win-unpacked/${exe}: resource ${integrity[0]} is not ${exe}'s own app.asar header hash`
+      ]
+    ],
+    [
+      `the ${otherIdentity.key} helper manifest`,
+      path.join(dir, 'resources', 'engine', 'dictation-helper.manifest.json'),
+      path.join(otherDir, 'resources', 'engine', 'dictation-helper.manifest.json'),
+      [helperManifestProblem]
+    ]
+  ]
+  for (const [what, file, source, expected] of copies) {
+    if (sha256(fs.readFileSync(file)) === sha256(fs.readFileSync(source))) {
+      problems.push(`negative control: ${what}: the two files are already identical`)
+      continue
+    }
+    const found = withFileFrom(file, source, path.dirname(dir), () =>
+      sameFilesProblems(asar, files, otherDir, { log: quiet, cache })
+    )
+    const ok = matches(found, expected)
+    console.log(
+      `  negative control, ${what} (identical in both packages): ${ok ? 'caught' : `NOT caught (${JSON.stringify(found)})`}`
+    )
+    if (!ok) problems.push(`negative control: ${what} was not reported exactly`)
+  }
   // A feed file in the non-production package is caught (written, checked, removed).
   const feedHere = path.join(dir, 'resources', 'app-update.yml')
   const feedThere = path.join(otherDir, 'resources', 'app-update.yml')
-  const hereIdentity = packageIdentity(dir, asarModule())
   const extra = hereIdentity.key === 'production' ? null : feedHere
   if (extra && !fs.existsSync(extra) && fs.existsSync(feedThere)) {
     fs.copyFileSync(feedThere, extra, fs.constants.COPYFILE_EXCL)
@@ -1015,6 +1094,9 @@ function versionEntries(data) {
 
 /** The version strings rcedit sets to the identity's product name (electron-builder's own list). */
 const PRODUCT_NAME_STRINGS = ['FileDescription', 'InternalName', 'ProductName']
+const isProductNameString = (entry) =>
+  /^VS_VERSION_INFO\/StringFileInfo\/[0-9a-f]{8}\//i.test(entry) &&
+  PRODUCT_NAME_STRINGS.includes(entry.split('/').pop())
 
 /** SHA-256 of an asar's header JSON: what Electron's ASAR integrity resource records. */
 function asarHeaderHash(file) {
@@ -1036,12 +1118,13 @@ function asarHeaderHash(file) {
  * equal apart from the two sizes the resource section has (data directory 2 and
  * the section's VirtualSize); and the resources must be the same set with the
  * same data, apart from (1) the version strings FileDescription, InternalName
- * and ProductName, which must each be that package's own product name, and (2)
- * Electron's ASAR integrity record, which must be the SHA-256 of that package's
- * own app.asar header. Bytes of the resource section that no resource uses (its
- * directory tables and padding) are not compared.
+ * and ProductName and (2) Electron's ASAR integrity record. That each of those is
+ * its own package's (its product name; the SHA-256 of its own app.asar header)
+ * is packageSelfProblems', for each package whether or not the exes differ.
+ * Bytes of the resource section that no resource uses (its directory tables and
+ * padding) are not compared.
  */
-function exeDifference(here, there, context) {
+function exeDifference(here, there) {
   const [a, b] = [peHeaders(here), peHeaders(there)]
   const rsrc = (h) => h.sectionAt(h.directory(2).rva)
   const [ra, rb] = [rsrc(a), rsrc(b)]
@@ -1061,32 +1144,15 @@ function exeDifference(here, there, context) {
     const [x, y] = [resA.get(key), resB.get(key)]
     if (!x || !y) return `resource ${key} only in one package`
     if (x.codePage !== y.codePage) return `resource ${key}: code page differs`
-    if (key.startsWith('INTEGRITY/')) {
-      for (const [record, side] of [
-        [x, context.here],
-        [y, context.there]
-      ]) {
-        const expected = JSON.stringify([
-          { file: 'resources\\app.asar', alg: 'SHA256', value: side.asarHeader }
-        ])
-        if (record.data.toString('utf8') !== expected)
-          return `resource ${key} is not ${side.identity.exe}'s own app.asar header hash`
-      }
-      continue
-    }
+    // Each package's own record: packageSelfProblems.
+    if (key.startsWith('INTEGRITY/')) continue
     if (key.startsWith('#16/')) {
       const [va, vb] = [new Map(versionEntries(x.data)), new Map(versionEntries(y.data))]
       for (const entry of new Set([...va.keys(), ...vb.keys()])) {
         const name = entry.split('/').pop()
-        if (
-          /^VS_VERSION_INFO\/StringFileInfo\/[0-9a-f]{8}\//i.test(entry) &&
-          PRODUCT_NAME_STRINGS.includes(name)
-        ) {
-          if (
-            va.get(entry) !== context.here.identity.productName ||
-            vb.get(entry) !== context.there.identity.productName
-          )
-            return `version string ${name} is not each package's product name (${va.get(entry)} / ${vb.get(entry)})`
+        // Each package's own product name: packageSelfProblems.
+        if (isProductNameString(entry)) {
+          if (va.has(entry) !== vb.has(entry)) return `version entry ${entry} only in one package`
         } else if (va.get(entry) !== vb.get(entry)) return `version entry ${entry} differs`
       }
       continue
@@ -1126,13 +1192,37 @@ function guidText(bytes) {
 
 const PRIVATE_DETAILS = Buffer.from('<PrivateImplementationDetails>{', 'latin1')
 
+/** Where each `<PrivateImplementationDetails>{` class name's GUID starts in #Strings. */
+function privateDetails(buffer, strings) {
+  const out = []
+  for (
+    let at = buffer.indexOf(PRIVATE_DETAILS, strings[0]);
+    at >= 0 && at < strings[1];
+    at = buffer.indexOf(PRIVATE_DETAILS, at + 1)
+  )
+    out.push(at + PRIVATE_DETAILS.length)
+  return out
+}
+
+/** Whether a helper's <PrivateImplementationDetails> class names carry its own module version id. */
+function helperOwnsItsId(buffer) {
+  const streams = clrStreams(buffer)
+  const guid = streams.get('#GUID')
+  const strings = streams.get('#Strings')
+  if (!guid || guid[1] - guid[0] !== 16 || !strings) return false
+  const mvid = guidText(buffer.subarray(guid[0], guid[1]))
+  return privateDetails(buffer, strings).every(
+    (at) => buffer.toString('latin1', at, at + 37) === `${mvid}}`
+  )
+}
+
 /**
  * Why two Bark helper builds differ beyond what csc.exe 4.x's lack of
  * /deterministic explains, or null. Each package build recompiles the helper;
  * csc then writes a new COFF time stamp, a new module version id (the #GUID heap,
  * one GUID) and that id again in the name of its <PrivateImplementationDetails>
- * class (#Strings). Every other byte must be equal, and in each file that class
- * name must hold that file's own module version id.
+ * class (#Strings). Every other byte must be equal (that the class name holds
+ * the file's own id is packageSelfProblems').
  */
 function helperDifference(here, there) {
   if (here.length !== there.length) return `size ${here.length} / ${there.length}`
@@ -1147,22 +1237,10 @@ function helperDifference(here, there) {
     [a.pe + 8, a.pe + 12],
     [guid[0], guid[1]]
   ]
-  for (const [buffer, name] of [
-    [here, 'this package'],
-    [there, 'the other package']
-  ]) {
-    const mvid = guidText(buffer.subarray(guid[0], guid[1]))
-    for (
-      let at = buffer.indexOf(PRIVATE_DETAILS, strings[0]);
-      at >= 0 && at < strings[1];
-      at = buffer.indexOf(PRIVATE_DETAILS, at + 1)
-    ) {
-      const start = at + PRIVATE_DETAILS.length
-      if (buffer.toString('latin1', start, start + 37) !== `${mvid}}`)
-        return `${name}: <PrivateImplementationDetails> does not carry its own module version id`
-      holes.push([start, start + 36])
-    }
-  }
+  // Where csc wrote the id into the class name (that it is the file's own id is
+  // packageSelfProblems').
+  for (const buffer of [here, there])
+    for (const at of privateDetails(buffer, strings)) holes.push([at, at + 36])
   return equalExcept(here, there, 0, here.length, holes)
     ? null
     : 'differs beyond the time stamp and module version id'
@@ -1170,31 +1248,21 @@ function helperDifference(here, there) {
 
 /**
  * The package-level files that may differ between two identity packages, and how
- * (`check(here, there, context)` -> null when expected, else what is wrong).
- * `context.here` / `context.there`: { dir, identity, asarHeader }.
+ * (`check(here, there)` -> null when expected, else what is wrong).
  */
 const PACKAGE_DIFFERENCES = {
   [EXE]: exeDifference,
   'resources/engine/dictation-helper.exe': (here, there) => helperDifference(here, there),
-  // Each manifest describes its own helper; nothing else in it may differ.
-  'resources/engine/dictation-helper.manifest.json': (here, there, context) => {
-    const { stableDigest } = require('./authenticode-digest.mjs')
-    const sides = [
-      [here, context.here],
-      [there, context.there]
-    ].map(([buffer, side]) => {
-      const manifest = JSON.parse(buffer.toString('utf8'))
-      const helper = fs.readFileSync(
-        path.join(side.dir, 'resources', 'engine', 'dictation-helper.exe')
-      )
-      return { manifest, sha: sha256(helper), digest: stableDigest(helper), side }
-    })
-    for (const { manifest, sha, digest, side } of sides)
-      if (manifest.sha256 !== sha || manifest.authenticodeSha256 !== digest)
-        return `${side.identity.exe}'s manifest does not describe its own helper`
-    const rest = ({ manifest }) =>
-      JSON.stringify({ ...manifest, sha256: undefined, authenticodeSha256: undefined })
-    return rest(sides[0]) === rest(sides[1]) ? null : 'differs in more than the helper digests'
+  // Only the helper digests may differ (that each describes its own helper is
+  // packageSelfProblems').
+  'resources/engine/dictation-helper.manifest.json': (here, there) => {
+    const rest = (buffer) =>
+      JSON.stringify({
+        ...JSON.parse(buffer.toString('utf8')),
+        sha256: undefined,
+        authenticodeSha256: undefined
+      })
+    return rest(here) === rest(there) ? null : 'differs in more than the helper digests'
   }
 }
 
@@ -1203,14 +1271,7 @@ const PRODUCTION_ONLY = new Set(['resources/app-update.yml'])
 
 /** Problems when the two packages' files outside app.asar(.unpacked) differ unexpectedly. */
 function packageTreeProblems(dir, otherDir, api, { log = console.log, cache } = {}) {
-  const side = (folder) => {
-    const identity = packageIdentity(folder, api)
-    return {
-      dir: folder,
-      identity,
-      asarHeader: asarHeaderHash(path.join(folder, 'resources', 'app.asar'))
-    }
-  }
+  const side = (folder) => ({ dir: folder, identity: packageIdentity(folder, api) })
   const here = side(dir)
   const there = side(otherDir)
   const theirs = cache?.get(otherDir) ?? packageTreeHashes(otherDir, there.identity)
@@ -1240,7 +1301,7 @@ function packageTreeProblems(dir, otherDir, api, { log = console.log, cache } = 
     const check = PACKAGE_DIFFERENCES[rel]
     if (problem === 'content differs' && check) {
       const read = (s) => fs.readFileSync(path.join(s.dir, rel === EXE ? s.identity.exe : rel))
-      const why = check(read(here), read(there), { here, there })
+      const why = check(read(here), read(there))
       if (!why) {
         allowed++
         log(`  ${shown}: differs as the identity allows`)
@@ -1258,6 +1319,105 @@ function packageTreeProblems(dir, otherDir, api, { log = console.log, cache } = 
   return problems
 }
 
+// ---------------------------------------------------------------------------
+// Round 9: each package on its own. The comparison above sees only differences,
+// so a file copied from the other package (the production exe under the QA
+// exe's name, the other helper manifest) would be identical there and never
+// checked; these checks look at each package whatever the other holds.
+
+/**
+ * Why a bundle (out/main/index.js) is not `identity`'s, or null: it must be
+ * built for that identity (`appIdentity("<key>")`) and pin `helperDigest`, its
+ * own package's helper's stable Authenticode digest.
+ */
+function bundleSelfProblem(text, identity, helperDigest) {
+  const call = /const APP_IDENTITY = appIdentity\(\s*"([a-z]+)"\s*\);/.exec(text)
+  if (!call) return 'no identity block'
+  if (call[1] !== identity.key) return `built for the ${call[1]} identity, not ${identity.key}`
+  const found = HELPER_DIGEST.exec(text)
+  if (!found) return 'no helper digest'
+  if (found[2] !== helperDigest)
+    return `helper digest ${found[2]} is not this package's helper's (${helperDigest})`
+  return null
+}
+
+/**
+ * Problems with one package by itself: the identity it is (app.asar's package
+ * name) must be what everything identity-specific in it says. Its exe is named
+ * for it, every FileDescription / InternalName / ProductName version string is
+ * its product name and its one ASAR integrity record is the SHA-256 of its own
+ * app.asar header; its bundle is built for it and pins its own helper's digest;
+ * its helper manifest's sha256 and authenticodeSha256 describe its own helper;
+ * its helper's <PrivateImplementationDetails> class names carry the helper's own
+ * module version id.
+ */
+function packageSelfProblems(dir, api = asarModule()) {
+  let identity
+  try {
+    identity = packageIdentity(dir, api)
+  } catch (error) {
+    return [`${dir}: ${error.message}`]
+  }
+  const { stableDigest } = require('./authenticode-digest.mjs')
+  const problems = []
+  const asar = path.join(dir, 'resources', 'app.asar')
+  const exe = path.join(dir, identity.exe)
+  const exeLabel = `win-unpacked/${identity.exe}`
+  if (!fs.existsSync(exe)) problems.push(`${exeLabel}: missing`)
+  else {
+    const resources = peResources(fs.readFileSync(exe))
+    const versions = [...resources].filter(([key]) => key.startsWith('#16/'))
+    const strings = versions.flatMap(([, { data }]) =>
+      versionEntries(data).filter(([entry]) => isProductNameString(entry))
+    )
+    const named = new Set(strings.map(([entry]) => entry.split('/').pop()))
+    const wrong = strings.filter(([, value]) => value !== identity.productName)
+    if (!versions.length || named.size !== PRODUCT_NAME_STRINGS.length)
+      problems.push(`${exeLabel}: no ${PRODUCT_NAME_STRINGS.join(' / ')} version strings`)
+    else if (wrong.length)
+      problems.push(
+        `${exeLabel}: version string(s) ${wrong.map(([entry]) => entry.split('/').pop()).join(', ')} not the ${identity.key} product name "${identity.productName}" (${wrong.map(([, value]) => JSON.stringify(value)).join(', ')})`
+      )
+    const integrity = [...resources].filter(([key]) => key.startsWith('INTEGRITY/'))
+    const expected = JSON.stringify([
+      { file: 'resources\\app.asar', alg: 'SHA256', value: asarHeaderHash(asar) }
+    ])
+    if (integrity.length !== 1)
+      problems.push(`${exeLabel}: ${integrity.length} ASAR integrity records`)
+    else if (integrity[0][1].data.toString('utf8') !== expected)
+      problems.push(
+        `${exeLabel}: resource ${integrity[0][0]} is not ${identity.exe}'s own app.asar header hash`
+      )
+  }
+  const helperPath = path.join(dir, 'resources', 'engine', 'dictation-helper.exe')
+  const helper = fs.existsSync(helperPath) ? fs.readFileSync(helperPath) : null
+  const digest = helper ? stableDigest(helper) : null
+  const bundle = bundleSelfProblem(
+    api.extractFile(asar, path.join('out', 'main', 'index.js')).toString('utf8'),
+    identity,
+    digest
+  )
+  if (bundle) problems.push(`app.asar/out/main/index.js: the ${identity.key} package: ${bundle}`)
+  const manifestRel = 'resources/engine/dictation-helper.manifest.json'
+  const manifestPath = path.join(dir, ...manifestRel.split('/'))
+  if (!helper) problems.push('win-unpacked/resources/engine/dictation-helper.exe: missing')
+  else if (!fs.existsSync(manifestPath)) problems.push(`win-unpacked/${manifestRel}: missing`)
+  else {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    if (manifest.sha256 !== sha256(helper) || manifest.authenticodeSha256 !== digest)
+      problems.push(
+        `win-unpacked/${manifestRel}: ${identity.exe}'s manifest does not describe its own helper`
+      )
+  }
+  if (helper && !helperOwnsItsId(helper))
+    problems.push(
+      `win-unpacked/resources/engine/dictation-helper.exe: the ${identity.key} package: <PrivateImplementationDetails> does not carry its own module version id`
+    )
+  return problems
+}
+
+module.exports.packageSelfProblems = packageSelfProblems
+module.exports.bundleSelfProblem = bundleSelfProblem
 module.exports.IDENTITY_DIFFERENCES = IDENTITY_DIFFERENCES
 module.exports.PACKAGE_DIFFERENCES = PACKAGE_DIFFERENCES
 module.exports.packageTreeProblems = packageTreeProblems
@@ -1363,6 +1523,14 @@ if (require.main === module) {
         `  negative control: ${base} and its ggml-cpu-x64.dll treated as absent are reported`
       )
     }
+  }
+  // Round 9: the package on its own (with --same-files-as, both, inside sameFilesProblems).
+  if (!sameAs && !target.endsWith('.asar')) {
+    const self = packageSelfProblems(target)
+    problems.push(...self)
+    console.log(
+      `  this package on its own (identity, integrity, helper digests): ${self.length} problem(s)`
+    )
   }
   if (sameAs) problems.push(...sameFilesProblems(asar, files, sameAs))
   if (sameAs && negativeControl && !problems.length)

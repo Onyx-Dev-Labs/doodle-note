@@ -284,9 +284,15 @@ jobs:
       # (the exe's product-name strings and ASAR integrity record; the helper's
       # csc.exe time stamp and module version id; its manifest's digests, which
       # must describe its own helper) and app-update.yml (production only).
+      # Before comparing, each package is checked on its own (round 9): its exe's
+      # product-name strings and ASAR integrity record, its bundle's identity and
+      # helper digest, its helper manifest and module version id are its own, so
+      # a file copied from the other package (identical, so never "a difference")
+      # is still caught.
       # --negative-control then changes one byte in an unpacked file, an asar entry,
       # out/main/index.js, resources\mcp\cli.js, the exe and the helper (incl. one
-      # inside each allowance's neighbourhood) and adds a feed file to the QA
+      # inside each allowance's neighbourhood), copies the production exe and
+      # helper manifest into the QA package, and adds a feed file to the QA
       # package, and fails unless each is caught exactly (bytes put back).
       # Built last: it rebuilds out/ with the QA identity. Built as the full
       # installer, not --dir: the NSIS target is what adds resources\elevate.exe,
