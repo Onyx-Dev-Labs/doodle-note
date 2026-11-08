@@ -172,9 +172,11 @@ test('codex: a user-added [mcp_servers.doodle-note.env] subtable is removed with
   assert.equal(codexConfigServerCommand(next, 'x'), codexSpec.command)
   // Idempotent.
   assert.equal(codexConfigWithServer(next, codexSpec), next)
+  // Lines go exactly as the base (macOS) code removed them: the blank lines
+  // between our table and the next one go with ours.
   assert.equal(
     codexConfigWithoutServer(next),
-    'model = "o3"\n\n[mcp_servers.other]\ncommand = "npx"\n'
+    'model = "o3"\n[mcp_servers.other]\ncommand = "npx"\n'
   )
 })
 

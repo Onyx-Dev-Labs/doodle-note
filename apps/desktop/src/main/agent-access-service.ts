@@ -362,13 +362,13 @@ export class AgentAccessService {
       if (connected) {
         return def.dialect === 'json'
           ? jsonConfigWithServer(raw, this.server, def.configPath)
-          : codexConfigWithServer(raw, this.server)
+          : codexConfigWithServer(raw, this.server, def.configPath)
       }
       // Nothing to remove from a file that doesn't exist.
       if (raw === null) return null
       return def.dialect === 'json'
         ? jsonConfigWithoutServer(raw, def.configPath)
-        : codexConfigWithoutServer(raw)
+        : codexConfigWithoutServer(raw, def.configPath)
     })
     return this.status()
   }
@@ -425,7 +425,7 @@ export class AgentAccessService {
           if (command === null || !isStale(command)) return null
           return def.dialect === 'json'
             ? jsonConfigWithServer(raw, this.server, def.configPath)
-            : codexConfigWithServer(raw, this.server)
+            : codexConfigWithServer(raw, this.server, def.configPath)
         })
         results.push({ id: def.id, outcome })
       } catch (error) {

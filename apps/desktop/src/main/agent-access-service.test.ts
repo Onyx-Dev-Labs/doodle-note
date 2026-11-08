@@ -272,3 +272,45 @@ test('repointing: an entry without a command, an empty file and a BOM are not fa
     assert.match(readFileSync(codex, 'utf8'), /^\[mcp_servers\.doodle-note\]/)
   })
 })
+
+test('codex: a config that cannot be read as TOML is never edited', () => {
+  withHome((home) => {
+    mkdirSync(join(home, '.codex'))
+    const codex = join(home, '.codex', 'config.toml')
+    // An unterminated header after our table: where our table ends is unknown.
+    const raw =
+      '[mcp_servers.doodle-note]\ncommand = "C:\\\\Programs\\\\desktop\\\\DoodleNote.exe"\n\n' +
+      '[projects."C:/work/[demo]]\ntrust_level = "trusted"\n'
+    writeFileSync(codex, raw)
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    assert.throws(() => service.setClientConnected('codex', true), /could not be read as TOML/)
+    assert.throws(() => service.setClientConnected('codex', false), /left unchanged/)
+    const [result] = service.repointStaleClients(() => true, ['codex'])
+    assert.equal(result.outcome, 'failed')
+    assert.match(result.error ?? '', /config\.toml could not be read as TOML/)
+    assert.equal(readFileSync(codex, 'utf8'), raw)
+  })
+})
+
+test('codex: Connect, Disconnect and repointing keep a project table whose name has brackets', () => {
+  withHome((home) => {
+    mkdirSync(join(home, '.codex'))
+    const codex = join(home, '.codex', 'config.toml')
+    const project = '[projects."C:/work/[demo]"]\ntrust_level = "trusted"\n'
+    writeFileSync(
+      codex,
+      '[mcp_servers.doodle-note]\ncommand = "C:\\\\Programs\\\\desktop\\\\DoodleNote.exe"\n\n' +
+        project
+    )
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    assert.deepEqual(
+      service.repointStaleClients(() => true, ['codex']),
+      [{ id: 'codex', outcome: 'updated' }]
+    )
+    assert.ok(readFileSync(codex, 'utf8').startsWith(project))
+    service.setClientConnected('codex', false)
+    assert.equal(readFileSync(codex, 'utf8'), project)
+    service.setClientConnected('codex', true)
+    assert.ok(readFileSync(codex, 'utf8').startsWith(project + '\n[mcp_servers.doodle-note]\n'))
+  })
+})

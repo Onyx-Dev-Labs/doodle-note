@@ -425,6 +425,13 @@ test('the MCP server command is read back from both client dialects', () => {
     () => codexConfigServerCommand('[mcp_servers.doodle-note]\ncommand = "unterminated\n', 'x'),
     ClientConfigError
   )
+  // A quoted key in an inline table is the same command: it is repaired, not skipped.
+  const quotedInline = `[mcp_servers]\ndoodle-note = { "command" = ${JSON.stringify(oldExe)} }\n`
+  assert.equal(codexConfigServerCommand(quotedInline, 'x'), oldExe)
+  assert.equal(
+    codexConfigServerCommand(codexConfigWithServer(quotedInline, spec('DoodleNote')), 'x'),
+    spec('DoodleNote').command
+  )
 })
 
 test('AgentAccessService repoints only stale DoodleNote entries and keeps the rest', () => {
