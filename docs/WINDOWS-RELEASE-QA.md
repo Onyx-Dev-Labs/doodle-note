@@ -443,7 +443,7 @@ moves an existing install on upgrade:
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
 held files and real processes in a temporary sandbox (CI "Check Windows
-installer migration guards"; 300 cases): the junction overlap cases above, a
+installer migration guards"; 412 cases): the junction overlap cases above, a
 second process swapping folders for junctions to an outside folder while the
 old folder is removed (nothing outside is touched), a second process
 retargeting the `Programs` junction onto the profile's parent or onto a decoy
@@ -458,7 +458,10 @@ mid-move, once on an update before the first launch) whose next run recovers the
 journal and the record, the app's own record handling
 (`scripts/consume-install-record.ts`) reading the recovered record, running and
 clearing it, tampered or foreign recovery copies ignored, a closer that never
-answers (`unknown` in about 4 s) and the silent quit-with-exit-code-2 case.
+answers (`unknown` in about 4 s) and the silent quit-with-exit-code-2 case, the
+recorded status of each outcome and the log (see "Where an install records what it
+decided"), and a user uninstall that keeps the old folder dropping only this
+identity's login entry for it.
 
 `appId`, the shortcut name and so the uninstall key are unchanged, so Start and
 Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the
