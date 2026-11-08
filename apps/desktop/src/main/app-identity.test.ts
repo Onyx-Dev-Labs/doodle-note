@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import identities from '../shared/app-identities.json'
 import { APP_IDENTITY, appIdentity, identityMismatch } from './app-identity'
+import { BARK_HELPER_IDENTITY, barkHelperIdentity } from './dictation-helper-client'
 import { MCP_SERVER_KEY } from './mcp-clients-logic'
 import { installStateKey } from './windows-install-record'
 import {
@@ -185,7 +186,10 @@ test('the app uses the identity for its AUMID, login item, agent access and upda
   const main = join(desktop, 'src', 'main')
   for (const file of readdirSync(main)) {
     if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue
-    const source = readFileSync(join(main, file), 'utf8')
+    let source = readFileSync(join(main, file), 'utf8')
+    // win/bark's client default; a QA build overrides it (tested below).
+    if (file === 'dictation-helper-client.ts')
+      source = source.replace("export const BARK_HELPER_IDENTITY = 'com.doodlenote.desktop'", '')
     assert.doesNotMatch(source, /'com\.doodlenote\.desktop'/, file)
     assert.doesNotMatch(source, /'doodle-note'/, file)
   }
@@ -199,4 +203,21 @@ test('a package whose name does not match the code identity is refused', () => {
   )
   assert.equal(identityMismatch('desktop-qa', appIdentity('qa')), null)
   assert.match(identityMismatch('desktop', appIdentity('qa')) ?? '', /qa identity/)
+})
+
+test("Bark's Windows helper names its state after the build identity", () => {
+  // win/bark: DICTATION_HELPER_IDENTITY from barkHelperIdentity(channel, override)
+  // (mute-recovery mutex and file); index.ts passes the QA identity as the override.
+  const host = read('src/main/dictation-host.ts')
+  assert.match(host, /identity: barkHelperIdentity\(options\.channel, options\.helperIdentity\)/)
+  const index = read('src/main/index.ts')
+  assert.match(
+    index,
+    /helperIdentity: APP_IDENTITY\.name === 'production' \? null : APP_IDENTITY\.appId,/
+  )
+  // Production keeps the client's default (the production identity); QA its own.
+  assert.equal(BARK_HELPER_IDENTITY, appIdentity('production').appId)
+  assert.equal(barkHelperIdentity('release', null), appIdentity('production').appId)
+  assert.equal(barkHelperIdentity('release', appIdentity('qa').appId), appIdentity('qa').appId)
+  assert.notEqual(appIdentity('qa').appId, BARK_HELPER_IDENTITY)
 })

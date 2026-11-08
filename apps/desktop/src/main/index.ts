@@ -898,6 +898,10 @@ app.whenReady().then(async () => {
     userData: app.getPath('userData'),
     logsDir: app.getPath('logs'),
     helperPath: resolveDictationHelperBinary(),
+    // A QA identity build keeps its own Bark helper state beside production's
+    // (Windows: mute-recovery mutex and state file); production and dev use the
+    // channel's default.
+    helperIdentity: APP_IDENTITY.name === 'production' ? null : APP_IDENTITY.appId,
     packaged: app.isPackaged,
     // Bark needs a speech engine and a helper for typing: the Swift engine and helper
     // on macOS, the Parakeet worker and the C# helper on Windows. It is off until the
