@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  BARK_HELPER_IDENTITY,
   DictationHelperClient,
   WINDOWS_EXIT_GRACE_MS,
   helperSpawnEnv,
@@ -404,7 +405,7 @@ function recordingHelper(readyMs: number): { command: string; args: string[]; lo
     `
 const fs = require('node:fs')
 const note = (line) => fs.appendFileSync(${JSON.stringify(log)}, line + '\\n')
-note('started test=' + (process.env.DICTATION_HELPER_TEST || '') + ' other=' + (process.env.DN_KEEP_ME || ''))
+note('started test=' + (process.env.DICTATION_HELPER_TEST || '') + ' other=' + (process.env.DN_KEEP_ME || '') + ' identity=' + (process.env.DICTATION_HELPER_IDENTITY || ''))
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 let buf = ''
 process.stdin.on('data', (d) => {
@@ -508,5 +509,35 @@ test('Windows: DICTATION_HELPER_* never reaches the helper unless the app is in 
     assert.match(await read(fake.log), /started test= other=yes/)
   } finally {
     await client.dispose()
+  }
+})
+
+test('Windows: the helper is told the app identity, which the user environment cannot override', async () => {
+  const fake = recordingHelper(0)
+  const prod = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    env: helperSpawnEnv({ ...process.env, DICTATION_HELPER_IDENTITY: 'someone.else' }, false)
+  })
+  try {
+    assert.ok(await prod.status())
+    assert.match(
+      await read(fake.log),
+      new RegExp(`identity=${BARK_HELPER_IDENTITY.replace(/\./g, '\\.')}\\b`)
+    )
+  } finally {
+    await prod.dispose()
+  }
+  const qaFake = recordingHelper(0)
+  const qa = new DictationHelperClient({
+    ...qaFake,
+    platform: 'win32',
+    identity: 'com.doodlenote.desktop.qa'
+  })
+  try {
+    assert.ok(await qa.status())
+    assert.match(await read(qaFake.log), /identity=com\.doodlenote\.desktop\.qa/)
+  } finally {
+    await qa.dispose()
   }
 })

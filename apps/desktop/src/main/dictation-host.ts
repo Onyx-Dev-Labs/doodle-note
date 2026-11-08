@@ -30,7 +30,11 @@ import {
 import type { PermissionPane } from '../shared/dictation-permissions'
 import { privacySettingsUrl } from '../shared/dictation-platform'
 import { CaptureOwnership } from './capture-ownership'
-import { DictationHelperClient, helperSpawnEnv } from './dictation-helper-client'
+import {
+  BARK_HELPER_IDENTITY,
+  DictationHelperClient,
+  helperSpawnEnv
+} from './dictation-helper-client'
 import { HelperIntegrity, resolveHelperExpectation } from './helper-integrity'
 import { verifyAuthenticode } from './win-authenticode'
 import { DictationOverlay } from './dictation-overlay'
@@ -104,6 +108,7 @@ export function createDictationHost(options: DictationHostOptions): {
     platform,
     ...(integrity
       ? {
+          identity: BARK_HELPER_IDENTITY,
           verify: () => integrity.ensure().then((verdict) => verdict === 'ok'),
           // A user's environment must not reach the helper's test facilities; only an unpackaged
           // run with Bark's test hooks on passes DICTATION_HELPER_* through.

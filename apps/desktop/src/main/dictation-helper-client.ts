@@ -40,7 +40,19 @@ export interface HelperLaunch {
   verify?: () => Promise<boolean>
   /** Windows: the spawn environment (see helperSpawnEnv). Defaults to the app's own. */
   env?: NodeJS.ProcessEnv
+  /**
+   * Windows: the app identity the helper names its own state after (the mute-recovery mutex and
+   * file), so a QA identity installed beside production never shares it. Defaults to
+   * BARK_HELPER_IDENTITY.
+   */
+  identity?: string
 }
+
+/**
+ * The app identity passed to the Windows helper (DICTATION_HELPER_IDENTITY). The production app id;
+ * a build-time identity (a QA build beside production) replaces it from one place.
+ */
+export const BARK_HELPER_IDENTITY = 'com.doodlenote.desktop'
 
 /**
  * Windows: the helper's environment. DICTATION_HELPER_* variables reach it only when the app itself
@@ -577,7 +589,16 @@ export class DictationHelperClient {
     try {
       child = spawn(this.launch.command, this.launch.args ?? [], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        ...(this.windows && this.launch.env ? { env: this.launch.env } : {})
+        // Windows: the identity is set last, after DICTATION_HELPER_* was stripped, so neither a
+        // user's environment nor a test run can point the helper at another identity's state.
+        ...(this.windows
+          ? {
+              env: {
+                ...(this.launch.env ?? process.env),
+                DICTATION_HELPER_IDENTITY: this.launch.identity ?? BARK_HELPER_IDENTITY
+              }
+            }
+          : {})
       })
     } catch (error) {
       this.launchError = (error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN'

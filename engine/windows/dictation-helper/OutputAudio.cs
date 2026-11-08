@@ -311,7 +311,9 @@ namespace DoodleNote.DictationHelper
         static string adoptedOwner;
 
         /// <summary>
-        /// Serialize read/modify/write of the shared record across helper instances in this session.
+        /// Serialize read/modify/write of the record across helper instances of the SAME app identity in
+        /// this session (the mutex and the file are named after HelperIdentity, so a QA identity beside
+        /// production shares neither).
         /// The record file lives in the per-user %TEMP%, so a per-session (Local\) mutex is the right
         /// scope and avoids the access-denied a Global\ mutex causes for a second signed-in user.
         /// If the lock cannot be created or acquired the protected operation is SKIPPED (never run
@@ -320,7 +322,7 @@ namespace DoodleNote.DictationHelper
         static T WithStateLock<T>(Func<T> body, T fallback)
         {
             System.Threading.Mutex mutex;
-            try { mutex = new System.Threading.Mutex(false, "Local\\DoodleNote-Bark-output"); }
+            try { mutex = new System.Threading.Mutex(false, HelperIdentity.OutputMutexName(HelperIdentity.Sanitized)); }
             catch (Exception) { return fallback; }
             using (mutex)
             {
@@ -351,7 +353,8 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         static string StatePath
         {
-            get { return Path.Combine(Path.GetTempPath(), "DoodleNote-Bark-output.json"); }
+            // Named after the app identity, so a QA build beside production keeps its own record.
+            get { return Path.Combine(Path.GetTempPath(), HelperIdentity.OutputStateFileName(HelperIdentity.Sanitized)); }
         }
 
         public static string Mute()
