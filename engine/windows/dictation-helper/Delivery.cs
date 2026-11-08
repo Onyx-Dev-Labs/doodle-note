@@ -378,8 +378,18 @@ namespace DoodleNote.DictationHelper
                 }
             }
             if (holdMs > 0) Thread.Sleep(holdMs);
-            // As before Ctrl+V (the real check): a clipboard that changed hands meanwhile is left alone.
-            if (!ours.LooksOurs() && !saved.OurWriteVisible(ours)) { saved.Settle("user-changed"); return "user-changed|" + savedFormats; }
+            // As before Ctrl+V (the real check): a clipboard that changed hands meanwhile is left alone; one that could
+            // not be looked at keeps its record (the restore below then runs only on proof, or is kept for a retry).
+            if (!ours.LooksOurs())
+            {
+                uint seen;
+                SavedClipboard.Inspection look = saved.InspectOurWrite(ours, out seen);
+                if (look == SavedClipboard.Inspection.Foreign) { saved.Settle("user-changed"); return "user-changed|" + savedFormats; }
+                // The sequence moved under our ownership: ownership alone no longer proves anything (proof c is off).
+                if (look != SavedClipboard.Inspection.Ours) PendingClipboard.ForgetOwnership();
+                if (look == SavedClipboard.Inspection.Uninspectable) return "uninspectable/" + saved.Restore(ours) + "|" + savedFormats;
+                if (look == SavedClipboard.Inspection.OwnedButChanged) { saved.KeepAsOffer(); return "owned-but-changed/unrestored|" + savedFormats; }
+            }
             // Test build only: a target that pastes by reading the synthesized ANSI text formats (an ANSI or
             // RichEdit app does), on another thread right after "Ctrl+V", as a real target would.
             if (TestMode.Env("DICTATION_HELPER_TEST_TARGET_READ") == "ansi") SimulateAnsiTargetRead();
@@ -531,26 +541,55 @@ namespace DoodleNote.DictationHelper
             string unsafeReason = ReleaseModifiers() ? null : "focus-changed";
             if (unsafeReason == null) unsafeReason = PasteProviderGuard(snapshot);
             if (unsafeReason == null) unsafeReason = PasteMaskGuard(snapshot);
+            // The clipboard must still be our write, or Ctrl+V would paste someone else's content (another app
+            // copied between our write and now). This look can block (it opens the clipboard), so it comes BEFORE
+            // the final checks. A moved sequence alone is not someone else's copy: our window owning the clipboard
+            // with our complete write on it is still ours. Someone else's content: nothing is pasted, their copy is
+            // left alone (settled). A clipboard that could not be looked at: nothing is pasted, nothing settled.
+            bool sequenceProof = true;
+            uint inspectedSequence = 0;
+            if (unsafeReason == null && !ours.LooksOurs())
+            {
+                SavedClipboard.Inspection look = saved.InspectOurWrite(ours, out inspectedSequence);
+                if (look == SavedClipboard.Inspection.Foreign)
+                {
+                    Wire.Log("the clipboard changed hands before Ctrl+V; not pasting");
+                    clipboardAfterFailedWrite = "user-changed";
+                    saved.Settle("user-changed");
+                    return null;
+                }
+                // The sequence moved under our ownership: ownership alone no longer proves anything (proof c is off).
+                if (look != SavedClipboard.Inspection.Ours) PendingClipboard.ForgetOwnership();
+                if (look == SavedClipboard.Inspection.Uninspectable)
+                {
+                    Wire.Log("the clipboard could not be looked at before Ctrl+V; not pasting (the record is kept)");
+                    clipboardAfterFailedWrite = saved.Restore(ours);
+                    holdsAfterFailedWrite = saved.Holds;
+                    return null;
+                }
+                if (look == SavedClipboard.Inspection.OwnedButChanged)
+                {
+                    Wire.Log("our window still owns the clipboard but our write is not all there; not pasting (kept, as an offer)");
+                    saved.KeepAsOffer();
+                    clipboardAfterFailedWrite = "unrestored";
+                    holdsAfterFailedWrite = "unknown";
+                    return null;
+                }
+                sequenceProof = false;
+            }
+            // The cheap checks LAST, immediately before SendInput, with nothing that can block in between: same
+            // foreground process, same focused window, no password or read-only style, no modifier held, and the
+            // clipboard still as the look above left it (owner and sequence, read without opening it).
             if (unsafeReason == null) unsafeReason = PasteFinalGuard(snapshot);
+            if (unsafeReason == null && !(sequenceProof ? ours.LooksOurs() : ours.UnchangedSince(inspectedSequence))) unsafeReason = "clipboard-changed";
             if (unsafeReason != null)
             {
-                DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, unsafeReason);
+                DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, unsafeReason == "clipboard-changed" ? "focus-changed" : unsafeReason);
+                if (unsafeReason == "clipboard-changed") Wire.Log("the clipboard changed right before Ctrl+V; not pasting");
                 moved.Method = "paste";
                 moved.Clipboard = saved.Restore(ours);
                 moved.ClipboardHolds = saved.Holds;
                 return moved;
-            }
-            // The clipboard must still be our write, or Ctrl+V would paste someone else's content
-            // (another app copied between our write and now). Nothing is pasted then, and their newer
-            // copy is left alone; the typing fallback may still run.
-            // A moved sequence alone is not someone else's copy: our window owning the clipboard with our complete write
-            // on it is still ours (the content check runs before anything is settled).
-            if (!ours.LooksOurs() && !saved.OurWriteVisible(ours))
-            {
-                Wire.Log("the clipboard changed hands before Ctrl+V; not pasting");
-                clipboardAfterFailedWrite = "user-changed";
-                saved.Settle("user-changed");
-                return null;
             }
             uint sent = Native.Send(new[]
             {
@@ -1391,6 +1430,12 @@ namespace DoodleNote.DictationHelper
                 && SequenceUnlocked != 0 && Native.GetClipboardSequenceNumber() == SequenceUnlocked;
         }
 
+        /// <summary>Without the lock (right before Ctrl+V): our window still owns the clipboard and its sequence is the one a content look saw.</summary>
+        public bool UnchangedSince(uint sequence)
+        {
+            return Owner != IntPtr.Zero && Native.GetClipboardOwner() == Owner && sequence != 0 && Native.GetClipboardSequenceNumber() == sequence;
+        }
+
         /// <summary>Without the lock (right before Ctrl+V): the clipboard still holds our write, as far as can be seen.</summary>
         public bool LooksOurs()
         {
@@ -1434,6 +1479,8 @@ namespace DoodleNote.DictationHelper
         const int MaxMarkerBytes = 64;
         readonly List<KeyValuePair<uint, byte[]>> items = new List<KeyValuePair<uint, byte[]>>();
         IntPtr metafile = IntPtr.Zero;
+        /// <summary>A written-down metafile that could not be rebuilt (see ReadFrom).</summary>
+        bool metafileLost;
         bool complete = true;
         /// <summary>True only when a user-visible format was dropped by the byte or time cap; drops of private formats are silent.</summary>
         bool reportedSkip;
@@ -1646,9 +1693,12 @@ namespace DoodleNote.DictationHelper
             {
                 byte[] bits = reader.ReadBytes(metaLength);
                 saved.metafile = Native.SetEnhMetaFileBits((uint)bits.Length, bits);
+                // A metafile that cannot be rebuilt is part of the save that cannot go back: never "restored", never
+                // "already on the clipboard" (so such a record is never dropped as untouched).
+                if (saved.metafile == IntPtr.Zero) saved.metafileLost = true;
             }
             saved.forceMarkers = reader.ReadBoolean();
-            saved.complete = reader.ReadBoolean();
+            saved.complete = reader.ReadBoolean() && !saved.metafileLost;
             saved.reportedSkip = reader.ReadBoolean();
             return saved;
         }
@@ -1695,6 +1745,7 @@ namespace DoodleNote.DictationHelper
         /// <summary>Every saved format is among the present ones (with MatchesOpenClipboard: the clipboard holds exactly the saved content).</summary>
         public bool AllPresent(IList<uint> present)
         {
+            if (metafileLost) return false;
             uint sentinel = Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat);
             foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key != sentinel && !present.Contains(item.Key)) return false;
             if (metafile != IntPtr.Zero && !present.Contains(CF_ENHMETAFILE)) return false;
@@ -1886,12 +1937,41 @@ namespace DoodleNote.DictationHelper
             return ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, Record.Id, Record.Nonce, Record.DictatedHash) == OurWrite.Complete;
         }
 
-        /// <summary>Opens the clipboard: our window owns it and our complete write (this transaction's) is on it.</summary>
-        public bool OurWriteVisible(ClipboardOwnership ours)
+        /// <summary>
+        /// What a look at the clipboard found against our write. FOREIGN only when its owner changed (someone emptied
+        /// it: their copy is newer, settled). OWNED BUT CHANGED: our window still owns it but our complete write is not
+        /// on it (an app added a format without emptying, a monitor read it): kept, as an offer. UNINSPECTABLE: it
+        /// could not be opened: no proof of anything, kept.
+        /// </summary>
+        public enum Inspection { Ours, Foreign, OwnedButChanged, Uninspectable }
+
+        /// <summary>
+        /// Opens the clipboard (a blocking call: it may retry for ~180 ms) and says whether our window owns it with our
+        /// complete write (this transaction's) on it; `sequence` is the sequence at that look. A clipboard that could
+        /// not be opened is UNINSPECTABLE: that is no proof our write is gone, so nothing may be settled on it.
+        /// </summary>
+        public Inspection InspectOurWrite(ClipboardOwnership ours, out uint sequence)
         {
-            if (!ClipboardText.Open()) return false;
-            try { return OurWriteStillThere(ours); }
+            sequence = 0;
+            if (!ClipboardText.Open()) return Inspection.Uninspectable;
+            try
+            {
+                sequence = Native.GetClipboardSequenceNumber();
+                if (OurWriteStillThere(ours)) return Inspection.Ours;
+                return ours.Owner != IntPtr.Zero && Native.GetClipboardOwner() == ours.Owner ? Inspection.OwnedButChanged : Inspection.Foreign;
+            }
             finally { Native.CloseClipboard(); }
+        }
+
+        /// <summary>Keep this transaction's record as an offer: no proof by ownership may apply to it any more.</summary>
+        public void KeepAsOffer()
+        {
+            PendingRecord record = Record;
+            Record = null;
+            PendingClipboard.ForgetOwnership();
+            if (record == null) return;
+            if (record.Persisted) PendingClipboard.Keep(record);
+            else PendingClipboard.Finish(record, "unrestored");
         }
 
         /// <summary>Set by RestoreInner when the record must be kept whatever the result (a lost journal).</summary>
@@ -1919,6 +1999,16 @@ namespace DoodleNote.DictationHelper
                     // write on it (sentinel with this transaction's nonce, our markers, our text) is ours.
                     Wire.Log("the clipboard sequence moved since our write, but our window owns it and our complete write is on it (a target read the synthesized formats): restoring");
                     provenBySequence = true;
+                }
+                if (!provenBySequence && ours.Owner != IntPtr.Zero && Native.GetClipboardOwner() == ours.Owner)
+                {
+                    // Our window still owns it, but it is not exactly our write (an app added a format without emptying):
+                    // not someone else's newer copy, and not provably ours either: kept, as an offer (never settled).
+                    Wire.Log("our window owns the clipboard but our write is not all there: kept as an offer");
+                    PendingClipboard.ForgetOwnership();
+                    keepRecord = true;
+                    Holds = "unknown";
+                    return "unrestored";
                 }
                 if (!provenBySequence && ours.Confirmed)
                 {

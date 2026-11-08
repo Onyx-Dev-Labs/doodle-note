@@ -40,6 +40,11 @@ namespace DoodleNote.DictationHelper
         /// <summary>The dictated text's SHA-256: our write is recognized by it (also in memory-only transactions).</summary>
         public byte[] DictatedHash;
         public DateTime CreatedUtc = DateTime.UtcNow;
+        /// <summary>The first offer (sequence, tick, boot), kept through every journal write once set.</summary>
+        public uint OfferedSequence;
+        public long OfferedTick;
+        public string OfferedBoot = "";
+        public string OfferedUtc = "";
         /// <summary>The tick count (since boot) when the transaction began: a smaller one now means a new boot.</summary>
         public long CreatedTick = (long)Native.GetTickCount64();
         /// <summary>Guards publication of the payload against settlement (a settled record is never published).</summary>
@@ -316,6 +321,8 @@ namespace DoodleNote.DictationHelper
         /// <summary>This helper just emptied the clipboard for this transaction (so our window owns it for this one only).</summary>
         public static void NoteEmptied(PendingRecord record) { lastEmptiedBy = record != null ? record.Id : null; }
         static void NoteEmptied(string id) { lastEmptiedBy = id; }
+        /// <summary>Our window still owns the clipboard but its content is not exactly ours: proof (c) may not apply any more.</summary>
+        public static void ForgetOwnership() { lastEmptiedBy = null; }
 
         /// <summary>A restore ran but the record must be kept (its stage could not be journaled): checked again later.</summary>
         public static void Keep(PendingRecord record)
@@ -372,6 +379,10 @@ namespace DoodleNote.DictationHelper
                 "tick", (double)record.CreatedTick,
                 "boot", Native.BootTimeUtc.ToString("o"),
                 "created", record.CreatedUtc.ToString("o"),
+                "offeredSequence", (double)record.OfferedSequence,
+                "offeredTick", (double)record.OfferedTick,
+                "offeredBoot", record.OfferedBoot ?? "",
+                "offered", record.OfferedUtc ?? "",
                 "updated", DateTime.UtcNow.ToString("o")));
             WriteStateJson(StatePath(record.Id), json);
         }
@@ -598,15 +609,22 @@ namespace DoodleNote.DictationHelper
             {
                 if (!RecordName.IsMatch(Prefix + id + ".state")) return false;
                 if (inFlight.Contains(id)) return false;
-                Dictionary<string, object> state = null;
-                try { state = Wire.Parse(File.ReadAllText(StatePath(id))); } catch (Exception) { }
-                if (state != null)
+                if (File.Exists(StatePath(id)))
                 {
-                    RecordFacts facts = RecordFacts.Of(state);
-                    if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid)) return false; // its helper still runs
+                    // A state file that cannot be read now could belong to a running helper: not deleted (retryable).
+                    Dictionary<string, object> state = null;
+                    try { state = Wire.Parse(File.ReadAllText(StatePath(id))); } catch (Exception) { return false; }
+                    if (state != null)
+                    {
+                        RecordFacts facts = RecordFacts.Of(state);
+                        if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid)) return false; // its helper still runs
+                    }
                 }
                 // The real result: false when the files could not be deleted (the card stays, retryable).
-                return DeleteId(id, "dismissed by the user") || !File.Exists(StatePath(id));
+                // The real result: true only when every file of the record is gone (else the card stays, retryable;
+                // a payload left without its state file is removed by the orphan sweep).
+                DeleteId(id, "dismissed by the user");
+                return !OnDisk(id);
             }
         }
 
@@ -636,24 +654,30 @@ namespace DoodleNote.DictationHelper
             SavedClipboard saved;
             string nonce;
             byte[] dictatedHash;
+            // The payload's metadata and read: a failure to look at it or read it now is never corruption (kept).
+            byte[] sealedBytes = null;
+            string readError = null;
             try
             {
                 FileInfo info = new FileInfo(PayloadPath(id));
                 if (!info.Exists) { DeleteId(id, "no payload (the paste went ahead before it was written)"); return "ERROR: stage " + facts.Stage + " but no payload; cannot put back"; }
                 if (info.Length > MaxRecordBytes) { DeleteId(id, "payload over the size cap"); return "ERROR: payload of " + info.Length + " bytes over the cap; not read"; }
-                byte[] sealedBytes = null;
-                string readError = null;
-                try { sealedBytes = File.ReadAllBytes(PayloadPath(id)); }
-                catch (Exception error)
-                {
-                    if (!(error is IOException || error is UnauthorizedAccessException)) throw;
-                    readError = error.GetType().Name;
-                }
-                if (readError != null)
-                {
-                    result = RecoverResult.Busy; reply["result"] = "busy";
-                    return "its payload could not be read now (" + readError + "); kept";
-                }
+                sealedBytes = File.ReadAllBytes(PayloadPath(id));
+            }
+            catch (Exception error)
+            {
+                if (!(error is IOException || error is UnauthorizedAccessException || error is System.Security.SecurityException)) throw;
+                readError = error.GetType().Name;
+            }
+            if (readError != null)
+            {
+                result = RecoverResult.Busy; reply["result"] = "busy";
+                return "its payload could not be read now (" + readError + "); kept";
+            }
+            // Only a payload read in full that does not decrypt or parse is corrupt (and only then deleted).
+            string corrupt = null;
+            try
+            {
                 byte[] plain = ProtectedData.Unprotect(sealedBytes, Entropy, DataProtectionScope.CurrentUser);
                 using (BinaryReader reader = new BinaryReader(new MemoryStream(plain), Encoding.UTF8))
                 {
@@ -670,11 +694,12 @@ namespace DoodleNote.DictationHelper
                     saved = SavedClipboard.ReadFrom(reader);
                 }
             }
-            catch (Exception error)
-            {
-                // A payload that was read in full and does not decrypt or parse: demonstrated corruption.
-                DeleteId(id, "payload corrupt"); return "ERROR: payload corrupt (" + error.GetType().Name + ")";
-            }
+            catch (CryptographicException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
+            catch (EndOfStreamException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
+            catch (FormatException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
+            catch (ArgumentException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
+            catch (OverflowException error) { corrupt = error.GetType().Name; saved = null; nonce = null; dictatedHash = null; }
+            if (corrupt != null) { DeleteId(id, "payload corrupt"); return "ERROR: payload corrupt (" + corrupt + ")"; }
             if (!ClipboardText.Open()) { result = RecoverResult.Busy; reply["result"] = "busy"; return "the clipboard is busy; kept for a retry"; }
             PendingRecord journal = null;
             string outcome;
@@ -714,6 +739,8 @@ namespace DoodleNote.DictationHelper
                 {
                     // The retention applies only to what was offered and never restored (a provable state restores
                     // however old it is), measured on the tick count from the first offer.
+                    // Offered first (this fixes the offered sequence and tick if it was not offered yet), then the retention.
+                    Offer(id, facts, saved, view, verdict);
                     if (Expired(facts, Now()))
                     {
                         DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention");
@@ -721,12 +748,12 @@ namespace DoodleNote.DictationHelper
                     }
                     result = RecoverResult.Pending;
                     reply["result"] = "pending";
-                    Offer(id, facts, saved, view, verdict);
                     return "pending (" + seen + "): not provably ours, kept and offered; nothing written";
                 }
                 // Journaled like a delivery, keeping the stage FOUND as its origin (unwrapped only when the found
                 // stage is itself a recovery that never emptied: then the clipboard is as that recovery found it).
-                journal = new PendingRecord(id, nonce) { Persisted = true, SequenceAfterWrite = facts.SequenceAfterWrite, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, CreatedTick = facts.Tick, DictatedHash = dictatedHash };
+                journal = new PendingRecord(id, nonce) { Persisted = true, SequenceAfterWrite = facts.SequenceAfterWrite, DeliveryId = facts.Delivery, Unrestored = facts.Unrestored, CreatedUtc = facts.CreatedUtc, CreatedTick = facts.Tick, DictatedHash = dictatedHash,
+                    OfferedSequence = facts.OfferedSequence, OfferedTick = facts.OfferedTick, OfferedBoot = facts.OfferedBoot, OfferedUtc = facts.OfferedUtc }; // a failed recovery keeps the first offer
                 RecordFacts origin = facts.Stage == "recovering" && facts.OriginStage.Length > 0 ? facts.AsOrigin() : facts;
                 journal.OriginStage = origin.Stage;
                 journal.OriginSequenceAtStage = origin.SequenceAtStage;
@@ -786,6 +813,7 @@ namespace DoodleNote.DictationHelper
                 facts.OfferedSequence = view.Sequence;
                 facts.OfferedTick = (long)Native.GetTickCount64();
                 facts.OfferedBoot = bootId;
+                facts.OfferedUtc = DateTime.UtcNow.ToString("o");
                 PersistOffer(id, facts);
             }
             ClipboardOffer offer = new ClipboardOffer
@@ -813,20 +841,16 @@ namespace DoodleNote.DictationHelper
                 state["offeredSequence"] = (double)facts.OfferedSequence;
                 state["offeredTick"] = (double)facts.OfferedTick;
                 state["offeredBoot"] = facts.OfferedBoot ?? "";
-                state["offered"] = DateTime.UtcNow.ToString("o");
+                state["offered"] = facts.OfferedUtc;
                 WriteStateJson(StatePath(id), Wire.Serialize(state));
             }
             catch (Exception error) { Wire.Log("the offer could not be recorded in the state file (" + error.GetType().Name + "); offered from memory"); }
         }
 
-        /// <summary>A record nobody restored, dismissed or proved for this long is deleted (a sanity cap on the wall clock).</summary>
-        public static readonly TimeSpan RetentionCap = TimeSpan.FromDays(30);
-
         /// <summary>
         /// The retention rule (unit-tested): 24 h from the FIRST OFFER, measured on the tick count of the same boot
-        /// (no wall clock, so a clock correction never deletes anything). A record from another boot is deleted as
-        /// such (Compare). Only a record whose first offer has no tick (an older build) falls back to the wall
-        /// clock, and then only past RetentionCap.
+        /// (no wall clock). A record from another boot is deleted as such (Compare). A record not yet offered (also one
+        /// from an older build) is offered first, which sets the tick; the 24 h run from then.
         /// </summary>
         internal static bool Expired(RecordFacts facts, LogonNow now)
         {
@@ -835,7 +859,7 @@ namespace DoodleNote.DictationHelper
                 bool sameBoot = facts.OfferedBoot.Length > 0 && now.BootId.Length > 0 ? facts.OfferedBoot == now.BootId : now.Tick >= facts.OfferedTick;
                 return sameBoot && now.Tick - facts.OfferedTick > (long)Retention.TotalMilliseconds;
             }
-            return facts.CreatedUtc != DateTime.MinValue && DateTime.UtcNow - facts.CreatedUtc > RetentionCap;
+            return false; // not offered yet: the offer sets the tick first (no wall clock, ever)
         }
 
         static Timer expiryTimer;
@@ -850,29 +874,13 @@ namespace DoodleNote.DictationHelper
             expiryTimer = new Timer(delegate { ExpireSweep(); }, null, 30 * 60 * 1000, 30 * 60 * 1000);
         }
 
-        internal static void ExpireSweep()
-        {
-            lock (gate)
-            {
-                string[] files;
-                try { files = System.IO.Directory.GetFiles(Directory, Prefix + "*.state"); } catch (Exception) { return; }
-                Regex names = RecordName;
-                LogonNow now = Now();
-                foreach (string path in files)
-                {
-                    Match match = names.Match(Path.GetFileName(path));
-                    if (!match.Success || match.Groups[3].Success) continue;
-                    string id = match.Groups[1].Value;
-                    if (inFlight.Contains(id)) continue;
-                    Dictionary<string, object> state;
-                    try { state = Wire.Parse(File.ReadAllText(path)); } catch (Exception) { continue; }
-                    if (state == null) continue;
-                    RecordFacts facts = RecordFacts.Of(state);
-                    if (facts.Pid != Process.GetCurrentProcess().Id && HelperRunning(facts.Pid)) continue;
-                    if (Expired(facts, now)) DeleteId(id, "expired: offered longer than the " + Retention.TotalHours + " h retention");
-                }
-            }
-        }
+        /// <summary>
+        /// The retention's own check runs the full decision procedure for every record of this identity (RecoverLeftover):
+        /// the state is read, another session's records and those of a running helper are left alone, a provable
+        /// state is restored, and only a pending one is measured against the retention. Nothing is deleted here on age
+        /// alone.
+        /// </summary>
+        internal static void ExpireSweep() { RecoverLeftover("retention check"); }
 
         public enum RecoveryVerdict { Stale, Untouched, Pending, OtherSession, OursByWrite, OursByOwner, InterruptedEmpty }
 
@@ -901,9 +909,10 @@ namespace DoodleNote.DictationHelper
             if (logonMatch == LogonMatch.OtherSession) return RecoveryVerdict.OtherSession;
             if (logonMatch == LogonMatch.Different) return RecoveryVerdict.Stale;
             if (view.HoldsSavedExactly) return RecoveryVerdict.Untouched;
-            // Nothing of the user's was emptied: the clipboard is unchanged since before our EmptyClipboard.
-            if (stage == "emptying" && view.Sequence == facts.SequenceAtStage) return RecoveryVerdict.Untouched;
             if (logonMatch == LogonMatch.Unknown) return RecoveryVerdict.Pending;
+            // Nothing of the user's was emptied: the clipboard is unchanged since before our EmptyClipboard. A sequence
+            // comparison, so only within the same logon (after a relogin the numbers start over and may coincide).
+            if (stage == "emptying" && view.Sequence == facts.SequenceAtStage) return RecoveryVerdict.Untouched;
             if (view.OwnedByThisTransaction) return RecoveryVerdict.OursByOwner;
             // (a) needs continuity too: the content proves where it came from, not that nobody replayed it since
             // (a clipboard manager that kept every format, our sentinel included). Within our own operations from
@@ -919,29 +928,20 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// The sequence moved beyond anything our own operations from the journaled stage could explain (each of
-        /// our writes and put-backs, Windows' moves at a close, one per synthesized format present). Used ONLY to
-        /// withhold proof (a) (a complete write beyond it may be a replay): it never deletes anything.
+        /// The rule (unit-tested): the sequence moved beyond the operations we actually performed from the journaled
+        /// stage. Only "emptied" counts operations after its journal, because our write's sets and its sentinel are
+        /// one locked step (the sentinel, set last, proves they ran). Every other stage counts nothing it has not
+        /// journaled as done: a restore that was only about to run establishes no continuity. Plus Windows' moves at
+        /// a close and one per synthesized format present. Compared as a forward distance (wrap-safe; a sequence
+        /// behind the basis counts as beyond). Used ONLY to withhold proof (a): it never deletes anything.
         /// </summary>
         internal static bool Beyond(RecordFacts facts, ClipboardView view)
         {
             uint basis = Math.Max(facts.SequenceAtStage, Math.Max(facts.SequenceClosed, facts.SequenceAfterWrite));
-            if (basis == 0) return false;
-            uint ops = (uint)Math.Max(WriteOps, view.RestoreOps);
-            uint bound;
-            switch (facts.Stage)
-            {
-                case "emptying":
-                case "restoring":
-                case "recovering":
-                    bound = basis + 1 + ops; break;
-                case "written":
-                    bound = basis; break;
-                default:
-                    bound = basis + ops; break;
-            }
-            bound += (uint)(CloseMoves + view.SynthesizedPresent);
-            return view.Sequence > bound;
+            if (basis == 0) return true; // nothing journaled to be continuous with
+            uint allowance = (uint)(CloseMoves + view.SynthesizedPresent) + (facts.Stage == "emptied" ? (uint)WriteOps : 0u);
+            uint distance = unchecked(view.Sequence - basis);
+            return distance > allowance;
         }
 
         static bool HelperRunning(int pid)
@@ -990,6 +990,7 @@ namespace DoodleNote.DictationHelper
         public uint OfferedSequence;
         public long OfferedTick;
         public string OfferedBoot = "";
+        public string OfferedUtc = "";
 
         public static RecordFacts Of(Dictionary<string, object> state)
         {
@@ -1013,6 +1014,7 @@ namespace DoodleNote.DictationHelper
             facts.OfferedSequence = (uint)(Wire.Num(state, "offeredSequence") ?? 0);
             facts.OfferedTick = (long)(Wire.Num(state, "offeredTick") ?? 0);
             facts.OfferedBoot = Wire.Str(state, "offeredBoot") ?? "";
+            facts.OfferedUtc = Wire.Str(state, "offered") ?? "";
             DateTime created;
             if (DateTime.TryParse(Wire.Str(state, "created") ?? "", null, System.Globalization.DateTimeStyles.RoundtripKind, out created)) facts.CreatedUtc = created.ToUniversalTime();
             return facts;

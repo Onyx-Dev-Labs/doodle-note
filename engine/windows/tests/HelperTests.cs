@@ -651,6 +651,7 @@ namespace DoodleNote.DictationHelper.Tests
             expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another boot: the clipboard did not survive it");
             expect(PendingClipboard.RecoveryVerdict.OtherSession, facts("restore-emptied", 8), view(10, OurWrite.None, 2, false), LogonMatch.OtherSession, "another session's record: left alone");
             expect(PendingClipboard.RecoveryVerdict.Untouched, facts("emptying", 3), view(3, OurWrite.None, 2, true), same, "nothing emptied yet");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3), view(3, OurWrite.None, 2, false), unknown, "the same sequence after a relogin proves nothing (the numbers start over): pending, never deleted");
             ClipboardView exact = view(15, OurWrite.None, 5, true); exact.HoldsSavedExactly = true;
             expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exact, unknown, "the clipboard already holds exactly the saved content");
             expect(PendingClipboard.RecoveryVerdict.Untouched, facts("saved", 7), view(7, OurWrite.Complete, 1, true), same, "nothing was emptied");
@@ -658,6 +659,26 @@ namespace DoodleNote.DictationHelper.Tests
             RecordFacts chain = new RecordFacts { Stage = "recovering", SequenceAtStage = 20, SequenceAfterWrite = 7, OriginStage = "recovering-emptied", OriginSequenceAtStage = 18 };
             expect(PendingClipboard.RecoveryVerdict.Pending, chain, view(20, OurWrite.None, 2, true), same, "the four-helper chain: pending, not stale");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "recovering", SequenceAtStage = 18, OriginStage = "restore-emptied", OriginSequenceAtStage = 18 }, view(18, OurWrite.None, 0, false), same, "a recovery that never emptied: the found empty at its M still proves (b)");
+        }
+
+        public static void ContinuityCountsOnlyOperationsWePerformed()
+        {
+            Func<string, uint, RecordFacts> facts = (stage, at) => new RecordFacts { Stage = stage, SequenceAtStage = at };
+            Func<uint, ClipboardView> view = (seq) => new ClipboardView { Sequence = seq, RestoreOps = 9 };
+            uint slack = (uint)PendingClipboard.CloseMoves;
+            // A restore journaled but not yet begun establishes no continuity: a replay of every format after a crash
+            // before its empty (Empty + 8 sets) is beyond, whatever operations that restore would have performed.
+            Assert.Equal(true, PendingClipboard.Beyond(facts("restoring", 100), view(100 + 1 + 8)), "restoring: a replay after a crash before the empty is beyond");
+            Assert.Equal(false, PendingClipboard.Beyond(facts("restoring", 100), view(100 + slack)), "restoring: unchanged (plus a close) is continuous");
+            Assert.Equal(true, PendingClipboard.Beyond(facts("recovering", 100), view(100 + slack + 1)), "recovering: nothing it had not done counts");
+            // "emptied": our write's sets and its sentinel are one locked step after the journal.
+            Assert.Equal(false, PendingClipboard.Beyond(facts("emptied", 100), view(100 + (uint)PendingClipboard.WriteOps + slack)), "emptied: our own write's sets count");
+            Assert.Equal(true, PendingClipboard.Beyond(facts("emptied", 100), view(100 + (uint)PendingClipboard.WriteOps + slack + 1)), "emptied: one more is beyond");
+            // Wrap-safe forward distance; a sequence behind the basis is beyond.
+            Assert.Equal(false, PendingClipboard.Beyond(facts("written", 0xFFFFFFFFu), view(0u + 1)), "across the wrap: two steps forward");
+            Assert.Equal(true, PendingClipboard.Beyond(facts("written", 0xFFFFFFF0u), view(0x10u)), "across the wrap: far forward");
+            Assert.Equal(true, PendingClipboard.Beyond(facts("written", 100), view(99)), "behind the basis");
+            Assert.Equal(true, PendingClipboard.Beyond(new RecordFacts { Stage = "written" }, view(5)), "nothing journaled: no continuity");
         }
 
         public static void TheLogonIdentityNeverUsesTheWallClock()
@@ -709,8 +730,8 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(false, PendingClipboard.Expired(offered, now(1000 + 2 * day, "15")), "another boot: not by this rule (Compare deletes it as another boot)");
             RecordFacts jumped = new RecordFacts { OfferedTick = 1000, OfferedBoot = "14", CreatedUtc = DateTime.UtcNow.AddDays(-40) };
             Assert.Equal(false, PendingClipboard.Expired(jumped, now(5000, "14")), "a wall-clock jump alone never deletes (the tick count decides)");
-            Assert.Equal(false, PendingClipboard.Expired(new RecordFacts { CreatedUtc = DateTime.UtcNow.AddDays(-2) }, now(5000, "14")), "never offered: not by this rule");
-            Assert.Equal(true, PendingClipboard.Expired(new RecordFacts { CreatedUtc = DateTime.UtcNow.AddDays(-31) }, now(5000, "14")), "an older build's record without an offer tick: the 30-day cap");
+            Assert.Equal(false, PendingClipboard.Expired(new RecordFacts { CreatedUtc = DateTime.UtcNow.AddDays(-2) }, now(5000, "14")), "never offered: not by this rule (the offer sets the tick first)");
+            Assert.Equal(false, PendingClipboard.Expired(new RecordFacts { CreatedUtc = DateTime.UtcNow.AddDays(-400) }, now(5000, "14")), "no offer tick, however old by the wall clock: never on the wall clock");
         }
 
         public static void OurWriteIsRecognizedOnlyWhenExactlyOurs()
