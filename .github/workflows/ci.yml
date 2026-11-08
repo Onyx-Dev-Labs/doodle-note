@@ -268,3 +268,15 @@ jobs:
             apps/desktop/release/DoodleNote-*-setup.exe.blockmap
             apps/desktop/release/latest.yml
           retention-days: 7
+
+      # The QA identity package (the one the upgrade test installs) must ship
+      # exactly the production package's files: the same app.asar entries and the
+      # same app.asar.unpacked files, checked file by file, not only for presence.
+      # Built last: it rebuilds out/ with the QA identity.
+      - name: Check the QA package ships exactly the production package's files
+        timeout-minutes: 15
+        run: |
+          node apps/desktop/scripts/package-win-qa.cjs --dir
+          if ($LASTEXITCODE -ne 0) { throw "QA package build failed" }
+          node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked
+          if ($LASTEXITCODE -ne 0) { throw "The QA package does not ship the production package's files" }

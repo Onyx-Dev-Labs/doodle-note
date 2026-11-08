@@ -7,6 +7,11 @@
 // Windows runtime binary (speech engine, Koffi, reflink, llama) is missing.
 //
 //   node scripts/test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]
+//     [--same-files-as <other win-unpacked dir>]
+//
+// --same-files-as also requires exactly the same app.asar entries and exactly the
+// same files under app.asar.unpacked as the other package (CI: the QA identity
+// package against the production one).
 //
 // Reads the asar header directly (no @electron/asar dependency): the file starts
 // with a Chromium pickle holding the JSON directory tree.
@@ -180,13 +185,58 @@ module.exports = {
   foreignNativeBinaries,
   nativeBinariesInAsar,
   missingRequiredBinaries,
-  REQUIRED_UNPACKED
+  REQUIRED_UNPACKED,
+  listTree,
+  fileListDifferences
+}
+
+/** Every file under `dir`, relative and `/`-separated, sorted ([] when it does not exist). */
+function listTree(dir) {
+  const files = []
+  const walk = (sub) => {
+    for (const entry of fs.readdirSync(path.join(dir, sub), { withFileTypes: true })) {
+      const rel = sub ? `${sub}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(rel)
+      else files.push(rel)
+    }
+  }
+  if (fs.existsSync(dir)) walk('')
+  return files.sort()
+}
+
+/** What only `a` and only `b` hold, for two file lists. */
+function fileListDifferences(a, b) {
+  const inA = new Set(a)
+  const inB = new Set(b)
+  return { onlyA: a.filter((file) => !inB.has(file)), onlyB: b.filter((file) => !inA.has(file)) }
+}
+
+/** Problems when the package at `asar` does not ship exactly the files of `otherDir`. */
+function sameFilesProblems(asar, files, otherDir) {
+  const problems = []
+  const otherAsar = path.join(otherDir, 'resources', 'app.asar')
+  const pairs = [
+    ['app.asar', files, listAsar(otherAsar)],
+    ['app.asar.unpacked', listTree(`${asar}.unpacked`), listTree(`${otherAsar}.unpacked`)]
+  ]
+  for (const [name, ours, theirs] of pairs) {
+    const { onlyA, onlyB } = fileListDifferences(ours, theirs)
+    console.log(
+      `  ${name}: ${ours.length} files here, ${theirs.length} in ${otherDir}; ${onlyA.length} only here, ${onlyB.length} only there`
+    )
+    if (ours.length === 0) problems.push(`${name}: no files`)
+    problems.push(...onlyA.map((file) => `${name}/${file}: only in this package`))
+    problems.push(...onlyB.map((file) => `${name}/${file}: only in ${otherDir}`))
+  }
+  return problems
 }
 
 if (require.main === module) {
   const args = process.argv.slice(2)
   const listIndex = args.indexOf('--list')
   const listFile = listIndex >= 0 ? args.splice(listIndex, 2)[1] : null
+  const sameIndex = args.indexOf('--same-files-as')
+  const sameAs = sameIndex >= 0 ? args.splice(sameIndex, 2)[1] : null
   const target = args[0]
   if (!target) {
     console.error('usage: test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]')
@@ -227,6 +277,7 @@ if (require.main === module) {
   console.log(
     `  inside app.asar: ${packed.length} native binaries, ${packedForeign.length} that cannot load on Windows x64`
   )
+  if (sameAs) problems.push(...sameFilesProblems(asar, files, sameAs))
   if (problems.length) {
     console.error(`FAIL: ${problems.length} problem(s) in the Windows package`)
     for (const problem of problems.slice(0, 40)) console.error(`  ${problem}`)
@@ -236,4 +287,5 @@ if (require.main === module) {
   console.log(
     'Windows app.asar contains only the built app and its runtime dependencies; native binaries are all x64 Windows'
   )
+  if (sameAs) console.log(`Same app.asar entries and app.asar.unpacked files as ${sameAs}`)
 }

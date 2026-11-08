@@ -30,6 +30,8 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
   nativeBinariesInAsar(file: string): { path: string; machine: string }[]
   missingRequiredBinaries(unpackedDir: string): string[]
   REQUIRED_UNPACKED: string[]
+  listTree(dir: string): string[]
+  fileListDifferences(a: string[], b: string[]): { onlyA: string[]; onlyB: string[] }
 }
 const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
@@ -708,4 +710,39 @@ test('Bark is no longer limited to the development build, and still needs macOS 
   assert.ok(block.length > 0, 'the dictation host options were found')
   assert.doesNotMatch(block, /APP_CHANNEL\s*===\s*'dev'/)
   assert.match(block, /process\.platform === 'darwin' && engine instanceof EngineProcess/)
+})
+
+test("CI proves the QA package ships exactly the production package's files", () => {
+  const differences = packageCheck.fileListDifferences(
+    ['out/main/index.js', 'node_modules/a/index.js', 'package.json'],
+    ['out/main/index.js', 'node_modules/b/index.js', 'package.json']
+  )
+  assert.deepEqual(differences, {
+    onlyA: ['node_modules/a/index.js'],
+    onlyB: ['node_modules/b/index.js']
+  })
+  assert.deepEqual(packageCheck.fileListDifferences(['x'], ['x']), { onlyA: [], onlyB: [] })
+  const dir = mkdtempSync(join(tmpdir(), 'dn-tree-'))
+  try {
+    mkdirSync(join(dir, 'node_modules', 'k'), { recursive: true })
+    writeFileSync(join(dir, 'node_modules', 'k', 'k.node'), '')
+    writeFileSync(join(dir, 'a.txt'), '')
+    assert.deepEqual(packageCheck.listTree(dir), ['a.txt', 'node_modules/k/k.node'])
+    assert.deepEqual(packageCheck.listTree(join(dir, 'missing')), [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  // After the production package and its checks: the QA package, then the comparison.
+  const qaStep = ciWorkflow.indexOf(
+    "- name: Check the QA package ships exactly the production package's files"
+  )
+  assert.ok(qaStep > ciWorkflow.indexOf('run: pnpm --filter desktop package:win'))
+  assert.ok(qaStep > ciWorkflow.indexOf('uses: actions/upload-artifact'))
+  const qa = ciWorkflow.slice(qaStep)
+  assert.ok(
+    qa.indexOf('node apps/desktop/scripts/package-win-qa.cjs --dir') <
+      qa.indexOf(
+        'node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked'
+      )
+  )
 })
