@@ -18,6 +18,7 @@ import {
 } from './helper-integrity'
 import { peLayout, stableDigest } from '../../scripts/authenticode-digest.mjs'
 import { HelperChecker, classifyTrustResult, type FfiLike } from './windows-helper-check'
+import { DictationHelperClient } from './dictation-helper-client'
 
 const require = createRequire(import.meta.url)
 const scriptDigest = require('../../scripts/authenticode-digest.mjs') as {
@@ -392,6 +393,8 @@ function integrity(
     holdBudgetMs?: number
     holdRetryCooldownMs?: number
     leaseMaxMs?: number
+    confirmBudgetMs?: number
+    confirmCapMs?: number
   } = {}
 ): HelperIntegrity {
   return new HelperIntegrity({
@@ -404,7 +407,9 @@ function integrity(
     ...(extra.holdRetryCooldownMs !== undefined
       ? { holdRetryCooldownMs: extra.holdRetryCooldownMs }
       : {}),
-    ...(extra.leaseMaxMs !== undefined ? { leaseMaxMs: extra.leaseMaxMs } : {})
+    ...(extra.leaseMaxMs !== undefined ? { leaseMaxMs: extra.leaseMaxMs } : {}),
+    ...(extra.confirmBudgetMs !== undefined ? { confirmBudgetMs: extra.confirmBudgetMs } : {}),
+    ...(extra.confirmCapMs !== undefined ? { confirmCapMs: extra.confirmCapMs } : {})
   })
 }
 
@@ -721,4 +726,219 @@ test('package:win writes the manifest after the helper build (and any signing) a
   if (signing >= 0) assert.ok(signing > build && signing < manifest, script)
   const vite = readFileSync(new URL('../../electron.vite.config.ts', import.meta.url), 'utf8')
   assert.match(vite, /__DOODLENOTE_HELPER_INTEGRITY__: helperIntegrity\(\)/)
+})
+
+/** A holder whose confirmations are scripted per hold: `answers[hold-1][n]` for the n-th confirm. */
+function scriptedHolder(
+  answers: Array<Array<boolean | 'never'>>,
+  options: { aliveFor?: number } = {}
+): { holder: HelperHolder; log: string[] } {
+  const log: string[] = []
+  let count = 0
+  const holder: HelperHolder = async (path) => {
+    count += 1
+    const index = count
+    log.push(`hold ${index}`)
+    const bytes = readFileSync(path)
+    let alive = true
+    if (options.aliveFor !== undefined) setTimeout(() => (alive = false), options.aliveFor)
+    let asked = 0
+    return {
+      facts: {
+        status: 'held',
+        fileSha256: (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex'),
+        digest: stableHelperDigest(bytes),
+        signed: false
+      },
+      alive: () => alive,
+      trust: async () => ({ status: 'unavailable', reason: 'unsigned' }),
+      confirm: () => {
+        const answer = (answers[index - 1] ?? [])[asked] ?? true
+        asked += 1
+        log.push(`confirm ${index}.${asked} -> ${String(answer)}`)
+        if (answer === 'never') return new Promise<boolean>(() => {})
+        if (answer === false) alive = false
+        return Promise.resolve(answer)
+      },
+      release: () => {
+        log.push(`release ${index}`)
+        alive = false
+      }
+    }
+  }
+  return { holder, log }
+}
+
+/** A stand-in helper (Node) that logs each start and answers status. */
+function countingHelper(): { command: string; args: string[]; starts: () => number } {
+  const dir = mkdtempSync(join(tmpdir(), 'bark-compose-'))
+  const script = join(dir, 'helper.js')
+  const log = join(dir, 'starts.txt')
+  writeFileSync(
+    script,
+    `
+const fs = require('node:fs')
+fs.appendFileSync(process.argv[2], 'start\\n')
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, platform: 'win32' })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  return {
+    command: process.execPath,
+    args: [script, log],
+    starts: () =>
+      existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean).length : 0
+  }
+}
+
+test('composition: pre-spawn successes never erase post-spawn losses; the launch falls to digest-only and serves', async () => {
+  const buffer = fakePe()
+  const path = helperFile(buffer)
+  const expect = { digest: stableHelperDigest(buffer)!, publisherCn: CN, thumbprints: [] }
+  // Every hold: confirmed before the spawn, lost after it (Astra's alternating sequence).
+  const worker = scriptedHolder([
+    [true, false],
+    [true, false],
+    [true, false]
+  ])
+  const check = integrity(path, expect, worker.holder)
+  const fake = countingHelper()
+  const client = new DictationHelperClient({
+    command: fake.command,
+    args: fake.args,
+    platform: 'win32',
+    verify: async () => {
+      const lease = await check.acquire()
+      return {
+        ok: lease.verdict === 'ok',
+        locked: lease.locked,
+        confirm: lease.confirm,
+        release: lease.release,
+        launched: lease.launched
+      }
+    }
+  })
+  try {
+    const status = await client.status()
+    assert.ok(status, 'the request is served (by the digest-only launch), not left unavailable')
+    assert.deepEqual(worker.log, [
+      'hold 1',
+      'confirm 1.1 -> true',
+      'confirm 1.2 -> false',
+      'release 1',
+      'hold 2',
+      'confirm 2.1 -> true',
+      'confirm 2.2 -> false',
+      'release 2'
+    ])
+    // The discarded helpers were ended at once (they may not even have started running).
+    assert.ok(fake.starts() >= 1 && fake.starts() <= 3)
+    assert.equal(client.restartsUsed, 2, 'each discarded helper used the restart allowance')
+    assert.equal(check.lastLocked, false, 'the status row shows the digest-only start')
+    // Still within the cooldown: the next check stays digest-only (nothing reset the losses).
+    const next = await check.acquire()
+    assert.equal(next.locked, false)
+    next.release()
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('composition: only a launch that went all the way through clears the lost holds', async () => {
+  const buffer = fakePe()
+  const path = helperFile(buffer)
+  const expect = { digest: stableHelperDigest(buffer)!, publisherCn: CN, thumbprints: [] }
+  // Hold 1 is lost after the spawn; hold 2 succeeds; then two more losses are needed for digest-only.
+  const worker = scriptedHolder([
+    [true, false],
+    [true, true],
+    [true, false],
+    [true, false]
+  ])
+  const check = integrity(path, expect, worker.holder)
+  const fake = countingHelper()
+  const client = new DictationHelperClient({
+    command: fake.command,
+    args: fake.args,
+    platform: 'win32',
+    verify: async () => {
+      const lease = await check.acquire()
+      return {
+        ok: lease.verdict === 'ok',
+        locked: lease.locked,
+        confirm: lease.confirm,
+        release: lease.release,
+        launched: lease.launched
+      }
+    }
+  })
+  try {
+    assert.ok(await client.status())
+    assert.equal(check.lastLocked, true, 'the second, held launch went through')
+    // One loss after a full success is not yet digest-only.
+    const lease = await check.acquire()
+    assert.equal(lease.locked, true)
+    assert.equal(await lease.confirm(), true)
+    assert.equal(await lease.confirm(), false)
+    lease.release()
+    const again = await check.acquire()
+    assert.equal(again.locked, true, 'one loss since the last full launch: still held')
+    again.release()
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('a busy worker is waited for, never treated as a lost hold; only its exit is', async () => {
+  const buffer = fakePe()
+  const path = helperFile(buffer)
+  const expect = { digest: stableHelperDigest(buffer)!, publisherCn: CN, thumbprints: [] }
+  // Answers late (a model load): confirmed when the answer comes.
+  let slowResolve: ((held: boolean) => void) | null = null
+  const slowHolder: HelperHolder = async (p) => {
+    const bytes = readFileSync(p)
+    return {
+      facts: { status: 'held', fileSha256: 'x', digest: stableHelperDigest(bytes), signed: false },
+      alive: () => true,
+      trust: async () => ({ status: 'unavailable', reason: 'unsigned' }),
+      confirm: () =>
+        new Promise<boolean>((resolve) => {
+          slowResolve = resolve
+          setTimeout(() => resolve(true), 400)
+        }),
+      release: () => {}
+    }
+  }
+  const slow = integrity(path, expect, slowHolder, { confirmBudgetMs: 50, confirmCapMs: 3_000 })
+  const lease = await slow.acquire()
+  const started = Date.now()
+  assert.equal(await lease.confirm(), true, 'the late answer decides')
+  assert.ok(Date.now() - started >= 350, 'it waited past the step for the busy worker')
+  assert.ok(slowResolve)
+  lease.release()
+  // Never answers but stays alive past the cap: it still holds the file (liveness).
+  const silent = integrity(path, expect, scriptedHolder([['never']]).holder, {
+    confirmBudgetMs: 50,
+    confirmCapMs: 300
+  })
+  const held = await silent.acquire()
+  assert.equal(await held.confirm(), true, 'confirmed by liveness, nothing ended')
+  held.release()
+  // Never answers and then ends: a lost hold.
+  const dying = integrity(path, expect, scriptedHolder([['never']], { aliveFor: 150 }).holder, {
+    confirmBudgetMs: 50,
+    confirmCapMs: 3_000
+  })
+  const lost = await dying.acquire()
+  assert.equal(await lost.confirm(), false, 'the worker ended while it was waited for')
+  lost.release()
 })

@@ -499,6 +499,18 @@ function ingest(data: AudioMessage): void {
   }
 }
 
+/**
+ * QA hook (inert unless DOODLENOTE_BARK_TEST_HOOKS=1 and the stall are both set; only a delay): right after
+ * answering the FIRST "still held?" of a hold (the one before the helper's spawn), block this
+ * worker's loop synchronously for this many milliseconds, as loading a model or a long decode does,
+ * so the confirmation after the spawn arrives while the worker cannot answer.
+ */
+const TEST_CONFIRM_STALL_MS =
+  process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
+    ? Number(process.env.DOODLENOTE_BARK_TEST_WORKER_STALL_MS ?? 0)
+    : 0
+const stalledHolds = new Set<number>()
+
 /** Bark's helper check: holds and verifies the helper file for the app (see windows-helper-check.ts). */
 const helperChecker = new HelperChecker(() => windowsFfi() as unknown as FfiLike)
 
@@ -525,6 +537,10 @@ port.on('message', (message: Electron.MessageEvent) => {
         op: 'confirm',
         held: helperChecker.held(data.id)
       })
+      if (TEST_CONFIRM_STALL_MS > 0 && !stalledHolds.has(data.id)) {
+        stalledHolds.add(data.id)
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, TEST_CONFIRM_STALL_MS)
+      }
       break
     case 'helper-release':
       helperChecker.release(data.id)

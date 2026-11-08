@@ -83,6 +83,12 @@ export interface HelperLease {
    */
   confirm(): Promise<boolean>
   release(): void
+  /**
+   * The whole launch under this lease succeeded (spawned, confirmed, published, and the helper
+   * answered its first status). Only this clears the count of lost holds; a confirmation alone
+   * never does, so alternating pre-spawn successes and post-spawn losses still add up.
+   */
+  launched(): void
 }
 
 /** The publisher CN used when the build did not sign the helper (documented build arg). */
@@ -101,8 +107,19 @@ export const LEASE_MAX_MS = 15_000
 export const MAX_LOST_HOLDS = 2
 /** In digest-only fallback, the held path is tried again on the next spawn after this long. */
 export const HOLD_RETRY_COOLDOWN_MS = 60_000
-/** A "still held?" round trip to the speech worker; it answers in milliseconds when it can. */
+/**
+ * A "still held?" round trip to the speech worker answers in milliseconds when the worker is idle.
+ * Its loop is blocked while it loads a model or decodes (seconds), so an unanswered round trip is
+ * not a lost hold: past this the worker's liveness is checked again (a hold ends only by an
+ * explicit release or the worker's exit, which the app sees), and the answer is awaited further.
+ */
 export const CONFIRM_BUDGET_MS = 250
+/**
+ * The longest a confirmation waits for the worker's answer. A worker that is still running past it
+ * still holds the file (nothing else ends a hold), so the hold counts as confirmed by liveness;
+ * nothing is ever ended because the worker was slow to answer.
+ */
+export const CONFIRM_CAP_MS = 5_000
 
 /**
  * PE layout facts the digest needs, fully validated; null for a malformed or non-contiguous image
@@ -200,6 +217,9 @@ export interface HelperIntegrityOptions {
   budgetMs?: number
   holdBudgetMs?: number
   holdRetryCooldownMs?: number
+  /** Tests: the confirmation's step and cap (CONFIRM_BUDGET_MS, CONFIRM_CAP_MS). */
+  confirmBudgetMs?: number
+  confirmCapMs?: number
   leaseMaxMs?: number
   log?: (line: string) => void
 }
@@ -249,6 +269,7 @@ function within<T>(
 }
 
 const NO_RELEASE = (): void => {}
+const NO_LAUNCH = (): void => {}
 const NOT_HELD = (): Promise<boolean> => Promise.resolve(false)
 
 /** Where the bytes that were checked came from. */
@@ -318,7 +339,13 @@ export class HelperIntegrity {
         lease = await this.check(this.holdAllowed())
       }
     } catch {
-      lease = { verdict: 'damaged', locked: false, confirm: NOT_HELD, release: NO_RELEASE }
+      lease = {
+        verdict: 'damaged',
+        locked: false,
+        confirm: NOT_HELD,
+        release: NO_RELEASE,
+        launched: NO_LAUNCH
+      }
     }
     this.set(lease.verdict)
     this.setLocked(lease.locked)
@@ -345,6 +372,39 @@ export class HelperIntegrity {
     if (locked === this.lastLocked) return
     this.lastLocked = locked
     for (const listener of this.listeners) listener(this.current)
+  }
+
+  /**
+   * The worker's answer to "still held?", waited for in CONFIRM_BUDGET_MS steps: a definite answer
+   * decides; a worker that ended (liveness) is a lost hold; a worker that is only busy is waited for,
+   * and past CONFIRM_CAP_MS while still running it holds the file by construction (confirmed by
+   * liveness). Never false because of a slow answer alone.
+   */
+  private async confirmHeld(holdOf: HeldHelperLike): Promise<boolean> {
+    const started = Date.now()
+    const cap = this.options.confirmCapMs ?? CONFIRM_CAP_MS
+    const step = this.options.confirmBudgetMs ?? CONFIRM_BUDGET_MS
+    // A failed round trip is a definite "not held" (never a reason to spin).
+    const answer = holdOf.confirm().catch(() => false)
+    const pending = Symbol('pending')
+    let waited = false
+    for (;;) {
+      const result = await within<boolean | typeof pending>(answer, step, pending)
+      if (result !== pending) {
+        if (waited)
+          this.log(`the busy speech worker confirmed the hold after ${Date.now() - started} ms`)
+        return result
+      }
+      if (!holdOf.alive()) return false
+      if (Date.now() - started >= cap) {
+        this.log(
+          `the speech worker has not answered for ${Date.now() - started} ms but is still running, so it still holds the file (confirmed by liveness)`
+        )
+        return true
+      }
+      if (!waited) this.log('the speech worker is busy; waiting for its answer (not a lost hold)')
+      waited = true
+    }
   }
 
   /** Set by check(): whether the hold behind the last lease is still alive. */
@@ -425,12 +485,24 @@ export class HelperIntegrity {
       const facts = held.facts
       if (facts.status === 'absent') {
         held.release()
-        return { verdict: 'absent', locked: false, confirm: NOT_HELD, release: NO_RELEASE }
+        return {
+          verdict: 'absent',
+          locked: false,
+          confirm: NOT_HELD,
+          release: NO_RELEASE,
+          launched: NO_LAUNCH
+        }
       }
       if (facts.status === 'unreadable') {
         held.release()
         this.log(`unreadable (${facts.code})`)
-        return { verdict: 'damaged', locked: false, confirm: NOT_HELD, release: NO_RELEASE }
+        return {
+          verdict: 'damaged',
+          locked: false,
+          confirm: NOT_HELD,
+          release: NO_RELEASE,
+          launched: NO_LAUNCH
+        }
       }
       source = { kind: 'held', held, ...facts }
     } else {
@@ -440,9 +512,21 @@ export class HelperIntegrity {
         buffer = await fs.readFile(helperPath)
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code === 'ENOENT')
-          return { verdict: 'absent', locked: false, confirm: NOT_HELD, release: NO_RELEASE }
+          return {
+            verdict: 'absent',
+            locked: false,
+            confirm: NOT_HELD,
+            release: NO_RELEASE,
+            launched: NO_LAUNCH
+          }
         this.log(`unreadable (${(error as NodeJS.ErrnoException)?.code ?? 'error'})`)
-        return { verdict: 'damaged', locked: false, confirm: NOT_HELD, release: NO_RELEASE }
+        return {
+          verdict: 'damaged',
+          locked: false,
+          confirm: NOT_HELD,
+          release: NO_RELEASE,
+          launched: NO_LAUNCH
+        }
       }
       this.log(`not held (${this.lastUnlockedReason ?? 'unknown'}); checked by path, locked:false`)
       source = {
@@ -465,7 +549,13 @@ export class HelperIntegrity {
     const finish = (verdict: HelperIntegrityVerdict): HelperLease => {
       if (verdict !== 'ok' || !holdOf) {
         release()
-        return { verdict, locked: false, confirm: NOT_HELD, release: NO_RELEASE }
+        return {
+          verdict,
+          locked: false,
+          confirm: NOT_HELD,
+          release: NO_RELEASE,
+          launched: NO_LAUNCH
+        }
       }
       this.stillHeld = holdOf.alive()
       // Never let a forgotten lease keep the file held.
@@ -477,12 +567,17 @@ export class HelperIntegrity {
           this.noteLostHold('the holder ended before the spawn returned')
           return false
         }
-        const ok = await within(holdOf.confirm(), CONFIRM_BUDGET_MS, false)
-        if (ok) this.lostHolds = 0
-        else this.noteLostHold('the hold was gone when the spawn returned')
+        const ok = await this.confirmHeld(holdOf)
+        if (!ok) this.noteLostHold('the hold was gone when the spawn returned')
         return ok
       }
-      return { verdict, locked: true, confirm, release }
+      const launched = (): void => {
+        // Only a launch that went all the way through clears the count, and only on the held path
+        // (a digest-only launch must not cut the cooldown short).
+        if (this.lostHolds > 0) this.log('a held launch succeeded; lost holds reset')
+        this.lostHolds = 0
+      }
+      return { verdict, locked: true, confirm, release, launched }
     }
 
     const expectation = this.options.expectation()

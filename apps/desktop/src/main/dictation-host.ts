@@ -155,7 +155,8 @@ export function createDictationHost(options: DictationHostOptions): {
               ok: lease.verdict === 'ok',
               locked: lease.locked,
               confirm: lease.confirm,
-              release: lease.release
+              release: lease.release,
+              launched: lease.launched
             }
           },
           // A user's environment must not reach the helper's test facilities; only an unpackaged

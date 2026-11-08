@@ -573,8 +573,9 @@ test('Windows: a hold lost after the spawn: the helper is ended unseen, re-check
     // The first helper announced ready and a tap at once, but it was gated: nothing of it reached
     // the app, and the one status request went to the confirmed helper.
     assert.equal(taps, 1, "only the confirmed helper's tap was seen")
+    // The launch's own first status (it marks the launch successful), then the caller's.
     const ops = (await read(fake.log)).split('\n').filter((line) => line.startsWith('op '))
-    assert.deepEqual(ops, ['op status'])
+    assert.deepEqual(ops, ['op status', 'op status'])
   } finally {
     await client.dispose()
   }

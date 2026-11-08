@@ -74,6 +74,8 @@ export interface HelperLaunchVerdict {
   /** Asked after the spawn returns; false invalidates the spawn (see HelperLaunch.verify). */
   confirm?: () => Promise<boolean>
   release?: () => void
+  /** The whole launch succeeded: published, ready, and its first status answered. */
+  launched?: () => void
 }
 
 /** Spawns attempted per start when the hold keeps being lost before the spawn returns. */
@@ -96,9 +98,10 @@ export function helperSpawnEnv(env: NodeJS.ProcessEnv, testMode: boolean): NodeJ
 /**
  * How long a Windows helper may take to leave after its stdin closes before it is
  * ended. Windows cannot deliver a catchable signal, and a forced end would skip the
- * helper's own clean-up (giving back muted sound, releasing hooks).
+ * helper's own clean-up (finishing a delivery's clipboard restore, waited up to 3 s; giving
+ * back muted sound; releasing hooks).
  */
-export const WINDOWS_EXIT_GRACE_MS = 3_500
+export const WINDOWS_EXIT_GRACE_MS = 6_000
 
 /**
  * How long to wait for a freshly started helper to announce itself. An unsigned .NET exe
@@ -633,9 +636,12 @@ export class DictationHelperClient {
    *     held back, and no trigger is re-armed;
    *  4. confirm the hold again right AFTER the spawn (CreateProcess runs inside spawn());
    *  5. only then release the lease and publish the helper (replaying its held-back output).
-   * A failed confirmation ends the gated process before anything observed it, and the whole check
-   * runs again with a fresh hold. Killing it cannot undo what it already ran if the bytes had been
-   * swapped; see the PR notes for why process creation is not moved into the worker.
+   * A failed confirmation ends the gated process before anything observed it. That spawn counts
+   * against the restart allowance like a crash, and the check runs again with a fresh hold after the
+   * normal restart backoff (after repeated losses the integrity check goes digest-only, locked:false).
+   * Killing it cannot undo what it already ran if the bytes had been swapped; see the PR notes for
+   * why process creation is not moved into the worker. The launch counts as a success (which clears
+   * the lost-hold count) only once the published helper answered its first status.
    */
   private async launchVerified(attempts: number): Promise<boolean> {
     const verify = this.launch.verify!
@@ -676,11 +682,22 @@ export class DictationHelperClient {
         return false
       }
       if (!(await confirm())) {
-        console.error(
-          '[dictation] the helper file was no longer held when the helper started; ending it unused and checking again'
-        )
         verdict.release?.()
         this.discardGated(spawned)
+        // A discarded helper is a spawn like any other: it uses the restart allowance, and the next
+        // attempt waits the normal backoff.
+        const delay = this.countDiscardedSpawn()
+        if (delay === null || attempt + 1 >= attempts) {
+          console.error(
+            '[dictation] the helper file was no longer held when the helper started; ended it unused (no attempts left now)'
+          )
+          break
+        }
+        console.error(
+          `[dictation] the helper file was no longer held when the helper started; ended it unused, checking again in ${delay} ms`
+        )
+        // Not unref'd: a caller is waiting on this launch.
+        await new Promise((resolve) => setTimeout(resolve, delay))
         continue
       }
       verdict.release?.()
@@ -689,9 +706,42 @@ export class DictationHelperClient {
         return false
       }
       this.publish(spawned)
-      return ready
+      const ok = await ready
+      if (ok && this.child === spawned) {
+        // The first status, sent without re-entering the launch (start: false).
+        const status = await this.request('status', {}, this.timeouts.status, false)
+        if (status?.ok) verdict.launched?.()
+      }
+      return ok
     }
+    // Out of attempts: the next one comes through the normal restart path (backoff, allowance).
+    if (!this.disposed) this.scheduleRestart()
     return false
+  }
+
+  /**
+   * A gated helper ended unused: count it like a restart. Returns the backoff before the next
+   * attempt, or null when the session's restart allowance is used up.
+   */
+  private countDiscardedSpawn(): number | null {
+    if (this.totalRestarts >= MAX_RESTARTS_PER_SESSION) return null
+    const delay = RESTART_BACKOFF_MS[Math.min(this.restartAttempts, RESTART_BACKOFF_MS.length - 1)]
+    this.restartAttempts += 1
+    this.totalRestarts += 1
+    return delay
+  }
+
+  /** Automatic restarts (crashes and discarded spawns) used this session (diagnostics, tests). */
+  get restartsUsed(): number {
+    return this.totalRestarts
+  }
+
+  /**
+   * Windows: whether a helper that leaves now is started again on its own (a restart is scheduled
+   * on its exit while the session's allowance lasts). The helper-busy card says "restarting" only then.
+   */
+  willRestart(): boolean {
+    return this.windows && !this.disposed && this.totalRestarts < MAX_RESTARTS_PER_SESSION
   }
 
   /** End a gated helper whose lease turned out invalid; nothing ever saw it. */
@@ -878,6 +928,14 @@ export class DictationHelperClient {
           ? parsed.phase
           : null
       if (phase) for (const listener of this.hookListeners) listener(phase)
+      return false
+    }
+    if (parsed.event === 'restarting') {
+      // The helper is leaving to be replaced (stuck provider calls, or clipboard readers stuck on
+      // owners that never render); it exits once its delivery in progress is done.
+      console.error(
+        `[dictation] the helper announced a restart (${typeof parsed.reason === 'string' ? parsed.reason : 'unknown'}); ${this.willRestart() ? 'it will be started again' : 'no automatic restart is left this session'}`
+      )
       return false
     }
     if (parsed.event === 'parse-error') return false
