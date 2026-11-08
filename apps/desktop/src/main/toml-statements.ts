@@ -1,11 +1,16 @@
 /**
  * A statement-level reading of a TOML document, for editing one table of a
  * config file in place. Every statement of a TOML 1.0 document is recognised
- * (plus the TOML 1.1 relaxations a newer Codex may accept: newlines and a
- * trailing comma in inline tables, `\e` and `\xHH` escapes, times without
- * seconds), with full quote and escape handling in keys, table headers and
- * values, and reported with the lines it spans. A caller can then drop whole
- * statements and keep every other byte of the file as it was.
+ * (plus the TOML 1.1 layout relaxations a newer Codex may accept: newlines and a
+ * trailing comma in inline tables, times without seconds), with full quote and
+ * escape handling in keys, table headers and values, and reported with the lines
+ * it spans. A caller can then drop whole statements and keep every other byte of
+ * the file as it was.
+ *
+ * Escapes are TOML 1.0's exactly: `\b \t \n \f \r \" \\`, `\uXXXX` and
+ * `\UXXXXXXXX` (a Unicode scalar value). TOML 1.1's `\e` and `\xHH` are refused,
+ * like any other unknown escape: they change what a string (a command path) says,
+ * and a TOML 1.0 reader of the same file would reject it.
  *
  * Anything that cannot be read throws TomlUncertain. A caller must then leave
  * the file alone: guessing where a table ends is how an edit deletes a user's
@@ -44,7 +49,6 @@ const ESCAPES: Record<string, string> = {
   n: '\n',
   f: '\f',
   r: '\r',
-  e: '\x1b',
   '"': '"',
   '\\': '\\'
 }
@@ -152,7 +156,7 @@ class Reader {
       this.i += 2
       return ESCAPES[e]
     }
-    const length = e === 'u' ? 4 : e === 'U' ? 8 : e === 'x' ? 2 : 0
+    const length = e === 'u' ? 4 : e === 'U' ? 8 : 0
     const digits = this.s.slice(this.i + 2, this.i + 2 + length)
     if (length === 0 || !/^[0-9A-Fa-f]+$/.test(digits) || digits.length !== length)
       this.fail('invalid escape')

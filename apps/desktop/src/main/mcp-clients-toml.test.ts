@@ -9,6 +9,7 @@ import {
   codexConfigWithoutServer
 } from './mcp-clients-logic'
 import type { McpServerSpec } from '../shared/integrations-api'
+import { TomlUncertain, tomlStatements } from './toml-statements'
 
 /**
  * The Codex config corpus: every input with the exact text left after removing
@@ -167,4 +168,31 @@ test('codex: every base-supported shape gives byte-identical results to the base
           }
   assert.equal(compared, PREFIXES.length * OUR_TABLES.length * SUFFIXES.length * 4)
   assert.equal(codexConfigWithServer(null, spec), baseWith(null, spec))
+})
+
+test('toml escapes: exactly TOML 1.0 (\\uXXXX, \\UXXXXXXXX), never TOML 1.1 \\e or \\xHH', () => {
+  const read = (value: string): string => {
+    const [statement] = tomlStatements(`k = ${value}\n`)
+    assert.equal(statement.value?.kind, 'string')
+    return (statement.value as { value: string }).value
+  }
+  assert.equal(read('"\\U0001F600 \\u00E9 \\U0000002D"'), '\u{1F600} \u00e9 -')
+  assert.equal(read('"\\b\\t\\n\\f\\r\\"\\\\"'), '\b\t\n\f\r"\\')
+  // A line-ending backslash trims the newline and all whitespace after it.
+  assert.equal(read('"""a \\\n   \n  b"""'), 'a b')
+  assert.equal(read('"""a \\   \r\n  b"""'), 'a b')
+  // Literal strings have no escapes at all.
+  assert.equal(read("'C:\\old\\x41\\e'"), 'C:\\old\\x41\\e')
+  assert.equal(read("'''\nC:\\old\\U0001F600'''"), 'C:\\old\\U0001F600')
+  for (const bad of [
+    '"\\x41"',
+    '"\\e"',
+    '"\\U0001F60"',
+    '"\\u00E"',
+    '"\\U00110000"',
+    '"\\uD800"',
+    '"\\q"',
+    '"""a \\ b"""'
+  ])
+    assert.throws(() => read(bad), TomlUncertain, bad)
 })

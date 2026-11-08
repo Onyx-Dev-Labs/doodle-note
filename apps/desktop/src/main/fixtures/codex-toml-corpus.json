@@ -229,5 +229,106 @@
       "throws": true
     },
     "valid": false
+  },
+  {
+    "name": "\\U escape (8 hex digits) in our command is decoded",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\Doodle\\U0001F600.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\Doodle\ud83d\ude00.exe",
+    "valid": true
+  },
+  {
+    "name": "\\U escape in our table name is still ours",
+    "input": "[mcp_servers.\"doodle\\U0000002Dnote\"]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "\\u escape (4 hex digits) in our command is decoded",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\Doodle\\u00e9.exe\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\Doodle\u00e9.exe",
+    "valid": true
+  },
+  {
+    "name": "\\U with too few hex digits is refused",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\x\\U0001F60.exe\"\n[keep]\nz = 1\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\U beyond Unicode is refused",
+    "input": "[keep]\nz = 1\nname = \"\\U00110000\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\u surrogate is refused",
+    "input": "[keep]\nz = 1\nname = \"\\uD800\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\x escape (TOML 1.1 only) is refused",
+    "input": "[keep]\nz = 1\nname = \"\\x41\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "\\e escape (TOML 1.1 only) is refused",
+    "input": "[keep]\nz = 1\nname = \"\\e[0m\"\n[mcp_servers.doodle-note]\ncommand = \"C:\\\\old\\\\DoodleNote.exe\"\nargs = []\n",
+    "expected": null,
+    "command": {
+      "throws": true
+    },
+    "valid": false
+  },
+  {
+    "name": "line-ending backslash in a multi-line basic command",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"\"\"C:\\\\old\\\\\\\n    DoodleNote.exe\"\"\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "line-ending backslash with trailing spaces and blank lines",
+    "input": "[mcp_servers.doodle-note]\ncommand = \"\"\"\nC:\\\\old\\\\\\   \n\n   DoodleNote.exe\"\"\"\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "literal string command keeps its backslashes",
+    "input": "[mcp_servers.doodle-note]\ncommand = 'C:\\old\\DoodleNote.exe'\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "multi-line literal command drops only the first newline",
+    "input": "[mcp_servers.doodle-note]\ncommand = '''\nC:\\old\\DoodleNote.exe'''\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\DoodleNote.exe",
+    "valid": true
+  },
+  {
+    "name": "escapes are not read inside a literal string",
+    "input": "[mcp_servers.doodle-note]\ncommand = 'C:\\old\\u0041\\x41.exe'\n[keep]\nz = 1\n",
+    "expected": "[keep]\nz = 1\n",
+    "command": "C:\\old\\u0041\\x41.exe",
+    "valid": true
   }
 ]
