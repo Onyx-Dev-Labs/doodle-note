@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { systemPowerShell } from './win-authenticode'
 
 /**
  * The record the Windows installer writes when it has really moved an install
@@ -56,7 +55,18 @@ export function parseInstallRecord(output: string): InstallMigrationRecord | nul
   return { from, to, at }
 }
 
-/** Windows PowerShell 5.1 must not inherit PowerShell 7's module path (see win-authenticode.ts). */
+/** Windows PowerShell 5.1 from System32, never whichever powershell.exe is first on PATH. */
+function systemPowerShell(env: NodeJS.ProcessEnv = process.env): string {
+  return join(
+    env.SystemRoot || env.windir || 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe'
+  )
+}
+
+/** Windows PowerShell 5.1 must not inherit PowerShell 7's module path (it fails to load its modules). */
 function powerShellEnv(key: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [name, value] of Object.entries(process.env)) {
