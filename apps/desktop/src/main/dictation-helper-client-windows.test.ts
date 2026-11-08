@@ -47,6 +47,20 @@ const read = async (file: string): Promise<string> => {
   return existsSync(file) ? readFileSync(file, 'utf8') : ''
 }
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Wait until a condition holds (checked every 20 ms). The cap only bounds a failing test; a passing
+ * test never depends on how long anything takes.
+ */
+async function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  capMs = 10_000
+): Promise<boolean> {
+  for (let waited = 0; waited <= capMs; waited += 20) {
+    if (await condition()) return true
+    await sleep(20)
+  }
+  return false
+}
 
 test('Windows: the helper reports typing as its delivery method', async () => {
   const fake = lingeringHelper()
@@ -62,7 +76,8 @@ test('Windows: dispose lets the helper clean up (no forced end inside the grace 
   const client = new DictationHelperClient({ ...fake, platform: 'win32' })
   assert.ok(await client.status())
   await client.dispose()
-  await sleep(600)
+  // The stand-in takes 200 ms to clean up after stdin closes; a forced end would cut that short.
+  await waitFor(async () => (await read(fake.log)).includes('cleaned-up'))
   assert.equal(await read(fake.log), 'stdin-closed\ncleaned-up\n')
   assert.ok(WINDOWS_EXIT_GRACE_MS > 600)
 })
@@ -75,7 +90,7 @@ test(
     const client = new DictationHelperClient({ ...fake, platform: 'darwin' })
     assert.ok(await client.status())
     await client.dispose()
-    await sleep(400)
+    await waitFor(async () => /sigterm/.test(await read(fake.log)))
     assert.match(await read(fake.log), /sigterm/)
     assert.doesNotMatch(await read(fake.log), /cleaned-up/)
   }
@@ -195,12 +210,13 @@ process.stdin.on('data', (d) => {
     assert.equal(await client.muteOutput(), true)
     // Crash the helper while the sound is muted.
     client.restart()
-    // The automatic restart backoff is 500 ms; wait past it so a fresh helper has launched.
-    await sleep(900)
+    // Wait for the automatic restart (after its backoff) to launch a fresh helper.
+    const startCount = async (): Promise<number> =>
+      (await read(starts)).split('\n').filter(Boolean).length
+    await waitFor(async () => (await startCount()) >= 2)
     // restoreOutput gives the sound back through the replacement helper.
     await client.restoreOutput()
-    await sleep(200)
-    const count = (await read(starts)).split('\n').filter(Boolean).length
+    const count = await startCount()
     assert.ok(count >= 2, `expected a restart, saw ${count} starts`)
   } finally {
     await client.dispose()
@@ -236,7 +252,7 @@ process.stdin.on('data', (d) => {
   try {
     const status = await client.status()
     assert.equal(status?.hooksLive, true)
-    await sleep(100)
+    await waitFor(() => phases.length >= 2)
     assert.deepEqual(phases, ['lost', 'restored'])
   } finally {
     await client.dispose()
@@ -298,10 +314,12 @@ process.stdin.on('data', (d) => {
   })
   try {
     assert.equal(await mac.muteOutput(), true)
+    const exited = new Promise<void>((resolve) => mac.onExit(resolve))
     mac.restart() // the helper dies while the sound is muted
-    await sleep(300)
+    await exited
+    // If restoreOutput relaunched a helper it would wait for that helper's reply, which the stand-in
+    // only sends after logging its start: once it returns, the start count is final.
     await mac.restoreOutput()
-    await sleep(300)
     const count = (await read(starts)).split('\n').filter(Boolean).length
     assert.equal(count, 1, 'darwin never relaunches the helper from restoreOutput')
   } finally {
@@ -315,6 +333,7 @@ test('Windows: a late ready (after the readiness window) is still honoured for t
   writeFileSync(
     script,
     `
+const fs = require('node:fs')
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 let buf = ''
 process.stdin.on('data', (d) => {
@@ -324,22 +343,28 @@ process.stdin.on('data', (d) => {
     send({ event: 'reply', id: req.id, ok: true, outcome: 'muted' })
   }
 })
-// Announce readiness only after a delay that exceeds a (shortened) readiness window.
-setTimeout(() => send({ event: 'ready', pid: process.pid, platform: 'win32' }), 200)
+// Announce readiness only when the test says so (after the readiness window has expired), then a
+// tap, which tells the test the client has processed the ready line.
+const signal = process.argv[2]
+const wait = setInterval(() => { if (fs.existsSync(signal)) { clearInterval(wait); send({ event: 'ready', pid: process.pid, platform: 'win32' }); send({ event: 'tap' }) } }, 5)
 `
   )
-  // The readiness window is shortened to 50 ms, well before the helper readies at 200 ms, so the
-  // ready that arrives afterwards is the 'late' case; the client must still honour it.
+  const signal = join(dir, 'ready-now')
   const client = new DictationHelperClient({
     command: process.execPath,
-    args: [script],
+    args: [script, signal],
     platform: 'win32',
     readyTimeoutMs: 50
   })
+  let tapped = false
+  client.onTap(() => {
+    tapped = true
+  })
   try {
-    const early = await client.muteOutput() // issued before ready: refused (null → false)
+    const early = await client.muteOutput() // the readiness window expires first: refused
     assert.equal(early, false, 'a request inside the unready window does not reach the helper')
-    await sleep(300) // the late ready has now arrived
+    writeFileSync(signal, '') // now the (late) ready arrives
+    assert.ok(await waitFor(() => tapped), 'the late ready was processed')
     const late = await client.muteOutput()
     assert.equal(late, true, 'a request after the late ready reaches the helper')
   } finally {
@@ -397,8 +422,12 @@ process.stdin.on('data', (d) => {
   }
 })
 
-/** A helper that records every op it receives (and its environment) and readies after `readyMs`. */
-function recordingHelper(readyMs: number): { command: string; args: string[]; log: string } {
+/**
+ * A helper that records every op it receives (and its environment). With `signal`, it announces
+ * readiness only once that file exists, followed by a tap event (so the test knows the client has
+ * processed the ready); otherwise at once.
+ */
+function recordingHelper(signal: string | null): { command: string; args: string[]; log: string } {
   const dir = mkdtempSync(join(tmpdir(), 'dictation-rec-'))
   const script = join(dir, 'helper.js')
   const log = join(dir, 'ops.txt')
@@ -418,27 +447,36 @@ process.stdin.on('data', (d) => {
     send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
   }
 })
-setTimeout(() => send({ event: 'ready', pid: process.pid, platform: 'test' }), Number(process.argv[3]))
+const signal = process.argv[3]
+const announce = () => { send({ event: 'ready', pid: process.pid, platform: 'test' }); send({ event: 'tap' }) }
+if (signal === '-') announce()
+else { const wait = setInterval(() => { if (fs.existsSync(signal)) { clearInterval(wait); announce() } }, 5) }
 process.stdin.on('end', () => process.exit(0))
 `
   )
-  return { command: process.execPath, args: [script, log, String(readyMs)], log }
+  return { command: process.execPath, args: [script, log, signal ?? '-'], log }
 }
 
 for (const platform of ['darwin', 'win32'] as const) {
   test(`${platform}: a ready that arrives after the readiness window ${platform === 'win32' ? 're-arms' : 'does NOT re-arm'} the hold key`, async () => {
-    const fake = recordingHelper(200)
+    const signal = join(mkdtempSync(join(tmpdir(), 'dictation-sig-')), 'ready-now')
+    const fake = recordingHelper(signal)
     const client = new DictationHelperClient({ ...fake, platform, readyTimeoutMs: 50 })
+    let tapped = false
+    client.onTap(() => {
+      tapped = true
+    })
     try {
-      // Inside the window the ready has not come: the first start fails (as before on both).
+      // The readiness window expires before the ready: the first start fails (as before on both).
       assert.equal(await client.setHoldKey('rightOption'), 'helper-unavailable')
-      // Poll rather than sleep a fixed time: under load the late ready can take a while to land.
-      let ops = ''
-      for (let waited = 0; waited < (platform === 'win32' ? 3_000 : 1_500); waited += 50) {
-        ops = await read(fake.log)
-        if (platform === 'win32' && /op hold-start/.test(ops)) break
-        await sleep(50)
-      }
+      writeFileSync(signal, '') // the late ready
+      assert.ok(await waitFor(() => tapped), 'the client processed the late ready')
+      // A barrier through the same pipe: release() is written without waiting for readiness on both
+      // platforms, after any re-arm the ready triggered. Once the helper logs it, every earlier
+      // write has been read, so the presence or absence of hold-start below is final.
+      client.release('barrier')
+      assert.ok(await waitFor(async () => /op release/.test(await read(fake.log))), 'barrier seen')
+      const ops = await read(fake.log)
       if (platform === 'win32')
         assert.match(ops, /op hold-start/, 'Windows re-arms on the late ready')
       else
@@ -450,7 +488,7 @@ for (const platform of ['darwin', 'win32'] as const) {
 }
 
 test('Windows: a helper that fails its integrity check is never executed (status included)', async () => {
-  const fake = recordingHelper(0)
+  const fake = recordingHelper(null)
   let checks = 0
   const client = new DictationHelperClient({
     ...fake,
@@ -471,7 +509,7 @@ test('Windows: a helper that fails its integrity check is never executed (status
 })
 
 test('Windows: a verified helper starts, and the check runs again before a respawn', async () => {
-  const fake = recordingHelper(0)
+  const fake = recordingHelper(null)
   let checks = 0
   const client = new DictationHelperClient({
     ...fake,
@@ -505,7 +543,7 @@ test('Windows: DICTATION_HELPER_* never reaches the helper unless the app is in 
   assert.equal(clean.PATH, 'x')
   assert.equal(helperSpawnEnv(env, true).DICTATION_HELPER_TEST, '1')
   // End to end: the spawned helper does not see the variable.
-  const fake = recordingHelper(0)
+  const fake = recordingHelper(null)
   const client = new DictationHelperClient({
     ...fake,
     platform: 'win32',
@@ -520,7 +558,7 @@ test('Windows: DICTATION_HELPER_* never reaches the helper unless the app is in 
 })
 
 test('Windows: the helper is told the app identity, which the user environment cannot override', async () => {
-  const fake = recordingHelper(0)
+  const fake = recordingHelper(null)
   const prod = new DictationHelperClient({
     ...fake,
     platform: 'win32',
@@ -536,7 +574,7 @@ test('Windows: the helper is told the app identity, which the user environment c
   } finally {
     await prod.dispose()
   }
-  const qaFake = recordingHelper(0)
+  const qaFake = recordingHelper(null)
   const qa = new DictationHelperClient({
     ...qaFake,
     platform: 'win32',
@@ -568,7 +606,7 @@ test('the helper identity follows the build channel; an identity module can over
     'a blank override is ignored'
   )
   // End to end: a Dev-channel client hands the helper the Dev identity.
-  const fake = recordingHelper(0)
+  const fake = recordingHelper(null)
   const dev = new DictationHelperClient({
     ...fake,
     platform: 'win32',
