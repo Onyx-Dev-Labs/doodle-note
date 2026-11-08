@@ -148,71 +148,13 @@ namespace DoodleNote.DictationHelper
         }
     }
 
-    /// <summary>
-    /// A UI Automation focus-changed subscription caching the focused element's RuntimeId, its
-    /// IsPassword (null when unreadable) and process id, plus when that was last read. Current()
-    /// refreshes synchronously whenever the cache is older than the caller's limit (or when the
-    /// subscription could not be installed), so the typing guard never relies on a stale answer.
-    /// </summary>
-    internal sealed class FocusMonitor : IDisposable
-    {
-        readonly object gate = new object();
-        AutomationFocusChangedEventHandler handler;
-        string runtimeId;
-        bool? isPassword;
-        int pid;
-        long readAt;
-
-        public FocusMonitor()
-        {
-            Update(UIA.Focused());
-            handler = (sender, e) => Update(sender as AutomationElement);
-            try { Automation.AddAutomationFocusChangedEventHandler(handler); }
-            catch (Exception) { handler = null; } // every Current() call then reads the live focus
-        }
-
-        void Update(AutomationElement element)
-        {
-            string rid = UIA.RuntimeId(element);
-            bool? pwd = UIA.TryIsPassword(element);
-            int owner = element != null ? UIA.Pid(element) : 0;
-            lock (gate)
-            {
-                runtimeId = rid;
-                isPassword = pwd;
-                pid = owner;
-                readAt = Stopwatch.GetTimestamp();
-            }
-        }
-
-        /// <summary>The focused element's identity, re-read now if the cache is older than staleMs.</summary>
-        public void Current(int staleMs, out string rid, out bool? pwd, out int owner)
-        {
-            bool stale;
-            lock (gate) stale = handler == null || (Stopwatch.GetTimestamp() - readAt) * 1000.0 / Stopwatch.Frequency >= staleMs;
-            if (stale) Update(UIA.Focused());
-            lock (gate)
-            {
-                rid = runtimeId;
-                pwd = isPassword;
-                owner = pid;
-            }
-        }
-
-        public void Dispose()
-        {
-            if (handler == null) return;
-            try { Automation.RemoveAutomationFocusChangedEventHandler(handler); }
-            catch (Exception) { }
-            handler = null;
-        }
-    }
-
     internal sealed class ElementFacts
     {
         public string Role = "";
         public bool Secure;
         public bool Editable;
+        /// <summary>The element's facts could be read (false when it vanished mid-read: never trust the defaults then).</summary>
+        public bool Readable;
 
         public static ElementFacts Of(AutomationElement element, Native.GUITHREADINFO gui)
         {
@@ -223,6 +165,7 @@ namespace DoodleNote.DictationHelper
                 facts.Role = "Win32";
                 facts.Editable = gui.hwndCaret != IntPtr.Zero;
                 facts.Secure = IsPasswordEdit(gui.hwndFocus);
+                facts.Readable = true;
                 return facts;
             }
             try
@@ -237,6 +180,7 @@ namespace DoodleNote.DictationHelper
                 else facts.Editable = textLike && info.IsEnabled && info.IsKeyboardFocusable;
                 // Some web and custom controls report a generic role but show a caret.
                 if (!facts.Editable && gui.hwndCaret != IntPtr.Zero) facts.Editable = true;
+                facts.Readable = true;
             }
             catch (ElementNotAvailableException) { }
             return facts;

@@ -389,14 +389,20 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(false, key.Observe(true, true, false), "a callback in the same tick is not suspect evidence");
         }
 
-        public static void MouseLossNeedsTwoConsecutiveSuspectTicks()
+        public static void MouseLossNeedsTwoSuspectTicksEvenWithQuietTicksBetween()
         {
-            HookLossDetector mouse = new HookLossDetector(2);
+            HookLossDetector mouse = new HookLossDetector(2, false);
             Assert.Equal(false, mouse.Observe(true, false, false), "one cursor move without a callback (an app moving it) is not a loss");
-            Assert.Equal(false, mouse.Observe(false, false, false), "a quiet tick breaks the run");
-            Assert.Equal(false, mouse.Observe(true, false, false), "run restarts at one");
-            Assert.Equal(true, mouse.Observe(true, false, false), "two consecutive suspect ticks: lost");
+            Assert.Equal(false, mouse.Observe(false, false, false), "a quiet tick does not clear the evidence");
+            Assert.Equal(false, mouse.Observe(false, false, false), "nor does another");
+            Assert.Equal(true, mouse.Observe(true, false, false), "a second suspect tick, however far apart: lost");
             Assert.Equal(false, mouse.Observe(true, false, false), "evidence is cleared once a loss is declared");
+            Assert.Equal(false, mouse.Observe(false, true, false), "a callback proves it alive and clears the evidence");
+            Assert.Equal(false, mouse.Observe(true, false, false), "so the count starts again");
+            HookLossDetector key = new HookLossDetector(2, true);
+            key.Observe(true, false, false);
+            key.Observe(false, false, false);
+            Assert.Equal(false, key.Observe(true, false, false), "the consecutive rule still resets on a quiet tick");
         }
 
         public static void AHigherIntegrityForegroundOnlyCountsEvidenceThenNeedsTwoTicksAfter()
@@ -414,15 +420,23 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(true, alive.Observe(true, false, false), "later, the normal one-tick rule applies again");
         }
 
-        public static void TheHookRetryDelayGrowsAndCaps()
+        public static void TheHookRetryAttemptsAtFourEightSixteenAndThirtySeconds()
         {
-            int delay = 0;
-            int[] expected = { 4000, 8000, 16000, 30000, 30000 };
-            foreach (int want in expected)
+            // A 2 s watchdog tick; every attempt fails. Record the elapsed time of each attempt.
+            RetryClock clock = new RetryClock(2000);
+            List<int> attempts = new List<int>();
+            for (int tick = 0; tick <= 60; tick++)
             {
-                delay = HoldWatcher.NextBackoff(delay, 2000);
-                Assert.Equal(want, delay, "retry delay");
+                if (!clock.Tick()) continue;
+                attempts.Add(tick * 2000);
+                clock.Failed();
             }
+            // Gaps between attempts: 4, 8, 16, 30, 30 ... seconds (not one tick later).
+            int[] gaps = { 4000, 8000, 16000, 30000, 30000 };
+            Assert.Equal(0, attempts[0], "first attempt at once");
+            for (int i = 0; i < gaps.Length; i++) Assert.Equal(gaps[i], attempts[i + 1] - attempts[i], "gap " + i);
+            clock.Succeeded();
+            Assert.Equal(true, clock.Tick(), "after a success the next loss is retried at once");
         }
 
         public static void TestFacilitiesAreOffWithoutTheSwitch()

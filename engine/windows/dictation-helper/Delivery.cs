@@ -43,6 +43,8 @@ namespace DoodleNote.DictationHelper
         public GuardStats Guard;
         /// <summary>Per-keystroke wait for the target to process the key while typing (null for a paste).</summary>
         public GuardStats Settle;
+        /// <summary>The slowest single provider (UIA) call during the delivery, in ms (diagnostics).</summary>
+        public double ProviderSlowestMs = -1;
 
         public DeliveryResult(DeliveryOutcome outcome, string reason) { Outcome = outcome; Reason = reason; }
 
@@ -55,6 +57,7 @@ namespace DoodleNote.DictationHelper
             if (CharsDelivered >= 0) output["charsDelivered"] = CharsDelivered;
             if (Guard != null && Guard.Count > 0) output["guard"] = Guard.Fields();
             if (Settle != null && Settle.Count > 0) output["settle"] = Settle.Fields();
+            if (ProviderSlowestMs >= 0) output["providerSlowestMs"] = Math.Round(ProviderSlowestMs, 1);
             return output;
         }
     }
@@ -122,6 +125,13 @@ namespace DoodleNote.DictationHelper
             return state;
         }
 
+        /// <summary>Read within timeoutMs of wall clock; null when the read throws or overruns.</summary>
+        public static ControlState TryRead(AutomationElement element, int timeoutMs)
+        {
+            ControlState state;
+            return Bounded.Run(() => Read(element), timeoutMs, out state) ? state : null;
+        }
+
         public bool Observable { get { return Value != null || Location != null; } }
 
         public bool SameAs(ControlState other)
@@ -167,31 +177,49 @@ namespace DoodleNote.DictationHelper
             int boundaries = 0;
             foreach (char c in normalized) if (char.IsWhiteSpace(c) || char.IsPunctuation(c)) boundaries++;
             // Per character: the 8 ms pacing, the per-keystroke safety check and the wait for the target
-            // to process the key (measured 43-45 ms per character on Dev04 in WinForms and Edge), plus
-            // 70 ms at each word boundary, plus confirm and settle. Mirrored in dictation-helper-protocol.ts.
+            // to show it processed the key (measured on Dev04: 30-35 ms per character in Notepad and
+            // WinForms besides the boundary pauses), plus 70 ms at each word boundary, plus confirm and
+            // settle. Mirrored in dictation-helper-protocol.ts.
             return normalized.Length * 50 + boundaries * 70 + 3000;
         }
 
-        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs, int alreadyElapsedMs)
+        /// <summary>Wall-clock bound for validating the target before any insertion.</summary>
+        const int ValidateBudgetMs = 1500;
+        /// <summary>Wall-clock bound for one guard check (all its provider calls together).</summary>
+        const int GuardBudgetMs = 250;
+        /// <summary>Wall-clock bound for the target to show it processed one typed key.</summary>
+        const int KeySettleMs = 400;
+        /// <summary>Wall-clock bound for one read of the field while confirming an insertion.</summary>
+        const int ReadBudgetMs = 600;
+        /// <summary>Wall-clock bound for saving the user's clipboard before a paste.</summary>
+        const int CaptureBudgetMs = 1500;
+
+        sealed class Validation
         {
-            // The deadline is measured from when the request was received, not from here: a
-            // deliver stuck behind a slow UIA call must not begin after the app gave up.
-            Stopwatch began = Stopwatch.StartNew();
-            Func<long> elapsed = () => began.ElapsedMilliseconds + alreadyElapsedMs;
-            if (!snapshot.HasElement || snapshot.Facts == null) return new DeliveryResult(DeliveryOutcome.Refused, "no-target");
+            public string Refusal;
+            public AutomationElement Current;
+            public ControlState Before;
+        }
+
+        /// <summary>
+        /// Everything checked before an insertion, in one bounded call: the snapshot's control is still
+        /// focused, readable, not secure (UIA and Win32 ES_PASSWORD), not above us, editable, and the
+        /// caller's guards hold. An unreadable control is refused (target-unverifiable), never trusted.
+        /// </summary>
+        static Validation Validate(TargetSnapshot snapshot, DeliveryGuards guards)
+        {
+            Validation v = new Validation();
             AutomationElement current;
-            if (!Target.StillFocused(snapshot, out current)) return new DeliveryResult(DeliveryOutcome.Refused, "focus-changed");
-            // Re-read: the field may have become a password field since the snapshot.
+            if (!Target.StillFocused(snapshot, out current)) { v.Refusal = "focus-changed"; return v; }
             Native.GUITHREADINFO gui = Target.CurrentGui();
             ElementFacts now = ElementFacts.Of(current, gui);
-            if (snapshot.Facts.Secure || now.Secure) return new DeliveryResult(DeliveryOutcome.Refused, "secure-field");
-            if (snapshot.AboveUs) return new DeliveryResult(DeliveryOutcome.Refused, "elevated-target");
-            if (!now.Editable) return new DeliveryResult(DeliveryOutcome.Refused, "not-editable");
-
+            if (current != null && !now.Readable) { v.Refusal = "target-unverifiable"; return v; }
+            if (snapshot.Facts.Secure || now.Secure || Target.IsPasswordEdit(gui.hwndFocus)) { v.Refusal = "secure-field"; return v; }
+            if (snapshot.AboveUs) { v.Refusal = "elevated-target"; return v; }
+            if (!now.Editable) { v.Refusal = "not-editable"; return v; }
             if (guards.ExpectSelection != null)
             {
-                if (current == null || UIA.Selection(current) != guards.ExpectSelection)
-                    return new DeliveryResult(DeliveryOutcome.Refused, "selection-changed");
+                if (current == null || UIA.Selection(current) != guards.ExpectSelection) { v.Refusal = "selection-changed"; return v; }
             }
             if (guards.Replace != null)
             {
@@ -201,15 +229,32 @@ namespace DoodleNote.DictationHelper
                 try { value = current != null ? UIA.ReadValue(current, FieldRead.MaxCharacters * 4) : null; }
                 catch (ElementNotAvailableException) { }
                 if (value == null || TextLocator.UniqueIndex(guards.Replace, value) < 0 || !UIA.SelectText(current, guards.Replace))
-                    return new DeliveryResult(DeliveryOutcome.Refused, "text-changed");
+                { v.Refusal = "text-changed"; return v; }
             }
-            ControlState before = ControlState.Read(current);
+            v.Current = current;
+            v.Before = ControlState.Read(current);
+            return v;
+        }
+
+        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs, int alreadyElapsedMs)
+        {
+            // The deadline is measured from when the request was received, not from here: a
+            // deliver stuck behind a slow UIA call must not begin after the app gave up.
+            Stopwatch began = Stopwatch.StartNew();
+            Func<long> elapsed = () => began.ElapsedMilliseconds + alreadyElapsedMs;
+            if (!snapshot.HasElement || snapshot.Facts == null) return new DeliveryResult(DeliveryOutcome.Refused, "no-target");
+            Validation v;
+            if (!Bounded.Run(() => Validate(snapshot, guards), ValidateBudgetMs, out v))
+                return new DeliveryResult(DeliveryOutcome.Refused, "target-unverifiable");
+            if (v.Refusal != null) return new DeliveryResult(DeliveryOutcome.Refused, v.Refusal);
+            AutomationElement current = v.Current;
+            ControlState before = v.Before;
             timings.ValidateMs = Ms(began);
 
             // Windows has no caret insertion through UI Automation (ValuePattern replaces
             // the whole field), so text goes in the way people paste: the clipboard and
             // Ctrl+V, with the clipboard put back. Synthetic Unicode typing is the fallback
-            // when the clipboard cannot be opened. DICTATION_HELPER_STRATEGY=type forces the fallback
+            // when the clipboard cannot be used. DICTATION_HELPER_STRATEGY=type forces the fallback
             // in a test build only (TestMode); the shipped helper has no such switch.
             bool forceType = TestMode.Env("DICTATION_HELPER_STRATEGY") == "type";
             // The client sized its wait from the text length; never begin an insertion it has
@@ -217,24 +262,39 @@ namespace DoodleNote.DictationHelper
             if (deadlineMs > 0 && !forceType && elapsed() + PasteEstimateMs > deadlineMs
                 && elapsed() + TypeEstimateMs(text) > deadlineMs)
                 return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
+            // What happened to the user's clipboard when a paste could not complete, so the typing
+            // fallback reports it instead of "untouched".
+            string clipboardAfterPaste = "untouched";
             if (!forceType)
             {
                 if (deadlineMs == 0 || elapsed() + PasteEstimateMs <= deadlineMs)
                 {
-                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings);
+                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, out clipboardAfterPaste);
                     if (pasted != null) return pasted;
                 }
             }
             if (deadlineMs > 0 && elapsed() + TypeEstimateMs(text) > deadlineMs)
-                return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
-            return TypeText(text, current, snapshot, before, timings, deadlineMs, elapsed);
+            {
+                DeliveryResult late = new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
+                late.Clipboard = clipboardAfterPaste;
+                return late;
+            }
+            DeliveryResult typed = TypeText(text, current, snapshot, before, timings, deadlineMs, elapsed);
+            if (typed.Clipboard == "untouched") typed.Clipboard = clipboardAfterPaste;
+            return typed;
         }
 
-        /// <summary>Null when the clipboard could not be opened (nothing was attempted).</summary>
-        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings)
+        /// <summary>
+        /// Null when the clipboard could not be used (nothing was pasted; the typing fallback may run).
+        /// `clipboardAfterFailedWrite` reports what happened to the user's clipboard in that case.
+        /// </summary>
+        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, out string clipboardAfterFailedWrite)
         {
+            clipboardAfterFailedWrite = "untouched";
             Stopwatch insert = Stopwatch.StartNew();
-            SavedClipboard saved = SavedClipboard.Capture();
+            // Saving the user's clipboard renders lazily-provided formats (OLE "Embed Source" and the
+            // like), which can take arbitrarily long; it runs on its own thread with a wall-clock bound.
+            SavedClipboard saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
             if (saved == null) return null;
             ClipboardOwnership ours;
             if (!ClipboardText.Write(text, out ours))
@@ -242,12 +302,15 @@ namespace DoodleNote.DictationHelper
                 // The write failed part-way. If we emptied the clipboard, the user's content is gone
                 // from it unless we put it back now (before any typing fallback): ownership comes from
                 // having emptied it, not from the text landing, so an owned partial write is restored.
-                if (ours.Emptied) saved.Restore(ours);
+                if (ours.Emptied) clipboardAfterFailedWrite = saved.Restore(ours);
                 return null;
             }
-            if (!ReleaseModifiers() || !TargetStillSafe(snapshot))
+            // Immediately before Ctrl+V, the same strict check the typing path makes: anything that
+            // cannot be read (identity, password state) refuses; nothing is pasted on a guess.
+            string unsafeReason = ReleaseModifiers() ? PasteGuard(snapshot) : "focus-changed";
+            if (unsafeReason != null)
             {
-                DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, "focus-changed");
+                DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, unsafeReason);
                 moved.Method = "paste";
                 moved.Clipboard = saved.Restore(ours);
                 return moved;
@@ -295,211 +358,30 @@ namespace DoodleNote.DictationHelper
             return result;
         }
 
-        static DeliveryResult TypeText(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, int deadlineMs, Func<long> elapsed)
+        /// <summary>
+        /// Before the Ctrl+V keystroke: the foreground app and focused control are still the snapshot's,
+        /// the focused window is not an ES_PASSWORD edit, and (one bounded UIA call) the control is
+        /// still focused and its IsPassword reads false. Unreadable or slow → target-unverifiable.
+        /// </summary>
+        static string PasteGuard(TargetSnapshot snapshot)
         {
-            Stopwatch insert = Stopwatch.StartNew();
-            if (!ReleaseModifiers() || !TargetStillSafe(snapshot))
+            string win32 = Win32Guard(snapshot);
+            if (win32 != null) return win32;
+            if (snapshot.Element == null) return null;
+            string reason;
+            if (!Bounded.Run(delegate
             {
-                DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, "focus-changed");
-                moved.Method = "type";
-                return moved;
-            }
-            // A UIA target must have an identity to compare against; without one (or without a
-            // readable secure state, checked per keystroke below) typing is refused, never permitted.
-            if (snapshot.Element != null && snapshot.RuntimeId == null)
-            {
-                DeliveryResult unverifiable = new DeliveryResult(DeliveryOutcome.Refused, "target-unverifiable");
-                unverifiable.Method = "type";
-                return unverifiable;
-            }
-            // One character per call with a short gap: text controls built on XAML and the
-            // Text Services Framework drop Unicode keystrokes that arrive in a burst.
-            string normalized = text.Replace("\r\n", "\n");
-            GuardStats guardStats = new GuardStats();
-            GuardStats settleStats = new GuardStats();
-            // A "the target has processed the key" signal (caret offset, and the value length for a
-            // short field): after each keystroke the loop waits (bounded) for it to change before the
-            // next guard runs. Chromium reports value changes but not always caret moves, Win32 edits
-            // both; a long document only pays for the caret read.
-            bool readValue = before.Value != null && before.Value.Length < 4096;
-            string signal = element != null ? KeySignal(element, readValue) : null;
-            if (signal == "-:-1") signal = null; // nothing observable: no settle wait
-            int expected = 0;
-            uint sent = 0;
-            int charsTyped = 0;
-            bool aborted = false;
-            string abortReason = null;
-            Stopwatch sinceCheck = Stopwatch.StartNew();
-            // A focus-change subscription keeps the focused element's identity current between the
-            // synchronous refreshes the guard does whenever that cache is older than FocusStaleMs.
-            using (FocusMonitor focus = new FocusMonitor())
-            {
-            for (int i = 0; i < normalized.Length; i++)
-            {
-                // Immediately before EVERY keystroke: foreground app, focused control identity and a
-                // FRESH secure-state read (KeystrokeGuard). Any failure, or anything it cannot read,
-                // stops typing at once; not one more keystroke is sent.
-                long guardStart = Stopwatch.GetTimestamp();
-                string unsafeReason = KeystrokeGuard(snapshot, focus);
-                double guardMs = (Stopwatch.GetTimestamp() - guardStart) * 1000.0 / Stopwatch.Frequency;
-                guardStats.Add(guardMs);
-                if (unsafeReason != null)
-                {
-                    aborted = true;
-                    abortReason = unsafeReason;
-                    break;
-                }
-                // A guard read that stalls (a hung UIA provider) means the state it vouched for may be
-                // stale by the time the key lands: stop rather than type on old information.
-                if (guardMs > GuardBudgetMs)
-                {
-                    aborted = true;
-                    abortReason = "target-unverifiable";
-                    break;
-                }
-                // A fuller UIA check (re-reads the live focused control's secure state) on an
-                // interval, as a backstop for targets without a RuntimeId.
-                if (i == 0 || charsTyped % 24 == 0 || sinceCheck.ElapsedMilliseconds >= 100)
-                {
-                    sinceCheck.Restart();
-                    if (!TargetStillSafe(snapshot)) { aborted = true; abortReason = "focus-changed"; break; }
-                }
-                // Re-check the deadline each iteration: a stalled UIA check must not let typing run
-                // past the client's timeout (item 3).
-                if (deadlineMs > 0 && elapsed() > deadlineMs) { aborted = true; abortReason = "deadline-exceeded"; break; }
-                char unit = normalized[i];
-                Native.INPUT[] pair;
-                if (unit == '\n') pair = new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) };
-                else if (char.IsHighSurrogate(unit) && i + 1 < normalized.Length)
-                {
-                    // A surrogate pair goes as one call, so the character is never split.
-                    char low = normalized[++i];
-                    pair = new[] { Native.Unicode(unit, false), Native.Unicode(low, false), Native.Unicode(unit, true), Native.Unicode(low, true) };
-                }
-                else pair = new[] { Native.Unicode(unit, false), Native.Unicode(unit, true) };
-                expected += pair.Length;
-                uint count = Native.Send(pair);
-                sent += count;
-                if (count != pair.Length) break;
-                charsTyped = i + 1;
-                // Word boundaries are where editors run spelling and suggestions; keystrokes
-                // that arrive meanwhile were seen to be dropped (Windows 11 Notepad).
-                // Wait until the target has processed this key (its caret moved) before the guard for
-                // the next one: a page that reacts to this key (moving focus, turning the field into a
-                // password field) has then published that change, so the next guard sees it. Chromium
-                // updates its accessibility tree asynchronously; without this a fast typist could get
-                // one key in after the switch. Bounded, so an unobservable or slow target only waits
-                // KeystrokeSettleMs.
-                if (signal != null)
-                {
-                    long settleStart = Stopwatch.GetTimestamp();
-                    string now = signal;
-                    while (true)
-                    {
-                        now = KeySignal(element, readValue);
-                        if (now != signal) break;
-                        if ((Stopwatch.GetTimestamp() - settleStart) * 1000.0 / Stopwatch.Frequency >= KeystrokeSettleMs) break;
-                        Thread.Sleep(1);
-                    }
-                    settleStats.Add((Stopwatch.GetTimestamp() - settleStart) * 1000.0 / Stopwatch.Frequency);
-                    signal = now;
-                }
-                Thread.Sleep(char.IsWhiteSpace(unit) || char.IsPunctuation(unit) ? 70 : 8);
-            }
-            }
-            timings.InsertMs += Ms(insert);
-            if (aborted)
-            {
-                // The target changed/became secure, or the deadline passed, mid-type: some characters
-                // may already be in, so the host keeps the text and must not resend.
-                DeliveryResult stopped = new DeliveryResult(sent == 0 ? DeliveryOutcome.Refused : DeliveryOutcome.Uncertain, sent == 0 ? abortReason : "insertion-unverifiable");
-                stopped.Method = "type";
-                stopped.CharsDelivered = charsTyped;
-                stopped.Guard = guardStats;
-                stopped.Settle = settleStats;
-                return stopped;
-            }
-            if (sent == 0)
-            {
-                DeliveryResult failed = new DeliveryResult(DeliveryOutcome.Failed, "keystroke-unavailable");
-                failed.Method = "type";
-                failed.Guard = guardStats;
-                failed.Settle = settleStats;
-                return failed;
-            }
-            if (sent != expected)
-            {
-                DeliveryResult partial = new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable");
-                partial.Method = "type";
-                partial.CharsDelivered = charsTyped;
-                partial.Guard = guardStats;
-                partial.Settle = settleStats;
-                return partial;
-            }
-            Stopwatch confirm = Stopwatch.StartNew();
-            // Keystrokes arrive one by one: wait for the field to change and then to settle,
-            // so the reply (and the clipboard of a later paste) never races the last characters.
-            bool verified = before.Observable && Changed(element, before, 800 + 4 * normalized.Length) && Settled(element, 150, 2000 + 4 * normalized.Length);
-            // Keystrokes can be dropped one by one, so a change is not enough: the whole text must be there.
-            if (verified)
-            {
-                ControlState after = ControlState.Read(element);
-                verified = after.Value == null || after.Value.Replace("\r\n", "\n").Replace('\r', '\n').Contains(normalized);
-            }
-            timings.ConfirmMs += Ms(confirm);
-            DeliveryResult result = verified
-                ? new DeliveryResult(DeliveryOutcome.Delivered, null)
-                : new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable");
-            result.Method = "type";
-            result.Verified = verified;
-            result.CharsDelivered = charsTyped;
-            result.Guard = guardStats;
-            result.Settle = settleStats;
-            return result;
+                AutomationElement current;
+                if (!Target.StillFocused(snapshot, out current)) return "focus-changed";
+                bool? secure = UIA.TryIsPassword(snapshot.Element);
+                if (secure == null) return "target-unverifiable";
+                return secure.Value ? "secure-field" : null;
+            }, GuardBudgetMs, out reason)) return "target-unverifiable";
+            return reason;
         }
 
-        /// <summary>
-        /// The focus cache is refreshed synchronously when older than this. 0: every keystroke reads
-        /// the live focused element, so a move to another control is seen before the next key, not up
-        /// to one cache period later. (The cost is measured per delivery in DeliveryResult.Guard.)
-        /// </summary>
-        const int FocusStaleMs = 0;
-        /// <summary>Caret offset and (when readValue) value length, as "caret:length"; "-:-1" when neither is readable.</summary>
-        static string KeySignal(AutomationElement element, bool readValue)
-        {
-            int? caret = UIA.SelectionStart(element);
-            int length = -1;
-            if (readValue)
-            {
-                try
-                {
-                    ValuePattern value = UIA.Value(element);
-                    string text = value != null ? value.Current.Value : null;
-                    if (text != null) length = text.Length;
-                }
-                catch (Exception) { length = -2; } // unreadable now (e.g. it became a password field): a change
-            }
-            return (caret.HasValue ? caret.Value.ToString() : "-") + ":" + length;
-        }
-
-        /// <summary>A single guard check slower than this aborts typing (its answer may be stale).</summary>
-        const double GuardBudgetMs = 250;
-        /// <summary>The longest wait for the target to process one typed key (see TypeText).</summary>
-        const double KeystrokeSettleMs = 120;
-
-        /// <summary>
-        /// The safety check run immediately before each typed keystroke. Null when it is safe to send
-        /// the next key; otherwise the refusal reason. Missing identity or an unreadable secure state
-        /// is a refusal ("target-unverifiable"), never a pass.
-        ///  - The foreground window still belongs to the snapshot's process.
-        ///  - Win32 (every key, cheap): the focused window is not an Edit with ES_PASSWORD; for a target
-        ///    without a UIA element, the focused window is still the snapshot's.
-        ///  - UIA: the focused element (cache, refreshed when older than FocusStaleMs) is still the
-        ///    snapshot's RuntimeId in the same process and not a password control, AND a fresh
-        ///    IsPassword read on the element itself is false, so a field that becomes secure without
-        ///    any focus change (a page flipping input type, PasswordChar set mid-type) stops typing.
-        /// </summary>
-        static string KeystrokeGuard(TargetSnapshot snapshot, FocusMonitor focus)
+        /// <summary>Foreground process, focused window identity (Win32 targets) and ES_PASSWORD; no provider call.</summary>
+        static string Win32Guard(TargetSnapshot snapshot)
         {
             IntPtr foreground = Native.GetForegroundWindow();
             if (foreground == IntPtr.Zero) return "focus-changed";
@@ -508,27 +390,185 @@ namespace DoodleNote.DictationHelper
             if (pid != snapshot.Pid) return "focus-changed";
             Native.GUITHREADINFO gui = Target.GuiInfo(thread);
             if (Target.IsPasswordEdit(gui.hwndFocus)) return "secure-field";
-            if (snapshot.Element == null)
-                return snapshot.FocusWindow != IntPtr.Zero && gui.hwndFocus == snapshot.FocusWindow ? null : "focus-changed";
-            string rid;
-            bool? focusedSecure;
-            int owner;
-            focus.Current(FocusStaleMs, out rid, out focusedSecure, out owner);
-            if (rid == null || focusedSecure == null) return "target-unverifiable";
-            if (focusedSecure.Value) return "secure-field";
-            if (owner != (int)snapshot.Pid || rid != snapshot.RuntimeId) return "focus-changed";
-            bool? secure = UIA.TryIsPassword(snapshot.Element);
-            if (secure == null) return "target-unverifiable";
-            return secure.Value ? "secure-field" : null;
+            if (snapshot.Element == null && (snapshot.FocusWindow == IntPtr.Zero || gui.hwndFocus != snapshot.FocusWindow)) return "focus-changed";
+            return null;
         }
 
-        static bool TargetStillSafe(TargetSnapshot snapshot)
+        /// <summary>The focused window of the foreground thread.</summary>
+        static IntPtr FocusWindow()
         {
-            if (snapshot.AboveUs) return false;
-            AutomationElement current;
-            if (!Target.StillFocused(snapshot, out current)) return false;
-            ElementFacts now = ElementFacts.Of(current, Target.CurrentGui());
-            return !now.Secure;
+            IntPtr foreground = Native.GetForegroundWindow();
+            if (foreground == IntPtr.Zero) return IntPtr.Zero;
+            uint pid;
+            uint thread = Native.GetWindowThreadProcessId(foreground, out pid);
+            return Target.GuiInfo(thread).hwndFocus;
+        }
+
+        /// <summary>
+        /// Chromium and Electron windows publish their accessibility tree to UI Automation
+        /// asynchronously, so a keystroke's effect (a field turning into a password field, focus moving)
+        /// cannot be observed before the next key. The typing fallback is refused there: the paste path
+        /// handles these apps; when it cannot, the text is kept for copying.
+        /// </summary>
+        internal static bool IsChromiumClass(IntPtr window)
+        {
+            for (IntPtr w = window; w != IntPtr.Zero; w = Native.GetParent(w))
+            {
+                string name = Native.ClassOf(w);
+                if (name == "Chrome_RenderWidgetHostHWND" || name == "Chrome_WidgetWin_1" || name == "Chrome_WidgetWin_0") return true;
+            }
+            return false;
+        }
+
+        static DeliveryResult TypeText(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, int deadlineMs, Func<long> elapsed)
+        {
+            Stopwatch insert = Stopwatch.StartNew();
+            string refusal = null;
+            if (!ReleaseModifiers()) refusal = "focus-changed";
+            IntPtr focusWindow = FocusWindow();
+            if (refusal == null && IsChromiumClass(focusWindow) && TestMode.Env("DICTATION_HELPER_TEST_ALLOW_CHROMIUM_TYPING") != "1")
+                refusal = "typing-unsupported";
+            // A UIA target must have an identity to compare against.
+            if (refusal == null && snapshot.Element != null && snapshot.RuntimeId == null) refusal = "target-unverifiable";
+            // Every keystroke must be observed as processed before the next one; a target whose
+            // processing cannot be observed is refused up front rather than typed into blindly.
+            KeystrokeObserver observer = null;
+            if (refusal == null)
+            {
+                observer = KeystrokeObserver.For(snapshot, focusWindow);
+                if (observer == null) refusal = "typing-unobservable";
+            }
+            if (refusal != null)
+            {
+                DeliveryResult refused = new DeliveryResult(DeliveryOutcome.Refused, refusal);
+                refused.Method = "type";
+                return refused;
+            }
+            // One character per call with a short gap: text controls built on XAML and the
+            // Text Services Framework drop Unicode keystrokes that arrive in a burst.
+            string normalized = text.Replace("\r\n", "\n");
+            GuardStats guardStats = new GuardStats();
+            GuardStats settleStats = new GuardStats();
+            int expected = 0;
+            uint sent = 0;
+            int charsTyped = 0;
+            bool aborted = false;
+            string abortReason = null;
+            double slowestBefore = Bounded.SlowestMs;
+            using (observer)
+            {
+                for (int i = 0; i < normalized.Length; i++)
+                {
+                    // Immediately before EVERY keystroke: foreground app, focused control identity and a
+                    // FRESH secure-state read, all within GuardBudgetMs of wall clock. Any failure, or
+                    // anything it cannot read in time, stops typing; not one more keystroke is sent.
+                    long guardStart = Stopwatch.GetTimestamp();
+                    string unsafeReason = KeystrokeGuard(snapshot);
+                    guardStats.Add((Stopwatch.GetTimestamp() - guardStart) * 1000.0 / Stopwatch.Frequency);
+                    if (unsafeReason != null) { aborted = true; abortReason = unsafeReason; break; }
+                    if (deadlineMs > 0 && elapsed() > deadlineMs) { aborted = true; abortReason = "deadline-exceeded"; break; }
+                    // A target that processes keys slowly (but observably) would run past the deadline
+                    // part-way through: once its rate is known (3 keys), stop at once if the rest cannot
+                    // finish in time, rather than typing most of the text and stopping late.
+                    if (deadlineMs > 0 && charsTyped >= 3)
+                    {
+                        double perChar = insert.ElapsedMilliseconds / (double)charsTyped;
+                        if (elapsed() + perChar * (normalized.Length - i) > deadlineMs) { aborted = true; abortReason = "deadline-exceeded"; break; }
+                    }
+                    char unit = normalized[i];
+                    Native.INPUT[] pair;
+                    int start = i;
+                    if (unit == '\n') pair = new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) };
+                    else if (char.IsHighSurrogate(unit) && i + 1 < normalized.Length)
+                    {
+                        // A surrogate pair goes as one call, so the character is never split.
+                        char low = normalized[++i];
+                        pair = new[] { Native.Unicode(unit, false), Native.Unicode(low, false), Native.Unicode(unit, true), Native.Unicode(low, true) };
+                    }
+                    else pair = new[] { Native.Unicode(unit, false), Native.Unicode(unit, true) };
+                    long mark = observer.Mark();
+                    expected += pair.Length;
+                    uint count = Native.Send(pair);
+                    sent += count;
+                    if (count != pair.Length) break;
+                    charsTyped = i + 1;
+                    // The key counts as processed only when the target shows it (its text length moved,
+                    // or a text/value event arrived for it) within KeySettleMs. Without that the next
+                    // guard could read state from before this key: stop instead (uncertain).
+                    long settleStart = Stopwatch.GetTimestamp();
+                    bool secureNow;
+                    bool processed = observer.WaitProcessed(mark, KeySettleMs, out secureNow);
+                    settleStats.Add((Stopwatch.GetTimestamp() - settleStart) * 1000.0 / Stopwatch.Frequency);
+                    if (secureNow) { aborted = true; abortReason = "secure-field"; break; }
+                    if (!processed) { aborted = true; abortReason = "target-unconfirmed"; break; }
+                    // Word boundaries are where editors run spelling and suggestions; keystrokes
+                    // that arrive meanwhile were seen to be dropped (Windows 11 Notepad).
+                    Thread.Sleep(char.IsWhiteSpace(normalized[start]) || char.IsPunctuation(normalized[start]) ? 70 : 8);
+                }
+            }
+            timings.InsertMs += Ms(insert);
+            Func<DeliveryResult, DeliveryResult> stamp = delegate (DeliveryResult r)
+            {
+                r.Method = "type";
+                r.CharsDelivered = charsTyped;
+                r.Guard = guardStats;
+                r.Settle = settleStats;
+                r.ProviderSlowestMs = Math.Max(Bounded.SlowestMs, slowestBefore);
+                return r;
+            };
+            if (aborted)
+            {
+                // Stopped mid-type: some characters may already be in, so the host keeps the text and
+                // must not resend.
+                return stamp(new DeliveryResult(sent == 0 ? DeliveryOutcome.Refused : DeliveryOutcome.Uncertain, sent == 0 ? abortReason : "insertion-unverifiable"));
+            }
+            if (sent == 0) return stamp(new DeliveryResult(DeliveryOutcome.Failed, "keystroke-unavailable"));
+            if (sent != expected) return stamp(new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable"));
+            Stopwatch confirm = Stopwatch.StartNew();
+            // Keystrokes arrive one by one: wait for the field to change and then to settle,
+            // so the reply (and the clipboard of a later paste) never races the last characters.
+            bool verified = before.Observable && Changed(element, before, 800 + 4 * normalized.Length) && Settled(element, 150, 2000 + 4 * normalized.Length);
+            // Keystrokes can be dropped one by one, so a change is not enough: the whole text must be there.
+            if (verified)
+            {
+                ControlState after = ControlState.TryRead(element, ReadBudgetMs);
+                verified = after != null && (after.Value == null || after.Value.Replace("\r\n", "\n").Replace('\r', '\n').Contains(normalized));
+            }
+            timings.ConfirmMs += Ms(confirm);
+            DeliveryResult result = stamp(verified
+                ? new DeliveryResult(DeliveryOutcome.Delivered, null)
+                : new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable"));
+            result.Verified = verified;
+            return result;
+        }
+
+        /// <summary>
+        /// The safety check run immediately before each typed keystroke. Null when it is safe to send
+        /// the next key; otherwise the refusal reason. The Win32 part (foreground process, ES_PASSWORD)
+        /// makes no provider call; the UIA part (the focused element's RuntimeId, process and IsPassword,
+        /// and a fresh IsPassword on the snapshot's element) runs as ONE bounded call: a missing identity,
+        /// an unreadable secure state or a call slower than GuardBudgetMs is target-unverifiable.
+        /// </summary>
+        static string KeystrokeGuard(TargetSnapshot snapshot)
+        {
+            string win32 = Win32Guard(snapshot);
+            if (win32 != null) return win32;
+            if (snapshot.Element == null) return null;
+            string reason;
+            if (!Bounded.Run(delegate
+            {
+                AutomationElement focused = UIA.Focused();
+                string rid = UIA.RuntimeId(focused);
+                bool? focusedSecure = UIA.TryIsPassword(focused);
+                int owner = focused != null ? UIA.Pid(focused) : 0;
+                if (rid == null || focusedSecure == null) return "target-unverifiable";
+                if (focusedSecure.Value) return "secure-field";
+                if (owner != (int)snapshot.Pid || rid != snapshot.RuntimeId) return "focus-changed";
+                bool? secure = UIA.TryIsPassword(snapshot.Element);
+                if (secure == null) return "target-unverifiable";
+                return secure.Value ? "secure-field" : null;
+            }, GuardBudgetMs, out reason)) return "target-unverifiable";
+            return reason;
         }
 
         /// <summary>
@@ -563,16 +603,18 @@ namespace DoodleNote.DictationHelper
             return Native.Send(lift.ToArray()) == lift.Count;
         }
 
-        /// <summary>True once the control has read the same for quietMs (false if it never settles in time).</summary>
+        /// <summary>True once the control has read the same for quietMs (false if it never settles in time, or cannot be read).</summary>
         static bool Settled(AutomationElement element, int quietMs, int withinMs)
         {
             Stopwatch watch = Stopwatch.StartNew();
-            ControlState last = ControlState.Read(element);
+            ControlState last = ControlState.TryRead(element, ReadBudgetMs);
+            if (last == null) return false;
             Stopwatch quiet = Stopwatch.StartNew();
             while (watch.ElapsedMilliseconds < withinMs)
             {
                 Thread.Sleep(15);
-                ControlState now = ControlState.Read(element);
+                ControlState now = ControlState.TryRead(element, ReadBudgetMs);
+                if (now == null) return false;
                 if (!now.SameAs(last))
                 {
                     last = now;
@@ -583,15 +625,17 @@ namespace DoodleNote.DictationHelper
             return false;
         }
 
+        /// <summary>The control reads differently from `before` within withinMs (a read that times out never counts as a change).</summary>
         static bool Changed(AutomationElement element, ControlState before, int withinMs)
         {
             Stopwatch watch = Stopwatch.StartNew();
             do
             {
-                if (!ControlState.Read(element).SameAs(before)) return true;
+                ControlState now = ControlState.TryRead(element, ReadBudgetMs);
+                if (now != null && !now.SameAs(before)) return true;
                 Thread.Sleep(15);
             } while (watch.ElapsedMilliseconds < withinMs);
-            return !ControlState.Read(element).SameAs(before);
+            return false;
         }
     }
 
@@ -702,6 +746,9 @@ namespace DoodleNote.DictationHelper
         public void Confirm()
         {
             IntPtr window = Ui.ClipboardWindow;
+            Owner = window;
+            // Test build only: simulate another reader holding the clipboard through the confirmation.
+            if (TestMode.Env("DICTATION_HELPER_TEST_SKIP_CONFIRM") == "1") return;
             if (window == IntPtr.Zero || !ClipboardText.Open()) return;
             try
             {
@@ -719,6 +766,15 @@ namespace DoodleNote.DictationHelper
         public bool StillOurs()
         {
             return Confirmed && Native.GetClipboardOwner() == Owner && Native.GetClipboardSequenceNumber() == SequenceFinal;
+        }
+
+        /// <summary>
+        /// Under the clipboard lock, when Confirm() could not run (another reader held the clipboard):
+        /// our window is still the owner, i.e. nobody has emptied the clipboard since our write.
+        /// </summary>
+        public bool OwnerUnchanged()
+        {
+            return Owner != IntPtr.Zero && Native.GetClipboardOwner() == Owner;
         }
     }
 
@@ -793,6 +849,39 @@ namespace DoodleNote.DictationHelper
             return length > 0 ? name.ToString(0, length) : "";
         }
 
+        /// <summary>
+        /// Formats an OLE source renders on demand (it may start or wake the source app): read after
+        /// every other format, so a slow render costs only itself and runs last under the time cap.
+        /// </summary>
+        static readonly string[] RenderedLast =
+        {
+            "embed source", "embedded object", "link source", "link source descriptor", "object descriptor",
+            "native", "ownerlink", "objectlink"
+        };
+
+        /// <summary>
+        /// Capture on a dedicated thread, waiting at most timeoutMs of wall clock: an owner that takes
+        /// long to render a lazily provided format (OLE "Embed Source") cannot stall the delivery. Null
+        /// when the clipboard cannot be opened or saving it did not finish in time; nothing is pasted
+        /// then (the user's clipboard would not come back), and the capture thread closes the
+        /// clipboard when the owner finally answers.
+        /// </summary>
+        public static SavedClipboard CaptureBounded(int timeoutMs)
+        {
+            SavedClipboard result = null;
+            Thread thread = new Thread(delegate () { result = Capture(); });
+            thread.IsBackground = true;
+            thread.Name = "dictation-clipboard-capture";
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            if (!thread.Join(timeoutMs))
+            {
+                Wire.Log("saving the clipboard took too long (a source app is rendering its content); not pasting");
+                return null;
+            }
+            return result;
+        }
+
         /// <summary>Null when the clipboard cannot be opened.</summary>
         public static SavedClipboard Capture()
         {
@@ -803,7 +892,17 @@ namespace DoodleNote.DictationHelper
             try
             {
                 bool hasDib = Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5);
+                List<uint> formats = new List<uint>();
+                List<uint> renderedLast = new List<uint>();
                 for (uint format = Native.EnumClipboardFormats(0); format != 0; format = Native.EnumClipboardFormats(format))
+                {
+                    if (format >= 0xC000 && Array.IndexOf(RenderedLast, FormatName(format).ToLowerInvariant()) >= 0) renderedLast.Add(format);
+                    else formats.Add(format);
+                }
+                formats.AddRange(renderedLast);
+                int captureDelay = TestMode.Int("DICTATION_HELPER_TEST_CAPTURE_DELAY_MS", 0);
+                if (captureDelay > 0) Thread.Sleep(captureDelay);
+                foreach (uint format in formats)
                 {
                     // Deciding which formats are user-visible is cheap; only safe ones are read below.
                     bool safe;
@@ -903,7 +1002,19 @@ namespace DoodleNote.DictationHelper
             bool ok = true;
             try
             {
-                if (!ours.StillOurs()) return "user-changed";
+                if (ours.Confirmed)
+                {
+                    // Proven ownership: a different owner or sequence is a newer copy by someone else,
+                    // which wins (no warning; nothing of the user's was lost to us).
+                    if (!ours.StillOurs()) return "user-changed";
+                }
+                else if (!ours.OwnerUnchanged())
+                {
+                    // Ownership was never confirmed (the clipboard was busy) and the owner changed: we
+                    // cannot tell a foreign copy from our own write, so we do not overwrite it, and say
+                    // the user's clipboard was not put back.
+                    return "unrestored";
+                }
                 // If the clipboard cannot be emptied, do not partially overwrite it: report it plainly.
                 // (A test build can simulate EmptyClipboard failing here.)
                 if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") == "1" || !Native.EmptyClipboard()) return "unrestored";

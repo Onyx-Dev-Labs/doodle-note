@@ -140,6 +140,12 @@ namespace DoodleNote.DictationHelper
         public static extern bool GetCursorPos(out POINT point);
         [DllImport("user32.dll")]
         public static extern IntPtr GetClipboardOwner();
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetParent(IntPtr hwnd);
+        public const uint WM_GETTEXTLENGTH = 0x000E;
+        public const uint SMTO_ABORTIFHUNG = 0x0002, SMTO_BLOCK = 0x0001;
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
 
         // Clipboard.
         [DllImport("user32.dll", SetLastError = true)]

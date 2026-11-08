@@ -54,13 +54,15 @@ namespace DoodleNote.DictationHelper
         Native.POINT prevCursor;
         bool havePrevCursor;
         readonly HookLossDetector keyDetector = new HookLossDetector(1);
-        /// <summary>Two consecutive ticks for the mouse: an app moving the cursor itself (SetCursorPos) is not input.</summary>
-        readonly HookLossDetector mouseDetector = new HookLossDetector(2);
         /// <summary>
-        /// Per hook: the current retry delay (grows 4 s, 8 s, 16 s, 30 s while re-installing fails)
-        /// and, separately, the countdown to the next attempt.
+        /// Two suspect ticks for the mouse (an app moving the cursor itself once is not input); quiet
+        /// ticks in between do not clear the evidence, so occasional use still adds up.
         /// </summary>
-        int keyRetryDelayMs, keyCountdownMs, mouseRetryDelayMs, mouseCountdownMs;
+        readonly HookLossDetector mouseDetector = new HookLossDetector(2, false);
+        /// <summary>Per hook: when to retry re-installing it (4/8/16/30 s while re-installing fails).</summary>
+        readonly RetryClock keyRetry = new RetryClock(WatchdogMs), mouseRetry = new RetryClock(WatchdogMs);
+        /// <summary>The armed mouse button's async state on the previous tick (stationary-use evidence).</summary>
+        bool prevButtonDown;
         /// <summary>Whether a lost event has been announced for each hook, to balance with restored.</summary>
         bool keyLostAnnounced, mouseLostAnnounced;
 #if DICTATION_TEST
@@ -134,8 +136,7 @@ namespace DoodleNote.DictationHelper
             keySpec = null;
             // A removed or replaced watcher takes its loss state with it.
             keyLostAnnounced = false;
-            keyRetryDelayMs = 0;
-            keyCountdownMs = 0;
+            keyRetry.Succeeded();
             keyDetector.Reset();
             UpdatePoll();
             AnnounceHooks();
@@ -165,6 +166,7 @@ namespace DoodleNote.DictationHelper
             minHoldMs = HoldDelay(minHold);
             prevMouseCallbackCount = mouseCallbackCount;
             havePrevCursor = Native.GetCursorPos(out prevCursor);
+            prevButtonDown = Native.IsDown(ButtonVk((int)button));
             mouseDetector.Reset();
             RaiseHookThreadPriority();
             StartWatchdog();
@@ -182,8 +184,7 @@ namespace DoodleNote.DictationHelper
             mousePaused = false;
             mouseButton = -1;
             mouseLostAnnounced = false;
-            mouseRetryDelayMs = 0;
-            mouseCountdownMs = 0;
+            mouseRetry.Succeeded();
             mouseDetector.Reset();
             UpdatePoll();
             AnnounceHooks();
@@ -432,12 +433,17 @@ namespace DoodleNote.DictationHelper
                 bool haveCursor = Native.GetCursorPos(out cursor); // false on a secure desktop: no evidence
                 bool moved = haveCursor && havePrevCursor && (cursor.X != prevCursor.X || cursor.Y != prevCursor.Y);
                 if (haveCursor) { prevCursor = cursor; havePrevCursor = true; }
+                // The armed button's own state, read passively: pressing it without moving the mouse
+                // is evidence too (a button the live hook swallows never changes this state).
+                bool buttonDown = Native.IsDown(ButtonVk(mouseButton));
+                bool buttonMoved = buttonDown != prevButtonDown;
+                prevButtonDown = buttonDown;
                 long count = mouseCallbackCount;
                 bool advanced = count != prevMouseCallbackCount;
                 prevMouseCallbackCount = count;
-                if (mouseDetector.Observe(moved && !advanced, advanced, above))
+                if (mouseDetector.Observe((moved || buttonMoved) && !advanced, advanced, above))
                 {
-                    Wire.Log("mouse hook loss detected (the cursor moved with no callback)");
+                    Wire.Log("mouse hook loss detected (the cursor or the armed button moved with no callback)");
                     Native.UnhookWindowsHookEx(mouseHook);
                     mouseHook = IntPtr.Zero;
                 }
@@ -447,47 +453,46 @@ namespace DoodleNote.DictationHelper
             if (wantMouse && mouseHook == IntPtr.Zero) RecoverMouse();
         }
 
+        static int ButtonVk(int button)
+        {
+            return button == 2 ? Native.VK_MBUTTON : button == 3 ? Native.VK_XBUTTON1 : Native.VK_XBUTTON2;
+        }
+
         void RecoverKey()
         {
-            if (keyCountdownMs > 0) { keyCountdownMs -= WatchdogMs; return; }
+            if (!keyRetry.Tick()) return;
             if (ReinstallKey())
             {
                 Wire.Log("keyboard hook re-installed");
-                keyRetryDelayMs = 0;
-                keyCountdownMs = 0;
+                keyRetry.Succeeded();
                 prevKeyCallbackCount = keyCallbackCount;
                 prevArmedDown = Native.IsDown(keySpec.Vk);
                 keyDetector.Reset();
                 if (keyLostAnnounced) { keyLostAnnounced = false; AnnounceHooks(); }
                 return;
             }
-            keyRetryDelayMs = NextBackoff(keyRetryDelayMs);
-            keyCountdownMs = keyRetryDelayMs;
+            keyRetry.Failed();
             if (!keyLostAnnounced) { keyLostAnnounced = true; AnnounceHooks(); }
         }
 
         void RecoverMouse()
         {
-            if (mouseCountdownMs > 0) { mouseCountdownMs -= WatchdogMs; return; }
+            if (!mouseRetry.Tick()) return;
             if (ReinstallMouse())
             {
                 Wire.Log("mouse hook re-installed");
-                mouseRetryDelayMs = 0;
-                mouseCountdownMs = 0;
+                mouseRetry.Succeeded();
                 prevMouseCallbackCount = mouseCallbackCount;
                 havePrevCursor = Native.GetCursorPos(out prevCursor);
+                prevButtonDown = Native.IsDown(ButtonVk(mouseButton));
                 mouseDetector.Reset();
                 if (mouseLostAnnounced) { mouseLostAnnounced = false; AnnounceHooks(); }
                 return;
             }
-            mouseRetryDelayMs = NextBackoff(mouseRetryDelayMs);
-            mouseCountdownMs = mouseRetryDelayMs;
+            mouseRetry.Failed();
             if (!mouseLostAnnounced) { mouseLostAnnounced = true; AnnounceHooks(); }
         }
 
-        /// <summary>The next retry delay: 2 ticks, then doubling, capped at 30 s.</summary>
-        internal static int NextBackoff(int current, int tickMs) { return Math.Min(current <= 0 ? 2 * tickMs : current * 2, 30000); }
-        static int NextBackoff(int current) { return NextBackoff(current, WatchdogMs); }
 
         /// <summary>Whether the foreground window's process runs at a higher integrity than this helper.</summary>
         static bool ForegroundRunsAboveUs()
