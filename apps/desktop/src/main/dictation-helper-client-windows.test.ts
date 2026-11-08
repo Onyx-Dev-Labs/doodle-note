@@ -529,6 +529,67 @@ test('Windows: a verified helper starts, and the check runs again before a respa
   }
 })
 
+test('Windows: a hold lost before the spawn returned invalidates it; the helper is re-checked and re-spawned', async () => {
+  const fake = recordingHelper(null)
+  const events: string[] = []
+  let checks = 0
+  const client = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    verify: async () => {
+      checks += 1
+      const attempt = checks
+      events.push(`verify ${attempt}`)
+      return {
+        ok: true,
+        locked: true,
+        // The first lease's holder ended before the spawn returned (a killed speech worker).
+        confirm: async () => {
+          events.push(`confirm ${attempt}`)
+          return attempt > 1
+        },
+        release: () => events.push(`release ${attempt}`)
+      }
+    }
+  })
+  try {
+    assert.ok(await client.status(), 'the second, confirmed spawn serves the request')
+    assert.deepEqual(events, [
+      'verify 1',
+      'confirm 1',
+      'release 1',
+      'verify 2',
+      'confirm 2',
+      'release 2'
+    ])
+    // The helper spawned under the invalid lease was ended at once and never asked anything: the
+    // one status request went to the confirmed helper.
+    const ops = (await read(fake.log)).split('\n').filter((line) => line.startsWith('op '))
+    assert.deepEqual(ops, ['op status'])
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: a hold that keeps being lost stops after the attempt limit; nothing runs unconfirmed', async () => {
+  const fake = recordingHelper(null)
+  let checks = 0
+  const client = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    verify: async () => {
+      checks += 1
+      return { ok: true, locked: true, confirm: async () => false }
+    }
+  })
+  try {
+    assert.equal(await client.status(), null)
+    assert.equal(checks, 3, 'three attempts, each with a fresh check')
+  } finally {
+    await client.dispose()
+  }
+})
+
 test('Windows: DICTATION_HELPER_* never reaches the helper unless the app is in test mode', async () => {
   const env = {
     DICTATION_HELPER_TEST: '1',

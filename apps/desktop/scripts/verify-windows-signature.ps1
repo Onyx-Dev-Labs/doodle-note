@@ -37,7 +37,7 @@ if (-not (Test-Path $manifestPath)) {
 }
 $manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
 $env:DN_HELPER_PATH = $helper
-$digest = (node -e "process.stdout.write(require(process.argv[1]).stableDigest(require('fs').readFileSync(process.env.DN_HELPER_PATH)) || '')" (Join-Path $PSScriptRoot "authenticode-digest.cjs"))
+$digest = (node -e "process.stdout.write(require(process.argv[1]).stableDigest(require('fs').readFileSync(process.env.DN_HELPER_PATH)) || '')" (Join-Path $PSScriptRoot "authenticode-digest.mjs"))
 if ($LASTEXITCODE -ne 0 -or -not $digest) { throw "Could not recompute the dictation helper digest" }
 if ($digest -ne $manifest.authenticodeSha256) {
   throw "Refusing to publish: the signed dictation helper digest $digest does not match the build's $($manifest.authenticodeSha256)"

@@ -35,8 +35,7 @@ import {
   barkHelperIdentity,
   helperSpawnEnv
 } from './dictation-helper-client'
-import { HelperIntegrity, resolveHelperExpectation } from './helper-integrity'
-import { startVerifier } from './win-authenticode'
+import { HelperIntegrity, resolveHelperExpectation, type HelperHolder } from './helper-integrity'
 import { DictationOverlay } from './dictation-overlay'
 import { DictationService, type EngineLike } from './dictation-service'
 import { DictationSettingsStore } from './dictation-settings'
@@ -54,6 +53,11 @@ export interface DictationHostOptions {
    * (barkHelperIdentity); a build-time identity module (a QA identity) passes its own here.
    */
   helperIdentity?: string | null
+  /**
+   * Windows: the speech worker's hold on the helper file (WinEngineHost.holdHelper), which also
+   * verifies its signature; without it the helper is checked by digest alone (locked:false).
+   */
+  helperHolder?: HelperHolder | null
   /** The speech engine (macOS sidecar, or Bark's Windows engine); dictation is unavailable without it. */
   engine: EngineLike | null
   /** Defaults to the running platform. */
@@ -118,6 +122,8 @@ export function createDictationHost(options: DictationHostOptions): {
   const settings = new DictationSettingsStore(options.userData)
   const platform = options.platform ?? process.platform
   const packaged = options.packaged ?? false
+  // Bark's test facilities: an unpackaged run with DOODLENOTE_BARK_TEST_HOOKS=1 only.
+  const testHooks = !packaged && process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
   // Windows only: the helper's integrity is checked lazily, asynchronously and only right before
   // it is spawned (so only once Bark is on), never at startup; a damaged helper is never executed.
   const integrity =
@@ -125,7 +131,7 @@ export function createDictationHost(options: DictationHostOptions): {
       ? new HelperIntegrity({
           helperPath: options.helperPath,
           expectation: () => resolveHelperExpectation(options.helperPath, packaged),
-          verifier: startVerifier,
+          holder: options.helperHolder ?? null,
           cachePath: join(options.userData, 'helper-integrity.json'),
           log: (line) => console.error(`[dictation] ${line}`)
         })
@@ -136,17 +142,25 @@ export function createDictationHost(options: DictationHostOptions): {
     ...(integrity
       ? {
           identity: barkHelperIdentity(options.channel, options.helperIdentity),
-          verify: () =>
-            integrity.acquire().then((lease) => ({
+          verify: async () => {
+            const lease = await integrity.acquire()
+            // QA only (unpackaged with Bark's test hooks on): hold the lease a while before the spawn,
+            // so a test can end the speech worker in the middle of the hold.
+            const pause = testHooks
+              ? Number(process.env.DOODLENOTE_BARK_TEST_HOLD_PAUSE_MS) || 0
+              : 0
+            if (pause > 0 && lease.locked)
+              await new Promise((resolve) => setTimeout(resolve, pause))
+            return {
               ok: lease.verdict === 'ok',
+              locked: lease.locked,
+              confirm: lease.confirm,
               release: lease.release
-            })),
+            }
+          },
           // A user's environment must not reach the helper's test facilities; only an unpackaged
           // run with Bark's test hooks on passes DICTATION_HELPER_* through.
-          env: helperSpawnEnv(
-            process.env,
-            !packaged && process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
-          )
+          env: helperSpawnEnv(process.env, testHooks)
         }
       : {})
   })

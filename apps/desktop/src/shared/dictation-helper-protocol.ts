@@ -91,9 +91,15 @@ export interface HelperDelivery {
   /** ax: macOS accessibility insertion. paste: clipboard and Cmd/Ctrl+V. type: Windows Unicode keystrokes. */
   method?: 'ax' | 'paste' | 'type'
   verified: boolean
-  /** untouched | restored | user-changed | partial */
+  /** untouched | restored | user-changed | partial | skipped | unrestored */
   clipboard: string
   timings?: HelperDeliveryTimings
+  /** Windows typing: the UTF-16 units whose keys the field confirmed one by one before it stopped. */
+  charsDelivered?: number
+  /** Windows typing: 1 when one more key was sent but its arrival could not be confirmed. */
+  charsUnconfirmed?: number
+  /** Windows, when the clipboard is "unrestored": what it holds now. */
+  clipboardHolds?: 'dictated' | 'foreign' | 'unknown'
 }
 
 export type HoldFailure = 'input-monitoring-denied' | 'unknown-key' | 'helper-unavailable'

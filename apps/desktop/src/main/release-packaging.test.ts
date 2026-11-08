@@ -130,6 +130,9 @@ test('only the platform-guarded Windows speech worker loads Koffi', () => {
   // engine-win is its own bundle entry, started only by the Windows hosts.
   assert.deepEqual(importing(/from ['"]\.\/engine-win['"]/), [])
   assert.match(read('main/windows-asr-runtime.ts'), /process\.platform !== 'win32'/)
+  // Bark's helper check runs inside that same worker, through the FFI the worker already loads.
+  assert.deepEqual(importing(/['"]\.\/windows-helper-check['"]/), ['main/engine-win.ts'])
+  assert.doesNotMatch(read('main/windows-helper-check.ts'), /require\(|['"]koffi['"]/)
 })
 
 test('CI builds and retains a real Windows installer', () => {

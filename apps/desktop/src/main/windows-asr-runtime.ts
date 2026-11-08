@@ -18,3 +18,13 @@ export function loadWindowsAsrRuntime(): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   runtime = (require('koffi') as typeof import('koffi')).load(dll)
 }
+
+/**
+ * The FFI module for the worker's own Win32 calls (the dictation helper check in
+ * windows-helper-check.ts). Windows only; this file stays the only place that loads it.
+ */
+export function windowsFfi(): typeof import('koffi') {
+  if (process.platform !== 'win32') throw new Error('The Win32 FFI is only available on Windows.')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('koffi') as typeof import('koffi')
+}

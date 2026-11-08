@@ -36,8 +36,10 @@ export interface HelperLaunch {
   readyTimeoutMs?: number
   /**
    * Windows: awaited before EVERY spawn (status included). ok false means the helper must not run
-   * (it failed its integrity check), so it is never executed. release() is called right after the
-   * spawn: until then the verifier may hold the helper file locked against replacement.
+   * (it failed its integrity check), so it is never executed. After the spawn returns, confirm()
+   * (when given) must answer true, proving the file was still held when the process was created;
+   * otherwise the spawned helper is ended at once and the check runs again. release() follows: until
+   * then the speech worker holds the helper file locked against replacement.
    */
   verify?: () => Promise<HelperLaunchVerdict>
   /** Windows: the spawn environment (see helperSpawnEnv). Defaults to the app's own. */
@@ -67,8 +69,15 @@ export function barkHelperIdentity(channel: AppChannel, override?: string | null
 /** The integrity verdict for one spawn (see HelperLaunch.verify). */
 export interface HelperLaunchVerdict {
   ok: boolean
+  /** The file is held (write/rename/delete denied) until release(). */
+  locked?: boolean
+  /** Asked after the spawn returns; false invalidates the spawn (see HelperLaunch.verify). */
+  confirm?: () => Promise<boolean>
   release?: () => void
 }
+
+/** Spawns attempted per start when the hold keeps being lost before the spawn returns. */
+export const HELPER_SPAWN_ATTEMPTS = 3
 
 /**
  * Windows: the helper's environment. DICTATION_HELPER_* variables reach it only when the app itself
@@ -368,7 +377,17 @@ export class DictationHelperClient {
         : {}),
       verified: reply.verified === true,
       clipboard: typeof reply.clipboard === 'string' ? reply.clipboard : 'untouched',
-      ...(isTimings(reply.timings) ? { timings: reply.timings } : {})
+      ...(isTimings(reply.timings) ? { timings: reply.timings } : {}),
+      // Windows only (the macOS helper never sends these).
+      ...(typeof reply.charsDelivered === 'number' ? { charsDelivered: reply.charsDelivered } : {}),
+      ...(typeof reply.charsUnconfirmed === 'number'
+        ? { charsUnconfirmed: reply.charsUnconfirmed }
+        : {}),
+      ...(reply.clipboardHolds === 'dictated' ||
+      reply.clipboardHolds === 'foreign' ||
+      reply.clipboardHolds === 'unknown'
+        ? { clipboardHolds: reply.clipboardHolds }
+        : {})
     }
   }
 
@@ -582,33 +601,78 @@ export class DictationHelperClient {
     // Do not spin on a helper that dies immediately.
     if (Date.now() - this.lastExitAt < 500) return Promise.resolve(false)
     // Windows: verify the helper immediately before every spawn; a damaged helper never runs.
-    if (this.windows && this.launch.verify) {
-      if (!this.verifying) {
-        this.verifying = this.launch.verify().then(
-          (verdict) => verdict,
-          (): HelperLaunchVerdict => ({ ok: false })
-        )
+    if (this.windows && this.launch.verify) return this.verifiedSpawn(HELPER_SPAWN_ATTEMPTS)
+    return this.spawnChild()
+  }
+
+  /**
+   * Windows: verify, spawn, and only then confirm the file was still held when the process was
+   * created (CreateProcess runs inside spawn()). A lease whose hold was lost meanwhile is invalid: the
+   * helper just spawned is ended unused and the whole check runs again, with a fresh hold.
+   */
+  private verifiedSpawn(attempts: number): Promise<boolean> {
+    const verify = this.launch.verify!
+    if (!this.verifying) {
+      this.verifying = verify().then(
+        (verdict) => verdict,
+        (): HelperLaunchVerdict => ({ ok: false })
+      )
+    }
+    const pending = this.verifying
+    return pending.then(async (verdict) => {
+      if (this.verifying === pending) this.verifying = null
+      if (!verdict.ok || this.disposed) {
+        verdict.release?.()
+        return false
       }
-      const pending = this.verifying
-      return pending.then((verdict) => {
-        if (this.verifying === pending) this.verifying = null
-        if (!verdict.ok || this.disposed) {
+      if (this.child && this.ready) {
+        verdict.release?.()
+        return this.ready
+      }
+      let ready: Promise<boolean>
+      try {
+        ready = this.spawnChild()
+      } catch (error) {
+        verdict.release?.()
+        throw error
+      }
+      const spawned = this.child
+      if (verdict.locked && verdict.confirm) {
+        let held = false
+        try {
+          held = await verdict.confirm()
+        } catch {
+          held = false
+        }
+        if (!held) {
+          console.error(
+            '[dictation] the helper file was no longer held when the helper started; ending it and checking again'
+          )
           verdict.release?.()
+          if (spawned) this.discardChild(spawned)
+          if (attempts > 1 && !this.disposed) return this.verifiedSpawn(attempts - 1)
           return false
         }
-        if (this.child && this.ready) {
-          verdict.release?.()
-          return this.ready
-        }
-        // CreateProcess runs inside spawn(); the verifier's lock is dropped only after it.
-        try {
-          return this.spawnChild()
-        } finally {
-          verdict.release?.()
-        }
-      })
+      }
+      verdict.release?.()
+      return ready
+    })
+  }
+
+  /** End a helper spawned under a lease that turned out invalid; it is never used. */
+  private discardChild(child: HelperChild): void {
+    if (this.child === child) {
+      this.child = null
+      this.ready = null
+      this.helperReady = false
+      this.rearmedChild = null
     }
-    return this.spawnChild()
+    try {
+      child.stdin.end()
+    } catch {
+      // Already closed.
+    }
+    child.kill()
   }
 
   private spawnChild(): Promise<boolean> {

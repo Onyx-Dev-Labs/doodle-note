@@ -99,3 +99,6 @@ export function sileroVadConfig(model: string, settings: VadSettings): Record<st
 export function vadBufferSeconds(settings: VadSettings): number {
   return Math.max(60, settings.maxSpeechSec * 3)
 }
+
+/** The worker's FFI module, for its Win32 helper check (see windows-helper-check.ts). */
+export { windowsFfi } from './windows-asr-runtime'

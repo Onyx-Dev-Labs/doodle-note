@@ -1,6 +1,7 @@
-// The signing-invariant digest of a PE file (Bark's Windows dictation helper), shared by the build,
-// the manifest writer and the smoke test. The app has a TypeScript twin in
-// src/main/helper-integrity.ts (stableHelperDigest); helper-integrity.test.ts asserts both agree.
+// The signing-invariant digest of a PE file (Bark's Windows dictation helper). This is the ONE
+// implementation: the build, the manifest writer and the smoke test (CommonJS, through require) and
+// the app at runtime (src/main/helper-integrity.ts and the Windows speech worker's helper check)
+// all import this file.
 //
 // It follows the Authenticode PE hashing rules, in their order:
 //   1. the headers [0, SizeOfHeaders) without the optional-header CheckSum (4 bytes) and without the
@@ -11,16 +12,19 @@
 //      file changes the digest. Signers pad an unsigned file with zeros to a multiple of 8 before
 //      appending the table; that padding lies inside step 3 of the signed file, so an unsigned file
 //      is hashed with the same zero padding. Signing therefore leaves the value unchanged.
-// The whole layout is validated first: the section table lies inside SizeOfHeaders, every section's
-// raw range lies inside the file after the headers, sections do not overlap, and the certificate
-// table starts at or after the end of the last section (8-aligned, inside the file). Anything else
-// (a table pointing into a section, overlapping or truncated sections, ...) returns null, which
-// callers treat as damaged.
-const { createHash } = require('node:crypto')
+// The whole layout is validated first, and only a CONTIGUOUS layout is accepted: the section table
+// lies inside SizeOfHeaders, the sections' raw data follow the headers back to back with no gap
+// (SizeOfHeaders + the sum of SizeOfRawData is the end of the last section), every range lies
+// inside the file, and the certificate table starts at or after the end of the last section
+// (8-aligned, inside the file). Authenticode leaves bytes in gaps between sections unhashed; a
+// contiguous layout has no such bytes, so nothing in the image can change without changing the
+// digest. Anything else returns null, which callers treat as damaged (and the build refuses).
+import { createHash } from 'node:crypto'
 
 const MAX_SECTIONS = 96
 
-function peLayout(buffer) {
+/** Validated layout facts, or null for a malformed or non-contiguous image. */
+export function peLayout(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d)
     return null
   const length = buffer.length
@@ -54,30 +58,26 @@ function peLayout(buffer) {
     sections.push({ pointer, size })
   }
   sections.sort((a, b) => a.pointer - b.pointer)
-  for (let i = 1; i < sections.length; i++) {
-    if (sections[i - 1].pointer + sections[i - 1].size > sections[i].pointer) return null
+  // Contiguous: each section starts exactly where the previous one (or the headers) ended.
+  let end = sizeOfHeaders
+  for (const section of sections) {
+    if (section.pointer !== end) return null
+    end = section.pointer + section.size
   }
-  const sectionsEnd = sections.length
-    ? sections[sections.length - 1].pointer + sections[sections.length - 1].size
-    : sizeOfHeaders
+  const sectionsEnd = end
   const certVa = buffer.readUInt32LE(secEntry)
   const certSize = buffer.readUInt32LE(secEntry + 4)
   let table = null
   if (certVa !== 0 || certSize !== 0) {
     if (certVa === 0 || certSize === 0) return null
-    if (
-      certVa % 8 !== 0 ||
-      certVa < sectionsEnd ||
-      certVa < sizeOfHeaders ||
-      certVa + certSize > length
-    )
-      return null
+    if (certVa % 8 !== 0 || certVa < sectionsEnd || certVa + certSize > length) return null
     table = { va: certVa, size: certSize }
   }
   return { checksumOffset, secEntry, sizeOfHeaders, sections, sectionsEnd, table }
 }
 
-function stableDigest(buffer) {
+/** The digest (hex SHA-256), or null for an image peLayout rejects. */
+export function stableDigest(buffer) {
   try {
     const layout = peLayout(buffer)
     if (!layout) return null
@@ -101,5 +101,3 @@ function stableDigest(buffer) {
     return null
   }
 }
-
-module.exports = { stableDigest, peLayout }

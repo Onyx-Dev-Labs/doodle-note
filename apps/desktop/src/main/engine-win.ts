@@ -14,7 +14,10 @@
  *        {t:'start', channels:[...]}      — begin a session
  *        {t:'audio', channel, samples}    — 16k mono Float32Array frame
  *        {t:'stop'}                       — finish session (emit finals+done)
+ *        {t:'helper-hold'|'helper-trust'|'helper-confirm'|'helper-release', id, path?}
+ *                                         — Bark's helper check (windows-helper-check.ts)
  *   out: {t:'event', event:{...}}         — engine event object
+ *        {t:'helper', id, op, ...}        — the helper check's replies
  *
  * An updated install whose Parakeet model is not downloaded yet uses the
  * cached streaming Zipformer from earlier builds for live captions (see
@@ -40,6 +43,7 @@ import {
   parakeetRecognizerConfig,
   sileroVadConfig,
   vadBufferSeconds,
+  windowsFfi,
   type SherpaModule
 } from './windows-asr-recognizers'
 import {
@@ -59,6 +63,7 @@ import {
   type LegacyRecognizer
 } from './windows-asr-legacy'
 import { EchoOrderGate } from './windows-asr-echo-gate'
+import { HelperChecker, type FfiLike } from './windows-helper-check'
 
 interface AudioMessage {
   t: 'audio'
@@ -83,6 +88,8 @@ type InMessage =
   | { t: 'start'; channels: string[]; sessionId?: number }
   | AudioMessage
   | { t: 'stop'; sessionId?: number }
+  | { t: 'helper-hold'; id: number; path: string }
+  | { t: 'helper-trust' | 'helper-confirm' | 'helper-release'; id: number }
 
 interface ChannelTranscriber {
   readonly channel: string
@@ -492,9 +499,36 @@ function ingest(data: AudioMessage): void {
   }
 }
 
+/** Bark's helper check: holds and verifies the helper file for the app (see windows-helper-check.ts). */
+const helperChecker = new HelperChecker(() => windowsFfi() as unknown as FfiLike)
+
 port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
   switch (data.t) {
+    case 'helper-hold':
+      port.postMessage({
+        t: 'helper',
+        id: data.id,
+        op: 'hold',
+        ...helperChecker.hold(data.id, data.path)
+      })
+      break
+    case 'helper-trust':
+      void helperChecker.trust(data.id).then((reply) => {
+        port.postMessage({ t: 'helper', id: data.id, op: 'trust', ...reply })
+      })
+      break
+    case 'helper-confirm':
+      port.postMessage({
+        t: 'helper',
+        id: data.id,
+        op: 'confirm',
+        held: helperChecker.held(data.id)
+      })
+      break
+    case 'helper-release':
+      helperChecker.release(data.id)
+      break
     case 'init':
       knownCalibration = data.calibration ?? null
       void init(data.modelsDir, data.quality, data.parakeetModel)

@@ -833,7 +833,9 @@ app.whenReady().then(async () => {
           inputStateUid: (uid: string | null) =>
             windowsInputStateUid(uid, (id) => winBark.deviceName(id)),
           // While Bark is on, the speech model stays loaded so a press starts at once.
-          onEnabled: (enabled: boolean) => winEngineHost.setKeepWarm(enabled)
+          onEnabled: (enabled: boolean) => winEngineHost.setKeepWarm(enabled),
+          // The speech worker holds and verifies the helper before each spawn (no PowerShell).
+          helperHolder: (path: string) => winEngineHost.holdHelper(path)
         }
       : {}),
     notes: () => notesService,

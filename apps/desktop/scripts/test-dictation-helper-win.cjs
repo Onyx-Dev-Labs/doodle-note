@@ -61,7 +61,8 @@ async function main() {
     '__drop-hooks',
     '__state-lock-probe',
     '__runs-above',
-    '__hooks-state'
+    '__hooks-state',
+    '__bounded-state'
   ])
     send({ op, id: op })
   const status = await wait((l) => l.id === 's', 10_000)
@@ -75,7 +76,8 @@ async function main() {
     '__drop-hooks',
     '__state-lock-probe',
     '__runs-above',
-    '__hooks-state'
+    '__hooks-state',
+    '__bounded-state'
   ])
     testOps.push(await wait((l) => l.id === op, 5_000))
   const checks = [
@@ -123,7 +125,7 @@ async function main() {
     console.error('not ok - manifest has no authenticodeSha256 digest')
     process.exit(1)
   }
-  const { stableDigest } = require('./authenticode-digest.cjs')
+  const { stableDigest } = require('./authenticode-digest.mjs')
   const digest = stableDigest(buffer)
   if (digest !== manifest.authenticodeSha256) {
     console.error(`not ok - helper digest ${digest} != manifest ${manifest.authenticodeSha256}`)
@@ -152,7 +154,7 @@ function signingFixture(unsignedBytes) {
   const { mkdtempSync, writeFileSync, readFileSync, appendFileSync, rmSync } = require('node:fs')
   const os = require('node:os')
   const path = require('node:path')
-  const { stableDigest, peLayout } = require('./authenticode-digest.cjs')
+  const { stableDigest, peLayout } = require('./authenticode-digest.mjs')
   const dir = mkdtempSync(path.join(os.tmpdir(), 'dn-helper-sign-'))
   const copy = path.join(dir, 'helper-signed-copy.bin.exe')
   writeFileSync(copy, unsignedBytes)

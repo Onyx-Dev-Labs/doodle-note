@@ -7,23 +7,20 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   HelperIntegrity,
+  MAX_LOST_HOLDS,
   peHasCertificateTable,
   resolveHelperExpectation,
   stableHelperDigest,
+  type HeldHelperLike,
   type HelperExpectation,
-  type SignatureCheck,
-  type VerifierSessionLike
+  type HelperHolder,
+  type SignatureCheck
 } from './helper-integrity'
-import {
-  classifySignatureStatus,
-  parseVerifyOutput,
-  systemPowerShell,
-  verifierEnv,
-  VERIFY_SCRIPT
-} from './win-authenticode'
+import { peLayout, stableDigest } from '../../scripts/authenticode-digest.mjs'
+import { HelperChecker, classifyTrustResult, type FfiLike } from './windows-helper-check'
 
 const require = createRequire(import.meta.url)
-const cjs = require('../../scripts/authenticode-digest.cjs') as {
+const scriptDigest = require('../../scripts/authenticode-digest.mjs') as {
   stableDigest: (buffer: Buffer) => string | null
 }
 const writer = require('../../scripts/write-dictation-helper-manifest.cjs') as {
@@ -139,104 +136,242 @@ test('malformed layouts are rejected: overlaps, truncation, a table before the e
   cases['no sections'] = noSections
   for (const [name, image] of Object.entries(cases)) {
     assert.equal(stableHelperDigest(image), null, name)
-    assert.equal(cjs.stableDigest(image), null, `${name} (build script)`)
+    assert.equal(scriptDigest.stableDigest(image), null, `${name} (build script)`)
   }
   assert.equal(stableHelperDigest(Buffer.from('not a pe image at all, just text......')), null)
 })
 
-test('the TypeScript digest and the build scripts agree byte for byte', () => {
+test('one digest implementation: the app, the worker and the build scripts import the same module', () => {
   for (const sample of [
     fakePe(5),
     sign(fakePe(5)),
     Buffer.concat([sign(fakePe()), Buffer.from('x')])
-  ])
-    assert.equal(stableHelperDigest(sample), cjs.stableDigest(sample))
+  ]) {
+    assert.equal(stableHelperDigest(sample), stableDigest(sample))
+    assert.equal(
+      stableHelperDigest(sample),
+      scriptDigest.stableDigest(sample),
+      'require() from CJS'
+    )
+  }
+  assert.equal(scriptDigest.stableDigest, stableDigest, 'the very same function object')
+  const sources = ['helper-integrity.ts', 'windows-helper-check.ts']
+  for (const name of sources) {
+    const text = readFileSync(new URL(`./${name}`, import.meta.url), 'utf8')
+    assert.match(text, /from '\.\.\/\.\.\/scripts\/authenticode-digest\.mjs'/, name)
+    assert.doesNotMatch(
+      text,
+      /createHash\('sha256'\)[\s\S]{0,200}checksumOffset/,
+      `${name}: no second copy`
+    )
+  }
+  for (const script of ['write-dictation-helper-manifest.cjs', 'test-dictation-helper-win.cjs']) {
+    const text = readFileSync(new URL(`../../scripts/${script}`, import.meta.url), 'utf8')
+    assert.match(text, /require\('\.\/authenticode-digest\.mjs'\)/, script)
+  }
+  assert.equal(
+    existsSync(new URL('../../scripts/authenticode-digest.cjs', import.meta.url)),
+    false,
+    'the old CommonJS twin is gone'
+  )
   const real = fileURLToPath(
     new URL('../../../../engine/.build/windows/dictation-helper.exe', import.meta.url)
   )
-  if (existsSync(real)) {
-    const bytes = readFileSync(real)
-    assert.ok(stableHelperDigest(bytes))
-    assert.equal(stableHelperDigest(bytes), cjs.stableDigest(bytes))
-  }
+  if (existsSync(real))
+    assert.ok(stableHelperDigest(readFileSync(real)), 'the real helper is contiguous')
 })
 
-test('every Get-AuthenticodeSignature status is classified', () => {
-  assert.equal(classifySignatureStatus('Valid'), 'valid')
-  assert.equal(classifySignatureStatus('HashMismatch'), 'invalid', 'tampered')
-  assert.equal(
-    classifySignatureStatus('NotSigned'),
-    'invalid',
-    'a certificate table that does not verify'
+test('a layout with a gap between sections (or after the headers) is rejected, by the app and the build', () => {
+  const gapped = Buffer.concat([fakePe(), Buffer.alloc(0x200, 0x22)])
+  section(gapped, 1, 0x200, 0x600) // .data moved past an unhashed 0x200-byte gap at 0x400
+  assert.equal(peLayout(gapped), null, 'gap between sections')
+  assert.equal(stableHelperDigest(gapped), null)
+  const afterHeaders = Buffer.concat([fakePe(), Buffer.alloc(0x200, 0x22)])
+  section(afterHeaders, 0, 0x200, 0x400)
+  section(afterHeaders, 1, 0x200, 0x600) // .text starts 0x200 after SizeOfHeaders
+  assert.equal(peLayout(afterHeaders), null, 'gap after the headers')
+  assert.ok(peLayout(fakePe()), 'the contiguous fixture is accepted')
+  // The build refuses it too (the manifest writer asserts the layout).
+  assert.throws(
+    () => writer.main(helperFile(gapped), { configuredCn: null, quiet: true }),
+    /contiguous sections/
   )
-  for (const chain of ['NotTrusted', 'UnknownError'])
-    assert.equal(
-      classifySignatureStatus(chain),
-      'unavailable',
-      `${chain}: chain trust, not tampering`
-    )
-  for (const other of ['NotSupportedFileFormat', 'Incompatible', 'Error', undefined])
-    assert.equal(classifySignatureStatus(other), 'unavailable', String(other))
-  assert.deepEqual(
-    parseVerifyOutput('{"status":"Valid","cn":"Onyx Dev Labs LLC","thumbprint":"ab12"}'),
-    {
-      status: 'valid',
-      subjectCn: 'Onyx Dev Labs LLC',
-      thumbprint: 'AB12'
-    }
-  )
-  assert.deepEqual(parseVerifyOutput('{"status":"HashMismatch"}'), {
+})
+
+test('every WinVerifyTrust result is classified (definitive tampering vs chain trust)', () => {
+  assert.equal(classifyTrustResult(0).status, 'valid')
+  assert.deepEqual(classifyTrustResult(0x80096010 | 0), { status: 'invalid', code: 'HashMismatch' })
+  assert.deepEqual(classifyTrustResult(0x800b0100 | 0), { status: 'invalid', code: 'NotSigned' })
+  assert.deepEqual(classifyTrustResult(0x80096004 | 0), {
     status: 'invalid',
-    code: 'HashMismatch'
+    code: 'BadCertSignature'
   })
-  assert.equal(parseVerifyOutput('garbage').status, 'unavailable')
-})
-
-test('the verifier locks before it verifies, takes the path as data, and drops PSModulePath', () => {
-  assert.ok(
-    VERIFY_SCRIPT.indexOf("[IO.File]::Open($env:DN_HELPER_PATH, 'Open', 'Read', 'Read')") <
-      VERIFY_SCRIPT.indexOf('Get-AuthenticodeSignature'),
-    'the file is opened (write/delete denied) before anything else'
-  )
-  assert.match(VERIFY_SCRIPT, /-LiteralPath \$env:DN_HELPER_PATH/)
-  assert.doesNotMatch(VERIFY_SCRIPT, /\$\(\$env:DN_HELPER_PATH/)
-  const env = verifierEnv(
-    { PSModulePath: 'C:\\pwsh7', psmodulepath: 'x', PATH: 'p' },
-    'C:\\a $(evil)\\h.exe'
-  )
-  assert.equal(env.PSModulePath, undefined)
-  assert.equal(env.psmodulepath, undefined)
-  assert.equal(env.DN_HELPER_PATH, 'C:\\a $(evil)\\h.exe')
-  assert.equal(
-    systemPowerShell({ SystemRoot: 'C:\\Windows' }).replace(/\//g, '\\'),
-    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  for (const chain of [0x800b0109, 0x800b010a, 0x800b0101, 0x800b0111, 0x80092026])
+    assert.equal(classifyTrustResult(chain | 0).status, 'unavailable', chain.toString(16))
+  assert.match(
+    (classifyTrustResult(0x80004005 | 0) as { reason: string }).reason,
+    /UnknownError 0x80004005/
   )
 })
 
-/** A scripted verifier: records what it was asked and when it was released or killed. */
-function fakeVerifier(
-  answer: SignatureCheck | 'hang',
-  options: { lock?: boolean | 'hang' } = {}
-): { factory: (path: string) => VerifierSessionLike; log: string[] } {
+/** A fake Win32 surface for the worker's checker: files in a map, handles that deny writes. */
+function fakeFfi(files: Map<string, Buffer>): { ffi: FfiLike; open: Set<number>; log: string[] } {
+  const open = new Set<number>()
   const log: string[] = []
-  const factory = (): VerifierSessionLike => {
-    log.push('start')
+  let nextHandle = 100
+  const handles = new Map<number, { path: string; at: number }>()
+  const fn = (
+    impl: (...args: unknown[]) => unknown
+  ): ((...args: unknown[]) => unknown) & {
+    async: (...args: unknown[]) => void
+  } =>
+    Object.assign(impl, {
+      async: (...args: unknown[]) =>
+        setImmediate(() => (args.pop() as (e: unknown, r: unknown) => void)(null, impl(...args)))
+    })
+  const table: Record<string, ReturnType<typeof fn>> = {
+    CreateFileW: fn((path) => {
+      if (!files.has(String(path))) return { address: 0xffffffffffffffffn }
+      const handle = nextHandle++
+      handles.set(handle, { path: String(path), at: 0 })
+      open.add(handle)
+      log.push(`open ${String(path)}`)
+      return { address: BigInt(handle) }
+    }),
+    CloseHandle: fn((handle) => {
+      const id = Number((handle as { address: bigint }).address)
+      open.delete(id)
+      log.push(`close ${id}`)
+      return true
+    }),
+    GetFileSizeEx: fn((handle, out) => {
+      const entry = handles.get(Number((handle as { address: bigint }).address))!
+      ;(out as number[])[0] = files.get(entry.path)!.length
+      return true
+    }),
+    ReadFile: fn((handle, buffer, count, read) => {
+      const entry = handles.get(Number((handle as { address: bigint }).address))!
+      const bytes = files.get(entry.path)!
+      const n = bytes.copy(buffer as Buffer, 0, entry.at, entry.at + Number(count))
+      entry.at += n
+      ;(read as number[])[0] = n
+      return true
+    }),
+    WinVerifyTrust: fn(() => 0x800b0109 | 0)
+  }
+  const ffi: FfiLike = {
+    load: () => ({
+      func: (definition: string) => {
+        const name = /__stdcall (\w+)\(/.exec(definition)?.[1] ?? ''
+        return table[name] ?? fn(() => null)
+      }
+    }),
+    struct: (name) => name,
+    pointer: (type) => type,
+    array: (type) => type,
+    sizeof: () => 8,
+    decode: () => null,
+    address: (value) => (value as { address: bigint }).address
+  }
+  return { ffi, open, log }
+}
+
+test('the worker holds the helper open from the read until release, and never past its limit', async () => {
+  const image = fakePe()
+  const files = new Map([['C:\\h\\dictation-helper.exe', image]])
+  const { ffi, open, log } = fakeFfi(files)
+  const checker = new HelperChecker(() => ffi, 60)
+  const reply = checker.hold(1, 'C:\\h\\dictation-helper.exe')
+  assert.equal(reply.ok, true)
+  if (!reply.ok) return
+  assert.equal(
+    reply.digest,
+    stableHelperDigest(image),
+    'hashed from the bytes read through the handle'
+  )
+  assert.equal(reply.signed, false)
+  assert.equal(open.size, 1, 'the handle stays open after the read')
+  assert.equal(checker.held(1), true)
+  const trust = await checker.trust(1)
+  assert.equal(trust.status, 'unavailable', 'an untrusted root is chain trust, not tampering')
+  checker.release(1)
+  assert.equal(open.size, 0)
+  assert.equal(checker.held(1), false)
+  assert.deepEqual(checker.hold(2, 'C:\\missing.exe'), { ok: false, code: 'ENOENT' })
+  checker.hold(3, 'C:\\h\\dictation-helper.exe')
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  assert.equal(open.size, 0, 'a hold nobody released ends by itself')
+  assert.ok(log.filter((line) => line.startsWith('open')).length === 2)
+})
+
+/**
+ * A scripted holder standing in for the speech worker: reads the file when asked to hold (as the
+ * worker does through its handle) and can end at chosen moments, like a killed worker.
+ */
+function fakeHolder(
+  answer: SignatureCheck | 'hang',
+  options: {
+    /** 'reject': the worker cannot start; 'hang': it never answers; 'late': it answers after 120 ms. */
+    hold?: 'ok' | 'reject' | 'hang' | 'late'
+    /** When the worker dies: during the signature check, or before the spawn returns (confirm). */
+    dies?: 'during-trust' | 'before-confirm'
+    /** Only the first N holds die (later ones are healthy). */
+    dyingHolds?: number
+  } = {}
+): { holder: HelperHolder; log: string[]; holds: () => number } {
+  const log: string[] = []
+  let count = 0
+  const holder: HelperHolder = async (path) => {
+    count += 1
+    const index = count
+    log.push(`hold ${index}`)
+    if (options.hold === 'reject') throw new Error('the speech worker could not be started')
+    if (options.hold === 'hang') return new Promise<HeldHelperLike>(() => {})
+    if (options.hold === 'late') await new Promise((resolve) => setTimeout(resolve, 120))
+    const dying = options.dies !== undefined && index <= (options.dyingHolds ?? Infinity)
+    let alive = true
+    let facts: HeldHelperLike['facts']
+    try {
+      const { readFileSync: read } = await import('node:fs')
+      const { statSync } = await import('node:fs')
+      if (statSync(path).isDirectory()) throw Object.assign(new Error('dir'), { code: 'EISDIR' })
+      const bytes = read(path)
+      const { createHash } = await import('node:crypto')
+      facts = {
+        status: 'held',
+        fileSha256: createHash('sha256').update(bytes).digest('hex'),
+        digest: stableHelperDigest(bytes),
+        signed: peHasCertificateTable(bytes)
+      }
+    } catch (error) {
+      facts =
+        (error as NodeJS.ErrnoException).code === 'ENOENT'
+          ? { status: 'absent' }
+          : { status: 'unreadable', code: 'EIO' }
+    }
     return {
-      locked:
-        options.lock === 'hang'
-          ? new Promise<boolean>(() => {})
-          : Promise.resolve(options.lock ?? true),
-      check: (verify) => {
-        log.push(verify ? 'verify' : 'skip')
-        if (!verify)
-          return Promise.resolve({ status: 'unavailable', reason: 'skipped' } as SignatureCheck)
-        return answer === 'hang' ? new Promise<SignatureCheck>(() => {}) : Promise.resolve(answer)
+      facts,
+      alive: () => alive,
+      trust: async () => {
+        log.push(`trust ${index}`)
+        if (dying && options.dies === 'during-trust') {
+          alive = false
+          return { status: 'unavailable', reason: 'the speech worker ended' }
+        }
+        return answer === 'hang' ? new Promise<SignatureCheck>(() => {}) : answer
       },
-      release: () => log.push('release'),
-      kill: () => log.push('kill')
+      confirm: async () => {
+        log.push(`confirm ${index}`)
+        if (dying && options.dies === 'before-confirm') alive = false
+        return alive
+      },
+      release: () => {
+        log.push(`release ${index}`)
+        alive = false
+      }
     }
   }
-  return { factory, log }
+  return { holder, log, holds: () => count }
 }
 
 function helperFile(buffer: Buffer, manifest?: Record<string, unknown>): string {
@@ -250,15 +385,21 @@ function helperFile(buffer: Buffer, manifest?: Record<string, unknown>): string 
 function integrity(
   helperPath: string,
   expectation: HelperExpectation | (() => HelperExpectation | null) | null,
-  verifier: (path: string) => VerifierSessionLike,
-  extra: { cachePath?: string | null; budgetMs?: number; leaseMaxMs?: number } = {}
+  holder: HelperHolder | null,
+  extra: {
+    cachePath?: string | null
+    budgetMs?: number
+    holdBudgetMs?: number
+    leaseMaxMs?: number
+  } = {}
 ): HelperIntegrity {
   return new HelperIntegrity({
     helperPath,
     expectation: typeof expectation === 'function' ? expectation : () => expectation,
-    verifier,
+    holder,
     cachePath: extra.cachePath ?? null,
     ...(extra.budgetMs !== undefined ? { budgetMs: extra.budgetMs } : {}),
+    ...(extra.holdBudgetMs !== undefined ? { holdBudgetMs: extra.holdBudgetMs } : {}),
     ...(extra.leaseMaxMs !== undefined ? { leaseMaxMs: extra.leaseMaxMs } : {})
   })
 }
@@ -270,51 +411,44 @@ const valid = (subjectCn: string, thumbprint = 'AA11'): SignatureCheck => ({
 })
 const CN = 'Onyx Dev Labs LLC'
 
-test('lazy, and the file stays locked from before it is read until the lease is released', async () => {
+test('lazy, and the file stays held from before it is read until the lease is released', async () => {
   const buffer = fakePe()
-  const verifier = fakeVerifier(valid(CN))
+  const worker = fakeHolder(valid(CN))
   const check = integrity(
     helperFile(buffer),
     { digest: stableHelperDigest(buffer)!, publisherCn: CN, thumbprints: [] },
-    verifier.factory
+    worker.holder
   )
   assert.equal(check.state(), 'unchecked')
-  assert.deepEqual(verifier.log, [], 'nothing runs before it is needed')
+  assert.deepEqual(worker.log, [], 'nothing runs before it is needed')
   const lease = await check.acquire()
   assert.equal(lease.verdict, 'ok')
   assert.equal(lease.locked, true)
-  assert.deepEqual(
-    verifier.log,
-    ['start', 'skip'],
-    'unsigned: locked, no signature check, still held'
-  )
+  assert.deepEqual(worker.log, ['hold 1'], 'unsigned: held, no signature check')
+  assert.equal(await lease.confirm(), true, 'still held when the spawn returns')
   lease.release()
-  assert.deepEqual(verifier.log, ['start', 'skip', 'release'])
+  assert.deepEqual(worker.log, ['hold 1', 'confirm 1', 'release 1'])
   assert.equal(check.lastBranch, 'digest')
 })
 
 test('fail closed on everything that is not a matching helper', async () => {
   const buffer = fakePe()
   const expectation = { digest: stableHelperDigest(buffer)!, publisherCn: null, thumbprints: [] }
-  const v = fakeVerifier(valid(CN))
-  assert.equal(await integrity(helperFile(buffer), null, v.factory).ensure(), 'damaged')
+  const w = (): HelperHolder => fakeHolder(valid(CN)).holder
+  assert.equal(await integrity(helperFile(buffer), null, w()).ensure(), 'damaged')
   assert.equal(
-    await integrity(helperFile(Buffer.from('garbage')), expectation, v.factory).ensure(),
+    await integrity(helperFile(Buffer.from('garbage')), expectation, w()).ensure(),
     'damaged'
   )
   const changed = Buffer.from(buffer)
   changed[0x300] ^= 1
-  assert.equal(await integrity(helperFile(changed), expectation, v.factory).ensure(), 'damaged')
-  assert.equal(
-    await integrity(
-      join(tmpdir(), 'no-such-dir-bark', 'dictation-helper.exe'),
-      expectation,
-      v.factory
-    ).ensure(),
-    'absent'
-  )
+  assert.equal(await integrity(helperFile(changed), expectation, w()).ensure(), 'damaged')
+  const missing = join(tmpdir(), 'no-such-dir-bark', 'dictation-helper.exe')
+  assert.equal(await integrity(missing, expectation, w()).ensure(), 'absent')
+  assert.equal(await integrity(missing, expectation, null).ensure(), 'absent', 'by path too')
   const dir = mkdtempSync(join(tmpdir(), 'bark-integrity-dir-'))
-  assert.equal(await integrity(dir, expectation, v.factory).ensure(), 'damaged')
+  assert.equal(await integrity(dir, expectation, w()).ensure(), 'damaged')
+  assert.equal(await integrity(dir, expectation, null).ensure(), 'damaged', 'by path too')
 })
 
 test('signed: exact CN and recorded thumbprint; definitive tampering is damaged', async () => {
@@ -322,7 +456,7 @@ test('signed: exact CN and recorded thumbprint; definitive tampering is damaged'
   const path = helperFile(signed)
   const expect = { digest: stableHelperDigest(signed)!, publisherCn: CN, thumbprints: ['AA11'] }
   const run = async (answer: SignatureCheck): Promise<string> =>
-    integrity(path, expect, fakeVerifier(answer).factory).ensure()
+    integrity(path, expect, fakeHolder(answer).holder).ensure()
   assert.equal(await run(valid(CN)), 'ok')
   assert.equal(await run(valid(`${CN} Evil`)), 'damaged', 'a substring is not enough')
   assert.equal(await run(valid('Onyx Dev Labs')), 'damaged')
@@ -331,57 +465,110 @@ test('signed: exact CN and recorded thumbprint; definitive tampering is damaged'
   assert.equal(await run({ status: 'invalid', code: 'NotSigned' }), 'damaged')
 })
 
-test('chain-trust failures and an unavailable verifier fall back to the digest and are not cached', async () => {
+test('chain-trust failures fall back to the digest and are not cached; no hold means digest only, locked:false', async () => {
   const signed = sign(fakePe())
   const path = helperFile(signed)
   const cachePath = join(mkdtempSync(join(tmpdir(), 'bark-cache-')), 'cache.json')
   const expect = { digest: stableHelperDigest(signed)!, publisherCn: CN, thumbprints: [] }
-  for (const status of ['NotTrusted', 'UnknownError', 'NotSupportedFileFormat', 'Incompatible']) {
-    const answer = parseVerifyOutput(JSON.stringify({ status }))
-    const verifier = fakeVerifier(answer)
-    const check = integrity(path, expect, verifier.factory, { cachePath })
-    assert.equal(await check.ensure(), 'ok', status)
-    assert.equal(check.lastBranch, 'signature-unavailable', status)
-    assert.equal(existsSync(cachePath), false, `${status} is not persisted`)
+  for (const reason of ['NotTrusted 0x800b0109', 'UnknownError 0x80004005', 'signer unreadable']) {
+    const worker = fakeHolder({ status: 'unavailable', reason })
+    const check = integrity(path, expect, worker.holder, { cachePath })
+    assert.equal(await check.ensure(), 'ok', reason)
+    assert.equal(check.lastBranch, 'signature-unavailable', reason)
+    assert.equal(existsSync(cachePath), false, `${reason} is not persisted`)
   }
   // The next spawn verifies again (here: a definitive answer, which is persisted).
-  const again = fakeVerifier(valid(CN))
-  assert.equal(await integrity(path, expect, again.factory, { cachePath }).ensure(), 'ok')
-  assert.ok(again.log.includes('verify'))
+  const again = fakeHolder(valid(CN))
+  assert.equal(await integrity(path, expect, again.holder, { cachePath }).ensure(), 'ok')
+  assert.ok(again.log.includes('trust 1'))
   assert.ok(existsSync(cachePath))
-  // No lock (PowerShell blocked): the digest decides, without a lock.
-  const blocked = integrity(path, expect, fakeVerifier(valid(CN), { lock: false }).factory)
-  const lease = await blocked.acquire()
+  // The worker cannot start: the digest decides, read by path, and the verdict says unlocked.
+  const noWorker = integrity(path, expect, fakeHolder(valid(CN), { hold: 'reject' }).holder)
+  const lease = await noWorker.acquire()
   assert.equal(lease.verdict, 'ok')
   assert.equal(lease.locked, false)
-  // A digest mismatch is damaged whatever the verifier says.
+  assert.equal(await lease.confirm(), false, 'an unlocked lease never claims a hold')
+  assert.match(noWorker.lastUnlockedReason ?? '', /holder failed/)
+  // A digest mismatch is damaged whatever the signature says.
   assert.equal(
     await integrity(
       path,
       { ...expect, digest: '0'.repeat(64) },
-      fakeVerifier(valid(CN)).factory
+      fakeHolder(valid(CN)).holder
     ).ensure(),
     'damaged'
   )
 })
 
-test('the 3 s budget ends a verifier that does not answer; a forgotten lease is ended too', async () => {
+test('a worker that ends during the check invalidates the lease; the check runs again on a fresh hold', async () => {
   const signed = sign(fakePe())
   const path = helperFile(signed)
   const expect = { digest: stableHelperDigest(signed)!, publisherCn: CN, thumbprints: [] }
-  const slowLock = fakeVerifier(valid(CN), { lock: 'hang' })
+  const worker = fakeHolder(valid(CN), { dies: 'during-trust', dyingHolds: 1 })
+  const check = integrity(path, expect, worker.holder)
+  const lease = await check.acquire()
+  assert.equal(lease.verdict, 'ok')
+  assert.equal(lease.locked, true, 'locked, by the second (live) hold')
+  assert.deepEqual(worker.log.slice(0, 4), ['hold 1', 'trust 1', 'release 1', 'hold 2'])
+  assert.ok(worker.log.includes('trust 2'), 'the signature is checked again on the fresh hold')
+  assert.equal(await lease.confirm(), true)
+  lease.release()
+})
+
+test('a hold lost before the spawn returns fails confirm(); after repeated losses the check is digest-only', async () => {
+  const buffer = fakePe()
+  const path = helperFile(buffer)
+  const expect = { digest: stableHelperDigest(buffer)!, publisherCn: CN, thumbprints: [] }
+  const worker = fakeHolder(valid(CN), { dies: 'before-confirm' })
+  const check = integrity(path, expect, worker.holder)
+  for (let lost = 0; lost < MAX_LOST_HOLDS; lost++) {
+    const lease = await check.acquire()
+    assert.equal(lease.locked, true)
+    assert.equal(
+      await lease.confirm(),
+      false,
+      `loss ${lost + 1}: the hold was gone after the spawn`
+    )
+    lease.release()
+  }
+  const holdsBefore = worker.holds()
+  const last = await check.acquire()
+  assert.equal(last.verdict, 'ok', 'the digest still decides')
+  assert.equal(last.locked, false, 'and says plainly that nothing is held')
+  assert.equal(worker.holds(), holdsBefore, 'no further hold was attempted')
+  assert.match(check.lastUnlockedReason ?? '', /digest only/)
+})
+
+test('the budgets: a worker that does not answer the hold, or the signature, is not waited for', async () => {
+  const signed = sign(fakePe())
+  const path = helperFile(signed)
+  const expect = { digest: stableHelperDigest(signed)!, publisherCn: CN, thumbprints: [] }
   const started = Date.now()
-  assert.equal(await integrity(path, expect, slowLock.factory, { budgetMs: 60 }).ensure(), 'ok')
-  assert.ok(slowLock.log.includes('kill'), 'a verifier that cannot lock in time is ended')
-  const slowVerdict = fakeVerifier('hang')
-  assert.equal(await integrity(path, expect, slowVerdict.factory, { budgetMs: 60 }).ensure(), 'ok')
-  assert.ok(slowVerdict.log.includes('kill'), 'a verifier that cannot verify in time is ended')
+  const silent = integrity(path, expect, fakeHolder(valid(CN), { hold: 'hang' }).holder, {
+    holdBudgetMs: 60
+  })
+  const lease = await silent.acquire()
+  assert.equal(lease.verdict, 'ok')
+  assert.equal(lease.locked, false, 'no hold within the budget: digest only')
+  const lateWorker = fakeHolder(valid(CN), { hold: 'late' })
+  const late = await integrity(path, expect, lateWorker.holder, { holdBudgetMs: 30 }).acquire()
+  assert.equal(late.locked, false)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.deepEqual(
+    lateWorker.log,
+    ['hold 1', 'release 1'],
+    'a hold that answers too late is let go at once'
+  )
+  const slowVerdict = fakeHolder('hang')
+  const slow = integrity(path, expect, slowVerdict.holder, { budgetMs: 60 })
+  assert.equal(await slow.ensure(), 'ok')
+  assert.equal(slow.lastBranch, 'signature-unavailable')
   assert.ok(Date.now() - started < 2_000)
-  const forgotten = fakeVerifier(valid(CN))
-  const lease = await integrity(path, expect, forgotten.factory, { leaseMaxMs: 30 }).acquire()
-  assert.equal(lease.locked, true)
+  const forgotten = fakeHolder(valid(CN))
+  const held = await integrity(path, expect, forgotten.holder, { leaseMaxMs: 30 }).acquire()
+  assert.equal(held.locked, true)
   await new Promise((resolve) => setTimeout(resolve, 80))
-  assert.ok(forgotten.log.includes('kill'), 'an unreleased lease does not keep the verifier alive')
+  assert.ok(forgotten.log.includes('release 1'), 'an unreleased lease does not keep the hold')
 })
 
 test('the cache is keyed on the whole file and the whole expectation', async () => {
@@ -393,44 +580,57 @@ test('the cache is keyed on the whole file and the whole expectation', async () 
     publisherCn: CN,
     thumbprints: []
   }
-  const first = fakeVerifier(valid(CN))
-  assert.equal(await integrity(path, () => expect, first.factory, { cachePath }).ensure(), 'ok')
-  const relaunch = fakeVerifier(valid(CN))
-  const relaunched = integrity(path, () => expect, relaunch.factory, { cachePath })
+  const first = fakeHolder(valid(CN))
+  assert.equal(await integrity(path, () => expect, first.holder, { cachePath }).ensure(), 'ok')
+  const relaunch = fakeHolder(valid(CN))
+  const relaunched = integrity(path, () => expect, relaunch.holder, { cachePath })
   assert.equal(await relaunched.ensure(), 'ok')
   assert.deepEqual(
     relaunch.log,
-    ['start', 'skip', 'release'],
-    'a cached verdict skips the signature check (the file is still locked)'
+    ['hold 1', 'release 1'],
+    'a cached verdict skips the signature check (the file is still held)'
   )
   // Corrupt the certificate table only (the signing-invariant digest is unchanged): re-verified.
   const corrupted = Buffer.from(signed)
   corrupted[corrupted.length - 10] ^= 0xff
   writeFileSync(path, corrupted)
-  const afterCorruption = fakeVerifier({ status: 'invalid', code: 'HashMismatch' })
+  const afterCorruption = fakeHolder({ status: 'invalid', code: 'HashMismatch' })
   assert.equal(
-    await integrity(path, () => expect, afterCorruption.factory, { cachePath }).ensure(),
+    await integrity(path, () => expect, afterCorruption.holder, { cachePath }).ensure(),
     'damaged'
   )
-  assert.ok(afterCorruption.log.includes('verify'))
+  assert.ok(afterCorruption.log.includes('trust 1'))
   // A different expectation (another pinned thumbprint) is never answered from the old verdict.
   writeFileSync(path, signed)
   expect = { ...expect, thumbprints: ['ZZ99'] }
-  const newPin = fakeVerifier(valid(CN, 'AA11'))
+  const newPin = fakeHolder(valid(CN, 'AA11'))
   assert.equal(
-    await integrity(path, () => expect, newPin.factory, { cachePath }).ensure(),
+    await integrity(path, () => expect, newPin.holder, { cachePath }).ensure(),
     'damaged'
   )
-  assert.ok(newPin.log.includes('verify'))
+  assert.ok(newPin.log.includes('trust 1'))
 })
 
 test('a build that signed its helper must ship it signed', async () => {
   const unsigned = fakePe()
   const expect = { digest: stableHelperDigest(unsigned)!, publisherCn: CN, thumbprints: ['AA11'] }
   assert.equal(
-    await integrity(helperFile(unsigned), expect, fakeVerifier(valid(CN)).factory).ensure(),
+    await integrity(helperFile(unsigned), expect, fakeHolder(valid(CN)).holder).ensure(),
     'damaged'
   )
+})
+
+test('production never starts PowerShell to check the helper', () => {
+  for (const name of [
+    'helper-integrity.ts',
+    'dictation-host.ts',
+    'windows-helper-check.ts',
+    'engine-host-win.ts'
+  ]) {
+    const text = readFileSync(new URL(`./${name}`, import.meta.url), 'utf8')
+    assert.doesNotMatch(text, /powershell\.exe|Get-AuthenticodeSignature|win-authenticode/i, name)
+  }
+  assert.equal(existsSync(new URL('./win-authenticode.ts', import.meta.url)), false)
 })
 
 test('packaged builds trust only the baked expectation, never the manifest beside the helper', () => {

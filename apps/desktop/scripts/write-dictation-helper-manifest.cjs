@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Writes engine/.build/windows/dictation-helper.manifest.json for Bark's Windows helper:
-//   - authenticodeSha256: the signing-invariant digest (scripts/authenticode-digest.cjs), the same
+//   - authenticodeSha256: the signing-invariant digest (scripts/authenticode-digest.mjs), the same
 //     before and after signing;
 //   - signed / publisherCn / thumbprints: when the helper has been signed, the signer's exact
 //     common name and certificate thumbprint, read from the signed file, so the app pins them;
@@ -16,7 +16,7 @@ const { execFileSync } = require('node:child_process')
 const { createHash } = require('node:crypto')
 const { readFileSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
-const { stableDigest, peLayout } = require('./authenticode-digest.cjs')
+const { stableDigest, peLayout } = require('./authenticode-digest.mjs')
 
 /**
  * The publisher CN expected on a signed helper. Microsoft Artifact Signing issues certificates whose
@@ -70,7 +70,11 @@ function main(helperPath = defaultHelper, options = {}) {
   const manifestPath = path.join(path.dirname(helper), 'dictation-helper.manifest.json')
   const bytes = readFileSync(helper)
   const layout = peLayout(bytes)
-  if (!layout) throw new Error(`${helper} is not a valid PE image`)
+  // The digest only accepts a contiguous layout (no unhashed gaps); the build refuses anything else.
+  if (!layout)
+    throw new Error(
+      `${helper} is not a valid PE image with contiguous sections (see authenticode-digest.mjs)`
+    )
   const digest = stableDigest(bytes)
   if (!digest) throw new Error(`could not compute the helper digest of ${helper}`)
   const configured =

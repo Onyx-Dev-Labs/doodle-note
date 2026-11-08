@@ -15,6 +15,7 @@ import { PARAKEET_UNIFIED } from './windows-asr-models'
 import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import { ImportCanceledError } from './import-jobs'
+import type { HeldHelperLike, SignatureCheck } from './helper-integrity'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
@@ -104,6 +105,14 @@ export class WinEngineHost {
   private sessionProfile: 'dictation' | null = null
   /** The session asked for microphone `level` events (dictation's meter). */
   private sessionLevels = false
+  /** Bark's helper check: requests awaiting the worker's reply, keyed `${id}:${op}`. */
+  private readonly helperPending = new Map<
+    string,
+    { child: UtilityProcess; resolve: (reply: Record<string, unknown> | null) => void }
+  >()
+  /** Holds open in the current worker (they end with it). */
+  private readonly helperHeld = new Set<number>()
+  private nextHelperId = 1
 
   constructor(
     private readonly broadcast: (channel: string, payload: unknown) => void,
@@ -264,11 +273,25 @@ export class WinEngineHost {
 
     child.on('message', (message: unknown) => {
       if (this.child !== child) return
-      const data = message as { t?: string; event?: Record<string, unknown> }
+      const data = message as {
+        t?: string
+        event?: Record<string, unknown>
+        id?: number
+        op?: string
+      }
+      if (data.t === 'helper') {
+        const key = `${String(data.id)}:${String(data.op)}`
+        const pending = this.helperPending.get(key)
+        this.helperPending.delete(key)
+        pending?.resolve(data as Record<string, unknown>)
+        return
+      }
       if (data.t !== 'event' || !data.event) return
       this.handleEngineEvent(data.event)
     })
     child.on('exit', (code) => {
+      // Bark's helper holds end with the worker: every waiting request learns it at once.
+      this.endHelperHolds(child)
       if (this.child !== child) return
       if (this.unloading) {
         // Deliberate close: setup stays complete. Only a download retry starts a fresh worker.
@@ -330,6 +353,106 @@ export class WinEngineHost {
     })
 
     this.postInit()
+  }
+
+  /** The worker ended: its holds are gone and its pending helper requests get no answer. */
+  private endHelperHolds(child: UtilityProcess): void {
+    for (const [key, pending] of [...this.helperPending]) {
+      if (pending.child !== child) continue
+      this.helperPending.delete(key)
+      pending.resolve(null)
+    }
+    if (this.child === child || this.child === null) this.helperHeld.clear()
+  }
+
+  private helperRequest(
+    child: UtilityProcess,
+    id: number,
+    op: 'hold' | 'trust' | 'confirm',
+    message: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
+    return new Promise((resolve) => {
+      this.helperPending.set(`${id}:${op}`, { child, resolve })
+      try {
+        child.postMessage(message)
+      } catch {
+        this.helperPending.delete(`${id}:${op}`)
+        resolve(null)
+      }
+    })
+  }
+
+  /**
+   * Bark: have the speech worker open the helper with writing, renaming and deleting denied, read
+   * and hash it through that handle, and keep holding it (windows-helper-check.ts). Starts the worker
+   * if it is not running (Bark needs it for dictation anyway). Rejects when the worker cannot be
+   * started or ends before answering.
+   */
+  async holdHelper(path: string): Promise<HeldHelperLike> {
+    if (this.disposed) throw new Error('the speech engine is shutting down')
+    const started = Date.now()
+    const startedWorker = !this.child
+    if (!this.child) {
+      if (this.unloaded) this.reload()
+      else this.startServe()
+    }
+    const child = this.child
+    if (!child) throw new Error('the speech worker could not be started')
+    const id = this.nextHelperId++
+    const reply = await this.helperRequest(child, id, 'hold', { t: 'helper-hold', id, path })
+    if (!reply) throw new Error('the speech worker ended before holding the helper')
+    console.error(
+      `[engine] helper hold answered in ${Date.now() - started} ms (${startedWorker ? 'the speech worker was started for it' : 'the speech worker was running'})`
+    )
+    const alive = (): boolean => this.child === child && this.helperHeld.has(id)
+    const release = (): void => {
+      if (!this.helperHeld.delete(id)) return
+      if (this.child === child) {
+        try {
+          child.postMessage({ t: 'helper-release', id })
+        } catch {
+          // The worker is gone, and the hold with it.
+        }
+      }
+    }
+    let facts: HeldHelperLike['facts']
+    if (reply.ok === true) {
+      this.helperHeld.add(id)
+      facts = {
+        status: 'held',
+        fileSha256: String(reply.fileSha256),
+        digest: typeof reply.digest === 'string' ? reply.digest : null,
+        signed: reply.signed === true
+      }
+    } else {
+      facts =
+        reply.code === 'ENOENT'
+          ? { status: 'absent' }
+          : { status: 'unreadable', code: String(reply.code ?? 'EIO') }
+    }
+    return {
+      facts,
+      alive,
+      release,
+      trust: async (): Promise<SignatureCheck> => {
+        if (!alive()) return { status: 'unavailable', reason: 'the hold ended' }
+        const answer = await this.helperRequest(child, id, 'trust', { t: 'helper-trust', id })
+        if (!answer) return { status: 'unavailable', reason: 'the speech worker ended' }
+        if (answer.status === 'valid')
+          return {
+            status: 'valid',
+            subjectCn: typeof answer.subjectCn === 'string' ? answer.subjectCn : null,
+            thumbprint: typeof answer.thumbprint === 'string' ? answer.thumbprint : null
+          }
+        if (answer.status === 'invalid') return { status: 'invalid', code: String(answer.code) }
+        return { status: 'unavailable', reason: String(answer.reason ?? 'unknown') }
+      },
+      confirm: async (): Promise<boolean> => {
+        if (!alive()) return false
+        const answer = await this.helperRequest(child, id, 'confirm', { t: 'helper-confirm', id })
+        return !!answer && answer.held === true && alive()
+      }
+    }
   }
 
   private postInit(): void {
