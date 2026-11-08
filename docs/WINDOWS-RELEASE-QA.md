@@ -361,8 +361,21 @@ moves an existing install on upgrade:
    stays armed for as many runs as it takes, and a record the app has not read
    yet survives another update.
 3. `customInstall` verifies the new copy (exe, `app.asar`, uninstaller, and the
-   uninstall entry pointing at it), checks the old folder again, then removes
-   it with a walk that deletes a junction or link but never what it points to
+   uninstall entry pointing at it), then pins the old folder before checking it
+   again (`dnPinLegacy`): it opens the old folder itself (never what a link there
+   points to, `DELETE` access, no `FILE_SHARE_DELETE`, so nobody can rename or
+   replace it) and, as they are now, `Programs`, the profile and the new folder;
+   runs every check above; and checks the same facts again on those very handles:
+   the pinned folder is a real folder, its final path is the pinned `Programs`'s
+   final path plus `desktop`, it holds `DoodleNote.exe` (opened through that final
+   path), and it is neither the profile nor the new folder nor overlaps them
+   (final paths and volume serial + file index of the same handles). Only then
+   does it remove exactly that pinned folder, never re-opening it by path: a
+   `Programs` junction retargeted between the checks and the removal makes the
+   path no longer open as the pinned folder, so removal stops ("unsafe") and the
+   journal stays armed; and the walk never enters a folder whose identity is the
+   profile's or the new folder's, however it was reached. It removes the old
+   folder with a walk that deletes a junction or link but never what it points to
    (NSIS's own `RMDir /r` follows junctions, verified on Dev04) and deletes
    `DoodleNote.exe` last, so a folder that is only partly removed is still
    recognised next time. The walk is handle-based: each folder is held open
@@ -396,9 +409,14 @@ moves an existing install on upgrade:
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
 held files and real processes in a temporary sandbox (CI "Check Windows
-installer migration guards"; 189 cases): the junction overlap cases above, a
+installer migration guards"; 220 cases): the junction overlap cases above, a
 second process swapping folders for junctions to an outside folder while the
-old folder is removed (nothing outside is touched), short-name and foreign
+old folder is removed (nothing outside is touched), a second process
+retargeting the `Programs` junction onto the profile's parent or onto a decoy
+install at a pause between the checks and the removal (a harness-only build,
+`DN_TEST_PAUSE`; nothing anywhere is deleted and the journal stays armed, in an
+update and in the uninstall clean-up; a control run without the retarget removes
+the folder), short-name and foreign
 uninstall commands, a file held across two runs with the uninstaller's key
 deletion simulated each time and a third run finishing, the uninstall clean-up,
 a closer that never answers (`unknown` in about 4 s) and the silent

@@ -205,6 +205,11 @@ async function main() {
       '-DDN_CLOSE_FIND_TIMEOUT_MS=3000',
       '-DDN_CLOSE_TIMEOUT_MS=3000'
     ])
+    // The same guards stopping between dnPinLegacy's checks and the removal until
+    // <pause>.go exists (test builds only: DN_TEST_PAUSE is never set for an installer).
+    const pauseBase = path.join(sandbox, 'pause')
+    const pauseExe = path.join(sandbox, 'harness-pause.exe')
+    compile(pauseExe, [`-DDN_TEST_PAUSE=${pauseBase}`])
 
     const root = path.join(sandbox, 'Local', 'Programs')
     const profile = path.join(sandbox, 'Roaming', 'desktop')
@@ -283,6 +288,17 @@ async function main() {
       ['check', path.join(elsewhere, 'desktop'), path.join(elsewhere, 'DoodleNote'), /is not/],
       ['root', profileRoot, path.join(profileRoot, 'desktop')],
       ['check', path.join(profileRoot, 'desktop'), path.join(profileRoot, 'DoodleNote'), /profile/],
+      ['pin', path.join(profileRoot, 'desktop'), path.join(profileRoot, 'DoodleNote'), /profile/],
+      ['root', root, profile],
+      ['pin', old, now, 'ok'],
+      ['pin', path.join(root, 'desktop-old'), now, /is not .*\\desktop$/],
+      ['root', aliasOld, profile],
+      [
+        'pin',
+        path.join(aliasOld, 'desktop'),
+        path.join(aliasOld, 'DoodleNote'),
+        /junction or link/
+      ],
       ['remove', doomed, '', 'removed'],
       ['remove', held, '', 'kept'],
       ['close', path.join(sandbox, 'procs', 'desktop'), 'never', 'running'],
@@ -829,6 +845,128 @@ async function main() {
     assert.match(swapStats, /swapped=\d+ failed=\d+/)
     const [, swapped, failed] = /swapped=(\d+) failed=(\d+)/.exec(swapStats).map(Number)
     assert.ok(swapped + failed > 0, 'the swapper raced the removal')
+
+    // Root handoff: the old folder is pinned before it is checked and removed only
+    // through that pin. A second process retargets the Programs junction at the
+    // pause between the checks and the removal (onto the profile's parent, then onto
+    // a decoy that looks like an install): nothing anywhere is deleted, and the
+    // journal stays armed. A control run with no retarget removes the folder.
+    const rr = path.join(sandbox, 'rr')
+    const rrReal = path.join(rr, 'Local', 'RealPrograms')
+    const rrPrograms = path.join(rr, 'Local', 'Programs')
+    const rrRoaming = path.join(rr, 'Roaming')
+    const rrProfile = path.join(rrRoaming, 'desktop')
+    const rrDecoy = path.join(rr, 'Decoy')
+    const rrFiles = {
+      [path.join(rrReal, 'desktop', 'DoodleNote.exe')]: 'old',
+      [path.join(rrReal, 'desktop', 'resources', 'app.asar')]: 'asar',
+      [path.join(rrReal, 'DoodleNote', 'DoodleNote.exe')]: 'new',
+      // The profile looks like an install too, so only identity tells them apart.
+      [path.join(rrProfile, 'DoodleNote.exe')]: 'profile exe',
+      [path.join(rrProfile, 'settings.json')]: 'profile settings',
+      [path.join(rrProfile, 'meetings', 'm1.md')]: 'profile meeting',
+      [path.join(rrRoaming, 'DoodleNote', 'DoodleNote.exe')]: 'roaming new',
+      [path.join(rrDecoy, 'desktop', 'DoodleNote.exe')]: 'decoy exe',
+      [path.join(rrDecoy, 'desktop', 'resources', 'app.asar')]: 'decoy asar',
+      [path.join(rrDecoy, 'DoodleNote', 'DoodleNote.exe')]: 'decoy new'
+    }
+    for (const [file, text] of Object.entries(rrFiles)) write(file, text)
+    junction(rrPrograms, rrReal)
+    const rrState = `${journalKey}-rr`
+    registryKeys.push(rrState)
+    const rrOld = path.join(rrPrograms, 'desktop')
+    const rrNew = path.join(rrPrograms, 'DoodleNote')
+    const rrSetup = [
+      ['root', rrPrograms, rrProfile],
+      ['jkey', `${rrState}\\InstallMigration`, ''],
+      ['skey', rrState, '']
+    ]
+    /** At the pause: retarget `link` to `target` ('' = leave it), then let the harness go on. */
+    const retargetAtPause = (target, log) =>
+      spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "$p = $env:DN_PAUSE; $end = (Get-Date).AddSeconds(120); while (-not (Test-Path -LiteralPath ($p + '.ready'))) { if ((Get-Date) -gt $end) { 'timeout' | Set-Content -LiteralPath $env:DN_LOG; exit 1 }; Start-Sleep -Milliseconds 20 }; $r = 'unchanged'; if ($env:DN_TARGET) { [IO.Directory]::Delete($env:DN_LINK); New-Item -ItemType Junction -Path $env:DN_LINK -Target $env:DN_TARGET | Out-Null; $r = 'retargeted=' + @((Get-Item -LiteralPath $env:DN_LINK).Target)[0] }; $r | Set-Content -LiteralPath $env:DN_LOG; New-Item -ItemType File -Path ($p + '.go') | Out-Null"
+        ],
+        {
+          stdio: 'ignore',
+          windowsHide: true,
+          env: {
+            ...process.env,
+            DN_PAUSE: pauseBase,
+            DN_LINK: rrPrograms,
+            DN_TARGET: target,
+            DN_LOG: log
+          }
+        }
+      )
+    const rrRun = async (name, target, runCasesList) => {
+      const log = path.join(sandbox, `${name}-retarget.txt`)
+      const swapper = retargetAtPause(target, log)
+      started.push(swapper)
+      const run = phase(name, runCasesList, { exe: pauseExe })
+      await new Promise((resolve) => {
+        if (swapper.exitCode !== null) resolve()
+        else swapper.on('exit', resolve)
+      })
+      const note = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : 'no log'
+      reports.push(`${name}: ${note}`)
+      console.log(`${name}: ${note}`)
+      checkCases(name, runCasesList, run.results)
+      for (const signal of ['.ready', '.go']) fs.rmSync(pauseBase + signal, { force: true })
+      // Put the junction back for the next run.
+      fs.rmdirSync(rrPrograms)
+      junction(rrPrograms, rrReal)
+      return note
+    }
+    const rrUntouched = (except = []) => {
+      for (const [file, text] of Object.entries(rrFiles))
+        if (!except.includes(file)) assert.equal(fs.readFileSync(file, 'utf8'), text, file)
+    }
+    const identityKept = /^kept: something in the old folder failed an identity check/
+    for (const [name, target] of [
+      ['rr-profile', rrRoaming],
+      ['rr-decoy', rrDecoy]
+    ]) {
+      const note = await rrRun(name, target, [
+        ...rrSetup,
+        ['arm', rrOld, rrNew, '', 'armed'],
+        ['finish', rrOld, rrNew, '0', identityKept],
+        ['jstate', '', '', 'armed'],
+        ['record', '', '', 'none']
+      ])
+      assert.match(note, /^retargeted=/, `${name}: the junction was retargeted at the pause`)
+      rrUntouched()
+    }
+    // The same race in a user uninstall's clean-up of the old folder.
+    const rrUninstall = await rrRun('rr-uninstall', rrRoaming, [
+      ...rrSetup,
+      ['unlegacy', rrNew, 'never', 'kept: an identity check failed while removing it'],
+      ['jstate', '', '', 'armed']
+    ])
+    assert.match(rrUninstall, /^retargeted=/)
+    rrUntouched()
+    // Control: nothing retargeted, so the pinned folder (and only it) goes.
+    // MigratedFrom names the old folder as the installer knew it (through the junction).
+    const rrRecord = `\\rr\\local\\programs\\desktop|`
+    const rrControl = await rrRun('rr-control', '', [
+      ...rrSetup,
+      ['finish', rrOld, rrNew, '0', 'removed'],
+      ['jstate', '', '', 'none'],
+      ['record', '', '', (r) => lower(r).includes(rrRecord)]
+    ])
+    assert.equal(rrControl, 'unchanged')
+    assert.ok(
+      !fs.existsSync(path.join(rrReal, 'desktop')),
+      'the control run removed the old folder'
+    )
+    rrUntouched([
+      path.join(rrReal, 'desktop', 'DoodleNote.exe'),
+      path.join(rrReal, 'desktop', 'resources', 'app.asar')
+    ])
 
     // D4: the journal survives electron-builder's uninstaller deleting
     // Software\{APP_GUID} on every run: a file held across two runs, a third finishes.

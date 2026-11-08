@@ -4,7 +4,8 @@
 ;
 ;   root|<programs root>|<profile dir>   sets $dnProgramsRoot / $dnProfileDir
 ;   check|<old>|<new>                    dnCheckLegacyDir: "" (ok) or the reason
-;   remove|<old>                         dnRemoveLegacyDir: removed | kept
+;   remove|<old>                         dnRemoveLegacyDir with <old> itself pinned: removed | kept | unsafe
+;   pin|<old>|<new>                      dnPinLegacy: "ok" (then unpinned) or the reason
 ;   close|<dir>|<policy>                 dnCloseAppIn: none | closed | running | unknown
 ;   locked|<exe>                         dnExeLocked: 1 | 0
 ;   canonical|<path>                     dnCanonical: the normalised long path
@@ -120,9 +121,25 @@ Function .onInit
         StrCpy $result "ok"
       ${endif}
     ${elseif} $kind == "remove"
+      ; The deleter alone: pin the folder as dnPinLegacy would, without its checks.
+      Push $a
+      Push ${DN_ACCESS_DELETE}
+      Push 3
+      Call dnOpenNoFollow
+      Pop $dnPinRoot
       Push $a
       Call dnRemoveLegacyDir
       Pop $result
+      Call dnUnpin
+    ${elseif} $kind == "pin"
+      Push $a
+      Push $b
+      Call dnPinLegacy
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "ok"
+      ${endif}
+      Call dnUnpin
     ${elseif} $kind == "close"
       StrCpy $dnClosePolicy $b
       !insertmacro dnCloseAppIn $a $dnClosePolicy $result

@@ -208,13 +208,17 @@ test('Windows installs move to a DoodleNote folder without forking the install o
       install.indexOf('Call dnFinishMigration')
   )
   const finish = guards.slice(guards.indexOf('Function dnFinishMigration'))
-  // dnFinishMigration and (uninstaller) dnUninstallLegacy, each after dnCheckLegacyDir.
+  // dnFinishMigration and (uninstaller) dnUninstallLegacy, each after dnPinLegacy
+  // (which runs dnCheckLegacyDir) and each followed by dnUnpin.
   assert.equal(guards.match(/^\s+Call dnRemoveLegacyDir$/gm)?.length, 2)
-  assert.ok(finish.indexOf('Call dnCheckLegacyDir') < finish.indexOf('Call dnRemoveLegacyDir'))
+  assert.ok(finish.indexOf('Call dnPinLegacy') < finish.indexOf('Call dnRemoveLegacyDir'))
+  assert.ok(finish.indexOf('Call dnRemoveLegacyDir') < finish.indexOf('Call dnUnpin'))
   const uninstallLegacy = guards.slice(guards.indexOf('Function dnUninstallLegacy'))
   assert.ok(
-    uninstallLegacy.indexOf('Call dnCheckLegacyDir') <
-      uninstallLegacy.indexOf('Call dnRemoveLegacyDir')
+    uninstallLegacy.indexOf('Call dnPinLegacy') < uninstallLegacy.indexOf('Call dnRemoveLegacyDir')
+  )
+  assert.ok(
+    uninstallLegacy.indexOf('Call dnRemoveLegacyDir') < uninstallLegacy.indexOf('Call dnUnpin')
   )
   // The record the app needs before it repoints anything is written only after a
   // real move, and otherwise only put back as it was saved (dnRestoreState).
@@ -389,6 +393,32 @@ test('the install migration never removes through a link and closes only its own
   assert.match(guards, /SetFileInformationByHandle\(p r0, i 21,/)
   assert.ok(tree.includes('${orIf} $6 != "$9\\$4"'))
   assert.ok(tree.includes('${orIf} $6 != $9'))
+  // The root is pinned before it is checked, checked again on the pinned handles,
+  // and removed only through that pin: dnRemoveLegacyDir never opens a path.
+  const fn = (name: string): string =>
+    guards.slice(
+      guards.indexOf(`Function ${name}`),
+      guards.indexOf('FunctionEnd', guards.indexOf(`Function ${name}`))
+    )
+  const pinLegacy = fn('dnPinLegacy')
+  assert.ok(pinLegacy.indexOf('Pop $dnPinRoot') < pinLegacy.indexOf('Call dnCheckLegacyDir'))
+  assert.ok(pinLegacy.indexOf('Pop $dnPinProfile') < pinLegacy.indexOf('Call dnCheckLegacyDir'))
+  assert.ok(pinLegacy.indexOf('Pop $dnPinDest') < pinLegacy.indexOf('Call dnCheckLegacyDir'))
+  for (const check of [
+    'the pinned old folder is not a real folder',
+    'the pinned old folder is $2, not in $3',
+    'the pinned old folder has no ${DN_APP_EXE}',
+    'the pinned old folder overlaps the app profile',
+    'the pinned old folder overlaps the new folder'
+  ])
+    assert.ok(pinLegacy.includes(check), check)
+  assert.doesNotMatch(remove, /dnOpenNoFollow|dnFinalPath|CreateFileW/)
+  assert.match(remove, /StrCpy \$1 \$dnPinRoot/)
+  assert.ok(tree.includes('${if} $6 == $dnProtectProfile\n      ${orIf} $6 == $dnProtectDest'))
+  // The test pause exists only in a harness build.
+  assert.equal(guards.split('DN_TEST_PAUSE').length - 1, 4)
+  assert.match(guards, /!ifdef DN_TEST_PAUSE\n/)
+  assert.doesNotMatch(installer, /DN_TEST_PAUSE/)
   // Overlap with the profile is checked on resolved paths too (junctions followed).
   const legacyCheck = guards.slice(
     guards.indexOf('Function dnCheckLegacyDir'),

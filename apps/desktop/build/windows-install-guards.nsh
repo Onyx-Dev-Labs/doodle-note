@@ -233,6 +233,14 @@ FunctionEnd
   Var dnProfileDir
   Var dnJournalKey
   Var dnPlanNote
+  ; Handles dnPinLegacy holds from before the old folder is checked until it is
+  ; removed (dnUnpin), and the identities dnRemoveTreeAt must never enter.
+  Var dnPinRoot
+  Var dnPinParent
+  Var dnPinProfile
+  Var dnPinDest
+  Var dnProtectProfile
+  Var dnProtectDest
 
   ; Push PATH; Call dnCanonical; Pop RESULT: absolute, long-name form without a
   ; trailing separator ("" when the path is not valid). Links are not resolved.
@@ -719,6 +727,8 @@ FunctionEnd
   ;   - a file, junction or symbolic link is deleted through that handle (a link
   ;     itself, never its target); a real folder is held open the same way, emptied
   ;     the same way, then deleted through its handle.
+  ;   - no folder it empties may be the app profile or the new install
+  ;     ($dnProtectProfile / $dnProtectDest, set by dnPinLegacy).
   ; STATUS: "ok" (all gone), "kept" (something could not be deleted, e.g. held
   ; open, and stays) or "unsafe" (an identity check failed: removal stopped at
   ; once; nothing that failed a check was touched).
@@ -759,6 +769,11 @@ FunctionEnd
       ${if} $6 == ""
       ${orIf} $6 != $9
       ${orIf} $7 <> 0
+        StrCpy $8 "unsafe"
+      ${endif}
+      ; Never the app profile or the new install, however it was reached.
+      ${if} $6 == $dnProtectProfile
+      ${orIf} $6 == $dnProtectDest
         StrCpy $8 "unsafe"
       ${endif}
     ${endif}
@@ -847,13 +862,271 @@ FunctionEnd
     Pop $2
   FunctionEnd
 
-  ; Push DIR; Call dnRemoveLegacyDir; Pop "removed", "kept" or "unsafe". Holds
-  ; DIR open (dnOpenNoFollow) after checking that it is a real folder exactly where
-  ; its parent really is, then empties it with dnRemoveTreeAt: everything but
-  ; DN_APP_EXE first and the exe last, so a folder that is only partly removed (a
-  ; file was held) still holds the exe and the next run's dnCheckLegacyDir still
-  ; recognises it as the old install. "unsafe": an identity check failed and
-  ; removal stopped; what is left stays for the next run.
+  ; Push PATH; Call dnOpenFollow; Pop HANDLE (0 when PATH does not exist or cannot
+  ; be opened): what Windows opens at PATH, links followed, held only to read its
+  ; identity and final path (FILE_READ_ATTRIBUTES, every share mode).
+  Function ${DN_FN}dnOpenFollow
+    Exch $0
+    Push $1
+    System::Call 'kernel32::CreateFileW(w r0, i 0x80, i 7, p 0, i 3, i 0x02000000, p 0) p.r1'
+    ${if} $1 = -1
+      StrCpy $1 0
+    ${endif}
+    StrCpy $0 $1
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Call dnUnpin: closes every handle dnPinLegacy holds.
+  Function ${DN_FN}dnUnpin
+    ${if} $dnPinRoot <> 0
+      System::Call 'kernel32::CloseHandle(p $dnPinRoot)'
+    ${endif}
+    ${if} $dnPinParent <> 0
+      System::Call 'kernel32::CloseHandle(p $dnPinParent)'
+    ${endif}
+    ${if} $dnPinProfile <> 0
+      System::Call 'kernel32::CloseHandle(p $dnPinProfile)'
+    ${endif}
+    ${if} $dnPinDest <> 0
+      System::Call 'kernel32::CloseHandle(p $dnPinDest)'
+    ${endif}
+    StrCpy $dnPinRoot 0
+    StrCpy $dnPinParent 0
+    StrCpy $dnPinProfile 0
+    StrCpy $dnPinDest 0
+    StrCpy $dnProtectProfile ""
+    StrCpy $dnProtectDest ""
+  FunctionEnd
+
+  ; Push PIN; Push PATH; Call dnWhereIs; Pop WHERE: PIN's final path when PIN is
+  ; open, else where PATH would be (dnResolved: it does not exist); "" when it
+  ; cannot be read.
+  Function ${DN_FN}dnWhereIs
+    Exch $1
+    Exch
+    Exch $0
+    ${if} $0 <> 0
+      Push $0
+      Call ${DN_FN}dnHandlePath
+      Pop $0
+    ${else}
+      Push $1
+      Call ${DN_FN}dnResolved
+      Pop $0
+    ${endif}
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Call dnPinLegacy; Pop REASON: "" when LEGACY may be
+  ; removed now, else why not. Before anything is checked it pins LEGACY itself
+  ; ($dnPinRoot: never what a link there points to, DELETE access, no
+  ; FILE_SHARE_DELETE, so it cannot be renamed, moved or replaced) and, as they are
+  ; now with links followed, $dnProgramsRoot, the profile and NEW. Then: every
+  ; dnCheckLegacyDir check by path, and the same facts again on the pinned handles
+  ; themselves: the pinned folder is a real folder, its final path is the pinned
+  ; parent's final path plus APP_FILENAME, it holds DN_APP_EXE (opened through that
+  ; final path), and it neither overlaps nor is the profile or NEW (final paths and
+  ; volume serial + file index of the same handles; a missing one by dnResolved).
+  ; On success the pins stay for dnRemoveLegacyDir, which deletes only through
+  ; $dnPinRoot, and the profile and NEW become identities the deleter never enters;
+  ; the caller ends with dnUnpin. On failure everything is unpinned. A test build
+  ; (DN_TEST_PAUSE) waits here, between the checks and the removal, for a second
+  ; process to change the folders.
+  Function ${DN_FN}dnPinLegacy
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    Push $3
+    Push $4
+    Push $5
+    Push $6
+    Call ${DN_FN}dnUnpin
+    StrCpy $5 ""
+    Push $0
+    Call ${DN_FN}dnCanonical
+    Pop $2
+    ${if} $2 == ""
+      StrCpy $5 "a path is not valid"
+    ${else}
+      Push $2
+      Push ${DN_ACCESS_DELETE}
+      Push 3
+      Call ${DN_FN}dnOpenNoFollow
+      Pop $dnPinRoot
+      Push $dnProgramsRoot
+      Call ${DN_FN}dnOpenFollow
+      Pop $dnPinParent
+      Push $dnProfileDir
+      Call ${DN_FN}dnOpenFollow
+      Pop $dnPinProfile
+      Push $1
+      Call ${DN_FN}dnOpenFollow
+      Pop $dnPinDest
+      ; Every check by path, as when the migration was planned.
+      Push $0
+      Push $1
+      Call ${DN_FN}dnCheckLegacyDir
+      Pop $5
+      ${if} $5 == ""
+      ${andIf} $dnPinRoot = 0
+        StrCpy $5 "the old folder cannot be opened"
+      ${elseif} $5 == ""
+      ${andIf} $dnPinParent = 0
+        StrCpy $5 "the old folder cannot be opened"
+      ${endif}
+    ${endif}
+    ${if} $5 == ""
+      Push $dnPinRoot
+      Call ${DN_FN}dnHandleAttributes
+      Pop $3
+      IntOp $4 $3 & 0x410
+      ${if} $3 = -1
+      ${orIf} $4 <> ${DN_ATTR_DIRECTORY}
+        StrCpy $5 "the pinned old folder is not a real folder"
+      ${endif}
+    ${endif}
+    ${if} $5 == ""
+      Push $dnPinRoot
+      Call ${DN_FN}dnHandlePath
+      Pop $2
+      Push $dnPinParent
+      Call ${DN_FN}dnHandlePath
+      Pop $3
+      ; A drive root comes back as "\\?\C:\".
+      StrCpy $4 $3 1 -1
+      ${if} $4 == "\"
+        StrCpy $3 $3 -1
+      ${endif}
+      ${if} $2 == ""
+      ${orIf} $3 == ""
+        StrCpy $5 "a pinned folder cannot be read"
+      ${elseif} $2 != "$3\${APP_FILENAME}"
+        StrCpy $5 "the pinned old folder is $2, not in $3"
+      ${endif}
+    ${endif}
+    ${if} $5 == ""
+      Push "$2\${DN_APP_EXE}"
+      Push 0x80
+      Push 7
+      Call ${DN_FN}dnOpenNoFollow
+      Pop $4
+      ${if} $4 = 0
+        StrCpy $5 "the pinned old folder has no ${DN_APP_EXE}"
+      ${else}
+        Push $4
+        Call ${DN_FN}dnHandleAttributes
+        Pop $3
+        Push $4
+        Call ${DN_FN}dnHandlePath
+        Pop $6
+        System::Call 'kernel32::CloseHandle(p r4)'
+        IntOp $4 $3 & 0x410
+        ${if} $3 = -1
+        ${orIf} $4 <> 0
+        ${orIf} $6 != "$2\${DN_APP_EXE}"
+          StrCpy $5 "the pinned old folder has no ${DN_APP_EXE}"
+        ${endif}
+      ${endif}
+    ${endif}
+    ${if} $5 == ""
+      Push $dnPinRoot
+      Call ${DN_FN}dnHandleIdentity
+      Pop $6
+      Push $dnPinProfile
+      Push $dnProfileDir
+      Call ${DN_FN}dnWhereIs
+      Pop $3
+      ${if} $6 == ""
+      ${orIf} $3 == ""
+        StrCpy $5 "a pinned folder or the app profile cannot be read"
+      ${else}
+        Push $2
+        Push $3
+        Call ${DN_FN}dnOverlaps
+        Pop $4
+        ${if} $dnPinProfile <> 0
+          Push $dnPinProfile
+          Call ${DN_FN}dnHandleIdentity
+          Pop $dnProtectProfile
+          ${if} $dnProtectProfile == $6
+          ${orIf} $dnProtectProfile == ""
+            StrCpy $4 "1"
+          ${endif}
+        ${endif}
+        ${if} $4 == "1"
+          StrCpy $5 "the pinned old folder overlaps the app profile"
+        ${endif}
+      ${endif}
+    ${endif}
+    ${if} $5 == ""
+      Push $dnPinDest
+      Push $1
+      Call ${DN_FN}dnWhereIs
+      Pop $3
+      ${if} $3 == ""
+        StrCpy $5 "the new folder cannot be read"
+      ${else}
+        Push $2
+        Push $3
+        Call ${DN_FN}dnOverlaps
+        Pop $4
+        ${if} $dnPinDest <> 0
+          Push $dnPinDest
+          Call ${DN_FN}dnHandleIdentity
+          Pop $dnProtectDest
+          ${if} $dnProtectDest == $6
+          ${orIf} $dnProtectDest == ""
+            StrCpy $4 "1"
+          ${endif}
+        ${endif}
+        ${if} $4 == "1"
+          StrCpy $5 "the pinned old folder overlaps the new folder"
+        ${endif}
+      ${endif}
+    ${endif}
+    ${if} $5 != ""
+      Call ${DN_FN}dnUnpin
+    ${endif}
+    !ifdef DN_TEST_PAUSE
+      ; Test builds only: signal <pause>.ready, wait (up to 60 s) for <pause>.go.
+      ${if} $5 == ""
+        FileOpen $3 "${DN_TEST_PAUSE}.ready" w
+        FileClose $3
+        StrCpy $3 0
+        ${do}
+          ${if} ${FileExists} "${DN_TEST_PAUSE}.go"
+          ${orIf} $3 >= 1200
+            ${break}
+          ${endif}
+          Sleep 50
+          IntOp $3 $3 + 1
+        ${loop}
+      ${endif}
+    !endif
+    StrCpy $0 $5
+    Pop $6
+    Pop $5
+    Pop $4
+    Pop $3
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Push DIR; Call dnRemoveLegacyDir; Pop "removed", "kept" or "unsafe". Removes
+  ; the folder $dnPinRoot holds (dnPinLegacy, or a test that pins DIR itself) and
+  ; never opens DIR by path to find it: DIR must still open as that very folder
+  ; (dnRemoveTreeAt checks before every listing), and everything is verified and
+  ; deleted through handles. Everything but DN_APP_EXE goes first and the exe last,
+  ; so a folder that is only partly removed (a file was held) still holds the exe
+  ; and the next run's dnCheckLegacyDir still recognises it as the old install.
+  ; "unsafe": an identity check failed and removal stopped; what is left stays for
+  ; the next run. The root pin is closed (and so a deleted folder really goes).
   Function ${DN_FN}dnRemoveLegacyDir
     Exch $0
     Push $1
@@ -861,35 +1134,17 @@ FunctionEnd
     Push $3
     Push $4
     StrCpy $3 "kept"
-    Push $0
-    Push ${DN_ACCESS_DELETE}
-    Push 3
-    Call ${DN_FN}dnOpenNoFollow
-    Pop $1
-    ${if} $1 <> 0
+    StrCpy $1 $dnPinRoot
+    ${if} $1 = 0
+      StrCpy $3 "unsafe"
+    ${else}
       Push $1
-      Call ${DN_FN}dnHandlePath
-      Pop $4
-      ${GetParent} $0 $2
-      Push $2
-      Call ${DN_FN}dnFinalPath
+      Call ${DN_FN}dnHandleAttributes
       Pop $2
-      ${GetFileName} $0 $3
-      StrCpy $2 "$2\$3"
-      StrCpy $3 "kept"
-      ${if} $4 == ""
-      ${orIf} $4 != $2
+      IntOp $4 $2 & 0x410
+      ${if} $2 = -1
+      ${orIf} $4 <> ${DN_ATTR_DIRECTORY}
         StrCpy $3 "unsafe"
-      ${else}
-        Push $1
-        Call ${DN_FN}dnHandleAttributes
-        Pop $2
-        IntOp $4 $2 & ${DN_ATTR_REPARSE_POINT}
-        IntOp $2 $2 & ${DN_ATTR_DIRECTORY}
-        ${if} $4 <> 0
-        ${orIf} $2 = 0
-          StrCpy $3 "unsafe"
-        ${endif}
       ${endif}
       ${if} $3 != "unsafe"
         Push $0
@@ -915,6 +1170,7 @@ FunctionEnd
         ${endif}
       ${endif}
       System::Call 'kernel32::CloseHandle(p r1)'
+      StrCpy $dnPinRoot 0
     ${endif}
     ${if} $3 != "unsafe"
       ${if} ${FileExists} "$0\*.*"
@@ -1008,7 +1264,7 @@ FunctionEnd
       ${else}
         Push $1
         Push $0
-        Call ${DN_FN}dnCheckLegacyDir
+        Call ${DN_FN}dnPinLegacy
         Pop $2
         ${if} $2 != ""
           StrCpy $0 "kept: $2"
@@ -1016,6 +1272,7 @@ FunctionEnd
           Push $1
           Call ${DN_FN}dnRemoveLegacyDir
           Pop $2
+          Call ${DN_FN}dnUnpin
           ${if} $2 == "removed"
             DeleteRegKey HKCU $dnJournalKey
             StrCpy $0 "removed"
@@ -1143,10 +1400,11 @@ FunctionEnd
   FunctionEnd
 
   ; Push LEGACY; Push NEW; Push KEEP; Call dnFinishMigration; Pop RESULT, once the
-  ; new copy in NEW is verified. Checks LEGACY again right before deleting
-  ; anything (the folders may have changed since the run started), then removes
-  ; it by verified handles (dnRemoveLegacyDir) and clears the journal. RESULT: "removed", or
-  ; "kept: <why>" with the journal left armed so the next run retries.
+  ; new copy in NEW is verified. Pins LEGACY and checks it again on the pinned
+  ; handles right before deleting anything (dnPinLegacy: the folders may have
+  ; changed since the run started), then removes exactly the pinned folder by
+  ; verified handles (dnRemoveLegacyDir) and clears the journal. RESULT: "removed",
+  ; or "kept: <why>" with the journal left armed so the next run retries.
   ;
   ; Only after a real move (the old folder is gone) does it record MigratedFrom,
   ; MigratedTo and MigratedAt under $dnStateKey. The app repoints its login item
@@ -1166,10 +1424,13 @@ FunctionEnd
     Push $R4
     Push $R5
     Push $R6
-    Push $0
-    Push $1
-    Call dnCheckLegacyDir
-    Pop $3
+    StrCpy $3 ""
+    ${if} $2 != "1"
+      Push $0
+      Push $1
+      Call dnPinLegacy
+      Pop $3
+    ${endif}
     ${if} $2 == "1"
       StrCpy $3 "kept: ${PRODUCT_NAME} there is still running"
     ${elseif} $3 != ""
@@ -1178,6 +1439,7 @@ FunctionEnd
       Push $0
       Call dnRemoveLegacyDir
       Pop $3
+      Call dnUnpin
       ${if} $3 == "removed"
         DeleteRegKey HKCU $dnJournalKey
         Push $0

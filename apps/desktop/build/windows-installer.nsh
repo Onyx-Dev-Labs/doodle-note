@@ -26,8 +26,10 @@
 ;   3. customInstall verifies the new install, keeps the user's desktop and
 ;      Start menu shortcut choices (recorded before the old version was touched),
 ;      repoints taskbar pins that start exactly the old exe (dnRepointPins), then
-;      dnFinishMigration checks the old folder again and only then removes it
-;      through handles verified to be inside it (never following links). Only
+;      dnFinishMigration pins the old folder (an open handle nobody can rename or
+;      replace), checks it again on that handle and only then removes exactly that
+;      folder, through handles verified to be inside it (never following links,
+;      never re-opening it by path, never entering the profile or the new folder). Only
 ;      when the old folder is really gone does it write the MigratedFrom /
 ;      MigratedTo / MigratedAt record (HKCU\Software\${APP_GUID}) that lets the
 ;      app repoint its login item and MCP client entries.
