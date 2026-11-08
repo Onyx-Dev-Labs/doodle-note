@@ -36,6 +36,10 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
   REQUIRED_RESOURCES: string[]
   listTree(dir: string): string[]
   fileListDifferences(a: string[], b: string[]): { onlyA: string[]; onlyB: string[] }
+  IDENTITY_DIFFERENCES: Record<
+    string,
+    (here: Buffer, there: Buffer, dirs: { here: string; there: string }) => string | null
+  >
 }
 const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
@@ -975,7 +979,78 @@ test("CI proves the QA package ships exactly the production package's files", ()
   assert.ok(
     qa.indexOf('node apps/desktop/scripts/package-win-qa.cjs --dir') <
       qa.indexOf(
-        'node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked'
+        'node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control'
       )
   )
+})
+
+test('only the identity files may differ between the QA and production packages, and only as allowed', () => {
+  const allowed = packageCheck.IDENTITY_DIFFERENCES
+  assert.deepEqual(Object.keys(allowed).sort(), [
+    'app.asar/out/main/index.js',
+    'app.asar/package.json'
+  ])
+  const json = (value: unknown): Buffer => Buffer.from(JSON.stringify(value, null, 2))
+  const pkg = { name: 'desktop', version: '0.5.0', main: './out/main/index.js' }
+  const none = { here: '', there: '' }
+  assert.equal(
+    allowed['app.asar/package.json'](json({ ...pkg, name: 'desktop-qa' }), json(pkg), none),
+    null
+  )
+  assert.match(
+    allowed['app.asar/package.json'](
+      json({ ...pkg, name: 'desktop-qa', version: '0.5.1' }),
+      json(pkg),
+      none
+    )!,
+    /more than "name"/
+  )
+  assert.match(
+    allowed['app.asar/package.json'](json({ ...pkg, name: 'other' }), json(pkg), none)!,
+    /name other/
+  )
+
+  const dir = mkdtempSync(join(tmpdir(), 'dn-identity-diff-'))
+  try {
+    const resources = (name: string, digest: string): string => {
+      const at = join(dir, name)
+      mkdirSync(join(at, 'engine'), { recursive: true })
+      writeFileSync(
+        join(at, 'engine', 'dictation-helper.manifest.json'),
+        JSON.stringify({ authenticodeSha256: digest })
+      )
+      return at
+    }
+    const [qaDigest, prodDigest] = ['a'.repeat(64), 'b'.repeat(64)]
+    const dirs = { here: resources('qa', qaDigest), there: resources('prod', prodDigest) }
+    const bundle = (identity: string, digest: string, tail = 'start();\n'): Buffer =>
+      Buffer.from(
+        'const DEFAULTS = {};\n' +
+          (identity === 'qa' ? 'const QA_DICTATION_SHORTCUTS = { toggleShortcut: "X" };\n' : '') +
+          'function appIdentity(name) {\n  return { name };\n}\n' +
+          `const APP_IDENTITY = appIdentity(\n  "${identity}"\n);\n` +
+          'function other() {}\n' +
+          `var define_DOODLENOTE_HELPER_INTEGRITY_default = { digest: "${digest}", publisherCn: "Onyx Dev Labs LLC", thumbprints: [] };\n` +
+          tail
+      )
+    const main = allowed['app.asar/out/main/index.js']
+    assert.equal(main(bundle('qa', qaDigest), bundle('production', prodDigest), dirs), null)
+    // Anything else that differs is a failure: code outside the block, ...
+    assert.match(
+      main(bundle('qa', qaDigest, 'start(1);\n'), bundle('production', prodDigest), dirs)!,
+      /outside the identity block and the helper digest/
+    )
+    // ... a helper digest that is not the package's own helper's, ...
+    assert.match(
+      main(bundle('qa', prodDigest), bundle('production', prodDigest), dirs)!,
+      /is not this package's/
+    )
+    // ... or a bundle without the identity block.
+    assert.match(
+      main(Buffer.from('start();\n'), bundle('production', prodDigest), dirs)!,
+      /no identity block/
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

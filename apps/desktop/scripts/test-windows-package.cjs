@@ -14,10 +14,16 @@
 //
 // --same-files-as also requires exactly the same app.asar entries and exactly the
 // same files under app.asar.unpacked as the other package (CI: the QA identity
-// package against the production one).
+// package against the production one), byte for byte: every asar entry is
+// extracted with @electron/asar (the module electron-builder packed it with) and
+// every unpacked file read, and their SHA-256 compared. Only the files in
+// IDENTITY_DIFFERENCES may differ, and only in the way each entry allows.
+// --negative-control (with --same-files-as) then changes one byte in one unpacked
+// file and one byte of one asar entry of this package, checks that each is
+// reported, and puts the byte back.
 //
-// Reads the asar header directly (no @electron/asar dependency): the file starts
-// with a Chromium pickle holding the JSON directory tree.
+// Lists the asar from its header directly: the file starts with a Chromium pickle
+// holding the JSON directory tree.
 const fs = require('node:fs')
 const path = require('node:path')
 
@@ -250,6 +256,113 @@ function listTree(dir) {
   return files.sort()
 }
 
+/** @electron/asar, resolved through electron-builder (no dependency of the app's own). */
+function asarModule() {
+  const desktop = path.join(__dirname, '..')
+  const builder = path.dirname(
+    require.resolve('electron-builder/package.json', { paths: [desktop] })
+  )
+  const lib = path.dirname(require.resolve('app-builder-lib/package.json', { paths: [builder] }))
+  return require(require.resolve('@electron/asar', { paths: [lib] }))
+}
+
+const sha256 = (buffer) => require('node:crypto').createHash('sha256').update(buffer).digest('hex')
+
+/**
+ * SHA-256 of every file packed inside the archive, by POSIX path: each extracted
+ * with @electron/asar. Entries stored in app.asar.unpacked (`unpacked`) are hashed
+ * there instead (unpackedHashes); a link is its target.
+ */
+function asarHashes(file, asar = asarModule()) {
+  const out = new Map()
+  const walk = (node, prefix) => {
+    for (const [name, child] of Object.entries(node.files ?? {})) {
+      const rel = prefix ? `${prefix}/${name}` : name
+      if (child.files) walk(child, rel)
+      else if (child.link) out.set(rel, `link:${child.link}`)
+      else if (!child.unpacked)
+        out.set(rel, sha256(asar.extractFile(file, rel.split('/').join(path.sep))))
+    }
+  }
+  walk(readAsarHeader(file), '')
+  return out
+}
+
+/** SHA-256 of every file under `dir`, by relative POSIX path. */
+function treeHashes(dir) {
+  return new Map(listTree(dir).map((rel) => [rel, sha256(fs.readFileSync(path.join(dir, rel)))]))
+}
+
+/**
+ * The only files that may differ between two identity packages (QA and
+ * production), and the only way each may differ (`check(here, there, { here,
+ * there })` with both contents and both resources folders: null when the
+ * difference is the expected one, else what is wrong). Everything else in
+ * app.asar and app.asar.unpacked must be byte-identical.
+ */
+const IDENTITY_DIFFERENCES = {
+  // electron-builder writes the identity's package name (scripts/package-win-qa.cjs
+  // packages QA as desktop-qa: profile %APPDATA%\desktop-qa, install folder);
+  // nothing else in it may change.
+  'app.asar/package.json': (here, there) => {
+    const [a, b] = [here, there].map((buffer) => JSON.parse(buffer.toString('utf8')))
+    const names = new Set(['desktop', 'desktop-qa'])
+    if (!names.has(a.name) || !names.has(b.name)) return `name ${a.name} / ${b.name}`
+    const rest = (json) => JSON.stringify({ ...json, name: undefined })
+    return rest(a) === rest(b) ? null : 'differs in more than "name"'
+  },
+  // electron-vite bakes two things in that differ between the two packages, and
+  // nothing else may:
+  // - the identity (src/main/app-identity.ts, __DOODLENOTE_IDENTITY__): APP_IDENTITY =
+  //   appIdentity("qa" | "production") and, for QA only, its default dictation
+  //   shortcuts: the block from `const QA_DICTATION_SHORTCUTS` / `function
+  //   appIdentity(` to the end of the `const APP_IDENTITY = appIdentity(...)` call;
+  // - the Bark helper's digest (__DOODLENOTE_HELPER_INTEGRITY__): each package
+  //   build recompiles resources/engine/dictation-helper.exe with the inbox .NET
+  //   Framework csc.exe, which has no /deterministic, so each bundle must carry
+  //   exactly its own package's helper digest (authenticodeSha256 in the
+  //   dictation-helper.manifest.json beside it).
+  // Both are cut out (after those checks) and the rest compared byte for byte.
+  'app.asar/out/main/index.js': (here, there, dirs) => {
+    const cut = (text, resources) => {
+      const from = ['const QA_DICTATION_SHORTCUTS', 'function appIdentity(']
+        .map((marker) => text.indexOf(marker))
+        .filter((at) => at >= 0)
+      const call = text.indexOf('const APP_IDENTITY = appIdentity(')
+      const to = call < 0 ? -1 : text.indexOf(');', call) + 2
+      if (!from.length || to < 2) return { why: 'no identity block' }
+      let rest = `${text.slice(0, Math.min(...from))}<identity>${text.slice(to)}`
+      const digest = /(define_DOODLENOTE_HELPER_INTEGRITY_default = \{ digest: ")([0-9a-f]{64})(")/
+      const found = digest.exec(rest)
+      if (found) {
+        const manifest = path.join(resources, 'engine', 'dictation-helper.manifest.json')
+        const own = fs.existsSync(manifest)
+          ? JSON.parse(fs.readFileSync(manifest, 'utf8')).authenticodeSha256
+          : null
+        if (found[2] !== own)
+          return { why: `helper digest ${found[2]} is not this package's (${own})` }
+        rest = rest.replace(digest, '$1<helper digest>$3')
+      }
+      return { rest }
+    }
+    const [a, b] = [cut(here.toString('utf8'), dirs.here), cut(there.toString('utf8'), dirs.there)]
+    if (a.why || b.why) return a.why ?? b.why
+    return a.rest === b.rest ? null : 'differs outside the identity block and the helper digest'
+  }
+}
+
+/** Every difference between two `path -> hash` maps, under `name`, as problems. */
+function hashDifferences(name, ours, theirs, otherDir) {
+  const problems = []
+  for (const rel of new Set([...ours.keys(), ...theirs.keys()])) {
+    const label = `${name}/${rel}`
+    if (!theirs.has(rel)) problems.push({ label, problem: 'only in this package' })
+    else if (!ours.has(rel)) problems.push({ label, problem: `only in ${otherDir}` })
+    else if (ours.get(rel) !== theirs.get(rel)) problems.push({ label, problem: 'content differs' })
+  }
+  return problems.sort((x, y) => (x.label < y.label ? -1 : 1))
+}
+
 /** What only `a` and only `b` hold, for two file lists. */
 function fileListDifferences(a, b) {
   const inA = new Set(a)
@@ -257,25 +370,130 @@ function fileListDifferences(a, b) {
   return { onlyA: a.filter((file) => !inB.has(file)), onlyB: b.filter((file) => !inA.has(file)) }
 }
 
-/** Problems when the package at `asar` does not ship exactly the files of `otherDir`. */
-function sameFilesProblems(asar, files, otherDir) {
+/**
+ * Problems when the package at `asar` does not ship exactly the files of `otherDir`,
+ * byte for byte, apart from IDENTITY_DIFFERENCES.
+ */
+function sameFilesProblems(asar, files, otherDir, { log = console.log, asarApi } = {}) {
   const problems = []
   const otherAsar = path.join(otherDir, 'resources', 'app.asar')
+  const api = asarApi ?? asarModule()
   const pairs = [
-    ['app.asar', files, listAsar(otherAsar)],
-    ['app.asar.unpacked', listTree(`${asar}.unpacked`), listTree(`${otherAsar}.unpacked`)]
+    ['app.asar', asarHashes(asar, api), asarHashes(otherAsar, api)],
+    ['app.asar.unpacked', treeHashes(`${asar}.unpacked`), treeHashes(`${otherAsar}.unpacked`)]
   ]
+  const contents = (archive, rel) =>
+    rel.startsWith('app.asar/')
+      ? api.extractFile(archive, rel.slice('app.asar/'.length).split('/').join(path.sep))
+      : fs.readFileSync(path.join(`${archive}.unpacked`, rel.slice('app.asar.unpacked/'.length)))
   for (const [name, ours, theirs] of pairs) {
-    const { onlyA, onlyB } = fileListDifferences(ours, theirs)
-    console.log(
-      `  ${name}: ${ours.length} files here, ${theirs.length} in ${otherDir}; ${onlyA.length} only here, ${onlyB.length} only there`
+    const differences = hashDifferences(name, ours, theirs, otherDir)
+    let allowed = 0
+    for (const { label, problem } of differences) {
+      const check = IDENTITY_DIFFERENCES[label]
+      if (problem === 'content differs' && check) {
+        const why = check(contents(asar, label), contents(otherAsar, label), {
+          here: path.dirname(asar),
+          there: path.dirname(otherAsar)
+        })
+        if (!why) {
+          allowed++
+          log(`  ${label}: differs as the identity allows`)
+          continue
+        }
+        problems.push(`${label}: ${why}`)
+      } else problems.push(`${label}: ${problem}`)
+    }
+    log(
+      `  ${name}: ${ours.size} files here, ${theirs.size} in ${otherDir}; ${ours.size - differences.length} identical (SHA-256), ${allowed} identity file(s), ${differences.length - allowed} other difference(s)`
     )
-    if (ours.length === 0) problems.push(`${name}: no files`)
-    problems.push(...onlyA.map((file) => `${name}/${file}: only in this package`))
-    problems.push(...onlyB.map((file) => `${name}/${file}: only in ${otherDir}`))
+    if (ours.size === 0) problems.push(`${name}: no files`)
   }
   return problems
 }
+
+/**
+ * Changes one byte of `file` at `offset` (XOR 0xff), runs `check`, and puts the
+ * byte back (verified). Returns what `check` returned.
+ */
+function withFlippedByte(file, offset, check) {
+  const fd = fs.openSync(file, 'r+')
+  const byte = Buffer.alloc(1)
+  try {
+    fs.readSync(fd, byte, 0, 1, offset)
+    const original = byte[0]
+    fs.writeSync(fd, Buffer.from([original ^ 0xff]), 0, 1, offset)
+    try {
+      return check()
+    } finally {
+      fs.writeSync(fd, Buffer.from([original]), 0, 1, offset)
+      fs.readSync(fd, byte, 0, 1, offset)
+      if (byte[0] !== original) throw new Error(`${file}: byte ${offset} not restored`)
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/**
+ * The negative control for --same-files-as: one byte changed in one file under
+ * app.asar.unpacked, in one asar entry (inside its data, not the header), and in
+ * out/main/index.js outside what IDENTITY_DIFFERENCES lets differ (its last
+ * byte), must each be reported as exactly that file. Problems when one is missed.
+ */
+function negativeControlProblems(asar, files, otherDir) {
+  const quiet = () => {}
+  const problems = []
+  const unpacked = listTree(`${asar}.unpacked`).find(
+    (rel) => fs.statSync(path.join(`${asar}.unpacked`, rel)).size > 0
+  )
+  const { header, dataOffset } = readAsar(asar)
+  const entry = (rel) => rel.split('/').reduce((node, name) => node.files[name], header)
+  const packed = files.find((rel) => {
+    if (IDENTITY_DIFFERENCES[`app.asar/${rel}`]) return false
+    const node = entry(rel)
+    return !node.unpacked && !node.link && node.size > 0
+  })
+  const cases = [
+    [
+      `app.asar.unpacked/${unpacked}`,
+      path.join(`${asar}.unpacked`, unpacked),
+      Math.floor(fs.statSync(path.join(`${asar}.unpacked`, unpacked)).size / 2)
+    ],
+    [
+      `app.asar/${packed}`,
+      asar,
+      dataOffset + Number(entry(packed).offset) + Math.floor(entry(packed).size / 2)
+    ],
+    [
+      'app.asar/out/main/index.js',
+      asar,
+      dataOffset + Number(entry('out/main/index.js').offset) + entry('out/main/index.js').size - 1,
+      'differs outside the identity block and the helper digest'
+    ]
+  ]
+  for (const [label, file, offset, why = 'content differs'] of cases) {
+    const found = withFlippedByte(file, offset, () =>
+      sameFilesProblems(asar, files, otherDir, { log: quiet })
+    )
+    const expected = [`${label}: ${why}`]
+    const ok = JSON.stringify(found) === JSON.stringify(expected)
+    console.log(
+      `  negative control, one byte of ${label}: ${ok ? 'caught' : `NOT caught (${JSON.stringify(found)})`}`
+    )
+    if (!ok)
+      problems.push(`negative control: one changed byte in ${label} was not reported exactly`)
+  }
+  const after = sameFilesProblems(asar, files, otherDir, { log: quiet })
+  if (after.length)
+    problems.push(`negative control: the package did not come back intact (${after[0]})`)
+  return problems
+}
+
+module.exports.IDENTITY_DIFFERENCES = IDENTITY_DIFFERENCES
+module.exports.sameFilesProblems = sameFilesProblems
+module.exports.negativeControlProblems = negativeControlProblems
+module.exports.asarHashes = asarHashes
 
 if (require.main === module) {
   const args = process.argv.slice(2)
@@ -283,6 +501,8 @@ if (require.main === module) {
   const listFile = listIndex >= 0 ? args.splice(listIndex, 2)[1] : null
   const sameIndex = args.indexOf('--same-files-as')
   const sameAs = sameIndex >= 0 ? args.splice(sameIndex, 2)[1] : null
+  const controlIndex = args.indexOf('--negative-control')
+  const negativeControl = controlIndex >= 0 && Boolean(args.splice(controlIndex, 1))
   const target = args[0]
   if (!target) {
     console.error('usage: test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]')
@@ -337,6 +557,9 @@ if (require.main === module) {
     `  inside app.asar: ${packed.length} native binaries, ${packedForeign.length} that cannot load on Windows x64`
   )
   if (sameAs) problems.push(...sameFilesProblems(asar, files, sameAs))
+  if (sameAs && negativeControl && !problems.length)
+    problems.push(...negativeControlProblems(asar, files, sameAs))
+  if (negativeControl && !sameAs) problems.push('--negative-control needs --same-files-as')
   if (problems.length) {
     console.error(`FAIL: ${problems.length} problem(s) in the Windows package`)
     for (const problem of problems.slice(0, 40)) console.error(`  ${problem}`)
@@ -346,5 +569,8 @@ if (require.main === module) {
   console.log(
     'Windows app.asar contains only the built app and its runtime dependencies; native binaries are all x64 Windows'
   )
-  if (sameAs) console.log(`Same app.asar entries and app.asar.unpacked files as ${sameAs}`)
+  if (sameAs)
+    console.log(
+      `Same app.asar entries and app.asar.unpacked files as ${sameAs}, byte for byte apart from the identity files${negativeControl ? '; one changed byte in any of them is caught' : ''}`
+    )
 }

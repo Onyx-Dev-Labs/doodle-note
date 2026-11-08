@@ -271,12 +271,17 @@ jobs:
 
       # The QA identity package (the one the upgrade test installs) must ship
       # exactly the production package's files: the same app.asar entries and the
-      # same app.asar.unpacked files, checked file by file, not only for presence.
+      # same app.asar.unpacked files, byte for byte (SHA-256 of every asar entry and
+      # every unpacked file), apart from the identity files test-windows-package.cjs
+      # allows (IDENTITY_DIFFERENCES: package.json "name"; in out/main/index.js the
+      # identity block and the Bark helper digest). --negative-control then changes
+      # one byte in an unpacked file, an asar entry and out/main/index.js outside
+      # what may differ, and fails unless each is caught (bytes put back).
       # Built last: it rebuilds out/ with the QA identity.
       - name: Check the QA package ships exactly the production package's files
         timeout-minutes: 15
         run: |
           node apps/desktop/scripts/package-win-qa.cjs --dir
           if ($LASTEXITCODE -ne 0) { throw "QA package build failed" }
-          node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked
+          node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release-qa/win-unpacked --same-files-as apps/desktop/release/win-unpacked --negative-control
           if ($LASTEXITCODE -ne 0) { throw "The QA package does not ship the production package's files" }
