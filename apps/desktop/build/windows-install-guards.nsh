@@ -731,4 +731,148 @@ Var dnLocked
     Pop $1
     Pop $2
   FunctionEnd
+  ; Push NAME; Push PATH; Call dnShortcutState; Pop "1" | "0": whether the
+  ; shortcut PATH existed when this migration started. The first run records the
+  ; answer in the journal ($dnJournalKey, value NAME) before anything changes; a
+  ; run that finishes an interrupted migration uses that answer, not what the
+  ; interrupted run left behind.
+  Function dnShortcutState
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    ReadRegStr $2 HKCU $dnJournalKey $0
+    ${if} $2 != "1"
+    ${andIf} $2 != "0"
+      StrCpy $2 "0"
+      ${if} ${FileExists} $1
+        StrCpy $2 "1"
+      ${endif}
+      WriteRegStr HKCU $dnJournalKey $0 $2
+    ${endif}
+    StrCpy $0 $2
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Push DIR; Push OLD; Push NEW; Call dnRepointPins; Pop COUNT. Repoints every
+  ; shortcut (*.lnk) in DIR whose target is exactly OLD (both normalised) to NEW:
+  ; its target, and its icon and working folder only where they named OLD and
+  ; OLD's folder. Any other shortcut is not opened for writing, no other property
+  ; (arguments, description, AppUserModelID) changes, and nothing is created.
+  ; IShellLinkW / IPersistFile through the System plugin.
+  Function dnRepointPins
+    Exch $2
+    Exch
+    Exch $1
+    Exch 2
+    Exch $0
+    Push $3
+    Push $4
+    Push $5
+    Push $6
+    Push $7
+    Push $8
+    Push $9
+    Push $R0
+    Push $R1
+    Push $R2
+    Push $R3
+    Push $R4
+    StrCpy $3 0
+    Push $1
+    Call dnCanonical
+    Pop $R0
+    ${GetParent} $R0 $R1
+    ${GetParent} $2 $R2
+    ClearErrors
+    FindFirst $4 $5 "$0\*.lnk"
+    ${doWhile} $5 != ""
+      StrCpy $R4 "$0\$5"
+      StrCpy $6 0
+      StrCpy $7 0
+      ; CLSID_ShellLink, IID_IShellLinkW, IID_IPersistFile.
+      System::Call 'ole32::CoCreateInstance(g "{00021401-0000-0000-C000-000000000046}", p 0, i 1, g "{000214F9-0000-0000-C000-000000000046}", *p .r6) i.r9'
+      ${if} $9 = 0
+        System::Call '$6->0(g "{0000010B-0000-0000-C000-000000000046}", *p .r7) i.r9'
+      ${endif}
+      ${if} $9 = 0
+        ; IPersistFile::Load(path, STGM_READ)
+        System::Call '$7->5(w r14, i 0) i.r9'
+      ${endif}
+      ${if} $9 = 0
+        ; IShellLinkW::GetPath(buffer, size, NULL, 0)
+        System::Call '$6->3(w .r8, i ${NSIS_MAX_STRLEN}, p 0, i 0) i.r9'
+      ${endif}
+      ${if} $9 = 0
+      ${andIf} $8 != ""
+        Push $8
+        Call dnCanonical
+        Pop $8
+        ${if} $8 == $R0
+          ; SetPath(NEW)
+          System::Call '$6->20(w r2) i.r9'
+          ${if} $9 = 0
+            ; GetIconLocation / SetIconLocation, only when the icon was OLD.
+            StrCpy $R3 0
+            System::Call '$6->16(w .r8, i ${NSIS_MAX_STRLEN}, *i .r13) i.r9'
+            ${if} $9 = 0
+            ${andIf} $8 != ""
+              Push $8
+              Call dnCanonical
+              Pop $8
+              ${if} $8 == $R0
+                System::Call '$6->17(w r2, i r13) i.r9'
+              ${endif}
+            ${endif}
+            ; GetWorkingDirectory / SetWorkingDirectory, only when it was OLD's folder.
+            System::Call '$6->8(w .r8, i ${NSIS_MAX_STRLEN}) i.r9'
+            ${if} $9 = 0
+            ${andIf} $8 != ""
+              Push $8
+              Call dnCanonical
+              Pop $8
+              ${if} $8 == $R1
+                System::Call '$6->9(w r12) i.r9'
+              ${endif}
+            ${endif}
+            ; IPersistFile::Save(path, TRUE)
+            System::Call '$7->6(w r14, i 1) i.r9'
+            ${if} $9 = 0
+              IntOp $3 $3 + 1
+              DetailPrint "Repointed $R4"
+            ${endif}
+          ${endif}
+        ${endif}
+      ${endif}
+      ${if} $7 <> 0
+        System::Call '$7->2()'
+      ${endif}
+      ${if} $6 <> 0
+        System::Call '$6->2()'
+      ${endif}
+      ClearErrors
+      FindNext $4 $5
+    ${loop}
+    FindClose $4
+    StrCpy $0 $3
+    Pop $R4
+    Pop $R3
+    Pop $R2
+    Pop $R1
+    Pop $R0
+    Pop $9
+    Pop $8
+    Pop $7
+    Pop $6
+    Pop $5
+    Pop $4
+    Pop $3
+    Exch $0
+    Exch 2
+    Pop $1
+    Pop $2
+  FunctionEnd
 !endif

@@ -211,6 +211,19 @@ test('Windows installs move to a DoodleNote folder without forking the install o
     assert.ok(finish.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) > removed, value)
   }
   assert.ok(removed > finish.indexOf('Call dnRemoveLegacyDir'))
+  // Shortcuts: what the user had deleted stays deleted; pins are repointed by target only.
+  assert.ok(
+    install.indexOf('${if} $dnHadStartMenuLink == "0"') <
+      install.indexOf('Delete "$newStartMenuLink"')
+  )
+  assert.ok(
+    install.indexOf('Delete "$newStartMenuLink"') < install.indexOf('StrCpy $launchLink "$appExe"')
+  )
+  assert.ok(install.indexOf('Call dnRepointPins') < install.indexOf('Call dnFinishMigration'))
+  assert.doesNotMatch(install, /CreateShortCut/)
+  const running = installer.slice(installer.indexOf('!macro dnMigrationCheckAppRunning'))
+  for (const link of ['$oldDesktopLink', '$oldStartMenuLink'])
+    assert.ok(running.indexOf(`Push ${link}\n      Call dnShortcutState`) > 0, link)
   // A /D=<folder> install is never redirected, and only <LocalAppData>\Programs\APP_FILENAME
   // itself is (an install recorded in another folder named desktop is upgraded in place).
   assert.match(
@@ -249,7 +262,7 @@ test('the install migration journal belongs to one app identity and is validated
   // anything recorded is used.
   const restore = init.indexOf('WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"')
   assert.ok(restore > 0)
-  for (const check of ['Call dnTrustedJournal', '${if} $R6 != ""', '${if} $R7 == $R9']) {
+  for (const check of ['Call dnTrustedJournal', '${if} $R6 == ""', '${if} $R7 == $R9']) {
     const at = init.indexOf(check)
     assert.ok(at > 0 && at < restore, check)
   }

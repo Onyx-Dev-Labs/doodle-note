@@ -18,8 +18,11 @@
 ;      (never electron-builder's path-prefix or image-name matching), then parks
 ;      the old uninstall command in a journal so electron-builder's "uninstall
 ;      old version" step cannot delete the old folder before the new one exists.
-;   3. customInstall verifies the new install, then dnFinishMigration checks the
-;      old folder again and only then removes it without following links. Only
+;   3. customInstall verifies the new install, keeps the user's desktop and
+;      Start menu shortcut choices (recorded before the old version was touched),
+;      repoints taskbar pins that start exactly the old exe (dnRepointPins), then
+;      dnFinishMigration checks the old folder again and only then removes it
+;      without following links. Only
 ;      when the old folder is really gone does it write the MigratedFrom /
 ;      MigratedTo / MigratedAt record (HKCU\Software\${APP_GUID}) that lets the
 ;      app repoint its login item and MCP client entries.
@@ -81,7 +84,9 @@
   !define DN_TASKBAR_PINS "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
 
   Var dnLegacyDir
+  ; "1" when the user had the old install's desktop / Start menu shortcut.
   Var dnHadDesktopLink
+  Var dnHadStartMenuLink
   ; "1" when the old folder must stay this run (its app could not be closed).
   Var dnKeepLegacy
 
@@ -92,7 +97,8 @@
 
   !macro customInit
     StrCpy $dnLegacyDir ""
-    StrCpy $dnHadDesktopLink "0"
+    StrCpy $dnHadDesktopLink "1"
+    StrCpy $dnHadStartMenuLink "1"
     StrCpy $dnKeepLegacy "0"
     StrCpy $dnProgramsRoot "$LOCALAPPDATA\Programs"
     StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
@@ -117,7 +123,11 @@
       ${if} $dnPlanNote != ""
         DetailPrint "Ignoring $dnPlanNote"
       ${endif}
-      ${if} $R6 != ""
+      ${if} $R6 == ""
+        ; Shortcut answers recorded by an untrusted journal are not this move's.
+        DeleteRegValue HKCU "${DN_MIGRATION_KEY}" "DesktopLink"
+        DeleteRegValue HKCU "${DN_MIGRATION_KEY}" "StartMenuLink"
+      ${else}
         ${if} $dnLegacyDir == ""
           StrCpy $dnLegacyDir $R6
         ${endif}
@@ -137,12 +147,6 @@
       ${endif}
     ${endif}
 
-    ${if} $dnLegacyDir != ""
-      ; Respect a user who deleted the desktop shortcut of the old install.
-      ${if} ${FileExists} "$DESKTOP\${SHORTCUT_NAME}.lnk"
-        StrCpy $dnHadDesktopLink "1"
-      ${endif}
-    ${endif}
   !macroend
 
   !macro dnParkLegacyUninstaller
@@ -173,6 +177,18 @@
       Call dnMigrationClose
       Pop $dnKeepLegacy
       !insertmacro dnParkLegacyUninstaller
+      ; Which shortcuts the user still had, before the old version is touched
+      ; (setLinkVars has run: these are the old install's own shortcut paths).
+      ; The new install recreates both (keepShortcuts is false: its exe is new),
+      ; and customInstall removes again what the user had deleted.
+      Push "DesktopLink"
+      Push $oldDesktopLink
+      Call dnShortcutState
+      Pop $dnHadDesktopLink
+      Push "StartMenuLink"
+      Push $oldStartMenuLink
+      Call dnShortcutState
+      Pop $dnHadStartMenuLink
     ${else}
       !insertmacro dnEnsureNotRunning "$INSTDIR"
     ${endif}
@@ -187,14 +203,21 @@
       ${andIf} ${FileExists} "$INSTDIR\resources\app.asar"
       ${andIf} ${FileExists} "$INSTDIR\${UNINSTALL_FILENAME}"
       ${andIf} $R7 == $R9
+        ; Keep the user's shortcut choices: what they had deleted stays deleted.
         ${if} $dnHadDesktopLink == "0"
           Delete "$newDesktopLink"
         ${endif}
-        ${if} ${FileExists} "${DN_TASKBAR_PINS}\${SHORTCUT_NAME}.lnk"
-          CreateShortCut "${DN_TASKBAR_PINS}\${SHORTCUT_NAME}.lnk" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
-          ClearErrors
-          WinShell::SetLnkAUMI "${DN_TASKBAR_PINS}\${SHORTCUT_NAME}.lnk" "${APP_ID}"
+        ${if} $dnHadStartMenuLink == "0"
+          Delete "$newStartMenuLink"
+          StrCpy $launchLink "$appExe"
         ${endif}
+        System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+        ; Taskbar pins of any name that start exactly the old exe.
+        Push "${DN_TASKBAR_PINS}"
+        Push "$dnLegacyDir\${APP_EXECUTABLE_FILENAME}"
+        Push "$appExe"
+        Call dnRepointPins
+        Pop $R8
         DeleteRegValue HKCU "${DN_MIGRATION_KEY}" "LegacyUninstallString"
         Push $dnLegacyDir
         Push $INSTDIR

@@ -18,6 +18,8 @@
 ;   journal|<dest>                       dnTrustedJournal: the trusted source, or "none: <note>"
 ;   migclose|<legacy>|<new>|<policy>     dnMigrationClose: KEEP (1 | 0)
 ;   finish|<legacy>|<new>|<keep>         dnFinishMigration: removed | kept: <why>
+;   linkstate|<name>|<path>              dnShortcutState: 1 | 0 (recorded in the journal on first use)
+;   pins|<dir>|<old>|<new>               dnRepointPins: number of shortcuts repointed
 Unicode true
 SilentInstall silent
 RequestExecutionLevel user
@@ -165,6 +167,17 @@ Function .onInit
       Push $a
       Push $b
       Call dnMigrationClose
+      Pop $result
+    ${elseif} $kind == "linkstate"
+      Push $a
+      Push $b
+      Call dnShortcutState
+      Pop $result
+    ${elseif} $kind == "pins"
+      Push $a
+      Push $b
+      Push $c
+      Call dnRepointPins
       Pop $result
     ${elseif} $kind == "finish"
       Push $a

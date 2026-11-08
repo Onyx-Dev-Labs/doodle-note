@@ -339,8 +339,16 @@ moves an existing install on upgrade:
    it with a walk that deletes a junction or link but never what it points to
    (NSIS's own `RMDir /r` follows junctions, verified on Dev04) and deletes
    `DoodleNote.exe` last, so a folder that is only partly removed is still
-   recognised next time. It keeps the user's desktop-shortcut choice and
-   repoints a taskbar pin. If the new copy is incomplete the old folder is kept.
+   recognised next time. Before the old version is touched, `customCheckAppRunning`
+   records (in the journal, so an interrupted run's leftovers cannot change the
+   answer) whether the user still had the old desktop and Start menu shortcuts;
+   electron-builder recreates both for the new exe, and `customInstall` deletes
+   again whichever the user had deleted. Every taskbar pin (`*.lnk` in
+   `User Pinned\TaskBar`, any name) whose target is exactly the old exe is
+   repointed to the new exe (its icon and working folder too where they named
+   the old ones; arguments, description and AppUserModelID kept); no other
+   shortcut is written and none is created. If the new copy is incomplete the
+   old folder is kept.
    Only when the old folder is really gone does it write the record
    `HKCU\Software\{APP_GUID}` `MigratedFrom` / `MigratedTo` / `MigratedAt`.
 
@@ -409,7 +417,10 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 2. Run `release-qa\DoodleNote QA-<version>-setup.exe` (also with `/S --updated`).
    Check: `Programs\DoodleNote QA` exists and `Programs\desktop-qa` is gone; one
    "DoodleNote QA" entry in Apps & features whose uninstaller is in the new
-   folder; Start menu and desktop shortcuts start the new exe; the profile and
+   folder; Start menu and desktop shortcuts start the new exe (repeat once with
+   the legacy Start menu shortcut deleted and once with the desktop one deleted:
+   they stay deleted); a taskbar pin of the legacy app, also one renamed, starts
+   the new exe and other pins are unchanged; the profile and
    library are unchanged; the QA Run value and the sandboxed client configs name
    the new exe (`install-migration.json` in the profile says `complete`); the QA
    journal key is gone; right after the installer and before the first launch

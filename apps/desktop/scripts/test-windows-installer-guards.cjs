@@ -33,6 +33,32 @@ function junction(link, target) {
   execFileSync('cmd.exe', ['/d', '/c', 'mklink', '/J', link, target], { stdio: 'ignore' })
 }
 
+/** Runs a Windows PowerShell script with `data` as JSON in $env:DN_DATA; returns its output. */
+function powershell(script, data) {
+  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    env: { ...process.env, DN_DATA: JSON.stringify(data) }
+  })
+}
+
+/** Creates .lnk files (WScript.Shell, as Explorer would) from {file, target, ...} specs. */
+function makeShortcuts(specs) {
+  powershell(
+    '$sh = New-Object -ComObject WScript.Shell; foreach ($l in ($env:DN_DATA | ConvertFrom-Json)) { $s = $sh.CreateShortcut($l.file); $s.TargetPath = $l.target; if ($l.args) { $s.Arguments = $l.args }; if ($l.description) { $s.Description = $l.description }; if ($l.icon) { $s.IconLocation = $l.icon }; if ($l.workdir) { $s.WorkingDirectory = $l.workdir }; $s.Save() }',
+    specs
+  )
+}
+
+/** Reads back target, arguments, description, icon and working folder of .lnk files. */
+function readShortcuts(files) {
+  return JSON.parse(
+    powershell(
+      '$sh = New-Object -ComObject WScript.Shell; ConvertTo-Json -Compress @(foreach ($f in ($env:DN_DATA | ConvertFrom-Json)) { $s = $sh.CreateShortcut($f); [pscustomobject]@{ target = $s.TargetPath; args = $s.Arguments; description = $s.Description; icon = $s.IconLocation; workdir = $s.WorkingDirectory } })',
+      files
+    )
+  )
+}
+
 /** A harmless long-running process whose image is `exe` (a copy of ping.exe). */
 function runAs(exe) {
   fs.mkdirSync(path.dirname(exe), { recursive: true })
@@ -54,7 +80,7 @@ function alive(pid) {
 /**
  * A case is [kind, a, b, expected] or, for kinds with a third field, [kind, a, b, c, expected].
  */
-const THREE_FIELDS = new Set(['arm', 'migclose', 'finish'])
+const THREE_FIELDS = new Set(['arm', 'migclose', 'finish', 'pins'])
 const fields = (c) => (THREE_FIELDS.has(c[0]) ? c.slice(0, 4) : c.slice(0, 3))
 const expectation = (c) => (THREE_FIELDS.has(c[0]) ? c[4] : c[3])
 
@@ -72,6 +98,9 @@ async function main() {
   const holds = []
   /** Throwaway HKCU keys the harness writes; deleted afterwards. */
   const registryKeys = []
+  const pinFiles = {}
+  const pinBefore = []
+  const pinBytes = new Map()
   try {
     const nsis = await makensis()
     const exe = path.join(sandbox, 'harness.exe')
@@ -289,6 +318,52 @@ async function main() {
       '',
       (r) => lower(r).startsWith(migRecord) && /\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(r)
     ])
+
+    // L6: shortcut presence is recorded once per migration, before anything changes.
+    const present = path.join(sandbox, 'links', 'present.lnk')
+    const missing = path.join(sandbox, 'links', 'missing.lnk')
+    write(present, 'x')
+    cases.push(['linkstate', 'DesktopLink', present, '1'])
+    cases.push(['linkstate', 'DesktopLink', missing, '1'])
+    cases.push(['linkstate', 'StartMenuLink', missing, '0'])
+    cases.push(['linkstate', 'StartMenuLink', present, '0'])
+
+    // L6: taskbar pins of any name that start exactly the old exe are repointed;
+    // nothing else is touched or created.
+    const pinApp = path.join(sandbox, 'pin-app', 'Programs')
+    const pinOld = path.join(pinApp, 'desktop', 'DoodleNote.exe')
+    const pinNew = path.join(pinApp, 'DoodleNote', 'DoodleNote.exe')
+    const pinSibling = path.join(pinApp, 'desktop-qa', 'DoodleNote.exe')
+    const pinOther = path.join(pinApp, 'desktop', 'Other.exe')
+    for (const file of [pinOld, pinNew, pinSibling, pinOther]) write(file, 'x')
+    const pins = path.join(sandbox, 'pins')
+    const notepad = path.join(process.env.SystemRoot, 'System32', 'notepad.exe')
+    pinFiles.A = path.join(pins, 'My DoodleNote.lnk')
+    pinFiles.B = path.join(pins, 'Notepad.lnk')
+    pinFiles.C = path.join(pins, 'Upper.lnk')
+    pinFiles.D = path.join(pins, 'Sibling.lnk')
+    pinFiles.E = path.join(pins, 'Other.lnk')
+    fs.mkdirSync(pins, { recursive: true })
+    write(path.join(pins, 'notes.txt'), 'not a shortcut')
+    makeShortcuts([
+      {
+        file: pinFiles.A,
+        target: pinOld,
+        args: '--hidden',
+        description: 'keep me',
+        icon: `${pinOld},0`,
+        workdir: path.dirname(pinOld)
+      },
+      { file: pinFiles.B, target: notepad },
+      { file: pinFiles.C, target: pinOld.toUpperCase() },
+      { file: pinFiles.D, target: pinSibling },
+      { file: pinFiles.E, target: pinOther }
+    ])
+    pinBefore.push(...readShortcuts(Object.values(pinFiles)))
+    for (const file of [pinFiles.B, pinFiles.D, pinFiles.E])
+      pinBytes.set(file, fs.readFileSync(file))
+    cases.push(['pins', pins, pinOld, pinNew, '2'])
+    cases.push(['pins', pins, pinOld, pinNew, '0'])
     // 8.3 short names: the old folder exists, the new one does not yet. Runner TEMP
     // paths are short already (C:\\Users\\RUNNER~1); elsewhere use the short form.
     const shortRoot = execFileSync(
@@ -393,6 +468,35 @@ async function main() {
     assert.ok(fs.existsSync(path.join(l3, 'desktop', 'DoodleNote.exe')))
     assert.ok(fs.existsSync(path.join(l3, 'desktop', 'locked.dat')))
     assert.ok(fs.existsSync(path.join(l3, 'DoodleNote', 'DoodleNote.exe')))
+    // L6: the two pins that started the old exe now start the new one, keeping
+    // their arguments and description; the others are byte-for-byte untouched.
+    const pinAfter = readShortcuts(Object.values(pinFiles))
+    const [a, b, c, d, e] = pinAfter
+    assert.equal(lower(a.target), lower(pinNew))
+    assert.equal(a.args, '--hidden')
+    assert.equal(a.description, 'keep me')
+    assert.equal(lower(a.icon), lower(`${pinNew},0`))
+    assert.equal(lower(a.workdir), lower(path.dirname(pinNew)))
+    assert.equal(lower(c.target), lower(pinNew))
+    assert.deepEqual([b, d, e], [pinBefore[1], pinBefore[3], pinBefore[4]])
+    for (const [file, bytes] of pinBytes) assert.ok(fs.readFileSync(file).equals(bytes), file)
+    assert.equal(fs.readFileSync(path.join(pins, 'notes.txt'), 'utf8'), 'not a shortcut')
+    assert.deepEqual(
+      fs.readdirSync(pins).sort(),
+      [
+        'My DoodleNote.lnk',
+        'notes.txt',
+        'Notepad.lnk',
+        'Other.lnk',
+        'Sibling.lnk',
+        'Upper.lnk'
+      ].sort()
+    )
+    if (keep)
+      write(
+        path.join(keep, 'installer-guards-pins.json'),
+        JSON.stringify({ pinBefore, pinAfter }, null, 2)
+      )
     // H2: the real move removed the old folder and kept the new one.
     assert.ok(!fs.existsSync(migSource))
     assert.ok(fs.existsSync(path.join(migDest, 'DoodleNote.exe')))
