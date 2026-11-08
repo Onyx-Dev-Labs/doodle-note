@@ -393,8 +393,8 @@ every identity-bearing name from the one entry in
 | AppUserModelID and the "Open at login" Run value | `com.doodlenote.desktop` | `com.doodlenote.desktop.qa` |
 | MCP entry in client configs | `doodle-note` | `doodle-note-qa` |
 | MCP opt-in file and client configs | the real home directory | a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`), like the dev channel |
-| Migration journal | `HKCU\Software\{f85f8dcf-...}\InstallMigration` | `HKCU\Software\{320d0756-...}\InstallMigration` |
-| Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\{f85f8dcf-...}` | `HKCU\Software\{320d0756-...}` |
+| Migration journal | `HKCU\Software\f85f8dcf-...\InstallMigration` | `HKCU\Software\320d0756-...\InstallMigration` |
+| Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
 | Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
 
 `pnpm package:win:qa` builds it: the app code with `DOODLENOTE_QA_IDENTITY=1`
@@ -405,10 +405,11 @@ and its package name disagree, so a production bundle can never be packaged as
 QA or the reverse. `node scripts/package-win-qa.cjs --legacy-layout` builds the
 starting point: the same QA identity without the migration include, so it
 installs to `Programs\desktop-qa` exactly like builds from before the rename
-(output `release-qa-legacy\`). The Bark helper's output-mute coordination is
-still shared by every identity in the session (`Local\DoodleNote-Bark-output`
-and `%TEMP%\DoodleNote-Bark-output.json`), so do not dictate with production and
-QA running at the same time.
+(output `release-qa-legacy\`). The Bark helper names its output-mute
+coordination after the identity it is launched with (`DICTATION_HELPER_IDENTITY`
+= the build's `appId`: `Local\DoodleNote-Bark-output-<appId>` and
+`%TEMP%\DoodleNote-Bark-output-<appId>.json`), so production and QA no longer
+share it.
 
 Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 `Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
@@ -428,7 +429,7 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
    library are unchanged; the QA Run value and the sandboxed client configs name
    the new exe (`install-migration.json` in the profile says `complete`); the QA
    journal key is gone; right after the installer and before the first launch
-   `HKCU\Software\{320d0756-...}` holds `MigratedFrom` / `MigratedTo` /
+   `HKCU\Software\320d0756-...` holds `MigratedFrom` / `MigratedTo` /
    `MigratedAt`, and after the first launch they are gone; nothing of production
    changed (its folder, Run value, uninstall key and real MCP configs).
 3. Repeat with the legacy QA app running (closed only after the OK prompt; with
@@ -484,13 +485,13 @@ files that already carry a valid vendor signature (Microsoft's
 `d3dcompiler_47.dll`, `dxil.dll`) keep it. electron-builder never offers
 single-file `extraResources` to its signer, so `package:win` signs
 `engine\.build\windows\dictation-helper.exe` itself right after building it.
-Anything that records the helper's hash (its integrity manifest) must run after
-that step, or be signing-invariant. The order is helper build (which writes
-the manifest), helper signing, electron-builder; since win/bark `1949dcc` the
-manifest records the signing-invariant Authenticode digest and a signed helper
-must also pass the chain and publisher check, so this order holds for unsigned
-and signed builds alike (pinning the certificate thumbprint is a TODO in
-`sign-windows.cjs` for when the certificate exists).
+Anything that records the helper's signature must run after that step. The
+order is helper build, helper signing, `write-dictation-helper-manifest.cjs`
+(win/bark: the signing-invariant Authenticode digest, and for a signed helper
+the signer's exact CN and certificate thumbprint, which electron-vite bakes into
+the app), electron-vite, electron-builder; pinned by `helper-integrity.test.ts`
+and `dictation-platform.test.ts`. `pnpm package:win:qa` runs the same order
+(unsigned).
 
 A PFX supplied the electron-builder way (`CSC_LINK` / `WIN_CSC_LINK`) is refused
 with an error: the helper step never receives electron-builder's certificate,
