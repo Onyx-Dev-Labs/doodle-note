@@ -72,7 +72,13 @@ import { MicWatcher } from './mic-watcher'
 import { NotesService } from './notes-service'
 import { PromptPanel } from './prompt-panel'
 import { SyncService } from './sync-service'
-import { fitIntoWorkArea, MAIN_WINDOW_SIZE, mainWindowBoundsFor } from './window-sizing'
+import {
+  keepsMainWindowOnScreen,
+  MAIN_WINDOW_SIZE,
+  mainWindowBoundsFor,
+  refitMainWindow,
+  type DisplayArea
+} from './window-sizing'
 import {
   SESSION_END_CANCEL_RESET_MS,
   SESSION_END_FINISH_TIMEOUT_MS,
@@ -354,18 +360,39 @@ function broadcastEngineEvent(event: EngineEvent): void {
 }
 
 /**
- * Windows: keep the main window within the work area of the display it is on
- * when it moves to another display or scaling changes (mixed-DPI setups, a
- * laptop undocked from a monitor). See mainWindowBoundsFor.
+ * Windows: keep the main window usable when it moves to another display or
+ * scaling changes (mixed-DPI setups, a laptop undocked from a monitor), without
+ * ever shrinking a window that is fully visible, e.g. one spanning two monitors.
+ * See refitMainWindow and mainWindowBoundsFor. macOS is never touched.
  */
 function keepMainWindowOnScreen(window: BrowserWindow): void {
+  if (!keepsMainWindowOnScreen(process.platform)) return
+  const area = (display: Electron.Display): DisplayArea => ({
+    id: display.id,
+    workArea: display.workArea
+  })
+  const centerOf = (bounds: Electron.Rectangle): DisplayArea =>
+    area(
+      screen.getDisplayNearestPoint({
+        x: Math.round(bounds.x + bounds.width / 2),
+        y: Math.round(bounds.y + bounds.height / 2)
+      })
+    )
+  let previous: DisplayArea | null = centerOf(window.getBounds())
   const refit = (): void => {
     if (window.isDestroyed() || window.isMaximized() || window.isFullScreen()) return
     if (window.isMinimized()) return
-    const area = screen.getDisplayMatching(window.getBounds()).workArea
-    const limits = mainWindowBoundsFor(area)
+    const bounds = window.getBounds()
+    const center = centerOf(bounds)
+    const limits = mainWindowBoundsFor(center.workArea)
     window.setMinimumSize(limits.minWidth, limits.minHeight)
-    const next = fitIntoWorkArea(window.getBounds(), area)
+    const next = refitMainWindow({
+      bounds,
+      displays: screen.getAllDisplays().map(area),
+      center,
+      previous
+    })
+    previous = center
     if (next) window.setBounds(next)
   }
   screen.on('display-metrics-changed', refit)
@@ -408,7 +435,7 @@ function createWindow(): void {
   })
 
   mainWindow = window
-  if (process.platform === 'win32') keepMainWindowOnScreen(window)
+  keepMainWindowOnScreen(window)
   window.on('close', (event) => {
     if (libraryActivity.moving) {
       event.preventDefault()

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { fitIntoWorkArea, MAIN_WINDOW_SIZE, mainWindowBoundsFor } from './window-sizing'
+import {
+  fitIntoWorkArea,
+  keepsMainWindowOnScreen,
+  MAIN_WINDOW_SIZE,
+  mainWindowBoundsFor,
+  refitMainWindow,
+  visibleFraction,
+  type DisplayArea
+} from './window-sizing'
 
 const css = readFileSync(new URL('../renderer/src/assets/main.css', import.meta.url), 'utf8')
 
@@ -87,4 +95,86 @@ test('the Windows tray icons carry an image for every common notification-area s
     for (const size of [16, 20, 24, 32, 40, 48])
       assert.ok(sizes.includes(size), `${name} has ${size}px`)
   }
+})
+
+// Two monitors side by side: a 1920x1080 one (taskbar 40 px) and a smaller
+// 1280x720 one to its right, both at 100%.
+const left: DisplayArea = { id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1040 } }
+const right: DisplayArea = { id: 2, workArea: { x: 1920, y: 0, width: 1280, height: 680 } }
+const displays = [left, right]
+
+test('a window deliberately spanning both monitors is never shrunk', () => {
+  // Larger than either work area, fully visible across the two.
+  const spanning = { x: 400, y: 50, width: 2600, height: 600 }
+  assert.equal(visibleFraction(spanning, [left.workArea, right.workArea]), 1)
+  for (const [center, previous] of [
+    [left, left],
+    [right, left],
+    [left, right],
+    [right, null]
+  ] as const) {
+    assert.equal(refitMainWindow({ bounds: spanning, displays, center, previous }), null)
+  }
+  // Partly below the smaller monitor's work area but within the pair's extent: left alone,
+  // even when its center just moved onto the smaller monitor.
+  const uneven = { x: 1000, y: 100, width: 2000, height: 800 }
+  assert.ok(visibleFraction(uneven, [left.workArea, right.workArea]) < 1)
+  assert.equal(refitMainWindow({ bounds: uneven, displays, center: right, previous: left }), null)
+})
+
+test('a window moved mostly off every work area is brought back inside', () => {
+  const offscreen = { x: 3000, y: 200, width: 1000, height: 400 }
+  assert.ok(visibleFraction(offscreen, [left.workArea, right.workArea]) < 0.5)
+  assert.deepEqual(
+    refitMainWindow({ bounds: offscreen, displays, center: right, previous: right }),
+    { x: 2200, y: 200, width: 1000, height: 400 }
+  )
+})
+
+test('moving onto a smaller monitor shrinks a window only when it no longer fits there', () => {
+  const big = { x: 1950, y: 0, width: 1180, height: 760 }
+  // From the big monitor to the small one: larger than the small one's work area.
+  assert.deepEqual(refitMainWindow({ bounds: big, displays, center: right, previous: left }), {
+    x: 1950,
+    y: 0,
+    width: 1180,
+    height: 680
+  })
+  // Already on the small monitor at the last check: a further move does not refit again.
+  assert.equal(refitMainWindow({ bounds: big, displays, center: right, previous: right }), null)
+  // Onto a larger monitor: nothing to do.
+  assert.equal(
+    refitMainWindow({
+      bounds: { x: 100, y: 0, width: 1180, height: 1100 },
+      displays,
+      center: left,
+      previous: right
+    }),
+    null
+  )
+})
+
+test('a scale change on the same monitor refits a window that became too large', () => {
+  const at200: DisplayArea = { id: 1, workArea: { x: 0, y: 0, width: 960, height: 500 } }
+  assert.deepEqual(
+    refitMainWindow({
+      bounds: { x: 0, y: 0, width: 900, height: 760 },
+      displays: [at200],
+      center: at200,
+      previous: left
+    }),
+    { x: 0, y: 0, width: 900, height: 500 }
+  )
+})
+
+test('only Windows keeps the main window on screen; macOS and Linux are untouched', () => {
+  assert.equal(keepsMainWindowOnScreen('win32'), true)
+  assert.equal(keepsMainWindowOnScreen('darwin'), false)
+  assert.equal(keepsMainWindowOnScreen('linux'), false)
+  const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+  const body = index.slice(index.indexOf('function keepMainWindowOnScreen('))
+  assert.match(
+    body,
+    /^function keepMainWindowOnScreen\(window: BrowserWindow\): void \{\n\s+if \(!keepsMainWindowOnScreen\(process\.platform\)\) return\n/
+  )
 })

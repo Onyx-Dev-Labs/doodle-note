@@ -543,9 +543,19 @@ the meeting prompt are placed inside the work area of the display they are on,
 and the notification-area icons carry 16, 20, 24, 32, 40 and 48 px images.
 The main window opens on the display under the pointer, sized to fit its work
 area (1080p at 200% leaves about 960x500 DIPs, less than the 1180x760 default
-and the 560 DIP minimum height), and is fitted back inside the work area when
-it moves to a display with less room or the scale changes. The pill is placed
-again whenever scaling changes or a display is added or removed.
+and the 560 DIP minimum height). After a move, a scale change or a removed
+display it is left alone whenever it is fully visible, including a window
+deliberately spanning two monitors and larger than either; it is brought back
+only when less than half of it is on any work area, and shrunk only when the
+display under its center became smaller (another display, or a higher scale)
+and the window is larger than the combined work areas it overlaps. macOS keeps
+its own window handling. The pill is placed again whenever scaling changes or a
+display is added or removed.
+
+`capture-windows-dpi.cjs` must run a copy of the app from a folder that is not
+an installed identity's folder; the app never repoints a login item or MCP
+client configs unless the installer recorded a move into the folder it runs
+from, so a copied exe cannot change them.
 
 `apps/desktop/scripts/capture-windows-dpi.cjs <DoodleNote.exe> <out-dir>
 --profiles <isolated-profiles-dir>` launches the packaged app with
