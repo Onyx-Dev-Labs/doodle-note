@@ -274,11 +274,14 @@ async function holdFile(file) {
  * names off, or a valid 8.3 name), which the record must carry (round 9).
  */
 let legacyShortName = ''
+/** The Run value as seeded (through the old folder's 8.3 path), until the app repoints it. */
+let seededRun = ''
 
 function seedLegacyEntries() {
   const oldExe = path.join(OLD, EXE)
   const shortOldExe = path.join(shortPath(OLD), EXE)
-  setRunValue(`"${shortOldExe}"`)
+  seededRun = `"${shortOldExe}"`
+  setRunValue(seededRun)
   const entry = {
     command: oldExe,
     args: [path.join(OLD, 'resources', 'mcp', 'cli.js')],
@@ -499,7 +502,7 @@ async function scenarioA() {
       at = found + 1
     }
     // Not yet repointed: that is the app's job, on the record.
-    assert.match(reg(KEYS.run)?.[qa.appId] ?? '', /desktop-qa/i)
+    assert.equal(reg(KEYS.run)?.[qa.appId], seededRun, 'A2: the Run value as seeded')
   })
   await step('A3 first launch consumes the record', () => firstLaunch('A3'))
   await step('A4 uninstall /S', () => uninstallAndCheck('A4'))
