@@ -412,6 +412,10 @@ export class WinEngineHost {
       const reply = await this.registryRequest({ op: 'read', subKey, name })
       return typeof reply.value === 'string' ? reply.value : null
     },
+    readBinary: async (subKey, name) => {
+      const reply = await this.registryRequest({ op: 'readBinary', subKey, name })
+      return typeof reply.value === 'string' ? Buffer.from(reply.value, 'hex') : null
+    },
     writeStrings: async (subKey, values) => {
       await this.registryRequest({ op: 'write', subKey, values: values.map(([n, d]) => [n, d]) })
     },

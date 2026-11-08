@@ -53,6 +53,8 @@ export interface InstallRecordPending {
 export interface WindowsRegistry {
   /** A REG_SZ value's text, or null when the key or value is not there. */
   readString(subKey: string, name: string): Promise<string | null>
+  /** A REG_BINARY value's bytes, or null when the key or value is not there (round 10). */
+  readBinary(subKey: string, name: string): Promise<Buffer | null>
   /** Writes REG_SZ values in order (the key is created if needed). */
   writeStrings(subKey: string, values: ReadonlyArray<readonly [string, string]>): Promise<void>
   /** Deletes one value; resolves when it is gone or was never there. */
@@ -60,6 +62,14 @@ export interface WindowsRegistry {
 }
 
 export const INSTALL_RECORD_VALUE = 'MigrationRecord'
+
+/**
+ * Where Task Manager and Settings > Apps > Startup keep each Run entry's
+ * enabled / disabled state: a REG_BINARY value named like the Run value.
+ */
+export const STARTUP_APPROVED_RUN_KEY =
+  'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'
+
 export const INSTALL_RECORD_VERSION = 'DNMR2'
 
 /** electron-builder's namespace for APP_GUID (app-builder-lib NsisTarget). */

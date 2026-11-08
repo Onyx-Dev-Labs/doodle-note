@@ -16,6 +16,8 @@ import {
   PathResolutionError,
   legacyInstallFor,
   loginItemStateFromRun,
+  LoginItemStateUnknown,
+  startupApprovedEnabled,
   longPath,
   samePath,
   readFailureReason,
@@ -299,6 +301,7 @@ test('the record is read, cleared and the status written through the registry, n
   const writes: string[] = []
   const registry: WindowsRegistry = {
     readString: async (subKey, name) => values.get(`${subKey}|${name}`) ?? null,
+    readBinary: async () => null,
     writeStrings: async (subKey, pairs) => {
       for (const [name, data] of pairs) {
         writes.push(name)
@@ -533,12 +536,16 @@ test('the login item: the Run value is read as written and matched 8.3-aware', a
   const legacy = `${LONG_PROGRAMS}\\desktop`
   const isLegacy = (path: string): boolean => isInsideFolder(path, legacy, realPath)
   const asked: string[] = []
+  // StartupApproved unreadable here: Electron's answer decides (cases below for the rest).
   const state = (value: string | null, enabled?: boolean): Promise<LoginItemState> =>
     loginItemStateFromRun(
       async () => value,
+      async () => {
+        throw Object.assign(new Error('no worker'), { code: 'reader-unavailable' })
+      },
       (program) => {
         asked.push(program)
-        return enabled
+        return enabled ?? true
       },
       isLegacy
     )
@@ -561,6 +568,96 @@ test('the login item: the Run value is read as written and matched 8.3-aware', a
   ])
     assert.deepEqual(await state(value), { registered: false, enabled: true }, String(value))
   assert.equal(asked.length, 3)
+})
+
+test('round 10: a login item turned off in Task Manager stays off, an unknown state is never guessed', async () => {
+  const realPath = movedDisk()
+  const legacy = `${LONG_PROGRAMS}\\desktop`
+  const isLegacy = (path: string): boolean => isInsideFolder(path, legacy, realPath)
+  const shortOld = `"${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe"`
+  const off = Buffer.from('030000000102030405060708', 'hex')
+  const on = Buffer.from('020000000000000000000000', 'hex')
+  const unreadable = async (): Promise<Buffer | null> => {
+    throw Object.assign(new Error('TYPE'), { code: 'TYPE' })
+  }
+  const state = (
+    approved: () => Promise<Buffer | null>,
+    electron: boolean | undefined
+  ): Promise<LoginItemState> =>
+    loginItemStateFromRun(
+      async () => shortOld,
+      approved,
+      () => electron,
+      isLegacy
+    )
+  // The case the review found: Electron cannot match the 8.3 program (undefined), the
+  // item is disabled: it stays disabled (before: undefined -> true, re-enabled).
+  assert.deepEqual(await state(async () => off, undefined), { registered: true, enabled: false })
+  // StartupApproved decides when it can be read, whatever Electron says.
+  assert.deepEqual(await state(async () => off, true), { registered: true, enabled: false })
+  assert.deepEqual(await state(async () => on, false), { registered: true, enabled: true })
+  // No StartupApproved value: never toggled, enabled.
+  assert.deepEqual(await state(async () => null, undefined), { registered: true, enabled: true })
+  // Unreadable: Electron's answer, when it has one.
+  assert.deepEqual(await state(unreadable, false), { registered: true, enabled: false })
+  assert.deepEqual(await state(unreadable, true), { registered: true, enabled: true })
+  // Neither knows (unreadable or an empty value, and no Electron match): never guessed.
+  await assert.rejects(state(unreadable, undefined), LoginItemStateUnknown)
+  await assert.rejects(
+    state(async () => Buffer.alloc(0), undefined),
+    LoginItemStateUnknown
+  )
+  // A Run value that is not the old install's: not asked at all.
+  assert.deepEqual(
+    await loginItemStateFromRun(
+      async () => `"${SHORT_PROGRAMS}\\DoodleNote\\DoodleNote.exe"`,
+      async () => assert.fail('not asked'),
+      () => assert.fail('not asked'),
+      isLegacy
+    ),
+    { registered: false, enabled: true }
+  )
+  // The byte rule: even enabled (0x02, 0x06), odd disabled (0x01, 0x03, 0x07).
+  for (const [first, enabled] of [
+    [0x02, true],
+    [0x06, true],
+    [0x00, true],
+    [0x01, false],
+    [0x03, false],
+    [0x07, false]
+  ] as const)
+    assert.equal(startupApprovedEnabled(Buffer.from([first, 0, 0, 0])), enabled, String(first))
+  assert.equal(startupApprovedEnabled(null), true)
+  assert.equal(startupApprovedEnabled(Buffer.alloc(0)), undefined)
+  // In the move: an unknown state leaves the step pending (retried), nothing registered.
+  const registered: boolean[] = []
+  let reads = 0
+  const deps = fakeDeps({
+    loginItem: {
+      stateFor: async (isLegacyPath) => {
+        reads++
+        return loginItemStateFromRun(
+          async () => `"${oldExe}"`,
+          reads === 1 ? unreadable : async () => off,
+          () => undefined,
+          isLegacyPath
+        )
+      },
+      registerCurrent: (enabled) => registered.push(enabled)
+    }
+  })
+  const first = await runWindowsInstallMigration(deps)
+  assert.deepEqual(first.pending, ['login-item'])
+  assert.equal(first.retry, true)
+  assert.deepEqual(registered, [])
+  assert.deepEqual((await runWindowsInstallMigration(deps)).pending, [])
+  assert.deepEqual(registered, [false], 'registered again, still disabled')
+  // The app wires StartupApproved for its own login item name through the worker.
+  const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+  assert.match(
+    index,
+    /\(\) => registry\.readBinary\(STARTUP_APPROVED_RUN_KEY, APP_IDENTITY\.loginItemName\)/
+  )
 })
 
 test('a launch through the short path: the record is consumed, and the marker is recognised', async () => {

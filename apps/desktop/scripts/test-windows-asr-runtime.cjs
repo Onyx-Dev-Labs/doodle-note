@@ -128,12 +128,19 @@ async function main() {
         const anonymous = open([])
         const status = `Software\\DoodleNote-InstallStatus\\${guid}`
         const run = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+        const approved = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'
         try {
           return {
             record: await ask({ op: 'read', subKey: `Software\\${guid}`, name: 'MigrationRecord' }),
             status: await ask({ op: 'read', subKey: status, name: 'AppMigration' }),
             // Round 8: the login item's Run value (a dotted name, the appId) is readable.
             runValue: await ask({ op: 'read', subKey: run, name: 'com.doodlenote.desktop' }),
+            // Round 10: its Task Manager state (REG_BINARY, as hex, or null).
+            approved: await ask({
+              op: 'readBinary',
+              subKey: approved,
+              name: 'com.doodlenote.desktop'
+            }),
             refused: [
               await ask({ op: 'write', subKey: status, values: [['LastResult', 'x']] }),
               await ask({ op: 'read', subKey: `Software\\${other}`, name: 'MigrationRecord' }),
@@ -145,6 +152,8 @@ async function main() {
               await ask({ op: 'delete', subKey: `Software\\${other}`, name: 'MigrationRecord' }),
               await ask({ op: 'read', subKey: `Software\\${guid}`, name: 'InstallLocation' }),
               await ask({ op: 'read', subKey: run, name: 'com.doodlenote.desktop.qa' }),
+              await ask({ op: 'readBinary', subKey: approved, name: 'com.doodlenote.desktop.qa' }),
+              await ask({ op: 'read', subKey: approved, name: 'com.doodlenote.desktop' }),
               await ask({
                 op: 'read',
                 subKey: 'Software\\Microsoft\\Windows\\CurrentVersion',
@@ -165,6 +174,11 @@ async function main() {
         read.ok && (read.value === null || typeof read.value === 'string'),
         JSON.stringify(registry)
       )
+    assert.ok(
+      registry.approved.ok &&
+        (registry.approved.value === null || /^([0-9a-f]{2})+$/.test(registry.approved.value)),
+      JSON.stringify(registry)
+    )
     for (const refused of registry.refused)
       assert.deepEqual([refused.ok, refused.code], [false, 'SCOPE'], JSON.stringify(registry))
     console.log(JSON.stringify({ executablePath, profile, preflight: result, stream, registry }))

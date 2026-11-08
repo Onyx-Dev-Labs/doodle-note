@@ -530,7 +530,10 @@ library location, settings and accounts; it is named after the app (package
 name `desktop`), not the install folder, and is not moved. Keep the package name
 and `appId` as they are unless a profile migration is written too. On the next
 launch the app repoints the "Open at login" entry (keeping a Task Manager
-disable) and MCP client configs (Claude Desktop, Claude Code, Codex) that
+disable: round 10 reads it from `Explorer\StartupApproved\Run` itself, because
+Electron's own lookup cannot match a Run value written through an 8.3 path and
+would answer "enabled"; when neither can tell, the entry is left as it is and
+the step stays pending) and MCP client configs (Claude Desktop, Claude Code, Codex) that
 launched the old exe (`src/main/windows-install-migration.ts`). "Launched the old
 exe" is decided with 8.3 short names expanded on both sides (`isInsideFolder`):
 an MCP command or Run value the old app wrote while it was started through a
@@ -575,7 +578,9 @@ identity and stays byte-identical across packages: it may read only `MigrationRe
 `Software\{APP_GUID}`, the three `AppMigration` / `AppMigrationReason` /
 `AppMigrationLastAttempt` values in its `Software\DoodleNote-InstallStatus\{APP_GUID}`,
 and its own Run value (named after its `appId`) in
-`Software\Microsoft\Windows\CurrentVersion\Run`; write only those three status
+`Software\Microsoft\Windows\CurrentVersion\Run`, and (round 10, the only
+binary read, `RRF_RT_REG_BINARY`, at most 256 bytes) that value's Task Manager
+state in `Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`; write only those three status
 values; delete only that `MigrationRecord`. Anything else (another identity's
 GUID, the installer's own values such as `InstallLocation` or `LastResult`, the
 journal, another app's Run value) is refused (`SCOPE`) before any Win32 call. All

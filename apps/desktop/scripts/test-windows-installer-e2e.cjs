@@ -92,7 +92,9 @@ const KEYS = {
   recovery: `Software\\DoodleNote-InstallRecovery\\${GUID}`,
   recoveryParent: 'Software\\DoodleNote-InstallRecovery',
   status: `Software\\DoodleNote-InstallStatus\\${GUID}`,
-  run: 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+  run: 'Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+  // Task Manager's enabled/disabled state of each Run value (REG_BINARY, same name).
+  approved: 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'
 }
 const PROFILE = path.join(process.env.APPDATA, qa.packageName)
 const SANDBOX = path.join(PROFILE, 'agent-access-home')
@@ -137,10 +139,29 @@ function setRunValue(value) {
 }
 
 function deleteRunValue() {
-  powershell(
-    "$p = 'HKCU:\\' + $d.key; if ((Test-Path -LiteralPath $p) -and ((Get-Item -LiteralPath $p).GetValueNames() -contains $d.name)) { Remove-ItemProperty -LiteralPath $p -Name $d.name }; exit 0",
-    { key: KEYS.run, name: qa.appId }
+  for (const key of [KEYS.run, KEYS.approved])
+    powershell(
+      "$p = 'HKCU:\\' + $d.key; if ((Test-Path -LiteralPath $p) -and ((Get-Item -LiteralPath $p).GetValueNames() -contains $d.name)) { Remove-ItemProperty -LiteralPath $p -Name $d.name }; exit 0",
+      { key, name: qa.appId }
+    )
+}
+
+/** QA's StartupApproved\Run value: its bytes as hex, null when absent. */
+function approvedValue() {
+  const out = powershell(
+    "$p = 'HKCU:\\' + $d.key; if (Test-Path -LiteralPath $p) { $k = Get-Item -LiteralPath $p; if ($k.GetValueNames() -contains $d.name) { if ([string]$k.GetValueKind($d.name) -ne 'Binary') { 'kind:' + $k.GetValueKind($d.name) } else { -join ($k.GetValue($d.name) | ForEach-Object { $_.ToString('x2') }) } } else { 'null' } } else { 'null' }",
+    { key: KEYS.approved, name: qa.appId }
   )
+  return out === 'null' ? null : out
+}
+
+/** Turns QA's login item off as Task Manager does (0x03, then a FILETIME). */
+function disableInTaskManager() {
+  powershell(
+    "$p = 'HKCU:\\' + $d.key; New-Item -Force -Path $p | Out-Null; New-ItemProperty -LiteralPath $p -Name $d.name -PropertyType Binary -Value ([byte[]](3,0,0,0,1,2,3,4,5,6,7,8)) -Force | Out-Null",
+    { key: KEYS.approved, name: qa.appId }
+  )
+  assert.equal(approvedValue(), '030000000102030405060708', 'seeded: disabled in Task Manager')
 }
 
 /** Every HKCU uninstall entry whose DisplayName starts with the QA product name. */
@@ -349,6 +370,9 @@ function seedLegacyEntries() {
   )
   seededRun = `"${shortOldExe}"`
   setRunValue(seededRun)
+  // Round 10: turned off in Task Manager. Electron cannot match the 8.3 program to
+  // tell its state, so the app must read StartupApproved itself and keep it off.
+  disableInTaskManager()
   const entry = {
     command: oldExe,
     args: [path.join(OLD, 'resources', 'mcp', 'cli.js')],
@@ -369,7 +393,7 @@ function seedLegacyEntries() {
     `model = "o3"\n\n[mcp_servers.${qa.mcpServerKey}]\ncommand = ${JSON.stringify(shortOldExe)}\nargs = []\n\n[projects."C:/work/[demo]"]\ntrust_level = "trusted"\n`
   )
   console.log(
-    `  seeded: Run = "${shortOldExe}", three MCP configs naming the old exe; the old folder's 8.3 name: ${legacyShortName || '(none)'}`
+    `  seeded: Run = "${shortOldExe}" (disabled in Task Manager), three MCP configs naming the old exe; the old folder's 8.3 name: ${legacyShortName || '(none)'}`
   )
 }
 
@@ -495,6 +519,13 @@ async function firstLaunch(label) {
     run?.toLowerCase(),
     `"${path.join(NEW, EXE)}"`.toLowerCase(),
     `${label}: Run value repointed`
+  )
+  // Still turned off in Task Manager (odd first byte; Electron writes 03 00 ...).
+  const approved = approvedValue()
+  console.log(`  StartupApproved after the repoint: ${approved}`)
+  assert.ok(
+    approved !== null && /^[0-9a-f]{2}/.test(approved) && (parseInt(approved.slice(0, 2), 16) & 1) === 1,
+    `${label}: the login item is still disabled in Task Manager (${approved})`
   )
   const mcp = mcpCommands()
   const lower = (value) => (typeof value === 'string' ? value.toLowerCase() : value)
@@ -846,6 +877,7 @@ async function main() {
           {
             status: reg(KEYS.status),
             run: reg(KEYS.run)?.[qa.appId] ?? null,
+            startupApproved: approvedValue(),
             uninstallEntries: qaUninstallEntries(),
             notes
           },

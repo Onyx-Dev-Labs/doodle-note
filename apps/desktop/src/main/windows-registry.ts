@@ -4,7 +4,9 @@
  * PowerShell, reg.exe or anything else for them:
  *
  *  - read: one REG_SZ value (RegGetValueW with RRF_RT_REG_SZ): the installer's MigrationRecord,
- *    the app's own status, or the app's own "Open at login" Run value;
+ *    the app's own status, or the app's own "Open at login" Run value; and one REG_BINARY value
+ *    (RRF_RT_REG_BINARY, round 10): that Run value's Task Manager state in
+ *    Explorer\StartupApproved\Run;
  *  - write: REG_SZ values (RegSetKeyValueW, which creates the key): only the three AppMigration
  *    values in the identity's HKCU\Software\DoodleNote-InstallStatus\<APP_GUID> key;
  *  - delete: one value (RegDeleteKeyValueW): only MigrationRecord in HKCU\Software\<APP_GUID>.
@@ -25,6 +27,7 @@
 import {
   APP_MIGRATION_VALUES,
   INSTALL_RECORD_VALUE,
+  STARTUP_APPROVED_RUN_KEY,
   electronBuilderGuid,
   installStateKey,
   installStatusKey,
@@ -41,15 +44,17 @@ export interface RegistryFfi {
 
 export type RegistryRequest =
   | { op: 'read'; subKey: string; name: string }
+  | { op: 'readBinary'; subKey: string; name: string }
   | { op: 'write'; subKey: string; values: Array<[string, string]> }
   | { op: 'delete'; subKey: string; name: string }
 
-/** `value`: a read's text, or null when the key or value is not there. */
+/** `value`: a read's text (readBinary: its bytes as hex), or null when the key or value is not there. */
 export type RegistryReply = { ok: true; value?: string | null } | { ok: false; code: string }
 
 /** Which keys and values a request may touch. */
 export interface RegistryScope {
   readable(subKey: string, name: string): boolean
+  binaryReadable(subKey: string, name: string): boolean
   writable(subKey: string, name: string): boolean
   deletable(subKey: string, name: string): boolean
 }
@@ -64,8 +69,9 @@ const STATUS_VALUES: ReadonlySet<string> = new Set(Object.values(APP_MIGRATION_V
  * What the app of identity `appId` may do, and nothing else: read its record
  * (Software\<APP_GUID> MigrationRecord), its own status values
  * (Software\DoodleNote-InstallStatus\<APP_GUID> AppMigration*) and its own Run
- * value (its loginItemName, the appId); write those status values; delete its
- * record. Key and value names compare case-insensitively, as the registry does.
+ * value (its loginItemName, the appId) and that value's StartupApproved state;
+ * write those status values; delete its record. Key and value names compare
+ * case-insensitively, as the registry does.
  */
 export function appRegistryScope(
   identity: Pick<AppIdentity, 'appId' | 'loginItemName'>
@@ -85,6 +91,8 @@ export function appRegistryScope(
       (same(subKey, state) && same(name, INSTALL_RECORD_VALUE)) ||
       (same(subKey, status) && statusValue(name)) ||
       (same(subKey, RUN_KEY) && same(name, loginItemName)),
+    binaryReadable: (subKey, name) =>
+      same(subKey, STARTUP_APPROVED_RUN_KEY) && same(name, loginItemName),
     writable: (subKey, name) => same(subKey, status) && statusValue(name),
     deletable: (subKey, name) => same(subKey, state) && same(name, INSTALL_RECORD_VALUE)
   }
@@ -93,6 +101,7 @@ export function appRegistryScope(
 /** A worker started without an identity may touch nothing. */
 export const NO_REGISTRY_SCOPE: RegistryScope = {
   readable: () => false,
+  binaryReadable: () => false,
   writable: () => false,
   deletable: () => false
 }
@@ -101,6 +110,9 @@ export const NO_REGISTRY_SCOPE: RegistryScope = {
 const HKEY_CURRENT_USER = -2147483647
 const REG_SZ = 1
 const RRF_RT_REG_SZ = 0x2
+const RRF_RT_REG_BINARY = 0x8
+/** A StartupApproved value is 12 bytes. */
+const MAX_BINARY_BYTES = 256
 const ERROR_SUCCESS = 0
 const ERROR_FILE_NOT_FOUND = 2
 const ERROR_MORE_DATA = 234
@@ -153,6 +165,10 @@ export class RegistryAccess {
       case 'read':
         if (!this.scope.readable(request.subKey, request.name)) return { ok: false, code: 'SCOPE' }
         return this.read(win, request.subKey, request.name)
+      case 'readBinary':
+        if (!this.scope.binaryReadable(request.subKey, request.name))
+          return { ok: false, code: 'SCOPE' }
+        return this.readBinary(win, request.subKey, request.name)
       case 'write':
         for (const [name, data] of request.values) {
           if (!this.scope.writable(request.subKey, name) || data.length > MAX_WRITE_CHARS)
@@ -211,6 +227,22 @@ export class RegistryAccess {
     }
     return { ok: false, code: 'SIZE' }
   }
+
+  private readBinary(win: Win32, subKey: string, name: string): RegistryReply {
+    const buffer = Buffer.alloc(MAX_BINARY_BYTES)
+    const got = [buffer.length]
+    const rc = Number(
+      win.RegGetValueW(HKEY_CURRENT_USER, subKey, name, RRF_RT_REG_BINARY, [0], buffer, got)
+    )
+    if (rc === ERROR_FILE_NOT_FOUND) return { ok: true, value: null }
+    if (rc === ERROR_UNSUPPORTED_TYPE) return { ok: false, code: 'TYPE' }
+    if (rc === ERROR_MORE_DATA) return { ok: false, code: 'SIZE' }
+    if (rc !== ERROR_SUCCESS) return { ok: false, code: `WIN32_${rc}` }
+    const length = Number(got[0])
+    if (!Number.isSafeInteger(length) || length < 0 || length > buffer.length)
+      return { ok: false, code: 'SIZE' }
+    return { ok: true, value: buffer.subarray(0, length).toString('hex') }
+  }
 }
 
 /** The WindowsRegistry (windows-install-record.ts) over a RegistryAccess in this process (tests, scripts). */
@@ -225,6 +257,10 @@ export function asWindowsRegistry(access: RegistryAccess): WindowsRegistry {
   }
   return {
     readString: async (subKey, name) => run({ op: 'read', subKey, name }).value ?? null,
+    readBinary: async (subKey, name) => {
+      const value = run({ op: 'readBinary', subKey, name }).value
+      return typeof value === 'string' ? Buffer.from(value, 'hex') : null
+    },
     writeStrings: async (subKey, values) => {
       run({ op: 'write', subKey, values: values.map(([name, data]) => [name, data]) })
     },

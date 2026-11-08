@@ -74,6 +74,7 @@ import {
   installStateKey,
   installStatusKey,
   readInstallRecord,
+  STARTUP_APPROVED_RUN_KEY,
   writeInstallMigrationStatus
 } from './windows-install-record'
 import {
@@ -1241,10 +1242,12 @@ app.whenReady().then(async () => {
         writeMarker: (contents) => writeFileSync(markerPath, contents),
         loginItem: {
           // The Run value is read as written and compared 8.3-aware; Electron's own
-          // lookup compares plain strings (see loginItemStateFromRun).
+          // lookup compares plain strings, so the Task Manager state is read from
+          // StartupApproved first (see loginItemStateFromRun).
           stateFor: (isLegacyPath) =>
             loginItemStateFromRun(
               () => registry.readString(LOGIN_RUN_KEY, APP_IDENTITY.loginItemName),
+              () => registry.readBinary(STARTUP_APPROVED_RUN_KEY, APP_IDENTITY.loginItemName),
               (program) =>
                 app
                   .getLoginItemSettings({ path: program })

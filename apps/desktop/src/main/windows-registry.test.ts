@@ -40,6 +40,27 @@ test("the worker's scope is its own identity: its record, its status, its Run va
   }
   assert.ok(s.readable(run, 'com.doodlenote.desktop'))
   assert.ok(s.deletable(state, 'MigrationRecord'))
+  // Round 10: binary reads, only its own Run value's StartupApproved state.
+  const approved = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'
+  assert.ok(s.binaryReadable(approved, 'com.doodlenote.desktop'))
+  assert.ok(s.binaryReadable(approved.toLowerCase(), 'COM.DOODLENOTE.DESKTOP'))
+  for (const [subKey, name] of [
+    [approved, 'com.doodlenote.desktop.qa'],
+    [approved, 'OneDrive'],
+    [approved, 'com.doodlenote'],
+    [`${approved}32`, 'com.doodlenote.desktop'],
+    [
+      'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder',
+      'com.doodlenote.desktop'
+    ],
+    [run, 'com.doodlenote.desktop'],
+    [state, 'MigrationRecord']
+  ])
+    assert.ok(!s.binaryReadable(subKey, name), `${subKey} ${name}`)
+  // ... and the string scope never covers it: no other op reaches StartupApproved.
+  assert.ok(!s.readable(approved, 'com.doodlenote.desktop'))
+  assert.ok(!s.writable(approved, 'com.doodlenote.desktop'))
+  assert.ok(!s.deletable(approved, 'com.doodlenote.desktop'))
   // Refused: another identity's keys (QA's GUID; any other syntactically valid GUID).
   const qa = '320d0756-c91c-52c4-9287-55a7f514978d'
   const other = '00000000-0000-0000-0000-000000000000'
@@ -81,6 +102,8 @@ test("the worker's scope is its own identity: its record, its status, its Run va
   assert.ok(q.readable(run, 'com.doodlenote.desktop.qa'))
   assert.ok(!q.readable(state, 'MigrationRecord'))
   assert.ok(!q.readable(run, 'com.doodlenote.desktop'))
+  assert.ok(q.binaryReadable(approved, 'com.doodlenote.desktop.qa'))
+  assert.ok(!q.binaryReadable(approved, 'com.doodlenote.desktop'))
   assert.ok(!q.writable(status, 'AppMigration'))
   assert.ok(!q.deletable(state, 'MigrationRecord'))
   assert.throws(() => appRegistryScope({ appId: '..\\x', loginItemName: '..\\x' }), /not an app id/)
@@ -96,7 +119,7 @@ test("the worker's scope is its own identity: its record, its status, its Run va
   assert.throws(() => workerIdentityArgs('a b'), /not an app id/)
   for (const name of ['production', 'qa'] as const)
     assert.equal(appIdentity(name).loginItemName, appIdentity(name).appId)
-  for (const op of ['readable', 'writable', 'deletable'] as const)
+  for (const op of ['readable', 'binaryReadable', 'writable', 'deletable'] as const)
     assert.equal(NO_REGISTRY_SCOPE[op](`Software\\${guid}`, 'MigrationRecord'), false)
   const read = (name: string): string =>
     readFileSync(new URL(name, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -115,7 +138,7 @@ test("the worker's scope is its own identity: its record, its status, its Run va
 })
 
 /** A fake advapi32 over a Map, with RegGetValueW's sizing protocol. */
-function fakeFfi(values: Map<string, string | number>): RegistryFfi & { calls: string[] } {
+function fakeFfi(values: Map<string, string | number | Buffer>): RegistryFfi & { calls: string[] } {
   const calls: string[] = []
   return {
     calls,
@@ -131,8 +154,10 @@ function fakeFfi(values: Map<string, string | number>): RegistryFfi & { calls: s
             if (name === 'RegGetValueW') {
               const value = values.get(key)
               if (value === undefined) return 2
-              if (typeof value !== 'string') return 1630
-              const bytes = Buffer.from(`${value}\0`, 'utf16le')
+              // RRF_RT_REG_SZ (2) or RRF_RT_REG_BINARY (8): any other type is 1630.
+              const binary = args[3] === 8
+              if (binary ? !Buffer.isBuffer(value) : typeof value !== 'string') return 1630
+              const bytes = Buffer.isBuffer(value) ? value : Buffer.from(`${value}\0`, 'utf16le')
               const size = args[6] as number[]
               const data = args[5] as Buffer | null
               if (!data) {
@@ -161,15 +186,20 @@ function fakeFfi(values: Map<string, string | number>): RegistryFfi & { calls: s
 }
 
 test('registry requests: exact text, absent is null, wrong type and out-of-scope refused', () => {
-  const values = new Map<string, string | number>([
+  const approved = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'
+  const disabled = Buffer.from('030000000102030405060708', 'hex')
+  const values = new Map<string, string | number | Buffer>([
     [`Software\\${guid}|MigrationRecord`, 'DNMR1|Jörg 李|😀'],
-    [`Software\\${guid}|Number`, 7]
+    [`Software\\${guid}|Number`, 7],
+    [`${approved}|com.doodlenote.desktop`, disabled],
+    [`${approved}|com.doodlenote.desktop.qa`, disabled]
   ])
   const ffi = fakeFfi(values)
   const access = new RegistryAccess(() => ffi, appRegistryScope(APP_IDENTITY))
   // The protocol (sizes, absent, types) over a scope that allows these names too.
   const wide = new RegistryAccess(() => ffi, {
     readable: (subKey) => subKey === `Software\\${guid}`,
+    binaryReadable: (subKey) => subKey === `Software\\${guid}` || subKey === approved,
     writable: () => false,
     deletable: () => false
   })
@@ -188,6 +218,27 @@ test('registry requests: exact text, absent is null, wrong type and out-of-scope
     ok: false,
     code: 'TYPE'
   })
+  // Round 10: REG_BINARY reads come back as hex; a string value is TYPE, absent is null.
+  assert.deepEqual(
+    access.handle({ op: 'readBinary', subKey: approved, name: 'com.doodlenote.desktop' }),
+    { ok: true, value: disabled.toString('hex') }
+  )
+  assert.deepEqual(wide.handle({ op: 'readBinary', subKey: approved, name: 'Missing' }), {
+    ok: true,
+    value: null
+  })
+  assert.deepEqual(
+    wide.handle({ op: 'readBinary', subKey: `Software\\${guid}`, name: 'MigrationRecord' }),
+    { ok: false, code: 'TYPE' }
+  )
+  assert.deepEqual(
+    access.handle({ op: 'readBinary', subKey: approved, name: 'com.doodlenote.desktop.qa' }),
+    { ok: false, code: 'SCOPE' }
+  )
+  assert.deepEqual(
+    access.handle({ op: 'read', subKey: approved, name: 'com.doodlenote.desktop' }),
+    { ok: false, code: 'SCOPE' }
+  )
   // The app's scope refuses those names (SCOPE, not TYPE: before any Win32 call).
   assert.deepEqual(access.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'Number' }), {
     ok: false,
@@ -257,6 +308,7 @@ test(
     const statusKey = `${key}-status`
     const scope: RegistryScope = {
       readable: (subKey) => subKey === key || subKey === statusKey,
+      binaryReadable: (subKey) => subKey === key,
       writable: (subKey) => subKey === statusKey,
       deletable: (subKey, name) => subKey === key && name === 'MigrationRecord'
     }
@@ -269,6 +321,24 @@ test(
       assert.equal(await registry.readString(key, 'MigrationRecord'), record)
       reg('add', `HKCU\\${key}`, '/v', 'Number', '/t', 'REG_DWORD', '/d', '7', '/f')
       await assert.rejects(registry.readString(key, 'Number'), { code: 'TYPE' })
+      // Round 10: a REG_BINARY value (a StartupApproved-shaped one, in the test key).
+      assert.equal(await registry.readBinary(key, 'Approved'), null)
+      reg(
+        'add',
+        `HKCU\\${key}`,
+        '/v',
+        'Approved',
+        '/t',
+        'REG_BINARY',
+        '/d',
+        '030000000102030405060708',
+        '/f'
+      )
+      assert.equal(
+        (await registry.readBinary(key, 'Approved'))?.toString('hex'),
+        '030000000102030405060708'
+      )
+      await assert.rejects(registry.readBinary(key, 'MigrationRecord'), { code: 'TYPE' })
       await registry.writeStrings(statusKey, [
         ['AppMigration', 'pending'],
         ['AppMigrationReason', 'Jörg']
@@ -299,6 +369,7 @@ test(
     const registry = asWindowsRegistry(
       new RegistryAccess(() => koffi, {
         readable: (subKey) => subKey === key || subKey === statusKey,
+        binaryReadable: () => false,
         writable: (subKey) => subKey === statusKey,
         deletable: (subKey, name) => subKey === key && name === 'MigrationRecord'
       })

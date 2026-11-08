@@ -201,22 +201,52 @@ export function runValueProgram(value: string): string | null {
 }
 
 /**
+ * A Run entry's Task Manager state from its StartupApproved\Run value: none
+ * (never toggled) is enabled; otherwise the first byte, even (0x02, 0x06) for
+ * enabled, odd (0x03: turned off in Task Manager or Settings; 0x01, 0x07) for
+ * disabled. An empty value is not known (undefined).
+ */
+export function startupApprovedEnabled(data: Buffer | null): boolean | undefined {
+  if (data === null) return true
+  if (data.length === 0) return undefined
+  return (data[0] & 1) === 0
+}
+
+/** Thrown when a login item's enabled state cannot be told: the step stays pending. */
+export class LoginItemStateUnknown extends Error {}
+
+/**
  * The login item's state for the old install. The Run value is read as written
  * (`readRunValue`, through the worker's registry access) and compared 8.3-aware
  * (`isLegacyPath`); Electron's own lookup compares the path as a plain string, so
  * a value written through a short path would never match it. The Task Manager
- * enabled/disabled state comes from Electron, asked with the program exactly as
- * written (`enabledFor`; undefined when it does not know: enabled).
+ * enabled/disabled state is read where Windows keeps it (`readStartupApproved`,
+ * the identity's StartupApproved\Run value, round 10); if that read fails,
+ * Electron's answer for the program exactly as written (`enabledFor`). When
+ * neither knows, it is never guessed (re-registering with "enabled" would turn
+ * a disabled item back on): LoginItemStateUnknown, and the step stays pending.
  */
 export async function loginItemStateFromRun(
   readRunValue: () => Promise<string | null>,
+  readStartupApproved: () => Promise<Buffer | null>,
   enabledFor: (program: string) => boolean | undefined,
   isLegacyPath: (path: string) => boolean
 ): Promise<LoginItemState> {
   const value = await readRunValue()
   const program = value === null ? null : runValueProgram(value)
   if (program === null || !isLegacyPath(program)) return { registered: false, enabled: true }
-  return { registered: true, enabled: enabledFor(program) ?? true }
+  let enabled: boolean | undefined
+  try {
+    enabled = startupApprovedEnabled(await readStartupApproved())
+  } catch {
+    enabled = undefined
+  }
+  enabled ??= enabledFor(program)
+  if (enabled === undefined)
+    throw new LoginItemStateUnknown(
+      'its enabled state (Task Manager) could not be read; the login item is left as it is'
+    )
+  return { registered: true, enabled }
 }
 
 export interface LoginItemState {
