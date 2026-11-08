@@ -886,10 +886,8 @@ test('AgentAccessService repoints only stale DoodleNote entries and keeps the re
   const previousAppData = process.env.APPDATA
   process.env.APPDATA = join(home, 'AppData', 'Roaming')
   try {
-    const claudeDir =
-      process.platform === 'win32'
-        ? join(home, 'AppData', 'Roaming', 'Claude')
-        : join(home, 'Library', 'Application Support', 'Claude')
+    // The service gets Windows roots (repointing is the strict, Windows-only code).
+    const claudeDir = join(home, 'AppData', 'Roaming', 'Claude')
     mkdirSync(claudeDir, { recursive: true })
     mkdirSync(join(home, '.codex'), { recursive: true })
     const claudeDesktop = join(claudeDir, 'claude_desktop_config.json')
@@ -945,10 +943,8 @@ test('AgentAccessService reports unreadable or malformed client configs as faile
   const previousAppData = process.env.APPDATA
   process.env.APPDATA = join(home, 'AppData', 'Roaming')
   try {
-    const claudeDir =
-      process.platform === 'win32'
-        ? join(home, 'AppData', 'Roaming', 'Claude')
-        : join(home, 'Library', 'Application Support', 'Claude')
+    // The service gets Windows roots (repointing is the strict, Windows-only code).
+    const claudeDir = join(home, 'AppData', 'Roaming', 'Claude')
     // A folder where the file should be: the read fails (EISDIR), it is not absent.
     mkdirSync(join(claudeDir, 'claude_desktop_config.json'), { recursive: true })
     const claudeCode = join(home, '.claude.json')
