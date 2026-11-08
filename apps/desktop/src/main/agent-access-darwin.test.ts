@@ -494,6 +494,102 @@ test('darwin writer: read-only targets are written in place, exactly as writeFil
   }
 })
 
+/** One side's result of a write: error code, bytes, mode, same inode, files left beside it. */
+function writeResult(
+  folder: string,
+  path: string,
+  ino: number | null,
+  run: () => void
+): {
+  code: string | null
+  bytes: string | null
+  mode: number | null
+  inPlace: boolean | null
+  leftovers: string[]
+} {
+  let code: string | null = null
+  try {
+    run()
+  } catch (error) {
+    code = (error as NodeJS.ErrnoException).code ?? (error as Error).message
+  }
+  chmodSync(folder, 0o755)
+  const exists = existsSync(path)
+  return {
+    code,
+    bytes: exists ? readFileSync(path, 'utf8') : null,
+    mode: exists ? statSync(path).mode & 0o7777 : null,
+    inPlace: ino === null || !exists ? null : statSync(path).ino === ino,
+    leftovers: readdirSync(folder).filter((f) => f.endsWith('.tmp'))
+  }
+}
+
+test('round 11: a 220-character target name, directly or through a link, as the base', (t) => {
+  if (!posix) {
+    t.skip('POSIX file names and links')
+    return
+  }
+  const root = mkdtempSync(join(tmpdir(), 'dn-darwin-long-'))
+  try {
+    const long = `${'n'.repeat(215)}.json`
+    assert.equal(long.length, 220)
+    for (const via of ['direct', 'link'] as const)
+      for (const exists of [true, false]) {
+        const results = (['base', 'darwin'] as const).map((side) => {
+          const folder = join(root, `${via}-${exists}`, side)
+          mkdirSync(folder, { recursive: true })
+          const file = join(folder, long)
+          if (exists) {
+            writeFileSync(file, '{"a":1}')
+            chmodSync(file, 0o640)
+          }
+          const path = via === 'direct' ? file : join(folder, '.claude.json')
+          if (via === 'link') symlinkSync(long, path)
+          const ino = exists ? statSync(file).ino : null
+          const result = writeResult(folder, file, ino, () => {
+            if (side === 'base') writeFileSync(path, '{"b":2}')
+            else replaceConfigFileBase(path, '{"b":2}')
+          })
+          if (via === 'link') assert.equal(readlinkSync(path), long, `${side}: still the link`)
+          return result
+        })
+        const [base, darwin] = results
+        t.diagnostic(`${via}, ${exists ? 'existing' : 'new'}: base ${base.code ?? 'written'}, darwin ${darwin.code ?? 'written'}`)
+        assert.equal(darwin.code, null, 'no ENAMETOOLONG from the temporary name')
+        // Written atomically (a new inode) where the base wrote in place; the rest equal.
+        assert.deepEqual({ ...darwin, inPlace: null }, { ...base, inPlace: null }, `${via} ${exists}`)
+      }
+    // And through the services: ~/.claude.json linked to the long name.
+    withHomes((homes) => {
+      const client = CLIENTS.find((c) => c.id === 'claude-code')!
+      for (const op of OPS) {
+        const sides = (['base', 'darwin'] as const).map((side) => {
+          const home = homes[side]
+          rmSync(home, { recursive: true, force: true })
+          mkdirSync(home, { recursive: true })
+          writeFileSync(join(home, long), '{"a":1}')
+          symlinkSync(long, client.path(home))
+          return outcome(join(home, long), () => {
+            if (side === 'base') {
+              if (op !== 'status')
+                baseSetClientConnected(client.path(home), client.dialect, op === 'connect')
+              return baseConnected(client.path(home), client.dialect)
+            }
+            const service = darwinService(home)
+            const status =
+              op === 'status' ? service.status() : service.setClientConnected(client.id, op === 'connect')
+            return status.clients.find((c) => c.id === client.id)!.connected
+          })
+        })
+        assert.deepEqual(sides[1], sides[0], `claude-code ${op} through a long-named link`)
+        assert.ok(lstatSync(client.path(homes.darwin)).isSymbolicLink())
+      }
+    })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("darwin: a folder in the config file's place fails as the base failed", () => {
   withHomes((homes) => {
     for (const client of CLIENTS)

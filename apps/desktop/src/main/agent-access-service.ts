@@ -1,6 +1,6 @@
 import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import {
   accessSync,
   chmodSync,
@@ -17,7 +17,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, sep } from 'node:path'
+import { dirname, isAbsolute, join, sep } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
   AGENT_ACCESS_CONNECT_CLIENT_CHANNEL,
@@ -141,9 +141,19 @@ const sleep = (ms: number): void => {
 }
 
 /**
+ * A temporary file's name beside `target`: short and of fixed length whatever the
+ * target is called (round 11), so it fits wherever the target's own name fits (a
+ * name built from a 220-character basename would be 262 characters,
+ * ENAMETOOLONG where the base's write of the target itself succeeded).
+ */
+export function temporaryBeside(target: string): string {
+  return join(dirname(target), `.dn-${randomBytes(4).toString('hex')}.tmp`)
+}
+
+/**
  * Windows: replaces a client config file atomically: the new text goes to a
- * temporary file beside it (same folder, so the rename stays on one volume) with
- * the original's mode (a new file: 0600), and is renamed over it. Clients such as Claude Code rewrite their file
+ * temporary file beside it (same folder, so the rename stays on one volume; a short
+ * name, temporaryBeside) with the original's mode (a new file: 0600), and is renamed over it. Clients such as Claude Code rewrite their file
  * often, so the file is read again just before the rename; when it is no longer
  * `expected` (null: it did not exist) nothing is written and false is returned so
  * the caller starts over from the new content. A symbolic link is followed, so a
@@ -156,7 +166,7 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
   if (target === null)
     throw new Error(`${path}: could not tell where this file leads; not written.`)
   const mode = expected === null ? 0o600 : statSync(target).mode & 0o7777
-  const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
+  const temporary = temporaryBeside(target)
   writeFileSync(temporary, next, { flag: 'wx', mode })
   try {
     // The file mode is subject to the umask on creation; set it exactly.
@@ -231,11 +241,19 @@ export function replaceConfigFileBase(path: string, next: string): void {
     return
   }
   const mode = stats === null ? null : stats.mode & 0o7777
-  const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
+  const temporary = temporaryBeside(target)
   try {
     writeFileSync(temporary, next, { flag: 'wx', mode: mode ?? 0o666 })
   } catch (error) {
-    if (!refused(error)) throw error
+    // Whatever refused the temporary file (round 11: any error, not only a refusal),
+    // the original is untouched: the base's write decides. A partly written one
+    // (no space) is removed; one that already existed (EEXIST) is not ours.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST')
+      try {
+        unlinkSync(temporary)
+      } catch {
+        // never created
+      }
     writeFileSync(path, next)
     return
   }
