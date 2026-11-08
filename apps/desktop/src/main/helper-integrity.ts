@@ -33,6 +33,12 @@ import { createHash } from 'node:crypto'
 import { existsSync, promises as fs, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { peLayout as sharedPeLayout, stableDigest } from '../../scripts/authenticode-digest.mjs'
+import {
+  CONFIRM_BUDGET_MS,
+  CONFIRM_CAP_MS,
+  HOLD_EXPIRY_MS,
+  SIGNATURE_BUDGET_MS
+} from './helper-hold-timing'
 
 export type HelperIntegrityState = 'unchecked' | 'checking' | 'ok' | 'damaged' | 'absent'
 export type HelperIntegrityVerdict = 'ok' | 'damaged' | 'absent'
@@ -94,32 +100,26 @@ export interface HelperLease {
 /** The publisher CN used when the build did not sign the helper (documented build arg). */
 export const DEFAULT_HELPER_PUBLISHER_CN = 'Onyx Dev Labs LLC'
 /** The budget for the signature verdict (once the file is held) before the digest decides. */
-export const SIGNATURE_BUDGET_MS = 3_000
+export { SIGNATURE_BUDGET_MS }
 /**
  * The budget for the speech worker to answer the hold. It answers between its own tasks, and loading
  * the speech model blocks it for a few seconds (measured 4.7 s on Dev04), so this is longer than the
  * signature budget; past it the file is checked by path (locked:false).
  */
 export const HOLD_BUDGET_MS = 10_000
-/** A lease that is never released is ended after this long, so no hold lingers. */
-export const LEASE_MAX_MS = 15_000
+/** A lease that is never released is ended after this long, so no hold lingers (the worker's own expiry). */
+export const LEASE_MAX_MS = HOLD_EXPIRY_MS
 /** After this many leases whose hold was lost before the spawn, the next check is digest-only. */
 export const MAX_LOST_HOLDS = 2
 /** In digest-only fallback, the held path is tried again on the next spawn after this long. */
 export const HOLD_RETRY_COOLDOWN_MS = 60_000
 /**
- * A "still held?" round trip to the speech worker answers in milliseconds when the worker is idle.
- * Its loop is blocked while it loads a model or decodes (seconds), so an unanswered round trip is
- * not a lost hold: past this the worker's liveness is checked again (a hold ends only by an
- * explicit release or the worker's exit, which the app sees), and the answer is awaited further.
+ * A "still held?" round trip answers in milliseconds when the worker is idle; its loop is blocked while
+ * it loads a model or decodes (seconds). The answer is awaited in CONFIRM_BUDGET_MS steps up to
+ * CONFIRM_CAP_MS (helper-hold-timing.ts). Only an answer counts: a worker that has not answered by
+ * then leaves the lease unconfirmed (locked:false), and nothing is ended for a slow answer.
  */
-export const CONFIRM_BUDGET_MS = 250
-/**
- * The longest a confirmation waits for the worker's answer. A worker that is still running past it
- * still holds the file (nothing else ends a hold), so the hold counts as confirmed by liveness;
- * nothing is ever ended because the worker was slow to answer.
- */
-export const CONFIRM_CAP_MS = 5_000
+export { CONFIRM_BUDGET_MS, CONFIRM_CAP_MS }
 
 /**
  * PE layout facts the digest needs, fully validated; null for a malformed or non-contiguous image
@@ -375,12 +375,14 @@ export class HelperIntegrity {
   }
 
   /**
-   * The worker's answer to "still held?", waited for in CONFIRM_BUDGET_MS steps: a definite answer
-   * decides; a worker that ended (liveness) is a lost hold; a worker that is only busy is waited for,
-   * and past CONFIRM_CAP_MS while still running it holds the file by construction (confirmed by
-   * liveness). Never false because of a slow answer alone.
+   * The worker's answer to "still held?", waited for in CONFIRM_BUDGET_MS steps up to CONFIRM_CAP_MS:
+   * a definite answer decides; a worker that ended (liveness) is a lost hold; a worker that is only
+   * busy is waited for. A worker that has not answered by the cap does NOT confirm the hold (it may
+   * have expired it): the spawn goes ahead unconfirmed, the lease reads locked:false and the Settings
+   * row says so, and a late positive answer (the hold was still open then, so it never closed in
+   * between) brings locked:true back. Never false because of a slow answer alone.
    */
-  private async confirmHeld(holdOf: HeldHelperLike): Promise<boolean> {
+  private async confirmHeld(holdOf: HeldHelperLike): Promise<'held' | 'lost' | 'unconfirmed'> {
     const started = Date.now()
     const cap = this.options.confirmCapMs ?? CONFIRM_CAP_MS
     const step = this.options.confirmBudgetMs ?? CONFIRM_BUDGET_MS
@@ -392,15 +394,25 @@ export class HelperIntegrity {
       const result = await within<boolean | typeof pending>(answer, step, pending)
       if (result !== pending) {
         if (waited)
-          this.log(`the busy speech worker confirmed the hold after ${Date.now() - started} ms`)
-        return result
+          this.log(
+            `the busy speech worker answered the hold after ${Date.now() - started} ms (${result ? 'held' : 'not held'})`
+          )
+        return result ? 'held' : 'lost'
       }
-      if (!holdOf.alive()) return false
+      if (!holdOf.alive()) return 'lost'
       if (Date.now() - started >= cap) {
         this.log(
-          `the speech worker has not answered for ${Date.now() - started} ms but is still running, so it still holds the file (confirmed by liveness)`
+          `the speech worker has not answered for ${Date.now() - started} ms: the hold is unconfirmed (locked:false); the spawn goes ahead`
         )
-        return true
+        void answer.then((late) => {
+          if (late && holdOf.alive()) {
+            this.log(
+              'the speech worker confirmed the hold late; it was held throughout (locked:true)'
+            )
+            this.setLocked(true)
+          }
+        })
+        return 'unconfirmed'
       }
       if (!waited) this.log('the speech worker is busy; waiting for its answer (not a lost hold)')
       waited = true
@@ -567,9 +579,17 @@ export class HelperIntegrity {
           this.noteLostHold('the holder ended before the spawn returned')
           return false
         }
-        const ok = await this.confirmHeld(holdOf)
-        if (!ok) this.noteLostHold('the hold was gone when the spawn returned')
-        return ok
+        const answer = await this.confirmHeld(holdOf)
+        if (answer === 'lost') {
+          this.noteLostHold('the hold was gone when the spawn returned')
+          return false
+        }
+        if (answer === 'unconfirmed') {
+          // Not a lost hold, and not a held one either: nothing is ended, but locked:true needs an answer.
+          this.lastUnlockedReason = 'the speech worker did not confirm the hold in time'
+          this.setLocked(false)
+        }
+        return true
       }
       const launched = (): void => {
         // Only a launch that went all the way through clears the count, and only on the held path

@@ -18,6 +18,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { peLayout, stableDigest } from '../../scripts/authenticode-digest.mjs'
+import { HOLD_EXPIRY_MS } from './helper-hold-timing'
 
 type NativeFn = ((...args: unknown[]) => unknown) & {
   async: (...args: unknown[]) => void
@@ -194,7 +195,9 @@ export class HelperChecker {
 
   constructor(
     private readonly ffi: () => FfiLike,
-    private readonly maxHoldMs = 15_000
+    private readonly maxHoldMs = HOLD_EXPIRY_MS,
+    /** Told when a hold ends by expiry (not by release), so the app sees it at once. */
+    private readonly onExpire: (id: number) => void = () => {}
   ) {}
 
   private api(): Win32 {
@@ -250,7 +253,11 @@ export class HelperChecker {
       const digest = stableDigest(buffer)
       const signed = peLayout(buffer)?.table != null
       this.release(id)
-      const timer = setTimeout(() => this.release(id), this.maxHoldMs)
+      const timer = setTimeout(() => {
+        if (!this.holds.has(id)) return
+        this.release(id)
+        this.onExpire(id)
+      }, this.maxHoldMs)
       timer.unref?.()
       this.holds.set(id, { path, handle, timer })
       keep = true

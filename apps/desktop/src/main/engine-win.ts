@@ -64,6 +64,7 @@ import {
 } from './windows-asr-legacy'
 import { EchoOrderGate } from './windows-asr-echo-gate'
 import { HelperChecker, type FfiLike } from './windows-helper-check'
+import { boundedTestStallMs, MAX_ASR_STALL_MS, MAX_CONFIRM_STALL_MS } from './speech-worker-env'
 
 interface AudioMessage {
   t: 'audio'
@@ -109,7 +110,7 @@ function emit(event: Record<string, unknown>): void {
  * QA hook (packaged-app smoke only, inert unless set): stall the first decode
  * of each live session for this many milliseconds to force a real backlog.
  */
-const TEST_STALL_MS = Number(process.env.DOODLENOTE_ASR_TEST_STALL_MS ?? 0)
+const TEST_STALL_MS = boundedTestStallMs(process.env.DOODLENOTE_ASR_TEST_STALL_MS, MAX_ASR_STALL_MS)
 
 function withTestStall(
   model: OfflineRecognizerLike<OfflineStreamLike>
@@ -507,12 +508,17 @@ function ingest(data: AudioMessage): void {
  */
 const TEST_CONFIRM_STALL_MS =
   process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
-    ? Number(process.env.DOODLENOTE_BARK_TEST_WORKER_STALL_MS ?? 0)
+    ? boundedTestStallMs(process.env.DOODLENOTE_BARK_TEST_WORKER_STALL_MS, MAX_CONFIRM_STALL_MS)
     : 0
 const stalledHolds = new Set<number>()
 
 /** Bark's helper check: holds and verifies the helper file for the app (see windows-helper-check.ts). */
-const helperChecker = new HelperChecker(() => windowsFfi() as unknown as FfiLike)
+const helperChecker = new HelperChecker(
+  () => windowsFfi() as unknown as FfiLike,
+  undefined,
+  // A hold that expires is reported at once, so the app never counts on it afterwards.
+  (id) => port.postMessage({ t: 'helper-expired', id })
+)
 
 port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage

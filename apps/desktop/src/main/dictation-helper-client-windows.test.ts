@@ -96,6 +96,31 @@ test(
   }
 )
 
+test("Windows: the exit grace covers the helper's own worst-case exit (its constants, read from the C#)", () => {
+  const read = (file: string): string =>
+    readFileSync(
+      new URL(`../../../../engine/windows/dictation-helper/${file}`, import.meta.url),
+      'utf8'
+    )
+  const program = read('Program.cs')
+  const number = (source: string, name: string): number => {
+    const match = new RegExp(`${name} = (\\d+)`).exec(source)
+    assert.ok(match, name)
+    return Number(match![1])
+  }
+  const worst =
+    number(program, 'QuitWaitMs') +
+    number(program, 'HooksStopMs') +
+    number(program, 'AudioRestoreMs') +
+    number(program, 'DrainMs') +
+    number(read('ClipboardReader.cs'), 'IdleExitWaitMs')
+  assert.equal(worst, 7_000)
+  assert.ok(
+    WINDOWS_EXIT_GRACE_MS > worst,
+    `grace ${WINDOWS_EXIT_GRACE_MS} ms > worst exit ${worst} ms`
+  )
+})
+
 test('Windows: a helper that Windows refuses to start is reported as blocked, never on macOS', async () => {
   // A file that exists but cannot be started: on Windows a .exe that is not a real program
   // fails with UNKNOWN, the code Windows Application Control blocks produce (seen on Dev04).

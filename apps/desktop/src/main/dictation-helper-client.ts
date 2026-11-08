@@ -98,10 +98,12 @@ export function helperSpawnEnv(env: NodeJS.ProcessEnv, testMode: boolean): NodeJ
 /**
  * How long a Windows helper may take to leave after its stdin closes before it is
  * ended. Windows cannot deliver a catchable signal, and a forced end would skip the
- * helper's own clean-up (finishing a delivery's clipboard restore, waited up to 3 s; giving
- * back muted sound; releasing hooks).
+ * helper's own clean-up. Its worst case is the helper's own constants (Program.cs, read by a test):
+ * QuitWaitMs 3 s for a delivery's restore and reply and an abandoned clipboard write's rollback,
+ * then HooksStopMs 1 s, the clipboard readers' IdleExitWaitMs 0.5 s, AudioRestoreMs 2 s and
+ * DrainMs 0.5 s: 7 s, plus a second of margin.
  */
-export const WINDOWS_EXIT_GRACE_MS = 6_000
+export const WINDOWS_EXIT_GRACE_MS = 8_000
 
 /**
  * How long to wait for a freshly started helper to announce itself. An unsigned .NET exe
@@ -199,6 +201,9 @@ export class DictationHelperClient {
   private gated: HelperChild | null = null
   private gatedChunks: string[] = []
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
+  private readonly clipboardLateListeners = new Set<(clipboard: string) => void>()
+  /** The last deliver request's id (a late clipboard rollback names the delivery it belongs to). */
+  private lastDeliverId: string | null = null
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -242,6 +247,15 @@ export class DictationHelperClient {
   onExit(listener: () => void): () => void {
     this.exitListeners.add(listener)
     return () => this.exitListeners.delete(listener)
+  }
+
+  /**
+   * Windows: the clipboard rollback of the LAST delivery finished after its reply (the reply said the
+   * clipboard state was unknown); `clipboard` is what happened after all (restored, untouched, …).
+   */
+  onClipboardLate(listener: (clipboard: string) => void): () => void {
+    this.clipboardLateListeners.add(listener)
+    return () => this.clipboardLateListeners.delete(listener)
   }
 
   /** Windows: the low-level hooks were lost and re-installed (or could not be). */
@@ -938,6 +952,13 @@ export class DictationHelperClient {
       )
       return false
     }
+    if (parsed.event === 'clipboard' && parsed.phase === 'late-restore') {
+      const clipboard = typeof parsed.clipboard === 'string' ? parsed.clipboard : 'unknown'
+      console.error(`[dictation] the clipboard's late rollback finished: ${clipboard}`)
+      if (parsed.id === this.lastDeliverId)
+        for (const listener of this.clipboardLateListeners) listener(clipboard)
+      return false
+    }
     if (parsed.event === 'parse-error') return false
     if (parsed.event === 'reply' && typeof parsed.id === 'string') {
       const entry = this.pending.get(parsed.id)
@@ -960,6 +981,7 @@ export class DictationHelperClient {
     const child = this.child
     if (!child || child.exitCode !== null) return null
     const id = randomUUID()
+    if (op === 'deliver') this.lastDeliverId = id
     return new Promise<Reply | null>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)

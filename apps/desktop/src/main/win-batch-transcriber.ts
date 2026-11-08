@@ -18,6 +18,8 @@ import {
 } from './import-logic'
 
 import { checkImportCanceled, ImportCanceledError } from './import-jobs'
+import { speechWorkerEnv } from './speech-worker-env'
+import { APP_CHANNEL } from '../shared/app-channel'
 
 const TIMEOUT_MS = 30 * 60_000
 /** Chromium decodes the complete file in memory; this still covers hours of compressed audio. */
@@ -120,7 +122,9 @@ export class WinBatchTranscriber {
     let child: UtilityProcess
     try {
       child = utilityProcess.fork(join(__dirname, 'engine-win.js'), [], {
-        serviceName: 'doodlenote-import-engine'
+        serviceName: 'doodlenote-import-engine',
+        // The same worker entry: the same QA-hook rules as the live engine.
+        env: speechWorkerEnv(process.env, app.isPackaged, APP_CHANNEL)
       })
     } catch (error) {
       reject(new Error(`Could not start the Windows import engine: ${String(error)}`))

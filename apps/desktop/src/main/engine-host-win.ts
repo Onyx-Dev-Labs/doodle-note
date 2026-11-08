@@ -16,6 +16,8 @@ import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import { ImportCanceledError } from './import-jobs'
 import type { HeldHelperLike, SignatureCheck } from './helper-integrity'
+import { speechWorkerEnv } from './speech-worker-env'
+import { APP_CHANNEL } from '../shared/app-channel'
 
 const RESTART_DELAY_MS = 3_000
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000
@@ -266,7 +268,9 @@ export class WinEngineHost {
   startServe(): void {
     if (this.child || this.disposed) return
     const child = utilityProcess.fork(join(__dirname, 'engine-win.js'), [], {
-      serviceName: 'doodlenote-engine'
+      serviceName: 'doodlenote-engine',
+      // QA hooks reach the worker only where they are meant to (never a production package).
+      env: speechWorkerEnv(process.env, app.isPackaged, APP_CHANNEL)
     })
     this.child = child
     this.ready = false
@@ -278,6 +282,11 @@ export class WinEngineHost {
         event?: Record<string, unknown>
         id?: number
         op?: string
+      }
+      if (data.t === 'helper-expired' && typeof data.id === 'number') {
+        // The worker closed this hold on its own: it is not held any more (alive() false at once).
+        this.helperHeld.delete(data.id)
+        return
       }
       if (data.t === 'helper') {
         const key = `${String(data.id)}:${String(data.op)}`

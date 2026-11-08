@@ -925,13 +925,15 @@ test('a busy worker is waited for, never treated as a lost hold; only its exit i
   assert.ok(Date.now() - started >= 350, 'it waited past the step for the busy worker')
   assert.ok(slowResolve)
   lease.release()
-  // Never answers but stays alive past the cap: it still holds the file (liveness).
+  // Never answers but stays alive past the cap: the spawn goes ahead (nothing ended), but the hold
+  // is NOT reported as held without an answer.
   const silent = integrity(path, expect, scriptedHolder([['never']]).holder, {
     confirmBudgetMs: 50,
     confirmCapMs: 300
   })
   const held = await silent.acquire()
-  assert.equal(await held.confirm(), true, 'confirmed by liveness, nothing ended')
+  assert.equal(await held.confirm(), true, 'nothing is ended for a slow answer')
+  assert.equal(silent.lastLocked, false, 'unconfirmed: locked:false, and Settings says so')
   held.release()
   // Never answers and then ends: a lost hold.
   const dying = integrity(path, expect, scriptedHolder([['never']], { aliveFor: 150 }).holder, {
@@ -941,4 +943,81 @@ test('a busy worker is waited for, never treated as a lost hold; only its exit i
   const lost = await dying.acquire()
   assert.equal(await lost.confirm(), false, 'the worker ended while it was waited for')
   lost.release()
+})
+
+test("Astra's sequence: a hold the worker expired while the app waited is never reported held", async () => {
+  // The real worker checker (fake Win32) and the app's integrity check, joined the way the host joins
+  // them: the worker answers "still held?" late (its loop is busy) and expires the hold meanwhile.
+  const image = fakePe()
+  const helperPath = 'C:\\h\\dictation-helper.exe'
+  const { ffi, open } = fakeFfi(new Map([[helperPath, image]]))
+  const expired = new Set<number>()
+  const checker = new HelperChecker(
+    () => ffi,
+    80,
+    (id) => expired.add(id)
+  )
+  let nextId = 1
+  const holder: HelperHolder = async (path) => {
+    const id = nextId++
+    const reply = checker.hold(id, path)
+    if (!reply.ok) throw new Error('no hold')
+    return {
+      facts: {
+        status: 'held',
+        fileSha256: reply.fileSha256,
+        digest: reply.digest,
+        signed: reply.signed
+      },
+      // The host's bookkeeping: an expiry event ends liveness at once.
+      alive: () => checker.held(id) && !expired.has(id),
+      trust: async () => ({ status: 'unavailable', reason: 'unsigned' }),
+      // The busy worker answers after 300 ms, with what it then knows.
+      confirm: () =>
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(checker.held(id)), 300)),
+      release: () => checker.release(id)
+    }
+  }
+  const expect = { digest: stableHelperDigest(image)!, publisherCn: CN, thumbprints: [] }
+  const check = new HelperIntegrity({
+    helperPath,
+    expectation: () => expect,
+    holder,
+    cachePath: null,
+    confirmBudgetMs: 50,
+    confirmCapMs: 2_000
+  })
+  // helperPath is not a real file, so ensure the digest branch reads through the holder only.
+  const lease = await check.acquire()
+  assert.equal(lease.verdict, 'ok')
+  const confirmed = await lease.confirm()
+  const actualWorkerHeld = checker.held(1)
+  assert.equal(actualWorkerHeld, false, 'the worker expired the hold')
+  assert.equal(open.size, 0, 'no native handle is open any more')
+  assert.equal(confirmed, false, 'so the confirmation fails (it is a lost hold)')
+  assert.equal(check.lastLocked, false, 'and nothing says locked:true')
+  lease.release()
+})
+
+test('the hold timing is one consistent source: the confirmation cap and the spawn path end before the worker expires a hold', async () => {
+  const timing = await import('./helper-hold-timing')
+  assert.equal(timing.holdTimingProblem(), null)
+  assert.ok(timing.worstHoldToConfirmMs() < timing.HOLD_EXPIRY_MS)
+  assert.match(String(timing.holdTimingProblem(10_000)), /could expire/)
+  const integrityModule = await import('./helper-integrity')
+  assert.equal(
+    integrityModule.LEASE_MAX_MS,
+    timing.HOLD_EXPIRY_MS,
+    'the app lease and the worker expiry are one constant'
+  )
+  assert.equal(integrityModule.CONFIRM_CAP_MS, timing.CONFIRM_CAP_MS)
+  const source = readFileSync(
+    fileURLToPath(new URL('./windows-helper-check.ts', import.meta.url)),
+    'utf8'
+  )
+  assert.match(
+    source,
+    /maxHoldMs = HOLD_EXPIRY_MS/,
+    'the worker takes its expiry from the same module'
+  )
 })
