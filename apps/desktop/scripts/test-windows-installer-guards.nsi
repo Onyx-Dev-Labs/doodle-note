@@ -42,6 +42,10 @@
 ;   status                               LastStep|LastResult|LastReason|LastRun, or none
 ;   why                                  $dnWhy (the last refusal's code), or none
 ;   stwrite|<step>|<result>|<reason>     dnStatus with no folders: done
+;   runkey|<run key>|<approved key>      sets $dnRunKey / $dnStartupKey (throwaway HKCU keys); $dnLoginItem = DoodleNoteGuardsTest
+;   runwrite|<data>                      writes the login entry (data: the rest of the line) and its Task Manager state; "" deletes both
+;   runread                              <login entry data or none>|<present | none (Task Manager state)>
+;   droplogin|<legacy>|<dest>            dnDropLoginItem: removed | absent | kept
 Unicode true
 SilentInstall silent
 RequestExecutionLevel user
@@ -355,6 +359,60 @@ Function .onInit
     ${elseif} $kind == "stwrite"
       !insertmacro dnStatus $a $b $c ""
       StrCpy $result "done"
+    ${elseif} $kind == "runkey"
+      StrCpy $dnRunKey $a
+      StrCpy $dnStartupKey $b
+      StrCpy $dnLoginItem "DoodleNoteGuardsTest"
+      StrCpy $result "set"
+    ${elseif} $kind == "runwrite"
+      ; The data is the rest of the line ("|" included).
+      StrCpy $0 $a
+      ${if} $b != ""
+      ${orIf} $c != ""
+      ${orIf} $line != ""
+        StrCpy $0 "$0|$b"
+      ${endif}
+      ${if} $c != ""
+      ${orIf} $line != ""
+        StrCpy $0 "$0|$c"
+      ${endif}
+      ${if} $line != ""
+        StrCpy $0 "$0|$line"
+      ${endif}
+      ${if} $0 == ""
+        DeleteRegValue HKCU $dnRunKey $dnLoginItem
+        DeleteRegValue HKCU $dnStartupKey $dnLoginItem
+      ${else}
+        WriteRegStr HKCU $dnRunKey $dnLoginItem $0
+        WriteRegBin HKCU $dnStartupKey $dnLoginItem 020000000000000000000000
+      ${endif}
+      StrCpy $result "set"
+    ${elseif} $kind == "runread"
+      ReadRegStr $0 HKCU $dnRunKey $dnLoginItem
+      ${if} $0 == ""
+        StrCpy $0 "none"
+      ${endif}
+      StrCpy $2 "none"
+      StrCpy $3 0
+      ${do}
+        ClearErrors
+        EnumRegValue $1 HKCU $dnStartupKey $3
+        ${if} ${Errors}
+        ${orIf} $1 == ""
+          ${break}
+        ${endif}
+        ${if} $1 == $dnLoginItem
+          StrCpy $2 "present"
+          ${break}
+        ${endif}
+        IntOp $3 $3 + 1
+      ${loop}
+      StrCpy $result "$0|$2"
+    ${elseif} $kind == "droplogin"
+      Push $a
+      Push $b
+      Call dnDropLoginItem
+      Pop $result
     ${elseif} $kind == "finish"
       Push $a
       Push $b

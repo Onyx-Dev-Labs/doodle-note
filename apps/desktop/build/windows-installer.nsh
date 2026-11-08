@@ -310,9 +310,33 @@
 ; behind (dnUninstallLegacy), before electron-builder deletes the journal with
 ; Software\${APP_GUID}.
 !ifdef DN_WITH_UNINSTALL_LEGACY
+  ; A one-click uninstaller calls SetSilent silent before the uninstall section
+  ; (after its own "are you sure?" and app-running prompts), so ${Silent} is always
+  ; true by customUnInstall and dnClosePolicy would say "never" even when the user
+  ; started it from Apps & features. The policy for the old folder's app is decided
+  ; here, from the command line: --updated closes (an update asked for it), /S
+  ; never closes, anything else asks (the user is there).
+  !macro customUnInit
+    ${if} ${isUpdated}
+      StrCpy $dnClosePolicy "close"
+    ${else}
+      ${GetParameters} $R0
+      ClearErrors
+      ${GetOptions} $R0 "/S" $R1
+      ${if} ${Errors}
+        StrCpy $dnClosePolicy "ask"
+      ${else}
+        StrCpy $dnClosePolicy "never"
+      ${endif}
+    ${endif}
+  !macroend
+
   !macro customUnInstall
     ${ifNot} ${isUpdated}
-      !insertmacro dnClosePolicy $dnClosePolicy
+      ; $dnClosePolicy: customUnInit's, not dnClosePolicy (always "never" here).
+      StrCpy $dnRunKey "Software\Microsoft\Windows\CurrentVersion\Run"
+      StrCpy $dnStartupKey "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+      StrCpy $dnLoginItem "${APP_ID}"
       StrCpy $dnProgramsRoot "$LOCALAPPDATA\Programs"
       StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
       StrCpy $dnJournalKey "Software\${APP_GUID}\InstallMigration"

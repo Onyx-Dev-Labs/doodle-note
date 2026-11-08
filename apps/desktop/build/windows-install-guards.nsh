@@ -1378,19 +1378,110 @@ FunctionEnd
 !endif
 
 !ifdef DN_WITH_UNINSTALL_LEGACY
+  ; This identity's "Open at login" entry, as Electron writes it: the value
+  ; $dnLoginItem (the appId) under HKCU\$dnRunKey, and its Task Manager state under
+  ; HKCU\$dnStartupKey. The uninstaller and the harness set them.
+  Var dnRunKey
+  Var dnStartupKey
+  Var dnLoginItem
+
+  ; Push LEGACY; Push DEST; Call dnDropLoginItem; Pop RESULT. When a user uninstall
+  ; has to leave LEGACY behind (its app would not close, a file was held), this
+  ; identity's login entry would keep starting that stale copy at every sign-in,
+  ; with no Apps & features entry left to remove it. If the entry starts exactly
+  ; LEGACY's or DEST's DN_APP_EXE (the quoted path Electron writes, compared
+  ; normalised, then nothing or arguments), it is deleted with its Task Manager
+  ; state: "removed". "absent": there is none. "kept": it starts something else,
+  ; which is not ours to change.
+  Function ${DN_FN}dnDropLoginItem
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    Push $3
+    Push $4
+    Push $5
+    StrCpy $5 "absent"
+    ReadRegStr $2 HKCU $dnRunKey $dnLoginItem
+    ${if} $2 != ""
+      StrCpy $5 "kept"
+      StrCpy $3 $2 1
+      ${if} $3 == '"'
+        StrCpy $4 1
+        ${do}
+          StrCpy $3 $2 1 $4
+          ${if} $3 == '"'
+          ${orIf} $3 == ""
+            ${break}
+          ${endif}
+          IntOp $4 $4 + 1
+        ${loop}
+        ${if} $3 == '"'
+          ; $4: the closing quote. Then the end, or a space and arguments.
+          IntOp $3 $4 + 1
+          StrCpy $3 $2 1 $3
+          ${if} $3 == ""
+          ${orIf} $3 == " "
+            IntOp $3 $4 - 1
+            StrCpy $3 $2 $3 1
+            Push $3
+            Call ${DN_FN}dnCanonical
+            Pop $3
+            ${if} $3 != ""
+              Push "$0\${DN_APP_EXE}"
+              Call ${DN_FN}dnCanonical
+              Pop $4
+              ${if} $3 == $4
+                StrCpy $5 "removed"
+              ${else}
+                Push "$1\${DN_APP_EXE}"
+                Call ${DN_FN}dnCanonical
+                Pop $4
+                ${if} $3 == $4
+                  StrCpy $5 "removed"
+                ${endif}
+              ${endif}
+            ${endif}
+          ${endif}
+        ${endif}
+      ${endif}
+      ${if} $5 == "removed"
+        DeleteRegValue HKCU $dnRunKey $dnLoginItem
+        DeleteRegValue HKCU $dnStartupKey $dnLoginItem
+        ReadRegStr $2 HKCU $dnRunKey $dnLoginItem
+        ${if} $2 != ""
+          StrCpy $5 "kept"
+        ${endif}
+      ${endif}
+    ${endif}
+    StrCpy $0 $5
+    Pop $5
+    Pop $4
+    Pop $3
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
   ; Push DEST; Call dnUninstallLegacy; Pop RESULT. A user uninstall (not --updated)
   ; of the copy in DEST while a move into DEST is unfinished (a trusted journal,
   ; dnTrustedJournal) also removes the old folder that move left behind, after the
   ; same checks and with the same handle-verified removal, because electron-builder's
   ; uninstaller deletes the journal and nothing would ever finish the move. The app
-  ; there is closed only with consent ($dnClosePolicy). RESULT: "none" (no unfinished
+  ; there is closed only with consent ($dnClosePolicy: the uninstaller asks when the
+  ; user started it, closes nothing under /S). RESULT: "none" (no unfinished
   ; move), "removed", or "kept: <why>": the old folder then stays as a stale copy
   ; without an uninstall entry, which the next install of this app finds at the old
-  ; default folder and moves away (dnPlanMigration).
+  ; default folder and moves away (dnPlanMigration); this identity's login entry is
+  ; dropped if it starts that copy (dnDropLoginItem), so it does not start at
+  ; every sign-in meanwhile.
   Function ${DN_FN}dnUninstallLegacy
     Exch $0
     Push $1
     Push $2
+    Push $3
+    StrCpy $3 $0
     Push $0
     Call ${DN_FN}dnTrustedJournal
     Pop $1
@@ -1437,9 +1528,23 @@ FunctionEnd
       ${if} $0 == "removed"
         !insertmacro dnStatus uninstall uninstalled-legacy-removed removed "from=$1"
       ${else}
-        !insertmacro dnStatus uninstall uninstalled-legacy-kept $dnWhy "from=$1"
+        StrCpy $2 $dnWhy
+        Push $1
+        Push $3
+        Call ${DN_FN}dnDropLoginItem
+        Pop $3
+        DetailPrint "Login item for $1: $3"
+        ${if} $3 == "removed"
+          !insertmacro dnStatus login-item login-item-removed run-value-deleted "from=$1"
+        ${elseif} $3 == "absent"
+          !insertmacro dnStatus login-item login-item-absent no-run-value "from=$1"
+        ${else}
+          !insertmacro dnStatus login-item login-item-kept not-ours "from=$1"
+        ${endif}
+        !insertmacro dnStatus uninstall uninstalled-legacy-kept $2 "from=$1"
       ${endif}
     ${endif}
+    Pop $3
     Pop $2
     Pop $1
     Exch $0

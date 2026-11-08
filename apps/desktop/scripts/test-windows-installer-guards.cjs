@@ -1493,6 +1493,74 @@ async function main() {
     ]
     checkCases('l2-nolog', l2NoLog, phase('l2-nolog', l2NoLog).results)
 
+    // L4: a user uninstall that has to keep the old folder (its app would not
+    // close) drops this identity's login entry when it starts that stale copy or
+    // the copy being uninstalled, with its Task Manager state; anything else stays.
+    const l4 = path.join(sandbox, 'l4', 'Local', 'Programs')
+    const l4Profile = path.join(sandbox, 'l4', 'Roaming', 'desktop')
+    const l4Old = path.join(l4, 'desktop')
+    const l4New = path.join(l4, 'DoodleNote')
+    fs.mkdirSync(l4Profile, { recursive: true })
+    write(path.join(l4Old, 'resources', 'app.asar'), 'asar')
+    write(path.join(l4New, 'DoodleNote.exe'), 'new')
+    const l4App = runAs(path.join(l4Old, 'DoodleNote.exe'))
+    started.push(l4App)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const l4State = `${journalKey}-l4`
+    registryKeys.push(l4State, `${l4State}-status`, `${l4State}-run`, `${l4State}-approved`)
+    const l4Log = path.join(sandbox, 'l4-install.log')
+    const oldEntry = `"${l4Old}\\DoodleNote.exe" --process-start-args "--hidden"`
+    const shortNew = shortPath(l4New)
+    const l4Cases = [
+      ['root', l4, l4Profile],
+      ['jkey', `${l4State}\\InstallMigration`, ''],
+      ['stkey', `${l4State}-status`, l4Log, 'set'],
+      ['runkey', `${l4State}-run`, `${l4State}-approved`, 'set'],
+      ['arm', l4Old, l4New, '', 'armed'],
+      // /S (never close): the old app keeps running, the folder stays, the entry goes.
+      ['runwrite', oldEntry, '', 'set'],
+      ['runread', '', '', `${oldEntry}|present`],
+      ['unlegacy', l4New, 'never', /^kept: .* is running$/],
+      ['runread', '', '', 'none|none'],
+      ['status', '', '', status('uninstall', 'uninstalled-legacy-kept', 'app-running')],
+      ['jstate', '', '', 'armed'],
+      // The copy being uninstalled (here through its 8.3 name) is ours too.
+      ['runwrite', `"${shortNew}\\DoodleNote.exe"`, '', 'set'],
+      ['unlegacy', l4New, 'never', /^kept: /],
+      ['runread', '', '', 'none|none'],
+      // Not ours: another exe, a longer name, an unquoted path. Never touched.
+      ['runwrite', `"${path.join(sandbox, 'Elsewhere', 'DoodleNote.exe')}"`, '', 'set'],
+      ['unlegacy', l4New, 'never', /^kept: /],
+      ['runread', '', '', `"${path.join(sandbox, 'Elsewhere', 'DoodleNote.exe')}"|present`],
+      ['runwrite', `"${l4Old}\\DoodleNote.exe.old" --x`, '', 'set'],
+      ['droplogin', l4Old, l4New, 'kept'],
+      ['runwrite', `${l4Old}\\DoodleNote.exe`, '', 'set'],
+      ['droplogin', l4Old, l4New, 'kept'],
+      ['runwrite', `"${l4Old}\\DoodleNote.exe"`, '', 'set'],
+      ['droplogin', l4Old, l4New, 'removed'],
+      ['droplogin', l4Old, l4New, 'absent'],
+      // A removed old folder leaves the entry alone (the app repoints it at next launch).
+      ['runwrite', oldEntry, '', 'set'],
+      ['unlegacy', l4New, 'close', 'removed'],
+      ['runread', '', '', `${oldEntry}|present`],
+      ['status', '', '', status('uninstall', 'uninstalled-legacy-removed', 'removed')]
+    ]
+    checkCases('l4-login-item', l4Cases, phase('l4-login-item', l4Cases).results)
+    assert.ok(!fs.existsSync(l4Old), 'l4: the old folder was removed once its app closed')
+    assert.ok(!alive(l4App.pid), 'l4: the old app was closed by exact path')
+    const l4Steps = readLog(l4Log).map((line) =>
+      / step=(\S+) result=(\S+) reason=(\S*)/.exec(line).slice(1).join(' ')
+    )
+    reports.push('--- l4 log', ...readLog(l4Log))
+    assert.deepEqual(
+      l4Steps.filter((step) => step.startsWith('login-item')),
+      [
+        'login-item login-item-removed run-value-deleted',
+        'login-item login-item-removed run-value-deleted',
+        'login-item login-item-kept not-ours'
+      ]
+    )
+
     if (keep) write(path.join(keep, 'installer-guards-results.txt'), reports.join('\r\n') + '\r\n')
     console.log(`installer guards: ${total} cases passed`)
   } finally {

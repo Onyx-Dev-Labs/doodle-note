@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { appIdentity } from './app-identity'
 
 const builderConfig = readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8')
 const publishScript = readFileSync(
@@ -597,6 +598,57 @@ test('every installer decision is recorded where QA can read it (status key and 
   )
   assert.doesNotMatch(doc, /the reason is in the install\s+log/)
   assert.match(doc, /HKCU\\Software\\DoodleNote-InstallStatus\\\{APP_GUID\}/)
+})
+
+test('a user uninstall asks before closing the old app and drops a login entry that would start it', () => {
+  const installer = readFileSync(
+    new URL('../../build/windows-installer.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  // The one-click uninstaller is SetSilent by customUnInstall: the policy comes from
+  // the command line in customUnInit (--updated close, /S never, otherwise ask).
+  const unInit = installer.slice(
+    installer.indexOf('!macro customUnInit'),
+    installer.indexOf('!macroend', installer.indexOf('!macro customUnInit'))
+  )
+  assert.match(unInit, /\$\{if\} \$\{isUpdated\}\n\s+StrCpy \$dnClosePolicy "close"/)
+  assert.match(
+    unInit,
+    /\$\{GetOptions\} \$R0 "\/S" \$R1\n\s+\$\{if\} \$\{Errors\}\n\s+StrCpy \$dnClosePolicy "ask"\n\s+\$\{else\}\n\s+StrCpy \$dnClosePolicy "never"/
+  )
+  const unInstall = installer.slice(installer.indexOf('!macro customUnInstall'))
+  assert.doesNotMatch(
+    unInstall.slice(0, unInstall.indexOf('!macroend')),
+    /!insertmacro dnClosePolicy/
+  )
+  // The login entry is this identity's (appId = the Run value name Electron writes).
+  assert.match(unInstall, /StrCpy \$dnRunKey "Software\\Microsoft\\Windows\\CurrentVersion\\Run"/)
+  assert.match(
+    unInstall,
+    /StrCpy \$dnStartupKey "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run"/
+  )
+  assert.match(unInstall, /StrCpy \$dnLoginItem "\$\{APP_ID\}"/)
+  for (const name of ['production', 'qa'] as const)
+    assert.equal(appIdentity(name).loginItemName, appIdentity(name).appId)
+  // Dropped only when the old folder is kept, and only after the close was refused.
+  const legacy = guards.slice(guards.indexOf('Function ${DN_FN}dnUninstallLegacy'))
+  const kept = legacy.indexOf('!insertmacro dnStatus uninstall uninstalled-legacy-kept')
+  assert.ok(legacy.indexOf('Call ${DN_FN}dnDropLoginItem') < kept)
+  assert.ok(
+    legacy.indexOf('!insertmacro dnStatus uninstall uninstalled-legacy-removed') <
+      legacy.indexOf('Call ${DN_FN}dnDropLoginItem')
+  )
+  const drop = guards.slice(
+    guards.indexOf('Function ${DN_FN}dnDropLoginItem'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function ${DN_FN}dnDropLoginItem'))
+  )
+  assert.match(drop, /Push "\$0\\\$\{DN_APP_EXE\}"\n\s+Call \$\{DN_FN\}dnCanonical/)
+  assert.match(drop, /Push "\$1\\\$\{DN_APP_EXE\}"\n\s+Call \$\{DN_FN\}dnCanonical/)
+  assert.match(drop, /DeleteRegValue HKCU \$dnStartupKey \$dnLoginItem/)
 })
 
 test('a Windows package missing its speech engine, Koffi, reflink or llama binaries fails', () => {

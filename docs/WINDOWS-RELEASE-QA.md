@@ -424,11 +424,21 @@ moves an existing install on upgrade:
    `HKCU\Software\{APP_GUID}` `MigratedFrom` / `MigratedTo` / `MigratedAt`.
 4. Uninstalling the new copy (not an update's `--updated` run) while a move is
    unfinished also removes the old folder it left (same checks, same
-   handle-based removal; its app closed only with consent), since the
-   uninstaller deletes the journal. If that app keeps running or a file there is
-   held, the old folder stays as a stale copy without an uninstall entry; the
-   next install of the same identity finds it at the old default folder and
-   moves it away.
+   handle-based removal), since the uninstaller deletes the journal. Its app is
+   closed only with consent: started from Apps & features (no `/S`), the
+   uninstaller asks, as it does for the copy being uninstalled; with `/S` it
+   closes nothing. (A one-click uninstaller switches itself to silent mode before
+   the uninstall section runs, so this is decided in `customUnInit` from the
+   command line; before, it never asked and never closed the old app.) If that
+   app keeps running (the user said Cancel, or `/S`) or a file there is held, the
+   old folder stays as a stale copy without an uninstall entry; the next install
+   of the same identity finds it at the old default folder and moves it away.
+   Meanwhile it would start at every sign-in from this identity's "Open at login"
+   entry (`HKCU\...\CurrentVersion\Run`, value = the `appId`), so that entry is
+   deleted, with its Task Manager state (`...\Explorer\StartupApproved\Run`),
+   when it starts exactly the old exe or the exe being uninstalled (quoted path
+   compared normalised, short names expanded); an entry that starts anything else
+   is left alone. The log records it (`step=login-item`).
 
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
@@ -496,6 +506,7 @@ the move is recorded in two places, by the installer and by a user uninstall:
 | `record` | `moved` | `record-written`, `record-failed` (record did not read back) |
 | `install` | `in-place`, `kept` | the plan's code; `incomplete-install` |
 | `uninstall` | `uninstalled`, `uninstalled-legacy-removed`, `uninstalled-legacy-kept` | `no-pending-move`, `removed`; `app-running`, `unknown-process`, `user-declined`, `file-in-use`, `identity-check`, or a `pin-*` / `legacy-*` code |
+| `login-item` (log only; `uninstall` is written after it) | `login-item-removed`, `login-item-absent`, `login-item-kept` | `run-value-deleted`, `no-run-value`, `not-ours`; only after `uninstalled-legacy-kept` |
 
 The log also has `note` lines that do not change the registry values
 (`journal-ignored` with the reason the journal was not trusted:
@@ -600,7 +611,10 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
    with the QA uninstall entry's `UninstallString` rewritten in 8.3 form (still
    moved; the parked command is put back verbatim if the run is cancelled), and
    by uninstalling `DoodleNote QA` from Apps & features while a move is pending
-   (both folders are gone afterwards).
+   (both folders are gone afterwards; with the legacy QA app running it asks
+   first, and after Cancel the old folder stays but the QA Run value
+   `com.doodlenote.desktop.qa` and its `StartupApproved` entry are gone, the
+   production one untouched, and `LastResult` is `uninstalled-legacy-kept`).
 
 ## Automatic updates (off until activation)
 
