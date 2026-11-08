@@ -295,7 +295,7 @@ export function DictationSettings(): React.JSX.Element {
                       : status.helper === 'damaged'
                         ? 'Damaged'
                         : 'Missing',
-              describeWindowsHelper(status.helper)
+              describeWindowsHelper(status.helper, status.helperLocked)
             )}
             {infoRow('Keyboard and mouse hook', hooks.label, hooks.detail)}
           </div>

@@ -100,6 +100,12 @@ test('privacy buttons: the same macOS panes as before; Windows has a microphone 
 
 test('Windows helper and hook rows say what is going on', () => {
   assert.match(describeWindowsHelper('ready'), /starts with DoodleNote/)
+  assert.doesNotMatch(describeWindowsHelper('ready', true), /digest only/)
+  assert.match(
+    describeWindowsHelper('ready', false),
+    /checked by its digest only/,
+    'unheld start shown'
+  )
   assert.match(describeWindowsHelper('blocked'), /app control/)
   assert.match(describeWindowsHelper('unavailable'), /Missing/)
   assert.equal(describeWindowsHooks(null).label, 'Checking…')

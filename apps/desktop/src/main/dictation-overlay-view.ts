@@ -94,7 +94,7 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'typing-stopped-secure':
     'Typing stopped because the field became a password field. Check it; the rest was not typed, and your text is kept for copying.',
   'helper-busy':
-    'An app is not responding, so DoodleNote could not check the field. Try again in a moment. Your text is kept for copying.'
+    'An app stopped responding, so the dictation helper is restarting. Try again in a moment. Your text is kept for copying.'
 }
 
 /** Copy for the heads-up line under the live pill. */

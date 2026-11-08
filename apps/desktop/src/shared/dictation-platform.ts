@@ -143,11 +143,14 @@ export function privacySettingsUrl(
  * not match this build; unavailable: the program is missing from this build.
  */
 export function describeWindowsHelper(
-  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable' | 'checking' | 'off'
+  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable' | 'checking' | 'off',
+  locked?: boolean
 ): string {
   switch (helper) {
     case 'ready':
-      return 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
+      return locked === false
+        ? 'Installed. It starts with DoodleNote and stops when DoodleNote quits. Its last start was checked by its digest only (the speech engine could not hold the file); the next start holds it again.'
+        : 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
     case 'checking':
       return 'Checking that the helper is the one this build shipped before it runs.'
     case 'off':

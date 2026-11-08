@@ -347,6 +347,16 @@ app, so they get no typing fallback. Paste is the only way in, and when a paste 
 confirmed the text is kept on the recovery card for copying. Settings → Bark → Permissions says
 the same.
 
+Line breaks in the typing fallback:
+- An Edit gets a Unicode CR, never a Return key, so no dialog or form can press its default button.
+- A plain Win32 Edit without ES_WANTRETURN does not take a line break in a dialog. Text with a line
+  break is refused there before any key is sent.
+- A RichEdit needs a real Return key. It is sent only when the box has ES_WANTRETURN or its window
+  has no default push button; otherwise the text is refused up front.
+
+Every key is checked just before it is sent: focus, password style, password character and
+read-only. Nothing can be proved about changes the app makes after the key has been queued.
+
 Known limitation: non-Latin scripts and the typing fallback. The paste path handles all of
 Unicode. Typing sends `KEYEVENTF_UNICODE` keys, and surrogate pairs go as one key. Where an IME or
 autocomplete changes the text by anything other than the typed key, typing stops at once and
@@ -360,6 +370,23 @@ starts PowerShell for it. The worker:
 4. Lets go only after the spawn has returned and the hold has been confirmed.
 
 If the worker ends before that, the spawn is discarded and the check runs again.
+
+The client confirms that the worker still holds the file immediately before the spawn, and again
+right after it. Until that second answer comes back, the new helper is not used: no request reaches
+it, its output is held back, and no hold key is armed. Killing a helper whose confirmation failed
+cannot undo what it already ran. Creating the process inside the worker would close that gap, but
+it is not done. The reasons are in PR #276, round 7.
+
+Integrity policy (stated plainly):
+- This check is a **corruption guard, not a security boundary**. The per-user install folder is
+  writable by the user, so code running as that user can replace the app itself; Application
+  Control is the real boundary.
+- The digest baked into the build decides. When it matches, the bytes are the build's own.
+- A signature that is untrusted, revoked or explicitly distrusted still gives "ok" when the digest
+  matches. A valid signature adds pinning of the signer's name and thumbprint.
+- A broken signature, or a valid one from the wrong signer, is damaged.
+- After repeated lost holds, the check runs on the digest alone. Settings shows that ("checked by
+  its digest only"), and the held check is tried again after 60 s.
 
 Fresh install: while the preferred Parakeet model downloads in the background a fresh
 install serves the weaker legacy Zipformer; Bark refuses to dictate on it (matching the

@@ -2757,8 +2757,8 @@ test('Windows: why typing stopped, or never started, reaches the recovery card',
       { outcome: 'refused', reason: 'typing-unsupported', method: 'type' },
       /classic Windows text boxes/
     ],
-    // An app is not responding: the helper's bounded calls are all stuck.
-    [{ outcome: 'refused', reason: 'helper-busy' }, /An app is not responding/],
+    // An app stopped responding: the helper's bounded calls are stuck, so it restarts itself.
+    [{ outcome: 'refused', reason: 'helper-busy' }, /dictation helper is restarting/],
     // Typing stopped part-way: the specific reason is kept, the card says so.
     [
       {
