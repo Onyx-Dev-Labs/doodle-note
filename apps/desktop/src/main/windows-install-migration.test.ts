@@ -23,9 +23,12 @@ import {
 } from './windows-install-migration'
 import {
   electronBuilderGuid,
+  installMigrationIdentity,
   installStateKey,
   parseInstallRecord,
-  type InstallMigrationRecord
+  parseInstallRecordValue,
+  type InstallMigrationRecord,
+  type InstallRecordPending
 } from './windows-install-record'
 import { APP_IDENTITY, appIdentity } from './app-identity'
 import { createRequire } from 'node:module'
@@ -184,12 +187,54 @@ test('APP_GUID and the record key match what electron-builder derives from the a
   )
 })
 
-test('the install record is complete or nothing', () => {
-  assert.deepEqual(parseInstallRecord(JSON.stringify(record)), record)
-  assert.equal(parseInstallRecord(JSON.stringify({ ...record, at: '' })), null)
-  assert.equal(parseInstallRecord(JSON.stringify({ from: record.from, to: record.to })), null)
-  assert.equal(parseInstallRecord('not json'), null)
-  assert.equal(parseInstallRecord('null'), null)
+test('the install record is one value naming this identity, complete or pending', () => {
+  const identity = installMigrationIdentity(APP_IDENTITY)
+  assert.equal(identity, 'f85f8dcf-6782-5a3e-a989-3eae169d6efb|desktop|DoodleNote')
+  assert.equal(
+    installMigrationIdentity(appIdentity('qa')),
+    '320d0756-c91c-52c4-9287-55a7f514978d|desktop-qa|DoodleNote QA'
+  )
+  const value = (fields: string[]): string => fields.join('|')
+  const whole = ['DNMR1', identity, record.from, record.to, record.at, 'END']
+  assert.deepEqual(parseInstallRecordValue(value(whole), identity), record)
+  // Identity and folder names compare as Windows does (case-insensitive).
+  assert.deepEqual(parseInstallRecordValue(value(whole), identity.toUpperCase()), record)
+  assert.equal(parseInstallRecordValue('', identity), null)
+  // Anything less than complete is pending: not acted on and not cleared.
+  const pending: Array<[string, string]> = [
+    // Cut short anywhere (the installer writes it in one go; a copy could be damaged).
+    ...whole.map((_, n): [string, string] => [value(whole.slice(0, n)), `first ${n} fields`]),
+    [value(whole).slice(0, -1), 'END cut short'],
+    [`${value(whole)}|extra`, 'a field too many'],
+    [value(['DNMR1', identity, '', record.to, record.at, 'END']), 'no old folder'],
+    [value(['DNMR1', identity, record.from, '  ', record.at, 'END']), 'no new folder'],
+    [value(['DNMR1', identity, record.from, record.to, '', 'END']), 'no time'],
+    [value(['DNMR1', identity, record.from, record.to, '2026-11-08', 'END']), 'not a UTC time'],
+    // Another identity's record (QA vs production, or the GUID of a different appId).
+    [value(['DNMR1', installMigrationIdentity(appIdentity('qa')), ...whole.slice(2)]), 'qa'],
+    [
+      value([
+        'DNMR1',
+        'f85f8dcf-6782-5a3e-a989-3eae169d6efb|desktop|DoodleNote QA',
+        ...whole.slice(2)
+      ]),
+      'folder'
+    ],
+    // A newer (or older) format this build does not read.
+    [value(['DNMR2', ...whole.slice(1)]), 'version'],
+    [`${record.from}|${record.to}|${record.at}`, 'the three-value form of earlier test builds']
+  ]
+  for (const [input, label] of pending.filter(([input]) => input !== '')) {
+    const parsed = parseInstallRecordValue(input, identity)
+    assert.ok(parsed && 'pending' in parsed, `${label}: ${JSON.stringify(parsed)}`)
+  }
+  // The PowerShell reader's JSON: absent/empty is none, anything unreadable is pending.
+  assert.deepEqual(parseInstallRecord(JSON.stringify({ record: value(whole) }), identity), record)
+  assert.equal(parseInstallRecord(JSON.stringify({ record: '' }), identity), null)
+  assert.equal(parseInstallRecord(JSON.stringify({ record: null }), identity), null)
+  assert.equal(parseInstallRecord(JSON.stringify({}), identity), null)
+  for (const output of ['not json', 'null', '42', JSON.stringify({ record: 7 })])
+    assert.ok('pending' in (parseInstallRecord(output, identity) as InstallRecordPending), output)
 })
 
 test('folder containment follows Windows rules and does not match siblings', () => {
@@ -202,7 +247,7 @@ test('folder containment follows Windows rules and does not match siblings', () 
 
 function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrationDeps & {
   marker: string | null
-  record: InstallMigrationRecord | null
+  record: InstallMigrationRecord | InstallRecordPending | null
   files: Set<string>
   logs: string[]
   registered: boolean[]
@@ -212,7 +257,7 @@ function fakeDeps(overrides: Partial<InstallMigrationDeps> = {}): InstallMigrati
     isPackaged: true,
     execPath: newExe,
     marker: null as string | null,
-    record: { ...record } as InstallMigrationRecord | null,
+    record: { ...record } as InstallMigrationRecord | InstallRecordPending | null,
     files: new Set<string>([newExe]),
     logs: [] as string[],
     registered: [] as boolean[],
@@ -280,6 +325,24 @@ test('without an installer record nothing is repointed, whatever the folder is c
   deps.record = null
   assert.equal((await runWindowsInstallMigration(deps)).ran, false)
   assert.equal(deps.marker, null)
+})
+
+test('a record that is there but incomplete is neither acted on nor cleared', async () => {
+  for (const reason of ['incomplete', 'for another app identity', 'unreadable']) {
+    let cleared = false
+    const deps = fakeDeps({
+      ...untouchable,
+      clearRecord: async () => {
+        cleared = true
+      }
+    })
+    deps.record = { pending: reason }
+    assert.equal((await runWindowsInstallMigration(deps)).ran, false)
+    assert.equal(cleared, false)
+    assert.equal(deps.marker, null)
+    assert.deepEqual(deps.record, { pending: reason })
+    assert.match(deps.logs.join('\n'), new RegExp(`left for the installer: ${reason}`))
+  }
 })
 
 test('a record that names another folder changes nothing', async () => {

@@ -32,6 +32,23 @@
   !define DN_PATH_FUNCTIONS
 !endif
 
+; !insertmacro dnTestStep NAME, right after a registry write that a later run must
+; be able to pick up from. Nothing in an installer. A harness build with
+; DN_TEST_STEPS (scripts/test-windows-installer-guards.cjs, never an installer)
+; terminates the process there when $dnTestStopAt is NAME: an installer killed
+; between two writes.
+!ifdef DN_TEST_STEPS
+  Var dnTestStopAt
+  !macro dnTestStep NAME
+    ${if} $dnTestStopAt == "${NAME}"
+      System::Call 'kernel32::TerminateProcess(p -1, i 9)'
+    ${endif}
+  !macroend
+!else
+  !macro dnTestStep NAME
+  !macroend
+!endif
+
 !define DN_ATTR_DIRECTORY 0x10
 !define DN_ATTR_REPARSE_POINT 0x400
 ; FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT
@@ -1343,6 +1360,12 @@ FunctionEnd
       StrCpy $dnPlanNote "the migration journal is for another app"
       StrCpy $dnWhy "journal-foreign"
       StrCpy $0 ""
+    ${elseif} $2 == ""
+    ${orIf} $3 == ""
+      ; Complete = Identity, SourceDir and DestDir (Identity is written last).
+      StrCpy $dnPlanNote "the migration journal is incomplete"
+      StrCpy $dnWhy "journal-incomplete"
+      StrCpy $0 ""
     ${else}
       Push $0
       Call ${DN_FN}dnCanonical
@@ -1563,9 +1586,7 @@ FunctionEnd
   Var dnSavedUninstall
   Var dnSavedDesktop
   Var dnSavedStartMenu
-  Var dnSavedFrom
-  Var dnSavedTo
-  Var dnSavedAt
+  Var dnSavedRecord
   Var dnRecoveryKey
   ; Why dnMigrationClose kept the old folder (app-running | unknown-process).
   Var dnKeepWhy
@@ -1690,9 +1711,9 @@ FunctionEnd
   ; verified handles (dnRemoveLegacyDir) and clears the journal. RESULT: "removed",
   ; or "kept: <why>" with the journal left armed so the next run retries.
   ;
-  ; Only after a real move (the old folder is gone) does it record MigratedFrom,
-  ; MigratedTo and MigratedAt under $dnStateKey. The app repoints its login item
-  ; and MCP client entries only when that record names its own folder
+  ; Only after a real move (the old folder is gone) does it write the record,
+  ; MigrationRecord under $dnStateKey (dnWriteRecord). The app repoints its login
+  ; item and MCP client entries only when that record names its own folder
   ; (src/main/windows-install-migration.ts), never because of a folder name.
   Function dnFinishMigration
     Exch $2
@@ -1701,13 +1722,6 @@ FunctionEnd
     Exch 2
     Exch $0
     Push $3
-    Push $R0
-    Push $R1
-    Push $R2
-    Push $R3
-    Push $R4
-    Push $R5
-    Push $R6
     StrCpy $3 ""
     ${if} $2 != "1"
       Push $0
@@ -1730,32 +1744,19 @@ FunctionEnd
       Pop $3
       Call dnUnpin
       ${if} $3 == "removed"
-        DeleteRegKey HKCU $dnJournalKey
         !insertmacro dnStatus remove moved removed "from=$0 to=$1"
+        !insertmacro dnTestStep "finish-removed"
+        ; The record first, then the journal: a run that stops in between leaves
+        ; the journal armed with its old folder gone, and the next run writes the
+        ; record (dnJournalDone / dnCompleteMove). One that cannot write it keeps
+        ; the journal for the same reason.
         Push $0
-        Call dnCanonical
-        Pop $2
-        WriteRegStr HKCU $dnStateKey "MigratedFrom" $2
         Push $1
-        Call dnCanonical
+        Call dnWriteRecord
         Pop $2
-        WriteRegStr HKCU $dnStateKey "MigratedTo" $2
-        ; UTC, ISO 8601.
-        ${GetTime} "" "LS" $R0 $R1 $R2 $R3 $R4 $R5 $R6
-        IntFmt $R0 "%02u" $R0
-        IntFmt $R1 "%02u" $R1
-        IntFmt $R4 "%02u" $R4
-        IntFmt $R5 "%02u" $R5
-        IntFmt $R6 "%02u" $R6
-        WriteRegStr HKCU $dnStateKey "MigratedAt" "$R2-$R1-$R0T$R4:$R5:$R6Z"
-        ; The record must read back whole (the app acts on nothing less).
-        ReadRegStr $R3 HKCU $dnStateKey "MigratedAt"
-        ReadRegStr $2 HKCU $dnStateKey "MigratedTo"
-        ${if} $R3 == "$R2-$R1-$R0T$R4:$R5:$R6Z"
-        ${andIf} $2 != ""
-          !insertmacro dnStatus record moved record-written "from=$0 to=$1"
-        ${else}
-          !insertmacro dnStatus record moved record-failed "from=$0 to=$1"
+        ${if} $2 == "written"
+          !insertmacro dnTestStep "finish-record"
+          DeleteRegKey HKCU $dnJournalKey
         ${endif}
       ${elseif} $3 == "unsafe"
         StrCpy $3 "kept: something in the old folder failed an identity check while it was being removed; removal stopped"
@@ -1770,13 +1771,6 @@ FunctionEnd
       !insertmacro dnStatus remove kept $dnWhy "from=$0 to=$1"
     ${endif}
     StrCpy $0 $3
-    Pop $R6
-    Pop $R5
-    Pop $R4
-    Pop $R3
-    Pop $R2
-    Pop $R1
-    Pop $R0
     Pop $3
     Exch $0
     Exch 2
@@ -2060,9 +2054,12 @@ FunctionEnd
     ${if} $4 != ""
       StrCpy $4 "refused: $4"
     ${else}
-      WriteRegStr HKCU $dnJournalKey "Identity" "${DN_MIGRATION_IDENTITY}"
+      ; Identity last: a journal cut short before it is incomplete, not trusted.
       WriteRegStr HKCU $dnJournalKey "SourceDir" $0
+      !insertmacro dnTestStep "park-SourceDir"
       WriteRegStr HKCU $dnJournalKey "DestDir" $1
+      !insertmacro dnTestStep "park-DestDir"
+      WriteRegStr HKCU $dnJournalKey "Identity" "${DN_MIGRATION_IDENTITY}"
       Push $0
       Call dnCanonical
       Pop $0
@@ -2107,28 +2104,310 @@ FunctionEnd
     Pop $1
   FunctionEnd
 
+  ; The record of a completed move: MigrationRecord under $dnStateKey, one REG_SZ
+  ; value, so writing (or restoring) it is a single registry write and a run cut
+  ; short leaves all of it or none of it:
+  ;
+  ;   DNMR1|<DN_MIGRATION_IDENTITY>|<old folder>|<new folder>|<UTC, ISO 8601>|END
+  ;
+  ; (no folder can contain "|"; the identity's own two "|" are fixed). The app
+  ; (src/main/windows-install-record.ts) acts only on a record in exactly this
+  ; form for its own identity and leaves anything else for a later run to repair.
+  !define DN_RECORD_VERSION "DNMR1"
+
+  ; Push VALUE; Call dnRecordCheck; Pop REASON: "" when VALUE is a complete record
+  ; for this identity naming exactly <Programs>\APP_FILENAME -> <Programs>\
+  ; PRODUCT_FILENAME (compared canonical); else "none" (empty), "format",
+  ; "identity" or "folders".
+  Function dnRecordCheck
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    Push $4
+    Push $5
+    Push $6
+    StrLen $2 "${DN_RECORD_VERSION}|"
+    StrCpy $3 $0 $2
+    StrLen $4 "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|"
+    StrCpy $5 $0 $4
+    ${if} $0 == ""
+      StrCpy $0 "none"
+    ${elseif} $3 S!= "${DN_RECORD_VERSION}|"
+      StrCpy $0 "format"
+    ${elseif} $5 != "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|"
+      StrCpy $0 "identity"
+    ${else}
+      ; The rest is <old>|<new>|<at>|END: $3, $4, $5 and $6; $1 counts the "|".
+      StrCpy $0 $0 "" $4
+      StrCpy $1 0
+      StrCpy $3 ""
+      StrCpy $4 ""
+      StrCpy $5 ""
+      StrCpy $6 ""
+      ${do}
+        StrCpy $2 $0 1
+        StrCpy $0 $0 "" 1
+        ${if} $2 == ""
+          ${break}
+        ${elseif} $2 == "|"
+          IntOp $1 $1 + 1
+        ${elseif} $1 = 0
+          StrCpy $3 "$3$2"
+        ${elseif} $1 = 1
+          StrCpy $4 "$4$2"
+        ${elseif} $1 = 2
+          StrCpy $5 "$5$2"
+        ${elseif} $1 = 3
+          StrCpy $6 "$6$2"
+        ${endif}
+      ${loop}
+      ${if} $1 != 3
+      ${orIf} $6 S!= "END"
+      ${orIf} $3 == ""
+      ${orIf} $4 == ""
+      ${orIf} $5 == ""
+        StrCpy $0 "format"
+      ${else}
+        Push $dnProgramsRoot
+        Call dnCanonical
+        Pop $1
+        Push $3
+        Call dnCanonical
+        Pop $3
+        Push $4
+        Call dnCanonical
+        Pop $4
+        ${if} $1 != ""
+        ${andIf} $3 == "$1\${APP_FILENAME}"
+        ${andIf} $4 == "$1\${PRODUCT_FILENAME}"
+          StrCpy $0 ""
+        ${else}
+          StrCpy $0 "folders"
+        ${endif}
+      ${endif}
+    ${endif}
+    Pop $6
+    Pop $5
+    Pop $4
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Call dnWriteRecord; Pop RESULT: writes the record of a
+  ; move from LEGACY to NEW (now, UTC) in one write and reads it back: "written"
+  ; or "failed".
+  Function dnWriteRecord
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    Push $3
+    Push $R0
+    Push $R1
+    Push $R2
+    Push $R3
+    Push $R4
+    Push $R5
+    Push $R6
+    Push $0
+    Call dnCanonical
+    Pop $2
+    Push $1
+    Call dnCanonical
+    Pop $3
+    ${GetTime} "" "LS" $R0 $R1 $R2 $R3 $R4 $R5 $R6
+    IntFmt $R0 "%02u" $R0
+    IntFmt $R1 "%02u" $R1
+    IntFmt $R4 "%02u" $R4
+    IntFmt $R5 "%02u" $R5
+    IntFmt $R6 "%02u" $R6
+    StrCpy $2 "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|$2|$3|$R2-$R1-$R0T$R4:$R5:$R6Z|END"
+    WriteRegStr HKCU $dnStateKey "MigrationRecord" $2
+    ReadRegStr $3 HKCU $dnStateKey "MigrationRecord"
+    ${if} $3 S== $2
+      StrCpy $2 "written"
+      !insertmacro dnStatus record moved record-written "from=$0 to=$1"
+    ${else}
+      StrCpy $2 "failed"
+      !insertmacro dnStatus record moved record-failed "from=$0 to=$1"
+    ${endif}
+    StrCpy $0 $2
+    Pop $R6
+    Pop $R5
+    Pop $R4
+    Pop $R3
+    Pop $R2
+    Pop $R1
+    Pop $R0
+    Pop $3
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Push KEY; Call dnJournalCheck; Pop REASON: "" when the journal values at
+  ; HKCU\KEY are complete (Identity, SourceDir and DestDir all there) and name this
+  ; identity and exactly <Programs>\APP_FILENAME -> <Programs>\PRODUCT_FILENAME
+  ; (compared canonical); else "none" (none of the three), "incomplete",
+  ; "identity" or "folders".
+  Function dnJournalCheck
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    ReadRegStr $1 HKCU $0 "Identity"
+    ReadRegStr $2 HKCU $0 "SourceDir"
+    ReadRegStr $3 HKCU $0 "DestDir"
+    ${if} $1 == ""
+    ${andIf} $2 == ""
+    ${andIf} $3 == ""
+      StrCpy $0 "none"
+    ${elseif} $1 == ""
+    ${orIf} $2 == ""
+    ${orIf} $3 == ""
+      StrCpy $0 "incomplete"
+    ${elseif} $1 != "${DN_MIGRATION_IDENTITY}"
+      StrCpy $0 "identity"
+    ${else}
+      Push $dnProgramsRoot
+      Call dnCanonical
+      Pop $1
+      Push $2
+      Call dnCanonical
+      Pop $2
+      Push $3
+      Call dnCanonical
+      Pop $3
+      ${if} $1 != ""
+      ${andIf} $2 == "$1\${APP_FILENAME}"
+      ${andIf} $3 == "$1\${PRODUCT_FILENAME}"
+        StrCpy $0 ""
+      ${else}
+        StrCpy $0 "folders"
+      ${endif}
+    ${endif}
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push DEST; Call dnJournalDone; Pop LEGACY: the old folder of a move an earlier
+  ; run removed and then stopped before it wrote the record (dnFinishMigration
+  ; writes the record before it clears the journal): the journal is complete for
+  ; this identity (dnJournalCheck) and DEST, and its old folder is not there at
+  ; all (not even as a link). "" otherwise. customInstall finishes such a move
+  ; (dnCompleteMove).
+  Function dnJournalDone
+    Exch $0
+    Push $1
+    Push $2
+    Push $dnJournalKey
+    Call dnJournalCheck
+    Pop $1
+    ${if} $1 == ""
+      ReadRegStr $1 HKCU $dnJournalKey "DestDir"
+      Push $1
+      Call dnCanonical
+      Pop $1
+      Push $0
+      Call dnCanonical
+      Pop $0
+      ${if} $0 != ""
+      ${andIf} $1 == $0
+        ReadRegStr $1 HKCU $dnJournalKey "SourceDir"
+        Push $1
+        Call dnCanonical
+        Pop $1
+        System::Call 'kernel32::GetFileAttributesW(w r1) i.r2 ?e'
+        Pop $0
+        ; ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND: gone, not unreadable.
+        ${if} $2 = -1
+        ${andIf} $0 = 2
+          StrCpy $0 $1
+        ${elseif} $2 = -1
+        ${andIf} $0 = 3
+          StrCpy $0 $1
+        ${else}
+          StrCpy $0 ""
+        ${endif}
+      ${else}
+        StrCpy $0 ""
+      ${endif}
+    ${else}
+      StrCpy $0 ""
+    ${endif}
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Call dnCompleteMove: what dnFinishMigration does after
+  ; its removal, for a move dnJournalDone found removed but unrecorded: writes the
+  ; record unless a complete one is there already, then clears the journal (kept
+  ; if the record could not be written, so the next run tries again).
+  Function dnCompleteMove
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    ReadRegStr $2 HKCU $dnStateKey "MigrationRecord"
+    Push $2
+    Call dnRecordCheck
+    Pop $2
+    ${if} $2 != ""
+      Push $0
+      Push $1
+      Call dnWriteRecord
+      Pop $2
+    ${else}
+      StrCpy $2 "written"
+    ${endif}
+    ${if} $2 == "written"
+      DeleteRegKey HKCU $dnJournalKey
+      !insertmacro dnStatus install moved journal-completed "from=$0 to=$1"
+    ${endif}
+    Pop $2
+    Pop $0
+    Pop $1
+  FunctionEnd
+
   ; Call dnSaveState / Call dnRestoreState / Call dnRecoverState.
   ; electron-builder's uninstaller, which "uninstall old version" runs (with
   ; --updated) on every update once the uninstall entry names an installed copy,
   ; deletes HKCU\Software\${APP_GUID}: the journal ($dnJournalKey, a subkey) and the
-  ; MigratedFrom / MigratedTo / MigratedAt record ($dnStateKey). dnSaveState, called
-  ; right before that step, copies both to the recovery key $dnRecoveryKey
-  ; (HKCU\Software\DoodleNote-InstallRecovery\${APP_GUID}: outside the deleted
-  ; subtree, still one per identity), and also keeps them in memory. dnRecoverState
-  ; writes back every value that is missing from the recovery key, after checking
-  ; it: written for this identity (RecoveryFor, written last), the journal naming
-  ; this identity and exactly <Programs>\APP_FILENAME -> <Programs>\PRODUCT_FILENAME,
-  ; the record naming those same two folders. It deletes the recovery key only once
-  ; what it restored reads back. customInit calls it first, so an installer that died
-  ; between "uninstall old version" and customInstall loses nothing: the next run
-  ; finds the journal and record again. dnRestoreState, first thing in customInstall,
-  ; calls it and then fills anything still missing from memory. So an unfinished
-  ; move stays armed across any number of runs, and a record the app has not
-  ; consumed yet survives another update, even an interrupted one.
+  ; record ($dnStateKey). dnSaveState, called right before that step, copies both
+  ; to the recovery key $dnRecoveryKey (HKCU\Software\DoodleNote-InstallRecovery\
+  ; ${APP_GUID}: outside the deleted subtree, still one per identity), and also
+  ; keeps them in memory. customInit calls dnRecoverState first, so an installer
+  ; that died between "uninstall old version" and customInstall loses nothing;
+  ; dnRestoreState, first thing in customInstall, calls it and then fills anything
+  ; still missing from memory. So an unfinished move stays armed across any number
+  ; of runs, and a record the app has not consumed yet survives another update,
+  ; even an interrupted one.
+  ;
+  ; Every step can be cut short and picked up by the next run:
+  ; - A new copy is valid only once RecoveryFor (written last) names this
+  ;   identity. A copy kept from an earlier run (dnRecoverState could not finish
+  ;   with it) is updated in place, one value at a time, and only from live state
+  ;   that is itself complete, so it stays valid between any two writes.
+  ; - dnRecoverState uses each part of the copy (journal, record) only after
+  ;   checking it: complete, this identity, exactly this identity's two folders
+  ;   (dnJournalCheck, dnRecordCheck). It writes every journal value that is
+  ;   missing or empty, Identity last, so a journal cut short is incomplete and
+  ;   the next run fills the rest; the record is one value. It deletes the copy
+  ;   only once every value in it reads back from the live keys exactly. A copy
+  ;   that fails its checks is left alone (a user uninstall deletes it).
   !macro dnCopyValue FROM TO NAME
     ReadRegStr $0 HKCU ${FROM} "${NAME}"
     ${if} $0 != ""
       WriteRegStr HKCU ${TO} "${NAME}" $0
+    ${else}
+      DeleteRegValue HKCU ${TO} "${NAME}"
     ${endif}
   !macroend
 
@@ -2139,40 +2418,73 @@ FunctionEnd
     ReadRegStr $dnSavedUninstall HKCU $dnJournalKey "LegacyUninstallString"
     ReadRegStr $dnSavedDesktop HKCU $dnJournalKey "DesktopLink"
     ReadRegStr $dnSavedStartMenu HKCU $dnJournalKey "StartMenuLink"
-    ReadRegStr $dnSavedFrom HKCU $dnStateKey "MigratedFrom"
-    ReadRegStr $dnSavedTo HKCU $dnStateKey "MigratedTo"
-    ReadRegStr $dnSavedAt HKCU $dnStateKey "MigratedAt"
+    ReadRegStr $dnSavedRecord HKCU $dnStateKey "MigrationRecord"
     ${if} $dnRecoveryKey != ""
       Push $0
-      DeleteRegKey HKCU $dnRecoveryKey
-      ${if} $dnSavedIdentity != ""
-      ${orIf} $dnSavedTo != ""
+      Push $1
+      Push $2
+      ReadRegStr $0 HKCU $dnRecoveryKey "RecoveryFor"
+      ${if} $0 != "${DN_MIGRATION_IDENTITY}"
+        ; Not a copy for this identity, or one cut short: start a new one.
+        DeleteRegKey HKCU $dnRecoveryKey
+      ${endif}
+      Push $dnJournalKey
+      Call dnJournalCheck
+      Pop $1
+      Push $dnSavedRecord
+      Call dnRecordCheck
+      Pop $2
+      ; Only complete live state replaces what the copy holds; a part that is not
+      ; complete here keeps the copy's (an earlier run's, not yet restored).
+      ${if} $1 == ""
+      ${orIf} $2 == ""
         ClearErrors
-        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "Identity"
-        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "SourceDir"
-        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DestDir"
-        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "LegacyUninstallString"
-        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DesktopLink"
-        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "StartMenuLink"
-        !insertmacro dnCopyValue $dnStateKey $dnRecoveryKey "MigratedFrom"
-        !insertmacro dnCopyValue $dnStateKey $dnRecoveryKey "MigratedTo"
-        !insertmacro dnCopyValue $dnStateKey $dnRecoveryKey "MigratedAt"
-        ; Last: a copy without it (cut short) is ignored.
+        ${if} $1 == ""
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "Identity"
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "SourceDir"
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DestDir"
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "LegacyUninstallString"
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DesktopLink"
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "StartMenuLink"
+          !insertmacro dnTestStep "save-journal"
+        ${endif}
+        ${if} $2 == ""
+          WriteRegStr HKCU $dnRecoveryKey "MigrationRecord" $dnSavedRecord
+          !insertmacro dnTestStep "save-record"
+        ${endif}
+        ; Last: a new copy without it (cut short) is ignored.
         WriteRegStr HKCU $dnRecoveryKey "RecoveryFor" "${DN_MIGRATION_IDENTITY}"
         ${if} ${Errors}
           DetailPrint "The install state could not be copied to HKCU\$dnRecoveryKey; it is kept for this run only"
         ${endif}
       ${endif}
+      Pop $2
+      Pop $1
       Pop $0
     ${endif}
   FunctionEnd
 
-  !macro dnRestoreValue KEY NAME VALUE
-    ${if} ${VALUE} != ""
-      ReadRegStr $0 HKCU ${KEY} "${NAME}"
-      ${if} $0 == ""
-        WriteRegStr HKCU ${KEY} "${NAME}" ${VALUE}
+  ; In dnRecoverState: the journal value NAME from the copy, if the journal has
+  ; none (or an empty one).
+  !macro dnRecoverValue NAME
+    ReadRegStr $2 HKCU $dnRecoveryKey "${NAME}"
+    ${if} $2 != ""
+      ReadRegStr $3 HKCU $dnJournalKey "${NAME}"
+      ${if} $3 == ""
+        WriteRegStr HKCU $dnJournalKey "${NAME}" $2
+        !insertmacro dnTestStep "recover-${NAME}"
       ${endif}
+    ${endif}
+  !macroend
+
+  ; In dnRecoverState: $5 = "journal-mismatch" unless the journal's NAME reads
+  ; back exactly as the copy has it.
+  !macro dnMatchValue NAME
+    ReadRegStr $2 HKCU $dnRecoveryKey "${NAME}"
+    ReadRegStr $3 HKCU $dnJournalKey "${NAME}"
+    ${if} $2 != ""
+    ${andIf} $3 S!= $2
+      StrCpy $5 "journal-mismatch"
     ${endif}
   !macroend
 
@@ -2188,74 +2500,78 @@ FunctionEnd
       ReadRegStr $0 HKCU $dnRecoveryKey "RecoveryFor"
     ${endif}
     ${if} $0 == "${DN_MIGRATION_IDENTITY}"
-      ; $5: "1" while everything restored reads back.
-      StrCpy $5 "1"
-      Push $dnProgramsRoot
-      Call dnCanonical
+      ; $4: the parts of the copy that passed their checks ("j", "r", "jr").
+      ; $5: why the copy must stay, the first reason found ("" = everything in it
+      ; is live again).
+      StrCpy $4 ""
+      StrCpy $5 ""
+      Push $dnRecoveryKey
+      Call dnJournalCheck
       Pop $1
-      ReadRegStr $2 HKCU $dnRecoveryKey "Identity"
-      ReadRegStr $3 HKCU $dnRecoveryKey "SourceDir"
-      Push $3
-      Call dnCanonical
-      Pop $3
-      ReadRegStr $4 HKCU $dnRecoveryKey "DestDir"
-      Push $4
-      Call dnCanonical
-      Pop $4
-      ${if} $1 != ""
-      ${andIf} $2 == "${DN_MIGRATION_IDENTITY}"
-      ${andIf} $3 == "$1\${APP_FILENAME}"
-      ${andIf} $4 == "$1\${PRODUCT_FILENAME}"
-        ReadRegStr $2 HKCU $dnRecoveryKey "Identity"
-        !insertmacro dnRestoreValue $dnJournalKey "Identity" $2
-        ReadRegStr $2 HKCU $dnRecoveryKey "SourceDir"
-        !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $2
-        ReadRegStr $2 HKCU $dnRecoveryKey "DestDir"
-        !insertmacro dnRestoreValue $dnJournalKey "DestDir" $2
-        ReadRegStr $2 HKCU $dnRecoveryKey "LegacyUninstallString"
-        !insertmacro dnRestoreValue $dnJournalKey "LegacyUninstallString" $2
-        ReadRegStr $2 HKCU $dnRecoveryKey "DesktopLink"
-        !insertmacro dnRestoreValue $dnJournalKey "DesktopLink" $2
-        ReadRegStr $2 HKCU $dnRecoveryKey "StartMenuLink"
-        !insertmacro dnRestoreValue $dnJournalKey "StartMenuLink" $2
-        ReadRegStr $2 HKCU $dnJournalKey "Identity"
-        ${if} $2 == ""
-          StrCpy $5 "0"
-        ${endif}
+      ${if} $1 == ""
+        StrCpy $4 "j"
+        ; Every value the journal is missing; the three that make it complete
+        ; last, Identity very last.
+        !insertmacro dnRecoverValue "LegacyUninstallString"
+        !insertmacro dnRecoverValue "DesktopLink"
+        !insertmacro dnRecoverValue "StartMenuLink"
+        !insertmacro dnRecoverValue "SourceDir"
+        !insertmacro dnRecoverValue "DestDir"
+        !insertmacro dnRecoverValue "Identity"
+      ${elseif} $1 != "none"
+        StrCpy $5 "journal-$1"
       ${endif}
-      ; The record is restored only as a whole, and only when none is there now.
-      ReadRegStr $2 HKCU $dnRecoveryKey "MigratedFrom"
+      ReadRegStr $2 HKCU $dnRecoveryKey "MigrationRecord"
       Push $2
-      Call dnCanonical
-      Pop $2
-      ReadRegStr $3 HKCU $dnRecoveryKey "MigratedTo"
-      Push $3
-      Call dnCanonical
-      Pop $3
-      ReadRegStr $4 HKCU $dnRecoveryKey "MigratedAt"
-      ${if} $1 != ""
-      ${andIf} $2 == "$1\${APP_FILENAME}"
-      ${andIf} $3 == "$1\${PRODUCT_FILENAME}"
-      ${andIf} $4 != ""
-        ReadRegStr $0 HKCU $dnStateKey "MigratedTo"
-        ${if} $0 == ""
-          ReadRegStr $2 HKCU $dnRecoveryKey "MigratedFrom"
-          ReadRegStr $3 HKCU $dnRecoveryKey "MigratedTo"
-          WriteRegStr HKCU $dnStateKey "MigratedFrom" $2
-          WriteRegStr HKCU $dnStateKey "MigratedTo" $3
-          WriteRegStr HKCU $dnStateKey "MigratedAt" $4
-          ReadRegStr $0 HKCU $dnStateKey "MigratedAt"
-          ${if} $0 != $4
-            StrCpy $5 "0"
+      Call dnRecordCheck
+      Pop $1
+      ${if} $1 == ""
+        StrCpy $4 "$4r"
+        ReadRegStr $3 HKCU $dnStateKey "MigrationRecord"
+        Push $3
+        Call dnRecordCheck
+        Pop $3
+        ${if} $3 != ""
+          ; None, or not a complete record for this identity: the copy's, whole.
+          WriteRegStr HKCU $dnStateKey "MigrationRecord" $2
+          !insertmacro dnTestStep "recover-MigrationRecord"
+        ${endif}
+      ${elseif} $1 != "none"
+      ${andIf} $5 == ""
+        StrCpy $5 "record-$1"
+      ${endif}
+      ; Before the copy goes, every value in it must read back from the live keys.
+      ${if} $5 == ""
+        ${if} $4 == "j"
+        ${orIf} $4 == "jr"
+          !insertmacro dnMatchValue "Identity"
+          !insertmacro dnMatchValue "SourceDir"
+          !insertmacro dnMatchValue "DestDir"
+          !insertmacro dnMatchValue "LegacyUninstallString"
+          !insertmacro dnMatchValue "DesktopLink"
+          !insertmacro dnMatchValue "StartMenuLink"
+        ${endif}
+        ${if} $4 == "r"
+        ${orIf} $4 == "jr"
+          ReadRegStr $2 HKCU $dnRecoveryKey "MigrationRecord"
+          ReadRegStr $3 HKCU $dnStateKey "MigrationRecord"
+          ${if} $3 S!= $2
+            StrCpy $5 "record-mismatch"
           ${endif}
         ${endif}
       ${endif}
-      ${if} $5 == "1"
+      ${if} $5 == ""
         DeleteRegKey HKCU $dnRecoveryKey
-        !insertmacro dnStatus recover recovered restored ""
+        !insertmacro dnTestStep "recover-deleted"
+        ${if} $4 != ""
+          !insertmacro dnStatus recover recovered restored ""
+        ${endif}
+      ${elseif} $4 == ""
+        DetailPrint "Ignored HKCU\$dnRecoveryKey: it does not name this install's folders ($5)"
+        !insertmacro dnStatus recover recovery-ignored $5 ""
       ${else}
-        DetailPrint "Kept HKCU\$dnRecoveryKey: the install state could not be written back"
-        !insertmacro dnStatus recover recover-incomplete writeback-failed ""
+        DetailPrint "Kept HKCU\$dnRecoveryKey: not all of it could be put back ($5)"
+        !insertmacro dnStatus recover recover-incomplete $5 ""
       ${endif}
     ${elseif} $0 != ""
       !insertmacro dnStatus recover recovery-ignored recovery-foreign ""
@@ -2268,22 +2584,38 @@ FunctionEnd
     Pop $0
   FunctionEnd
 
+  ; In dnRestoreState: the journal value NAME from memory, if the journal has none.
+  !macro dnRestoreValue KEY NAME VALUE
+    ${if} ${VALUE} != ""
+      ReadRegStr $0 HKCU ${KEY} "${NAME}"
+      ${if} $0 == ""
+        WriteRegStr HKCU ${KEY} "${NAME}" ${VALUE}
+      ${endif}
+    ${endif}
+  !macroend
+
   Function dnRestoreState
     Call dnRecoverState
     Push $0
-    !insertmacro dnRestoreValue $dnJournalKey "Identity" $dnSavedIdentity
-    !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $dnSavedSource
-    !insertmacro dnRestoreValue $dnJournalKey "DestDir" $dnSavedDest
+    ; Identity last, as in dnRecoverState.
     !insertmacro dnRestoreValue $dnJournalKey "LegacyUninstallString" $dnSavedUninstall
     !insertmacro dnRestoreValue $dnJournalKey "DesktopLink" $dnSavedDesktop
     !insertmacro dnRestoreValue $dnJournalKey "StartMenuLink" $dnSavedStartMenu
-    ; The record is written only as a whole.
-    ReadRegStr $0 HKCU $dnStateKey "MigratedTo"
-    ${if} $0 == ""
-    ${andIf} $dnSavedTo != ""
-      WriteRegStr HKCU $dnStateKey "MigratedFrom" $dnSavedFrom
-      WriteRegStr HKCU $dnStateKey "MigratedTo" $dnSavedTo
-      WriteRegStr HKCU $dnStateKey "MigratedAt" $dnSavedAt
+    !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $dnSavedSource
+    !insertmacro dnRestoreValue $dnJournalKey "DestDir" $dnSavedDest
+    !insertmacro dnRestoreValue $dnJournalKey "Identity" $dnSavedIdentity
+    ; The record, whole, when no complete one is there now.
+    ReadRegStr $0 HKCU $dnStateKey "MigrationRecord"
+    Push $0
+    Call dnRecordCheck
+    Pop $0
+    ${if} $0 != ""
+      Push $dnSavedRecord
+      Call dnRecordCheck
+      Pop $0
+      ${if} $0 == ""
+        WriteRegStr HKCU $dnStateKey "MigrationRecord" $dnSavedRecord
+      ${endif}
     ${endif}
     Pop $0
   FunctionEnd

@@ -13,6 +13,15 @@ const path = require('node:path')
 
 const desktop = path.resolve(__dirname, '..')
 const IDENTITY = 'guards-test|desktop|DoodleNote'
+/** The one-value record (dnWriteRecord): DNMR1|<identity>|<old>|<new>|<UTC>|END. */
+const RECORD_FORM =
+  /^DNMR1\|guards-test\|desktop\|DoodleNote\|[^|]+\|[^|]+\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|END$/
+/** A predicate: the record of a move from `from` to `to` (compared case-insensitively). */
+const recordOf = (from, to) => (r) =>
+  RECORD_FORM.test(r) &&
+  r.toLowerCase().startsWith(`DNMR1|${IDENTITY}|${from}|${to}|`.toLowerCase())
+const recordValue = (from, to, at = '2026-11-08T01:02:03Z') =>
+  `DNMR1|${IDENTITY}|${from}|${to}|${at}|END`
 
 async function makensis() {
   const builder = path.dirname(
@@ -212,6 +221,10 @@ async function main() {
     const pauseBase = path.join(sandbox, 'pause')
     const pauseExe = path.join(sandbox, 'harness-pause.exe')
     compile(pauseExe, [`-DDN_TEST_PAUSE=${pauseBase}`])
+    // The same guards terminating right after the registry write a `stopat` case
+    // names (dnTestStep; test builds only: DN_TEST_STEPS is never set for an installer).
+    const stepsExe = path.join(sandbox, 'harness-steps.exe')
+    compile(stepsExe, ['-DDN_TEST_STEPS=1'])
 
     const root = path.join(sandbox, 'Local', 'Programs')
     const profile = path.join(sandbox, 'Roaming', 'desktop')
@@ -407,21 +420,15 @@ async function main() {
     cases.push(['journal', l3Dest, '', trusted])
     holds.push(path.join(l3, 'desktop', 'locked.dat'))
 
-    // H2: a real move (old folder removed) writes the MigratedFrom/To/At record the
-    // app requires before it repoints anything; the journal is cleared.
+    // H2: a real move (old folder removed) writes the record the app requires before
+    // it repoints anything (one value, MigrationRecord); then the journal is cleared.
     const migSource = path.join(mig, 'desktop')
     const migDest = path.join(mig, 'DoodleNote')
-    const migRecord = `${lower(real(mig, 'desktop'))}|${lower(real(mig, 'DoodleNote'))}|`
     cases.push(['root', mig, migProfile])
     cases.push(['arm', migSource, migDest, '', 'armed'])
     cases.push(['finish', migSource, migDest, '0', 'removed'])
     cases.push(['jstate', '', '', 'none'])
-    cases.push([
-      'record',
-      '',
-      '',
-      (r) => lower(r).startsWith(migRecord) && /\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(r)
-    ])
+    cases.push(['record', '', '', recordOf(real(mig, 'desktop'), real(mig, 'DoodleNote'))])
 
     // L6: shortcut presence is recorded once per migration, before anything changes.
     const present = path.join(sandbox, 'links', 'present.lnk')
@@ -970,7 +977,7 @@ async function main() {
     assert.match(rrUninstall, /^retargeted=/)
     rrUntouched()
     // Control: nothing retargeted, so the pinned folder (and only it) goes.
-    // MigratedFrom names the old folder as the installer knew it (through the junction).
+    // The record names the old folder as the installer knew it (through the junction).
     const rrRecord = `\\rr\\local\\programs\\desktop|`
     const rrControl = await rrRun('rr-control', '', [
       ...rrSetup,
@@ -1049,7 +1056,6 @@ async function main() {
     process.kill(d4Holder.pid)
     await new Promise((resolve) => setTimeout(resolve, 1500))
     // Run 3: the file is free; the journal is still trusted and the move finishes.
-    const d4Record = `${lower(real(d4, 'desktop'))}|${lower(real(d4, 'DoodleNote'))}|`
     const run3 = [
       ...d4Setup,
       ['journal', d4New, '', d4Trusted],
@@ -1058,7 +1064,7 @@ async function main() {
       ['restore', '', '', 'done'],
       ['finish', d4Old, d4New, '0', 'removed'],
       ['jstate', '', '', 'none'],
-      ['record', '', '', (r) => lower(r).startsWith(d4Record)]
+      ['record', '', '', recordOf(real(d4, 'desktop'), real(d4, 'DoodleNote'))]
     ]
     const run3Results = phase('d4-run3', run3).results
     checkCases('d4-run3', run3, run3Results)
@@ -1131,7 +1137,7 @@ async function main() {
       ['rstate', '', '', 'none'],
       ['finish', p2Old, p2New, '0', 'removed'],
       ['jstate', '', '', 'none'],
-      ['record', '', '', (r) => /\\desktop\|.*\\DoodleNote\|\d{4}-/.test(r)]
+      ['record', '', '', recordOf(real(p2, 'desktop'), real(p2, 'DoodleNote'))]
     ]
     const p2Run2Results = phase('p2-run2-recovers', p2Run2).results
     checkCases('p2-run2-recovers', p2Run2, p2Run2Results)
@@ -1142,7 +1148,7 @@ async function main() {
       ...p2Setup,
       ['recover', '', '', 'done'],
       ['save', '', '', 'done'],
-      ['rread', 'MigratedTo', '', (r) => p2Record.split('|')[1] === r],
+      ['rread', 'MigrationRecord', '', p2Record],
       ['wipe', '', '', 'done'],
       ['record', '', '', 'none'],
       ['kill', '', '', '(killed)']
@@ -1164,7 +1170,8 @@ async function main() {
         require.resolve('tsx/cli', { paths: [desktop] }),
         path.join(__dirname, 'consume-install-record.ts'),
         `HKEY_CURRENT_USER\\${p2State}`,
-        path.join(fs.realpathSync.native(p2New), 'DoodleNote.exe')
+        path.join(fs.realpathSync.native(p2New), 'DoodleNote.exe'),
+        IDENTITY
       ],
       { encoding: 'utf8', cwd: desktop }
     ).trim()
@@ -1175,29 +1182,30 @@ async function main() {
     assert.equal(consumed.after, null)
     assert.deepEqual(
       [consumed.record.from, consumed.record.to, consumed.record.at],
-      p2Record.split('|')
+      p2Record.split('|').slice(4, 7)
     )
     total += 1
-    // The recovery copy is checked before anything is restored from it.
+    // The recovery copy is checked before anything is restored from it; one that
+    // fails the checks is left where it is (a user uninstall deletes it).
     const p2Real = real(p2)
+    const p2Foreign = path.join(sandbox, 'elsewhere', 'desktop')
     const p2Tamper = [
       ...p2Setup,
       ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
       ['rwrite', 'Identity', IDENTITY, 'set'],
-      ['rwrite', 'SourceDir', path.join(sandbox, 'elsewhere', 'desktop'), 'set'],
+      ['rwrite', 'SourceDir', p2Foreign, 'set'],
       ['rwrite', 'DestDir', p2New, 'set'],
-      ['rwrite', 'MigratedFrom', path.join(sandbox, 'elsewhere', 'desktop'), 'set'],
-      ['rwrite', 'MigratedTo', path.join(p2Real, 'DoodleNote'), 'set'],
-      ['rwrite', 'MigratedAt', '2026-01-01T00:00:00Z', 'set'],
+      ['rwrite', 'MigrationRecord', recordValue(p2Foreign, path.join(p2Real, 'DoodleNote')), 'set'],
       ['recover', '', '', 'done'],
       ['jstate', '', '', 'none'],
       ['record', '', '', 'none'],
-      ['rstate', '', '', 'none'],
+      ['rstate', '', '', 'present'],
       // Another identity's copy is not ours to restore or delete.
       ['rwrite', 'RecoveryFor', 'other-guid|desktop|DoodleNote', 'set'],
       ['rwrite', 'Identity', 'other-guid|desktop|DoodleNote', 'set'],
       ['rwrite', 'SourceDir', p2Old, 'set'],
       ['rwrite', 'DestDir', p2New, 'set'],
+      ['rwrite', 'MigrationRecord', '', 'set'],
       ['recover', '', '', 'done'],
       ['jstate', '', '', 'none'],
       ['rstate', '', '', 'present']
@@ -1414,7 +1422,7 @@ async function main() {
       ...l2Setup,
       ['finish', l2Old, l2New, '0', 'removed'],
       ['status', '', '', status('record', 'moved', 'record-written')],
-      ['record', '', '', (r) => /\\desktop\|.*\\DoodleNote\|\d{4}-/.test(r)],
+      ['record', '', '', recordOf(real(l2, 'desktop'), real(l2, 'DoodleNote'))],
       // Recover: a copy saved before "uninstall old version" is restored next run.
       ['save', '', '', 'done'],
       ['wipe', '', '', 'done'],
@@ -1560,6 +1568,431 @@ async function main() {
         'login-item login-item-kept not-ours'
       ]
     )
+
+    // P6: every step of the recovery, and the record itself, can be cut short at
+    // any registry write and is finished by the next run. The record is one value
+    // (all of it or none); a journal is complete only with Identity, SourceDir and
+    // DestDir (Identity written last); the recovery copy is deleted only once every
+    // value in it reads back from the live keys.
+    // The steps build terminates the harness right after the named write
+    // (dnTestStep; never compiled into an installer).
+    const p6 = path.join(sandbox, 'p6', 'Local', 'Programs')
+    const p6Profile = path.join(sandbox, 'p6', 'Roaming', 'desktop')
+    const p6Old = path.join(p6, 'desktop')
+    const p6New = path.join(p6, 'DoodleNote')
+    fs.mkdirSync(p6Profile, { recursive: true })
+    write(path.join(p6New, 'DoodleNote.exe'), 'new')
+    const p6Real = real(p6)
+    const p6From = path.join(p6Real, 'desktop')
+    const p6To = path.join(p6Real, 'DoodleNote')
+    const p6Foreign = path.join(sandbox, 'elsewhere', 'desktop')
+    const p6State = `${journalKey}-p6`
+    const p6Journal = `${p6State}\\InstallMigration`
+    const p6Parent = `${journalKey}-p6-recovery`
+    const p6Recovery = `${p6Parent}\\guards-test`
+    const p6Status = `${journalKey}-p6-status`
+    registryKeys.push(p6State, `${p6State}-uninstall`, p6Parent, p6Status)
+    const p6Log = path.join(sandbox, 'p6-logs', 'DoodleNote-install-test.log')
+    fs.mkdirSync(path.dirname(p6Log), { recursive: true })
+    const p6Setup = [
+      ['root', p6, p6Profile],
+      ['jkey', p6Journal, ''],
+      ['skey', p6State, ''],
+      ['ukey', `${p6State}-uninstall`, ''],
+      ['rkey', p6Recovery, ''],
+      ['stkey', p6Status, p6Log, 'set']
+    ]
+    const p6Rec = recordValue(p6From, p6To)
+    const p6Cmd = `"${p6From}\\Uninstall DoodleNote.exe" /currentuser`
+    const p6Values = [
+      ['Identity', IDENTITY],
+      ['SourceDir', p6From],
+      ['DestDir', p6To],
+      ['LegacyUninstallString', p6Cmd],
+      ['DesktopLink', '0'],
+      ['StartMenuLink', '1']
+    ]
+    const p6Live = [
+      ...p6Values.map(([name, data]) => ['jwrite', name, data, 'set']),
+      ['lwrite', 'MigrationRecord', p6Rec, 'set']
+    ]
+    const p6IsLive = [
+      ...p6Values.map(([name, data]) => ['jread', name, '', data]),
+      ['record', '', '', p6Rec]
+    ]
+    const p6Clean = [
+      ['wipe', '', '', 'done'],
+      ['rwipe', '', '', 'done'],
+      ['recover', '', '', 'done']
+    ]
+
+    // The checks: a record is complete for this identity and its two folders, or
+    // not a record; a journal is complete for them, or not trusted.
+    const p6Whole = ['DNMR1', IDENTITY, p6From, p6To, '2026-11-08T01:02:03Z', 'END']
+    const cut = p6Whole.join('|')
+    const p6Checks = [
+      ...p6Setup,
+      ['rcheck', '', p6Rec, 'ok'],
+      ['rcheck', '', recordValue(p6From.toUpperCase(), p6To.toLowerCase()), 'ok'],
+      ['rcheck', '', recordValue(`${p6From}\\`, `${p6To}\\.`), 'ok'],
+      ['rcheck', '', '', 'none'],
+      // Cut short anywhere: before each "|", and inside END.
+      ...[...cut]
+        .map((ch, i) => (ch === '|' ? i : -1))
+        .filter((i) => i > 0)
+        .map((i) => ['rcheck', '', cut.slice(0, i), /^(format|identity)$/]),
+      ['rcheck', '', cut.slice(0, -1), 'format'],
+      ['rcheck', '', `${cut}|`, 'format'],
+      ['rcheck', '', `${cut}|END`, 'format'],
+      ['rcheck', '', recordValue(p6From, p6To, ''), 'format'],
+      ['rcheck', '', recordValue('', p6To), 'format'],
+      ['rcheck', '', `DNMR2|${p6Whole.slice(1).join('|')}`, 'format'],
+      ['rcheck', '', `dnmr1|${p6Whole.slice(1).join('|')}`, 'format'],
+      ['rcheck', '', `${p6From}|${p6To}|2026-11-08T01:02:03Z`, 'format'],
+      ['rcheck', '', cut.replace('guards-test|', 'other-guid|'), 'identity'],
+      ['rcheck', '', cut.replace('|DoodleNote|', '|DoodleNote QA|'), 'identity'],
+      ['rcheck', '', recordValue(p6Foreign, p6To), 'folders'],
+      ['rcheck', '', recordValue(p6To, p6From), 'folders'],
+      ['rcheck', '', recordValue(p6From, path.join(p6Real, 'DoodleNote QA')), 'folders'],
+      ['wipe', '', '', 'done'],
+      ['jcheck', p6Journal, '', 'none'],
+      ['jwrite', 'Identity', IDENTITY, 'set'],
+      ['jcheck', p6Journal, '', 'incomplete'],
+      ['journal', p6New, '', 'none: the migration journal is incomplete'],
+      ['jwrite', 'SourceDir', p6From, 'set'],
+      ['jcheck', p6Journal, '', 'incomplete'],
+      ['journal', p6New, '', 'none: the migration journal is incomplete'],
+      ['why', '', '', 'journal-incomplete'],
+      ['jwrite', 'DestDir', p6To, 'set'],
+      ['jcheck', p6Journal, '', 'ok'],
+      ['jwrite', 'Identity', '', 'set'],
+      ['jcheck', p6Journal, '', 'incomplete'],
+      ['journal', p6New, '', 'none: '],
+      ['jwrite', 'Identity', 'other-guid|desktop|DoodleNote', 'set'],
+      ['jcheck', p6Journal, '', 'identity'],
+      ['jwrite', 'Identity', IDENTITY, 'set'],
+      ['jwrite', 'SourceDir', p6Foreign, 'set'],
+      ['jcheck', p6Journal, '', 'folders'],
+      ['jwrite', 'SourceDir', p6From, 'set'],
+      ['jwrite', 'DestDir', path.join(p6Real, 'DoodleNote QA'), 'set'],
+      ['jcheck', p6Journal, '', 'folders'],
+      ...p6Clean
+    ]
+    checkCases('p6-checks', p6Checks, phase('p6-checks', p6Checks).results)
+
+    // Restoration killed right after each of its writes: the next run finishes it,
+    // every value comes back exactly, and only then does the copy go.
+    const restoreSteps = [
+      'recover-LegacyUninstallString',
+      'recover-DesktopLink',
+      'recover-StartMenuLink',
+      'recover-SourceDir',
+      'recover-DestDir',
+      'recover-Identity',
+      'recover-MigrationRecord',
+      'recover-deleted'
+    ]
+    for (const [n, step] of restoreSteps.entries()) {
+      const killed = [
+        ...p6Setup,
+        ...p6Live,
+        ['save', '', '', 'done'],
+        ['rstate', '', '', 'present'],
+        ['wipe', '', '', 'done'],
+        ['stopat', step, '', 'set'],
+        ['recover', '', '', '(killed)']
+      ]
+      const run1 = phase(`p6-${step}-killed`, killed, { exe: stepsExe, status: 9 }).results
+      assert.equal(run1.length, killed.length - 1, `${step}: the harness died at the step`)
+      checkCases(`p6-${step}-killed`, killed.slice(0, -1), run1)
+      const run2 = [
+        ...p6Setup,
+        // What the killed run left: the journal is not complete before Identity,
+        // and the record is all there or not at all.
+        ['jcheck', p6Journal, '', n < 3 ? 'none' : n < 5 ? 'incomplete' : 'ok'],
+        ['record', '', '', n < 6 ? 'none' : p6Rec],
+        ['keyexists', p6Recovery, '', n < 7 ? 'present' : 'none'],
+        ['recover', '', '', 'done'],
+        ...p6IsLive,
+        ['jcheck', p6Journal, '', 'ok'],
+        ['rstate', '', '', 'none'],
+        ['keyexists', p6Recovery, '', 'none'],
+        ['status', '', '', n < 7 ? status('recover', 'recovered', 'restored') : undefined]
+      ]
+      checkCases(`p6-${step}-next`, run2, phase(`p6-${step}-next`, run2).results)
+    }
+
+    // A move killed after its old folder was removed but before the record (the
+    // record is written first, then the journal cleared): the next run sees the
+    // complete journal with its old folder gone and writes the record; one killed
+    // after the record keeps that record and only clears the journal.
+    for (const step of ['finish-removed', 'finish-record']) {
+      write(path.join(p6Old, 'DoodleNote.exe'), 'old')
+      write(path.join(p6Old, 'resources', 'app.asar'), 'asar')
+      const killed = [
+        ...p6Setup,
+        ['wipe', '', '', 'done'],
+        ['arm', p6Old, p6New, '', 'armed'],
+        ['jdone', p6New, '', 'none'],
+        ['stopat', step, '', 'set'],
+        ['finish', p6Old, p6New, '0', '(killed)']
+      ]
+      const run1 = phase(`p6-${step}-killed`, killed, { exe: stepsExe, status: 9 }).results
+      assert.equal(run1.length, killed.length - 1, `${step}: the harness died at the step`)
+      checkCases(`p6-${step}-killed`, killed.slice(0, -1), run1)
+      assert.ok(!fs.existsSync(p6Old), `${step}: the killed run removed the old folder`)
+      const kept = step === 'finish-record' ? recordOf(p6From, p6To) : 'none'
+      const run2 = [
+        ...p6Setup,
+        ['jstate', '', '', 'armed'],
+        ['record', '', '', kept],
+        // Not the old folder for a move any more: dnTrustedJournal refuses it.
+        ['journal', p6New, '', /^none: /],
+        ['jdone', p6New, '', (r) => lower(r) === lower(p6From)],
+        // Only for its own destination.
+        ['jdone', path.join(p6Real, 'Other'), '', 'none'],
+        ['complete', p6Old, p6New, 'done'],
+        ['jstate', '', '', 'none'],
+        ['record', '', '', recordOf(p6From, p6To)],
+        ['status', '', '', status('install', 'moved', 'journal-completed')],
+        ['jdone', p6New, '', 'none']
+      ]
+      const next = phase(`p6-${step}-next`, run2).results
+      checkCases(`p6-${step}-next`, run2, next)
+      if (step === 'finish-record')
+        assert.equal(
+          next[p6Setup.length + 1],
+          next[p6Setup.length + 7],
+          'the record is kept as it was'
+        )
+      // The app reads that record, repoints, and clears it.
+      const consumedP6 = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            require.resolve('tsx/cli', { paths: [desktop] }),
+            path.join(__dirname, 'consume-install-record.ts'),
+            `HKEY_CURRENT_USER\\${p6State}`,
+            path.join(p6To, 'DoodleNote.exe'),
+            IDENTITY
+          ],
+          { encoding: 'utf8', cwd: desktop }
+        )
+          .trim()
+          .split(/\r?\n/)
+          .pop()
+      )
+      reports.push(`p6 ${step} app consumed: ${JSON.stringify(consumedP6)}`)
+      assert.equal(consumedP6.result.ran, true, step)
+      assert.equal(consumedP6.after, null, step)
+      total += 1
+    }
+    // jdone is only for a folder that is really gone: not one still there, and
+    // not a link left in its place (even a dangling one).
+    write(path.join(p6Old, 'DoodleNote.exe'), 'old')
+    const p6Gone = [...p6Setup, ['arm', p6Old, p6New, '', 'armed'], ['jdone', p6New, '', 'none']]
+    checkCases('p6-jdone-present', p6Gone, phase('p6-jdone-present', p6Gone).results)
+    fs.rmSync(p6Old, { recursive: true, force: true })
+    fs.mkdirSync(path.join(sandbox, 'p6-target'))
+    junction(p6Old, path.join(sandbox, 'p6-target'))
+    fs.rmSync(path.join(sandbox, 'p6-target'), { recursive: true, force: true })
+    const p6Dangling = [
+      ...p6Setup,
+      ['jdone', p6New, '', 'none'],
+      ['jwrite', 'Identity', '', 'set'],
+      ['jdone', p6New, '', 'none'],
+      ['wipe', '', '', 'done']
+    ]
+    checkCases('p6-jdone-link', p6Dangling, phase('p6-jdone-link', p6Dangling).results)
+    fs.rmSync(p6Old, { recursive: true, force: true })
+
+    // The first journal write and the copy's writes, killed after each.
+    for (const step of ['park-SourceDir', 'park-DestDir']) {
+      write(path.join(p6Old, 'DoodleNote.exe'), 'old')
+      write(path.join(p6Old, 'Uninstall DoodleNote.exe'), 'old uninstaller')
+      const parkCmd = `"${p6Old}\\Uninstall DoodleNote.exe" /currentuser`
+      const killed = [
+        ...p6Setup,
+        ['wipe', '', '', 'done'],
+        ['ucmd', parkCmd, '1', 'set'],
+        ['stopat', step, '', 'set'],
+        ['park', p6Old, p6New, '(killed)']
+      ]
+      const run1 = phase(`p6-${step}-killed`, killed, { exe: stepsExe, status: 9 }).results
+      checkCases(`p6-${step}-killed`, killed.slice(0, -1), run1)
+      const run2 = [
+        ...p6Setup,
+        // No Identity yet: not a journal anyone trusts, and nothing was parked.
+        ['jcheck', p6Journal, '', 'incomplete'],
+        ['journal', p6New, '', 'none: '],
+        ['jdone', p6New, '', 'none'],
+        ['uread', '', '', `${parkCmd}|`],
+        ['park', p6Old, p6New, 'parked'],
+        ['jcheck', p6Journal, '', 'ok'],
+        ['uread', '', '', '|'],
+        ['ucmd', '', '1', 'set'],
+        ['wipe', '', '', 'done']
+      ]
+      checkCases(`p6-${step}-next`, run2, phase(`p6-${step}-next`, run2).results)
+      fs.rmSync(p6Old, { recursive: true, force: true })
+    }
+    for (const step of ['save-journal', 'save-record']) {
+      // A new copy cut short has no RecoveryFor and is ignored; the live keys were
+      // not touched yet ("uninstall old version" runs after dnSaveState), and the
+      // next save starts the copy again.
+      const killed = [
+        ...p6Setup,
+        ...p6Live,
+        ['stopat', step, '', 'set'],
+        ['save', '', '', '(killed)']
+      ]
+      const run1 = phase(`p6-${step}-killed`, killed, { exe: stepsExe, status: 9 }).results
+      checkCases(`p6-${step}-killed`, killed.slice(0, -1), run1)
+      const run2 = [
+        ...p6Setup,
+        ['rstate', '', '', 'none'],
+        ['keyexists', p6Recovery, '', 'present'],
+        ['recover', '', '', 'done'],
+        ...p6IsLive,
+        ['save', '', '', 'done'],
+        ['rstate', '', '', 'present'],
+        ['rread', 'MigrationRecord', '', p6Rec],
+        ['wipe', '', '', 'done'],
+        ['recover', '', '', 'done'],
+        ...p6IsLive
+      ]
+      checkCases(`p6-${step}-next`, run2, phase(`p6-${step}-next`, run2).results)
+    }
+
+    // Copies that fail their checks are ignored and left for a user uninstall;
+    // a copy is deleted only on a full match, and a kept one is updated in place.
+    const p6Tamper = [
+      ...p6Setup,
+      ['wipe', '', '', 'done'],
+      // Wrong identity in the journal part, another folder in the record.
+      ['rwrite', 'Identity', 'other-guid|desktop|DoodleNote', 'set'],
+      ['rwrite', 'SourceDir', p6From, 'set'],
+      ['rwrite', 'DestDir', p6To, 'set'],
+      ['rwrite', 'MigrationRecord', recordValue(p6Foreign, p6To), 'set'],
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ['recover', '', '', 'done'],
+      ['jcheck', p6Journal, '', 'none'],
+      ['record', '', '', 'none'],
+      ['rstate', '', '', 'present'],
+      ['status', '', '', status('recover', 'recovery-ignored', 'journal-identity')],
+      // Foreign folders in the journal part.
+      ['rwrite', 'Identity', IDENTITY, 'set'],
+      ['rwrite', 'SourceDir', p6Foreign, 'set'],
+      ['rwrite', 'MigrationRecord', '', 'set'],
+      ['recover', '', '', 'done'],
+      ['jcheck', p6Journal, '', 'none'],
+      ['rstate', '', '', 'present'],
+      ['status', '', '', status('recover', 'recovery-ignored', 'journal-folders')],
+      // A good journal part with a bad record: the journal is restored, the copy kept.
+      ['rwrite', 'SourceDir', p6From, 'set'],
+      ['rwrite', 'MigrationRecord', recordValue(p6From, p6To).replace('|END', ''), 'set'],
+      ['recover', '', '', 'done'],
+      ['jcheck', p6Journal, '', 'ok'],
+      ['record', '', '', 'none'],
+      ['rstate', '', '', 'present'],
+      ['status', '', '', status('recover', 'recover-incomplete', 'record-format')],
+      ['wipe', '', '', 'done'],
+      // A live record cut short or for another identity is replaced by the copy's.
+      ['rwrite', 'MigrationRecord', p6Rec, 'set'],
+      ['lwrite', 'MigrationRecord', p6Rec.slice(0, -4), 'set'],
+      ['recover', '', '', 'done'],
+      ['record', '', '', p6Rec],
+      ['rstate', '', '', 'none'],
+      ['rwrite', 'MigrationRecord', p6Rec, 'set'],
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ['lwrite', 'MigrationRecord', p6Rec.replace('guards-test|', 'other-guid|'), 'set'],
+      ['recover', '', '', 'done'],
+      ['record', '', '', p6Rec],
+      ['rstate', '', '', 'none'],
+      // A complete live record that differs is not overwritten, and the copy stays.
+      ['rwrite', 'MigrationRecord', p6Rec, 'set'],
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ['lwrite', 'MigrationRecord', recordValue(p6From, p6To, '2026-11-09T00:00:00Z'), 'set'],
+      ['recover', '', '', 'done'],
+      ['record', '', '', recordValue(p6From, p6To, '2026-11-09T00:00:00Z')],
+      ['rstate', '', '', 'present'],
+      ['status', '', '', status('recover', 'recover-incomplete', 'record-mismatch')],
+      // So does a journal value that differs; the next save updates the kept copy
+      // from the (complete) live keys, one value at a time, and then it matches.
+      ['wipe', '', '', 'done'],
+      ...p6Values.map(([name, data]) => ['rwrite', name, data, 'set']),
+      ['rwrite', 'MigrationRecord', '', 'set'],
+      ...p6Values.map(([name, data]) => ['jwrite', name, data, 'set']),
+      ['jwrite', 'DesktopLink', '1', 'set'],
+      ['recover', '', '', 'done'],
+      ['rstate', '', '', 'present'],
+      ['status', '', '', status('recover', 'recover-incomplete', 'journal-mismatch')],
+      ['jwrite', 'StartMenuLink', '', 'set'],
+      ['save', '', '', 'done'],
+      ['rread', 'DesktopLink', '', '1'],
+      ['rread', 'StartMenuLink', '', 'none'],
+      ['wipe', '', '', 'done'],
+      ['recover', '', '', 'done'],
+      ['jread', 'DesktopLink', '', '1'],
+      ['jread', 'StartMenuLink', '', 'none'],
+      ['rstate', '', '', 'none'],
+      ['status', '', '', status('recover', 'recovered', 'restored')],
+      // A kept copy is not replaced by a save whose live state is incomplete.
+      ['wipe', '', '', 'done'],
+      ['rwrite', 'MigrationRecord', p6Rec, 'set'],
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ['lwrite', 'MigrationRecord', recordValue(p6From, p6To, '2026-11-09T00:00:00Z'), 'set'],
+      ['recover', '', '', 'done'],
+      ['lwrite', 'MigrationRecord', '', 'set'],
+      ['jwrite', 'Identity', IDENTITY, 'set'],
+      ['save', '', '', 'done'],
+      ['rread', 'MigrationRecord', '', p6Rec],
+      ['rstate', '', '', 'present'],
+      ...p6Clean
+    ]
+    checkCases('p6-tamper', p6Tamper, phase('p6-tamper', p6Tamper).results)
+
+    // The app leaves a record that is not complete for its identity where it is,
+    // for a later installer run to repair, and acts on nothing.
+    for (const [label, value] of [
+      ['cut-short', p6Rec.slice(0, p6Rec.lastIndexOf('|'))],
+      ['other-identity', p6Rec.replace('guards-test|', 'other-guid|')],
+      ['earlier-format', `${p6From}|${p6To}|2026-11-08T01:02:03Z`]
+    ]) {
+      const setRecord = [...p6Setup, ['lwrite', 'MigrationRecord', value, 'set']]
+      checkCases(`p6-app-${label}`, setRecord, phase(`p6-app-${label}`, setRecord).results)
+      const output = (() => {
+        try {
+          return execFileSync(
+            process.execPath,
+            [
+              require.resolve('tsx/cli', { paths: [desktop] }),
+              path.join(__dirname, 'consume-install-record.ts'),
+              `HKEY_CURRENT_USER\\${p6State}`,
+              path.join(p6To, 'DoodleNote.exe'),
+              IDENTITY
+            ],
+            { encoding: 'utf8', cwd: desktop, stdio: ['ignore', 'pipe', 'ignore'] }
+          )
+        } catch (error) {
+          assert.equal(error.status, 1, `${label}: consume exit code`)
+          return String(error.stdout)
+        }
+      })()
+      const consumedPending = JSON.parse(output.trim().split(/\r?\n/).pop())
+      reports.push(`p6 app, ${label}: ${JSON.stringify(consumedPending)}`)
+      assert.equal(consumedPending.result.ran, false, label)
+      assert.ok(consumedPending.record && consumedPending.record.pending, label)
+      assert.deepEqual(consumedPending.after, consumedPending.record, label)
+      assert.match(consumedPending.log.join('\n'), /left for the installer/, label)
+      const still = [
+        ...p6Setup,
+        ['record', '', '', value],
+        ['lwrite', 'MigrationRecord', '', 'set']
+      ]
+      checkCases(`p6-app-${label}-kept`, still, phase(`p6-app-${label}-kept`, still).results)
+      total += 1
+    }
 
     if (keep) write(path.join(keep, 'installer-guards-results.txt'), reports.join('\r\n') + '\r\n')
     console.log(`installer guards: ${total} cases passed`)

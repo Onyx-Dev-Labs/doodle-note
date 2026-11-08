@@ -33,9 +33,11 @@
 ;      replace), checks it again on that handle and only then removes exactly that
 ;      folder, through handles verified to be inside it (never following links,
 ;      never re-opening it by path, never entering the profile or the new folder). Only
-;      when the old folder is really gone does it write the MigratedFrom /
-;      MigratedTo / MigratedAt record (HKCU\Software\${APP_GUID}) that lets the
-;      app repoint its login item and MCP client entries.
+;      when the old folder is really gone does it write the record (one value,
+;      MigrationRecord, in HKCU\Software\${APP_GUID}) that lets the app repoint its
+;      login item and MCP client entries, and only then clear the journal: a run
+;      that stops in between leaves the journal of a move whose old folder is gone,
+;      and the next run writes the record (dnJournalDone / dnCompleteMove).
 ;
 ; The journal, HKCU\Software\${APP_GUID}\InstallMigration, belongs to this app
 ; identity (APP_GUID derives from appId) and records the identity and both
@@ -50,8 +52,10 @@
 ; written back after it (dnSaveState / dnRestoreState), or by the next run's
 ; customInit if this one stops in between (dnRecoverState): the journal stays
 ; armed for as many runs as it takes, and a record survives updates until the app
-; has consumed it. A user uninstall of the new copy while a move is unfinished also removes
-; the old folder (customUnInstall, dnUninstallLegacy).
+; has consumed it. Each of those steps can itself be cut short at any write and is
+; finished by the next run; the copy is deleted only once all of it reads back.
+; A user uninstall of the new copy while a move is unfinished also removes the
+; old folder (customUnInstall, dnUninstallLegacy).
 ;
 ; Shortcut names, appId and so the uninstall registry key are unchanged, so the
 ; Start menu entry is replaced in place and Apps & features keeps one entry.
@@ -108,7 +112,7 @@
 
 !ifdef DN_MIGRATE_INSTALL_FOLDER
   ; Per identity: the journal of a migration in progress, and (in the parent key)
-  ; the MigratedFrom/MigratedTo/MigratedAt record of one that was completed.
+  ; the MigrationRecord of one that was completed.
   !define DN_STATE_KEY "Software\${APP_GUID}"
   !define DN_MIGRATION_KEY "${DN_STATE_KEY}\InstallMigration"
   ; A copy of both, outside the Software\${APP_GUID} subtree electron-builder's
@@ -125,6 +129,9 @@
   Var dnKeepLegacy
   ; The plan's reason code, recorded again when an in-place install completes.
   Var dnInstallWhy
+  ; The old folder of a move an earlier run removed but did not record
+  ; (dnJournalDone); customInstall finishes it.
+  Var dnDoneLegacy
 
   ; Exactly what electron-builder registers for a per-user install in DIR.
   !macro dnUninstallCommand DIR OUT
@@ -133,6 +140,7 @@
 
   !macro customInit
     StrCpy $dnLegacyDir ""
+    StrCpy $dnDoneLegacy ""
     StrCpy $dnHadDesktopLink "1"
     StrCpy $dnHadStartMenuLink "1"
     StrCpy $dnKeepLegacy "0"
@@ -215,6 +223,14 @@
           StrCpy $dnInstallWhy "uninstall-command"
           !insertmacro dnStatus plan plan-in-place uninstall-command "to=$INSTDIR"
         ${endif}
+      ${endif}
+
+      ; Nothing to move, but an earlier run's move may have removed its old folder
+      ; and stopped before writing the record: customInstall finishes it.
+      ${if} $dnLegacyDir == ""
+        Push "$INSTDIR"
+        Call dnJournalDone
+        Pop $dnDoneLegacy
       ${endif}
     ${else}
       StrCpy $dnInstallWhy "custom-dir"
@@ -301,6 +317,17 @@
       ${endif}
     ${else}
       !insertmacro dnStatus install in-place $dnInstallWhy "to=$INSTDIR"
+      ReadRegStr $R7 HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+      !insertmacro dnUninstallCommand "$INSTDIR" $R9
+      ${if} $dnDoneLegacy != ""
+      ${andIf} ${FileExists} "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+      ${andIf} ${FileExists} "$INSTDIR\resources\app.asar"
+      ${andIf} ${FileExists} "$INSTDIR\${UNINSTALL_FILENAME}"
+      ${andIf} $R7 == $R9
+        Push $dnDoneLegacy
+        Push $INSTDIR
+        Call dnCompleteMove
+      ${endif}
     ${endif}
   !macroend
 !endif

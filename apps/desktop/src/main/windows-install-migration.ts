@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { win32 } from 'node:path'
 import { APP_IDENTITY, type AppIdentity } from './app-identity'
-import type { InstallMigrationRecord } from './windows-install-record'
+import type { InstallMigrationRecord, InstallRecordPending } from './windows-install-record'
 
 /**
  * Windows install folder rename, app side. Builds before 0.5.x installed to
@@ -15,9 +15,9 @@ import type { InstallMigrationRecord } from './windows-install-record'
  *   bundled MCP server through the old DoodleNote.exe.
  *
  * Both are repointed at the running exe, but only on the installer's word: the
- * MigratedFrom / MigratedTo / MigratedAt record it writes under
- * HKCU\Software\<APP_GUID> after it really moved this identity's install
- * (windows-install-record.ts). A copy of the exe started from any folder that
+ * MigrationRecord it writes under HKCU\Software\<APP_GUID> after it really moved
+ * this identity's install (windows-install-record.ts). A record that is there but
+ * not complete for this identity is left alone, for the installer to repair. A copy of the exe started from any folder that
  * happens to be named DoodleNote (a DPI capture, a portable copy) finds no record
  * naming its folder and changes nothing. Nothing else depends on the folder: the
  * profile (%APPDATA%\desktop, which holds the library location, settings and
@@ -136,8 +136,12 @@ export interface InstallMigrationDeps {
   platform: NodeJS.Platform
   isPackaged: boolean
   execPath: string
-  /** The installer's record of a completed move, or null when there is none. */
-  readRecord(): Promise<InstallMigrationRecord | null>
+  /**
+   * The installer's record of a completed move, null when there is none, or
+   * `{ pending }` when one is there but not complete (left alone: not acted on,
+   * not cleared).
+   */
+  readRecord(): Promise<InstallMigrationRecord | InstallRecordPending | null>
   /** Removes the record once every step has succeeded. */
   clearRecord(): Promise<void>
   /** Whether a file exists (the old exe must be gone). */
@@ -225,14 +229,19 @@ export async function runWindowsInstallMigration(
 ): Promise<InstallMigrationResult> {
   const none = { ran: false, loginItem: false, mcpClients: [], pending: [] }
   if (deps.platform !== 'win32' || !deps.isPackaged) return none
-  let record: InstallMigrationRecord | null
+  let read: InstallMigrationRecord | InstallRecordPending | null
   try {
-    record = await deps.readRecord()
+    read = await deps.readRecord()
   } catch (error) {
     deps.log(`[install-migration] install record not read: ${(error as Error).message}`)
     return none
   }
-  if (!record) return none
+  if (!read) return none
+  if ('pending' in read) {
+    deps.log(`[install-migration] install record left for the installer: ${read.pending}`)
+    return none
+  }
+  const record = read
   const legacy = legacyInstallFor(record, deps.execPath)
   if ('reason' in legacy) {
     deps.log(`[install-migration] ignoring the install record: ${legacy.reason}`)

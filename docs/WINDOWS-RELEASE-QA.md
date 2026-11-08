@@ -369,16 +369,21 @@ moves an existing install on upgrade:
    uninstaller. electron-builder's uninstaller, which "uninstall old version"
    runs with `--updated` on every update once the uninstall entry names an
    installed copy, deletes `HKCU\Software\{APP_GUID}` with the journal and the
-   `MigratedFrom/To/At` record in it. Right before that step both are copied to
+   `MigrationRecord` in it. Right before that step both are copied to
    `HKCU\Software\DoodleNote-InstallRecovery\{APP_GUID}` (outside the deleted
    subtree, still one per identity; `RecoveryFor` written last, so a copy cut
    short is ignored) and written back first thing in `customInstall`. If the
    installer stops in between (killed, extraction failed), the next run's
    `customInit` puts them back before anything reads them, after checking the
-   copy: written for this identity, the journal naming this identity and exactly
-   `Programs\desktop` → `Programs\DoodleNote`, the record naming those same two
-   folders; only values that are missing are written, and the copy is deleted only
-   once what it restored reads back. So a move kept by a held file stays armed for
+   copy: written for this identity, the journal complete (`Identity`, `SourceDir`,
+   `DestDir`) and naming this identity and exactly `Programs\desktop` →
+   `Programs\DoodleNote`, the record complete and naming those same two folders.
+   Every journal value that is missing or empty is written (`Identity` last, so a
+   journal cut short is incomplete and never trusted, and the next run fills in
+   the rest); the record is one value, written whole. The copy is deleted only
+   once every value in it reads back from the live keys exactly. A copy that
+   fails its checks is left alone (and reported); a user uninstall deletes it. Every one of these writes can be cut short (the guard harness kills
+   the installer right after each one) and the next run finishes the job. So a move kept by a held file stays armed for
    as many runs as it takes, and a record the app has not read yet survives
    another update, even an interrupted one (before this, an update interrupted
    before the first launch after a move lost the record, and with the old folder
@@ -420,8 +425,14 @@ moves an existing install on upgrade:
    the old ones; arguments, description and AppUserModelID kept); no other
    shortcut is written and none is created. If the new copy is incomplete the
    old folder is kept.
-   Only when the old folder is really gone does it write the record
-   `HKCU\Software\{APP_GUID}` `MigratedFrom` / `MigratedTo` / `MigratedAt`.
+   Only when the old folder is really gone does it write the record, one value
+   `HKCU\Software\{APP_GUID}` `MigrationRecord` =
+   `DNMR1|{APP_GUID}|desktop|DoodleNote|<old folder>|<new folder>|<UTC>|END`,
+   read back, and only then clear the journal. A run that stops between the
+   removal and the record leaves a complete journal whose old folder is gone; the
+   next run (which then has nothing to move) writes the record and clears the
+   journal after verifying the new copy (`LastStep` `install`, `LastReason`
+   `journal-completed`).
 4. Uninstalling the new copy (not an update's `--updated` run) while a move is
    unfinished also removes the old folder it left (same checks, same
    handle-based removal), since the uninstaller deletes the journal. Its app is
@@ -471,9 +482,13 @@ and `appId` as they are unless a profile migration is written too. On the next
 launch the app repoints the "Open at login" entry (keeping a Task Manager
 disable) and MCP client configs (Claude Desktop, Claude Code, Codex) that
 launched the old exe (`src/main/windows-install-migration.ts`), but only on the
-installer's record: it must exist for this identity, `MigratedTo` must be the
-running exe's own folder, and the old exe must be gone. When every step has
-succeeded the app deletes the record. A copy of the exe started from any folder
+installer's record: it must be complete and for this identity (version, the
+identity's `APP_GUID` and both folder names, both folders, a UTC time, `END`),
+its new folder must be the running exe's own folder, and the old exe must be
+gone. A record that is there but not complete for this identity is left exactly
+as it is (logged `install record left for the installer`) for a later installer
+run to repair from its copy. When every step has succeeded the app deletes the
+record. A copy of the exe started from any folder
 that merely is named `DoodleNote` (a DPI capture, a portable copy) finds no
 record naming its folder and changes nothing. Client configs are replaced atomically
 (a temporary file in the same folder with the original's mode, then a rename;
@@ -501,19 +516,19 @@ the move is recorded in two places, by the installer and by a user uninstall:
 
 | `LastStep` | `LastResult` | `LastReason` |
 |---|---|---|
-| `recover` | `recovered`, `recover-incomplete`, `recovery-ignored` | `restored`, `writeback-failed`, `recovery-foreign` |
+| `recover` | `recovered`, `recover-incomplete` (copy kept), `recovery-ignored` (nothing in the copy passed its checks; kept) | `restored`; the first reason the copy must stay: `journal-mismatch` / `record-mismatch` (a live value differs from the copy's after the write), `journal-incomplete`, `journal-identity`, `journal-folders`, `record-format`, `record-identity`, `record-folders`; `recovery-foreign` (another identity's) |
 | `plan` | `plan-move` (the move starts) or `plan-in-place` | `legacy-found`, `journal-resumed`; `no-legacy` (already moved), `fresh-install`, `custom-dir` (`/D`), `not-default-folder`, `uninstall-command`, or the refusing check: `legacy-link`, `legacy-no-exe`, `legacy-missing`, `legacy-not-folder`, `legacy-resolves-elsewhere`, `dest-link`, `dest-open-failed`, `dirs-overlap`, `dirs-same`, `profile-overlap`, `profile-overlap-resolved`, `profile-invalid`, `resolve-failed`, `open-failed`, `path-invalid` |
 | `close` | `close-ok`, `close-keep`, `exit-2`, `cancelled` | `none`, `closed`; `app-running`, `unknown-process`; `app-running-silent` (old app, `/S` without `--updated`), `app-running` (in-place); `user-cancelled` |
 | `park` | `parked`, `refused-park` (exit code 2) | `parked`, `nothing-to-park`; `uninstall-command` |
 | `remove` | `moved` or `kept` (journal stays armed) | `removed`; `app-running`, `unknown-process`, `file-in-use`, `identity-check`, or the refusing check: `pin-open-failed`, `pin-not-folder`, `pin-read-failed`, `pin-moved`, `pin-no-exe`, `pin-profile-overlap`, `pin-dest-read-failed`, `pin-dest-overlap`, any `legacy-*` / `dest-*` / `profile-*` code above |
-| `record` | `moved` | `record-written`, `record-failed` (record did not read back) |
-| `install` | `in-place`, `kept` | the plan's code; `incomplete-install` |
+| `record` | `moved` | `record-written`, `record-failed` (record did not read back; the journal stays, so the next run writes it) |
+| `install` | `in-place`, `kept`, `moved` | the plan's code; `incomplete-install`; `journal-completed` (an earlier run removed the old folder but stopped before the record) |
 | `uninstall` | `uninstalled`, `uninstalled-legacy-removed`, `uninstalled-legacy-kept` | `no-pending-move`, `removed`; `app-running`, `unknown-process`, `user-declined`, `file-in-use`, `identity-check`, or a `pin-*` / `legacy-*` code |
 | `login-item` (log only; `uninstall` is written after it) | `login-item-removed`, `login-item-absent`, `login-item-kept` | `run-value-deleted`, `no-run-value`, `not-ours`; only after `uninstalled-legacy-kept` |
 
 The log also has `note` lines that do not change the registry values
 (`journal-ignored` with the reason the journal was not trusted:
-`journal-foreign`, `journal-other-dest`, `journal-<check code>`). A run whose
+`journal-foreign`, `journal-incomplete`, `journal-other-dest`, `journal-<check code>`). A run whose
 `LastStep` is `plan`, `close` or `park` with no `exit-2` / `cancelled` stopped
 before `customInstall`. The guard harness checks these values for every outcome
 above, the line format, rotation, and that a log that cannot be written never
@@ -542,7 +557,7 @@ every identity-bearing name from the one entry in
 | Local AI models (meeting notes) | its profile's `models`, then `%APPDATA%\DoodleNote`, `%APPDATA%\desktop` and `%APPDATA%\DoodleNote Local` `models`, then `~\.cache\doodle-note\models` | only `%APPDATA%\desktop-qa\models`: download them in the QA build (or copy test models there); the production profile and the shared cache are never read |
 | Default global dictation shortcuts (fresh profile) | toggle `Control+Alt+D`, paste last `Control+Alt+Shift+V`, copy last `Control+Alt+Shift+C` | toggle `Control+Alt+Shift+D`, paste last and copy last off: only one app can register a global shortcut, so production's keep working while QA runs |
 | Migration journal | `HKCU\Software\f85f8dcf-...\InstallMigration` | `HKCU\Software\320d0756-...\InstallMigration` |
-| Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
+| Completed-move record (`MigrationRecord`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
 | Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
 
 `pnpm package:win:qa` builds it: the app code with `DOODLENOTE_QA_IDENTITY=1`
@@ -602,8 +617,9 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
    library are unchanged; the QA Run value and the sandboxed client configs name
    the new exe (`install-migration.json` in the profile says `complete`); the QA
    journal key is gone; right after the installer and before the first launch
-   `HKCU\Software\320d0756-...` holds `MigratedFrom` / `MigratedTo` /
-   `MigratedAt`, and after the first launch they are gone; nothing of production
+   `HKCU\Software\320d0756-...` holds `MigrationRecord`
+   (`DNMR1|320d0756-...|desktop-qa|DoodleNote QA|...\desktop-qa|...\DoodleNote QA|<UTC>|END`),
+   and after the first launch it is gone; nothing of production
    changed (its folder, Run value, uninstall key and real MCP configs).
 3. Repeat with the legacy QA app running (closed only after the OK prompt; with
    `/S` and no `--updated` the installer exits with code 2 and nothing changes),

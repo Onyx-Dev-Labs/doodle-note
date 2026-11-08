@@ -6,7 +6,11 @@
 // under test. Prints the result as JSON; exit 0 when the migration ran and the
 // record was cleared.
 //
-//   tsx scripts/consume-install-record.ts <HKEY_CURRENT_USER\...> <exe path>
+//   tsx scripts/consume-install-record.ts <HKEY_CURRENT_USER\...> <exe path> <identity>
+//
+// <identity>: the harness's DN_MIGRATION_IDENTITY (a packaged app uses
+// installMigrationIdentity(APP_IDENTITY)). Exit 0 needs a complete record; a
+// pending one (cut short, another identity's) must be left exactly as it was.
 import {
   runWindowsInstallMigration,
   type InstallMigrationResult
@@ -15,16 +19,17 @@ import { clearInstallRecord, readInstallRecord } from '../src/main/windows-insta
 import { existsSync } from 'node:fs'
 
 async function main(): Promise<void> {
-  const [key, exe] = process.argv.slice(2)
-  if (!key || !exe) throw new Error('usage: consume-install-record.ts <key> <exe>')
-  const record = await readInstallRecord(key)
+  const [key, exe, identity] = process.argv.slice(2)
+  if (!key || !exe || !identity)
+    throw new Error('usage: consume-install-record.ts <key> <exe> <identity>')
+  const record = await readInstallRecord(key, identity)
   let marker: string | null = null
   const log: string[] = []
   const result: InstallMigrationResult = await runWindowsInstallMigration({
     platform: 'win32',
     isPackaged: true,
     execPath: exe,
-    readRecord: () => readInstallRecord(key),
+    readRecord: () => readInstallRecord(key, identity),
     clearRecord: () => clearInstallRecord(key),
     exists: existsSync,
     readMarker: () => marker,
@@ -38,7 +43,7 @@ async function main(): Promise<void> {
     repointMcpClients: () => [],
     log: (message) => log.push(message)
   })
-  const after = await readInstallRecord(key)
+  const after = await readInstallRecord(key, identity)
   console.log(JSON.stringify({ record, result, after, log }))
   process.exit(result.ran && after === null ? 0 : 1)
 }

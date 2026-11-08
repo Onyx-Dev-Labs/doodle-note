@@ -63,7 +63,12 @@ import { WinBatchTranscriber } from './win-batch-transcriber'
 import { FoldersService } from './folders-service'
 import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { isInsideFolder, runWindowsInstallMigration } from './windows-install-migration'
-import { clearInstallRecord, installStateKey, readInstallRecord } from './windows-install-record'
+import {
+  clearInstallRecord,
+  installMigrationIdentity,
+  installStateKey,
+  readInstallRecord
+} from './windows-install-record'
 import { MediaService } from './media-service'
 import { AgentAccessService, agentAccessRoots } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
@@ -1195,7 +1200,7 @@ app.whenReady().then(async () => {
       platform: process.platform,
       isPackaged: app.isPackaged,
       execPath: process.execPath,
-      readRecord: () => readInstallRecord(recordKey),
+      readRecord: () => readInstallRecord(recordKey, installMigrationIdentity(APP_IDENTITY)),
       clearRecord: () => clearInstallRecord(recordKey),
       exists: existsSync,
       readMarker: () => (existsSync(markerPath) ? readFileSync(markerPath, 'utf8') : null),

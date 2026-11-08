@@ -15,7 +15,15 @@
 ;   arm|<source>|<dest>[|<identity>]     writes a journal as the installer does (default identity: ours)
 ;   jstate                               armed | none
 ;   skey|<key>                           sets $dnStateKey (HKCU, a throwaway test key)
-;   record                               MigratedFrom|MigratedTo|MigratedAt, or none
+;   record                               the MigrationRecord value, or none
+;   lwrite|<value>|<data>                writes a $dnStateKey value (data: the rest of the line; "" deletes it)
+;   jwrite|<value>|<data>                writes a journal value (data: the rest of the line; "" deletes it)
+;   rcheck||<data>                       dnRecordCheck on the data (the rest of the line): ok or the reason
+;   rwipe                                deletes $dnRecoveryKey
+;   jcheck|<key>                         dnJournalCheck on HKCU\<key>: ok or the reason
+;   jdone|<dest>                         dnJournalDone: the removed old folder, or none
+;   complete|<legacy>|<new>              dnCompleteMove: done
+;   keyexists|<key>                      present | none (HKCU\<key>)
 ;   journal|<dest>                       dnTrustedJournal: the trusted source, or "none: <note>"
 ;   migclose|<legacy>|<new>|<policy>     dnMigrationClose: KEEP (1 | 0)
 ;   finish|<legacy>|<new>|<keep>         dnFinishMigration: removed | kept: <why>
@@ -46,6 +54,7 @@
 ;   runwrite|<data>                      writes the login entry (data: the rest of the line) and its Task Manager state; "" deletes both
 ;   runread                              <login entry data or none>|<present | none (Task Manager state)>
 ;   droplogin|<legacy>|<dest>            dnDropLoginItem: removed | absent | kept
+;   stopat|<step>                        (DN_TEST_STEPS builds) terminates the process at dnTestStep <step>: set
 Unicode true
 SilentInstall silent
 RequestExecutionLevel user
@@ -78,6 +87,19 @@ Var pin
 
 Section
 SectionEnd
+
+; $0: the data of a "<kind>|<a>|<data...>" case, i.e. $b, $c and the rest of the
+; line joined back with "|" (identities and records contain it).
+!macro rest_of_line
+  StrCpy $0 $b
+  ${if} $c != ""
+  ${orIf} $line != ""
+    StrCpy $0 "$0|$c"
+  ${endif}
+  ${if} $line != ""
+    StrCpy $0 "$0|$line"
+  ${endif}
+!macroend
 
 ; Splits $line at the first "|": $kind gets the head, $line the rest.
 !macro next_field OUTVAR
@@ -185,12 +207,61 @@ Function .onInit
       StrCpy $dnStateKey $a
       StrCpy $result "set"
     ${elseif} $kind == "record"
-      ReadRegStr $0 HKCU $dnStateKey "MigratedFrom"
-      ReadRegStr $1 HKCU $dnStateKey "MigratedTo"
-      ReadRegStr $2 HKCU $dnStateKey "MigratedAt"
-      StrCpy $result "$0|$1|$2"
-      ${if} $result == "||"
+      ReadRegStr $result HKCU $dnStateKey "MigrationRecord"
+      ${if} $result == ""
         StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "lwrite"
+      !insertmacro rest_of_line
+      ${if} $0 == ""
+        DeleteRegValue HKCU $dnStateKey $a
+      ${else}
+        WriteRegStr HKCU $dnStateKey $a $0
+      ${endif}
+      StrCpy $result "set"
+    ${elseif} $kind == "jwrite"
+      !insertmacro rest_of_line
+      ${if} $0 == ""
+        DeleteRegValue HKCU $dnJournalKey $a
+      ${else}
+        WriteRegStr HKCU $dnJournalKey $a $0
+      ${endif}
+      StrCpy $result "set"
+    ${elseif} $kind == "rcheck"
+      !insertmacro rest_of_line
+      Push $0
+      Call dnRecordCheck
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "ok"
+      ${endif}
+    ${elseif} $kind == "jcheck"
+      Push $a
+      Call dnJournalCheck
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "ok"
+      ${endif}
+    ${elseif} $kind == "jdone"
+      Push $a
+      Call dnJournalDone
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "complete"
+      Push $a
+      Push $b
+      Call dnCompleteMove
+      StrCpy $result "done"
+    ${elseif} $kind == "keyexists"
+      ; HKEY_CURRENT_USER, KEY_READ; an empty key is present too.
+      StrCpy $result "none"
+      StrCpy $2 $a
+      System::Call 'advapi32::RegOpenKeyExW(p 0x80000001, w r2, i 0, i 0x20019, *p .r1) i.r0'
+      ${if} $0 = 0
+        StrCpy $result "present"
+        System::Call 'advapi32::RegCloseKey(p r1)'
       ${endif}
     ${elseif} $kind == "jstate"
       ReadRegStr $result HKCU $dnJournalKey "Identity"
@@ -302,6 +373,9 @@ Function .onInit
     ${elseif} $kind == "recover"
       Call dnRecoverState
       StrCpy $result "done"
+    ${elseif} $kind == "rwipe"
+      DeleteRegKey HKCU $dnRecoveryKey
+      StrCpy $result "done"
     ${elseif} $kind == "rstate"
       ReadRegStr $result HKCU $dnRecoveryKey "RecoveryFor"
       ${if} $result == ""
@@ -316,15 +390,12 @@ Function .onInit
       ${endif}
     ${elseif} $kind == "rwrite"
       ; The data is the rest of the line ("|" included: identities contain it).
-      StrCpy $0 $b
-      ${if} $c != ""
-      ${orIf} $line != ""
-        StrCpy $0 "$0|$c"
+      !insertmacro rest_of_line
+      ${if} $0 == ""
+        DeleteRegValue HKCU $dnRecoveryKey $a
+      ${else}
+        WriteRegStr HKCU $dnRecoveryKey $a $0
       ${endif}
-      ${if} $line != ""
-        StrCpy $0 "$0|$line"
-      ${endif}
-      WriteRegStr HKCU $dnRecoveryKey $a $0
       StrCpy $result "set"
     ${elseif} $kind == "kill"
       FileClose $out
@@ -413,6 +484,12 @@ Function .onInit
       Push $b
       Call dnDropLoginItem
       Pop $result
+    !ifdef DN_TEST_STEPS
+    ${elseif} $kind == "stopat"
+      ; The results so far stay on disk (FileWrite is unbuffered).
+      StrCpy $dnTestStopAt $a
+      StrCpy $result "set"
+    !endif
     ${elseif} $kind == "finish"
       Push $a
       Push $b

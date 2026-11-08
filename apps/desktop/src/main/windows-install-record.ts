@@ -1,13 +1,18 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import type { AppIdentity } from './app-identity'
 
 /**
  * The record the Windows installer writes when it has really moved an install
  * from Programs\<package> to Programs\<product> (build/windows-install-guards.nsh,
- * dnFinishMigration): HKCU\Software\<APP_GUID> MigratedFrom / MigratedTo /
- * MigratedAt. The app repoints its login item and MCP client entries only on the
- * strength of this record (windows-install-migration.ts), never on a folder name.
+ * dnWriteRecord): one value, HKCU\Software\<APP_GUID> MigrationRecord, so it is
+ * written (and restored from the installer's recovery copy) in a single step:
+ *
+ *   DNMR1|<APP_GUID>|<package>|<product>|<old folder>|<new folder>|<UTC>|END
+ *
+ * The app repoints its login item and MCP client entries only on the strength of
+ * this record (windows-install-migration.ts), never on a folder name.
  */
 export interface InstallMigrationRecord {
   /** The old install folder, now removed. */
@@ -18,7 +23,18 @@ export interface InstallMigrationRecord {
   at: string
 }
 
-export const INSTALL_RECORD_VALUES = ['MigratedFrom', 'MigratedTo', 'MigratedAt'] as const
+/**
+ * A record value that is there but not a complete record for this identity (cut
+ * short, another identity's, a newer format). The app acts on nothing less than a
+ * complete record and leaves this one where it is: a later installer run repairs
+ * or replaces it from its recovery copy.
+ */
+export interface InstallRecordPending {
+  pending: string
+}
+
+export const INSTALL_RECORD_VALUE = 'MigrationRecord'
+export const INSTALL_RECORD_VERSION = 'DNMR1'
 
 /** electron-builder's namespace for APP_GUID (app-builder-lib NsisTarget). */
 const ELECTRON_BUILDER_NS = Buffer.from('50e065bc313411e69bab38c9862bdaf3', 'hex')
@@ -40,19 +56,53 @@ export function installStateKey(appId: string): string {
   return `HKEY_CURRENT_USER\\Software\\${electronBuilderGuid(appId)}`
 }
 
-/** Parses the PowerShell reader's JSON line; null unless all three values are present. */
-export function parseInstallRecord(output: string): InstallMigrationRecord | null {
+/**
+ * What the installer's DN_MIGRATION_IDENTITY is for this app: APP_GUID, APP_FILENAME
+ * (the package name, the old folder) and PRODUCT_FILENAME (the new folder).
+ */
+export function installMigrationIdentity(
+  identity: Pick<AppIdentity, 'appId' | 'legacyInstallFolder' | 'installFolder'>
+): string {
+  return `${electronBuilderGuid(identity.appId)}|${identity.legacyInstallFolder}|${identity.installFolder}`
+}
+
+/**
+ * Parses a MigrationRecord value for `identity` (installMigrationIdentity): the
+ * record when it is complete, null when there is none, `{ pending }` when it is
+ * there but anything less than complete for this identity.
+ */
+export function parseInstallRecordValue(
+  value: string,
+  identity: string
+): InstallMigrationRecord | InstallRecordPending | null {
+  if (!value) return null
+  const parts = value.split('|')
+  if (parts[0] !== INSTALL_RECORD_VERSION) return { pending: 'not a record this app reads' }
+  if (parts.length !== 8 || parts[7] !== 'END') return { pending: 'incomplete' }
+  if (parts.slice(1, 4).join('|').toLowerCase() !== identity.toLowerCase())
+    return { pending: 'for another app identity' }
+  const [from, to, at] = parts.slice(4, 7)
+  if (!from.trim() || !to.trim()) return { pending: 'incomplete' }
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at)) return { pending: 'no valid time' }
+  return { from, to, at }
+}
+
+/** Parses the PowerShell reader's JSON line (READ_SCRIPT); see parseInstallRecordValue. */
+export function parseInstallRecord(
+  output: string,
+  identity: string
+): InstallMigrationRecord | InstallRecordPending | null {
   let parsed: unknown
   try {
     parsed = JSON.parse(output.trim())
   } catch {
-    return null
+    return { pending: 'unreadable' }
   }
-  if (!parsed || typeof parsed !== 'object') return null
-  const { from, to, at } = parsed as Record<string, unknown>
-  if (typeof from !== 'string' || typeof to !== 'string' || typeof at !== 'string') return null
-  if (!from.trim() || !to.trim() || !at.trim()) return null
-  return { from, to, at }
+  if (!parsed || typeof parsed !== 'object') return { pending: 'unreadable' }
+  const { record } = parsed as Record<string, unknown>
+  if (record === null || record === undefined || record === '') return null
+  if (typeof record !== 'string') return { pending: 'unreadable' }
+  return parseInstallRecordValue(record, identity)
 }
 
 /** Windows PowerShell 5.1 from System32, never whichever powershell.exe is first on PATH. */
@@ -82,7 +132,7 @@ const READ_SCRIPT =
   "$ErrorActionPreference = 'Stop';" +
   '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false;' +
   "$p = Get-ItemProperty -LiteralPath ('Registry::' + $env:DN_REG_KEY);" +
-  '[pscustomobject]@{ from = [string]$p.MigratedFrom; to = [string]$p.MigratedTo; at = [string]$p.MigratedAt } | ConvertTo-Json -Compress'
+  '[pscustomobject]@{ record = [string]$p.MigrationRecord } | ConvertTo-Json -Compress'
 
 const run = (file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -95,12 +145,16 @@ const regExe = (): string =>
   join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'reg.exe')
 
 /**
- * Reads the record, or null when there is none. Most launches have none: a quick
- * reg.exe presence check, and PowerShell only when MigratedTo exists.
+ * Reads the record for `identity` (installMigrationIdentity), or null when there
+ * is none. Most launches have none: a quick reg.exe presence check, and
+ * PowerShell only when the value exists.
  */
-export async function readInstallRecord(key: string): Promise<InstallMigrationRecord | null> {
+export async function readInstallRecord(
+  key: string,
+  identity: string
+): Promise<InstallMigrationRecord | InstallRecordPending | null> {
   try {
-    await run(regExe(), ['query', key, '/v', 'MigratedTo'])
+    await run(regExe(), ['query', key, '/v', INSTALL_RECORD_VALUE])
   } catch (error) {
     // reg.exe exits 1 when the key or value does not exist.
     if ((error as { code?: unknown }).code === 1) return null
@@ -111,16 +165,14 @@ export async function readInstallRecord(key: string): Promise<InstallMigrationRe
     ['-NoProfile', '-NonInteractive', '-Command', READ_SCRIPT],
     powerShellEnv(key)
   )
-  return parseInstallRecord(output)
+  return parseInstallRecord(output, identity)
 }
 
 /** Removes the record once everything it asked for is done (the journal subkey is untouched). */
 export async function clearInstallRecord(key: string): Promise<void> {
-  for (const name of INSTALL_RECORD_VALUES) {
-    try {
-      await run(regExe(), ['delete', key, '/v', name, '/f'])
-    } catch (error) {
-      if ((error as { code?: unknown }).code !== 1) throw error
-    }
+  try {
+    await run(regExe(), ['delete', key, '/v', INSTALL_RECORD_VALUE, '/f'])
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== 1) throw error
   }
 }

@@ -226,30 +226,81 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   assert.ok(
     uninstallLegacy.indexOf('Call dnRemoveLegacyDir') < uninstallLegacy.indexOf('Call dnUnpin')
   )
-  // The record the app needs before it repoints anything is written only after a
-  // real move, and otherwise only put back as it was saved: from the recovery key
-  // after checking it names this identity's two folders (dnRecoverState), or from
-  // memory (dnRestoreState).
+  // The record the app needs before it repoints anything is one value
+  // (MigrationRecord), written in one step only after a real move (dnWriteRecord,
+  // then the journal is cleared), or by the next run when one stopped in between
+  // (dnCompleteMove), and otherwise only put back as it was saved: from the
+  // recovery key after checking it is complete for this identity's two folders
+  // (dnRecoverState), or from memory (dnRestoreState).
   const removed = finish.indexOf('${if} $3 == "removed"')
-  const restoreState = guards.slice(guards.indexOf('Function dnRestoreState'))
-  const recoverState = guards.slice(
-    guards.indexOf('Function dnRecoverState'),
-    guards.indexOf('FunctionEnd', guards.indexOf('Function dnRecoverState'))
+  const fnBody = (name: string): string =>
+    guards.slice(
+      guards.indexOf(`Function ${name}`),
+      guards.indexOf('FunctionEnd', guards.indexOf(`Function ${name}`))
+    )
+  const restoreState = fnBody('dnRestoreState')
+  const recoverState = fnBody('dnRecoverState')
+  const writeRecord = fnBody('dnWriteRecord')
+  const completeMove = fnBody('dnCompleteMove')
+  assert.equal(
+    `${installer}\n${guards}`.split('WriteRegStr HKCU $dnStateKey "MigrationRecord"').length,
+    4
   )
-  for (const value of ['MigratedFrom', 'MigratedTo', 'MigratedAt']) {
-    assert.equal(
-      `${installer}\n${guards}`.split(`WriteRegStr HKCU $dnStateKey "${value}"`).length,
-      4,
-      value
-    )
-    assert.ok(finish.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) > removed, value)
-    assert.match(restoreState, new RegExp(`WriteRegStr HKCU \\$dnStateKey "${value}" \\$dnSaved`))
-    assert.ok(
-      recoverState.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) >
-        recoverState.indexOf('${andIf} $3 == "$1\\${PRODUCT_FILENAME}"\n      ${andIf} $4 != ""'),
-      value
-    )
-  }
+  assert.doesNotMatch(`${installer}\n${guards}`, /\$dnStateKey "Migrated(From|To|At)"/)
+  assert.match(
+    writeRecord,
+    /WriteRegStr HKCU \$dnStateKey "MigrationRecord" \$2\n\s+ReadRegStr \$3 HKCU \$dnStateKey "MigrationRecord"\n\s+\$\{if\} \$3 S== \$2/
+  )
+  assert.ok(finish.indexOf('Call dnWriteRecord') > removed)
+  assert.ok(
+    finish.indexOf('DeleteRegKey HKCU $dnJournalKey') >
+      finish.indexOf('${if} $2 == "written"', finish.indexOf('Call dnWriteRecord'))
+  )
+  assert.ok(completeMove.indexOf('Call dnRecordCheck') < completeMove.indexOf('Call dnWriteRecord'))
+  assert.ok(
+    completeMove.indexOf('${if} $2 == "written"') <
+      completeMove.indexOf('DeleteRegKey HKCU $dnJournalKey')
+  )
+  assert.match(
+    restoreState,
+    /Push \$dnSavedRecord\n\s+Call dnRecordCheck\n\s+Pop \$0\n\s+\$\{if\} \$0 == ""\n\s+WriteRegStr HKCU \$dnStateKey "MigrationRecord" \$dnSavedRecord/
+  )
+  // Journal values are restored Identity last (a journal cut short is incomplete).
+  const recovered = [...recoverState.matchAll(/dnRecoverValue "(\w+)"/g)].map((m) => m[1])
+  assert.deepEqual(recovered, [
+    'LegacyUninstallString',
+    'DesktopLink',
+    'StartMenuLink',
+    'SourceDir',
+    'DestDir',
+    'Identity'
+  ])
+  const restored = [...restoreState.matchAll(/dnRestoreValue \$dnJournalKey "(\w+)"/g)].map(
+    (m) => m[1]
+  )
+  assert.equal(restored.at(-1), 'Identity')
+  const park = fnBody('dnParkUninstaller')
+  assert.ok(park.indexOf('"DestDir" $1') < park.indexOf('"Identity" "${DN_MIGRATION_IDENTITY}"'))
+  // The copy goes only after every value in it read back.
+  const copyDeleted = recoverState.indexOf('DeleteRegKey HKCU $dnRecoveryKey')
+  assert.ok(recoverState.lastIndexOf('dnMatchValue') < copyDeleted)
+  assert.ok(recoverState.indexOf('StrCpy $5 "record-mismatch"') < copyDeleted)
+  assert.ok(recoverState.indexOf('WriteRegStr HKCU $dnStateKey "MigrationRecord" $2') < copyDeleted)
+  // Test-only termination points compile to nothing in an installer.
+  assert.match(
+    guards,
+    /!ifdef DN_TEST_STEPS\n(?:[^\n]*\n){1,8}?\s+System::Call 'kernel32::TerminateProcess\(p -1, i 9\)'[^]*?!else\n\s+!macro dnTestStep NAME\n\s+!macroend\n!endif/
+  )
+  assert.equal(guards.split('TerminateProcess(p -1').length - 1, 1)
+  assert.doesNotMatch(installer, /DN_TEST_STEPS|dnTestStopAt/)
+  // An earlier run's removed-but-unrecorded move is finished only after the new
+  // copy is verified, and only when this run moves nothing.
+  const inPlace = install.slice(install.indexOf('!insertmacro dnStatus install in-place'))
+  assert.ok(inPlace.indexOf('${andIf} $R7 == $R9') < inPlace.indexOf('Call dnCompleteMove'))
+  assert.ok(
+    inPlace.indexOf('FileExists} "$INSTDIR\\resources\\app.asar"') <
+      inPlace.indexOf('Call dnCompleteMove')
+  )
   // The recovery copy lives outside Software\{APP_GUID}, which electron-builder's
   // uninstaller deletes; customInit restores from it before anything reads the
   // journal; a user uninstall (not --updated) deletes it.
@@ -261,6 +312,7 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   assert.ok(
     init.indexOf('StrCpy $dnRecoveryKey "${DN_RECOVERY_KEY}"') < init.indexOf('Call dnRecoverState')
   )
+  assert.ok(init.indexOf('Call dnPlanMigration') < init.indexOf('Call dnJournalDone'))
   assert.ok(init.indexOf('Call dnRecoverState') < init.indexOf('Call dnPlanMigration'))
   assert.ok(init.indexOf('Call dnRecoverState') < init.indexOf('Call dnTrustedJournal'))
   assert.ok(restoreState.indexOf('Call dnRecoverState') < restoreState.indexOf('dnRestoreValue'))
@@ -573,7 +625,8 @@ test('every installer decision is recorded where QA can read it (status key and 
     ['Function dnMigrationClose', 'close'],
     ['Function dnParkUninstaller', 'park'],
     ['Function dnFinishMigration', 'remove'],
-    ['Function dnFinishMigration', 'record'],
+    ['Function dnWriteRecord', 'record'],
+    ['Function dnCompleteMove', 'install'],
     ['Function ${DN_FN}dnUninstallLegacy', 'uninstall']
   ]) {
     const body = guards.slice(guards.indexOf(fn), guards.indexOf('FunctionEnd', guards.indexOf(fn)))
