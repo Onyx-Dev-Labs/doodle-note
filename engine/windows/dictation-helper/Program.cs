@@ -136,9 +136,10 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// A console close or logoff event: the wait for a delivery in progress, so that it plus the bounded clean-up
-        /// (hooks, readers, sound, drain) fits in ConsoleHandlerWaitMs, below the ~5 s Windows allows.
+        /// (hooks 1000, readers 500, sound 2000, drain 500 ms: 4250 ms in all) fits in ConsoleHandlerWaitMs with a
+        /// 250 ms margin, below the ~5 s Windows allows.
         /// </summary>
-        public const int ConsoleCloseWaitMs = 500, ConsoleHandlerWaitMs = 4500;
+        public const int ConsoleCloseWaitMs = 250, ConsoleHandlerWaitMs = 4500;
 
         /// <summary>Set when the shutdown's steps are done (right before Environment.Exit).</summary>
         static readonly ManualResetEvent shutdownDone = new ManualResetEvent(false);
@@ -437,21 +438,8 @@ namespace DoodleNote.DictationHelper
                         });
                     }
                     break;
-#if DICTATION_TEST
-                // Test-build-only ops (compiled with /define:DICTATION_TEST and enabled only with
-                // DICTATION_HELPER_TEST=1). The shipped helper has none of these: they answer unknown-op.
-                case "__boundary-table":
-                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
-                    {
-                        byte[] bits = new byte[8192]; // 65536 bits
-                        for (int cp = 0; cp <= 0xFFFF; cp++)
-                        {
-                            char c = (char)cp;
-                            if (char.IsWhiteSpace(c) || char.IsPunctuation(c)) bits[cp >> 3] |= (byte)(1 << (cp & 7));
-                        }
-                        Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
-                    }
-                    break;
+                // Production ops (compiled into the shipped helper; a desktop test checks that no production op
+                // sits inside the DICTATION_TEST region and that every test op does).
                 case "clipboard-offers":
                     // Kept clipboard transactions the user may restore (formats and size only, never content).
                     work.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("offers", PendingClipboard.Offers())); });
@@ -473,6 +461,21 @@ namespace DoodleNote.DictationHelper
                     {
                         string record = Wire.Str(request, "record") ?? "";
                         work.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("dismissed", PendingClipboard.DismissOffer(record))); });
+                    }
+                    break;
+#if DICTATION_TEST
+                // Test-build-only ops (compiled with /define:DICTATION_TEST and enabled only with
+                // DICTATION_HELPER_TEST=1). The shipped helper has none of these: they answer unknown-op.
+                case "__boundary-table":
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    {
+                        byte[] bits = new byte[8192]; // 65536 bits
+                        for (int cp = 0; cp <= 0xFFFF; cp++)
+                        {
+                            char c = (char)cp;
+                            if (char.IsWhiteSpace(c) || char.IsPunctuation(c)) bits[cp >> 3] |= (byte)(1 << (cp & 7));
+                        }
+                        Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
                     }
                     break;
                 case "__clipboard-txn":

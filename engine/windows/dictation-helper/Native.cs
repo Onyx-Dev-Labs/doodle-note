@@ -213,7 +213,13 @@ namespace DoodleNote.DictationHelper
                     using (Microsoft.Win32.RegistryKey child = existing.CreateSubKey(probe)) { }
                     existing.DeleteSubKey(probe, false);
                 }
-                catch (System.IO.IOException) { return true; } // volatile
+                catch (System.IO.IOException error)
+                {
+                    // Only ERROR_CHILD_MUST_BE_VOLATILE (1021) proves the key is volatile; any other failure leaves it unknown.
+                    if ((System.Runtime.InteropServices.Marshal.GetHRForException(error) & 0xFFFF) == 1021) return true;
+                    info.Note = "the key's volatility could not be checked: " + error.Message;
+                    return false;
+                }
                 catch (Exception error) { info.Note = "the key's volatility could not be checked: " + error.GetType().Name; return false; }
             }
             // A persistent key of our name: its values may predate this boot. Replace it.

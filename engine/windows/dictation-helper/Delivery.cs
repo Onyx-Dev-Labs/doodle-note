@@ -379,7 +379,7 @@ namespace DoodleNote.DictationHelper
             }
             if (holdMs > 0) Thread.Sleep(holdMs);
             // As before Ctrl+V (the real check): a clipboard that changed hands meanwhile is left alone.
-            if (!ours.LooksOurs()) { saved.Settle("user-changed"); return "user-changed|" + savedFormats; }
+            if (!ours.LooksOurs() && !saved.OurWriteVisible(ours)) { saved.Settle("user-changed"); return "user-changed|" + savedFormats; }
             // Test build only: a target that pastes by reading the synthesized ANSI text formats (an ANSI or
             // RichEdit app does), on another thread right after "Ctrl+V", as a real target would.
             if (TestMode.Env("DICTATION_HELPER_TEST_TARGET_READ") == "ansi") SimulateAnsiTargetRead();
@@ -543,7 +543,9 @@ namespace DoodleNote.DictationHelper
             // The clipboard must still be our write, or Ctrl+V would paste someone else's content
             // (another app copied between our write and now). Nothing is pasted then, and their newer
             // copy is left alone; the typing fallback may still run.
-            if (!ours.LooksOurs())
+            // A moved sequence alone is not someone else's copy: our window owning the clipboard with our complete write
+            // on it is still ours (the content check runs before anything is settled).
+            if (!ours.LooksOurs() && !saved.OurWriteVisible(ours))
             {
                 Wire.Log("the clipboard changed hands before Ctrl+V; not pasting");
                 clipboardAfterFailedWrite = "user-changed";
@@ -1882,6 +1884,14 @@ namespace DoodleNote.DictationHelper
             List<uint> present = new List<uint>();
             for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) present.Add(f);
             return ClipboardText.ClassifyOurWrite(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, Record.Id, Record.Nonce, Record.DictatedHash) == OurWrite.Complete;
+        }
+
+        /// <summary>Opens the clipboard: our window owns it and our complete write (this transaction's) is on it.</summary>
+        public bool OurWriteVisible(ClipboardOwnership ours)
+        {
+            if (!ClipboardText.Open()) return false;
+            try { return OurWriteStillThere(ours); }
+            finally { Native.CloseClipboard(); }
         }
 
         /// <summary>Set by RestoreInner when the record must be kept whatever the result (a lost journal).</summary>

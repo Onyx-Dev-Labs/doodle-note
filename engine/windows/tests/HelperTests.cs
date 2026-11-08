@@ -627,56 +627,50 @@ namespace DoodleNote.DictationHelper.Tests
             Func<string, uint, RecordFacts> facts = (stage, atStage) => new RecordFacts { Stage = stage, SequenceAtStage = atStage, SequenceAfterWrite = 7 };
             Action<PendingClipboard.RecoveryVerdict, RecordFacts, ClipboardView, LogonMatch, string> expect = (want, f, v, logon, why) => Assert.Equal(want, PendingClipboard.Decide(f, v, logon), why);
             LogonMatch same = LogonMatch.Same, other = LogonMatch.Different, unknown = LogonMatch.Unknown;
-            // Provable, so it is restored on its own: (a) our complete write, (b) empty at exactly our journaled M, (c) our window for this transaction.
-            foreach (string stage in new[] { "emptying", "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied" })
-                expect(PendingClipboard.RecoveryVerdict.OursByWrite, facts(stage, 3), view(40, OurWrite.Complete, 8, false), same, stage + ": (a) our complete write");
+            // Provable, so it is restored on its own: (a) our complete write within our own operations, (b) empty at exactly our M, (c) our window for this transaction.
+            foreach (string stage in new[] { "emptied", "written", "restoring", "restore-emptied", "recovering", "recovering-emptied" })
+                expect(PendingClipboard.RecoveryVerdict.OursByWrite, facts(stage, 3), view(9, OurWrite.Complete, 8, false), same, stage + ": (a) our complete write, within our own operations");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, facts("emptied", 4), view(4, OurWrite.None, 0, false), same, "(b) empty at exactly M (journaled under our lock)");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "restore-emptied", SequenceAtStage = 8, SequenceClosed = 9 }, view(9, OurWrite.None, 0, false), same, "(b) empty at the sequence confirmed after our close");
             ClipboardView mine = view(12, OurWrite.None, 3, false); mine.OwnerIsUs = true; mine.OwnerAlive = true; mine.OwnedByThisTransaction = true;
             expect(PendingClipboard.RecoveryVerdict.OursByOwner, facts("restore-emptied", 8), mine, same, "(c) our live window owns it, and our last empty was this transaction's");
             ClipboardView otherTxn = view(12, OurWrite.None, 3, false); otherTxn.OwnerIsUs = true; otherTxn.OwnerAlive = true; otherTxn.OwnedByThisTransaction = false;
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), otherTxn, same, "our window owns it for ANOTHER transaction (a restore since): never ours for this one");
-            // Pending: kept, nothing written, offered to the user.
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), otherTxn, same, "our window owns it for ANOTHER transaction: never ours for this one");
+            // (a) needs continuity: a manager replaying every format (our sentinel too) after the crash, at a later sequence.
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), view(7 + (uint)PendingClipboard.CloseMoves + 8 + 1, OurWrite.Complete, 8, false), same, "a complete write BEYOND our own operations: a replay, offered, not restored on its own");
+            // Pending: kept, nothing written, offered.
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptied", 4), view(6, OurWrite.Partial, 2, false), same, "our write cut short, without the sentinel");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(10, OurWrite.None, 2, true), same, "only saved formats (a restore cut short, or a later identical copy)");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3), view(4, OurWrite.None, 0, false), same, "empty at N+1 after a pre-empty stage (ours or a deliberate clear)");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restoring", 7), view(8, OurWrite.None, 0, false), same, "empty at N+1 after restoring");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), view(7, OurWrite.None, 5, false), same, "the sequence of our write but not our content: no longer authority");
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptied", 4), view(5, OurWrite.None, 0, false), same, "empty one step after M: not exactly M");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(10, OurWrite.None, 2, true), same, "only saved formats");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("emptying", 3), view(4, OurWrite.None, 0, false), same, "empty at N+1 after a pre-empty stage");
             expect(PendingClipboard.RecoveryVerdict.Pending, facts("written", 7), view(7, OurWrite.Complete, 8, false), unknown, "an unknown logon: even our complete write waits for the user");
-            // Deleted without writing: provable or harmless.
+            // Never deleted for these (the blocker): our own later transactions, the user's later copy, a live foreign owner.
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), view(8 + 40, OurWrite.None, 3, false), same, "far beyond our bounds (another delivery, another offer's restore, the user's copy): still offered");
             ClipboardView foreign = view(9, OurWrite.None, 3, false); foreign.OwnerAlive = true;
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8), foreign, same, "a live foreign owner: the user copied since");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another logon or boot");
-            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8), view(8 + (uint)PendingClipboard.WriteOps + (uint)PendingClipboard.CloseMoves + 1, OurWrite.None, 2, false), same, "a sequence beyond everything our operations explain: the user's later copy");
+            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), foreign, same, "a live foreign owner: offered, not deleted");
+            // Deleted without writing, losing nothing.
+            expect(PendingClipboard.RecoveryVerdict.Stale, facts("restore-emptied", 8), view(10, OurWrite.Complete, 8, false), other, "another boot: the clipboard did not survive it");
+            expect(PendingClipboard.RecoveryVerdict.OtherSession, facts("restore-emptied", 8), view(10, OurWrite.None, 2, false), LogonMatch.OtherSession, "another session's record: left alone");
             expect(PendingClipboard.RecoveryVerdict.Untouched, facts("emptying", 3), view(3, OurWrite.None, 2, true), same, "nothing emptied yet");
             ClipboardView exact = view(15, OurWrite.None, 5, true); exact.HoldsSavedExactly = true;
-            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exact, unknown, "the clipboard already holds exactly the saved content: nothing to do");
+            expect(PendingClipboard.RecoveryVerdict.Untouched, facts("restore-emptied", 8), exact, unknown, "the clipboard already holds exactly the saved content");
             expect(PendingClipboard.RecoveryVerdict.Untouched, facts("saved", 7), view(7, OurWrite.Complete, 1, true), same, "nothing was emptied");
-            // Synthesized reads widen only the stale bound (in doubt: pending).
-            ClipboardView read = view(8 + 4 + (uint)PendingClipboard.CloseMoves + 3, OurWrite.None, 5, true); read.SynthesizedPresent = 3;
-            expect(PendingClipboard.RecoveryVerdict.Pending, facts("restore-emptied", 8), read, same, "three synthesized formats read since: still within the bound, so pending");
-            // Origin provenance (D3): a recovery keeps the stage it FOUND; unwrapped only through a recovery that never emptied.
+            // D3 origin.
             RecordFacts chain = new RecordFacts { Stage = "recovering", SequenceAtStage = 20, SequenceAfterWrite = 7, OriginStage = "recovering-emptied", OriginSequenceAtStage = 18 };
-            expect(PendingClipboard.RecoveryVerdict.Pending, chain, view(20, OurWrite.None, 2, true), same, "the four-helper chain: a user restore of a partly put-back clipboard killed before its empty: pending, not stale");
+            expect(PendingClipboard.RecoveryVerdict.Pending, chain, view(20, OurWrite.None, 2, true), same, "the four-helper chain: pending, not stale");
             expect(PendingClipboard.RecoveryVerdict.InterruptedEmpty, new RecordFacts { Stage = "recovering", SequenceAtStage = 18, OriginStage = "restore-emptied", OriginSequenceAtStage = 18 }, view(18, OurWrite.None, 0, false), same, "a recovery that never emptied: the found empty at its M still proves (b)");
-            expect(PendingClipboard.RecoveryVerdict.Pending, new RecordFacts { Stage = "recovering", SequenceAtStage = 18, OriginStage = "written", OriginSequenceAtStage = 7 }, view(18, OurWrite.None, 2, false), same, "an origin that cannot be verified now: pending");
         }
 
         public static void TheLogonIdentityNeverUsesTheWallClock()
         {
-            Func<string, string, long, LogonNow> now = (key, boot, keyTick) => new LogonNow { Session = 1, Logon = "3e7", SessionKey = key, KeyCreatedTick = keyTick, BootId = boot, Tick = 5000000 };
+            Func<string, string, LogonNow> now = (key, boot) => new LogonNow { Session = 1, Logon = "3e7", SessionKey = key, KeyCreatedTick = 1000, BootId = boot, Tick = 5000000 };
             RecordFacts here = new RecordFacts { Session = 1, Logon = "3e7", SessionKey = "a1", BootId = "14", Tick = 4000000 };
-            Assert.Equal(LogonMatch.Same, here.Compare(now("a1", "14", 1000)), "same session, LUID, key and boot (a clock correction changes nothing)");
-            Assert.Equal(LogonMatch.Different, new RecordFacts { Session = 2, Logon = "3e7", SessionKey = "a1", BootId = "14", Tick = 4000000 }.Compare(now("a1", "14", 1000)), "another window-station session");
-            Assert.Equal(LogonMatch.Different, here.Compare(now("a1", "15", 1000)), "another boot (Windows' boot counter)");
-            RecordFacts later = new RecordFacts { Session = 1, Logon = "3e7", SessionKey = "a1", Tick = 9000000 };
-            Assert.Equal(LogonMatch.Different, later.Compare(now("a1", "", 1000)), "the tick count is below the record's: a new boot");
-            Assert.Equal(LogonMatch.Unknown, here.Compare(now("b2", "14", 4500000)), "our key was created AFTER the record (a cleaner deleted it, or a persistent one was replaced): unknown, pending");
-            Assert.Equal(LogonMatch.Different, here.Compare(now("b2", "14", 1000)), "our key existed before the record, which carries another key: another load of the hive");
-            Assert.Equal(LogonMatch.Unknown, new RecordFacts { Session = 1, Logon = "4a1", SessionKey = "a1", BootId = "14", Tick = 4000000 }.Compare(now("a1", "14", 1000)), "another LUID in the same session (an elevated helper): unknown, not different");
-            Assert.Equal(LogonMatch.Unknown, here.Compare(now("", "14", 0)), "the key could not be read now");
-            Assert.Equal(LogonMatch.Unknown, new RecordFacts { Session = 1, Logon = "3e7", BootId = "14", Tick = 4000000 }.Compare(now("a1", "14", 1000)), "a record without a key");
+            Assert.Equal(LogonMatch.Same, here.Compare(now("a1", "14")), "same session, LUID, key and boot (a clock correction changes nothing)");
+            Assert.Equal(LogonMatch.Different, here.Compare(now("a1", "15")), "another boot (Windows' boot counter): deleted, the clipboard did not survive it");
+            Assert.Equal(LogonMatch.Different, new RecordFacts { Session = 1, Logon = "3e7", SessionKey = "a1", Tick = 9000000 }.Compare(now("a1", "")), "the tick count is below the record's: a new boot");
+            Assert.Equal(LogonMatch.OtherSession, new RecordFacts { Session = 2, Logon = "3e7", SessionKey = "a1", BootId = "14", Tick = 4000000 }.Compare(now("a1", "14")), "another session of the same user (shared %TEMP%): left alone, not deleted");
+            Assert.Equal(LogonMatch.Unknown, here.Compare(now("b2", "14")), "another key in the same boot (a cleaner, a replaced persistent key, a relogin): offered, never deleted");
+            Assert.Equal(LogonMatch.Unknown, new RecordFacts { Session = 1, Logon = "4a1", SessionKey = "a1", BootId = "14", Tick = 4000000 }.Compare(now("a1", "14")), "another LUID in the same session (an elevated helper)");
+            Assert.Equal(LogonMatch.Unknown, here.Compare(now("", "14")), "the key could not be read now");
         }
 
         public static void APersistentSessionKeyIsReplacedByAVolatileOne()
@@ -707,10 +701,16 @@ namespace DoodleNote.DictationHelper.Tests
 
         public static void PendingRecordsExpireAfterTheRetention()
         {
-            DateTime created = new DateTime(2026, 11, 8, 6, 0, 0, DateTimeKind.Utc);
-            Assert.Equal(false, PendingClipboard.Expired(created, created.AddHours(23)), "within 24 h: still offered");
-            Assert.Equal(true, PendingClipboard.Expired(created, created.AddHours(25)), "after 24 h: deleted");
-            Assert.Equal(false, PendingClipboard.Expired(DateTime.MinValue, created), "no creation time: never by this rule");
+            long day = 24L * 3600 * 1000;
+            Func<long, string, LogonNow> now = (tick, boot) => new LogonNow { BootId = boot, Tick = tick };
+            RecordFacts offered = new RecordFacts { OfferedTick = 1000, OfferedBoot = "14", CreatedUtc = DateTime.UtcNow };
+            Assert.Equal(false, PendingClipboard.Expired(offered, now(1000 + day - 1, "14")), "within 24 h of the first offer: still offered");
+            Assert.Equal(true, PendingClipboard.Expired(offered, now(1000 + day + 1, "14")), "24 h after the first offer, on the tick count: deleted");
+            Assert.Equal(false, PendingClipboard.Expired(offered, now(1000 + 2 * day, "15")), "another boot: not by this rule (Compare deletes it as another boot)");
+            RecordFacts jumped = new RecordFacts { OfferedTick = 1000, OfferedBoot = "14", CreatedUtc = DateTime.UtcNow.AddDays(-40) };
+            Assert.Equal(false, PendingClipboard.Expired(jumped, now(5000, "14")), "a wall-clock jump alone never deletes (the tick count decides)");
+            Assert.Equal(false, PendingClipboard.Expired(new RecordFacts { CreatedUtc = DateTime.UtcNow.AddDays(-2) }, now(5000, "14")), "never offered: not by this rule");
+            Assert.Equal(true, PendingClipboard.Expired(new RecordFacts { CreatedUtc = DateTime.UtcNow.AddDays(-31) }, now(5000, "14")), "an older build's record without an offer tick: the 30-day cap");
         }
 
         public static void OurWriteIsRecognizedOnlyWhenExactlyOurs()
