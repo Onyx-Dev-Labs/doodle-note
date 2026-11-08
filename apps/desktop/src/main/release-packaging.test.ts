@@ -29,7 +29,10 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
   foreignNativeBinaries(unpackedDir: string): string[]
   nativeBinariesInAsar(file: string): { path: string; machine: string }[]
   missingRequiredBinaries(unpackedDir: string): string[]
+  missingRequiredResources(resourcesDir: string): string[]
+  missingDependencies(files: string[], dependencies: Record<string, string>): string[]
   REQUIRED_UNPACKED: string[]
+  REQUIRED_RESOURCES: string[]
   listTree(dir: string): string[]
   fileListDifferences(a: string[], b: string[]): { onlyA: string[]; onlyB: string[] }
 }
@@ -548,6 +551,58 @@ test('a Windows package missing its speech engine, Koffi, reflink or llama binar
   // The QA packager uses package:win's (pnpm) node_modules collector even when started with node.
   const qa = readFileSync(new URL('../../scripts/package-win-qa.cjs', import.meta.url), 'utf8')
   assert.match(qa, /env\.npm_config_user_agent = 'pnpm'/)
+})
+
+test('the presence check covers every runtime binary, resource and dependency the app needs', () => {
+  // What the round-2 QA collector bug dropped, and what else loads at run time.
+  for (const rel of [
+    'node_modules/sherpa-onnx-win-x64/sherpa-onnx.node',
+    'node_modules/sherpa-onnx-win-x64/sherpa-onnx-c-api.dll',
+    'node_modules/sherpa-onnx-win-x64/onnxruntime.dll',
+    'node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
+    'node_modules/@reflink/reflink-win32-x64-msvc/reflink.win32-x64-msvc.node',
+    'node_modules/@node-llama-cpp/win-x64-vulkan/bins/win-x64-vulkan/llama-addon.node',
+    'node_modules/node-llama-cpp/node_modules/@node-llama-cpp/win-x64/bins/win-x64/llama-addon.node'
+  ])
+    assert.ok(packageCheck.REQUIRED_UNPACKED.includes(rel), rel)
+  for (const rel of [
+    'engine/dictation-helper.exe',
+    'engine/dictation-helper.manifest.json',
+    'mcp/cli.js'
+  ])
+    assert.ok(packageCheck.REQUIRED_RESOURCES.includes(rel), rel)
+  const dir = mkdtempSync(join(tmpdir(), 'dn-resources-'))
+  try {
+    assert.deepEqual(packageCheck.missingRequiredResources(dir), packageCheck.REQUIRED_RESOURCES)
+    for (const rel of packageCheck.REQUIRED_RESOURCES) {
+      if (rel === 'mcp/cli.js') continue
+      mkdirSync(join(dir, rel, '..'), { recursive: true })
+      writeFileSync(join(dir, rel), 'x')
+    }
+    assert.deepEqual(packageCheck.missingRequiredResources(dir), ['mcp/cli.js'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  // Every dependency of the app has its package in app.asar (production and QA alike).
+  const dependencies = (JSON.parse(desktopPackage) as { dependencies: Record<string, string> })
+    .dependencies
+  assert.ok(Object.keys(dependencies).includes('sherpa-onnx-node'))
+  const files = Object.keys(dependencies)
+    .filter((name) => name !== 'koffi')
+    .map((name) => `node_modules/${name}/package.json`)
+  assert.deepEqual(packageCheck.missingDependencies(files, dependencies), ['koffi'])
+  assert.deepEqual(
+    packageCheck.missingDependencies([...files, 'node_modules/koffi/package.json'], dependencies),
+    []
+  )
+  // A nested copy does not count as the app's own.
+  assert.deepEqual(
+    packageCheck.missingDependencies(
+      [...files, 'node_modules/x/node_modules/koffi/package.json'],
+      dependencies
+    ),
+    ['koffi']
+  )
 })
 
 test('native binaries packed inside app.asar itself are checked for their CPU too', () => {

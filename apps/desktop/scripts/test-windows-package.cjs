@@ -3,8 +3,11 @@
 // if app source, build scripts, docs, tests or sourcemaps were bundled into it, or
 // if app.asar.unpacked carries native binaries for another OS or CPU (they cannot
 // load, and cannot be Authenticode-signed), or if a native binary (.node, .dll,
-// .exe) was packed inside app.asar itself for another OS or CPU, or if a required
-// Windows runtime binary (speech engine, Koffi, reflink, llama) is missing.
+// .exe) was packed inside app.asar itself for another OS or CPU, or if anything the
+// Windows app needs at run time is missing: a runtime binary (speech engine and its
+// ONNX runtime, Koffi, reflink, llama CPU and Vulkan), a resource outside the archive
+// (Bark helper and its manifest, the MCP server, tray icons) or one of the app's own
+// dependencies inside app.asar.
 //
 //   node scripts/test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]
 //     [--same-files-as <other win-unpacked dir>]
@@ -139,15 +142,37 @@ function nativeBinariesInAsar(file) {
 }
 
 /**
- * Windows runtime binaries every package must carry unpacked: the speech engine,
- * Koffi (Windows APIs), reflink (library copies) and llama (local refinement). A
- * build whose node_modules collector missed pnpm's platform packages lacks them.
+ * Windows runtime binaries every package must carry unpacked: the speech engine
+ * (sherpa-onnx's addon, its C API and the ONNX runtime it loads), Koffi (Windows
+ * APIs), reflink (library copies) and llama (local refinement: the CPU addon
+ * node-llama-cpp resolves from its own node_modules, the hoisted copy, and the
+ * Vulkan build). A build whose node_modules collector missed pnpm's platform
+ * packages lacks them (round 2: the QA package lost sherpa-onnx, Koffi, reflink
+ * and llama Vulkan).
  */
 const REQUIRED_UNPACKED = [
   'node_modules/sherpa-onnx-win-x64/sherpa-onnx.node',
   'node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
   'node_modules/@reflink/reflink-win32-x64-msvc/reflink.win32-x64-msvc.node',
-  'node_modules/@node-llama-cpp/win-x64/bins/win-x64/llama-addon.node'
+  'node_modules/@node-llama-cpp/win-x64/bins/win-x64/llama-addon.node',
+  'node_modules/sherpa-onnx-win-x64/sherpa-onnx-c-api.dll',
+  'node_modules/sherpa-onnx-win-x64/onnxruntime.dll',
+  'node_modules/@node-llama-cpp/win-x64-vulkan/bins/win-x64-vulkan/llama-addon.node',
+  'node_modules/node-llama-cpp/node_modules/@node-llama-cpp/win-x64/bins/win-x64/llama-addon.node'
+]
+
+/**
+ * Files outside app.asar (extraResources) the Windows app needs: the Bark helper
+ * and the manifest its integrity check reads, the MCP server the client configs
+ * launch, and the tray icons.
+ */
+const REQUIRED_RESOURCES = [
+  'engine/dictation-helper.exe',
+  'engine/dictation-helper.manifest.json',
+  'mcp/cli.js',
+  'mcp/package.json',
+  'tray/dogWin.ico',
+  'tray/dogWinRecording.ico'
 ]
 
 /** The required Windows binaries missing from app.asar.unpacked. */
@@ -155,6 +180,24 @@ function missingRequiredBinaries(unpackedDir) {
   return REQUIRED_UNPACKED.filter(
     (rel) => !fs.existsSync(path.join(unpackedDir, ...rel.split('/')))
   )
+}
+
+/** The required resources missing from `resourcesDir` (win-unpacked\resources). */
+function missingRequiredResources(resourcesDir) {
+  return REQUIRED_RESOURCES.filter(
+    (rel) => !fs.existsSync(path.join(resourcesDir, ...rel.split('/')))
+  )
+}
+
+/**
+ * The app's own dependencies (`dependencies` of apps/desktop/package.json) that
+ * have no top-level package in app.asar, for the archive's file list.
+ */
+function missingDependencies(files, dependencies) {
+  const present = new Set(files)
+  return Object.keys(dependencies ?? {})
+    .sort()
+    .filter((name) => !present.has(`node_modules/${name}/package.json`))
 }
 
 /** Native binaries under app.asar.unpacked that cannot load in the x64 Windows app. */
@@ -185,7 +228,10 @@ module.exports = {
   foreignNativeBinaries,
   nativeBinariesInAsar,
   missingRequiredBinaries,
+  missingRequiredResources,
+  missingDependencies,
   REQUIRED_UNPACKED,
+  REQUIRED_RESOURCES,
   listTree,
   fileListDifferences
 }
@@ -264,6 +310,19 @@ if (require.main === module) {
   )
   console.log(
     `  app.asar.unpacked: ${REQUIRED_UNPACKED.length - missing.length}/${REQUIRED_UNPACKED.length} required Windows runtime binaries`
+  )
+  const missingResources = missingRequiredResources(path.dirname(asar))
+  problems.push(
+    ...missingResources.map((rel) => `resources/${rel}: required Windows resource missing`)
+  )
+  console.log(
+    `  resources: ${REQUIRED_RESOURCES.length - missingResources.length}/${REQUIRED_RESOURCES.length} required files outside app.asar`
+  )
+  const { dependencies } = require(path.join(__dirname, '..', 'package.json'))
+  const missingDeps = missingDependencies(files, dependencies)
+  problems.push(...missingDeps.map((name) => `app.asar/node_modules/${name}: dependency missing`))
+  console.log(
+    `  app.asar: ${Object.keys(dependencies ?? {}).length - missingDeps.length}/${Object.keys(dependencies ?? {}).length} of the app's dependencies`
   )
   const packed = nativeBinariesInAsar(asar)
   for (const binary of packed) console.log(`  inside app.asar: ${binary.path} (${binary.machine})`)
