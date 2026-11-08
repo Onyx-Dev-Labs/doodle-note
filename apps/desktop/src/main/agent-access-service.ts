@@ -1,9 +1,20 @@
 import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import {
   AGENT_ACCESS_CONNECT_CLIENT_CHANNEL,
   AGENT_ACCESS_DISCONNECT_CLIENT_CHANNEL,
@@ -44,6 +55,70 @@ export function readConfigFile(
     const code = (error as NodeJS.ErrnoException).code
     if (code === 'ENOENT' || code === 'ENOTDIR') return { state: 'absent' }
     return { state: 'error', message: (error as Error).message }
+  }
+}
+
+/** True when two config texts say the same thing (JSON compared parsed, TOML as text). */
+export function sameConfigContent(a: string, b: string, dialect: 'json' | 'toml'): boolean {
+  if (dialect === 'json') {
+    try {
+      return isDeepStrictEqual(JSON.parse(a), JSON.parse(b))
+    } catch {
+      return false
+    }
+  }
+  const text = (value: string): string => value.replace(/\r\n/g, '\n').trimEnd()
+  return text(a) === text(b)
+}
+
+const sleep = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/**
+ * Replaces a client config file atomically: the new text goes to a temporary file
+ * beside it (same folder, so the rename stays on one volume) with the original's
+ * mode, and is renamed over it. Clients such as Claude Code rewrite their file
+ * often, so the file is read again just before the rename; when it is no longer
+ * `expected` (null: it did not exist) nothing is written and false is returned so
+ * the caller starts over from the new content. A symbolic link is followed, so a
+ * dotfile link keeps pointing at its target.
+ */
+export function replaceConfigFile(path: string, expected: string | null, next: string): boolean {
+  const target = expected === null ? path : realpathSync(path)
+  const mode = expected === null ? 0o600 : statSync(target).mode & 0o7777
+  mkdirSync(dirname(target), { recursive: true })
+  const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
+  writeFileSync(temporary, next, { flag: 'wx', mode })
+  try {
+    // The file mode is subject to the umask on creation; set it exactly.
+    if (process.platform !== 'win32') chmodSync(temporary, mode)
+    const current = readConfigFile(target)
+    const now =
+      current.state === 'read' ? current.raw : current.state === 'absent' ? null : undefined
+    if (now !== expected) {
+      unlinkSync(temporary)
+      return false
+    }
+    // Windows refuses the rename while another process has the file open without
+    // FILE_SHARE_DELETE; that lasts milliseconds, so retry briefly.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(temporary, target)
+        return true
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '')) throw error
+        sleep(50)
+      }
+    }
+  } catch (error) {
+    try {
+      unlinkSync(temporary)
+    } catch {
+      // already renamed or removed
+    }
+    throw error
   }
 }
 
@@ -181,27 +256,42 @@ export class AgentAccessService {
   setClientConnected(id: McpClientId, connected: boolean): AgentAccessStatus {
     const def = this.clients.find((c) => c.id === id)
     if (!def) throw new Error(`Unknown MCP client: ${id}`)
-    const raw = this.tryRead(def.configPath)
-    let next: string | null
-    if (connected) {
-      next =
-        def.dialect === 'json'
+    this.updateClientConfig(def, (raw) => {
+      if (connected) {
+        return def.dialect === 'json'
           ? jsonConfigWithServer(raw, this.server, def.configPath)
           : codexConfigWithServer(raw, this.server)
-    } else {
+      }
       // Nothing to remove from a file that doesn't exist.
-      next =
-        raw === null
-          ? null
-          : def.dialect === 'json'
-            ? jsonConfigWithoutServer(raw, def.configPath)
-            : codexConfigWithoutServer(raw)
-    }
-    if (next !== null && next !== raw) {
-      mkdirSync(dirname(def.configPath), { recursive: true })
-      writeFileSync(def.configPath, next)
-    }
+      if (raw === null) return null
+      return def.dialect === 'json'
+        ? jsonConfigWithoutServer(raw, def.configPath)
+        : codexConfigWithoutServer(raw)
+    })
     return this.status()
+  }
+
+  /**
+   * Read-modify-write of one client config: `change` gets the current text (null:
+   * no file) and returns the new text, or null for no change. Nothing is written
+   * when the content would not change; the write is atomic (replaceConfigFile) and
+   * starts over if the client rewrote the file in the meantime. A config that
+   * exists but cannot be read throws, so it is never replaced blind.
+   */
+  private updateClientConfig(
+    def: McpClientDef,
+    change: (raw: string | null) => string | null
+  ): 'unchanged' | 'updated' {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const read = readConfigFile(def.configPath)
+      if (read.state === 'error') throw new Error(read.message)
+      const raw = read.state === 'read' ? read.raw : null
+      const next = change(raw)
+      if (next === null || (raw !== null && sameConfigContent(raw, next, def.dialect)))
+        return 'unchanged'
+      if (replaceConfigFile(def.configPath, raw, next)) return 'updated'
+    }
+    throw new Error(`${def.configPath} kept changing while it was being updated; try again.`)
   }
 
   /**
@@ -220,35 +310,19 @@ export class AgentAccessService {
     const results: McpRepointResult[] = []
     for (const def of this.clients) {
       if (only && !only.includes(def.id)) continue
-      const read = readConfigFile(def.configPath)
-      if (read.state === 'absent') {
-        results.push({ id: def.id, outcome: 'unchanged' })
-        continue
-      }
-      if (read.state === 'error') {
-        results.push({ id: def.id, outcome: 'failed', error: read.message })
-        continue
-      }
       try {
-        const raw = read.raw
-        const command =
-          def.dialect === 'json'
-            ? jsonConfigServerCommand(raw, def.configPath)
-            : codexConfigServerCommand(raw, def.configPath)
-        if (command === null || !isStale(command)) {
-          results.push({ id: def.id, outcome: 'unchanged' })
-          continue
-        }
-        const next =
-          def.dialect === 'json'
+        const outcome = this.updateClientConfig(def, (raw) => {
+          if (raw === null) return null
+          const command =
+            def.dialect === 'json'
+              ? jsonConfigServerCommand(raw, def.configPath)
+              : codexConfigServerCommand(raw, def.configPath)
+          if (command === null || !isStale(command)) return null
+          return def.dialect === 'json'
             ? jsonConfigWithServer(raw, this.server, def.configPath)
             : codexConfigWithServer(raw, this.server)
-        if (next === raw) {
-          results.push({ id: def.id, outcome: 'unchanged' })
-          continue
-        }
-        writeFileSync(def.configPath, next)
-        results.push({ id: def.id, outcome: 'updated' })
+        })
+        results.push({ id: def.id, outcome })
       } catch (error) {
         results.push({ id: def.id, outcome: 'failed', error: (error as Error).message })
       }

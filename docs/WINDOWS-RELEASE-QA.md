@@ -369,7 +369,11 @@ installer's record: it must exist for this identity, `MigratedTo` must be the
 running exe's own folder, and the old exe must be gone. When every step has
 succeeded the app deletes the record. A copy of the exe started from any folder
 that merely is named `DoodleNote` (a DPI capture, a portable copy) finds no
-record naming its folder and changes nothing.
+record naming its folder and changes nothing. Client configs are replaced atomically
+(a temporary file in the same folder with the original's mode, then a rename;
+a symbolic link is followed), only when their content changes, and not at all if
+the client rewrote the file in the meantime (the update starts over from the new
+text).
 
 ### Upgrade test: QA identity only
 
