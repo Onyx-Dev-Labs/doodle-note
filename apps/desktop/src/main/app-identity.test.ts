@@ -117,11 +117,13 @@ test('the QA identity shares no identity-bearing name with production', () => {
   const record = {
     from: `${programs}\\desktop-qa`,
     to: `${programs}\\DoodleNote QA`,
-    at: '2026-11-08T00:00:00Z'
+    at: '2026-11-08T00:00:00Z',
+    fromShortName: 'DESKTO~1'
   }
   assert.deepEqual(legacyInstallFor(record, `${programs}\\DoodleNote QA\\DoodleNote QA.exe`, qa), {
     dir: `${programs}\\desktop-qa`,
-    exe: `${programs}\\desktop-qa\\DoodleNote QA.exe`
+    exe: `${programs}\\desktop-qa\\DoodleNote QA.exe`,
+    shortName: 'DESKTO~1'
   })
   assert.ok(
     'reason' in

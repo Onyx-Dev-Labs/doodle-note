@@ -437,10 +437,20 @@ moves an existing install on upgrade:
    the old ones; arguments, description and AppUserModelID kept); no other
    shortcut is written and none is created. If the new copy is incomplete the
    old folder is kept.
+   Right before the removal it asks Windows for the old folder's own 8.3 name
+   (`GetShortPathNameW`; `DESKTO~1` for `desktop-qa`, none for `desktop`, which
+   is a valid 8.3 name, or where 8.3 names are off) and keeps it in the journal
+   (`LegacyShortName`, saved and recovered with the other journal values).
    Only when the old folder is really gone does it write the record, one value
    `HKCU\Software\{APP_GUID}` `MigrationRecord` =
-   `DNMR1|{APP_GUID}|desktop|DoodleNote|<old folder>|<new folder>|<UTC>|END`,
-   read back, and only then clear the journal. A run that stops between the
+   `DNMR2|{APP_GUID}|desktop|DoodleNote|<old folder>|<new folder>|<old 8.3 name>|<UTC>|END`
+   (the 8.3 name empty when there was none; 1 to 12 characters with a `~` and no
+   `\ / : * ? " < > |`, space or control character, the same rule in the
+   installer's `dnShortNameCheck` and the app's `recordShortNameValid`, both
+   checked against `src/main/fixtures/install-record-short-names.json`), read
+   back, and only then clear the journal. (`DNMR1`, without the 8.3 name, was
+   written only by this change's builds before round 9; both sides treat it as
+   not a record, `record-format`.) A run that stops between the
    removal and the record leaves a complete journal whose old folder is gone; the
    next run (which then has nothing to move) writes the record and clears the
    journal after verifying the new copy (`LastStep` `install`, `LastReason`
@@ -513,9 +523,15 @@ launched the old exe (`src/main/windows-install-migration.ts`). "Launched the ol
 exe" is decided with 8.3 short names expanded on both sides (`isInsideFolder`):
 an MCP command or Run value the old app wrote while it was started through a
 short path (`C:\Users\PATRIC~1\...\desktop\DoodleNote.exe`) still matches, since
-the old folder's parent exists and expands; in the old folder's own place an
-unexpanded alias of its name counts (`DESKTO~1` for `desktop-qa`; Windows' hashed
-form after `~4` does not). The Run value is read as written, through the speech
+the old folder's parent exists and expands; in the old folder's own place exactly
+one unexpanded alias counts, the 8.3 name the installer recorded for it before
+removing it (never one guessed from its long name: `DESKTO~2` may have been
+another folder's). Only a missing part (`ENOENT`, `ENOTDIR`) is skipped while
+expanding; a part that exists but cannot be resolved (access denied, a busy
+volume) makes the entry undecidable: it is not repointed, its step (the login
+item, or that MCP client) stays pending and the record is not consumed, so the
+next attempt (1 / 5 / 30 minutes, every start) decides it; a record whose own
+folders cannot be resolved stays `pending / path-unresolved`. The Run value is read as written, through the speech
 worker's registry access, because Electron's own lookup compares plain strings;
 the progress marker's exe is compared the same way. This happens only on the
 installer's record: it must be complete and for this identity (version, the
@@ -552,8 +568,9 @@ nothing): `AppMigrationReason`, `AppMigrationLastAttempt` (UTC) and, last,
 | `AppMigration` | `AppMigrationReason` | Retried |
 |---|---|---|
 | `complete` | `repointed`; `record-not-cleared` (the next launch deletes the record) | no |
-| `pending` | `steps-pending:<steps>` (`login-item`, `mcp-clients` or client ids that failed) | yes |
-| `pending` | `record-incomplete`, `record-foreign`, `record-format`, `record-time` (left for the installer), `record-other-folder` (a copy started elsewhere), `old-exe-present` | no (next start) |
+| `pending` | `steps-pending:<steps>` (`login-item`, `mcp-clients` or client ids that failed, incl. an entry whose path could not be resolved) | yes |
+| `pending` | `record-incomplete`, `record-foreign`, `record-format` (incl. a `DNMR1` record and an invalid 8.3 name), `record-time` (left for the installer), `record-other-folder` (a copy started elsewhere), `old-exe-present` | no (next start) |
+| `pending` | `path-unresolved` (the record's folders cannot be resolved now) | yes |
 | `read-failed` | `reader-unavailable` (the speech worker could not start or ended first), `reader-timeout` (no answer in 60 s), `reader-unsupported` (the FFI did not load), `reader-<code>` | yes |
 | `none` | `no-record`: an earlier `pending` / `read-failed` is over without a record | no |
 
@@ -773,7 +790,7 @@ production `f85f8dcf-…` ones), `reg delete "<key>" /f` each that is still ther
    the new exe (`install-migration.json` in the profile says `complete`); the QA
    journal key is gone; right after the installer and before the first launch
    `HKCU\Software\320d0756-...` holds `MigrationRecord`
-   (`DNMR1|320d0756-...|desktop-qa|DoodleNote QA|...\desktop-qa|...\DoodleNote QA|<UTC>|END`),
+   (`DNMR2|320d0756-...|desktop-qa|DoodleNote QA|...\desktop-qa|...\DoodleNote QA|<the old folder's 8.3 name, e.g. DESKTO~1>|<UTC>|END`),
    and after the first launch it is gone; `HKCU\Software\DoodleNote-InstallRecovery`
    does not exist (unless another identity's copy is in it); nothing of production
    changed (its folder, Run value, uninstall key and real MCP configs).
@@ -814,7 +831,7 @@ final status key).
 
 | Scenario | What it does | What it asserts |
 |---|---|---|
-| A basic | legacy `/S`; seed a Run value (8.3 path) and the three sandboxed MCP configs naming the old exe; current `/S --updated`; launch the installed app; uninstall `/S /currentuser` | after the install: old folder gone, new folder complete, exactly one QA uninstall entry naming the new folder, `MigrationRecord` complete (`DNMR1|<GUID>|desktop-qa|DoodleNote QA|<old>|<new>|<UTC>|END`), journal, recovery copy and its parent gone, status `record / moved / record-written`, log `plan-move legacy-found → close-ok → parked → recovered restored → remove moved removed → record moved record-written`, Start menu and desktop shortcuts start the new exe, the Run value still names the old exe; after the first launch: `AppMigration = complete / repointed`, record consumed, Run value and all three MCP entries repointed (Codex project table kept), `install-migration-status.json`; after the uninstall: folder, uninstall entry, `Software\{GUID}`, recovery keys and shortcuts gone, status `uninstall / uninstalled / no-pending-move`, profile, status key and `%TEMP%` log kept |
+| A basic | legacy `/S`; seed a Run value (the old folder's full 8.3 path, its own short name included) and the three sandboxed MCP configs naming the old exe; current `/S --updated`; launch the installed app; uninstall `/S /currentuser` | after the install: old folder gone, new folder complete, exactly one QA uninstall entry naming the new folder, `MigrationRecord` complete (`DNMR2|<GUID>|desktop-qa|DoodleNote QA|<old>|<new>|<the old folder's 8.3 name as read before the upgrade>|<UTC>|END`), journal, recovery copy and its parent gone, status `record / moved / record-written`, log `plan-move legacy-found → close-ok → parked → recovered restored → remove moved removed → record moved record-written`, Start menu and desktop shortcuts start the new exe, the Run value still names the old exe; after the first launch: `AppMigration = complete / repointed`, record consumed, Run value and all three MCP entries repointed (Codex project table kept), `install-migration-status.json`; after the uninstall: folder, uninstall entry, `Software\{GUID}`, recovery keys and shortcuts gone, status `uninstall / uninstalled / no-pending-move`, profile, status key and `%TEMP%` log kept |
 | B interrupted | legacy `/S`, seed; kill-step `/S --updated` stopped right after "uninstall old version" (exit 9); current `/S --updated`; launch; uninstall | after the kill: old folder kept, journal armed with the parked command, the new copy registered, no record; the next run's stock step runs the new copy's uninstaller (deleting `Software\{GUID}`), the recovery copy restores the journal (`recover / recovered / restored`) and the move finishes; then as A |
 | C consent, held file | legacy `/S`; start the legacy app; current `/S` (no `--updated`); stop the app; hold a file in the old folder; current `/S --updated` twice; release; once more; uninstall | `/S` without `--updated`: exit 2, `close / exit-2 / app-running-silent`, app not closed, nothing moved; held: journal armed after each of two runs, `remove / kept / file-in-use`, one uninstall entry, no record; the third run completes as in A |
 

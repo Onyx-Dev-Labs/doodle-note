@@ -1,0 +1,21 @@
+{
+  "comment": "MigrationRecord 8.3 names (the old folder's own short name): the installer (dnShortNameCheck, build/windows-install-guards.nsh) and the app (recordShortNameValid, src/main/windows-install-record.ts) must agree on every one. Checked by windows-install-migration.test.ts and scripts/test-windows-installer-guards.cjs.",
+  "valid": ["", "DESKTO~1", "deskto~2", "DE12AB~1", "DESKT~10", "MYAPP_~1", "DOODLE~1.EXE", "~", "ÄBCDEF~1", "A~1.B", "ABCDEFGH~123"],
+  "invalid": [
+    "DESKTOP",
+    "desktop-qa",
+    "ABCDEFGH~1234",
+    "DESK TO~1",
+    "DESK\\TO~1",
+    "DESK/TO~1",
+    "DESK:T~1",
+    "DESK*T~1",
+    "DESK?T~1",
+    "DESK\"T~1",
+    "DESK<T~1",
+    "DESK>T~1",
+    "DESK\tT~1",
+    " DESKTO~1",
+    "DESKTO~1 "
+  ]
+}

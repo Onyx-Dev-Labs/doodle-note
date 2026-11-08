@@ -8,7 +8,15 @@ import type { AppIdentity } from './app-identity'
  * dnWriteRecord): one value, HKCU\Software\<APP_GUID> MigrationRecord, so it is
  * written (and restored from the installer's recovery copy) in a single step:
  *
- *   DNMR1|<APP_GUID>|<package>|<product>|<old folder>|<new folder>|<UTC>|END
+ *   DNMR2|<APP_GUID>|<package>|<product>|<old folder>|<new folder>|<old 8.3 name>|<UTC>|END
+ *
+ * <old 8.3 name> is the old folder's own short name as Windows reported it
+ * (GetShortPathNameW) right before the installer removed the folder, or empty
+ * when it had none (a valid 8.3 name such as `desktop`, or 8.3 names off on the
+ * volume). Once the folder is gone that name cannot be expanded any more, so it
+ * is the one alias the app accepts in the old folder's place (isInsideFolder).
+ * (DNMR1, written by this PR's builds before round 9, had no such field; the app
+ * leaves one alone as `record-format`.)
  *
  * The app repoints its login item and MCP client entries only on the strength of
  * this record (windows-install-migration.ts), never on a folder name.
@@ -20,6 +28,8 @@ export interface InstallMigrationRecord {
   to: string
   /** When (UTC); identifies this move, so a later move is new work. */
   at: string
+  /** The old folder's own 8.3 name (`DESKTO~1`) as Windows reported it before removal; null: none. */
+  fromShortName: string | null
 }
 
 /**
@@ -50,7 +60,7 @@ export interface WindowsRegistry {
 }
 
 export const INSTALL_RECORD_VALUE = 'MigrationRecord'
-export const INSTALL_RECORD_VERSION = 'DNMR1'
+export const INSTALL_RECORD_VERSION = 'DNMR2'
 
 /** electron-builder's namespace for APP_GUID (app-builder-lib NsisTarget). */
 const ELECTRON_BUILDER_NS = Buffer.from('50e065bc313411e69bab38c9862bdaf3', 'hex')
@@ -98,6 +108,20 @@ export function installMigrationIdentity(
  */
 export const RECORD_TIME_SHAPE = 'DDDD-DD-DDTDD:DD:DDZ'
 
+/**
+ * The record's 8.3 name: empty (none), or 1 to 12 characters with a `~`, none of
+ * them a path separator, `: * ? " < > |`, a space or a control character. The
+ * installer checks the same rule (dnShortNameCheck, build/windows-install-guards.nsh;
+ * both against src/main/fixtures/install-record-short-names.json), and writes only
+ * a name that passes it.
+ */
+export function recordShortNameValid(name: string): boolean {
+  if (name === '') return true
+  if (name.length > 12 || !name.includes('~')) return false
+  for (const ch of name) if (ch < ' ' || '\\/:*?"<>| '.includes(ch)) return false
+  return true
+}
+
 export function recordTimeValid(at: string): boolean {
   if (at.length !== RECORD_TIME_SHAPE.length) return false
   for (let i = 0; i < RECORD_TIME_SHAPE.length; i++) {
@@ -121,14 +145,16 @@ export function parseInstallRecordValue(
   const parts = value.split('|')
   if (parts[0] !== INSTALL_RECORD_VERSION)
     return { pending: 'not a record this app reads', code: 'record-format' }
-  if (parts.length !== 8 || parts[7] !== 'END')
+  if (parts.length !== 9 || parts[8] !== 'END')
     return { pending: 'incomplete', code: 'record-incomplete' }
   if (parts.slice(1, 4).join('|').toLowerCase() !== identity.toLowerCase())
     return { pending: 'for another app identity', code: 'record-foreign' }
-  const [from, to, at] = parts.slice(4, 7)
+  const [from, to, shortName, at] = parts.slice(4, 8)
   if (!from.trim() || !to.trim()) return { pending: 'incomplete', code: 'record-incomplete' }
+  if (!recordShortNameValid(shortName))
+    return { pending: 'no valid 8.3 name', code: 'record-format' }
   if (!recordTimeValid(at)) return { pending: 'no valid time', code: 'record-time' }
-  return { from, to, at }
+  return { from, to, at, fromShortName: shortName === '' ? null : shortName }
 }
 
 /**

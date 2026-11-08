@@ -19,16 +19,23 @@ const recordTimes = JSON.parse(
     'utf8'
   )
 )
+/** MigrationRecord 8.3 names the installer and the app must agree on (round 9). */
+const recordShortNames = JSON.parse(
+  fs.readFileSync(
+    path.join(desktop, 'src', 'main', 'fixtures', 'install-record-short-names.json'),
+    'utf8'
+  )
+)
 const IDENTITY = 'guards-test|desktop|DoodleNote'
-/** The one-value record (dnWriteRecord): DNMR1|<identity>|<old>|<new>|<UTC>|END. */
+/** The one-value record (dnWriteRecord): DNMR2|<identity>|<old>|<new>|<old 8.3 name>|<UTC>|END. */
 const RECORD_FORM =
-  /^DNMR1\|guards-test\|desktop\|DoodleNote\|[^|]+\|[^|]+\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|END$/
+  /^DNMR2\|guards-test\|desktop\|DoodleNote\|[^|]+\|[^|]+\|[^|]*\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|END$/
 /** A predicate: the record of a move from `from` to `to` (compared case-insensitively). */
 const recordOf = (from, to) => (r) =>
   RECORD_FORM.test(r) &&
-  r.toLowerCase().startsWith(`DNMR1|${IDENTITY}|${from}|${to}|`.toLowerCase())
-const recordValue = (from, to, at = '2026-11-08T01:02:03Z') =>
-  `DNMR1|${IDENTITY}|${from}|${to}|${at}|END`
+  r.toLowerCase().startsWith(`DNMR2|${IDENTITY}|${from}|${to}|`.toLowerCase())
+const recordValue = (from, to, at = '2026-11-08T01:02:03Z', shortName = '') =>
+  `DNMR2|${IDENTITY}|${from}|${to}|${shortName}|${at}|END`
 
 async function makensis() {
   const builder = path.dirname(
@@ -472,6 +479,14 @@ async function main() {
     cases.push(['finish', migSource, migDest, '0', 'removed'])
     cases.push(['jstate', '', '', 'none'])
     cases.push(['record', '', '', recordOf(real(mig, 'desktop'), real(mig, 'DoodleNote'))])
+    // Round 9: a folder's own 8.3 name as Windows reports it (none for a valid 8.3
+    // name, or with 8.3 names off), the alias the record carries for the old folder.
+    for (const name of ['desktop', 'desktop-qa', 'Long Folder Name.qa']) {
+      const dir = path.join(sandbox, 'short-names', name)
+      fs.mkdirSync(dir, { recursive: true })
+      const short = path.basename(shortPath(dir))
+      cases.push(['sname', dir, '', short.toLowerCase() === name.toLowerCase() ? 'none' : short])
+    }
 
     // L6: shortcut presence is recorded once per migration, before anything changes.
     const present = path.join(sandbox, 'links', 'present.lnk')
@@ -1744,7 +1759,8 @@ async function main() {
       ['DestDir', p6To],
       ['LegacyUninstallString', p6Cmd],
       ['DesktopLink', '0'],
-      ['StartMenuLink', '1']
+      ['StartMenuLink', '1'],
+      ['LegacyShortName', 'DESKTO~1']
     ]
     const p6Live = [
       ...p6Values.map(([name, data]) => ['jwrite', name, data, 'set']),
@@ -1763,7 +1779,7 @@ async function main() {
 
     // The checks: a record is complete for this identity and its two folders, or
     // not a record; a journal is complete for them, or not trusted.
-    const p6Whole = ['DNMR1', IDENTITY, p6From, p6To, '2026-11-08T01:02:03Z', 'END']
+    const p6Whole = ['DNMR2', IDENTITY, p6From, p6To, '', '2026-11-08T01:02:03Z', 'END']
     const cut = p6Whole.join('|')
     const p6Checks = [
       ...p6Setup,
@@ -1781,8 +1797,10 @@ async function main() {
       ['rcheck', '', `${cut}|END`, 'format'],
       ['rcheck', '', recordValue(p6From, p6To, ''), 'format'],
       ['rcheck', '', recordValue('', p6To), 'format'],
-      ['rcheck', '', `DNMR2|${p6Whole.slice(1).join('|')}`, 'format'],
-      ['rcheck', '', `dnmr1|${p6Whole.slice(1).join('|')}`, 'format'],
+      ['rcheck', '', `DNMR3|${p6Whole.slice(1).join('|')}`, 'format'],
+      ['rcheck', '', `dnmr2|${p6Whole.slice(1).join('|')}`, 'format'],
+      // DNMR1 (no 8.3 name; this change's builds before round 9).
+      ['rcheck', '', `DNMR1|${IDENTITY}|${p6From}|${p6To}|2026-11-08T01:02:03Z|END`, 'format'],
       ['rcheck', '', `${p6From}|${p6To}|2026-11-08T01:02:03Z`, 'format'],
       ['rcheck', '', cut.replace('guards-test|', 'other-guid|'), 'identity'],
       ['rcheck', '', cut.replace('|DoodleNote|', '|DoodleNote QA|'), 'identity'],
@@ -1794,6 +1812,19 @@ async function main() {
       ...recordTimes.invalid
         .filter((time) => time !== '')
         .map((time) => ['rcheck', '', recordValue(p6From, p6To, time), 'time']),
+      // Round 9: the old folder's 8.3 name has exactly the shape the app requires.
+      ...recordShortNames.valid.map((name) => [
+        'rcheck',
+        '',
+        recordValue(p6From, p6To, undefined, name),
+        'ok'
+      ]),
+      ...recordShortNames.invalid.map((name) => [
+        'rcheck',
+        '',
+        recordValue(p6From, p6To, undefined, name),
+        'format'
+      ]),
       ['wipe', '', '', 'done'],
       ['jcheck', p6Journal, '', 'none'],
       ['jwrite', 'Identity', IDENTITY, 'set'],
@@ -1826,12 +1857,14 @@ async function main() {
       'recover-LegacyUninstallString',
       'recover-DesktopLink',
       'recover-StartMenuLink',
+      'recover-LegacyShortName',
       'recover-SourceDir',
       'recover-DestDir',
       'recover-Identity',
       'recover-MigrationRecord',
       'recover-deleted'
     ]
+    const at = (name) => restoreSteps.indexOf(`recover-${name}`)
     for (const [n, step] of restoreSteps.entries()) {
       const killed = [
         ...p6Setup,
@@ -1849,9 +1882,14 @@ async function main() {
         ...p6Setup,
         // What the killed run left: the journal is not complete before Identity,
         // and the record is all there or not at all.
-        ['jcheck', p6Journal, '', n < 3 ? 'none' : n < 5 ? 'incomplete' : 'ok'],
-        ['record', '', '', n < 6 ? 'none' : p6Rec],
-        ['keyexists', p6Recovery, '', n < 7 ? 'present' : 'none'],
+        [
+          'jcheck',
+          p6Journal,
+          '',
+          n < at('SourceDir') ? 'none' : n < at('Identity') ? 'incomplete' : 'ok'
+        ],
+        ['record', '', '', n < at('MigrationRecord') ? 'none' : p6Rec],
+        ['keyexists', p6Recovery, '', n < at('deleted') ? 'present' : 'none'],
         ['keyexists', p6Parent, '', 'present'],
         ['recover', '', '', 'done'],
         ...p6IsLive,
@@ -1859,7 +1897,12 @@ async function main() {
         ['rstate', '', '', 'none'],
         ['keyexists', p6Recovery, '', 'none'],
         ['keyexists', p6Parent, '', 'none'],
-        ['status', '', '', n < 7 ? status('recover', 'recovered', 'restored') : undefined]
+        [
+          'status',
+          '',
+          '',
+          n < at('deleted') ? status('recover', 'recovered', 'restored') : undefined
+        ]
       ]
       checkCases(`p6-${step}-next`, run2, phase(`p6-${step}-next`, run2).results)
     }

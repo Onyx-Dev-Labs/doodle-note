@@ -265,11 +265,19 @@ async function holdFile(file) {
 
 // ---------------------------------------------------------------------------
 // What the legacy app would have left behind: a login item and MCP entries naming
-// the old exe (the Run value and the Codex entry through the 8.3 short path).
+// the old exe (the Run value and the Codex entry through the 8.3 short path, the
+// old folder's own short name included: once the folder is removed only the
+// installer's record says which alias it had).
+
+/**
+ * The legacy folder's own 8.3 name while it exists ("" when it has none: 8.3
+ * names off, or a valid 8.3 name), which the record must carry (round 9).
+ */
+let legacyShortName = ''
 
 function seedLegacyEntries() {
   const oldExe = path.join(OLD, EXE)
-  const shortOldExe = path.join(shortPath(programs), qa.packageName, EXE)
+  const shortOldExe = path.join(shortPath(OLD), EXE)
   setRunValue(`"${shortOldExe}"`)
   const entry = {
     command: oldExe,
@@ -290,7 +298,9 @@ function seedLegacyEntries() {
     path.join(SANDBOX, '.codex', 'config.toml'),
     `model = "o3"\n\n[mcp_servers.${qa.mcpServerKey}]\ncommand = ${JSON.stringify(shortOldExe)}\nargs = []\n\n[projects."C:/work/[demo]"]\ntrust_level = "trusted"\n`
   )
-  console.log(`  seeded: Run = "${shortOldExe}", three MCP configs naming the old exe`)
+  console.log(
+    `  seeded: Run = "${shortOldExe}", three MCP configs naming the old exe; the old folder's 8.3 name: ${legacyShortName || '(none)'}`
+  )
 }
 
 function mcpCommands() {
@@ -335,6 +345,8 @@ async function installLegacy(label) {
   assert.ok(fs.existsSync(path.join(OLD, EXE)), `${label}: legacy exe in ${OLD}`)
   assert.ok(!fs.existsSync(NEW), `${label}: no new folder yet`)
   assertRegisteredIn(OLD, `${label}: the legacy install is registered`)
+  const short = path.basename(shortPath(OLD))
+  legacyShortName = short.toLowerCase() === qa.packageName.toLowerCase() ? '' : short
 }
 
 /**
@@ -354,9 +366,10 @@ function assertRegisteredIn(dir, label) {
   )
 }
 
-const RECORD = (from, to) =>
+/** The record of a move from `from` to `to`, carrying the old folder's 8.3 name `short` exactly. */
+const RECORD = (from, to, short) =>
   new RegExp(
-    `^DNMR1\\|${GUID}\\|${qa.packageName}\\|${qa.productName}\\|${escape(from)}\\|${escape(to)}\\|\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ\\|END$`,
+    `^DNMR2\\|${GUID}\\|${qa.packageName}\\|${qa.productName}\\|${escape(from)}\\|${escape(to)}\\|${escape(short)}\\|\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ\\|END$`,
     'i'
   )
 function escape(text) {
@@ -372,7 +385,11 @@ function assertMoved(label) {
   assertRegisteredIn(NEW, `${label}: the new install is registered`)
   const state = reg(KEYS.state)
   assert.ok(state, `${label}: Software\\{GUID} exists`)
-  assert.match(state.MigrationRecord ?? '', RECORD(OLD, NEW), `${label}: MigrationRecord`)
+  assert.match(
+    state.MigrationRecord ?? '',
+    RECORD(OLD, NEW, legacyShortName),
+    `${label}: MigrationRecord (the old folder's 8.3 name: ${legacyShortName || '(none)'})`
+  )
   assert.equal(reg(KEYS.journal), null, `${label}: journal gone`)
   assert.equal(reg(KEYS.recovery), null, `${label}: recovery copy gone`)
   assert.equal(reg(KEYS.recoveryParent), null, `${label}: recovery parent gone`)

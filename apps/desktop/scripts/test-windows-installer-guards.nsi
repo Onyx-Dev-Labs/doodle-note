@@ -19,6 +19,7 @@
 ;   lwrite|<value>|<data>                writes a $dnStateKey value (data: the rest of the line; "" deletes it)
 ;   jwrite|<value>|<data>                writes a journal value (data: the rest of the line; "" deletes it)
 ;   rcheck||<data>                       dnRecordCheck on the data (the rest of the line): ok or the reason
+;   sname|<dir>                          dnShortName: the folder's own 8.3 name, or none
 ;   rwipe                                deletes $dnRecoveryKey
 ;   jcheck|<key>                         dnJournalCheck on HKCU\<key>: ok or the reason
 ;   jdone|<dest>                         dnJournalDone: the removed old folder, or none
@@ -234,6 +235,13 @@ Function .onInit
       Pop $result
       ${if} $result == ""
         StrCpy $result "ok"
+      ${endif}
+    ${elseif} $kind == "sname"
+      Push $a
+      Call dnShortName
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "none"
       ${endif}
     ${elseif} $kind == "jcheck"
       Push $a

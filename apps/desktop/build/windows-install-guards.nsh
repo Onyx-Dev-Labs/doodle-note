@@ -1616,6 +1616,7 @@ FunctionEnd
   Var dnSavedUninstall
   Var dnSavedDesktop
   Var dnSavedStartMenu
+  Var dnSavedShortName
   Var dnSavedRecord
   Var dnRecoveryKey
   ; The key that holds every identity's recovery key ("": not deleted when empty).
@@ -1771,6 +1772,20 @@ FunctionEnd
       ; $dnWhy: dnPinLegacy's code.
       StrCpy $3 "kept: $3"
     ${else}
+      ; The old folder's own 8.3 name, while it still exists: once it is removed a
+      ; path written through that name cannot be expanded, and the record gives the
+      ; app exactly this alias to accept in its place (never one guessed from the
+      ; long name). Kept in the journal, so a run cut short after the removal still
+      ; records it (dnCompleteMove).
+      Push $0
+      Call dnShortName
+      Pop $2
+      ${if} $2 != ""
+        WriteRegStr HKCU $dnJournalKey "LegacyShortName" $2
+      ${else}
+        DeleteRegValue HKCU $dnJournalKey "LegacyShortName"
+      ${endif}
+      !insertmacro dnFlushRegistry
       Push $0
       Call dnRemoveLegacyDir
       Pop $3
@@ -2141,12 +2156,16 @@ FunctionEnd
   ; value, so writing (or restoring) it is a single registry write and a run cut
   ; short leaves all of it or none of it:
   ;
-  ;   DNMR1|<DN_MIGRATION_IDENTITY>|<old folder>|<new folder>|<UTC, ISO 8601>|END
+  ;   DNMR2|<DN_MIGRATION_IDENTITY>|<old folder>|<new folder>|<old 8.3 name>|<UTC, ISO 8601>|END
   ;
-  ; (no folder can contain "|"; the identity's own two "|" are fixed). The app
-  ; (src/main/windows-install-record.ts) acts only on a record in exactly this
-  ; form for its own identity and leaves anything else for a later run to repair.
-  !define DN_RECORD_VERSION "DNMR1"
+  ; (no folder can contain "|"; the identity's own two "|" are fixed). <old 8.3
+  ; name> is the old folder's own short name as GetShortPathNameW reported it right
+  ; before the removal (the journal's LegacyShortName), empty when it had none; it
+  ; passes dnShortNameCheck. The app (src/main/windows-install-record.ts) acts only
+  ; on a record in exactly this form for its own identity and leaves anything else
+  ; for a later run to repair. (DNMR1, without the 8.3 name, was written only by
+  ; builds of this change before round 9; both sides treat it as "format".)
+  !define DN_RECORD_VERSION "DNMR2"
 
   ; The record's time: exactly this shape, D an ASCII digit (UTC to the second, as
   ; dnWriteRecord writes it). The app requires the same shape (RECORD_TIME_SHAPE,
@@ -2197,6 +2216,107 @@ FunctionEnd
     Exch $0
   FunctionEnd
 
+  ; Push NAME; Call dnShortNameCheck; Pop OK: "1" when NAME may be a record's 8.3
+  ; name: empty (none), or 1 to 12 characters with a "~", none of them \ / : * ? " < > |,
+  ; a space or a control character. The app requires the same (recordShortNameValid,
+  ; src/main/windows-install-record.ts); both are checked against
+  ; src/main/fixtures/install-record-short-names.json.
+  Function dnShortNameCheck
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    Push $4
+    Push $5
+    Push $6
+    StrLen $1 $0
+    ${if} $1 = 0
+      StrCpy $0 "1"
+    ${elseif} $1 > 12
+      StrCpy $0 "0"
+    ${else}
+      StrCpy $4 "1"
+      StrCpy $5 "0"
+      StrCpy $2 0
+      ${do}
+        ${if} $2 >= $1
+          ${break}
+        ${endif}
+        StrCpy $3 $0 1 $2
+        ; The character's code: copied into a two-character buffer and read back.
+        System::Call '*(&w2 r3) p.r6'
+        System::Call '*$6(&i2 .r3)'
+        System::Free $6
+        StrCpy $6 $0 1 $2
+        ${if} $3 < 32
+        ${orIf} $6 == "\"
+        ${orIf} $6 == "/"
+        ${orIf} $6 == ":"
+        ${orIf} $6 == "*"
+        ${orIf} $6 == "?"
+        ${orIf} $6 == '"'
+        ${orIf} $6 == "<"
+        ${orIf} $6 == ">"
+        ${orIf} $6 == "|"
+        ${orIf} $6 == " "
+          StrCpy $4 "0"
+          ${break}
+        ${endif}
+        ${if} $6 == "~"
+          StrCpy $5 "1"
+        ${endif}
+        IntOp $2 $2 + 1
+      ${loop}
+      ${if} $4 == "1"
+      ${andIf} $5 == "1"
+        StrCpy $0 "1"
+      ${else}
+        StrCpy $0 "0"
+      ${endif}
+    ${endif}
+    Pop $6
+    Pop $5
+    Pop $4
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push DIR; Call dnShortName; Pop NAME: DIR's own 8.3 name (the last part of
+  ; GetShortPathNameW's answer), or "" when it has none (the name is a valid 8.3
+  ; name, 8.3 names are off on the volume, DIR does not exist) or the answer does
+  ; not pass dnShortNameCheck.
+  Function dnShortName
+    Exch $0
+    Push $1
+    Push $2
+    System::Call 'kernel32::GetShortPathNameW(w r0, w .r1, i ${NSIS_MAX_STRLEN}) i.r2'
+    ${if} $2 = 0
+    ${orIf} $2 >= ${NSIS_MAX_STRLEN}
+      StrCpy $0 ""
+    ${else}
+      ${GetFileName} $1 $1
+      ${GetFileName} $0 $2
+      ; == is case-insensitive: "desktop" reported as itself is no alias.
+      ${if} $1 == $2
+        StrCpy $0 ""
+      ${else}
+        Push $1
+        Call dnShortNameCheck
+        Pop $2
+        ${if} $2 == "1"
+          StrCpy $0 $1
+        ${else}
+          StrCpy $0 ""
+        ${endif}
+      ${endif}
+    ${endif}
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
   ; Push VALUE; Call dnRecordCheck; Pop REASON: "" when VALUE is a complete record
   ; for this identity naming exactly <Programs>\APP_FILENAME -> <Programs>\
   ; PRODUCT_FILENAME (compared canonical) at a time of DN_RECORD_TIME_SHAPE; else
@@ -2211,6 +2331,7 @@ FunctionEnd
     Push $4
     Push $5
     Push $6
+    Push $7
     StrLen $2 "${DN_RECORD_VERSION}|"
     StrCpy $3 $0 $2
     StrLen $4 "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|"
@@ -2222,13 +2343,15 @@ FunctionEnd
     ${elseif} $5 != "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|"
       StrCpy $0 "identity"
     ${else}
-      ; The rest is <old>|<new>|<at>|END: $3, $4, $5 and $6; $1 counts the "|".
+      ; The rest is <old>|<new>|<8.3 name>|<at>|END: $3, $4, $7, $5 and $6; $1
+      ; counts the "|".
       StrCpy $0 $0 "" $4
       StrCpy $1 0
       StrCpy $3 ""
       StrCpy $4 ""
       StrCpy $5 ""
       StrCpy $6 ""
+      StrCpy $7 ""
       ${do}
         StrCpy $2 $0 1
         StrCpy $0 $0 "" 1
@@ -2241,18 +2364,26 @@ FunctionEnd
         ${elseif} $1 = 1
           StrCpy $4 "$4$2"
         ${elseif} $1 = 2
-          StrCpy $5 "$5$2"
+          StrCpy $7 "$7$2"
         ${elseif} $1 = 3
+          StrCpy $5 "$5$2"
+        ${elseif} $1 = 4
           StrCpy $6 "$6$2"
         ${endif}
       ${loop}
-      ${if} $1 != 3
+      ${if} $1 != 4
       ${orIf} $6 S!= "END"
       ${orIf} $3 == ""
       ${orIf} $4 == ""
       ${orIf} $5 == ""
         StrCpy $0 "format"
       ${else}
+        Push $7
+        Call dnShortNameCheck
+        Pop $7
+        ${if} $7 != "1"
+          StrCpy $0 "format"
+        ${endif}
         Push $5
         Call dnTimeCheck
         Pop $5
@@ -2279,6 +2410,7 @@ FunctionEnd
         ${endif}
       ${endif}
     ${endif}
+    Pop $7
     Pop $6
     Pop $5
     Pop $4
@@ -2289,7 +2421,8 @@ FunctionEnd
   FunctionEnd
 
   ; Push LEGACY; Push NEW; Call dnWriteRecord; Pop RESULT: writes the record of a
-  ; move from LEGACY to NEW (now, UTC) in one write and reads it back: "written"
+  ; move from LEGACY to NEW (now, UTC; the old folder's 8.3 name from the journal's
+  ; LegacyShortName, dnFinishMigration) in one write and reads it back: "written"
   ; or "failed".
   Function dnWriteRecord
     Exch $1
@@ -2304,6 +2437,7 @@ FunctionEnd
     Push $R4
     Push $R5
     Push $R6
+    Push $R7
     Push $0
     Call dnCanonical
     Pop $2
@@ -2316,7 +2450,14 @@ FunctionEnd
     IntFmt $R4 "%02u" $R4
     IntFmt $R5 "%02u" $R5
     IntFmt $R6 "%02u" $R6
-    StrCpy $2 "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|$2|$3|$R2-$R1-$R0T$R4:$R5:$R6Z|END"
+    ReadRegStr $R3 HKCU $dnJournalKey "LegacyShortName"
+    Push $R3
+    Call dnShortNameCheck
+    Pop $R7
+    ${if} $R7 != "1"
+      StrCpy $R3 ""
+    ${endif}
+    StrCpy $2 "${DN_RECORD_VERSION}|${DN_MIGRATION_IDENTITY}|$2|$3|$R3|$R2-$R1-$R0T$R4:$R5:$R6Z|END"
     WriteRegStr HKCU $dnStateKey "MigrationRecord" $2
     ReadRegStr $3 HKCU $dnStateKey "MigrationRecord"
     ${if} $3 S== $2
@@ -2328,6 +2469,7 @@ FunctionEnd
       !insertmacro dnStatus record moved record-failed "from=$0 to=$1"
     ${endif}
     StrCpy $0 $2
+    Pop $R7
     Pop $R6
     Pop $R5
     Pop $R4
@@ -2512,6 +2654,7 @@ FunctionEnd
     ReadRegStr $dnSavedUninstall HKCU $dnJournalKey "LegacyUninstallString"
     ReadRegStr $dnSavedDesktop HKCU $dnJournalKey "DesktopLink"
     ReadRegStr $dnSavedStartMenu HKCU $dnJournalKey "StartMenuLink"
+    ReadRegStr $dnSavedShortName HKCU $dnJournalKey "LegacyShortName"
     ReadRegStr $dnSavedRecord HKCU $dnStateKey "MigrationRecord"
     ${if} $dnRecoveryKey != ""
       Push $0
@@ -2540,6 +2683,7 @@ FunctionEnd
           !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "LegacyUninstallString"
           !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DesktopLink"
           !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "StartMenuLink"
+          !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "LegacyShortName"
           !insertmacro dnTestStep "save-journal"
         ${endif}
         ${if} $2 == ""
@@ -2610,6 +2754,7 @@ FunctionEnd
         !insertmacro dnRecoverValue "LegacyUninstallString"
         !insertmacro dnRecoverValue "DesktopLink"
         !insertmacro dnRecoverValue "StartMenuLink"
+        !insertmacro dnRecoverValue "LegacyShortName"
         !insertmacro dnRecoverValue "SourceDir"
         !insertmacro dnRecoverValue "DestDir"
         !insertmacro dnRecoverValue "Identity"
@@ -2645,6 +2790,7 @@ FunctionEnd
           !insertmacro dnMatchValue "LegacyUninstallString"
           !insertmacro dnMatchValue "DesktopLink"
           !insertmacro dnMatchValue "StartMenuLink"
+          !insertmacro dnMatchValue "LegacyShortName"
         ${endif}
         ${if} $4 == "r"
         ${orIf} $4 == "jr"
@@ -2705,6 +2851,7 @@ FunctionEnd
     !insertmacro dnRestoreValue $dnJournalKey "LegacyUninstallString" $dnSavedUninstall
     !insertmacro dnRestoreValue $dnJournalKey "DesktopLink" $dnSavedDesktop
     !insertmacro dnRestoreValue $dnJournalKey "StartMenuLink" $dnSavedStartMenu
+    !insertmacro dnRestoreValue $dnJournalKey "LegacyShortName" $dnSavedShortName
     !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $dnSavedSource
     !insertmacro dnRestoreValue $dnJournalKey "DestDir" $dnSavedDest
     !insertmacro dnRestoreValue $dnJournalKey "Identity" $dnSavedIdentity

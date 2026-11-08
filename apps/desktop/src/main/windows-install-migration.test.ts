@@ -13,7 +13,7 @@ import {
 } from './mcp-clients-logic'
 import {
   isInsideFolder,
-  isShortAliasOf,
+  PathResolutionError,
   legacyInstallFor,
   loginItemStateFromRun,
   longPath,
@@ -35,6 +35,7 @@ import {
   installStatusKey,
   parseInstallRecordValue,
   readInstallRecord,
+  recordShortNameValid,
   recordTimeValid,
   RECORD_TIME_SHAPE,
   writeInstallMigrationStatus,
@@ -63,15 +64,20 @@ const spec = (dir: string): McpServerSpec => ({
 const record: InstallMigrationRecord = {
   from: `${programs}\\desktop`,
   to: `${programs}\\DoodleNote`,
-  at: '2026-11-08T01:02:03Z'
+  at: '2026-11-08T01:02:03Z',
+  fromShortName: null
 }
 
 test('the old install comes only from an installer record naming this exe folder', () => {
-  assert.deepEqual(legacyInstallFor(record, newExe), { dir: `${programs}\\desktop`, exe: oldExe })
+  assert.deepEqual(legacyInstallFor(record, newExe), {
+    dir: `${programs}\\desktop`,
+    exe: oldExe,
+    shortName: null
+  })
   // Case and trailing separators do not matter, as on Windows.
   assert.deepEqual(
     legacyInstallFor({ ...record, to: `${programs.toUpperCase()}\\DOODLENOTE\\` }, newExe),
-    { dir: `${programs}\\desktop`, exe: oldExe }
+    { dir: `${programs}\\desktop`, exe: oldExe, shortName: null }
   )
   // A record for another folder (another copy, another user profile) does not apply.
   assert.match(
@@ -118,18 +124,20 @@ test('8.3 short names are expanded on both sides before paths are compared', () 
       )
   const realPath = (path: string): string => {
     const found = disk.get(path.toLowerCase())
-    if (found === undefined) throw new Error(`ENOENT ${path}`)
+    if (found === undefined) throw Object.assign(new Error(`ENOENT ${path}`), { code: 'ENOENT' })
     return found
   }
   const shortPrograms = 'C:\\Users\\PATRIC~1\\AppData\\Local\\Programs'
   const longRecord: InstallMigrationRecord = {
     from: `${longPrograms}\\desktop`,
     to: `${longPrograms}\\DoodleNote`,
-    at: '2026-11-08T01:02:03Z'
+    at: '2026-11-08T01:02:03Z',
+    fromShortName: null
   }
   const expected = {
     dir: `${longPrograms}\\desktop`,
-    exe: `${longPrograms}\\desktop\\DoodleNote.exe`
+    exe: `${longPrograms}\\desktop\\DoodleNote.exe`,
+    shortName: null
   }
   const production = appIdentity('production')
 
@@ -163,7 +171,7 @@ test('8.3 short names are expanded on both sides before paths are compared', () 
   assert.ok(
     'reason' in
       legacyInstallFor(longRecord, `${shortPrograms}\\DOODLE~1\\DOODLE~1.EXE`, production, () => {
-        throw new Error('no expansion')
+        throw Object.assign(new Error('no expansion'), { code: 'ENOENT' })
       })
   )
   // Expansion never makes another folder match.
@@ -216,7 +224,7 @@ test('the install record is one value naming this identity, complete or pending'
     '320d0756-c91c-52c4-9287-55a7f514978d|desktop-qa|DoodleNote QA'
   )
   const value = (fields: string[]): string => fields.join('|')
-  const whole = ['DNMR1', identity, record.from, record.to, record.at, 'END']
+  const whole = ['DNMR2', identity, record.from, record.to, '', record.at, 'END']
   assert.deepEqual(parseInstallRecordValue(value(whole), identity), record)
   // Identity and folder names compare as Windows does (case-insensitive).
   assert.deepEqual(parseInstallRecordValue(value(whole), identity.toUpperCase()), record)
@@ -227,22 +235,26 @@ test('the install record is one value naming this identity, complete or pending'
     ...whole.map((_, n): [string, string] => [value(whole.slice(0, n)), `first ${n} fields`]),
     [value(whole).slice(0, -1), 'END cut short'],
     [`${value(whole)}|extra`, 'a field too many'],
-    [value(['DNMR1', identity, '', record.to, record.at, 'END']), 'no old folder'],
-    [value(['DNMR1', identity, record.from, '  ', record.at, 'END']), 'no new folder'],
-    [value(['DNMR1', identity, record.from, record.to, '', 'END']), 'no time'],
-    [value(['DNMR1', identity, record.from, record.to, '2026-11-08', 'END']), 'not a UTC time'],
+    [value(['DNMR2', identity, '', record.to, '', record.at, 'END']), 'no old folder'],
+    [value(['DNMR2', identity, record.from, '  ', '', record.at, 'END']), 'no new folder'],
+    [value(['DNMR2', identity, record.from, record.to, '', '', 'END']), 'no time'],
+    [value(['DNMR2', identity, record.from, record.to, '', '2026-11-08', 'END']), 'not a UTC time'],
+    [value(['DNMR2', identity, record.from, record.to, 'DESKTOP', record.at, 'END']), 'no ~'],
+    [value(['DNMR2', identity, record.from, record.to, 'A\\B~1', record.at, 'END']), 'a path'],
     // Another identity's record (QA vs production, or the GUID of a different appId).
-    [value(['DNMR1', installMigrationIdentity(appIdentity('qa')), ...whole.slice(2)]), 'qa'],
+    [value(['DNMR2', installMigrationIdentity(appIdentity('qa')), ...whole.slice(2)]), 'qa'],
     [
       value([
-        'DNMR1',
+        'DNMR2',
         'f85f8dcf-6782-5a3e-a989-3eae169d6efb|desktop|DoodleNote QA',
         ...whole.slice(2)
       ]),
       'folder'
     ],
-    // A newer (or older) format this build does not read.
-    [value(['DNMR2', ...whole.slice(1)]), 'version'],
+    // A newer (or older) format this build does not read; DNMR1 (no 8.3 name)
+    // was written only by this PR's builds before round 9.
+    [value(['DNMR3', ...whole.slice(1)]), 'version'],
+    [value(['DNMR1', identity, record.from, record.to, record.at, 'END']), 'DNMR1'],
     [`${record.from}|${record.to}|${record.at}`, 'the three-value form of earlier test builds']
   ]
   for (const [input, label] of pending.filter(([input]) => input !== '')) {
@@ -254,13 +266,29 @@ test('the install record is one value naming this identity, complete or pending'
     (parseInstallRecordValue(input, identity) as InstallRecordPending).code
   assert.equal(code(value(whole.slice(0, 5))), 'record-incomplete')
   assert.equal(
-    code(value(['DNMR1', installMigrationIdentity(appIdentity('qa')), ...whole.slice(2)])),
+    code(value(['DNMR2', installMigrationIdentity(appIdentity('qa')), ...whole.slice(2)])),
     'record-foreign'
   )
-  assert.equal(code(value(['DNMR2', ...whole.slice(1)])), 'record-format')
+  assert.equal(code(value(['DNMR3', ...whole.slice(1)])), 'record-format')
   assert.equal(
-    code(value(['DNMR1', identity, record.from, record.to, '2026-11-08', 'END'])),
+    code(value(['DNMR1', identity, record.from, record.to, record.at, 'END'])),
+    'record-format'
+  )
+  assert.equal(
+    code(value(['DNMR2', identity, record.from, record.to, 'DESKTOP', record.at, 'END'])),
+    'record-format'
+  )
+  assert.equal(
+    code(value(['DNMR2', identity, record.from, record.to, '', '2026-11-08', 'END'])),
     'record-time'
+  )
+  // The 8.3 name, when there is one, is the record's.
+  assert.deepEqual(
+    parseInstallRecordValue(
+      value(['DNMR2', identity, record.from, record.to, 'DESKTO~1', record.at, 'END']),
+      identity
+    ),
+    { ...record, fromShortName: 'DESKTO~1' }
   )
 })
 
@@ -284,7 +312,7 @@ test('the record is read, cleared and the status written through the registry, n
   assert.equal(await readInstallRecord(registry, key, identity), null)
   values.set(
     `${key}|MigrationRecord`,
-    ['DNMR1', identity, record.from, record.to, record.at, 'END'].join('|')
+    ['DNMR2', identity, record.from, record.to, '', record.at, 'END'].join('|')
   )
   assert.deepEqual(await readInstallRecord(registry, key, identity), record)
   await clearInstallRecord(registry, key)
@@ -360,27 +388,13 @@ function movedDisk(): (path: string) => string {
   }
   return (path) => {
     const found = disk.get(path.toLowerCase())
-    if (found === undefined) throw new Error(`ENOENT ${path}`)
+    if (found === undefined) throw Object.assign(new Error(`ENOENT ${path}`), { code: 'ENOENT' })
     return found
   }
 }
 const noExpansion = (): string => {
-  throw new Error('no expansion')
+  throw Object.assign(new Error('no expansion'), { code: 'ENOENT' })
 }
-
-test('8.3 aliases: the form Windows gives a long name, never the hashed one', () => {
-  assert.ok(isShortAliasOf('DESKTO~1', 'desktop-qa'))
-  assert.ok(isShortAliasOf('deskto~2', 'desktop-qa'))
-  assert.ok(isShortAliasOf('DOODLE~1.EXE', 'DoodleNote QA.exe'))
-  assert.ok(isShortAliasOf('MYAPP_~1', 'my app+x'))
-  assert.ok(!isShortAliasOf('DOODLE~1.EXE', 'DoodleNote QA.dll'))
-  assert.ok(!isShortAliasOf('DOODLE~1', 'DoodleNote QA.exe'))
-  assert.ok(!isShortAliasOf('DESKTO~1', 'deskto'))
-  assert.ok(!isShortAliasOf('DESK~1', 'desktop-qa'))
-  assert.ok(!isShortAliasOf('DE12AB~1', 'desktop-qa'))
-  assert.ok(!isShortAliasOf('DESKT~10', 'desktop-qa'))
-  assert.ok(!isShortAliasOf('desktop-qa', 'desktop-qa'))
-})
 
 test('stale-entry detection expands 8.3 names: MCP commands and Run values written through a short path', () => {
   const realPath = movedDisk()
@@ -393,8 +407,15 @@ test('stale-entry detection expands 8.3 names: MCP commands and Run values writt
   assert.ok(isInsideFolder(`${SHORT_PROGRAMS}\\desktop\\DOODLE~1.EXE`, legacy, realPath))
   // Before the fix the strings were compared as written: never recognised.
   assert.ok(!isInsideFolder(shortOld, legacy, noExpansion))
-  // QA: the old folder's own short name cannot expand any more; it is its alias.
-  assert.ok(isInsideFolder(`${SHORT_PROGRAMS}\\DESKTO~1\\DOODLE~1.EXE`, legacyQa, realPath))
+  // QA: the old folder's own short name cannot expand any more; the record's alias
+  // is accepted in its place, and only that one.
+  assert.ok(
+    isInsideFolder(`${SHORT_PROGRAMS}\\DESKTO~1\\DOODLE~1.EXE`, legacyQa, realPath, 'DESKTO~1')
+  )
+  assert.ok(
+    isInsideFolder(`${SHORT_PROGRAMS}\\deskto~1\\DOODLE~1.EXE`, legacyQa, realPath, 'DESKTO~1')
+  )
+  assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\DESKTO~1\\DOODLE~1.EXE`, legacyQa, realPath))
   assert.ok(isInsideFolder(`${SHORT_PROGRAMS}\\desktop-qa\\DoodleNote QA.exe`, legacyQa, realPath))
   // The new folders exist, so their short names expand to themselves: never stale.
   assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\DOODLE~1\\DOODLE~1.EXE`, legacyQa, realPath))
@@ -402,7 +423,109 @@ test('stale-entry detection expands 8.3 names: MCP commands and Run values writt
   assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\DoodleNote\\DOODLE~1.EXE`, legacy, realPath))
   assert.ok(!isInsideFolder(`${SHORT_PROGRAMS}\\OTHERA~1\\x.exe`, legacyQa, realPath))
   // An alias counts only in the old folder's own place.
-  assert.ok(!isInsideFolder(`C:\\DESKTO~1\\DoodleNote QA.exe`, legacyQa, realPath))
+  assert.ok(!isInsideFolder(`C:\\DESKTO~1\\DoodleNote QA.exe`, legacyQa, realPath, 'DESKTO~1'))
+})
+
+test('8.3 aliases: only the one the installer recorded, and an unresolvable path is no answer', () => {
+  const legacyQa = `${LONG_PROGRAMS}\\desktop-qa`
+  const exact = `${SHORT_PROGRAMS}\\DESKTO~1\\DoodleNote QA.exe`
+  const collider = `${SHORT_PROGRAMS}\\DESKTO~2\\DoodleNote QA.exe`
+  // Exact alias: the record says the old folder was DESKTO~1 and it is gone.
+  assert.ok(isInsideFolder(exact, legacyQa, movedDisk(), 'DESKTO~1'))
+  // Collider missing: DESKTO~2 (another removed folder, e.g. desktop-qb) is not
+  // the old folder just because it could have been its alias.
+  assert.ok(!isInsideFolder(collider, legacyQa, movedDisk(), 'DESKTO~1'))
+  // No alias recorded (a valid 8.3 name, or 8.3 names off): none is accepted.
+  assert.ok(!isInsideFolder(exact, legacyQa, movedDisk(), null))
+  // Collider unresolvable: DESKTO~1 exists but cannot be resolved (access denied):
+  // it may be another folder, so it is no answer at all, not "missing".
+  const denied = (path: string): string => {
+    if (/\\DESKTO~1/i.test(path)) throw Object.assign(new Error(`EPERM ${path}`), { code: 'EPERM' })
+    return movedDisk()(path)
+  }
+  assert.throws(() => isInsideFolder(exact, legacyQa, denied, 'DESKTO~1'), PathResolutionError)
+  assert.throws(() => longPath(exact, denied), /could not resolve .*DESKTO~1/)
+  // An existing folder that now holds the alias expands to its own long name.
+  const reused = (path: string): string =>
+    /\\DESKTO~1$/i.test(path) ? `${LONG_PROGRAMS}\\desktop-new` : movedDisk()(path)
+  assert.ok(!isInsideFolder(exact, legacyQa, reused, 'DESKTO~1'))
+  // Missing stays missing: ENOTDIR (a file where a folder would be) too.
+  const notDir = (path: string): string => {
+    if (/\\DESKTO~1/i.test(path))
+      throw Object.assign(new Error(`ENOTDIR ${path}`), { code: 'ENOTDIR' })
+    return movedDisk()(path)
+  }
+  assert.ok(isInsideFolder(exact, legacyQa, notDir, 'DESKTO~1'))
+})
+
+test('an unresolvable Run value or MCP command stays pending: not repointed, record not consumed', async () => {
+  const legacyQaRecord: InstallMigrationRecord = {
+    from: `${LONG_PROGRAMS}\\desktop`,
+    to: `${LONG_PROGRAMS}\\DoodleNote`,
+    at: '2026-11-08T01:02:03Z',
+    fromShortName: 'DESKTO~1'
+  }
+  const stale = `${SHORT_PROGRAMS}\\DESKTO~1\\DoodleNote.exe`
+  const flaky = { denied: true }
+  const disk = movedDisk()
+  const realPath = (path: string): string => {
+    if (flaky.denied && /\\DESKTO~1/i.test(path))
+      throw Object.assign(new Error(`EACCES ${path}`), { code: 'EACCES' })
+    return disk(path)
+  }
+  const repointed: string[] = []
+  const deps = fakeDeps({
+    execPath: `${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`,
+    realPath,
+    loginItem: {
+      stateFor: (isLegacyPath) => ({ registered: isLegacyPath(stale), enabled: true }),
+      registerCurrent: (enabled) => {
+        deps.registered.push(enabled)
+      }
+    },
+    repointMcpClients: (isLegacy) => {
+      try {
+        if (isLegacy(stale)) repointed.push('codex')
+        return [{ id: 'codex', outcome: isLegacy(stale) ? 'updated' : 'unchanged' }]
+      } catch (error) {
+        return [{ id: 'codex', outcome: 'failed', error: (error as Error).message }]
+      }
+    }
+  })
+  deps.record = legacyQaRecord
+  deps.files = new Set([`${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`])
+  const first = await runWindowsInstallMigration(deps)
+  assert.deepEqual(first.pending, ['login-item', 'codex'])
+  assert.equal(first.retry, true)
+  assert.deepEqual(deps.registered, [])
+  assert.deepEqual(repointed, [])
+  assert.notEqual(deps.record, null)
+  assert.deepEqual(first.status, {
+    state: 'pending',
+    at: '2026-11-08T07:08:09Z',
+    reason: 'steps-pending:login-item,codex'
+  })
+  // Once it resolves (missing: the old folder is gone), both steps finish.
+  flaky.denied = false
+  const second = await runWindowsInstallMigration(deps)
+  assert.deepEqual(second.pending, [])
+  assert.deepEqual(deps.registered, [true])
+  assert.deepEqual(repointed, ['codex'])
+  assert.equal(deps.record, null)
+})
+
+test('a record whose folders cannot be resolved now is left for the next try', async () => {
+  const deps = fakeDeps({
+    realPath: () => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' })
+    }
+  })
+  deps.record = record
+  const result = await runWindowsInstallMigration(deps)
+  assert.equal(result.ran, false)
+  assert.equal(result.retry, true)
+  assert.equal(result.status?.reason, 'path-unresolved')
+  assert.notEqual(deps.record, null)
 })
 
 test('the login item: the Run value is read as written and matched 8.3-aware', async () => {
@@ -447,7 +570,8 @@ test('a launch through the short path: the record is consumed, and the marker is
   const longRecord: InstallMigrationRecord = {
     from: `${LONG_PROGRAMS}\\desktop`,
     to: `${LONG_PROGRAMS}\\DoodleNote`,
-    at: '2026-11-08T01:02:03Z'
+    at: '2026-11-08T01:02:03Z',
+    fromShortName: null
   }
   const staleCommand = `${SHORT_PROGRAMS}\\desktop\\DoodleNote.exe`
   let seen: ((command: string) => boolean) | null = null
@@ -1154,13 +1278,66 @@ test('Settings shows the move only while it is unfinished, with what to expect',
   assert.match(installer?.detail ?? '', /running the DoodleNote installer again/)
 })
 
+test('the app and the installer accept exactly the same 8.3 names in a record', () => {
+  const names = JSON.parse(
+    readFileSync(new URL('./fixtures/install-record-short-names.json', import.meta.url), 'utf8')
+  ) as { valid: string[]; invalid: string[] }
+  const identity = installMigrationIdentity(APP_IDENTITY)
+  const value = (name: string): string =>
+    ['DNMR2', identity, record.from, record.to, name, record.at, 'END'].join('|')
+  for (const name of names.valid) {
+    assert.ok(recordShortNameValid(name), name)
+    assert.deepEqual(parseInstallRecordValue(value(name), identity), {
+      ...record,
+      fromShortName: name === '' ? null : name
+    })
+  }
+  for (const name of names.invalid) {
+    assert.ok(!recordShortNameValid(name), JSON.stringify(name))
+    assert.deepEqual(parseInstallRecordValue(value(name), identity), {
+      pending: 'no valid 8.3 name',
+      code: 'record-format'
+    })
+  }
+  // The installer's rule (dnShortNameCheck): the same limits, checked in every
+  // record it trusts and before it writes one; the name is captured before removal.
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const rule = guards.slice(guards.indexOf('Function dnShortNameCheck'))
+  assert.match(rule, /\$\{elseif\} \$1 > 12\n/)
+  for (const ch of ['\\', '/', ':', '*', '?', '"', '<', '>', '|', ' '])
+    assert.ok(
+      rule.slice(0, rule.indexOf('FunctionEnd')).includes(`== ${ch === '"' ? "'\"'" : `"${ch}"`}`),
+      ch
+    )
+  assert.match(rule, /\$\{if\} \$3 < 32\n/)
+  assert.match(rule, /\$\{if\} \$6 == "~"\n/)
+  const check = guards.slice(guards.indexOf('Function dnRecordCheck'))
+  assert.ok(check.indexOf('Call dnShortNameCheck') > 0)
+  assert.ok(check.indexOf('Call dnShortNameCheck') < check.indexOf('Call dnTimeCheck'))
+  const write = guards.slice(guards.indexOf('Function dnWriteRecord'))
+  assert.match(
+    write,
+    /ReadRegStr \$R3 HKCU \$dnJournalKey "LegacyShortName"\n\s+Push \$R3\n\s+Call dnShortNameCheck/
+  )
+  const finish = guards.slice(guards.indexOf('Function dnFinishMigration'))
+  assert.ok(finish.indexOf('Call dnShortName\n') < finish.indexOf('Call dnRemoveLegacyDir'))
+  assert.ok(
+    finish.indexOf('WriteRegStr HKCU $dnJournalKey "LegacyShortName" $2') <
+      finish.indexOf('Call dnRemoveLegacyDir')
+  )
+  assert.ok(guards.includes('!define DN_RECORD_VERSION "DNMR2"'))
+})
+
 test('the app and the installer accept exactly the same record times', () => {
   const times = JSON.parse(
     readFileSync(new URL('./fixtures/install-record-times.json', import.meta.url), 'utf8')
   ) as { valid: string[]; invalid: string[] }
   const identity = installMigrationIdentity(APP_IDENTITY)
   const value = (time: string): string =>
-    ['DNMR1', identity, record.from, record.to, time, 'END'].join('|')
+    ['DNMR2', identity, record.from, record.to, '', time, 'END'].join('|')
   for (const time of times.valid) {
     assert.ok(recordTimeValid(time), time)
     assert.deepEqual(parseInstallRecordValue(value(time), identity), { ...record, at: time })

@@ -36,6 +36,8 @@ export const INSTALL_FOLDER = APP_IDENTITY.installFolder
 export interface LegacyInstall {
   dir: string
   exe: string
+  /** The old folder's own 8.3 name the installer recorded (null: none). */
+  shortName: string | null
 }
 
 /** Resolves an existing path to the form Windows reports for it; throws when it does not exist. */
@@ -44,17 +46,41 @@ export type RealPath = (path: string) => string
 /**
  * fs.realpathSync.native: on Windows, GetFinalPathNameByHandle, so 8.3 short
  * names come back long (junctions and links are resolved too; the installer
- * never moves to or from such a folder). Nothing to expand elsewhere.
+ * never moves to or from such a folder). Nothing to expand elsewhere (reported
+ * as missing, so a path stays as written).
  */
 function nativeRealPath(path: string): string {
-  if (process.platform !== 'win32') throw new Error('not Windows')
+  if (process.platform !== 'win32')
+    throw Object.assign(new Error('not Windows'), { code: 'ENOENT' })
   return realpathSync.native(path)
+}
+
+/**
+ * A path whose existing part could not be resolved (access denied, a busy or
+ * broken volume, an invalid name): whether it lies in a removed folder cannot be
+ * told. Callers leave such an entry alone and the step pending.
+ */
+export class PathResolutionError extends Error {
+  constructor(
+    readonly path: string,
+    readonly cause: unknown
+  ) {
+    super(`could not resolve ${path}: ${(cause as Error)?.message ?? String(cause)}`)
+  }
+}
+
+/** Only "this does not exist": ENOENT, or ENOTDIR (a file where a folder would be). */
+function isMissing(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 /**
  * `path` with every 8.3 short name expanded: the deepest part that exists is
  * resolved (`realPath`) and the rest appended as written. A short name in the
  * part that does not exist (a removed folder) cannot be expanded and stays.
+ * Only a part that is missing is skipped; any other failure to resolve throws
+ * PathResolutionError (it may exist, so its name says nothing).
  */
 export function longPath(path: string, realPath: RealPath = nativeRealPath): string {
   const normalized = win32.normalize(path)
@@ -64,8 +90,9 @@ export function longPath(path: string, realPath: RealPath = nativeRealPath): str
   for (;;) {
     try {
       return win32.join(realPath(head), ...tail)
-    } catch {
+    } catch (error) {
       // Missing (or not on Windows): try the folder above it.
+      if (!isMissing(error)) throw new PathResolutionError(head, error)
     }
     const parent = win32.dirname(head)
     if (parent === head) return win32.join(head, ...tail)
@@ -113,30 +140,11 @@ export function legacyInstallFor(
     return {
       reason: `${record.from} is not the ${identity.legacyInstallFolder} folder beside ${dir}`
     }
-  return { dir: from, exe: win32.join(from, win32.basename(exe)) }
-}
-
-/**
- * Whether `alias` has the form Windows gives `longName` as an 8.3 short name
- * (`DESKTO~1` for `desktop-qa`; a valid 8.3 name such as `desktop` has none): the first six characters of its name, upper
- * case, with spaces and dots dropped and `+ , ; = [ ]` turned into `_`, then `~N`
- * (one digit), then the first three characters of its extension. The hashed form
- * Windows switches to after `~4` (`DE12AB~1`) is not recognised.
- */
-export function isShortAliasOf(alias: string, longName: string): boolean {
-  // A name that is already a valid 8.3 name gets no alias.
-  if (/^[^ .+,;=[\]]{1,8}(\.[^ .+,;=[\]]{1,3})?$/.test(longName)) return false
-  const match = /^([^.~\\/]{1,6})~[1-9](?:\.([^.~\\/]{1,3}))?$/.exec(alias)
-  if (!match) return false
-  const clean = (text: string): string =>
-    text
-      .replace(/[ .]/g, '')
-      .replace(/[+,;=[\]]/g, '_')
-      .toUpperCase()
-  const dot = longName.lastIndexOf('.')
-  const stem = clean(dot > 0 ? longName.slice(0, dot) : longName)
-  const extension = dot > 0 ? clean(longName.slice(dot + 1)).slice(0, 3) : ''
-  return match[1].toUpperCase() === stem.slice(0, 6) && (match[2] ?? '').toUpperCase() === extension
+  return {
+    dir: from,
+    exe: win32.join(from, win32.basename(exe)),
+    shortName: record.fromShortName
+  }
 }
 
 /**
@@ -145,14 +153,17 @@ export function isShortAliasOf(alias: string, longName: string): boolean {
  * command or Run value the old app wrote while it was started through a short
  * path (C:\Users\PATRIC~1\...\desktop\DoodleNote.exe) is still recognised: the
  * old folder is gone, but its parent exists and expands. The old folder's own
- * short name cannot expand once it is removed; an unexpanded short name in that
- * place counts when it is an alias of the folder's name (`isShortAliasOf`), which
- * is safe because a folder that still existed would have expanded.
+ * short name cannot expand once it is removed; in that place exactly
+ * `shortName` counts, the alias Windows reported for it before the installer
+ * removed it (the record's, never one guessed from its long name: another folder
+ * may have had `DESKTO~2`). A part that exists but cannot be resolved throws
+ * PathResolutionError: the caller cannot tell, so it leaves the entry alone.
  */
 export function isInsideFolder(
   path: string,
   folder: string,
-  realPath: RealPath = nativeRealPath
+  realPath: RealPath = nativeRealPath,
+  shortName: string | null = null
 ): boolean {
   const parts = (value: string): string[] =>
     win32
@@ -160,10 +171,12 @@ export function isInsideFolder(
       .replace(/[\\/]+$/, '')
       .toLowerCase()
       .split('\\')
+  const alias = shortName?.toLowerCase() ?? null
   const inside = (a: string[], b: string[], aliases: boolean): boolean =>
     a.length >= b.length &&
     b.every(
-      (part, i) => part === a[i] || (aliases && i === b.length - 1 && isShortAliasOf(a[i], part))
+      (part, i) =>
+        part === a[i] || (aliases && i === b.length - 1 && alias !== null && a[i] === alias)
     )
   if (inside(parts(path), parts(folder), false)) return true
   return inside(parts(longPath(path, realPath)), parts(longPath(folder, realPath)), true)
@@ -400,7 +413,14 @@ export async function runWindowsInstallMigration(
   }
   const record = read
   const realPath = deps.realPath ?? nativeRealPath
-  const legacy = legacyInstallFor(record, deps.execPath, APP_IDENTITY, realPath)
+  let legacy: LegacyInstall | { reason: string }
+  try {
+    legacy = legacyInstallFor(record, deps.execPath, APP_IDENTITY, realPath)
+  } catch (error) {
+    // The record's folders cannot be compared now; it stays for the next try.
+    deps.log(`[install-migration] install record not matched: ${(error as Error).message}`)
+    return stop('pending', 'path-unresolved', true)
+  }
   if ('reason' in legacy) {
     deps.log(`[install-migration] ignoring the install record: ${legacy.reason}`)
     return stop('pending', 'record-other-folder')
@@ -438,8 +458,9 @@ export async function runWindowsInstallMigration(
   let loginItem = false
   if (!loginItemDone) {
     try {
+      // A Run value that cannot be resolved throws: the step stays pending.
       const state = await deps.loginItem.stateFor((path) =>
-        isInsideFolder(path, legacy.dir, realPath)
+        isInsideFolder(path, legacy.dir, realPath, legacy.shortName)
       )
       if (state.registered) {
         deps.loginItem.registerCurrent(state.enabled)
@@ -458,7 +479,8 @@ export async function runWindowsInstallMigration(
   if (previouslyPending === 'all' || previouslyPending.length > 0) {
     try {
       const outcomes = deps.repointMcpClients(
-        (command) => isInsideFolder(command, legacy.dir, realPath),
+        // A command that cannot be resolved throws: that client stays pending.
+        (command) => isInsideFolder(command, legacy.dir, realPath, legacy.shortName),
         previouslyPending === 'all' ? null : previouslyPending
       )
       mcpPending = []

@@ -292,6 +292,7 @@ test('Windows installs move to a DoodleNote folder without forking the install o
     'LegacyUninstallString',
     'DesktopLink',
     'StartMenuLink',
+    'LegacyShortName',
     'SourceDir',
     'DestDir',
     'Identity'
@@ -1387,7 +1388,12 @@ test('the writes a later run depends on are flushed to disk', () => {
     guards.lastIndexOf('!insertmacro dnFlushRegistry', deleted) >
       guards.lastIndexOf('dnMatchValue', deleted)
   )
-  assert.equal([...guards.matchAll(/^\s+!insertmacro dnFlushRegistry$/gm)].length, 5)
+  // Round 9: the old folder's 8.3 name, before the folder is removed.
+  assert.ok(
+    guards.indexOf('!insertmacro dnFlushRegistry', guards.indexOf('"LegacyShortName" $2')) <
+      guards.indexOf('Call dnRemoveLegacyDir', guards.indexOf('"LegacyShortName" $2'))
+  )
+  assert.equal([...guards.matchAll(/^\s+!insertmacro dnFlushRegistry$/gm)].length, 6)
 })
 
 /** A VS_VERSIONINFO block (wLength, wValueLength, wType, key, value, children), 4-aligned. */

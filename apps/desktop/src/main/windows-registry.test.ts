@@ -187,7 +187,7 @@ test(
     }
     const registry = asWindowsRegistry(new RegistryAccess(() => koffi, scope))
     const record =
-      'DNMR1|x|desktop|DoodleNote|C:\\Users\\Jörg Ñandú 李雷 😀\\AppData\\Local\\Programs\\desktop|C:\\Users\\Jörg Ñandú 李雷 😀\\AppData\\Local\\Programs\\DoodleNote|2026-11-08T01:02:03Z|END'
+      'DNMR2|x|desktop|DoodleNote|C:\\Users\\Jörg Ñandú 李雷 😀\\AppData\\Local\\Programs\\desktop|C:\\Users\\Jörg Ñandú 李雷 😀\\AppData\\Local\\Programs\\DoodleNote||2026-11-08T01:02:03Z|END'
     try {
       assert.equal(await registry.readString(key, 'MigrationRecord'), null)
       reg('add', `HKCU\\${key}`, '/v', 'MigrationRecord', '/t', 'REG_SZ', '/d', record, '/f')
@@ -235,10 +235,11 @@ test(
     writeFileSync(exe, 'new')
     const identity = installMigrationIdentity(APP_IDENTITY)
     const value = [
-      'DNMR1',
+      'DNMR2',
       identity,
       join(programs, APP_IDENTITY.legacyInstallFolder),
       join(programs, APP_IDENTITY.installFolder),
+      '',
       '2026-11-08T01:02:03Z',
       'END'
     ].join('|')
