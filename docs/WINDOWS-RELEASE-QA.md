@@ -486,6 +486,7 @@ every identity-bearing name from the one entry in
 | MCP opt-in file and client configs | the real home directory and `%APPDATA%\Claude` | all of them in a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`: its own `.doodlenote\mcp.json`, `.claude.json`, `.codex\config.toml` and `AppData\Roaming\Claude`), like the dev channel; neither `%APPDATA%` nor an inherited `DOODLE_NOTE_MCP_CONFIG` is consulted |
 | MCP server launch spec | `ELECTRON_RUN_AS_NODE` | also `DOODLE_NOTE_MCP_CONFIG` (the sandbox opt-in file, absolute) and `DOODLE_NOTE_MCP_IDENTITY=qa`; the server then reads only that file, only if it was written for `qa`, and never falls back to `~\.doodlenote\mcp.json` |
 | Profile data at first launch | an older profile's meetings, folders, settings and chat are adopted | starts empty: the sibling `%APPDATA%\desktop` is the production profile and is never copied (meetings, settings with the encrypted cloud API key, chat) |
+| Local AI models (meeting notes) | its profile's `models`, then `%APPDATA%\DoodleNote`, `%APPDATA%\desktop` and `%APPDATA%\DoodleNote Local` `models`, then `~\.cache\doodle-note\models` | only `%APPDATA%\desktop-qa\models`: download them in the QA build (or copy test models there); the production profile and the shared cache are never read |
 | Migration journal | `HKCU\Software\f85f8dcf-...\InstallMigration` | `HKCU\Software\320d0756-...\InstallMigration` |
 | Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
 | Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
@@ -509,7 +510,9 @@ Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 
 1. Install `release-qa-legacy\DoodleNote QA-<version>-setup.exe`. The QA profile
    starts empty: seed it with test data only (import a test recording or create a
-   few test meetings; never copy anything from `%APPDATA%\desktop`). Turn on Open
+   few test meetings; never copy anything from `%APPDATA%\desktop`). It finds no
+   local AI models until they are downloaded in the QA build (or test models are
+   copied into `%APPDATA%\desktop-qa\models`): it never reads production's. Turn on Open
    at login, enable agent access and connect the three MCP clients (they are
    written in the sandbox above, never the real `~/.claude.json`,
    `%APPDATA%\Claude\claude_desktop_config.json` or `~/.codex`; check those
