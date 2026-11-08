@@ -7,6 +7,7 @@
 ;   remove|<old>                         dnRemoveLegacyDir: removed | kept
 ;   close|<dir>|<policy>                 dnCloseAppIn: none | closed | running | unknown
 ;   locked|<exe>                         dnExeLocked: 1 | 0
+;   canonical|<path>                     dnCanonical: the normalised long path
 ;   ensure|<dir>                         dnEnsureNotRunning (silent: quits if the app stays running): done
 Unicode true
 SilentInstall silent
@@ -100,6 +101,10 @@ Function .onInit
       !insertmacro dnCloseAppIn $a $dnClosePolicy $result
     ${elseif} $kind == "locked"
       !insertmacro dnExeLocked $a $result
+    ${elseif} $kind == "canonical"
+      Push $a
+      Call dnCanonical
+      Pop $result
     ${elseif} $kind == "ensure"
       StrCpy $dnClosePolicy "never"
       !insertmacro dnEnsureNotRunning $a

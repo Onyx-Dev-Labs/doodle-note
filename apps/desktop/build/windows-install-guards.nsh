@@ -135,10 +135,14 @@ Var dnLocked
 
   ; Push PATH; Call dnCanonical; Pop RESULT: absolute, long-name form without a
   ; trailing separator ("" when the path is not valid). Links are not resolved.
+  ; A path that does not exist yet gets its longest existing ancestor expanded
+  ; (so C:\Users\RUNNER~1\...\New matches C:\Users\runneradmin\...\New).
   Function dnCanonical
     Exch $0
     Push $1
     Push $2
+    Push $3
+    Push $4
     StrCpy $1 ""
     ${if} $0 != ""
       System::Call 'kernel32::GetFullPathNameW(w r0, i ${NSIS_MAX_STRLEN}, w .r1, p 0) i.r2'
@@ -146,11 +150,6 @@ Var dnLocked
       ${orIf} $2 >= ${NSIS_MAX_STRLEN}
         StrCpy $1 ""
       ${else}
-        System::Call 'kernel32::GetLongPathNameW(w r1, w .r0, i ${NSIS_MAX_STRLEN}) i.r2'
-        ${if} $2 <> 0
-        ${andIf} $2 < ${NSIS_MAX_STRLEN}
-          StrCpy $1 $0
-        ${endif}
         ${do}
           StrCpy $2 $1 1 -1
           ${if} $2 != "\"
@@ -162,9 +161,31 @@ Var dnLocked
           ${endif}
           StrCpy $1 $1 -1
         ${loop}
+        ; $4: the part that exists, $3: the rest (each component with a leading "\").
+        StrCpy $3 ""
+        StrCpy $4 $1
+        ${do}
+          System::Call 'kernel32::GetLongPathNameW(w r4, w .r0, i ${NSIS_MAX_STRLEN}) i.r2'
+          ${if} $2 <> 0
+          ${andIf} $2 < ${NSIS_MAX_STRLEN}
+            StrCpy $1 "$0$3"
+            ${break}
+          ${endif}
+          ${GetParent} $4 $0
+          StrLen $2 $0
+          ; Stop above a drive root: "C:" alone would mean the current directory.
+          ${if} $2 <= 2
+            ${break}
+          ${endif}
+          ${GetFileName} $4 $2
+          StrCpy $3 "\$2$3"
+          StrCpy $4 $0
+        ${loop}
       ${endif}
     ${endif}
     StrCpy $0 $1
+    Pop $4
+    Pop $3
     Pop $2
     Pop $1
     Exch $0

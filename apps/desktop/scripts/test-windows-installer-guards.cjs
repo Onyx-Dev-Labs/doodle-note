@@ -163,6 +163,34 @@ async function main() {
       ['locked', path.join(old, 'DoodleNote.exe'), '', '0'],
       ['ensure', path.join(sandbox, 'procs', 'desktop'), '', 'done']
     ]
+    // 8.3 short names: the old folder exists, the new one does not yet. Runner TEMP
+    // paths are short already (C:\\Users\\RUNNER~1); elsewhere use the short form.
+    const shortRoot = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '(New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:DN_LONG).ShortPath'
+      ],
+      { encoding: 'utf8', env: { ...process.env, DN_LONG: root } }
+    ).trim()
+    if (shortRoot && shortRoot.toLowerCase() !== root.toLowerCase()) {
+      cases.push(['root', shortRoot, profile])
+      cases.push(['check', `${shortRoot}\\desktop`, `${shortRoot}\\DoodleNote`, 'ok'])
+      cases.push([
+        'canonical',
+        `${shortRoot}\\DoodleNote`,
+        '',
+        path.join(fs.realpathSync.native(root), 'DoodleNote')
+      ])
+    }
+    cases.push([
+      'canonical',
+      path.join(root, 'not', 'yet', 'here'),
+      '',
+      path.join(fs.realpathSync.native(root), 'not', 'yet', 'here')
+    ])
     const casesFile = path.join(sandbox, 'cases.txt')
     const outFile = path.join(sandbox, 'results.txt')
     fs.writeFileSync(
@@ -201,6 +229,8 @@ async function main() {
     cases.forEach(([kind, a, , expected], i) => {
       if (expected === undefined || kind === 'root' || kind === 'noop') return
       if (expected instanceof RegExp) assert.match(results[i], expected, `${kind} ${a}`)
+      else if (kind === 'canonical')
+        assert.equal(results[i].toLowerCase(), expected.toLowerCase(), `${kind} ${a}`)
       else assert.equal(results[i], expected, `${kind} ${a}`)
     })
     // The link's target survived; the link and the rest of the folder did not.
