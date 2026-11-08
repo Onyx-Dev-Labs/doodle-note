@@ -1311,3 +1311,35 @@ test("the package check requires every bundled DLL a binary imports, and ggml's 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('the writes a later run depends on are flushed to disk', () => {
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  )
+  assert.match(
+    guards,
+    /!macro dnFlushRegistry\n\s+System::Call 'advapi32::RegFlushKey\(i 0x80000001\)'\n!macroend/
+  )
+  const after = (write: string): void => {
+    const at = guards.indexOf(write)
+    assert.ok(at > 0, write)
+    const next = guards.slice(at + write.length, at + write.length + 400)
+    assert.match(next, /^[^]*?!insertmacro dnFlushRegistry/, write)
+    // Flushed before anything else is written.
+    assert.ok(
+      next.indexOf('!insertmacro dnFlushRegistry') < (next.indexOf('WriteRegStr') + 1 || Infinity),
+      write
+    )
+  }
+  after('WriteRegStr HKCU $dnJournalKey "Identity" "${DN_MIGRATION_IDENTITY}"')
+  after('WriteRegStr HKCU $dnStateKey "MigrationRecord" $2\n    ReadRegStr')
+  after('WriteRegStr HKCU $dnRecoveryKey "RecoveryFor" "${DN_MIGRATION_IDENTITY}"')
+  after('WriteRegStr HKCU $dnStateKey "MigrationRecord" $dnSavedRecord')
+  const deleted = guards.indexOf('!insertmacro dnTestStep "recover-deleted"')
+  assert.ok(
+    guards.lastIndexOf('!insertmacro dnFlushRegistry', deleted) >
+      guards.lastIndexOf('dnMatchValue', deleted)
+  )
+  assert.equal([...guards.matchAll(/^\s+!insertmacro dnFlushRegistry$/gm)].length, 5)
+})

@@ -49,6 +49,17 @@
   !macroend
 !endif
 
+; !insertmacro dnFlushRegistry, after the writes a later run depends on (the journal's
+; Identity, the record, a complete recovery copy, a restored record): a registry
+; write survives the process being killed right after it, but sits in memory until
+; Windows writes the hive out (seconds later). RegFlushKey writes HKCU out now, so a
+; power loss right after that point does not lose it either. It is not a
+; transaction: a power loss between two writes still leaves what the next run's
+; checks were built for (an incomplete journal, a missing record).
+!macro dnFlushRegistry
+  System::Call 'advapi32::RegFlushKey(i 0x80000001)'
+!macroend
+
 !define DN_ATTR_DIRECTORY 0x10
 !define DN_ATTR_REPARSE_POINT 0x400
 ; FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT
@@ -2077,6 +2088,7 @@ FunctionEnd
       WriteRegStr HKCU $dnJournalKey "DestDir" $1
       !insertmacro dnTestStep "park-DestDir"
       WriteRegStr HKCU $dnJournalKey "Identity" "${DN_MIGRATION_IDENTITY}"
+      !insertmacro dnFlushRegistry
       Push $0
       Call dnCanonical
       Pop $0
@@ -2304,6 +2316,7 @@ FunctionEnd
     WriteRegStr HKCU $dnStateKey "MigrationRecord" $2
     ReadRegStr $3 HKCU $dnStateKey "MigrationRecord"
     ${if} $3 S== $2
+      !insertmacro dnFlushRegistry
       StrCpy $2 "written"
       !insertmacro dnStatus record moved record-written "from=$0 to=$1"
     ${else}
@@ -2531,6 +2544,7 @@ FunctionEnd
         ${endif}
         ; Last: a new copy without it (cut short) is ignored.
         WriteRegStr HKCU $dnRecoveryKey "RecoveryFor" "${DN_MIGRATION_IDENTITY}"
+        !insertmacro dnFlushRegistry
         ${if} ${Errors}
           DetailPrint "The install state could not be copied to HKCU\$dnRecoveryKey; it is kept for this run only"
         ${endif}
@@ -2638,6 +2652,8 @@ FunctionEnd
         ${endif}
       ${endif}
       ${if} $5 == ""
+        ; What was restored is on disk before the copy goes.
+        !insertmacro dnFlushRegistry
         DeleteRegKey HKCU $dnRecoveryKey
         !insertmacro dnTestStep "recover-deleted"
         ${if} $dnRecoveryParent != ""
@@ -2699,6 +2715,7 @@ FunctionEnd
       Pop $0
       ${if} $0 == ""
         WriteRegStr HKCU $dnStateKey "MigrationRecord" $dnSavedRecord
+        !insertmacro dnFlushRegistry
       ${endif}
     ${endif}
     Pop $0
