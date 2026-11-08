@@ -16,7 +16,8 @@ import { join as joinPath } from 'node:path'
 import type { WizardPreflightEvent, WizardPreflightResult } from '../shared/wizard-api'
 import { ImportCanceledError } from './import-jobs'
 import type { HeldHelperLike, SignatureCheck } from './helper-integrity'
-import { speechWorkerEnv } from './speech-worker-env'
+import { speechWorkerEnv, workerIdentityArgs } from './speech-worker-env'
+import { APP_IDENTITY } from './app-identity'
 import { APP_CHANNEL } from '../shared/app-channel'
 import type { WindowsRegistry } from './windows-install-record'
 
@@ -270,11 +271,16 @@ export class WinEngineHost {
   /** Fork the engine and load models (call once, after app ready). */
   startServe(): void {
     if (this.child || this.disposed) return
-    const child = utilityProcess.fork(join(__dirname, 'engine-win.js'), [], {
-      serviceName: 'doodlenote-engine',
-      // QA hooks reach the worker only where they are meant to (never a production package).
-      env: speechWorkerEnv(process.env, app.isPackaged, APP_CHANNEL)
-    })
+    // The identity whose registry values the worker may touch, on its command line only.
+    const child = utilityProcess.fork(
+      join(__dirname, 'engine-win.js'),
+      workerIdentityArgs(APP_IDENTITY.appId),
+      {
+        serviceName: 'doodlenote-engine',
+        // QA hooks reach the worker only where they are meant to (never a production package).
+        env: speechWorkerEnv(process.env, app.isPackaged, APP_CHANNEL)
+      }
+    )
     this.child = child
     this.ready = false
 

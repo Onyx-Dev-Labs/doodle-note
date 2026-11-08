@@ -567,9 +567,11 @@ execution policy or AppLocker rule for PowerShell cannot stop it, and the record
 folders read back exactly when the user folder is not ASCII (`reg.exe query`
 prints the console's OEM code page: `Jörg Ñandú 李雷 😀` comes back as `J�rg �and� ?? ??`
 under code page 437; `evidence/step5-fix-7/reg-unicode-probe.log`). Since round 9
-the worker's scope is the identity its bundle was built for, and nothing else
-(`appRegistryScope(APP_IDENTITY)`, built into `engine-win.ts`; no message can name
-another identity): it may read only `MigrationRecord` in that identity's
+the worker's scope is one identity's, and nothing else: the identity the app
+forks it for, passed on its command line (`--doodlenote-registry-identity=<appId>`,
+`engine-host-win.ts`; never read from a message or the environment; a worker
+started without one may touch nothing), so the worker bundle itself carries no
+identity and stays byte-identical across packages: it may read only `MigrationRecord` in that identity's
 `Software\{APP_GUID}`, the three `AppMigration` / `AppMigrationReason` /
 `AppMigrationLastAttempt` values in its `Software\DoodleNote-InstallStatus\{APP_GUID}`,
 and its own Run value (named after its `appId`) in

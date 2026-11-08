@@ -97,24 +97,35 @@ async function main() {
     // consumes its record) and in windows-registry.test.ts.
     const registry = await app.evaluate(
       async ({ utilityProcess, app }, [guid, other]) => {
-        const worker = utilityProcess.fork(`${app.getAppPath()}\\out\\main\\engine-win.js`)
-        let next = 1
-        const pending = new Map()
-        worker.on('message', (message) => {
-          if (message.t !== 'helper' || message.op !== 'reg') return
-          pending.get(message.id)?.(message)
-          pending.delete(message.id)
-        })
-        const ask = (body) =>
-          new Promise((resolve, reject) => {
-            const id = next++
-            const timer = setTimeout(() => reject(new Error('registry request timed out')), 60_000)
-            pending.set(id, (reply) => {
-              clearTimeout(timer)
-              resolve(reply)
-            })
-            worker.postMessage({ t: 'reg', id, ...body })
+        // As engine-host-win.ts forks it: the identity on its command line
+        // (speech-worker-env.ts workerIdentityArgs); and once without one.
+        const workers = []
+        const open = (args) => {
+          const worker = utilityProcess.fork(`${app.getAppPath()}\\out\\main\\engine-win.js`, args)
+          workers.push(worker)
+          let next = 1
+          const pending = new Map()
+          worker.on('message', (message) => {
+            if (message.t !== 'helper' || message.op !== 'reg') return
+            pending.get(message.id)?.(message)
+            pending.delete(message.id)
           })
+          return (body) =>
+            new Promise((resolve, reject) => {
+              const id = next++
+              const timer = setTimeout(
+                () => reject(new Error('registry request timed out')),
+                60_000
+              )
+              pending.set(id, (reply) => {
+                clearTimeout(timer)
+                resolve(reply)
+              })
+              worker.postMessage({ t: 'reg', id, ...body })
+            })
+        }
+        const ask = open(['--doodlenote-registry-identity=com.doodlenote.desktop'])
+        const anonymous = open([])
         const status = `Software\\DoodleNote-InstallStatus\\${guid}`
         const run = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
         try {
@@ -138,11 +149,13 @@ async function main() {
                 op: 'read',
                 subKey: 'Software\\Microsoft\\Windows\\CurrentVersion',
                 name: 'ProgramFilesDir'
-              })
+              }),
+              // Without an identity on its command line the worker may touch nothing.
+              await anonymous({ op: 'read', subKey: `Software\\${guid}`, name: 'MigrationRecord' })
             ]
           }
         } finally {
-          worker.kill()
+          for (const worker of workers) worker.kill()
         }
       },
       [PRODUCTION_GUID, OTHER_GUID]

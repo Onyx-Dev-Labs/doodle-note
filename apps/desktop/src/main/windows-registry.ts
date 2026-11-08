@@ -9,9 +9,9 @@
  *    values in the identity's HKCU\Software\DoodleNote-InstallStatus\<APP_GUID> key;
  *  - delete: one value (RegDeleteKeyValueW): only MigrationRecord in HKCU\Software\<APP_GUID>.
  *
- * The scope is the running build's identity only (appRegistryScope, from the identity the bundle
- * was built for): another identity's GUID, another key or another value name is refused (SCOPE)
- * before any Win32 call. All three calls use HKEY_CURRENT_USER and the default registry view (no
+ * The scope is one identity's only (appRegistryScope, for the identity the app forked the worker
+ * for, on its command line): another identity's GUID, another key or another value name is refused
+ * (SCOPE) before any Win32 call. All three calls use HKEY_CURRENT_USER and the default registry view (no
  * KEY_WOW64_* flag; the app and its installer are both 64-bit, so both see the 64-bit view). A
  * read is capped at 64 KiB, a written value at 1024 characters; the main process gives each request
  * 60 s (engine-host-win.ts REGISTRY_TIMEOUT_MS) before it reports reader-timeout.
@@ -88,6 +88,13 @@ export function appRegistryScope(
     writable: (subKey, name) => same(subKey, status) && statusValue(name),
     deletable: (subKey, name) => same(subKey, state) && same(name, INSTALL_RECORD_VALUE)
   }
+}
+
+/** A worker started without an identity may touch nothing. */
+export const NO_REGISTRY_SCOPE: RegistryScope = {
+  readable: () => false,
+  writable: () => false,
+  deletable: () => false
 }
 
 /** (HKEY)(ULONG_PTR)(LONG)0x80000001, sign-extended as Windows defines it. */

@@ -65,14 +65,19 @@ import {
 } from './windows-asr-legacy'
 import { EchoOrderGate } from './windows-asr-echo-gate'
 import { HelperChecker, type FfiLike } from './windows-helper-check'
-import { boundedTestStallMs, MAX_ASR_STALL_MS, MAX_CONFIRM_STALL_MS } from './speech-worker-env'
 import {
+  boundedTestStallMs,
+  MAX_ASR_STALL_MS,
+  MAX_CONFIRM_STALL_MS,
+  workerIdentityFrom
+} from './speech-worker-env'
+import {
+  NO_REGISTRY_SCOPE,
   RegistryAccess,
   appRegistryScope,
   type RegistryFfi,
   type RegistryRequest
 } from './windows-registry'
-import { APP_IDENTITY } from './app-identity'
 
 interface AudioMessage {
   t: 'audio'
@@ -530,12 +535,16 @@ const helperChecker = new HelperChecker(
 )
 /**
  * The install folder move's registry reads and writes, for the app (see windows-registry.ts):
- * only this build's identity's keys and values (the identity the bundle was built for, never
- * one a message names).
+ * only the keys and values of the identity the app forked this worker for (its command line,
+ * engine-host-win.ts; never a message, never the environment). Without one, nothing at all.
+ * (The loginItemName of every identity is its appId, app-identity.ts.)
  */
+const workerAppId = workerIdentityFrom(process.argv)
 const registry = new RegistryAccess(
   () => windowsFfi() as unknown as RegistryFfi,
-  appRegistryScope(APP_IDENTITY)
+  workerAppId
+    ? appRegistryScope({ appId: workerAppId, loginItemName: workerAppId })
+    : NO_REGISTRY_SCOPE
 )
 
 port.on('message', (message: Electron.MessageEvent) => {

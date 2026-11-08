@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   appRegistryScope,
+  NO_REGISTRY_SCOPE,
   RegistryAccess,
   asWindowsRegistry,
   type RegistryFfi,
@@ -19,6 +20,7 @@ import {
   writeInstallMigrationStatus
 } from './windows-install-record'
 import { runWindowsInstallMigration } from './windows-install-migration'
+import { workerIdentityArgs, workerIdentityFrom } from './speech-worker-env'
 import { APP_IDENTITY, appIdentity } from './app-identity'
 import type { InstallMigrationStatus } from '../shared/install-migration-api'
 
@@ -82,11 +84,33 @@ test("the worker's scope is its own identity: its record, its status, its Run va
   assert.ok(!q.writable(status, 'AppMigration'))
   assert.ok(!q.deletable(state, 'MigrationRecord'))
   assert.throws(() => appRegistryScope({ appId: '..\\x', loginItemName: '..\\x' }), /not an app id/)
-  // The worker builds its scope from the identity it was built for, never from a message.
-  const worker = readFileSync(new URL('./engine-win.ts', import.meta.url), 'utf8')
+  // The worker builds its scope from the identity on its command line, which the host
+  // sets (never a message or the environment); without one it may touch nothing.
+  assert.equal(workerIdentityFrom(workerIdentityArgs(APP_IDENTITY.appId)), APP_IDENTITY.appId)
+  assert.equal(workerIdentityFrom(['node', 'engine-win.js']), null)
+  assert.equal(
+    workerIdentityFrom([...workerIdentityArgs('com.a'), ...workerIdentityArgs('com.b')]),
+    null
+  )
+  assert.equal(workerIdentityFrom(['--doodlenote-registry-identity=..\\x']), null)
+  assert.throws(() => workerIdentityArgs('a b'), /not an app id/)
+  for (const name of ['production', 'qa'] as const)
+    assert.equal(appIdentity(name).loginItemName, appIdentity(name).appId)
+  for (const op of ['readable', 'writable', 'deletable'] as const)
+    assert.equal(NO_REGISTRY_SCOPE[op](`Software\\${guid}`, 'MigrationRecord'), false)
+  const read = (name: string): string =>
+    readFileSync(new URL(name, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const worker = read('./engine-win.ts')
+  assert.match(worker, /const workerAppId = workerIdentityFrom\(process\.argv\)\n/)
   assert.match(
     worker,
-    /new RegistryAccess\(\s*\(\) => windowsFfi\(\) as unknown as RegistryFfi,\s*appRegistryScope\(APP_IDENTITY\)\s*\)/
+    /workerAppId\s*\?\s*appRegistryScope\(\{ appId: workerAppId, loginItemName: workerAppId \}\)\s*:\s*NO_REGISTRY_SCOPE/
+  )
+  // The worker module carries no identity (its bundle is the same in every package).
+  assert.doesNotMatch(worker, /from '\.\/app-identity'|APP_IDENTITY|__DOODLENOTE_IDENTITY__/)
+  assert.match(
+    read('./engine-host-win.ts'),
+    /utilityProcess\.fork\(\s*join\(__dirname, 'engine-win\.js'\),\s*workerIdentityArgs\(APP_IDENTITY\.appId\),/
   )
 })
 
