@@ -43,6 +43,10 @@ namespace DoodleNote.DictationHelper
             AppDomain.CurrentDomain.UnhandledException += delegate (object sender, UnhandledExceptionEventArgs e)
             {
                 Wire.Log("ERROR: unhandled " + (e.ExceptionObject is Exception ? e.ExceptionObject.GetType().Name : "exception") + "; leaving");
+                // A terminal request: an exit already under way (a restart's long wait) is shortened, and
+                // this thread waits for it to finish its bounded steps instead of ending the process now.
+                DeliveriesInFlight.Shorten(QuitWaitMs);
+                if (Volatile.Read(ref exiting) == 1) { Thread.Sleep(QuitWaitMs + HooksStopMs + AudioRestoreMs + DrainMs + 1000); return; }
                 Shutdown(ExitCrash, null, QuitWaitMs);
             };
             Wire.Start();
@@ -60,7 +64,7 @@ namespace DoodleNote.DictationHelper
             audio.Async(OutputAudio.RecoverLeftover);
 
             // Being asked to quit must never leave the user's sound muted.
-            ctrlHandler = delegate(int type) { Shutdown(); return true; };
+            ctrlHandler = delegate(int type) { DeliveriesInFlight.Shorten(QuitWaitMs); Shutdown(); return true; };
             Native.SetConsoleCtrlHandler(ctrlHandler, true);
 
             Thread reader = new Thread(ReadLoop);
@@ -139,11 +143,9 @@ namespace DoodleNote.DictationHelper
             // is how the next helper finishes the job.
             Stopwatch wait = Stopwatch.StartNew();
             bool idle = DeliveriesInFlight.CloseAndWait(waitMs);
-            bool writesDone = ClipboardText.WaitForLateWrites(Math.Max(0, DeliveriesInFlight.RemainingMs));
-            Wire.Log((idle ? "leaving with no delivery in progress" : "leaving with a delivery still in progress")
-                + (writesDone ? "" : " and an abandoned clipboard write still waiting")
+            Wire.Log((idle ? "leaving with no delivery or clipboard write in progress" : "leaving with " + DeliveriesInFlight.Pending + " still in progress")
                 + " (waited " + wait.ElapsedMilliseconds + " ms)"
-                + (idle && writesDone ? "" : "; its transaction record lets the next helper put the clipboard back"));
+                + (idle ? "" : "; the transaction record lets the next helper put the clipboard back"));
             if (restartReason != null) Wire.Send(Wire.Fields("event", "restarting", "reason", restartReason));
             Ui.Invoke(delegate { HoldWatcher.Shared.StopAll(); MouseCapture.Shared.Cancel("stopped"); return true; }, HooksStopMs, false);
             ClipboardReaderClient.Shutdown();
@@ -420,6 +422,17 @@ namespace DoodleNote.DictationHelper
                         }
                         Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
                     }
+                    break;
+                case "__clipboard-txn":
+                    // Test build only: a clipboard transaction without a target (Delivery.TestTransaction).
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+#if DICTATION_TEST
+                    {
+                        string txnText = Wire.Str(request, "text") ?? "dictated";
+                        int holdMs = (int)(Wire.Num(request, "holdMs") ?? 0);
+                        work.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("result", Delivery.TestTransaction(txnText, holdMs))); });
+                    }
+#endif
                     break;
                 case "__saturate":
                     // Test build only: act as if the bounded-call cap had just been hit (the busy restart).

@@ -297,11 +297,12 @@ namespace DoodleNote.DictationHelper
             // What happened to the user's clipboard when a paste could not complete, so the typing
             // fallback reports it instead of "untouched".
             string clipboardAfterPaste = "untouched", holdsAfterPaste = null;
+            ClipboardText.LateWrite lateWrite = null;
             if (!forceType)
             {
                 if (deadlineMs == 0 || elapsed() + PasteEstimateMs <= deadlineMs)
                 {
-                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, out clipboardAfterPaste, out holdsAfterPaste);
+                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, out clipboardAfterPaste, out holdsAfterPaste, out lateWrite);
                     if (pasted != null) return pasted;
                 }
             }
@@ -320,6 +321,13 @@ namespace DoodleNote.DictationHelper
                 typed.Clipboard = clipboardAfterPaste;
                 typed.ClipboardHolds = holdsAfterPaste;
             }
+            // The reply says the latest known clipboard outcome: an abandoned write that finished its
+            // rollback while the typing ran has a real result by now (the late event says it too).
+            if (lateWrite != null && lateWrite.Outcome != null)
+            {
+                typed.Clipboard = lateWrite.Outcome;
+                typed.ClipboardHolds = lateWrite.Holds;
+            }
             return typed;
         }
 
@@ -328,13 +336,42 @@ namespace DoodleNote.DictationHelper
         /// `clipboardAfterFailedWrite` (and `holdsAfterFailedWrite` for "unrestored") report what
         /// happened to the user's clipboard in that case.
         /// </summary>
+#if DICTATION_TEST
+        /// <summary>
+        /// Test build only (the __clipboard-txn op): one clipboard transaction exactly as a paste runs it
+        /// (save, record, bounded write, hold, restore), without a target or Ctrl+V, so recovery can be
+        /// exercised natively without any window in front.
+        /// </summary>
+        public static string TestTransaction(string text, int holdMs)
+        {
+            SavedClipboard saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
+            if (saved == null) return "no-save";
+            PendingRecord record = PendingClipboard.Begin(saved, text);
+            if (record == null) return "no-record";
+            saved.Record = record;
+            ClipboardOwnership ours;
+            ClipboardText.LateWrite late;
+            bool written = ClipboardText.WriteBounded(text, out ours, saved, WriteBudgetMs, out late);
+            if (late != null) return "late";
+            if (!written)
+            {
+                string failed = ours.Emptied ? saved.Restore(ours) : "untouched";
+                saved.Settle(failed);
+                return "write-failed/" + failed;
+            }
+            if (holdMs > 0) Thread.Sleep(holdMs);
+            return saved.Restore(ours);
+        }
+#endif
+
         /// <summary>Wall-clock bound for our clipboard write (open, empty, set, close) on its own thread.</summary>
         const int WriteBudgetMs = 1000;
 
-        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, out string clipboardAfterFailedWrite, out string holdsAfterFailedWrite)
+        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, out string clipboardAfterFailedWrite, out string holdsAfterFailedWrite, out ClipboardText.LateWrite lateWrite)
         {
             clipboardAfterFailedWrite = "untouched";
             holdsAfterFailedWrite = null;
+            lateWrite = null;
             // An earlier transaction that could not be put back gets its chance first (before our write).
             PendingClipboard.RecoverLeftover("delivery");
             Stopwatch insert = Stopwatch.StartNew();
@@ -359,9 +396,10 @@ namespace DoodleNote.DictationHelper
             if (record == null) return null;
             saved.Record = record;
             ClipboardOwnership ours = null;
-            bool writeTimedOut;
-            bool written = ClipboardText.WriteBounded(text, out ours, saved, WriteBudgetMs, out writeTimedOut);
-            if (writeTimedOut)
+            ClipboardText.LateWrite late;
+            bool written = ClipboardText.WriteBounded(text, out ours, saved, WriteBudgetMs, out late);
+            lateWrite = late;
+            if (late != null)
             {
                 // Our write is still waiting inside EmptyClipboard on the owner. When that returns, the
                 // write puts the user's saved content back instead of ours (and finishes the record, and
@@ -547,7 +585,18 @@ namespace DoodleNote.DictationHelper
                 if (ClassicTextBox.HasStyle(gui.hwndFocus, ClassicTextBox.ES_PASSWORD)) return "secure-field";
                 if (ClassicTextBox.HasStyle(gui.hwndFocus, ClassicTextBox.ES_READONLY)) return "not-editable";
             }
+            // A modifier pressed again after the release earlier would turn Ctrl+V into another shortcut
+            // (Win+Ctrl+V, Ctrl+Shift+V): never sent then.
+            if (ModifiersDown()) return "keys-held";
             return null;
+        }
+
+        /// <summary>Shift, Ctrl, Alt or Win is down right now (GetAsyncKeyState; no message).</summary>
+        static bool ModifiersDown()
+        {
+            foreach (int vk in new[] { Native.VK_LSHIFT, Native.VK_RSHIFT, Native.VK_LCONTROL, Native.VK_RCONTROL, Native.VK_LMENU, Native.VK_RMENU, Native.VK_LWIN, Native.VK_RWIN })
+                if (Native.IsDown(vk)) return true;
+            return false;
         }
 
         /// <summary>The focused window of the foreground thread.</summary>
@@ -791,6 +840,7 @@ namespace DoodleNote.DictationHelper
             if (gui.hwndFocus != box.Window) return "focus-changed";
             if (box.StyleSecure || Target.IsPasswordEdit(gui.hwndFocus)) return "secure-field";
             if (box.StyleReadOnly) return "not-editable";
+            if (ModifiersDown()) return "keys-held";
             return null;
         }
 
@@ -873,15 +923,22 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>A write running on its own thread; Abandoned once the caller stopped waiting for it.</summary>
-        sealed class WriteJob
+        /// <summary>
+        /// A write on its own thread. Abandoned once the caller stopped waiting: then this is an in-flight
+        /// clipboard transaction until its rollback is done, and Outcome is what happened to the clipboard.
+        /// </summary>
+        public sealed class LateWrite
         {
             /// <summary>0 running, 1 finished (the caller takes the result), 2 abandoned (the thread cleans up).</summary>
             public int State;
             public bool Abandoned { get { return Volatile.Read(ref State) == 2; } }
             public bool Result;
             public ClipboardOwnership Ours;
-            /// <summary>The abandoned write put the saved content back itself (inside Write).</summary>
-            public bool PutBack;
+            /// <summary>The abandoned write put the saved content back itself (inside Write): its result.</summary>
+            public string PutBack;
+            /// <summary>The rollback's result once done (null while it still runs), and what the clipboard then holds.</summary>
+            public volatile string Outcome;
+            public string Holds;
         }
 
         /// <summary>
@@ -889,34 +946,13 @@ namespace DoodleNote.DictationHelper
         /// the ownership confirmation follows on the caller's thread. EmptyClipboard waits for
         /// the owner's WM_DESTROYCLIPBOARD, and an owner that answered a WM_NULL can still stall there.
         /// On a timeout the thread is left to finish (a blocked EmptyClipboard cannot be interrupted)
-        /// and is marked abandoned: once emptying returns it puts the user's saved content back instead
-        /// of our text, so nothing of theirs is lost and nothing of ours lingers.
+        /// and is marked abandoned (late): exits wait for it (DeliveriesInFlight), and once emptying returns
+        /// it puts the user's saved content back instead of our text and reports what happened.
         /// </summary>
-        /// <summary>Abandoned writes still running (each is an in-flight clipboard transaction until its rollback is done).</summary>
-        static int lateWrites;
-        static readonly object lateGate = new object();
-
-        /// <summary>Exits wait for abandoned writes to finish their rollback, like for deliveries (bounded).</summary>
-        public static bool WaitForLateWrites(int timeoutMs)
+        public static bool WriteBounded(string text, out ClipboardOwnership ownership, SavedClipboard saved, int budgetMs, out LateWrite late)
         {
-            Stopwatch watch = Stopwatch.StartNew();
-            lock (lateGate)
-            {
-                while (lateWrites > 0)
-                {
-                    int left = timeoutMs - (int)watch.ElapsedMilliseconds;
-                    if (left <= 0) return false;
-                    Monitor.Wait(lateGate, left);
-                }
-                return true;
-            }
-        }
-
-        public static int LateWrites { get { lock (lateGate) return lateWrites; } }
-
-        public static bool WriteBounded(string text, out ClipboardOwnership ownership, SavedClipboard saved, int budgetMs, out bool timedOut)
-        {
-            WriteJob job = new WriteJob();
+            LateWrite job = new LateWrite();
+            late = null;
             string deliveryId = Delivery.CurrentRequestId;
             Thread thread = new Thread(delegate ()
             {
@@ -930,18 +966,21 @@ namespace DoodleNote.DictationHelper
                 {
                     // Abandoned: this thread owns the rollback. If our text was already set, put the
                     // user's content back now; if it put it back while still open (Write), settle.
-                    string late;
+                    string outcome;
                     if (ours.Emptied)
                     {
                         ours.Confirm();
-                        late = saved.Restore(ours);
-                        Wire.Log("the late clipboard write was undone: " + late);
+                        outcome = saved.Restore(ours);
+                        Wire.Log("the late clipboard write was undone: " + outcome);
                     }
-                    else late = job.PutBack ? "restored" : "untouched";
-                    saved.Settle(late);
-                    // The reply already said "unrestored/unknown": tell the app what happened after all.
-                    Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", late));
-                    lock (lateGate) { lateWrites--; Monitor.PulseAll(lateGate); }
+                    else outcome = job.PutBack ?? "untouched";
+                    // A failed put-back stays "unrestored": its record is kept for a retry, and no warning is cleared.
+                    saved.Settle(outcome);
+                    job.Holds = outcome == "unrestored" ? "unknown" : null;
+                    job.Outcome = outcome;
+                    // Whenever it lands (before or after the reply), the app learns what happened.
+                    Wire.Send(Wire.Fields("event", "clipboard", "phase", "late-restore", "id", deliveryId ?? "", "clipboard", outcome));
+                    DeliveriesInFlight.LateEnd();
                 }
             });
             thread.IsBackground = true;
@@ -949,22 +988,23 @@ namespace DoodleNote.DictationHelper
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
             // Exactly one side decides: the thread marks itself finished, or the caller marks it abandoned.
+            DeliveriesInFlight.LateBegin();
             if (!thread.Join(Math.Max(1, budgetMs)) && Interlocked.CompareExchange(ref job.State, 2, 0) == 0)
             {
-                lock (lateGate) lateWrites++;
-                timedOut = true;
+                late = job;
                 ownership = new ClipboardOwnership();
                 return false;
             }
+            DeliveriesInFlight.LateEnd();
             thread.Join();
-            timedOut = false;
             ownership = job.Ours ?? new ClipboardOwnership();
             // The confirmation re-opens the clipboard while we own it (nothing waits on another app),
             // so it runs here, outside the write's bound.
             if (ownership.Emptied)
             {
                 ownership.Confirm();
-                PendingClipboard.Stage(saved.Record, "written", ownership.Confirmed ? ownership.SequenceFinal : ownership.SequenceUnlocked);
+                uint after = ownership.Confirmed ? ownership.SequenceFinal : ownership.SequenceUnlocked;
+                PendingClipboard.Stage(saved.Record, "written", after, after);
             }
             return job.Result;
         }
@@ -980,7 +1020,7 @@ namespace DoodleNote.DictationHelper
             return Write(text, out ownership, expectSequence, null, null, true);
         }
 
-        static bool Write(string text, out ClipboardOwnership ownership, uint expectSequence, WriteJob job, SavedClipboard saved, bool confirm)
+        static bool Write(string text, out ClipboardOwnership ownership, uint expectSequence, LateWrite job, SavedClipboard saved, bool confirm)
         {
             ownership = new ClipboardOwnership();
             if (!Open()) return false;
@@ -994,20 +1034,25 @@ namespace DoodleNote.DictationHelper
                     Wire.Log("the clipboard changed after it was saved; not pasting");
                     return false;
                 }
+                // Journaled BEFORE emptying (with the sequence before it): a helper that dies right after
+                // EmptyClipboard returns leaves "emptying" and an empty clipboard, which is recoverable.
+                if (saved != null) PendingClipboard.Stage(saved.Record, "emptying", Native.GetClipboardSequenceNumber());
                 // Test build only: an owner that stalls in WM_DESTROYCLIPBOARD, without needing one.
                 int stall = TestMode.Int("DICTATION_HELPER_TEST_EMPTY_STALL_MS", 0);
                 if (stall > 0) Thread.Sleep(stall);
                 if (Native.EmptyClipboard())
                 {
-                    if (saved != null) PendingClipboard.Stage(saved.Record, "emptied");
+                    if (saved != null) PendingClipboard.Stage(saved.Record, "emptied", Native.GetClipboardSequenceNumber());
+                    int afterEmpty = TestMode.Int("DICTATION_HELPER_TEST_STALL_AFTER_EMPTY_MS", 0);
+                    if (afterEmpty > 0) Thread.Sleep(afterEmpty); // test build only: die with the clipboard emptied
                     if (job != null && job.Abandoned && saved != null)
                     {
                         // The caller gave up while emptying waited on the owner: give the user's content
                         // back now, never leave ours (it would never be restored).
-                        PendingClipboard.Stage(saved.Record, "restoring");
-                        saved.PutBackOpen();
-                        job.PutBack = true;
-                        Wire.Log("the late clipboard write put the user's saved content back");
+                        PendingClipboard.Stage(saved.Record, "restoring", Native.GetClipboardSequenceNumber() - 1);
+                        if (saved.Record != null) SetSentinel(saved.Record.Id);
+                        job.PutBack = saved.PutBackResult(saved.PutBackOpen());
+                        Wire.Log("the late clipboard write put the user's saved content back: " + job.PutBack);
                         return false;
                     }
                     ownership.Emptied = true;
@@ -1019,8 +1064,7 @@ namespace DoodleNote.DictationHelper
                     SetConservativeMarkers();
                     // Our transaction's sentinel: recovery treats the clipboard as ours only with it (or
                     // by sequence number), never because the text matches.
-                    if (saved != null && saved.Record != null)
-                        SetBytes(Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat), System.Text.Encoding.UTF8.GetBytes(saved.Record.Id));
+                    if (saved != null && saved.Record != null) SetSentinel(saved.Record.Id);
                     // Sampled INSIDE the same open/close as our SetClipboardData: nobody else can
                     // write while we hold the clipboard.
                     ownership.SequenceInside = Native.GetClipboardSequenceNumber();
@@ -1044,6 +1088,12 @@ namespace DoodleNote.DictationHelper
             SetBytes(Native.RegisterClipboardFormat(MarkerNames[0]), new byte[] { 0 });
             SetBytes(Native.RegisterClipboardFormat(MarkerNames[1]), BitConverter.GetBytes(0));
             SetBytes(Native.RegisterClipboardFormat(MarkerNames[2]), BitConverter.GetBytes(0));
+        }
+
+        /// <summary>Our transaction's sentinel format on the open clipboard (the record id; no user content).</summary>
+        public static void SetSentinel(string recordId)
+        {
+            SetBytes(Native.RegisterClipboardFormat(PendingClipboard.SentinelFormat), System.Text.Encoding.UTF8.GetBytes(recordId));
         }
 
         /// <summary>A format's bytes (at most cap) from the open clipboard; null when absent. Never for a live foreign owner (it may render).</summary>
@@ -1127,7 +1177,11 @@ namespace DoodleNote.DictationHelper
             int confirmDelay = TestMode.Int("DICTATION_HELPER_TEST_CONFIRM_DELAY_MS", 0);
             if (confirmDelay > 0) Thread.Sleep(confirmDelay);
             if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
-            SequenceUnlocked = Native.GetClipboardSequenceNumber();
+            uint unlocked = Native.GetClipboardSequenceNumber();
+            // The owner read again AFTER the sequence number: only a number sampled while our window was
+            // still the owner on both sides is accepted (someone may write between two unlocked reads).
+            if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
+            SequenceUnlocked = unlocked;
             // Test build only: simulate another reader holding the clipboard through the confirmation.
             if (TestMode.Env("DICTATION_HELPER_TEST_SKIP_CONFIRM") == "1") return;
             if (!ClipboardText.Open()) return;
@@ -1455,24 +1509,83 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Under the clipboard lock: every user-content format now on the clipboard (Unicode text and
-        /// registered formats; Windows synthesizes the others) is one we saved, with identical bytes. That
-        /// is what a restore cut short leaves behind.
+        /// Under the clipboard lock: what is on the clipboard is exactly a restore of ours cut short (see
+        /// ExplainsPresent). Read without asking any live owner to render (the caller checked the owner).
         /// </summary>
-        public bool MatchesOpenClipboard()
+        public bool MatchesOpenClipboard(uint ignore)
         {
-            for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f))
+            List<uint> present = new List<uint>();
+            for (uint f = Native.EnumClipboardFormats(0); f != 0; f = Native.EnumClipboardFormats(f)) if (f != ignore) present.Add(f);
+            byte[] emf = null;
+            if (metafile != IntPtr.Zero)
             {
-                if (f != CF_UNICODETEXT && f < 0xC000) continue;
-                byte[] mine = null;
-                foreach (KeyValuePair<uint, byte[]> item in items) if (item.Key == f) { mine = item.Value; break; }
-                if (mine == null) return false;
-                byte[] now = ClipboardText.ReadBytes(f, mine.Length);
-                if (now == null || now.Length != mine.Length) return false;
-                for (int i = 0; i < mine.Length; i++) if (now[i] != mine[i]) return false;
+                uint size = Native.GetEnhMetaFileBits(metafile, 0, null);
+                if (size > 0) { emf = new byte[size]; if (Native.GetEnhMetaFileBits(metafile, size, emf) != size) emf = null; }
             }
-            return true;
+            return ExplainsPresent(present, delegate (uint f, int cap) { return ClipboardText.ReadBytes(f, cap); }, items, emf, ReadOpenEmf);
         }
+
+        static byte[] ReadOpenEmf()
+        {
+            IntPtr handle = Native.GetClipboardData(CF_ENHMETAFILE);
+            if (handle == IntPtr.Zero) return null;
+            uint size = Native.GetEnhMetaFileBits(handle, 0, null);
+            if (size == 0) return null;
+            byte[] bits = new byte[size];
+            return Native.GetEnhMetaFileBits(handle, size, bits) == size ? bits : null;
+        }
+
+        /// <summary>The standard formats Windows synthesizes from one another (a restore of one brings the others).</summary>
+        static readonly uint[][] Families =
+        {
+            new uint[] { CF_TEXT, CF_OEMTEXT, CF_UNICODETEXT, CF_LOCALE },
+            new uint[] { CF_BITMAP, CF_DIB, CF_DIBV5, CF_PALETTE },
+            new uint[] { CF_METAFILEPICT, CF_ENHMETAFILE }
+        };
+
+        /// <summary>
+        /// The rule (unit-tested): every format present is either one we saved, with identical bytes
+        /// (compared; EMF by its bits), or a standard format Windows synthesizes from a family we saved;
+        /// any other format, or any differing content, means the clipboard holds something else (a new
+        /// screenshot, a new copy). At least one format must have been compared.
+        /// </summary>
+        internal static bool ExplainsPresent(IList<uint> present, Func<uint, int, byte[]> read, IList<KeyValuePair<uint, byte[]>> saved, byte[] savedEmf, Func<byte[]> readEmf)
+        {
+            HashSet<uint> savedFormats = new HashSet<uint>();
+            foreach (KeyValuePair<uint, byte[]> item in saved) savedFormats.Add(item.Key);
+            if (savedEmf != null) savedFormats.Add(CF_ENHMETAFILE);
+            int compared = 0;
+            foreach (uint f in present)
+            {
+                byte[] mine = null;
+                foreach (KeyValuePair<uint, byte[]> item in saved) if (item.Key == f) { mine = item.Value; break; }
+                if (mine != null)
+                {
+                    byte[] now = read(f, mine.Length);
+                    if (now == null || now.Length != mine.Length) return false;
+                    for (int i = 0; i < mine.Length; i++) if (now[i] != mine[i]) return false;
+                    compared++;
+                    continue;
+                }
+                if (f == CF_ENHMETAFILE && savedEmf != null)
+                {
+                    byte[] now = readEmf();
+                    if (now == null || now.Length != savedEmf.Length) return false;
+                    for (int i = 0; i < now.Length; i++) if (now[i] != savedEmf[i]) return false;
+                    compared++;
+                    continue;
+                }
+                bool synthesized = false;
+                foreach (uint[] family in Families)
+                {
+                    if (Array.IndexOf(family, f) < 0) continue;
+                    foreach (uint member in family) if (savedFormats.Contains(member)) synthesized = true;
+                }
+                if (!synthesized) return false;
+            }
+            return compared > 0;
+        }
+
         /// <summary>The clipboard sequence number the save was taken at (the paste requires it unchanged).</summary>
         public uint Sequence;
         /// <summary>After a Restore that returned "unrestored": dictated | foreign | unknown (see DeliveryResult.ClipboardHolds).</summary>
@@ -1525,18 +1638,39 @@ namespace DoodleNote.DictationHelper
                 }
                 // If the clipboard cannot be emptied, do not partially overwrite it: report it plainly.
                 // (A test build can simulate EmptyClipboard failing here.)
-                PendingClipboard.Stage(Record, "restoring");
+                // Journaled first (with the sequence before our EmptyClipboard), and our sentinel goes on
+                // first, so a restore cut short anywhere is provably ours to finish (PendingClipboard.Decide).
+                PendingClipboard.Stage(Record, "restoring", Native.GetClipboardSequenceNumber());
                 if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") == "1" || !Native.EmptyClipboard())
                 {
                     Holds = "dictated";
                     return "unrestored";
                 }
+                if (Record != null) ClipboardText.SetSentinel(Record.Id);
+                int stall = TestMode.Int("DICTATION_HELPER_TEST_RESTORE_STALL_MS", 0);
+                if (stall > 0) Thread.Sleep(stall); // test build only: die in the middle of a restore
                 ok = PutBackOpen();
             }
             finally { Native.CloseClipboard(); }
-            if (reportedSkip) return "skipped";
-            return ok && complete ? "restored" : "partial";
+            string result = RestoreResult(ok, complete, reportedSkip);
+            if (result == "unrestored") Holds = "unknown";
+            return result;
         }
+
+        /// <summary>
+        /// The result of a put-back (unit-tested): a format we could not set back is a FAILED restore
+        /// ("unrestored": the record is kept and retried, no warning is cleared); content the save itself
+        /// could not keep is "skipped" or "partial" (settled: nothing more can be put back later).
+        /// </summary>
+        internal static string RestoreResult(bool setOk, bool complete, bool reportedSkip)
+        {
+            if (!setOk) return "unrestored";
+            if (reportedSkip) return "skipped";
+            return complete ? "restored" : "partial";
+        }
+
+        /// <summary>The late write's put-back (inside Write), mapped the same way.</summary>
+        public string PutBackResult(bool setOk) { return RestoreResult(setOk, complete, reportedSkip); }
     }
 }
 
@@ -1551,8 +1685,13 @@ namespace DoodleNote.DictationHelper
     {
         static readonly object gate = new object();
         static int count;
+        /// <summary>Clipboard writes running on their own thread (an abandoned one is an in-flight transaction).</summary>
+        static int writes;
         static bool closed;
         static long deadlineTicks = long.MaxValue;
+
+        public static void LateBegin() { lock (gate) writes++; }
+        public static void LateEnd() { lock (gate) { writes--; Monitor.PulseAll(gate); } }
 
         /// <summary>False once the helper is leaving (the delivery must be refused, not started).</summary>
         public static bool Begin()
@@ -1576,14 +1715,18 @@ namespace DoodleNote.DictationHelper
 
         static long Now { get { return Stopwatch.GetTimestamp() * 1000 / Stopwatch.Frequency; } }
 
-        /// <summary>Refuse new deliveries, then wait up to timeoutMs (or a shortened deadline) for the running ones; true when none is left.</summary>
+        /// <summary>
+        /// Refuse new deliveries, then wait for the running ones AND for every clipboard write's rollback,
+        /// until ONE deadline (timeoutMs from now, or earlier once Shorten moves it; Shorten wakes this
+        /// wait at once). True when nothing is left.
+        /// </summary>
         public static bool CloseAndWait(int timeoutMs)
         {
             lock (gate)
             {
                 closed = true;
                 deadlineTicks = Math.Min(deadlineTicks, Now + timeoutMs);
-                while (count > 0)
+                while (count > 0 || writes > 0)
                 {
                     long left = deadlineTicks - Now;
                     if (left <= 0) return false;
@@ -1603,10 +1746,7 @@ namespace DoodleNote.DictationHelper
             }
         }
 
-        /// <summary>What is left of the exit's wait (for the clipboard rollback after the deliveries).</summary>
-        public static int RemainingMs
-        {
-            get { lock (gate) return deadlineTicks == long.MaxValue ? 0 : (int)Math.Max(0, Math.Min(int.MaxValue, deadlineTicks - Now)); }
-        }
+        /// <summary>What is still running when the wait ends (for the exit's log).</summary>
+        public static string Pending { get { lock (gate) return count + " delivery(ies), " + writes + " clipboard write(s)"; } }
     }
 }

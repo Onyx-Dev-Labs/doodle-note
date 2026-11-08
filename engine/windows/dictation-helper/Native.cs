@@ -134,6 +134,26 @@ namespace DoodleNote.DictationHelper
 
         [DllImport("advapi32.dll", SetLastError = true)]
         static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returned);
+        [DllImport("kernel32.dll")]
+        public static extern ulong GetTickCount64();
+
+        /// <summary>When this boot started (UTC, from the tick count; equal within clock adjustments for one boot).</summary>
+        public static DateTime BootTimeUtc { get { return DateTime.UtcNow - TimeSpan.FromMilliseconds(GetTickCount64()); } }
+
+        /// <summary>This process's logon session (TokenStatistics.AuthenticationId); unique per logon until reboot. Empty when unreadable.</summary>
+        public static string LogonId()
+        {
+            IntPtr token;
+            if (!OpenProcessToken(GetCurrentProcess(), 0x0008, out token)) return "";
+            IntPtr buffer = Marshal.AllocHGlobal(256);
+            try
+            {
+                int returned;
+                if (!GetTokenInformation(token, 10, buffer, 256, out returned) || returned < 16) return ""; // TokenStatistics
+                return Marshal.ReadInt64(buffer, 8).ToString("x"); // AuthenticationId (after TokenId)
+            }
+            finally { Marshal.FreeHGlobal(buffer); CloseHandle(token); }
+        }
         [DllImport("advapi32.dll")]
         static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
         [DllImport("advapi32.dll")]
