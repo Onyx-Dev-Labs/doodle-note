@@ -116,7 +116,8 @@ function checkCases(name, cases, results) {
   cases.forEach((c, i) => {
     const [kind, a] = c
     const expected = expectation(c)
-    if (expected === undefined || ['root', 'noop', 'jkey', 'skey', 'ukey'].includes(kind)) return
+    if (expected === undefined || ['root', 'noop', 'jkey', 'skey', 'ukey', 'rkey'].includes(kind))
+      return
     const label = `${name}: ${kind} ${a}`
     if (expected instanceof RegExp) assert.match(results[i], expected, label)
     else if (typeof expected === 'function')
@@ -985,9 +986,10 @@ async function main() {
       ['root', d4, d4Profile],
       ['jkey', `${d4State}\\InstallMigration`, ''],
       ['skey', d4State, ''],
-      ['ukey', `${d4State}-uninstall`, '']
+      ['ukey', `${d4State}-uninstall`, ''],
+      ['rkey', `${d4State}-recovery`, '']
     ]
-    registryKeys.push(`${d4State}-uninstall`)
+    registryKeys.push(`${d4State}-uninstall`, `${d4State}-recovery`)
     const oldCmd = `"${d4Old}\\Uninstall DoodleNote.exe" /currentuser`
     const newCmd = `"${real(d4, 'DoodleNote')}\\Uninstall DoodleNote.exe" /currentuser`
     const d4Trusted = (r) => lower(r) === lower(real(d4, 'desktop'))
@@ -1054,6 +1056,134 @@ async function main() {
       ['jstate', '', '', 'none']
     ]
     checkCases('d4-run4', run4, phase('d4-run4', run4).results)
+
+    // P2: the journal and record are copied outside Software\{APP_GUID} before
+    // "uninstall old version", so an installer killed right after that step loses
+    // nothing: the next run's customInit (dnRecoverState) puts both back.
+    const p2 = path.join(sandbox, 'p2', 'Local', 'Programs')
+    const p2Profile = path.join(sandbox, 'p2', 'Roaming', 'desktop')
+    const p2Old = path.join(p2, 'desktop')
+    const p2New = path.join(p2, 'DoodleNote')
+    fs.mkdirSync(p2Profile, { recursive: true })
+    write(path.join(p2Old, 'DoodleNote.exe'), 'old')
+    write(path.join(p2Old, 'Uninstall DoodleNote.exe'), 'old uninstaller')
+    write(path.join(p2Old, 'resources', 'app.asar'), 'asar')
+    const p2State = `${journalKey}-p2`
+    const p2Recovery = `${journalKey}-p2-recovery`
+    registryKeys.push(p2State, `${p2State}-uninstall`, p2Recovery)
+    const p2Setup = [
+      ['root', p2, p2Profile],
+      ['jkey', `${p2State}\\InstallMigration`, ''],
+      ['skey', p2State, ''],
+      ['ukey', `${p2State}-uninstall`, ''],
+      ['rkey', p2Recovery, '']
+    ]
+    const p2OldCmd = `"${p2Old}\\Uninstall DoodleNote.exe" /currentuser`
+    const p2Trusted = (r) => lower(r) === lower(real(p2, 'desktop'))
+    // Run 1 dies right after "uninstall old version" deleted the live keys.
+    const p2Run1 = [
+      ...p2Setup,
+      ['ucmd', p2OldCmd, '1', 'set'],
+      ['park', p2Old, p2New, 'parked'],
+      ['linkstate', 'DesktopLink', path.join(sandbox, 'no-such.lnk'), '0'],
+      ['save', '', '', 'done'],
+      ['rstate', '', '', 'present'],
+      ['wipe', '', '', 'done'],
+      ['jstate', '', '', 'none'],
+      ['kill', '', '', '(killed)']
+    ]
+    const p2Run1Results = phase('p2-run1-killed', p2Run1, { status: 9 }).results
+    assert.equal(p2Run1Results.length, p2Run1.length - 1, 'the harness died at the kill')
+    checkCases('p2-run1-killed', p2Run1.slice(0, -1), p2Run1Results)
+    // Run 2: customInit recovers before anything reads the journal, then finishes.
+    write(path.join(p2New, 'DoodleNote.exe'), 'new')
+    const p2Run2 = [
+      ...p2Setup,
+      ['jstate', '', '', 'none'],
+      ['recover', '', '', 'done'],
+      ['jstate', '', '', 'armed'],
+      ['jread', 'LegacyUninstallString', '', p2OldCmd],
+      ['jread', 'DesktopLink', '', '0'],
+      ['rstate', '', '', 'none'],
+      ['journal', p2New, '', p2Trusted],
+      ['save', '', '', 'done'],
+      ['wipe', '', '', 'done'],
+      ['restore', '', '', 'done'],
+      ['rstate', '', '', 'none'],
+      ['finish', p2Old, p2New, '0', 'removed'],
+      ['jstate', '', '', 'none'],
+      ['record', '', '', (r) => /\\desktop\|.*\\DoodleNote\|\d{4}-/.test(r)]
+    ]
+    const p2Run2Results = phase('p2-run2-recovers', p2Run2).results
+    checkCases('p2-run2-recovers', p2Run2, p2Run2Results)
+    const p2Record = p2Run2Results[p2Run2.length - 1]
+    assert.ok(!fs.existsSync(p2Old), 'the recovered run removed the old folder')
+    // Update before the first launch, killed after "uninstall old version" too.
+    const p2Run3 = [
+      ...p2Setup,
+      ['recover', '', '', 'done'],
+      ['save', '', '', 'done'],
+      ['rread', 'MigratedTo', '', (r) => p2Record.split('|')[1] === r],
+      ['wipe', '', '', 'done'],
+      ['record', '', '', 'none'],
+      ['kill', '', '', '(killed)']
+    ]
+    const p2Run3Results = phase('p2-run3-killed', p2Run3, { status: 9 }).results
+    checkCases('p2-run3-killed', p2Run3.slice(0, -1), p2Run3Results)
+    const p2Run4 = [
+      ...p2Setup,
+      ['recover', '', '', 'done'],
+      ['record', '', '', p2Record],
+      ['rstate', '', '', 'none'],
+      ['jstate', '', '', 'none']
+    ]
+    checkCases('p2-run4-recovers', p2Run4, phase('p2-run4-recovers', p2Run4).results)
+    // The app's own code reads the recovered record, runs, and clears it.
+    const consume = execFileSync(
+      process.execPath,
+      [
+        require.resolve('tsx/cli', { paths: [desktop] }),
+        path.join(__dirname, 'consume-install-record.ts'),
+        `HKEY_CURRENT_USER\\${p2State}`,
+        path.join(fs.realpathSync.native(p2New), 'DoodleNote.exe')
+      ],
+      { encoding: 'utf8', cwd: desktop }
+    ).trim()
+    const consumed = JSON.parse(consume.split(/\r?\n/).pop())
+    reports.push(`p2 app consumed: ${JSON.stringify(consumed)}`)
+    console.log(`p2 app consumed: ${JSON.stringify(consumed)}`)
+    assert.equal(consumed.result.ran, true)
+    assert.equal(consumed.after, null)
+    assert.deepEqual(
+      [consumed.record.from, consumed.record.to, consumed.record.at],
+      p2Record.split('|')
+    )
+    total += 1
+    // The recovery copy is checked before anything is restored from it.
+    const p2Real = real(p2)
+    const p2Tamper = [
+      ...p2Setup,
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ['rwrite', 'Identity', IDENTITY, 'set'],
+      ['rwrite', 'SourceDir', path.join(sandbox, 'elsewhere', 'desktop'), 'set'],
+      ['rwrite', 'DestDir', p2New, 'set'],
+      ['rwrite', 'MigratedFrom', path.join(sandbox, 'elsewhere', 'desktop'), 'set'],
+      ['rwrite', 'MigratedTo', path.join(p2Real, 'DoodleNote'), 'set'],
+      ['rwrite', 'MigratedAt', '2026-01-01T00:00:00Z', 'set'],
+      ['recover', '', '', 'done'],
+      ['jstate', '', '', 'none'],
+      ['record', '', '', 'none'],
+      ['rstate', '', '', 'none'],
+      // Another identity's copy is not ours to restore or delete.
+      ['rwrite', 'RecoveryFor', 'other-guid|desktop|DoodleNote', 'set'],
+      ['rwrite', 'Identity', 'other-guid|desktop|DoodleNote', 'set'],
+      ['rwrite', 'SourceDir', p2Old, 'set'],
+      ['rwrite', 'DestDir', p2New, 'set'],
+      ['recover', '', '', 'done'],
+      ['jstate', '', '', 'none'],
+      ['rstate', '', '', 'present']
+    ]
+    checkCases('p2-checked', p2Tamper, phase('p2-checked', p2Tamper).results)
 
     // D4: a user uninstall of the new copy while a move is unfinished removes the
     // old folder too; a held file or a running old app keeps it (reported).

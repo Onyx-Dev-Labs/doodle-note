@@ -1306,6 +1306,7 @@ FunctionEnd
   Var dnSavedFrom
   Var dnSavedTo
   Var dnSavedAt
+  Var dnRecoveryKey
 
   ; Where to install, from the folder electron-builder chose (no /D).
   ; In: $dnPlanDir. Out: $dnPlanDir, the folder to install to; $dnPlanLegacy, the
@@ -1785,14 +1786,31 @@ FunctionEnd
     Pop $1
   FunctionEnd
 
-  ; Call dnSaveState / Call dnRestoreState. electron-builder's uninstaller, which
-  ; "uninstall old version" runs (with --updated) on every update once the uninstall
-  ; entry names an installed copy, deletes HKCU\Software\${APP_GUID}: the journal
-  ; ($dnJournalKey, a subkey) and the MigratedFrom / MigratedTo / MigratedAt record
-  ; ($dnStateKey). dnSaveState, called right before that step, remembers both;
-  ; dnRestoreState, first thing in customInstall (after it), writes back every value
-  ; that is now missing. So an unfinished move stays armed across any number of
-  ; runs, and a record the app has not consumed yet survives another update.
+  ; Call dnSaveState / Call dnRestoreState / Call dnRecoverState.
+  ; electron-builder's uninstaller, which "uninstall old version" runs (with
+  ; --updated) on every update once the uninstall entry names an installed copy,
+  ; deletes HKCU\Software\${APP_GUID}: the journal ($dnJournalKey, a subkey) and the
+  ; MigratedFrom / MigratedTo / MigratedAt record ($dnStateKey). dnSaveState, called
+  ; right before that step, copies both to the recovery key $dnRecoveryKey
+  ; (HKCU\Software\DoodleNote-InstallRecovery\${APP_GUID}: outside the deleted
+  ; subtree, still one per identity), and also keeps them in memory. dnRecoverState
+  ; writes back every value that is missing from the recovery key, after checking
+  ; it: written for this identity (RecoveryFor, written last), the journal naming
+  ; this identity and exactly <Programs>\APP_FILENAME -> <Programs>\PRODUCT_FILENAME,
+  ; the record naming those same two folders. It deletes the recovery key only once
+  ; what it restored reads back. customInit calls it first, so an installer that died
+  ; between "uninstall old version" and customInstall loses nothing: the next run
+  ; finds the journal and record again. dnRestoreState, first thing in customInstall,
+  ; calls it and then fills anything still missing from memory. So an unfinished
+  ; move stays armed across any number of runs, and a record the app has not
+  ; consumed yet survives another update, even an interrupted one.
+  !macro dnCopyValue FROM TO NAME
+    ReadRegStr $0 HKCU ${FROM} "${NAME}"
+    ${if} $0 != ""
+      WriteRegStr HKCU ${TO} "${NAME}" $0
+    ${endif}
+  !macroend
+
   Function dnSaveState
     ReadRegStr $dnSavedIdentity HKCU $dnJournalKey "Identity"
     ReadRegStr $dnSavedSource HKCU $dnJournalKey "SourceDir"
@@ -1803,6 +1821,29 @@ FunctionEnd
     ReadRegStr $dnSavedFrom HKCU $dnStateKey "MigratedFrom"
     ReadRegStr $dnSavedTo HKCU $dnStateKey "MigratedTo"
     ReadRegStr $dnSavedAt HKCU $dnStateKey "MigratedAt"
+    ${if} $dnRecoveryKey != ""
+      Push $0
+      DeleteRegKey HKCU $dnRecoveryKey
+      ${if} $dnSavedIdentity != ""
+      ${orIf} $dnSavedTo != ""
+        ClearErrors
+        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "Identity"
+        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "SourceDir"
+        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DestDir"
+        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "LegacyUninstallString"
+        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "DesktopLink"
+        !insertmacro dnCopyValue $dnJournalKey $dnRecoveryKey "StartMenuLink"
+        !insertmacro dnCopyValue $dnStateKey $dnRecoveryKey "MigratedFrom"
+        !insertmacro dnCopyValue $dnStateKey $dnRecoveryKey "MigratedTo"
+        !insertmacro dnCopyValue $dnStateKey $dnRecoveryKey "MigratedAt"
+        ; Last: a copy without it (cut short) is ignored.
+        WriteRegStr HKCU $dnRecoveryKey "RecoveryFor" "${DN_MIGRATION_IDENTITY}"
+        ${if} ${Errors}
+          DetailPrint "The install state could not be copied to HKCU\$dnRecoveryKey; it is kept for this run only"
+        ${endif}
+      ${endif}
+      Pop $0
+    ${endif}
   FunctionEnd
 
   !macro dnRestoreValue KEY NAME VALUE
@@ -1814,7 +1855,96 @@ FunctionEnd
     ${endif}
   !macroend
 
+  Function dnRecoverState
+    Push $0
+    Push $1
+    Push $2
+    Push $3
+    Push $4
+    Push $5
+    StrCpy $0 ""
+    ${if} $dnRecoveryKey != ""
+      ReadRegStr $0 HKCU $dnRecoveryKey "RecoveryFor"
+    ${endif}
+    ${if} $0 == "${DN_MIGRATION_IDENTITY}"
+      ; $5: "1" while everything restored reads back.
+      StrCpy $5 "1"
+      Push $dnProgramsRoot
+      Call dnCanonical
+      Pop $1
+      ReadRegStr $2 HKCU $dnRecoveryKey "Identity"
+      ReadRegStr $3 HKCU $dnRecoveryKey "SourceDir"
+      Push $3
+      Call dnCanonical
+      Pop $3
+      ReadRegStr $4 HKCU $dnRecoveryKey "DestDir"
+      Push $4
+      Call dnCanonical
+      Pop $4
+      ${if} $1 != ""
+      ${andIf} $2 == "${DN_MIGRATION_IDENTITY}"
+      ${andIf} $3 == "$1\${APP_FILENAME}"
+      ${andIf} $4 == "$1\${PRODUCT_FILENAME}"
+        ReadRegStr $2 HKCU $dnRecoveryKey "Identity"
+        !insertmacro dnRestoreValue $dnJournalKey "Identity" $2
+        ReadRegStr $2 HKCU $dnRecoveryKey "SourceDir"
+        !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $2
+        ReadRegStr $2 HKCU $dnRecoveryKey "DestDir"
+        !insertmacro dnRestoreValue $dnJournalKey "DestDir" $2
+        ReadRegStr $2 HKCU $dnRecoveryKey "LegacyUninstallString"
+        !insertmacro dnRestoreValue $dnJournalKey "LegacyUninstallString" $2
+        ReadRegStr $2 HKCU $dnRecoveryKey "DesktopLink"
+        !insertmacro dnRestoreValue $dnJournalKey "DesktopLink" $2
+        ReadRegStr $2 HKCU $dnRecoveryKey "StartMenuLink"
+        !insertmacro dnRestoreValue $dnJournalKey "StartMenuLink" $2
+        ReadRegStr $2 HKCU $dnJournalKey "Identity"
+        ${if} $2 == ""
+          StrCpy $5 "0"
+        ${endif}
+      ${endif}
+      ; The record is restored only as a whole, and only when none is there now.
+      ReadRegStr $2 HKCU $dnRecoveryKey "MigratedFrom"
+      Push $2
+      Call dnCanonical
+      Pop $2
+      ReadRegStr $3 HKCU $dnRecoveryKey "MigratedTo"
+      Push $3
+      Call dnCanonical
+      Pop $3
+      ReadRegStr $4 HKCU $dnRecoveryKey "MigratedAt"
+      ${if} $1 != ""
+      ${andIf} $2 == "$1\${APP_FILENAME}"
+      ${andIf} $3 == "$1\${PRODUCT_FILENAME}"
+      ${andIf} $4 != ""
+        ReadRegStr $0 HKCU $dnStateKey "MigratedTo"
+        ${if} $0 == ""
+          ReadRegStr $2 HKCU $dnRecoveryKey "MigratedFrom"
+          ReadRegStr $3 HKCU $dnRecoveryKey "MigratedTo"
+          WriteRegStr HKCU $dnStateKey "MigratedFrom" $2
+          WriteRegStr HKCU $dnStateKey "MigratedTo" $3
+          WriteRegStr HKCU $dnStateKey "MigratedAt" $4
+          ReadRegStr $0 HKCU $dnStateKey "MigratedAt"
+          ${if} $0 != $4
+            StrCpy $5 "0"
+          ${endif}
+        ${endif}
+      ${endif}
+      ${if} $5 == "1"
+        DeleteRegKey HKCU $dnRecoveryKey
+      ${else}
+        DetailPrint "Kept HKCU\$dnRecoveryKey: the install state could not be written back"
+      ${endif}
+    ${endif}
+    Pop $5
+    Pop $4
+    Pop $3
+    Pop $2
+    Pop $1
+    Pop $0
+  FunctionEnd
+
   Function dnRestoreState
+    Call dnRecoverState
     Push $0
     !insertmacro dnRestoreValue $dnJournalKey "Identity" $dnSavedIdentity
     !insertmacro dnRestoreValue $dnJournalKey "SourceDir" $dnSavedSource

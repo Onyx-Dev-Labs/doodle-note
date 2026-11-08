@@ -31,6 +31,11 @@
 ;   park|<legacy>|<new>                  dnParkUninstaller: parked | nothing to park | refused: <why>
 ;   jread|<value>                        the journal value, or "none"
 ;   save / restore                       dnSaveState / dnRestoreState: done
+;   rkey|<key>                           sets $dnRecoveryKey (HKCU, a throwaway test key)
+;   recover                              dnRecoverState (what customInit runs first): done
+;   rstate                               present (the recovery key names an identity) | none
+;   rread|<value> / rwrite|<value>|<data> reads ("none" when empty) / writes a recovery key value (data: the rest of the line)
+;   kill                                 terminates this process at once (an installer that dies)
 ;   wipe                                 deletes $dnStateKey with its journal subkey, as electron-builder's uninstaller does
 ;   unlegacy|<dest>|<policy>             dnUninstallLegacy: none | removed | kept: <why>
 Unicode true
@@ -283,6 +288,40 @@ Function .onInit
     ${elseif} $kind == "restore"
       Call dnRestoreState
       StrCpy $result "done"
+    ${elseif} $kind == "rkey"
+      StrCpy $dnRecoveryKey $a
+      StrCpy $result "set"
+    ${elseif} $kind == "recover"
+      Call dnRecoverState
+      StrCpy $result "done"
+    ${elseif} $kind == "rstate"
+      ReadRegStr $result HKCU $dnRecoveryKey "RecoveryFor"
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${else}
+        StrCpy $result "present"
+      ${endif}
+    ${elseif} $kind == "rread"
+      ReadRegStr $result HKCU $dnRecoveryKey $a
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "rwrite"
+      ; The data is the rest of the line ("|" included: identities contain it).
+      StrCpy $0 $b
+      ${if} $c != ""
+      ${orIf} $line != ""
+        StrCpy $0 "$0|$c"
+      ${endif}
+      ${if} $line != ""
+        StrCpy $0 "$0|$line"
+      ${endif}
+      WriteRegStr HKCU $dnRecoveryKey $a $0
+      StrCpy $result "set"
+    ${elseif} $kind == "kill"
+      FileClose $out
+      System::Call 'kernel32::GetCurrentProcess() p.r0'
+      System::Call 'kernel32::TerminateProcess(p r0, i 9)'
     ${elseif} $kind == "wipe"
       DeleteRegKey HKCU $dnStateKey
       StrCpy $result "done"

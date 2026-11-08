@@ -221,18 +221,62 @@ test('Windows installs move to a DoodleNote folder without forking the install o
     uninstallLegacy.indexOf('Call dnRemoveLegacyDir') < uninstallLegacy.indexOf('Call dnUnpin')
   )
   // The record the app needs before it repoints anything is written only after a
-  // real move, and otherwise only put back as it was saved (dnRestoreState).
+  // real move, and otherwise only put back as it was saved: from the recovery key
+  // after checking it names this identity's two folders (dnRecoverState), or from
+  // memory (dnRestoreState).
   const removed = finish.indexOf('${if} $3 == "removed"')
   const restoreState = guards.slice(guards.indexOf('Function dnRestoreState'))
+  const recoverState = guards.slice(
+    guards.indexOf('Function dnRecoverState'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnRecoverState'))
+  )
   for (const value of ['MigratedFrom', 'MigratedTo', 'MigratedAt']) {
     assert.equal(
       `${installer}\n${guards}`.split(`WriteRegStr HKCU $dnStateKey "${value}"`).length,
-      3,
+      4,
       value
     )
     assert.ok(finish.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) > removed, value)
     assert.match(restoreState, new RegExp(`WriteRegStr HKCU \\$dnStateKey "${value}" \\$dnSaved`))
+    assert.ok(
+      recoverState.indexOf(`WriteRegStr HKCU $dnStateKey "${value}"`) >
+        recoverState.indexOf('${andIf} $3 == "$1\\${PRODUCT_FILENAME}"\n      ${andIf} $4 != ""'),
+      value
+    )
   }
+  // The recovery copy lives outside Software\{APP_GUID}, which electron-builder's
+  // uninstaller deletes; customInit restores from it before anything reads the
+  // journal; a user uninstall (not --updated) deletes it.
+  assert.match(
+    installer,
+    /!define DN_RECOVERY_KEY "Software\\DoodleNote-InstallRecovery\\\$\{APP_GUID\}"/
+  )
+  const init = installer.slice(installer.indexOf('!macro customInit'))
+  assert.ok(
+    init.indexOf('StrCpy $dnRecoveryKey "${DN_RECOVERY_KEY}"') < init.indexOf('Call dnRecoverState')
+  )
+  assert.ok(init.indexOf('Call dnRecoverState') < init.indexOf('Call dnPlanMigration'))
+  assert.ok(init.indexOf('Call dnRecoverState') < init.indexOf('Call dnTrustedJournal'))
+  assert.ok(restoreState.indexOf('Call dnRecoverState') < restoreState.indexOf('dnRestoreValue'))
+  const saveState = guards.slice(
+    guards.indexOf('Function dnSaveState'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnSaveState'))
+  )
+  assert.ok(
+    saveState.lastIndexOf('dnCopyValue') <
+      saveState.indexOf('WriteRegStr HKCU $dnRecoveryKey "RecoveryFor"')
+  )
+  // Never DeleteRegKey HKCU "" (the whole hive): every use is guarded.
+  for (const fnText of [saveState, recoverState])
+    assert.ok(
+      fnText.indexOf('${if} $dnRecoveryKey != ""') <
+        fnText.indexOf('DeleteRegKey HKCU $dnRecoveryKey')
+    )
+  const uninstall = installer.slice(installer.indexOf('!macro customUnInstall'))
+  assert.ok(
+    uninstall.indexOf('${ifNot} ${isUpdated}') <
+      uninstall.indexOf('DeleteRegKey HKCU "Software\\DoodleNote-InstallRecovery\\${APP_GUID}"')
+  )
   assert.ok(removed > finish.indexOf('Call dnRemoveLegacyDir'))
   // Shortcuts: what the user had deleted stays deleted; pins are repointed by target only.
   assert.ok(

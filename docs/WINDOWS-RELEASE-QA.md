@@ -356,10 +356,21 @@ moves an existing install on upgrade:
    uninstaller. electron-builder's uninstaller, which "uninstall old version"
    runs with `--updated` on every update once the uninstall entry names an
    installed copy, deletes `HKCU\Software\{APP_GUID}` with the journal and the
-   `MigratedFrom/To/At` record in it; both are saved right before that step and
-   written back first thing in `customInstall`, so a move kept by a held file
-   stays armed for as many runs as it takes, and a record the app has not read
-   yet survives another update.
+   `MigratedFrom/To/At` record in it. Right before that step both are copied to
+   `HKCU\Software\DoodleNote-InstallRecovery\{APP_GUID}` (outside the deleted
+   subtree, still one per identity; `RecoveryFor` written last, so a copy cut
+   short is ignored) and written back first thing in `customInstall`. If the
+   installer stops in between (killed, extraction failed), the next run's
+   `customInit` puts them back before anything reads them, after checking the
+   copy: written for this identity, the journal naming this identity and exactly
+   `Programs\desktop` → `Programs\DoodleNote`, the record naming those same two
+   folders; only values that are missing are written, and the copy is deleted only
+   once what it restored reads back. So a move kept by a held file stays armed for
+   as many runs as it takes, and a record the app has not read yet survives
+   another update, even an interrupted one (before this, an update interrupted
+   before the first launch after a move lost the record, and with the old folder
+   already gone the app never repointed its login item or MCP entries). A user
+   uninstall (not `--updated`) deletes the copy with the rest.
 3. `customInstall` verifies the new copy (exe, `app.asar`, uninstaller, and the
    uninstall entry pointing at it), then pins the old folder before checking it
    again (`dnPinLegacy`): it opens the old folder itself (never what a link there
@@ -409,7 +420,7 @@ moves an existing install on upgrade:
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
 held files and real processes in a temporary sandbox (CI "Check Windows
-installer migration guards"; 220 cases): the junction overlap cases above, a
+installer migration guards"; 300 cases): the junction overlap cases above, a
 second process swapping folders for junctions to an outside folder while the
 old folder is removed (nothing outside is touched), a second process
 retargeting the `Programs` junction onto the profile's parent or onto a decoy
@@ -419,8 +430,12 @@ update and in the uninstall clean-up; a control run without the retarget removes
 the folder), short-name and foreign
 uninstall commands, a file held across two runs with the uninstaller's key
 deletion simulated each time and a third run finishing, the uninstall clean-up,
-a closer that never answers (`unknown` in about 4 s) and the silent
-quit-with-exit-code-2 case.
+an installer killed right after the "uninstall old version" step (twice: once
+mid-move, once on an update before the first launch) whose next run recovers the
+journal and the record, the app's own record handling
+(`scripts/consume-install-record.ts`) reading the recovered record, running and
+clearing it, tampered or foreign recovery copies ignored, a closer that never
+answers (`unknown` in about 4 s) and the silent quit-with-exit-code-2 case.
 
 `appId`, the shortcut name and so the uninstall key are unchanged, so Start and
 Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the

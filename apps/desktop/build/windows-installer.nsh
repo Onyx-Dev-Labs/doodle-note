@@ -42,9 +42,12 @@
 ; cannot be established, the new install goes ahead, the old folder stays and the
 ; journal stays armed. electron-builder's uninstaller deletes Software\${APP_GUID}
 ; (journal and record) whenever "uninstall old version" runs it, so the journal
-; and the record are saved before that step and written back after it
-; (dnSaveState / dnRestoreState): the journal stays armed for as many runs as it
-; takes. A user uninstall of the new copy while a move is unfinished also removes
+; and the record are copied before that step to
+; HKCU\Software\DoodleNote-InstallRecovery\${APP_GUID} (outside that subtree) and
+; written back after it (dnSaveState / dnRestoreState), or by the next run's
+; customInit if this one stops in between (dnRecoverState): the journal stays
+; armed for as many runs as it takes, and a record survives updates until the app
+; has consumed it. A user uninstall of the new copy while a move is unfinished also removes
 ; the old folder (customUnInstall, dnUninstallLegacy).
 ;
 ; Shortcut names, appId and so the uninstall registry key are unchanged, so the
@@ -100,6 +103,10 @@
   ; the MigratedFrom/MigratedTo/MigratedAt record of one that was completed.
   !define DN_STATE_KEY "Software\${APP_GUID}"
   !define DN_MIGRATION_KEY "${DN_STATE_KEY}\InstallMigration"
+  ; A copy of both, outside the Software\${APP_GUID} subtree electron-builder's
+  ; uninstaller deletes, for an installer that stops between that step and
+  ; customInstall (dnSaveState / dnRecoverState).
+  !define DN_RECOVERY_KEY "Software\DoodleNote-InstallRecovery\${APP_GUID}"
   !define DN_TASKBAR_PINS "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
 
   Var dnLegacyDir
@@ -123,12 +130,16 @@
     StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
     StrCpy $dnJournalKey "${DN_MIGRATION_KEY}"
     StrCpy $dnStateKey "${DN_STATE_KEY}"
+    StrCpy $dnRecoveryKey "${DN_RECOVERY_KEY}"
     StrCpy $dnUninstallKey "${UNINSTALL_REGISTRY_KEY}"
     !ifdef UNINSTALL_REGISTRY_KEY_2
       StrCpy $dnUninstallKey2 "${UNINSTALL_REGISTRY_KEY_2}"
     !else
       StrCpy $dnUninstallKey2 ""
     !endif
+    ; An earlier run that stopped after "uninstall old version" deleted the
+    ; journal and record: put them back (checked) before anything reads them.
+    Call dnRecoverState
     !insertmacro GetDParameter $R0
     ${if} $R0 == ""
       StrCpy $dnPlanDir "$INSTDIR"
@@ -284,6 +295,10 @@
       Push $INSTDIR
       Call un.dnUninstallLegacy
       Pop $R0
+      ; The installer's copy of the journal and record goes with them (an
+      ; update's --updated run keeps it: the installer that started it needs it).
+      DeleteRegKey HKCU "Software\DoodleNote-InstallRecovery\${APP_GUID}"
+      DeleteRegKey /ifempty HKCU "Software\DoodleNote-InstallRecovery"
     ${endif}
   !macroend
 !endif
