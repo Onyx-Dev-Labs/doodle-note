@@ -7,7 +7,10 @@
 // Windows app needs at run time is missing: a runtime binary (speech engine and its
 // ONNX runtime, Koffi, reflink, llama CPU and Vulkan), a resource outside the archive
 // (Bark helper and its manifest, the MCP server, tray icons) or one of the app's own
-// dependencies inside app.asar.
+// dependencies inside app.asar. For a win-unpacked folder it also computes the bundled
+// dependency closure: every PE file's imports (dependencyClosure) must be Windows' or
+// in the package beside it or the exe, ggml's run-time backends must be there
+// (ggmlBackendProblems), and a ggml-base.dll treated as absent must be reported.
 //
 //   node scripts/test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]
 //     [--same-files-as <other win-unpacked dir>]
@@ -206,6 +209,281 @@ function missingDependencies(files, dependencies) {
     .filter((name) => !present.has(`node_modules/${name}/package.json`))
 }
 
+/**
+ * The DLL names a PE file imports: its import table and its delay-load import
+ * table (lower case, in table order). [] for a file that is not a PE image.
+ */
+function peImports(file) {
+  const data = fs.readFileSync(file)
+  if (data.length < 64 || data.toString('latin1', 0, 2) !== 'MZ') return []
+  const pe = data.readUInt32LE(0x3c)
+  if (pe + 24 > data.length || data.toString('latin1', pe, pe + 4) !== 'PE\0\0') return []
+  const sections = data.readUInt16LE(pe + 6)
+  const optionalSize = data.readUInt16LE(pe + 20)
+  const optional = pe + 24
+  const magic = data.readUInt16LE(optional)
+  const plus = magic === 0x20b
+  if (!plus && magic !== 0x10b) return []
+  const imageBase = plus
+    ? data.readBigUInt64LE(optional + 24)
+    : BigInt(data.readUInt32LE(optional + 28))
+  const directories = optional + (plus ? 112 : 96)
+  const directoryCount = data.readUInt32LE(optional + (plus ? 108 : 92))
+  const table = optional + optionalSize
+  const toOffset = (rva) => {
+    for (let i = 0; i < sections; i++) {
+      const at = table + i * 40
+      const virtualSize = data.readUInt32LE(at + 8)
+      const virtualAddress = data.readUInt32LE(at + 12)
+      const rawSize = data.readUInt32LE(at + 16)
+      const rawPointer = data.readUInt32LE(at + 20)
+      if (rva >= virtualAddress && rva < virtualAddress + Math.max(virtualSize, rawSize))
+        return rva - virtualAddress + rawPointer
+    }
+    return -1
+  }
+  const nameAt = (rva) => {
+    const at = toOffset(rva)
+    if (at < 0) return null
+    const end = data.indexOf(0, at)
+    return end < 0 ? null : data.toString('latin1', at, end).toLowerCase()
+  }
+  const names = []
+  const directory = (index) =>
+    index < directoryCount ? data.readUInt32LE(directories + index * 8) : 0
+  // IMAGE_DIRECTORY_ENTRY_IMPORT: 20-byte descriptors, name RVA at +12, ended by a zero one.
+  const imports = directory(1)
+  if (imports) {
+    for (let at = toOffset(imports); at >= 0 && at + 20 <= data.length; at += 20) {
+      const nameRva = data.readUInt32LE(at + 12)
+      if (!nameRva && !data.readUInt32LE(at)) break
+      const name = nameAt(nameRva)
+      if (name) names.push(name)
+    }
+  }
+  // IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT: 32-byte descriptors, name at +4 (an RVA, or a
+  // VA in the old format whose attributes lack bit 0).
+  const delayed = directory(13)
+  if (delayed) {
+    for (let at = toOffset(delayed); at >= 0 && at + 32 <= data.length; at += 32) {
+      const attributes = data.readUInt32LE(at)
+      let nameRva = data.readUInt32LE(at + 4)
+      if (!nameRva) break
+      if (!(attributes & 1)) nameRva = Number(BigInt(nameRva) - imageBase)
+      const name = nameAt(nameRva)
+      if (name) names.push(name)
+    }
+  }
+  return names
+}
+
+/**
+ * DLLs that come from Windows, its drivers or the VC++ runtime, never from the
+ * package. Only these may be missing from it: a DLL a bundled binary imports that
+ * is not on this list must be in the package, beside the binary or the app's exe
+ * (where the loader looks first), even if some copy happens to sit in System32 (a
+ * stale System32 onnxruntime.dll is exactly what a missing bundled one would load).
+ */
+const SYSTEM_DLLS = new Set(
+  [
+    'advapi32',
+    'bcrypt',
+    'bcryptprimitives',
+    'cfgmgr32',
+    'comctl32',
+    'comdlg32',
+    'crypt32',
+    'cryptui',
+    'd2d1',
+    'd3d11',
+    'd3d12',
+    'd3d9',
+    'dbghelp',
+    'dcomp',
+    'dhcpcsvc',
+    'dnsapi',
+    'dwmapi',
+    'dwrite',
+    'dxgi',
+    'dxva2',
+    'gdi32',
+    'gdiplus',
+    'hid',
+    'imm32',
+    'iphlpapi',
+    'kernel32',
+    'mf',
+    'mfplat',
+    'mfreadwrite',
+    'mmdevapi',
+    'msdmo',
+    'mscoree',
+    'msimg32',
+    'msvcrt',
+    'ncrypt',
+    'netapi32',
+    'normaliz',
+    'ntdll',
+    'ole32',
+    'oleacc',
+    'oleaut32',
+    'opengl32',
+    'powrprof',
+    'propsys',
+    'psapi',
+    'rpcrt4',
+    'secur32',
+    'setupapi',
+    'shcore',
+    'shell32',
+    'shlwapi',
+    'ucrtbase',
+    'uiautomationcore',
+    'urlmon',
+    'user32',
+    'userenv',
+    'usp10',
+    'uxtheme',
+    'version',
+    'winhttp',
+    'wininet',
+    'winmm',
+    'wintrust',
+    'tbs',
+    'wldap32',
+    'ws2_32',
+    'wtsapi32',
+    'xinput1_4',
+    'mswsock',
+    'credui',
+    'esent',
+    'wevtapi',
+    'pdh',
+    'avrt',
+    'ksuser',
+    'audioses',
+    'mpr',
+    'wlanapi',
+    'ntmarta',
+    'sspicli',
+    'srvcli',
+    'wkscli',
+    'virtdisk',
+    'fltlib',
+    'winusb',
+    'msi',
+    'shdocvw',
+    'devobj',
+    'mfsensorgroup',
+    // VC++ runtime (the redistributable Windows Update installs) and OpenMP.
+    'vcruntime140',
+    'vcruntime140_1',
+    'msvcp140',
+    'msvcp140_1',
+    'msvcp140_2',
+    'concrt140',
+    'vcomp140',
+    // GPU drivers: present only with the driver, loaded optionally by the GPU builds.
+    'vulkan-1',
+    'nvcuda',
+    'opencl',
+    'nvml'
+  ]
+    .map((name) => `${name}.dll`)
+    // Not .dll: the print spooler and Bluetooth control-panel libraries Chromium imports.
+    .concat(['winspool.drv', 'bthprops.cpl'])
+)
+
+/** Imports that are not files at all: the host process (Electron's node.exe delay-load hook). */
+const HOST_IMPORTS = new Set(['node.exe', 'electron.exe'])
+
+/** `name` (a lower-case DLL name) comes from Windows, not the package. */
+function isSystemDll(name) {
+  return (
+    SYSTEM_DLLS.has(name) ||
+    HOST_IMPORTS.has(name) ||
+    /^(api|ext)-ms-win-[a-z0-9-]+(\.dll)?$/.test(name)
+  )
+}
+
+/**
+ * The bundled dependency closure of a win-unpacked package: every .node, .dll and
+ * .exe in it (the app's own exe, Electron's DLLs, app.asar.unpacked, resources)
+ * has its imports resolved. A system DLL (isSystemDll) is external; any other must
+ * be a file of that name beside the importing binary or beside the app's exe.
+ * Returns { binaries, imports, missing: [{ binary, dll }] }. `absent` (tests, and
+ * the negative control) lists package-relative files to treat as not there.
+ */
+function dependencyClosure(packageDir, absent = []) {
+  const gone = new Set(absent.map((rel) => rel.toLowerCase()))
+  const files = listTree(packageDir).filter((rel) => !gone.has(rel.toLowerCase()))
+  const byDir = new Map()
+  for (const rel of files) {
+    const dir = path.posix.dirname(rel).toLowerCase()
+    if (!byDir.has(dir)) byDir.set(dir, new Set())
+    byDir.get(dir).add(path.posix.basename(rel).toLowerCase())
+  }
+  const rootFiles = byDir.get('.') ?? new Set()
+  const binaries = files.filter((rel) =>
+    NATIVE_EXTENSIONS.includes(path.extname(rel).toLowerCase())
+  )
+  const missing = []
+  let imports = 0
+  for (const binary of binaries) {
+    const here = byDir.get(path.posix.dirname(binary).toLowerCase()) ?? new Set()
+    for (const dll of peImports(path.join(packageDir, ...binary.split('/')))) {
+      imports++
+      if (isSystemDll(dll) || here.has(dll) || rootFiles.has(dll)) continue
+      missing.push({ binary, dll })
+    }
+  }
+  return { binaries: binaries.length, imports, missing }
+}
+
+/**
+ * ggml loads its CPU backends (ggml-cpu-<variant>.dll, one per instruction set) and
+ * the Vulkan backend at run time from ggml-base.dll's folder; nothing imports them,
+ * so the closure cannot see them. Every folder holding ggml-base.dll must have the
+ * baseline ggml-cpu-x64.dll (loadable on any x64 CPU), the same CPU variants as every
+ * other such folder in the package, and a *-vulkan build its ggml-vulkan.dll.
+ * Problems as text; `absent` as for dependencyClosure.
+ */
+function ggmlBackendProblems(packageDir, absent = []) {
+  const gone = new Set(absent.map((rel) => rel.toLowerCase()))
+  const files = listTree(packageDir).filter((rel) => !gone.has(rel.toLowerCase()))
+  const dirs = new Map()
+  for (const rel of files) {
+    const dir = path.posix.dirname(rel)
+    if (!dirs.has(dir)) dirs.set(dir, new Set())
+    dirs.get(dir).add(path.posix.basename(rel).toLowerCase())
+  }
+  const ggml = [...dirs].filter(([, names]) => names.has('ggml-base.dll'))
+  const variants = new Set()
+  for (const [, names] of ggml)
+    for (const name of names) if (/^ggml-cpu-[a-z0-9]+\.dll$/.test(name)) variants.add(name)
+  variants.add('ggml-cpu-x64.dll')
+  const problems = []
+  for (const [dir, names] of ggml) {
+    for (const name of [...variants].sort())
+      if (!names.has(name)) problems.push(`${dir}/${name}: ggml CPU backend missing`)
+    if (/-vulkan$/i.test(dir) && !names.has('ggml-vulkan.dll'))
+      problems.push(`${dir}/ggml-vulkan.dll: ggml Vulkan backend missing`)
+  }
+  return problems
+}
+
+/**
+ * The closure must catch a missing bundled DLL: with `rel` treated as absent, a
+ * binary that imports it must be reported. Returns the problems (none when caught).
+ */
+function closureNegativeControl(packageDir, rel) {
+  const name = path.posix.basename(rel).toLowerCase()
+  const { missing } = dependencyClosure(packageDir, [rel])
+  return missing.some((m) => m.dll === name)
+    ? []
+    : [`dependency closure: with ${rel} absent nothing was reported missing (negative control)`]
+}
+
 /** Native binaries under app.asar.unpacked that cannot load in the x64 Windows app. */
 function foreignNativeBinaries(unpackedDir) {
   const problems = []
@@ -238,6 +516,11 @@ module.exports = {
   missingDependencies,
   REQUIRED_UNPACKED,
   REQUIRED_RESOURCES,
+  peImports,
+  isSystemDll,
+  dependencyClosure,
+  closureNegativeControl,
+  ggmlBackendProblems,
   listTree,
   fileListDifferences
 }
@@ -556,6 +839,38 @@ if (require.main === module) {
   console.log(
     `  inside app.asar: ${packed.length} native binaries, ${packedForeign.length} that cannot load on Windows x64`
   )
+  // Round 7: every DLL a bundled binary imports is in the package (or is Windows'),
+  // and ggml's run-time backends are there; with one ggml-base.dll treated as absent
+  // the closure must report it (the check is never vacuous).
+  if (!target.endsWith('.asar')) {
+    const closure = dependencyClosure(target)
+    problems.push(
+      ...closure.missing.map(
+        ({ binary, dll }) =>
+          `${binary}: imports ${dll}, which is not in its folder or the app folder and is not a Windows DLL`
+      )
+    )
+    console.log(
+      `  dependency closure: ${closure.binaries} binaries, ${closure.imports} imports, ${closure.missing.length} bundled DLLs missing`
+    )
+    const backends = ggmlBackendProblems(target)
+    problems.push(...backends)
+    console.log(`  ggml run-time backends: ${backends.length} missing`)
+    const base = listTree(target).find((rel) => /\/ggml-base\.dll$/i.test(rel))
+    if (!base) problems.push('dependency closure negative control: no ggml-base.dll in the package')
+    else {
+      problems.push(...closureNegativeControl(target, base))
+      problems.push(
+        ...(ggmlBackendProblems(target, [base.replace(/ggml-base\.dll$/i, 'ggml-cpu-x64.dll')])
+          .length
+          ? []
+          : ['ggml backend negative control: a missing ggml-cpu-x64.dll was not reported'])
+      )
+      console.log(
+        `  negative control: ${base} and its ggml-cpu-x64.dll treated as absent are reported`
+      )
+    }
+  }
   if (sameAs) problems.push(...sameFilesProblems(asar, files, sameAs))
   if (sameAs && negativeControl && !problems.length)
     problems.push(...negativeControlProblems(asar, files, sameAs))

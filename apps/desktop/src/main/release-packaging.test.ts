@@ -34,6 +34,14 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
   missingDependencies(files: string[], dependencies: Record<string, string>): string[]
   REQUIRED_UNPACKED: string[]
   REQUIRED_RESOURCES: string[]
+  peImports(file: string): string[]
+  isSystemDll(name: string): boolean
+  dependencyClosure(
+    dir: string,
+    absent?: string[]
+  ): { binaries: number; imports: number; missing: { binary: string; dll: string }[] }
+  closureNegativeControl(dir: string, rel: string): string[]
+  ggmlBackendProblems(dir: string, absent?: string[]): string[]
   listTree(dir: string): string[]
   fileListDifferences(a: string[], b: string[]): { onlyA: string[]; onlyB: string[] }
   IDENTITY_DIFFERENCES: Record<
@@ -908,6 +916,10 @@ test('CI builds and retains a real Windows installer', () => {
   assert.match(ciWorkflow, /windows-package:[\s\S]*runs-on:\s*windows-latest/)
   assert.match(ciWorkflow, /pnpm --filter desktop package:win/)
   assert.match(ciWorkflow, /Smoke packaged Windows native modules/)
+  assert.match(
+    ciWorkflow,
+    /Check Windows app\.asar contents[\s\S]*?run: node apps\/desktop\/scripts\/test-windows-package\.cjs apps\/desktop\/release\/win-unpacked\n/
+  )
   assert.match(ciWorkflow, /sherpa and llama native modules loaded successfully/)
   assert.match(ciWorkflow, /Get-AuthenticodeSignature/)
   assert.match(ciWorkflow, /actions\/upload-artifact@[0-9a-f]{40}\s+# v7\.0\.1/)
@@ -1139,4 +1151,163 @@ test('the uninstaller records its earliest exits: status is set in the hook elec
   )
   assert.doesNotMatch(installer, /DN_TEST_ASK_CANCEL|dnTestAsk/)
   assert.doesNotMatch(builderConfig, /DN_TEST_/)
+})
+
+/**
+ * A minimal x64 PE32+ image importing `imports` (import table) and `delayed`
+ * (delay-load table): one section at RVA 0x1000 holding both tables and the names.
+ */
+function fakePe(imports: string[], delayed: string[] = []): Buffer {
+  const headers = Buffer.alloc(0x200)
+  headers.write('MZ', 0, 'latin1')
+  headers.writeUInt32LE(0x40, 0x3c)
+  headers.write('PE\0\0', 0x40, 'latin1')
+  headers.writeUInt16LE(0x8664, 0x44)
+  headers.writeUInt16LE(1, 0x46)
+  headers.writeUInt16LE(240, 0x54)
+  const optional = 0x58
+  headers.writeUInt16LE(0x20b, optional)
+  headers.writeBigUInt64LE(0x180000000n, optional + 24)
+  headers.writeUInt32LE(16, optional + 108)
+  const rva = 0x1000
+  const importsSize = (imports.length + 1) * 20
+  const delayedAt = importsSize
+  const delayedSize = (delayed.length + 1) * 32
+  let names = delayedAt + delayedSize
+  const body = Buffer.alloc(
+    names + [...imports, ...delayed].reduce((n, d) => n + d.length + 1, 0) + 16
+  )
+  imports.forEach((dll, i) => {
+    body.writeUInt32LE(rva + names, i * 20 + 12)
+    body.writeUInt32LE(1, i * 20) // OriginalFirstThunk, any nonzero
+    body.write(`${dll}\0`, names, 'latin1')
+    names += dll.length + 1
+  })
+  delayed.forEach((dll, i) => {
+    body.writeUInt32LE(1, delayedAt + i * 32) // attributes: RVAs
+    body.writeUInt32LE(rva + names, delayedAt + i * 32 + 4)
+    body.write(`${dll}\0`, names, 'latin1')
+    names += dll.length + 1
+  })
+  const directories = optional + 112
+  if (imports.length) {
+    headers.writeUInt32LE(rva, directories + 8)
+    headers.writeUInt32LE(importsSize, directories + 12)
+  }
+  if (delayed.length) {
+    headers.writeUInt32LE(rva + delayedAt, directories + 13 * 8)
+    headers.writeUInt32LE(delayedSize, directories + 13 * 8 + 4)
+  }
+  const section = optional + 240
+  headers.write('.idata', section, 'latin1')
+  headers.writeUInt32LE(body.length, section + 8)
+  headers.writeUInt32LE(rva, section + 12)
+  headers.writeUInt32LE(body.length, section + 16)
+  headers.writeUInt32LE(0x200, section + 20)
+  return Buffer.concat([headers, body])
+}
+
+test("the package check requires every bundled DLL a binary imports, and ggml's backends", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dn-closure-'))
+  try {
+    const put = (rel: string, data: Buffer): void => {
+      mkdirSync(join(dir, ...rel.split('/').slice(0, -1)), { recursive: true })
+      writeFileSync(join(dir, ...rel.split('/')), data)
+    }
+    const bins = 'resources/app.asar.unpacked/node_modules/@node-llama-cpp/win-x64/bins/win-x64'
+    put(
+      'DoodleNote.exe',
+      fakePe(['KERNEL32.dll', 'ffmpeg.dll'], ['winspool.drv', 'api-ms-win-core-synch-l1-2-0.dll'])
+    )
+    put('ffmpeg.dll', fakePe(['kernel32.dll']))
+    put(
+      `${bins}/llama-addon.node`,
+      fakePe(
+        ['node.exe', 'llama-common.dll', 'ggml-base.dll', 'llama.b9842.dll'],
+        ['vcruntime140.dll']
+      )
+    )
+    put(`${bins}/llama-common.dll`, fakePe(['ggml-base.dll', 'MSVCP140.dll']))
+    put(`${bins}/llama.b9842.dll`, fakePe(['ggml.b9842.dll', 'ggml-base.dll']))
+    put(`${bins}/ggml.b9842.dll`, fakePe(['ggml-base.dll']))
+    put(`${bins}/ggml-base.dll`, fakePe(['kernel32.dll']))
+    put(`${bins}/ggml-cpu-x64.dll`, fakePe(['ggml-base.dll']))
+    put(`${bins}/ggml-cpu-haswell.dll`, fakePe(['ggml-base.dll']))
+    const vulkan =
+      'resources/app.asar.unpacked/node_modules/@node-llama-cpp/win-x64-vulkan/bins/win-x64-vulkan'
+    put(`${vulkan}/ggml-base.dll`, fakePe(['kernel32.dll']))
+    put(`${vulkan}/ggml-cpu-x64.dll`, fakePe(['ggml-base.dll']))
+    put(`${vulkan}/ggml-cpu-haswell.dll`, fakePe(['ggml-base.dll']))
+    put(`${vulkan}/ggml-vulkan.dll`, fakePe(['ggml-base.dll', 'vulkan-1.dll']))
+    // Both tables are read, names lower-cased.
+    assert.deepEqual(packageCheck.peImports(join(dir, 'DoodleNote.exe')), [
+      'kernel32.dll',
+      'ffmpeg.dll',
+      'winspool.drv',
+      'api-ms-win-core-synch-l1-2-0.dll'
+    ])
+    assert.deepEqual(packageCheck.peImports(join(dir, ...`${bins}/ggml-base.dll`.split('/'))), [
+      'kernel32.dll'
+    ])
+    for (const name of [
+      'kernel32.dll',
+      'api-ms-win-crt-heap-l1-1-0.dll',
+      'vcruntime140_1.dll',
+      'vulkan-1.dll',
+      'node.exe',
+      'winspool.drv'
+    ])
+      assert.ok(packageCheck.isSystemDll(name), name)
+    // Never Windows', whatever System32 holds: the bundled runtimes.
+    for (const name of [
+      'onnxruntime.dll',
+      'ggml-base.dll',
+      'llama-common.dll',
+      'sherpa-onnx-c-api.dll',
+      'ffmpeg.dll'
+    ])
+      assert.ok(!packageCheck.isSystemDll(name), name)
+    const whole = packageCheck.dependencyClosure(dir)
+    assert.deepEqual(whole.missing, [])
+    assert.equal(whole.binaries, 13)
+    assert.deepEqual(packageCheck.ggmlBackendProblems(dir), [])
+    // ggml-base.dll gone: every binary that imports it is reported, the negative control passes.
+    const base = `${bins}/ggml-base.dll`
+    const without = packageCheck.dependencyClosure(dir, [base])
+    assert.deepEqual(without.missing.map((m) => m.binary.split('/').pop()).sort(), [
+      'ggml-cpu-haswell.dll',
+      'ggml-cpu-x64.dll',
+      'ggml.b9842.dll',
+      'llama-addon.node',
+      'llama-common.dll',
+      'llama.b9842.dll'
+    ])
+    assert.ok(without.missing.every((m) => m.dll === 'ggml-base.dll'))
+    assert.deepEqual(packageCheck.closureNegativeControl(dir, base), [])
+    // A DLL only in another folder does not count (the loader looks beside the binary and the exe).
+    assert.deepEqual(packageCheck.dependencyClosure(dir, [`${bins}/llama-common.dll`]).missing, [
+      { binary: `${bins}/llama-addon.node`, dll: 'llama-common.dll' }
+    ])
+    // The eight-file presence list alone would pass this: the llama DLLs gone, the addon there.
+    assert.ok(
+      packageCheck.dependencyClosure(dir, [`${bins}/llama.b9842.dll`, `${bins}/ggml.b9842.dll`])
+        .missing.length >= 1
+    )
+    // An Electron DLL beside the exe counts; gone, the exe reports it.
+    assert.deepEqual(packageCheck.dependencyClosure(dir, ['ffmpeg.dll']).missing, [
+      { binary: 'DoodleNote.exe', dll: 'ffmpeg.dll' }
+    ])
+    // Run-time backends: the baseline, the same variants in every copy, Vulkan's own.
+    assert.deepEqual(packageCheck.ggmlBackendProblems(dir, [`${bins}/ggml-cpu-x64.dll`]), [
+      `${bins}/ggml-cpu-x64.dll: ggml CPU backend missing`
+    ])
+    assert.deepEqual(packageCheck.ggmlBackendProblems(dir, [`${vulkan}/ggml-cpu-haswell.dll`]), [
+      `${vulkan}/ggml-cpu-haswell.dll: ggml CPU backend missing`
+    ])
+    assert.deepEqual(packageCheck.ggmlBackendProblems(dir, [`${vulkan}/ggml-vulkan.dll`]), [
+      `${vulkan}/ggml-vulkan.dll: ggml Vulkan backend missing`
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

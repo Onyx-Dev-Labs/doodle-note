@@ -144,7 +144,12 @@ jobs:
         run: pnpm --filter desktop package:win
 
       # app.asar must hold only out/** and runtime node_modules: no src/,
-      # scripts/, docs/, tooling, tests or app sourcemaps.
+      # scripts/, docs/, tooling, tests or app sourcemaps. Every DLL a packaged
+      # .node/.dll/.exe imports (PE import and delay-load tables) must be in the
+      # package beside it or beside the exe unless it is a Windows/VC++/driver DLL,
+      # ggml's run-time CPU and Vulkan backends must be there, and the check must
+      # report a ggml-base.dll treated as absent (negative control). The QA package
+      # check below runs the same closure.
       - name: Check Windows app.asar contents
         timeout-minutes: 5
         run: node apps/desktop/scripts/test-windows-package.cjs apps/desktop/release/win-unpacked
