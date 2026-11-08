@@ -843,8 +843,15 @@ namespace DoodleNote.DictationHelper.Tests
                 PendingClipboard.TestPayloadDelayMs = 0;
                 // Leftovers without a state file, and a round-8 record: deleted, never restored from.
                 string prefix = "DoodleNote-Bark-clipboard-" + HelperIdentity.Sanitized;
-                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + "-0123456789abcdef0123456789abcdef.bin"), new byte[] { 1 });
-                System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + "-fedcba9876543210fedcba9876543210.bin.tmp"), new byte[] { 1 });
+                // Orphans older than 10 minutes go; a fresh one (another session's helper may be mid-step) stays.
+                string oldOrphan = System.IO.Path.Combine(dir, prefix + "-0123456789abcdef0123456789abcdef.bin");
+                string oldTmp = System.IO.Path.Combine(dir, prefix + "-fedcba9876543210fedcba9876543210.bin.tmp");
+                string freshOrphan = System.IO.Path.Combine(dir, prefix + "-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bin");
+                System.IO.File.WriteAllBytes(oldOrphan, new byte[] { 1 });
+                System.IO.File.WriteAllBytes(oldTmp, new byte[] { 1 });
+                System.IO.File.WriteAllBytes(freshOrphan, new byte[] { 1 });
+                System.IO.File.SetLastWriteTimeUtc(oldOrphan, DateTime.UtcNow.AddHours(-1));
+                System.IO.File.SetLastWriteTimeUtc(oldTmp, DateTime.UtcNow.AddHours(-1));
                 System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, prefix + ".bin"), new byte[] { 1 });
                 // Another identity whose name starts with ours (X-foo for X): its records are never read or deleted.
                 string otherState = System.IO.Path.Combine(dir, prefix + "-foo-0123456789abcdef0123456789abcdef.state");
@@ -854,7 +861,8 @@ namespace DoodleNote.DictationHelper.Tests
                 System.IO.File.WriteAllBytes(otherPayload, new byte[] { 1 });
                 System.IO.File.WriteAllBytes(otherOrphan, new byte[] { 1 });
                 PendingClipboard.RecoverLeftover("test");
-                Assert.Equal(3, System.IO.Directory.GetFiles(dir).Length, "our orphans and the legacy record are gone; the other identity's three files stay");
+                Assert.Equal(4, System.IO.Directory.GetFiles(dir).Length, "our old orphans and the legacy record are gone; the fresh orphan and the other identity's three files stay");
+                Assert.Equal(true, System.IO.File.Exists(freshOrphan) && !System.IO.File.Exists(oldOrphan) && !System.IO.File.Exists(oldTmp), "only orphans older than 10 minutes are swept");
                 Assert.Equal(true, System.IO.File.Exists(otherState) && System.IO.File.Exists(otherPayload) && System.IO.File.Exists(otherOrphan), "X-foo's record and payloads untouched");
             }
             finally
