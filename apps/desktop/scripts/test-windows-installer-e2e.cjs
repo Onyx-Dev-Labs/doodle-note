@@ -677,8 +677,9 @@ async function scenarioD() {
     console.log(`  log: ${steps.join(' -> ')}`)
     assert.equal(steps.indexOf('recover|recovered|restored') >= 0, true, 'D4: recovered')
     assert.ok(
-      steps.indexOf('recover|recovered|restored') < steps.indexOf('plan|plan-move|journal-resumed'),
-      'D4: recovered before the plan, which resumes the journal'
+      steps.indexOf('recover|recovered|restored') <
+        steps.findIndex((entry) => entry.startsWith('plan|')),
+      'D4: the journal is recovered before the run plans (customInit)'
     )
     assertMoved('D4')
   })
