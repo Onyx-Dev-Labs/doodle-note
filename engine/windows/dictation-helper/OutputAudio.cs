@@ -341,7 +341,9 @@ namespace DoodleNote.DictationHelper
         /// under the lock, false if the lock could not be taken within the timeout. Proves the body
         /// is SKIPPED on a WaitOne timeout rather than run unlocked.
         /// </summary>
+#if DICTATION_TEST
         public static bool ProbeStateLock() { return WithStateLock<bool>(() => true, false); }
+#endif
 
         /// <summary>
         /// Windows can end the helper without warning (the app is killed), so a silence in

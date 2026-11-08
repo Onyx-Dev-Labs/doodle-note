@@ -20,7 +20,22 @@ namespace DoodleNote.DictationHelper
             context = new WindowsFormsSynchronizationContext();
             SynchronizationContext.SetSynchronizationContext(context);
             threadId = Thread.CurrentThread.ManagedThreadId;
+            try
+            {
+                // A message-only window on this (pumping) thread owns the clipboard while a paste is
+                // in flight, so a restore can prove ownership with GetClipboardOwner (see ClipboardText).
+                CreateParams parameters = new CreateParams();
+                parameters.Parent = new IntPtr(-3); // HWND_MESSAGE
+                clipboardWindow = new NativeWindow();
+                clipboardWindow.CreateHandle(parameters);
+            }
+            catch (Exception) { clipboardWindow = null; }
         }
+
+        static NativeWindow clipboardWindow;
+
+        /// <summary>The helper's clipboard owner window, or IntPtr.Zero when it could not be created.</summary>
+        public static IntPtr ClipboardWindow { get { return clipboardWindow != null ? clipboardWindow.Handle : IntPtr.Zero; } }
 
         public static bool OnUiThread { get { return Thread.CurrentThread.ManagedThreadId == threadId; } }
 

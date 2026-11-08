@@ -130,6 +130,17 @@ namespace DoodleNote.DictationHelper
         public static extern bool SetThreadPriority(IntPtr thread, int priority);
         public const int THREAD_PRIORITY_HIGHEST = 2;
 
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returned);
+        [DllImport("advapi32.dll")]
+        static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+        [DllImport("advapi32.dll")]
+        static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);
+        [DllImport("user32.dll")]
+        public static extern bool GetCursorPos(out POINT point);
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetClipboardOwner();
+
         // Clipboard.
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool OpenClipboard(IntPtr owner);
@@ -210,12 +221,17 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Whether the process runs at a higher integrity than this helper. Windows drops
-        /// synthetic input sent to such a window (UIPI), so typing into it cannot work.
+        /// Whether the process runs at a higher mandatory integrity level than this helper. Windows
+        /// drops synthetic input sent to such a window (UIPI) and a low-level hook stops seeing input
+        /// destined for it, so typing into it cannot work and its foreground time is not hook loss.
+        /// Compares integrity levels (TokenIntegrityLevel RIDs), not elevation. A token that cannot be
+        /// opened for query (access denied) is treated as above us; a process that cannot be opened at
+        /// all is not (nothing is known about it).
         /// </summary>
         public static bool RunsAboveUs(uint pid)
         {
-            if (IsElevated(GetCurrentProcess())) return false;
+            int ours = IntegrityOf(GetCurrentProcess());
+            if (ours < 0) return false;
             IntPtr process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             if (process == IntPtr.Zero) return false;
             try
@@ -224,24 +240,49 @@ namespace DoodleNote.DictationHelper
                 if (!OpenProcessToken(process, 0x0008, out token)) return Marshal.GetLastWin32Error() == 5;
                 try
                 {
-                    int elevated, returned;
-                    return GetTokenInformation(token, 20, out elevated, 4, out returned) && elevated != 0;
+                    int theirs = IntegrityRid(token);
+                    if (theirs < 0) return Marshal.GetLastWin32Error() == 5;
+                    return theirs > ours;
                 }
                 finally { CloseHandle(token); }
             }
             finally { CloseHandle(process); }
         }
 
-        static bool IsElevated(IntPtr process)
+        static int ownIntegrity = -2;
+
+        /// <summary>The process's mandatory integrity RID (0x1000 low, 0x2000 medium, 0x3000 high, 0x4000 system), or -1.</summary>
+        static int IntegrityOf(IntPtr process)
         {
+            if (process == GetCurrentProcess() && ownIntegrity != -2) return ownIntegrity;
             IntPtr token;
-            if (!OpenProcessToken(process, 0x0008, out token)) return false;
+            int rid = -1;
+            if (OpenProcessToken(process, 0x0008, out token))
+            {
+                try { rid = IntegrityRid(token); }
+                finally { CloseHandle(token); }
+            }
+            if (process == GetCurrentProcess()) ownIntegrity = rid;
+            return rid;
+        }
+
+        /// <summary>TokenIntegrityLevel (25) -> TOKEN_MANDATORY_LABEL -> the label SID's last sub-authority.</summary>
+        public static int IntegrityRid(IntPtr token)
+        {
+            int needed;
+            GetTokenInformation(token, 25, IntPtr.Zero, 0, out needed);
+            if (needed <= 0 || needed > 4096) return -1;
+            IntPtr buffer = Marshal.AllocHGlobal(needed);
             try
             {
-                int elevated, returned;
-                return GetTokenInformation(token, 20, out elevated, 4, out returned) && elevated != 0;
+                if (!GetTokenInformation(token, 25, buffer, needed, out needed)) return -1;
+                IntPtr sid = Marshal.ReadIntPtr(buffer); // TOKEN_MANDATORY_LABEL.Label.Sid
+                if (sid == IntPtr.Zero) return -1;
+                int count = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+                if (count < 1) return -1;
+                return Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
             }
-            finally { CloseHandle(token); }
+            finally { Marshal.FreeHGlobal(buffer); }
         }
     }
 }

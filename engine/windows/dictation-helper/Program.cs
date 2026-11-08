@@ -314,8 +314,11 @@ namespace DoodleNote.DictationHelper
                         });
                     }
                     break;
+#if DICTATION_TEST
+                // Test-build-only ops (compiled with /define:DICTATION_TEST and enabled only with
+                // DICTATION_HELPER_TEST=1). The shipped helper has none of these: they answer unknown-op.
                 case "__boundary-table":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
                     {
                         byte[] bits = new byte[8192]; // 65536 bits
                         for (int cp = 0; cp <= 0xFFFF; cp++)
@@ -325,49 +328,58 @@ namespace DoodleNote.DictationHelper
                         }
                         Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
                     }
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
                     break;
                 case "__throw":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
-                        work.Async(id, delegate { throw new InvalidOperationException("boom"); });
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    work.Async(id, delegate { throw new InvalidOperationException("boom"); });
                     break;
                 case "__drop-hooks":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
-                        Ui.Post(id, delegate { HoldWatcher.Shared.DropKeyHookForTest(); Wire.Reply(id); });
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    Ui.Post(id, delegate { HoldWatcher.Shared.DropKeyHookForTest(); Wire.Reply(id); });
+                    break;
+                case "__drop-mouse-hook":
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    Ui.Post(id, delegate { HoldWatcher.Shared.DropMouseHookForTest(); Wire.Reply(id); });
+                    break;
+                case "__hooks-state":
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    Ui.Post(id, delegate
+                    {
+                        Wire.Reply(id, true, Wire.Fields("live", HoldWatcher.Shared.HooksLive,
+                            "key", HoldWatcher.Shared.KeyHookInstalled, "mouse", HoldWatcher.Shared.MouseHookInstalled));
+                    });
                     break;
                 case "__watchdog-tick":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
-                        Ui.Post(id, delegate { HoldWatcher.Shared.WatchdogTick(); Wire.Reply(id); });
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    Ui.Post(id, delegate { HoldWatcher.Shared.WatchdogTick(); Wire.Reply(id); });
                     break;
                 case "__runs-above":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
-                        work.Async(id, delegate {
-                            uint pid = (uint)(Wire.Num(request, "pid") ?? 0);
-                            Wire.Reply(id, true, Wire.Fields("pid", (double)pid, "above", Native.RunsAboveUs(pid)));
-                        });
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    work.Async(id, delegate
+                    {
+                        uint pid = (uint)(Wire.Num(request, "pid") ?? 0);
+                        Wire.Reply(id, true, Wire.Fields("pid", (double)pid, "above", Native.RunsAboveUs(pid)));
+                    });
                     break;
                 case "__foreground-above":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
-                        work.Async(id, delegate {
-                            IntPtr fg = Native.GetForegroundWindow();
-                            uint pid = fg == IntPtr.Zero ? 0 : Native.WindowPid(fg);
-                            Wire.Reply(id, true, Wire.Fields("foregroundPid", (double)pid, "above", pid != 0 && Native.RunsAboveUs(pid)));
-                        });
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    work.Async(id, delegate
+                    {
+                        IntPtr fg = Native.GetForegroundWindow();
+                        uint pid = fg == IntPtr.Zero ? 0 : Native.WindowPid(fg);
+                        Wire.Reply(id, true, Wire.Fields("foregroundPid", (double)pid, "above", pid != 0 && Native.RunsAboveUs(pid)));
+                    });
                     break;
                 case "__state-lock-probe":
-                    if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") != null)
-                        work.Async(id, delegate {
-                            int t0 = Environment.TickCount;
-                            bool ran = OutputAudio.ProbeStateLock();
-                            Wire.Reply(id, true, Wire.Fields("ran", ran, "waitedMs", Environment.TickCount - t0));
-                        });
-                    else Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    work.Async(id, delegate
+                    {
+                        int t0 = Environment.TickCount;
+                        bool ran = OutputAudio.ProbeStateLock();
+                        Wire.Reply(id, true, Wire.Fields("ran", ran, "waitedMs", Environment.TickCount - t0));
+                    });
                     break;
+#endif
                 default:
                     Wire.Reply(id, false, Wire.Fields("reason", "unknown-op"));
                     break;

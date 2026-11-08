@@ -52,6 +52,16 @@ namespace DoodleNote.DictationHelper
             catch (System.Runtime.InteropServices.COMException) { return null; }
         }
 
+        /// <summary>The element's IsPassword, or null when it cannot be read (never a guess).</summary>
+        public static bool? TryIsPassword(AutomationElement element)
+        {
+            if (element == null) return null;
+            try { return element.Current.IsPassword; }
+            catch (ElementNotAvailableException) { return null; }
+            catch (InvalidOperationException) { return null; }
+            catch (System.Runtime.InteropServices.COMException) { return null; }
+        }
+
         public static bool IsPassword(AutomationElement element)
         {
             if (element == null) return false;
@@ -139,50 +149,48 @@ namespace DoodleNote.DictationHelper
     }
 
     /// <summary>
-    /// A UI Automation focus-changed subscription whose latest result (RuntimeId, IsPassword,
-    /// process id) is cached, so a per-character safety check during typing is a cheap read of
-    /// the cache rather than a fresh FocusedElement/IsPassword round trip. Used to stop typing
-    /// the instant focus moves to a password control, even one in the same process.
+    /// A UI Automation focus-changed subscription caching the focused element's RuntimeId, its
+    /// IsPassword (null when unreadable) and process id, plus when that was last read. Current()
+    /// refreshes synchronously whenever the cache is older than the caller's limit (or when the
+    /// subscription could not be installed), so the typing guard never relies on a stale answer.
     /// </summary>
     internal sealed class FocusMonitor : IDisposable
     {
         readonly object gate = new object();
         AutomationFocusChangedEventHandler handler;
         string runtimeId;
-        bool isPassword;
+        bool? isPassword;
         int pid;
-        long version;
+        long readAt;
 
         public FocusMonitor()
         {
-            // Seed from the current focus, then follow changes.
             Update(UIA.Focused());
             handler = (sender, e) => Update(sender as AutomationElement);
             try { Automation.AddAutomationFocusChangedEventHandler(handler); }
-            catch (Exception) { handler = null; } // fall back to polling in Current()
+            catch (Exception) { handler = null; } // every Current() call then reads the live focus
         }
 
         void Update(AutomationElement element)
         {
             string rid = UIA.RuntimeId(element);
-            bool pwd = UIA.IsPassword(element);
+            bool? pwd = UIA.TryIsPassword(element);
             int owner = element != null ? UIA.Pid(element) : 0;
             lock (gate)
             {
                 runtimeId = rid;
                 isPassword = pwd;
                 pid = owner;
-                version++;
+                readAt = Stopwatch.GetTimestamp();
             }
         }
 
-        /// <summary>
-        /// The focused element's identity as last seen. When no focus event handler could be
-        /// installed, refresh from the live focus so the check still holds.
-        /// </summary>
-        public void Current(out string rid, out bool pwd, out int owner)
+        /// <summary>The focused element's identity, re-read now if the cache is older than staleMs.</summary>
+        public void Current(int staleMs, out string rid, out bool? pwd, out int owner)
         {
-            if (handler == null) Update(UIA.Focused());
+            bool stale;
+            lock (gate) stale = handler == null || (Stopwatch.GetTimestamp() - readAt) * 1000.0 / Stopwatch.Frequency >= staleMs;
+            if (stale) Update(UIA.Focused());
             lock (gate)
             {
                 rid = runtimeId;
@@ -234,7 +242,7 @@ namespace DoodleNote.DictationHelper
             return facts;
         }
 
-        static bool IsPasswordEdit(IntPtr hwnd)
+        internal static bool IsPasswordEdit(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero) return false;
             const int GWL_STYLE = -16, ES_PASSWORD = 0x20;
@@ -341,6 +349,9 @@ namespace DoodleNote.DictationHelper
             }
             return pid != 0;
         }
+
+        /// <summary>The window is an Edit control with the ES_PASSWORD style (cheap: one GetWindowLong).</summary>
+        public static bool IsPasswordEdit(IntPtr hwnd) { return ElementFacts.IsPasswordEdit(hwnd); }
 
         public static Native.GUITHREADINFO GuiInfo(uint thread)
         {

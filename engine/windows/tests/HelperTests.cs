@@ -379,5 +379,59 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal("restored", muter.Restore(), "given back");
             Assert.Equal(false, device.Muted, "unmuted");
         }
+
+        public static void KeyboardLossIsOneSuspectTickAndAnyCallbackClearsIt()
+        {
+            HookLossDetector key = new HookLossDetector(1);
+            Assert.Equal(false, key.Observe(false, false, false), "quiet tick: nothing");
+            Assert.Equal(false, key.Observe(false, true, false), "a callback: alive");
+            Assert.Equal(true, key.Observe(true, false, false), "the armed key moved with no callback: lost");
+            Assert.Equal(false, key.Observe(true, true, false), "a callback in the same tick is not suspect evidence");
+        }
+
+        public static void MouseLossNeedsTwoConsecutiveSuspectTicks()
+        {
+            HookLossDetector mouse = new HookLossDetector(2);
+            Assert.Equal(false, mouse.Observe(true, false, false), "one cursor move without a callback (an app moving it) is not a loss");
+            Assert.Equal(false, mouse.Observe(false, false, false), "a quiet tick breaks the run");
+            Assert.Equal(false, mouse.Observe(true, false, false), "run restarts at one");
+            Assert.Equal(true, mouse.Observe(true, false, false), "two consecutive suspect ticks: lost");
+            Assert.Equal(false, mouse.Observe(true, false, false), "evidence is cleared once a loss is declared");
+        }
+
+        public static void AHigherIntegrityForegroundOnlyCountsEvidenceThenNeedsTwoTicksAfter()
+        {
+            HookLossDetector key = new HookLossDetector(1);
+            Assert.Equal(false, key.Observe(true, false, true), "above us: counted, never acted on");
+            Assert.Equal(false, key.Observe(true, false, true), "still above us");
+            Assert.Equal(2, key.EvidenceWhileAbove, "evidence kept while above");
+            Assert.Equal(false, key.Observe(true, false, false), "back from it: one suspect tick is not enough");
+            Assert.Equal(true, key.Observe(true, false, false), "two consecutive suspect ticks after it: lost");
+            // A callback after returning proves the hook alive and resets the stricter rule.
+            HookLossDetector alive = new HookLossDetector(1);
+            alive.Observe(true, false, true);
+            Assert.Equal(false, alive.Observe(false, true, false), "callbacks resumed: alive");
+            Assert.Equal(true, alive.Observe(true, false, false), "later, the normal one-tick rule applies again");
+        }
+
+        public static void TheHookRetryDelayGrowsAndCaps()
+        {
+            int delay = 0;
+            int[] expected = { 4000, 8000, 16000, 30000, 30000 };
+            foreach (int want in expected)
+            {
+                delay = HoldWatcher.NextBackoff(delay, 2000);
+                Assert.Equal(want, delay, "retry delay");
+            }
+        }
+
+        public static void TestFacilitiesAreOffWithoutTheSwitch()
+        {
+            // The logic tests are a DICTATION_TEST build, but the facilities still need DICTATION_HELPER_TEST=1.
+            if (Environment.GetEnvironmentVariable("DICTATION_HELPER_TEST") == "1") return;
+            Assert.Equal(false, TestMode.On, "off without the switch");
+            Assert.Equal(null, TestMode.Env("DICTATION_HELPER_STRATEGY"), "no test environment read");
+            Assert.Equal(7, TestMode.Int("DICTATION_HELPER_WATCHDOG_MS", 7), "fallback used");
+        }
     }
 }
