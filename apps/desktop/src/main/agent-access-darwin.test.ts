@@ -2,18 +2,22 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync
 } from 'node:fs'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test, type TestContext } from 'node:test'
@@ -554,10 +558,16 @@ test('round 11: a 220-character target name, directly or through a link, as the 
           return result
         })
         const [base, darwin] = results
-        t.diagnostic(`${via}, ${exists ? 'existing' : 'new'}: base ${base.code ?? 'written'}, darwin ${darwin.code ?? 'written'}`)
+        t.diagnostic(
+          `${via}, ${exists ? 'existing' : 'new'}: base ${base.code ?? 'written'}, darwin ${darwin.code ?? 'written'}`
+        )
         assert.equal(darwin.code, null, 'no ENAMETOOLONG from the temporary name')
         // Written atomically (a new inode) where the base wrote in place; the rest equal.
-        assert.deepEqual({ ...darwin, inPlace: null }, { ...base, inPlace: null }, `${via} ${exists}`)
+        assert.deepEqual(
+          { ...darwin, inPlace: null },
+          { ...base, inPlace: null },
+          `${via} ${exists}`
+        )
       }
     // And through the services: ~/.claude.json linked to the long name.
     withHomes((homes) => {
@@ -577,7 +587,9 @@ test('round 11: a 220-character target name, directly or through a link, as the 
             }
             const service = darwinService(home)
             const status =
-              op === 'status' ? service.status() : service.setClientConnected(client.id, op === 'connect')
+              op === 'status'
+                ? service.status()
+                : service.setClientConnected(client.id, op === 'connect')
             return status.clients.find((c) => c.id === client.id)!.connected
           })
         })
@@ -586,6 +598,193 @@ test('round 11: a 220-character target name, directly or through a link, as the 
       }
     })
   } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Runs `run` with `hook` called before each of these fs functions (the writer's
+ * calls go through the same module object), so a change can be made at an exact
+ * point of the write.
+ */
+const fsModule = createRequire(import.meta.url)('node:fs') as Record<string, unknown>
+function withFsHook(hook: (name: string, args: unknown[]) => void, run: () => void): void {
+  const names = ['accessSync', 'openSync', 'writeFileSync', 'renameSync', 'linkSync']
+  const originals = names.map((name) => fsModule[name] as (...args: unknown[]) => unknown)
+  names.forEach((name, i) => {
+    fsModule[name] = (...args: unknown[]) => {
+      hook(name, args)
+      return originals[i](...args)
+    }
+  })
+  syncBuiltinESMExports()
+  try {
+    run()
+  } finally {
+    names.forEach((name, i) => (fsModule[name] = originals[i]))
+    syncBuiltinESMExports()
+  }
+}
+
+test('round 11: the concurrency contract, a change during the write against the base', (t) => {
+  if (!posix || process.getuid?.() === 0) {
+    t.skip('POSIX permission bits, as non-root')
+    return
+  }
+  const root = mkdtempSync(join(tmpdir(), 'dn-darwin-race-'))
+  const isTemp = (path: unknown): boolean => String(path).endsWith('.tmp')
+  try {
+    let n = 0
+    const setup = (file: number | null): { folder: string; path: string; ino: number | null } => {
+      const folder = join(root, String(n++))
+      mkdirSync(folder)
+      const path = join(folder, 'config.json')
+      if (file !== null) {
+        writeFileSync(path, '{"a":1}')
+        chmodSync(path, file)
+      }
+      return { folder, path, ino: file === null ? null : statSync(path).ino }
+    }
+    // Each case: the change, where it lands in the darwin writer, and the base's
+    // result with the same change at the same moment of its own write (before its
+    // open, or after it).
+    const once = (fire: () => void): (() => void) => {
+      let fired = false
+      return () => {
+        if (!fired) {
+          fired = true
+          fire()
+        }
+      }
+    }
+    const cases: {
+      name: string
+      file: number | null
+      at: (name: string, args: unknown[], path: string) => boolean
+      change: (path: string, folder: string) => void
+      /** The base's write: the change before its open (true) or after it (false). */
+      before: boolean
+      expect?: { mode?: number; leftovers?: number }
+    }[] = [
+      {
+        // Astra C2: writable at the check, 0444 before the temporary file exists.
+        // The darwin writer's open came first, as the base's open would have: written,
+        // and the new 0444 is kept (round 10: replaced, and 0644 restored).
+        name: 'chmod 0444 after the open, before the temporary file',
+        file: 0o644,
+        at: (name, args) => name === 'openSync' && isTemp(args[0]),
+        change: (path) => chmodSync(path, 0o444),
+        before: false
+      },
+      {
+        name: 'chmod 0444 before the open (after the folder check)',
+        file: 0o644,
+        at: (name) => name === 'accessSync',
+        change: (path) => chmodSync(path, 0o444),
+        before: true
+      },
+      {
+        // Another client's atomic rewrite meanwhile, to a read-only file: the name no
+        // longer holds the opened file, so the base's write decides (EACCES).
+        name: 'replaced by a read-only file after the open',
+        file: 0o644,
+        at: (name, args) => name === 'openSync' && isTemp(args[0]),
+        change: (path) => {
+          writeFileSync(`${path}.other`, '{"other":1}')
+          chmodSync(`${path}.other`, 0o444)
+          renameSync(`${path}.other`, path)
+        },
+        before: true
+      },
+      {
+        name: 'the folder made read-only before the temporary file',
+        file: 0o644,
+        at: (name, args) => name === 'openSync' && isTemp(args[0]),
+        change: (_path, folder) => chmodSync(folder, 0o555),
+        before: false
+      },
+      {
+        // A new file: one that appears meanwhile is never replaced (link(2)).
+        name: 'no file; a read-only one appears before it is linked',
+        file: null,
+        at: (name) => name === 'linkSync',
+        change: (path) => {
+          writeFileSync(path, '{"other":1}')
+          chmodSync(path, 0o444)
+        },
+        before: true
+      },
+      {
+        // The residual: a change in the microseconds between the last fstat and the
+        // rename lands on the replaced file. Pinned, so it cannot widen unseen.
+        name: 'residual: chmod 0444 between the last fstat and the rename',
+        file: 0o644,
+        at: (name) => name === 'renameSync',
+        change: (path) => chmodSync(path, 0o444),
+        before: false,
+        expect: { mode: 0o644 }
+      },
+      {
+        // The residual: the folder made read-only between the temporary file and the
+        // rename: the in-place write succeeds, the temporary file cannot be removed.
+        name: 'residual: the folder made read-only before the rename',
+        file: 0o644,
+        at: (name) => name === 'renameSync',
+        change: (_path, folder) => chmodSync(folder, 0o555),
+        before: false,
+        expect: { leftovers: 1 }
+      }
+    ]
+    for (const c of cases) {
+      const base = setup(c.file)
+      let baseResult: ReturnType<typeof writeResult>
+      if (c.before) {
+        c.change(base.path, base.folder)
+        baseResult = writeResult(base.folder, base.path, base.ino, () =>
+          writeFileSync(base.path, '{"b":2}')
+        )
+      } else
+        baseResult = writeResult(base.folder, base.path, base.ino, () => {
+          // The base's own write, opened before the change: open, change, write.
+          const fd = openSync(base.path, 'w')
+          try {
+            c.change(base.path, base.folder)
+            writeFileSync(fd, '{"b":2}')
+          } finally {
+            closeSync(fd)
+          }
+        })
+      const darwin = setup(c.file)
+      const fire = once(() => c.change(darwin.path, darwin.folder))
+      let darwinResult!: ReturnType<typeof writeResult>
+      withFsHook(
+        (name, args) => {
+          if (c.at(name, args, darwin.path)) fire()
+        },
+        () => {
+          darwinResult = writeResult(darwin.folder, darwin.path, darwin.ino, () =>
+            replaceConfigFileBase(darwin.path, '{"b":2}')
+          )
+        }
+      )
+      t.diagnostic(
+        `${c.name}: base ${baseResult.code ?? 'written'} ${baseResult.mode?.toString(8)}, ` +
+          `darwin ${darwinResult.code ?? 'written'} ${darwinResult.mode?.toString(8)}` +
+          (darwinResult.leftovers.length ? `, ${darwinResult.leftovers.length} left` : '')
+      )
+      const expected = {
+        ...baseResult,
+        mode: c.expect?.mode ?? baseResult.mode,
+        leftovers:
+          darwinResult.leftovers.length === (c.expect?.leftovers ?? 0)
+            ? darwinResult.leftovers
+            : ['(none)'],
+        inPlace: null
+      }
+      assert.deepEqual({ ...darwinResult, inPlace: null }, expected, c.name)
+    }
+  } finally {
+    chmodSync(root, 0o755)
     rmSync(root, { recursive: true, force: true })
   }
 })

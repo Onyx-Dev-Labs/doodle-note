@@ -4,10 +4,15 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants as fsConstants,
   existsSync,
+  fchmodSync,
+  fstatSync,
+  linkSync,
   mkdirSync,
   lstatSync,
+  openSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -214,11 +219,24 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  *
  * The rename needs write permission on the folder, not on the file, so it would
  * replace a read-only file the base could not write and fail on a writable file
- * in a read-only folder the base could write. So the temporary file + rename is
- * used only where both writes are allowed (the file, when it exists, and its
- * folder); anywhere else, and if creating the temporary file or the rename is
- * refused anyway (an ACL, a sticky folder, an immutable flag), the base's
- * in-place write, which succeeds or fails (same error) exactly as before.
+ * in a read-only folder the base could write. So the replace is used only where
+ * both writes are allowed, and the file's own permission is decided as the base
+ * decided it, by opening it for writing (round 11; no create, no truncation):
+ * that open is the moment the base's write was allowed, and its descriptor stays
+ * the authority until the last fstat, just before the rename. A change made after
+ * it (chmod 0444) is one the base's write, already open, would have outlived too:
+ * the text is written and the file keeps the mode it has just before the rename. A change made before it
+ * fails the open and the base's write decides. A new file is linked into place
+ * (link(2), never replacing a file that appeared meanwhile). If anything on the
+ * way fails (the open, the temporary file, the link or the rename), or the name
+ * no longer holds the opened file (replaced meanwhile), the original is untouched
+ * and the base's in-place write decides: it succeeds or fails (same error)
+ * exactly as it would have at that moment.
+ *
+ * What remains (the concurrency contract, tested): a mode, owner or ACL change
+ * made in the microseconds between the last fstat (the descriptor is released
+ * there) and the rename lands on the replaced file, not the new one; a temporary file the rename could not consume
+ * is left behind only if the folder became read-only during the write.
  */
 export function replaceConfigFileBase(path: string, next: string): void {
   const target = configWriteTarget(path)
@@ -230,47 +248,61 @@ export function replaceConfigFileBase(path: string, next: string): void {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
   // Not determinable (configWriteTarget), or a folder (or anything else that is
-  // not a file) in the config's place: written as the base wrote it, in place
-  // through the original path, so it fails (or succeeds) exactly as before.
-  if (target === null || (stats !== null && !stats.isFile())) {
+  // not a file) in the config's place, or a read-only folder: written as the base
+  // wrote it, in place through the original path, so it fails (or succeeds)
+  // exactly as before.
+  if (target === null || (stats !== null && !stats.isFile()) || !writable(dirname(target))) {
     writeFileSync(path, next)
     return
   }
-  if (!writable(dirname(target)) || (stats !== null && !writable(target))) {
-    writeFileSync(path, next)
-    return
-  }
-  const mode = stats === null ? null : stats.mode & 0o7777
-  const temporary = temporaryBeside(target)
+  let authority: number | null = null
+  if (stats !== null)
+    try {
+      authority = openSync(target, fsConstants.O_WRONLY)
+    } catch {
+      // Not writable (or gone) now: the base's write decides.
+      writeFileSync(path, next)
+      return
+    }
+  const replacing = authority !== null
+  let temporary: string | null = null
+  let done = false
   try {
-    writeFileSync(temporary, next, { flag: 'wx', mode: mode ?? 0o666 })
-  } catch (error) {
-    // Whatever refused the temporary file (round 11: any error, not only a refusal),
-    // the original is untouched: the base's write decides. A partly written one
-    // (no space) is removed; one that already existed (EEXIST) is not ours.
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST')
+    temporary = temporaryBeside(target)
+    // A new file: the default mode (0666 less the umask), as writeFileSync created
+    // it. A replacement: private until it takes the original's mode below.
+    const fd = openSync(temporary, 'wx', replacing ? 0o600 : 0o666)
+    try {
+      writeFileSync(fd, next)
+      if (authority !== null) {
+        // The mode the file has now (changed after the open: kept), set exactly.
+        const now = fstatSync(authority)
+        const here = lstatSync(target)
+        if (here.ino !== now.ino || here.dev !== now.dev) throw new Error('replaced meanwhile')
+        fchmodSync(fd, now.mode & 0o7777)
+        // Released before the rename (Windows refuses to rename over an open file);
+        // from here on a change lands on the replaced file: the stated residual.
+        closeSync(authority)
+        authority = null
+      }
+    } finally {
+      closeSync(fd)
+    }
+    if (replacing) renameSync(temporary, target)
+    else linkSync(temporary, target)
+    done = true
+  } catch {
+    // The original is untouched: the base's write decides.
+  } finally {
+    if (authority !== null) closeSync(authority)
+    if (temporary !== null && !(done && replacing))
       try {
         unlinkSync(temporary)
       } catch {
-        // never created
+        // never created, or already renamed
       }
-    writeFileSync(path, next)
-    return
   }
-  try {
-    // The mode is subject to the umask on creation; an existing file's is kept exactly.
-    if (mode !== null) chmodSync(temporary, mode)
-    renameSync(temporary, target)
-  } catch (error) {
-    try {
-      unlinkSync(temporary)
-    } catch {
-      // already renamed or removed
-    }
-    // The original is untouched: the base's write decides.
-    if (!refused(error)) throw error
-    writeFileSync(path, next)
-  }
+  if (!done) writeFileSync(path, next)
 }
 
 /** access(2) W_OK (macOS: also honours ACLs and the immutable flags). */
@@ -282,9 +314,6 @@ function writable(path: string): boolean {
     return false
   }
 }
-
-const refused = (error: unknown): boolean =>
-  ['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')
 
 interface McpClientDef {
   id: McpClientId
