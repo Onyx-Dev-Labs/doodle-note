@@ -93,7 +93,22 @@ Var dnLocked
   ${else}
     StrCpy ${OUT} "ask"
   ${endif}
+  !ifdef DN_TEST_ASK_CANCEL
+    ${if} $dnTestAsk == "1"
+      StrCpy ${OUT} "ask"
+    ${endif}
+  !endif
 !macroend
+
+; A harness-only build with DN_TEST_ASK_CANCEL (scripts/test-windows-uninstaller-hooks.nsi,
+; never an installer) runs silently with $dnTestAsk = "1": the policy is "ask" and the
+; prompt answers Cancel by itself, as a user who clicked Cancel would.
+!ifdef DN_TEST_ASK_CANCEL
+  Var dnTestAsk
+  !define DN_ASK_ANSWER "/SD IDCANCEL"
+!else
+  !define DN_ASK_ANSWER ""
+!endif
 
 ; Closes the app running from exactly DIR\DN_APP_EXE. RESULT: none,
 ; closed, running (still running: not allowed, or survived closing), unknown
@@ -111,7 +126,7 @@ Var dnLocked
   ${elseif} ${RESULT} == "10"
     StrCpy ${RESULT} "running"
     ${if} ${POLICY} == "ask"
-      ${if} ${Cmd} `MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK`
+      ${if} ${Cmd} `MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" ${DN_ASK_ANSWER} IDOK`
         StrCpy ${RESULT} "close"
       ${else}
         StrCpy ${RESULT} "cancel"

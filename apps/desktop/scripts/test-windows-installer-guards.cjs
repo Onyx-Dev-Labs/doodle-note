@@ -6,7 +6,7 @@
 //
 //   node scripts/test-windows-installer-guards.cjs [--keep <evidence-dir>]
 const assert = require('node:assert/strict')
-const { execFileSync, spawn } = require('node:child_process')
+const { execFileSync, spawn, spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -225,6 +225,31 @@ async function main() {
     // names (dnTestStep; test builds only: DN_TEST_STEPS is never set for an installer).
     const stepsExe = path.join(sandbox, 'harness-steps.exe')
     compile(stepsExe, ['-DDN_TEST_STEPS=1'])
+    // An uninstaller built from the real windows-installer.nsh with electron-builder's
+    // hook order (test-windows-uninstaller-hooks.nsi; DN_TEST_ASK_CANCEL is never set for
+    // an installer). Its writer writes it into its own install folder.
+    const hooksGuid = `dn-hooks-${path.basename(sandbox)}`
+    const hooksDir = path.join(sandbox, 'hooks', 'Local', 'Programs', 'DoodleNoteHooks')
+    const hooksUninstaller = path.join(hooksDir, 'Uninstall DoodleNoteHooks.exe')
+    const hooksWriter = path.join(sandbox, 'hooks-writer.exe')
+    execFileSync(
+      nsis.path,
+      [
+        '-V2',
+        '-WX',
+        `-DAPP_GUID=${hooksGuid}`,
+        '-DAPP_ID=com.doodlenote.hooks.test',
+        '-DAPP_FILENAME=desktop-hooks',
+        '-DPRODUCT_FILENAME=DoodleNoteHooks',
+        '-DPRODUCT_NAME=DoodleNoteHooks',
+        '-DUNINSTALL_FILENAME=Uninstall DoodleNoteHooks.exe',
+        `-DINSTALLER_NSH=${path.join(desktop, 'build', 'windows-installer.nsh')}`,
+        `-DOUT_FILE=${hooksWriter}`,
+        `-DUNINSTALLER_OUT=${hooksUninstaller}`,
+        path.join(__dirname, 'test-windows-uninstaller-hooks.nsi')
+      ],
+      { env: { ...process.env, ...nsis.env }, stdio: 'inherit' }
+    )
 
     const root = path.join(sandbox, 'Local', 'Programs')
     const profile = path.join(sandbox, 'Roaming', 'desktop')
@@ -1324,6 +1349,58 @@ async function main() {
     total += 1
     assert.ok(alive(d6App.pid), 'the running old app was left alone')
     assert.ok(fs.existsSync(path.join(d6, 'desktop', 'resources', 'app.asar')))
+
+    // Round 7 (P3): the uninstaller's earliest exits are recorded too. electron-builder's
+    // un.onInit calls un.checkAppRunning (customCheckAppRunning) before customUnInit, so a
+    // /S uninstall of the running app (exit code 2) and a cancelled close prompt end
+    // there; the status destinations are set in that hook. The real windows-installer.nsh,
+    // in that order: the status key and the log name the exit.
+    const hooksStatus = `Software\\DoodleNote-InstallStatus\\${hooksGuid}`
+    registryKeys.push(hooksStatus)
+    fs.mkdirSync(hooksDir, { recursive: true })
+    execFileSync(hooksWriter, [], { stdio: 'ignore' })
+    assert.ok(fs.existsSync(hooksUninstaller), 'the hooks uninstaller was written')
+    const hooksApp = runAs(path.join(hooksDir, 'DoodleNoteHooks.exe'))
+    started.push(hooksApp)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const hooksTemp = path.join(sandbox, 'hooks-temp')
+    fs.mkdirSync(hooksTemp, { recursive: true })
+    const hooksLog = path.join(hooksTemp, 'DoodleNote-install-com.doodlenote.hooks.test.log')
+    const uninstall = (args) =>
+      spawnSync(hooksUninstaller, [...args, `_?=${hooksDir}`], {
+        env: { ...process.env, TEMP: hooksTemp, TMP: hooksTemp },
+        stdio: 'ignore',
+        timeout: 120_000
+      })
+    const hooksValues = () =>
+      JSON.parse(
+        powershell(
+          "$k = Get-ItemProperty -LiteralPath ('HKCU:\\' + ($env:DN_DATA | ConvertFrom-Json)); ConvertTo-Json -Compress @($k.LastStep, $k.LastResult, $k.LastReason)",
+          hooksStatus
+        )
+      )
+    const hooksLines = () =>
+      fs.readFileSync(hooksLog).subarray(2).toString('utf16le').trim().split(/\r?\n/)
+    const silentUninstall = uninstall(['/S'])
+    assert.equal(silentUninstall.status, 2, 'a /S uninstall of the running app exits with 2')
+    assert.deepEqual(hooksValues(), ['close', 'exit-2', 'app-running'])
+    assert.match(
+      hooksLines().at(-1),
+      / uninstaller step=close result=exit-2 reason=app-running in=.*DoodleNoteHooks$/
+    )
+    assert.ok(alive(hooksApp.pid), 'the running app was left alone')
+    const cancelled = uninstall(['/ask'])
+    assert.equal(cancelled.error, undefined)
+    assert.deepEqual(hooksValues(), ['close', 'cancelled', 'user-cancelled'])
+    assert.match(
+      hooksLines().at(-1),
+      / uninstaller step=close result=cancelled reason=user-cancelled in=.*DoodleNoteHooks$/
+    )
+    assert.equal(hooksLines().length, 2)
+    assert.ok(alive(hooksApp.pid), 'the running app was left alone')
+    assert.ok(fs.existsSync(path.join(hooksDir, 'DoodleNoteHooks.exe')))
+    reports.push(`uninstaller hooks: ${hooksLines().join(' / ')}`)
+    total += 2
 
     // L2: every decision is recorded where QA can read it after a one-click run:
     // LastStep / LastResult / LastReason / LastRun under the identity's status key,

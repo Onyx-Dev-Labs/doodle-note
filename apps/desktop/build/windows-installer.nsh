@@ -91,7 +91,19 @@
 ; Programs\DoodleNote also matched Programs\DoodleNote QA, and without PowerShell
 ; it fell back to taskkill by image name). Defining this macro also keeps
 ; electron-builder from including that code.
+;
+; It is also the uninstaller's earliest hook: electron-builder's un.onInit calls
+; un.checkAppRunning (this macro) before customUnInit and before the uninstall
+; section, so a /S uninstall with the app running (exit code 2) or a cancelled close
+; prompt ends here. The status destinations are set first, so those exits are
+; recorded too (release-packaging.test.ts pins that order in electron-builder's
+; templates). The installer sets them in customInit, which runs before this, and
+; again here.
 !macro customCheckAppRunning
+  !ifdef DN_PATH_FUNCTIONS
+    StrCpy $dnStatusKey "${DN_STATUS_KEY}"
+    StrCpy $dnStatusLog "${DN_STATUS_LOG}"
+  !endif
   !insertmacro dnClosePolicy $dnClosePolicy
   !ifdef BUILD_UNINSTALLER
     !insertmacro dnEnsureNotRunning "$INSTDIR"

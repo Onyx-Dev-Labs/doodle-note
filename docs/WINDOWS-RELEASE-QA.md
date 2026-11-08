@@ -564,6 +564,18 @@ the move is recorded in two places, by the installer and by a user uninstall:
 | `uninstall` | `uninstalled`, `uninstalled-legacy-removed`, `uninstalled-legacy-kept` | `no-pending-move`, `removed`; `app-running`, `unknown-process`, `user-declined`, `file-in-use`, `identity-check`, or a `pin-*` / `legacy-*` code |
 | `login-item` (log only; `uninstall` is written after it) | `login-item-removed`, `login-item-absent`, `login-item-kept` | `run-value-deleted`, `no-run-value`, `not-ours`; only after `uninstalled-legacy-kept` |
 
+An uninstaller records its earliest exits too: electron-builder's `un.onInit` runs
+the app-running check (`customCheckAppRunning`) before `customUnInit` and the
+uninstall section, so the status destinations are set in that check. A `/S`
+uninstall while the app runs from the install folder records `close` / `exit-2` /
+`app-running` (`uninstaller step=close …` in the log) and exits with 2; a cancelled
+close prompt records `close` / `cancelled` / `user-cancelled`. The one exit nothing
+records is the one-click uninstaller's own "Are you sure?" box answered No: it
+comes before any hook electron-builder offers. The guard harness checks both
+recorded exits with an uninstaller built from `build/windows-installer.nsh` in
+electron-builder's order (`scripts/test-windows-uninstaller-hooks.nsi`), and
+`release-packaging.test.ts` pins that order in electron-builder 26.15.3's templates.
+
 The log also has `note` lines that do not change the registry values
 (`journal-ignored` with the reason the journal was not trusted:
 `journal-foreign`, `journal-incomplete`, `journal-other-dest`, `journal-<check code>`). A run whose

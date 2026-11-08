@@ -1058,3 +1058,85 @@ test('only the identity files may differ between the QA and production packages,
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('the uninstaller records its earliest exits: status is set in the hook electron-builder runs first', () => {
+  // electron-builder 26.15.3's own templates: the hook order this relies on.
+  const require = createRequire(import.meta.url)
+  const builder = require.resolve('electron-builder/package.json')
+  const libPackage = createRequire(builder).resolve('app-builder-lib/package.json')
+  const lib = JSON.parse(readFileSync(libPackage, 'utf8')) as { version: string }
+  // A new electron-builder must be checked against this test (and the harness) first.
+  assert.equal(lib.version, '26.15.3')
+  const templates = join(libPackage, '..', 'templates', 'nsis')
+  const template = (name: string): string => readFileSync(join(templates, name), 'utf8')
+  const uninstaller = template('uninstaller.nsh')
+  const unOnInit = uninstaller.slice(
+    uninstaller.indexOf('Function un.onInit'),
+    uninstaller.indexOf('FunctionEnd', uninstaller.indexOf('Function un.onInit'))
+  )
+  assert.match(
+    uninstaller,
+    /Function un\.checkAppRunning\n\s+!insertmacro CHECK_APP_RUNNING\nFunctionEnd/
+  )
+  const firstCheck = unOnInit.indexOf('call un.checkAppRunning')
+  assert.ok(firstCheck > 0)
+  assert.ok(firstCheck < unOnInit.indexOf('!insertmacro customUnInit'))
+  assert.ok(firstCheck < unOnInit.indexOf('!insertmacro initMultiUser'))
+  // The uninstall section (customUnInstall) comes after un.onInit by construction.
+  assert.ok(
+    uninstaller.indexOf('!insertmacro customUnInstall') >
+      uninstaller.indexOf('FunctionEnd', uninstaller.indexOf('Function un.onInit'))
+  )
+  const check = template('include/allowOnlyOneInstallerInstance.nsh')
+  assert.match(
+    check,
+    /!macro CHECK_APP_RUNNING[^]*?!ifmacrodef customCheckAppRunning\n\s+!insertmacro customCheckAppRunning\n\s+!else/
+  )
+  // The installer runs customInit (.onInit) before CHECK_APP_RUNNING (the install section).
+  assert.match(
+    template('installer.nsi'),
+    /Function \.onInit[^]*?!insertmacro customInit[^]*?FunctionEnd/
+  )
+  assert.match(template('installSection.nsh'), /!insertmacro CHECK_APP_RUNNING/)
+
+  // Ours: the status destinations are the first thing customCheckAppRunning sets.
+  const installer = readFileSync(
+    new URL('../../build/windows-installer.nsh', import.meta.url),
+    'utf8'
+  )
+  const hook = installer.slice(
+    installer.indexOf('!macro customCheckAppRunning'),
+    installer.indexOf('!macroend', installer.indexOf('!macro customCheckAppRunning'))
+  )
+  assert.match(
+    hook,
+    /^!macro customCheckAppRunning\n\s+!ifdef DN_PATH_FUNCTIONS\n\s+StrCpy \$dnStatusKey "\$\{DN_STATUS_KEY\}"\n\s+StrCpy \$dnStatusLog "\$\{DN_STATUS_LOG\}"\n\s+!endif\n\s+!insertmacro dnClosePolicy/
+  )
+  // The hooks harness calls them in the template's order.
+  const harness = readFileSync(
+    new URL('../../scripts/test-windows-uninstaller-hooks.nsi', import.meta.url),
+    'utf8'
+  )
+  const harnessInit = harness.slice(harness.indexOf('Function un.onInit'))
+  assert.ok(
+    harnessInit.indexOf('call un.checkAppRunning') <
+      harnessInit.indexOf('!insertmacro customUnInit')
+  )
+  assert.match(
+    harness,
+    /Function un\.checkAppRunning\n\s+!insertmacro customCheckAppRunning\nFunctionEnd/
+  )
+  assert.match(harness, /!include "\$\{INSTALLER_NSH\}"/)
+  // The test-only "answer Cancel" never reaches an installer: without DN_TEST_ASK_CANCEL the
+  // prompt has no silent default (a one-click uninstaller is silent when it asks).
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  )
+  assert.match(
+    guards,
+    /!ifdef DN_TEST_ASK_CANCEL\n\s+Var dnTestAsk\n\s+!define DN_ASK_ANSWER "\/SD IDCANCEL"\n!else\n\s+!define DN_ASK_ANSWER ""\n!endif/
+  )
+  assert.doesNotMatch(installer, /DN_TEST_ASK_CANCEL|dnTestAsk/)
+  assert.doesNotMatch(builderConfig, /DN_TEST_/)
+})
