@@ -465,8 +465,10 @@ async function scenarioA() {
     console.log(`  log: ${steps.join(' -> ')}`)
     const order = [
       'plan|plan-move|legacy-found',
-      'park|parked|parked',
       'close|close-ok|none',
+      'park|parked|parked',
+      // The copy saved before "uninstall old version", put back in customInstall.
+      'recover|recovered|restored',
       'remove|moved|removed',
       'record|moved|record-written'
     ]
