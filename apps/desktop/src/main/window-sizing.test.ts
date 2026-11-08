@@ -171,7 +171,7 @@ test('only Windows keeps the main window on screen; macOS and Linux are untouche
   assert.equal(keepsMainWindowOnScreen('win32'), true)
   assert.equal(keepsMainWindowOnScreen('darwin'), false)
   assert.equal(keepsMainWindowOnScreen('linux'), false)
-  const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
+  const index = readFileSync(new URL('./index.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const body = index.slice(index.indexOf('function keepMainWindowOnScreen('))
   assert.match(
     body,

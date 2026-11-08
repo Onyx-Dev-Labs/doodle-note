@@ -180,7 +180,7 @@ test('Windows installs move to a DoodleNote folder without forking the install o
   const installer = readFileSync(
     new URL('../../build/windows-installer.nsh', import.meta.url),
     'utf8'
-  )
+  ).replace(/\r\n/g, '\n')
   const config = builderConfig.replace(/\r\n/g, '\n')
   assert.match(config, /^nsis:\n(?: {2}.*\n)*? {2}include: build\/windows-installer\.nsh$/m)
   // The uninstall key derives from appId and the profile (%APPDATA%\desktop, which
