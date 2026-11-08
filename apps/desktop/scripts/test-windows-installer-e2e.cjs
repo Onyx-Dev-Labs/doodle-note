@@ -329,6 +329,24 @@ let seededRun = ''
 function seedLegacyEntries() {
   const oldExe = path.join(OLD, EXE)
   const shortOldExe = path.join(shortPath(OLD), EXE)
+  // The 8.3 cases are only real if the runner has 8.3 names: the seed must differ
+  // from the long path, in the old folder's own name too (not just the user folder).
+  assert.notEqual(
+    shortOldExe.toLowerCase(),
+    oldExe.toLowerCase(),
+    `8.3 names are off on this runner (${oldExe} has no short form): the 8.3 cases cannot run; ` +
+      'use an image with 8.3 names enabled on the system volume (fsutil 8dot3name query C:)'
+  )
+  assert.notEqual(
+    legacyShortName,
+    '',
+    `the old folder ${OLD} has no 8.3 name of its own (8.3 names off for new folders?): the alias case cannot run`
+  )
+  assert.equal(
+    path.basename(path.dirname(shortOldExe)).toLowerCase(),
+    legacyShortName.toLowerCase(),
+    "the seed goes through the old folder's own 8.3 name"
+  )
   seededRun = `"${shortOldExe}"`
   setRunValue(seededRun)
   const entry = {
