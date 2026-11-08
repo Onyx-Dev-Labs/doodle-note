@@ -432,18 +432,28 @@ const VC_RUNTIME_DLLS = new Set(
   ].map((name) => `${name}.dll`)
 )
 
-/** Package-relative binaries allowed to import VC_RUNTIME_DLLS (lower case). */
+/**
+ * The package folders (relative, lower case) whose binaries may import
+ * VC_RUNTIME_DLLS, enumerated exactly as observed in the package (round 11: no
+ * pattern, so no folder pairing that does not exist, such as win-x64 bins under
+ * the -vulkan package, is accepted): node-llama-cpp's three bins folders, and
+ * reflink. Only their own files, not a subfolder's.
+ */
 const VC_RUNTIME_IMPORTERS = [
-  /^resources\/app\.asar\.unpacked\/node_modules\/(node-llama-cpp\/node_modules\/)?@node-llama-cpp\/win-x64(-vulkan)?\/bins\/win-x64(-vulkan)?\/[^/]+\.(dll|node)$/,
-  /^resources\/app\.asar\.unpacked\/node_modules\/@reflink\/reflink-win32-x64-msvc\/[^/]+\.node$/
+  'resources/app.asar.unpacked/node_modules/@node-llama-cpp/win-x64/bins/win-x64',
+  'resources/app.asar.unpacked/node_modules/@node-llama-cpp/win-x64-vulkan/bins/win-x64-vulkan',
+  'resources/app.asar.unpacked/node_modules/node-llama-cpp/node_modules/@node-llama-cpp/win-x64/bins/win-x64',
+  'resources/app.asar.unpacked/node_modules/@reflink/reflink-win32-x64-msvc'
 ]
 
 /** `binary` (package-relative) may rely on the VC++ redistributable for `dll`. */
 function mayImportVcRuntime(binary, dll) {
-  return (
-    VC_RUNTIME_DLLS.has(dll) &&
-    VC_RUNTIME_IMPORTERS.some((pattern) => pattern.test(binary.toLowerCase()))
-  )
+  const path = binary.toLowerCase()
+  const cut = path.lastIndexOf('/')
+  const folder = path.slice(0, cut)
+  const name = path.slice(cut + 1)
+  if (!VC_RUNTIME_DLLS.has(dll) || !VC_RUNTIME_IMPORTERS.includes(folder)) return false
+  return folder.includes('@reflink/') ? name.endsWith('.node') : /\.(dll|node)$/.test(name)
 }
 
 /** Imports that are not files at all: the host process (Electron's node.exe delay-load hook). */
@@ -1538,11 +1548,10 @@ if (require.main === module) {
   if (!target.endsWith('.asar')) {
     const closure = dependencyClosure(target)
     problems.push(
-      ...closure.missing.map(
-        ({ binary, dll }) =>
-          VC_RUNTIME_DLLS.has(dll)
-            ? `${binary}: imports ${dll} (Visual C++ runtime, not part of Windows and not in the package); only VC_RUNTIME_IMPORTERS may rely on the redistributable`
-            : `${binary}: imports ${dll}, which is not in its folder or the app folder and is not a Windows DLL`
+      ...closure.missing.map(({ binary, dll }) =>
+        VC_RUNTIME_DLLS.has(dll)
+          ? `${binary}: imports ${dll} (Visual C++ runtime, not part of Windows and not in the package); only VC_RUNTIME_IMPORTERS may rely on the redistributable`
+          : `${binary}: imports ${dll}, which is not in its folder or the app folder and is not a Windows DLL`
       )
     )
     console.log(

@@ -1349,6 +1349,19 @@ test("the package check requires every bundled DLL a binary imports, and ggml's 
       [`${unpacked}/koffi/build/koffi/win32_x64/koffi.node`, false],
       [`${unpacked}/sherpa-onnx-win-x64/sherpa-onnx-c-api.dll`, false],
       [`${unpacked}/@node-llama-cpp/win-x64/bins/win-x64/sub/other.dll`, false],
+      // Round 11: only the three bins folders that exist, not a pairing of their parts.
+      [`${unpacked}/@node-llama-cpp/win-x64/bins/win-x64-vulkan/other.dll`, false],
+      [`${unpacked}/@node-llama-cpp/win-x64-vulkan/bins/win-x64/other.dll`, false],
+      [
+        `${unpacked}/node-llama-cpp/node_modules/@node-llama-cpp/win-x64-vulkan/bins/win-x64-vulkan/other.dll`,
+        false
+      ],
+      [
+        `${unpacked}/node-llama-cpp/node_modules/@node-llama-cpp/win-x64/bins/win-x64/other.dll`,
+        true
+      ],
+      [`${unpacked}/@reflink/reflink-win32-x64-msvc/other.dll`, false],
+      [`${unpacked}/@reflink/reflink-win32-x64-msvc/sub/reflink.node`, false],
       [`${unpacked}/@node-llama-cpp/linux-x64/bins/linux-x64/llama-addon.node`, false],
       ['resources/engine/doodlenote-bark-helper.exe', false]
     ] as const)
