@@ -51,8 +51,9 @@ test('tests and production builds run as the production identity', () => {
 test('the production identity is exactly what electron-builder.yml and package.json ship', () => {
   const production = appIdentity('production')
   const config = read('electron-builder.yml')
-  assert.match(config, new RegExp(`^appId: ${production.appId.replace(/\./g, '\\.')}$`, 'm'))
-  assert.match(config, new RegExp(`^productName: ${production.productName}$`, 'm'))
+  const lines = config.split('\n')
+  assert.ok(lines.includes(`appId: ${production.appId}`))
+  assert.ok(lines.includes(`productName: ${production.productName}`))
   assert.equal(JSON.parse(read('package.json')).name, production.packageName)
   // Unchanged from before the identity existed: the shipped uninstall key, login
   // item, MCP entry and folders must not move.
