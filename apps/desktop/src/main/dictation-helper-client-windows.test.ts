@@ -33,11 +33,12 @@ process.stdin.on('data', (d) => {
   }
 })
 // Like the Windows helper: closing stdin is the request to leave; clean-up takes a moment.
-process.stdin.on('end', () => { fs.appendFileSync(${JSON.stringify(log)}, 'stdin-closed\\n'); setTimeout(() => { fs.appendFileSync(${JSON.stringify(log)}, 'cleaned-up\\n'); process.exit(0) }, 200) })
-process.on('SIGTERM', () => { fs.appendFileSync(${JSON.stringify(log)}, 'sigterm\\n'); process.exit(0) })
+const LOG = process.argv[2] // passed as an argument, never built into the code
+process.stdin.on('end', () => { fs.appendFileSync(LOG, 'stdin-closed\\n'); setTimeout(() => { fs.appendFileSync(LOG, 'cleaned-up\\n'); process.exit(0) }, 200) })
+process.on('SIGTERM', () => { fs.appendFileSync(LOG, 'sigterm\\n'); process.exit(0) })
 `
   )
-  return { command: process.execPath, args: [script], log }
+  return { command: process.execPath, args: [script, log], log }
 }
 
 const read = async (file: string): Promise<string> => {
@@ -111,7 +112,7 @@ test('the Windows deliver budget grows with the text so a long typing fallback n
 
 test('Windows: a deliver carries a length-sized deadline; macOS sends none', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dictation-deadline-'))
-  const makeHelper = (seenPath: string): string => {
+  const makeHelper = (): string => {
     const file = join(dir, `helper-${Math.random().toString(36).slice(2)}.js`)
     writeFileSync(
       file,
@@ -124,7 +125,7 @@ process.stdin.on('data', (d) => {
   buf += d
   for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
     const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
-    if (req.op === 'deliver') { fs.writeFileSync(${JSON.stringify(seenPath)}, JSON.stringify(req)); send({ event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'paste', verified: true, clipboard: 'restored' }) }
+    if (req.op === 'deliver') { fs.writeFileSync(process.argv[2], JSON.stringify(req)); send({ event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'paste', verified: true, clipboard: 'restored' }) }
     else send({ event: 'reply', id: req.id, ok: true })
   }
 })
@@ -135,7 +136,7 @@ process.stdin.on('data', (d) => {
   const winSeen = join(dir, 'win-seen.json')
   const win = new DictationHelperClient({
     command: process.execPath,
-    args: [makeHelper(winSeen)],
+    args: [makeHelper(), winSeen],
     platform: 'win32'
   })
   try {
@@ -150,7 +151,7 @@ process.stdin.on('data', (d) => {
   const macSeen = join(dir, 'mac-seen.json')
   const mac = new DictationHelperClient({
     command: process.execPath,
-    args: [makeHelper(macSeen)],
+    args: [makeHelper(), macSeen],
     platform: 'darwin'
   })
   try {
@@ -169,7 +170,7 @@ test('Windows: a helper that crashes while the sound is muted is replaced to giv
     script,
     `
 const fs = require('node:fs')
-fs.appendFileSync(${JSON.stringify(starts)}, 'start\\n')
+fs.appendFileSync(process.argv[2], 'start\\n')
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 send({ event: 'ready', pid: process.pid, platform: 'win32' })
 let buf = ''
@@ -186,7 +187,7 @@ process.stdin.on('data', (d) => {
   )
   const client = new DictationHelperClient({
     command: process.execPath,
-    args: [script],
+    args: [script, starts],
     platform: 'win32'
   })
   try {
@@ -275,7 +276,7 @@ test('macOS: a helper that dies after a mute is NOT relaunched by restoreOutput 
     script,
     `
 const fs = require('node:fs')
-fs.appendFileSync(${JSON.stringify(starts)}, 'start\\n')
+fs.appendFileSync(process.argv[2], 'start\\n')
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 send({ event: 'ready', pid: process.pid })
 let buf = ''
@@ -291,7 +292,7 @@ process.stdin.on('data', (d) => {
   )
   const mac = new DictationHelperClient({
     command: process.execPath,
-    args: [script],
+    args: [script, starts],
     platform: 'darwin'
   })
   try {
@@ -404,7 +405,7 @@ function recordingHelper(readyMs: number): { command: string; args: string[]; lo
     script,
     `
 const fs = require('node:fs')
-const note = (line) => fs.appendFileSync(${JSON.stringify(log)}, line + '\\n')
+const note = (line) => fs.appendFileSync(process.argv[2], line + '\\n')
 note('started test=' + (process.env.DICTATION_HELPER_TEST || '') + ' other=' + (process.env.DN_KEEP_ME || '') + ' identity=' + (process.env.DICTATION_HELPER_IDENTITY || ''))
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 let buf = ''
@@ -416,11 +417,11 @@ process.stdin.on('data', (d) => {
     send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
   }
 })
-setTimeout(() => send({ event: 'ready', pid: process.pid, platform: 'test' }), ${readyMs})
+setTimeout(() => send({ event: 'ready', pid: process.pid, platform: 'test' }), Number(process.argv[3]))
 process.stdin.on('end', () => process.exit(0))
 `
   )
-  return { command: process.execPath, args: [script], log }
+  return { command: process.execPath, args: [script, log, String(readyMs)], log }
 }
 
 for (const platform of ['darwin', 'win32'] as const) {
@@ -521,9 +522,10 @@ test('Windows: the helper is told the app identity, which the user environment c
   })
   try {
     assert.ok(await prod.status())
-    assert.match(
-      await read(fake.log),
-      new RegExp(`identity=${BARK_HELPER_IDENTITY.replace(/\./g, '\\.')}\\b`)
+    const lines = (await read(fake.log)).split(/\r?\n/)
+    assert.ok(
+      lines.some((line) => line.endsWith(` identity=${BARK_HELPER_IDENTITY}`)),
+      'the production identity, not the one in the environment'
     )
   } finally {
     await prod.dispose()
