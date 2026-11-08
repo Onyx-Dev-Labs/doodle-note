@@ -37,7 +37,8 @@ Two more packaged smokes use the same setup:
 ```sh
 # Real recorder UI: a ~36 s utterance with no pause is transcribed completely
 # across forced cuts, the saved transcript is in time order, and a forced
-# engine backlog (DOODLENOTE_ASR_TEST_STALL_MS, an inert QA hook) shows and
+# engine backlog (DOODLENOTE_ASR_TEST_STALL_MS, a QA hook honoured only unpackaged or in a
+# DOODLENOTE_CHANNEL=dev package, and capped at 30 s) shows and
 # then clears "Live captions are running behind on this PC".
 node apps/desktop/scripts/smoke-windows-meeting-ui.cjs <packaged-exe> <models> <long.wav> "<phrase>|<phrase>"
 # Model recovery: an updated profile with only the cached Zipformer records at
@@ -375,16 +376,35 @@ Clipboard: the user's content is preserved (a copy made during our save is never
 how long that copy takes is bounded by the slow owner, not by us. Our own write (open, empty, set,
 close) runs on its own thread for at most 1 s; an owner that answered the WM_NULL probe and then
 stalls in WM_DESTROYCLIPBOARD makes the paste give up (typing may still run), and when the owner
-returns the late write puts the user's content back, never ours. From our write until its restore,
-the saved clipboard is also written down (DPAPI-encrypted for the user, in %TEMP% under the app
-identity) and deleted once the restore ran; a helper that ends in between is followed by one that
-puts it back while the clipboard still holds our text.
+returns the late write puts the user's content back, never ours (and tells the app, which updates
+the warning it showed).
 
-Leaving: on every exit path (the app quits, stdin closes, or the helper restarts itself) a
-delivery in progress finishes its restore and its reply first (a quit waits up to 3 s; a restart
-waits for the delivery to end). A restart because provider calls are stuck, or because two
-clipboard readers wait on owners that never render, happens only between deliveries. Clipboard
-readers still waiting in a render are never killed on exit; they finish the render and leave.
+Each paste is a clipboard transaction with a record: the saved clipboard (DPAPI-encrypted for the
+user) and its stage (saved, emptied, written, restoring) in %TEMP% under the app identity, deleted
+only once a restore ran. A failed restore keeps the record and retries (3 s, 10 s, 30 s, 60 s, 120 s,
+before the next delivery, and at the next helper start). Recovery restores only when the clipboard is
+provably ours (the sequence number right after our write, or our transaction's sentinel format with
+our privacy markers) or provably the interrupted stage (emptied and left empty, or a restore cut
+short); text that merely matches is not ownership. **Content that carries any clipboard privacy
+marker (as password managers set) is never written to disk**: that transaction stays in memory, so a
+helper killed between our write and the restore cannot give it back. The encrypted write runs in the
+background; a paste waits for it at most 250 ms (a large clipboard may go ahead before it is on disk).
+
+Leaving: the app asks the helper to quit by closing its stdin (there is no quit op). On every exit
+path (stdin closed, a restart, an unhandled exception) a delivery in progress finishes its restore and
+reply first, and an abandoned clipboard write finishes its rollback: a quit waits up to 3 s for both;
+a restart waits for the delivery to end, and stdin closing meanwhile shortens that to 3 s. Past the
+wait, the transaction record is how the next helper finishes the job. The helper's worst-case exit
+(3 s plus 4 s of bounded clean-up) stays inside the app's 8 s grace. A restart because provider calls
+are stuck, or because two clipboard readers wait on owners that never render, happens only between
+deliveries. Clipboard readers are never killed on exit; one still waiting in a render finishes it
+and leaves. Only the prune timer ends a reader, after 120 s on an owner reported hung.
+
+Known limits of the typing fallback, stated plainly: a custom WinForms control that sets
+ES_WANTRETURN but handles Enter as a dialog key in its own code can still press its AcceptButton (no
+check from outside can see that); and an app whose message loop is ANSI turns characters outside its
+code page (an emoji, for one) into "?" before the box sees them. The read-back then reports the
+delivery as uncertain, but the wrong character is already in the field.
 
 Known limitation: non-Latin scripts and the typing fallback. The paste path handles all of
 Unicode. Typing sends `KEYEVENTF_UNICODE` keys, and surrogate pairs go as one key. Where an IME or
@@ -404,8 +424,12 @@ The client confirms that the worker still holds the file immediately before the 
 right after it. Until that second answer comes back, the new helper is not used: no request reaches
 it, its output is held back, and no hold key is armed. A worker that is busy (loading a model,
 decoding live captions) is waited for, never treated as a lost hold: a hold ends only by an explicit
-release or the worker's exit, which the app sees, so a worker still running after 5 s without an
-answer still holds the file. A helper ended because its hold was really lost counts against the
+release, the worker's exit, or the worker's own 15 s expiry, each of which the app now sees at once.
+Only an answer confirms the hold: a worker that has not answered after 5 s leaves the spawn
+unconfirmed (it goes ahead, nothing is ended), the hold is reported locked:false and Settings says
+so, and a late positive answer brings locked:true back. The confirmation cap plus the worst-case spawn
+path (14 s) stays below the worker's expiry (15 s); both come from one module, which refuses to load
+otherwise. A helper ended because its hold was really lost counts against the
 restart allowance, and the next attempt waits the normal backoff. Only a launch that goes all the
 way through (spawned, confirmed, its first status answered) clears the count of lost holds. Killing a helper whose confirmation failed
 cannot undo what it already ran. Creating the process inside the worker would close that gap, but

@@ -98,7 +98,7 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'helper-stopped':
     'An app stopped responding, so the dictation helper stopped. It has restarted too often to restart on its own; it starts again the next time it is needed. Your text is kept for copying.',
   'line-break-unsupported':
-    "This box doesn't accept Enter from dictation, so nothing was typed. Your text is kept for copying."
+    "DoodleNote won't type line breaks into this box, so nothing was typed. Paste it instead; your text is kept for copying."
 }
 
 /** Copy for the heads-up line under the live pill. */

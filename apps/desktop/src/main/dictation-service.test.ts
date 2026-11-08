@@ -43,6 +43,7 @@ interface Harness {
     delivery: HelperDelivery
     /** Windows: false when the fake helper would not be restarted on its own. */
     willRestart?: boolean
+    clipboardLateListener?: (clipboard: string) => void
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     deliverGuards: DeliveryGuards[]
@@ -226,6 +227,10 @@ function harness(
     helper: {
       available: true,
       willRestart: () => helper.willRestart !== false,
+      onClipboardLate: (listener: (clipboard: string) => void) => {
+        helper.clipboardLateListener = listener
+        return () => {}
+      },
       ...(options.helperBlocked ? { blocked: true } : {}),
       status: async (): Promise<HelperStatus> => {
         helper.statusCalls += 1
@@ -2765,7 +2770,7 @@ test('Windows: why typing stopped, or never started, reaches the recovery card',
     // A supported classic box that does not take Enter from dictation: refused, its own explanation.
     [
       { outcome: 'refused', reason: 'line-break-unsupported', method: 'type' },
-      /doesn't accept Enter from dictation/
+      /won't type line breaks into this box/
     ],
     // Typing stopped part-way: the specific reason is kept, the card says so.
     [
@@ -2819,6 +2824,26 @@ test('Windows: the helper-busy card says "restarting" only while a restart will 
   const card = JSON.stringify(h.overlay.at(-1))
   assert.match(card, /dictation helper stopped/)
   assert.doesNotMatch(card, /is restarting/)
+})
+
+test('Windows: a late clipboard rollback updates the warning the reply caused', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.delivery = {
+    verified: false,
+    clipboard: 'unrestored',
+    clipboardHolds: 'unknown',
+    outcome: 'refused',
+    reason: 'target-unverifiable'
+  }
+  await speak(h, 'some words')
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /could not tell what it holds/)
+  assert.ok(h.helper.clipboardLateListener, 'the service listens for the late rollback')
+  h.helper.clipboardLateListener!('restored')
+  await tick()
+  const card = JSON.stringify(h.overlay.at(-1))
+  assert.doesNotMatch(card, /could not be put back/)
+  assert.equal(h.service.phase, 'recovery', 'the card itself stays')
 })
 
 test('Windows: paste last and a refused paste report the clipboard too', async () => {

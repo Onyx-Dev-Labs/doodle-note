@@ -148,6 +148,8 @@ export interface HelperLike {
   onClick(listener: () => void): () => void
   /** Replace the helper process (it re-arms its triggers when it comes back). */
   restart(): void
+  /** Windows: the last delivery's clipboard rollback finished after its reply (see the client). */
+  onClipboardLate?(listener: (clipboard: string) => void): () => void
   /** Windows: whether a helper that leaves now is started again on its own (absent: assume yes). */
   willRestart?(): boolean
   /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
@@ -406,6 +408,11 @@ export class DictationService {
       deps.helper.onExit(() => this.onHelperExit())
     )
     // Windows: a hook loss/re-install changes what the permissions panel shows; refresh it.
+    if (deps.helper.onClipboardLate) {
+      this.unsubscribe.push(
+        deps.helper.onClipboardLate((clipboard) => this.clipboardLate(clipboard))
+      )
+    }
     if (deps.helper.onHooks) {
       this.unsubscribe.push(deps.helper.onHooks(() => void this.status()))
     }
@@ -1810,6 +1817,23 @@ export class DictationService {
       return null
     }
     return CLIPBOARD_PROBLEM_MESSAGES[problem]
+  }
+
+  /**
+   * Windows: the warning for the last delivery said the clipboard could not be told; its rollback
+   * finished later. The card's line and the panel now say what actually happened (or go away).
+   */
+  private clipboardLate(clipboard: string): void {
+    const problem = clipboardProblem(clipboard, undefined)
+    this.deps.log(`clipboard rollback finished after the reply: ${clipboard}`)
+    if (this.clipboardWarning) {
+      this.clipboardWarning = problem
+        ? { gen: this.clipboardWarning.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+        : null
+      this.render()
+    }
+    if (this.panel?.kind === 'clipboard')
+      this.setPanel(problem ? { kind: 'clipboard', problem } : null, problem ? NOTICE_MS : 0)
   }
 
   private async deliver(

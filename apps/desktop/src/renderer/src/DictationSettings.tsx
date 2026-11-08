@@ -280,7 +280,7 @@ export function DictationSettings(): React.JSX.Element {
             {infoRow(
               'Typing into other apps',
               'No permission needed',
-              'The text goes in through the clipboard and Ctrl+V, and your clipboard is put back afterwards. If the clipboard cannot be used, typing the text instead works only in classic Windows text boxes, such as Notepad: browsers, Electron apps and other apps reachable only through UI Automation get paste only. Apps running as administrator cannot be typed into.'
+              'The text goes in through the clipboard and Ctrl+V, and your clipboard is put back afterwards. If the clipboard cannot be used, typing the text instead works only in classic Windows text boxes, such as Notepad: browsers, Electron apps and other apps reachable only through UI Automation get paste only. Line breaks are typed only into text boxes that accept Enter from dictation (ES_WANTRETURN); elsewhere, text with line breaks is pasted. Apps running as administrator cannot be typed into.'
             )}
             {infoRow(
               `${FEATURE_NAME} helper`,

@@ -149,7 +149,7 @@ export function describeWindowsHelper(
   switch (helper) {
     case 'ready':
       return locked === false
-        ? 'Installed. It starts with DoodleNote and stops when DoodleNote quits. Its last start was checked by its digest only (the speech engine could not hold the file). A later start holds it again; after repeated failures, only once a minute has passed.'
+        ? 'Installed. It starts with DoodleNote and stops when DoodleNote quits. Its last start was not confirmed as held by the speech engine, so it was checked by its digest only. A later start holds it again; after repeated failures, only once a minute has passed.'
         : 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
     case 'checking':
       return 'Checking that the helper is the one this build shipped before it runs.'
