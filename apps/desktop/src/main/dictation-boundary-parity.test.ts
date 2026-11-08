@@ -37,5 +37,5 @@ test('the estimate counts U+0085 (NEL) as a boundary, where JS \\s would not', (
   // 36 × U+0085 was the reviewer's counter-example; TS must match the C# count.
   const text = '\u0085'.repeat(36)
   // 36 units × 16 + 36 boundaries × 70 + 3000 overhead = 6096, as in the C# estimate.
-  assert.equal(helperDeliverEstimateMs(text), 36 * 16 + 36 * 70 + 3000)
+  assert.equal(helperDeliverEstimateMs(text), 36 * 50 + 36 * 70 + 3000)
 })

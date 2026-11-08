@@ -14,7 +14,7 @@ export interface WinDictationEngineHost {
     usingFallback: boolean
     downloadFailed: boolean
   }
-  retryDictationModel(): void
+  retryDictationModel(): 'started' | 'in-progress' | 'unavailable'
 }
 
 export interface WinDictationDevices {

@@ -152,8 +152,11 @@ export function micLooksMuted(state: InputState | null): boolean {
 
 /* ---- Windows delivery timing (must mirror engine/windows/dictation-helper/Delivery.cs) ---- */
 
-/** Per-character typing cost; matches Delivery.cs TypeText pacing and TypeEstimateMs. */
-export const HELPER_TYPE_PER_CHAR_MS = 16
+/**
+ * Per-character typing cost; matches Delivery.cs TypeEstimateMs: the 8 ms pacing, the per-keystroke
+ * password/focus guard and the wait for the target to process each key (43-45 ms measured on Dev04).
+ */
+export const HELPER_TYPE_PER_CHAR_MS = 50
 /** Extra pause at each word boundary (whitespace/punctuation). */
 export const HELPER_TYPE_BOUNDARY_MS = 70
 /** Fixed overhead for validation, confirm and settle in TypeEstimateMs. */

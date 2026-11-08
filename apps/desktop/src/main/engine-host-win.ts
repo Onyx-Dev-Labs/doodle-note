@@ -82,6 +82,10 @@ export class WinEngineHost {
   private parakeetDownloadProgress: number | null = null
   /** The background Parakeet download failed; dictation shows a failure and a retry is offered. */
   private parakeetDownloadFailed = false
+  /** A deliberate close that must start a fresh worker when its exit arrives (a download retry). */
+  private pendingRestart = false
+  /** A download retry is under way; cleared when the new worker reports progress or a result. */
+  private retryInFlight = false
   /** Frames captured while a reloading worker loads its model. */
   private pendingFrames: Array<{ channel: string; samples: Float32Array; sentAt: number }> = []
   private startAfterReload = false
@@ -194,19 +198,26 @@ export class WinEngineHost {
   }
 
   /**
-   * Retry the background Parakeet download (after a failure) when dictation is attempted, not only
-   * after a recording: reload the idle worker so it re-checks and re-downloads the model.
+   * Retry the background Parakeet download after a failure, when dictation is attempted (not only
+   * after a recording). A running worker is closed and, when its exit arrives, a fresh one starts
+   * (pendingRestart), which re-checks and re-downloads the model; with no worker, one starts now.
+   * The failure flag is cleared only when the new worker reports download progress (or a result),
+   * so the retry is real when the caller says "retrying". Returns what happened.
    */
-  retryDictationModel(): void {
-    if (!this.parakeetDownloadFailed || this.sessionActive || this.disposed) return
-    this.parakeetDownloadFailed = false
-    if (this.child && this.ready && !this.unloaded) {
+  retryDictationModel(): 'started' | 'in-progress' | 'unavailable' {
+    if (this.disposed || !this.parakeetDownloadFailed) return 'unavailable'
+    if (this.retryInFlight || this.pendingRestart) return 'in-progress'
+    if (this.sessionActive) return 'unavailable'
+    this.retryInFlight = true
+    if (this.child) {
+      this.pendingRestart = true
       this.unloading = true
       this.ready = false
-      this.child.kill() // the exit handler marks it unloaded; reload re-runs the model check
+      this.child.kill()
+    } else {
+      this.reload()
     }
-    this.unloaded = true
-    this.reload()
+    return 'started'
   }
 
   /** Where dictation's capture control messages go (the dictation capture window). */
@@ -260,12 +271,18 @@ export class WinEngineHost {
     child.on('exit', (code) => {
       if (this.child !== child) return
       if (this.unloading) {
-        // Deliberate idle close: setup stays complete; nothing restarts.
+        // Deliberate close: setup stays complete. Only a download retry starts a fresh worker.
         this.unloading = false
         this.unloaded = true
         this.child = null
+        if (this.pendingRestart && !this.disposed) {
+          this.pendingRestart = false
+          this.reload()
+        }
         return
       }
+      // The worker died on its own: a retry it was running has ended.
+      this.retryInFlight = false
       this.backgroundDownload = false
       if (this.sessionActive && this.startAfterReload) {
         // Crashed while reloading for this recording: finish it the same way
@@ -326,6 +343,11 @@ export class WinEngineHost {
   private handleEngineEvent(event: Record<string, unknown>): void {
     if (event.event === 'status' && event.stage === 'serve_ready') {
       this.liveModelName = typeof event.model === 'string' ? event.model : null
+      if (this.liveModelName === PARAKEET_UNIFIED.name) {
+        // The model is here after all (a retry found it): nothing failed any more.
+        this.parakeetDownloadFailed = false
+        this.retryInFlight = false
+      }
       // Diagnostics only: model, measured decode cost and caption mode.
       console.info(
         `[win-asr] ready model=${String(event.model ?? '')} loadMs=${String(event.loadMs ?? '')} calibrationRtf=${String(event.calibrationRtf ?? '')} captionMode=${String(event.captionMode ?? '')}`
@@ -350,6 +372,7 @@ export class WinEngineHost {
     if (event.event === 'status' && event.stage === 'model_download') {
       if (typeof event.progress === 'number') this.parakeetDownloadProgress = event.progress
       this.parakeetDownloadFailed = false
+      this.retryInFlight = false
       if (!this.backgroundDownload) {
         // Closing the worker now would abort the download it is running.
         this.backgroundDownload = true
@@ -365,6 +388,7 @@ export class WinEngineHost {
       // On a successful upgrade the next serve_ready reports Parakeet; a failure leaves the fallback.
       if (event.stage === 'model_upgraded') this.liveModelName = PARAKEET_UNIFIED.name
       if (event.stage === 'model_download_failed') this.parakeetDownloadFailed = true
+      this.retryInFlight = false
       this.parakeetDownloadProgress = null
       if (!this.sessionActive) this.armIdleTimer()
     }

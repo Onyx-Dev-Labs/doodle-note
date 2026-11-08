@@ -21,7 +21,7 @@ test('Bark asks the Windows engine for a raw dictation capture, and only that', 
         usingFallback: false,
         downloadFailed: false
       }),
-      retryDictationModel: () => {}
+      retryDictationModel: () => 'unavailable' as const
     },
     {
       listInputDevices: async () => [
@@ -68,7 +68,7 @@ test('a refusal from the engine is passed on unchanged', () => {
         usingFallback: true,
         downloadFailed: false
       }),
-      retryDictationModel: () => {}
+      retryDictationModel: () => 'unavailable' as const
     },
     { listInputDevices: async () => [] }
   )

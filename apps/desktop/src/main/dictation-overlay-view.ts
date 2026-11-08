@@ -62,6 +62,11 @@ export interface OverlayContext {
   showStatusMessages: boolean
   /** The app the live session will type into, when the user wants it shown. */
   target: OverlayTarget | null
+  /**
+   * Windows only: the user's clipboard could not be fully put back after this recovery's delivery
+   * attempt; shown on the recovery card's warning line.
+   */
+  clipboardWarning?: string | null
 }
 
 const NONE = { stop: false, cancel: false, copy: false, dismiss: false, view: false, undo: false }
@@ -117,7 +122,11 @@ export function overlaySize(view: OverlayView): Size {
       height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
     }
   }
-  if (view.mode === 'message') return { ...WINDOW.message }
+  if (view.mode === 'message')
+    // A warning line on a card (Windows: the clipboard could not be fully put back) needs room.
+    return view.warning
+      ? { width: WINDOW.message.width, height: WINDOW.message.height + WINDOW.warningLine }
+      : { ...WINDOW.message }
   if (view.mode === 'session') {
     if (view.edge !== 'bottom') {
       const status = view.showStatus && !(view.tone === 'active' && view.title === 'Listening')
@@ -241,7 +250,8 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
         title: RECOVERY_MESSAGES[resting.reason],
         detail: resting.text,
         level: null,
-        controls: { ...NONE, copy: true, dismiss: true }
+        controls: { ...NONE, copy: true, dismiss: true },
+        warning: ctx.clipboardWarning ?? null
       })
     }
     case 'notice': {
@@ -270,13 +280,28 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
   }
 }
 
+/** Windows: how the user's clipboard fared after a paste (see the helper's restore results). */
+export type ClipboardProblem = 'skipped' | 'partial' | 'unrestored'
+
+/** What the overlay says about each clipboard problem. Accurate to what the helper reported. */
+export const CLIPBOARD_PROBLEM_MESSAGES: Record<ClipboardProblem, string> = {
+  skipped: 'Part of your clipboard was too large or could not be kept, so it was not put back.',
+  partial: 'Part of your clipboard could not be put back.',
+  unrestored: 'Your clipboard could not be put back. It now holds the dictated text.'
+}
+
+/** The clipboard problem a helper restore result describes, or null when there is none. */
+export function clipboardProblem(result: string | undefined): ClipboardProblem | null {
+  return result === 'skipped' || result === 'partial' || result === 'unrestored' ? result : null
+}
+
 /** A small panel the service shows after a transform, over the resting pill. */
 export type OverlayPanel =
   | { kind: 'working'; name: string }
   | { kind: 'changed'; name: string }
   | { kind: 'diff'; name: string; segments: DiffSegment[] }
   | { kind: 'learned'; pairs: Array<{ from: string; to: string }> }
-  | { kind: 'clipboard-skipped' }
+  | { kind: 'clipboard'; problem: ClipboardProblem }
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
 export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
@@ -318,11 +343,11 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
         controls: { ...NONE, undo: true, dismiss: true },
         diff: panel.segments
       }
-    case 'clipboard-skipped':
+    case 'clipboard':
       return {
         ...common,
         tone: 'warn',
-        title: 'Your clipboard was too large to put back fully.',
+        title: CLIPBOARD_PROBLEM_MESSAGES[panel.problem],
         controls: { ...NONE, dismiss: true },
         diff: null
       }

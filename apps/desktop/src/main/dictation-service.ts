@@ -74,7 +74,9 @@ import type { PermissionOutcome, PermissionPane } from '../shared/dictation-perm
 import type { CaptureLease, CaptureOwnership } from './capture-ownership'
 import { MAX_CLEANUP_CHARS, buildTransformRequest, validateTransform } from './dictation-cleanup'
 import {
+  CLIPBOARD_PROBLEM_MESSAGES,
   RECOVERY_MESSAGES,
+  clipboardProblem,
   overlayView,
   panelView,
   type OverlayContext,
@@ -93,6 +95,7 @@ import {
 } from './dictation-pipeline'
 import { conflictingShortcuts, diffWords } from '../shared/dictation-transforms'
 import { barkCopy, barkPlatform, type BarkCopy } from '../shared/dictation-platform'
+import type { HelperIntegrityState } from './helper-integrity'
 import type { OverlayAction } from './dictation-overlay'
 
 export interface EngineLike {
@@ -113,7 +116,8 @@ export interface EngineLike {
     downloadFailed: boolean
   }
   /** Windows: retry a failed background model download when dictation is attempted. */
-  retryDictationModel?(): void
+  /** Windows: retry a failed model download; what happened decides the words shown. */
+  retryDictationModel?(): 'started' | 'in-progress' | 'unavailable'
 }
 
 export interface HelperLike {
@@ -191,10 +195,12 @@ export interface DictationDeps {
   /** Picks the platform's words (see dictation-platform.ts). Defaults to macOS. */
   platform?: NodeJS.Platform
   /**
-   * Windows: how the helper on disk compares with its build manifest. 'absent' is missing,
-   * 'damaged' is a hash mismatch, 'ok' otherwise. Absent on macOS (treated as 'ok').
+   * Windows: the helper's integrity (see helper-integrity.ts). 'unchecked' until Bark first needs
+   * the helper, 'checking' while verifying, then 'ok', 'damaged' or 'absent'. Absent on macOS.
    */
-  helperIntegrity?(): 'ok' | 'damaged' | 'absent'
+  helperIntegrity?(): HelperIntegrityState
+  /** Windows: start (or join) the integrity check; it runs asynchronously. */
+  checkHelperIntegrity?(): void
   settings: {
     get(): DictationSettings
     update(patch: DictationSettingsUpdate): DictationSettings
@@ -366,9 +372,13 @@ export class DictationService {
   private lastToggleAt = 0
   private readonly unsubscribe: Array<() => void> = []
   private readonly copy: BarkCopy
+  private readonly windows: boolean
+  /** Windows: the clipboard note for one recovery card (by generation). */
+  private clipboardWarning: { gen: number; message: string } | null = null
 
   constructor(private readonly deps: DictationDeps) {
     this.copy = barkCopy(deps.platform ?? 'darwin')
+    this.windows = barkPlatform(deps.platform ?? 'darwin') === 'win32'
     this.learner = new DictationLearner({
       read: (id) => deps.helper.watchRead(id),
       stop: (id) => deps.helper.watchStop(id),
@@ -567,6 +577,8 @@ export class DictationService {
       this.render()
       return
     }
+    // Windows: Bark is on, so the helper is about to be needed; verify it now (asynchronously).
+    this.deps.checkHelperIntegrity?.()
     this.setToggleShortcut(settings.toggleShortcut)
     const clashes = this.shortcutClashes(settings)
     this.setActionShortcut('paste', settings.pasteLastShortcut, clashes)
@@ -981,8 +993,19 @@ export class DictationService {
       })
       return
     }
-    if (this.deps.helperIntegrity?.() === 'damaged') {
+    const integrity = this.deps.helperIntegrity?.()
+    if (integrity === 'damaged') {
       this.dispatch({ type: 'notice', level: 'error', message: this.copy.helperDamaged })
+      return
+    }
+    if (integrity === 'unchecked' || integrity === 'checking') {
+      // Windows: the helper is verified before it may run; this usually takes well under a second.
+      this.deps.checkHelperIntegrity?.()
+      this.dispatch({
+        type: 'notice',
+        level: 'info',
+        message: `Checking the ${FEATURE_NAME} helper. Try again in a moment.`
+      })
       return
     }
     if (this.deps.helper.blocked) {
@@ -994,12 +1017,18 @@ export class DictationService {
       // A fresh install serves a weaker model while Parakeet downloads; do not dictate on it
       // (the Mac never dictates on a weaker model either).
       if (model.downloadFailed) {
-        // Attempting dictation re-triggers the download, rather than waiting for a recording.
-        this.deps.engine.retryDictationModel?.()
+        // Attempting dictation re-triggers the download, rather than waiting for a recording, and
+        // the words say what actually happened.
+        const retry = this.deps.engine.retryDictationModel?.() ?? 'unavailable'
         this.dispatch({
           type: 'notice',
-          level: 'error',
-          message: `The ${FEATURE_NAME} speech model could not be downloaded. Check your connection; retrying now.`
+          level: retry === 'in-progress' ? 'info' : 'error',
+          message:
+            retry === 'started'
+              ? `The ${FEATURE_NAME} speech model could not be downloaded. Retrying the download now.`
+              : retry === 'in-progress'
+                ? `The ${FEATURE_NAME} speech model download is being retried. Try again when it finishes.`
+                : `The ${FEATURE_NAME} speech model could not be downloaded. Check your connection and try again.`
         })
         return
       }
@@ -1503,7 +1532,16 @@ export class DictationService {
       edge: this.deps.settings.get().pillEdge,
       showLiveText: this.deps.settings.get().showLiveText,
       showStatusMessages: this.deps.settings.get().showStatusMessages,
-      target: this.overlayTarget()
+      target: this.overlayTarget(),
+      ...(this.clipboardWarning
+        ? {
+            clipboardWarning:
+              this.state.resting?.kind === 'recovery' &&
+              this.state.resting.gen === this.clipboardWarning.gen
+                ? this.clipboardWarning.message
+                : null
+          }
+        : {})
     }
     const base = overlayView(this.state, context)
     this.deps.overlay.render(this.panel && this.panelFits() ? panelView(this.panel, base) : base)
@@ -1717,7 +1755,7 @@ export class DictationService {
     this.lastTranscript = text
     // Ask the helper to keep the field only when learning from corrections is on.
     const learn = context?.settings.learnFromEdits === true
-    let clipboardSkipped = false
+    let clipboardResult: string | undefined
     const outcome = await this.deliver(
       context,
       text,
@@ -1726,7 +1764,7 @@ export class DictationService {
       },
       learn ? { watch: true } : undefined,
       (clipboard) => {
-        clipboardSkipped = clipboard === 'skipped'
+        clipboardResult = clipboard
       }
     )
     this.mark(gen, 'deliverEnd')
@@ -1740,9 +1778,14 @@ export class DictationService {
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })
-    // The paste went in, but the user's own clipboard was too large to restore fully: tell them.
-    if (outcome.kind === 'delivered' && clipboardSkipped) {
-      this.setPanel({ kind: 'clipboard-skipped' }, NOTICE_MS)
+    // Windows only: the user's own clipboard could not be fully put back. Say so whatever the
+    // outcome: as a panel after a delivery, on the recovery card's warning line otherwise.
+    const problem = this.windows ? clipboardProblem(clipboardResult) : null
+    if (problem && outcome.kind === 'delivered') {
+      this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
+    } else if (problem) {
+      this.clipboardWarning = { gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+      this.render()
     }
   }
 
@@ -2139,6 +2182,8 @@ export class DictationService {
   /* ---- status ---- */
 
   async status(): Promise<DictationStatus> {
+    // Windows: with Bark off the helper is not started (or verified) just to fill the settings page.
+    if (this.deps.helperIntegrity && !this.deps.settings.get().enabled) return this.snapshotStatus()
     const helper = await this.deps.helper.status()
     if (helper) this.helperStatus = helper
     this.rearmAfterPermissionGrant(helper)
@@ -2198,14 +2243,7 @@ export class DictationService {
       settings,
       phase: this.state.phase,
       permissions,
-      helper:
-        !this.deps.helper.available || this.deps.helperIntegrity?.() === 'absent'
-          ? 'unavailable'
-          : this.deps.helperIntegrity?.() === 'damaged'
-            ? 'damaged'
-            : this.deps.helper.blocked
-              ? 'blocked'
-              : 'ready',
+      helper: this.helperState(settings.enabled),
       toggleShortcut: this.toggleState,
       pasteLastShortcut: this.actionKeys.paste.state,
       copyLastShortcut: this.actionKeys.copy.state,
@@ -2238,6 +2276,26 @@ export class DictationService {
 
   private broadcast(): void {
     this.deps.broadcast(this.snapshotStatus())
+  }
+
+  /** Windows: the integrity verdict changed; the settings page and the pill reflect it. */
+  helperIntegrityChanged(): void {
+    this.broadcast()
+  }
+
+  /** The helper row. macOS: ready or unavailable, as before Windows support. */
+  private helperState(enabled: boolean): DictationStatus['helper'] {
+    if (!this.deps.helperIntegrity) {
+      // macOS: ready or unavailable as before Windows support (blocked is always false there).
+      if (!this.deps.helper.available) return 'unavailable'
+      return this.deps.helper.blocked ? 'blocked' : 'ready'
+    }
+    const integrity = this.deps.helperIntegrity()
+    if (!this.deps.helper.available || integrity === 'absent') return 'unavailable'
+    if (integrity === 'damaged') return 'damaged'
+    if (this.deps.helper.blocked) return 'blocked'
+    if (!enabled) return 'off'
+    return integrity === 'ok' ? 'ready' : 'checking'
   }
 
   /** Exposed for tests: the reducer state, never persisted. */

@@ -58,6 +58,8 @@ interface Harness {
     muteGate: Promise<void> | null
     fnKeyAction: number | null
     inputMonitoring: boolean
+    /** How many times the service asked the helper for its status. */
+    statusCalls: number
     inputMonitoringAccess: 'granted' | 'denied' | 'not-determined' | null
     accessibilityGrantedAfterAsk: boolean | null
     inputMonitoringGrantedAfterAsk: boolean | null
@@ -91,8 +93,10 @@ function harness(
     platform?: NodeJS.Platform
     /** Windows: the helper exists but Windows would not start it. */
     helperBlocked?: boolean
-    /** Windows: how the helper on disk compares with its manifest. */
-    helperIntegrity?: 'ok' | 'damaged' | 'absent'
+    /** Windows: the helper's integrity state (see helper-integrity.ts). */
+    helperIntegrity?: 'unchecked' | 'checking' | 'ok' | 'damaged' | 'absent'
+    /** Windows: called when the service asks for the integrity check to run. */
+    onCheckIntegrity?: () => void
     /** Windows: the dictation model readiness the engine reports. */
     modelState?: {
       ready: boolean
@@ -100,7 +104,7 @@ function harness(
       usingFallback: boolean
       downloadFailed: boolean
     }
-    retryModel?: () => void
+    retryModel?: () => 'started' | 'in-progress' | 'unavailable'
     warm?: () => void
     modelOptions?: {
       localModelLabel: string | null
@@ -145,6 +149,7 @@ function harness(
   }
   let engineBusy = false
   const helper: Harness['helper'] = {
+    statusCalls: 0,
     target: {
       snapshotId: 'x',
       pid: 1,
@@ -187,7 +192,12 @@ function harness(
     channel: 'dev',
     supported: true,
     ...(options.platform ? { platform: options.platform } : {}),
-    ...(options.helperIntegrity ? { helperIntegrity: () => options.helperIntegrity! } : {}),
+    ...(options.helperIntegrity
+      ? {
+          helperIntegrity: () => options.helperIntegrity!,
+          checkHelperIntegrity: () => options.onCheckIntegrity?.()
+        }
+      : {}),
     settings: {
       get: () => settings,
       update: (patch) => Object.assign(settings, patch),
@@ -214,16 +224,19 @@ function harness(
     helper: {
       available: true,
       ...(options.helperBlocked ? { blocked: true } : {}),
-      status: async (): Promise<HelperStatus> => ({
-        accessibility: true,
-        inputMonitoring: helper.inputMonitoring,
-        secureInput: false,
-        conflicts: [],
-        holdActive: false,
-        mouseActive: false,
-        inputMonitoringAccess: helper.inputMonitoringAccess,
-        fnKeyAction: helper.fnKeyAction
-      }),
+      status: async (): Promise<HelperStatus> => {
+        helper.statusCalls += 1
+        return {
+          accessibility: true,
+          inputMonitoring: helper.inputMonitoring,
+          secureInput: false,
+          conflicts: [],
+          holdActive: false,
+          mouseActive: false,
+          inputMonitoringAccess: helper.inputMonitoringAccess,
+          fnKeyAction: helper.fnKeyAction
+        }
+      },
       snapshot: async () => helper.target,
       appInfo: async (ids) => {
         helper.appInfoCalls.push(ids)
@@ -2624,11 +2637,103 @@ test('Windows: a failed model download shows a failure and retries when dictatio
     modelState: { ready: false, downloadProgress: null, usingFallback: true, downloadFailed: true },
     retryModel: () => {
       retried += 1
+      return retried === 1 ? 'started' : 'in-progress'
     }
   })
   h.service.toggle()
   await tick()
-  assert.match(JSON.stringify(h.overlay.at(-1)), /could not be downloaded/)
+  assert.match(
+    JSON.stringify(h.overlay.at(-1)),
+    /could not be downloaded\. Retrying the download now/
+  )
   assert.equal(retried, 1, 'attempting dictation re-triggers the download')
   assert.deepEqual(h.engineCalls, [])
+  // An attempt while a retry already runs says so, instead of claiming a new retry.
+  const running = harness({
+    platform: 'win32',
+    modelState: { ready: false, downloadProgress: null, usingFallback: true, downloadFailed: true },
+    retryModel: () => 'in-progress'
+  })
+  running.service.toggle()
+  await tick()
+  assert.match(JSON.stringify(running.overlay.at(-1)), /download is being retried/)
+})
+
+test('Windows: a clipboard that could not be fully put back is shown, for every outcome', async () => {
+  const delivered = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  delivered.helper.delivery = {
+    outcome: 'delivered',
+    method: 'paste',
+    verified: true,
+    clipboard: 'skipped'
+  }
+  await speak(delivered, 'big clipboard')
+  await tick()
+  assert.match(JSON.stringify(delivered.overlay.at(-1)), /too large or could not be kept/)
+
+  const unrestored = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  unrestored.helper.delivery = {
+    outcome: 'delivered',
+    method: 'paste',
+    verified: true,
+    clipboard: 'unrestored'
+  }
+  await speak(unrestored, 'locked clipboard')
+  await tick()
+  assert.match(
+    JSON.stringify(unrestored.overlay.at(-1)),
+    /could not be put back\. It now holds the dictated text/
+  )
+
+  const uncertain = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  uncertain.helper.delivery = {
+    outcome: 'uncertain',
+    reason: 'insertion-unverifiable',
+    verified: false,
+    clipboard: 'skipped'
+  }
+  await speak(uncertain, 'maybe typed')
+  await tick()
+  assert.equal(uncertain.service.phase, 'recovery')
+  const card = uncertain.overlay.at(-1) as { warning?: string | null }
+  assert.match(String(card.warning), /too large or could not be kept/, 'on the recovery card')
+})
+
+test('macOS never shows the Windows clipboard warnings (parity)', async () => {
+  const h = harness()
+  h.helper.delivery = { outcome: 'delivered', method: 'ax', verified: true, clipboard: 'skipped' }
+  await speak(h, 'mac clipboard')
+  await tick()
+  assert.doesNotMatch(JSON.stringify(h.overlay), /clipboard/i)
+})
+
+test('Windows: an unverified helper is checked before dictation, and Bark off never starts it', async () => {
+  let checks = 0
+  const h = harness({
+    platform: 'win32',
+    helperIntegrity: 'checking',
+    onCheckIntegrity: () => {
+      checks += 1
+    }
+  })
+  const before = checks
+  h.service.toggle()
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Checking the Bark helper/)
+  assert.ok(checks > before, 'the check is started')
+  assert.deepEqual(h.engineCalls, [])
+  assert.equal((await h.service.status()).helper, 'checking')
+
+  const off = harness({
+    platform: 'win32',
+    helperIntegrity: 'unchecked',
+    settings: { enabled: false }
+  })
+  const status = await off.service.status()
+  assert.equal(
+    off.helper.statusCalls,
+    0,
+    'the settings page does not start the helper while Bark is off'
+  )
+  assert.equal(status.helper, 'off')
 })
