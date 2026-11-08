@@ -1,7 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { clipboard, globalShortcut, ipcMain, shell, systemPreferences } from 'electron'
 import type { WebContents } from 'electron'
 import type { AppChannel } from '../shared/app-channel'
@@ -32,7 +30,9 @@ import {
 import type { PermissionPane } from '../shared/dictation-permissions'
 import { privacySettingsUrl } from '../shared/dictation-platform'
 import { CaptureOwnership } from './capture-ownership'
-import { DictationHelperClient } from './dictation-helper-client'
+import { DictationHelperClient, helperSpawnEnv } from './dictation-helper-client'
+import { HelperIntegrity, resolveHelperExpectation } from './helper-integrity'
+import { verifyAuthenticode } from './win-authenticode'
 import { DictationOverlay } from './dictation-overlay'
 import { DictationService, type EngineLike } from './dictation-service'
 import { DictationSettingsStore } from './dictation-settings'
@@ -43,6 +43,8 @@ export interface DictationHostOptions {
   userData: string
   logsDir: string
   helperPath: string
+  /** The app runs packaged (app.isPackaged): only the integrity values baked into the build count. */
+  packaged?: boolean
   /** The speech engine (macOS sidecar, or Bark's Windows engine); dictation is unavailable without it. */
   engine: EngineLike | null
   /** Defaults to the running platform. */
@@ -76,156 +78,6 @@ function microphoneAccess(): MicrophoneAccess {
   }
 }
 
-/** The publisher subject an Authenticode-signed helper must carry (substring match). */
-export const EXPECTED_HELPER_PUBLISHER = 'Onyx Dev Labs'
-
-/**
- * A SHA-256 over the parts of a PE file that signing does NOT change: everything except the
- * optional-header Checksum (4 bytes), the certificate-table data directory entry (8 bytes), and
- * the attribute certificate table itself (appended at the end on signing). So the SAME digest is
- * produced for an unsigned build and for that exact build after signing — a dev build and a signed
- * release are checked by one value — while any other change to the code flips it. Null when the
- * buffer is not a PE image.
- */
-export function stableHelperDigest(buffer: Buffer): string | null {
-  try {
-    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return null // 'MZ'
-    const pe = buffer.readUInt32LE(0x3c)
-    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return null // 'PE\0\0'
-    const optional = pe + 24
-    const magic = buffer.readUInt16LE(optional)
-    const checksumOffset = optional + 64
-    const dataDir = optional + (magic === 0x20b ? 112 : 96) // PE32+ vs PE32
-    const secEntry = dataDir + 4 * 8 // data directory index 4 (certificate table)
-    if (secEntry + 8 > buffer.length) return null
-    const certVa = buffer.readUInt32LE(secEntry)
-    const certSize = buffer.readUInt32LE(secEntry + 4)
-    const certStart = certSize > 0 && certVa > 0 ? certVa : buffer.length
-    const hash = createHash('sha256')
-    hash.update(buffer.subarray(0, checksumOffset))
-    hash.update(buffer.subarray(checksumOffset + 4, secEntry))
-    hash.update(buffer.subarray(secEntry + 8, Math.min(certStart, buffer.length)))
-    return hash.digest('hex')
-  } catch {
-    return null
-  }
-}
-
-/** Whether a PE file carries an Authenticode certificate table (security data directory, entry 4). */
-export function peHasCertificateTable(buffer: Buffer): boolean {
-  try {
-    if (buffer.length < 0x40 || buffer.readUInt16LE(0) !== 0x5a4d) return false
-    const pe = buffer.readUInt32LE(0x3c)
-    if (pe + 24 + 96 > buffer.length || buffer.readUInt32LE(pe) !== 0x00004550) return false
-    const optional = pe + 24
-    const magic = buffer.readUInt16LE(optional)
-    const dataDir = optional + (magic === 0x20b ? 112 : 96)
-    const secEntry = dataDir + 4 * 8
-    if (secEntry + 8 > buffer.length) return false
-    return buffer.readUInt32LE(secEntry + 4) > 0
-  } catch {
-    return false
-  }
-}
-
-/** A validated Authenticode signature with a signer we trust. */
-export interface SignatureVerdict {
-  valid: boolean
-  publisherOk: boolean
-}
-
-/**
- * Verify the helper's Authenticode signature with Windows (Get-AuthenticodeSignature), requiring
- * Status==Valid, the signer subject to contain EXPECTED_HELPER_PUBLISHER, and, when the manifest
- * pins a thumbprint, that thumbprint. Runs once at startup; any failure (no PowerShell, timeout)
- * returns a not-valid verdict so the caller falls back to the digest check.
- */
-export function verifyHelperSignature(
-  helperPath: string,
-  thumbprint: string | null
-): SignatureVerdict {
-  try {
-    const script =
-      "$ErrorActionPreference='Stop';" +
-      `$s=Get-AuthenticodeSignature -LiteralPath ${JSON.stringify(helperPath)};` +
-      '$o=[pscustomobject]@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject;thumb=$s.SignerCertificate.Thumbprint};' +
-      '$o|ConvertTo-Json -Compress'
-    const out = execFileSync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      { timeout: 8000, windowsHide: true }
-    ).toString()
-    const parsed = JSON.parse(out) as { status?: string; subject?: string; thumb?: string }
-    const valid = parsed.status === 'Valid'
-    const subjectOk =
-      typeof parsed.subject === 'string' && parsed.subject.includes(EXPECTED_HELPER_PUBLISHER)
-    const thumbOk =
-      !thumbprint ||
-      (typeof parsed.thumb === 'string' && parsed.thumb.toUpperCase() === thumbprint.toUpperCase())
-    return { valid, publisherOk: subjectOk && thumbOk }
-  } catch {
-    return { valid: false, publisherOk: false }
-  }
-}
-
-interface HelperManifest {
-  sha256?: unknown
-  authenticodeSha256?: unknown
-  thumbprint?: unknown
-}
-
-/**
- * How the helper on disk compares with the manifest written beside it at build time: 'absent'
- * missing, 'damaged' tampered/replaced, 'ok' otherwise (including a dev build with no manifest).
- *
- * The stable Authenticode digest is the primary check and is unchanged by signing, so one value
- * covers unsigned dev builds and signed releases. In addition, when the file carries a certificate
- * table its signature chain and publisher are verified with Windows; a cert table present with an
- * invalid signature or the wrong publisher is 'damaged' (it cannot just "look signed" to pass).
- */
-export function computeHelperIntegrity(
-  helperPath: string,
-  verifySignature: (
-    path: string,
-    thumbprint: string | null
-  ) => SignatureVerdict = verifyHelperSignature
-): 'ok' | 'damaged' | 'absent' {
-  if (!existsSync(helperPath)) return 'absent'
-  let buffer: Buffer
-  try {
-    buffer = readFileSync(helperPath)
-  } catch {
-    return 'ok'
-  }
-  const manifestPath = join(dirname(helperPath), 'dictation-helper.manifest.json')
-  if (!existsSync(manifestPath)) return 'ok' // a dev build with no manifest cannot be checked
-  let manifest: HelperManifest
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as HelperManifest
-  } catch {
-    return 'ok'
-  }
-  // Primary: the signing-invariant digest. A match means the code is exactly the build's.
-  if (typeof manifest.authenticodeSha256 === 'string') {
-    const digest = stableHelperDigest(buffer)
-    if (digest !== manifest.authenticodeSha256) return 'damaged'
-  } else if (typeof manifest.sha256 === 'string') {
-    // Older manifest: fall back to the whole-file hash (only valid for unsigned builds).
-    if (!peHasCertificateTable(buffer)) {
-      const actual = createHash('sha256').update(buffer).digest('hex')
-      if (actual !== manifest.sha256) return 'damaged'
-    }
-  }
-  // Reinforcement: a file that carries a certificate table must actually be validly signed by us,
-  // so a tampered signed exe (or one signed by someone else) cannot pass on the digest alone.
-  if (peHasCertificateTable(buffer)) {
-    const thumbprint = typeof manifest.thumbprint === 'string' ? manifest.thumbprint : null
-    const verdict = verifySignature(helperPath, thumbprint)
-    if (!verdict.valid || !verdict.publisherOk) return 'damaged'
-  }
-  return 'ok'
-}
-
 /** Builds the real service from Electron pieces and registers its IPC. */
 export function createDictationHost(options: DictationHostOptions): {
   service: DictationService
@@ -234,9 +86,34 @@ export function createDictationHost(options: DictationHostOptions): {
   const ownership = new CaptureOwnership()
   const settings = new DictationSettingsStore(options.userData)
   const platform = options.platform ?? process.platform
-  const client = new DictationHelperClient({ command: options.helperPath, platform })
-  // Windows only: a missing/damaged helper is told apart from a launch refusal.
-  const helperIntegrity = platform === 'win32' ? computeHelperIntegrity(options.helperPath) : 'ok'
+  const packaged = options.packaged ?? false
+  // Windows only: the helper's integrity is checked lazily, asynchronously and only right before
+  // it is spawned (so only once Bark is on), never at startup; a damaged helper is never executed.
+  const integrity =
+    platform === 'win32'
+      ? new HelperIntegrity({
+          helperPath: options.helperPath,
+          expectation: () => resolveHelperExpectation(options.helperPath, packaged),
+          verify: verifyAuthenticode,
+          cachePath: join(options.userData, 'helper-integrity.json'),
+          log: (line) => console.error(`[dictation] ${line}`)
+        })
+      : null
+  const client = new DictationHelperClient({
+    command: options.helperPath,
+    platform,
+    ...(integrity
+      ? {
+          verify: () => integrity.ensure().then((verdict) => verdict === 'ok'),
+          // A user's environment must not reach the helper's test facilities; only an unpackaged
+          // run with Bark's test hooks on passes DICTATION_HELPER_* through.
+          env: helperSpawnEnv(
+            process.env,
+            !packaged && process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
+          )
+        }
+      : {})
+  })
   const mapUid = options.inputStateUid
   // Windows only: the same client, with the microphone named the way the helper reads it.
   const helper = mapUid
@@ -281,7 +158,12 @@ export function createDictationHost(options: DictationHostOptions): {
     channel: options.channel,
     supported: options.engine !== null,
     platform,
-    ...(platform === 'win32' ? { helperIntegrity: () => helperIntegrity } : {}),
+    ...(integrity
+      ? {
+          helperIntegrity: () => integrity.state(),
+          checkHelperIntegrity: () => void integrity.ensure()
+        }
+      : {}),
     settings,
     // The meeting recorder holds the microphone before the sidecar session
     // exists; treat that handshake as busy too.
@@ -363,6 +245,7 @@ export function createDictationHost(options: DictationHostOptions): {
   })
 
   route.service = service
+  integrity?.onChange(() => service.helperIntegrityChanged())
   options.onEnabled?.(options.engine !== null && settings.get().enabled)
   const trusted = (event: { sender: WebContents }): boolean => options.isTrustedSender(event.sender)
   ipcMain.handle(DICTATION_GET_STATUS_CHANNEL, (event) =>

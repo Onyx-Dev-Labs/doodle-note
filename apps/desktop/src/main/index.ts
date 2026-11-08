@@ -822,6 +822,7 @@ app.whenReady().then(async () => {
     userData: app.getPath('userData'),
     logsDir: app.getPath('logs'),
     helperPath: resolveDictationHelperBinary(),
+    packaged: app.isPackaged,
     // Bark needs a speech engine and a helper for typing: the Swift engine and helper
     // on macOS, the Parakeet worker and the C# helper on Windows. It is off until the
     // person turns it on in Settings.

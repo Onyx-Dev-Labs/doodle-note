@@ -286,11 +286,15 @@ export function DictationSettings(): React.JSX.Element {
               `${FEATURE_NAME} helper`,
               status.helper === 'ready'
                 ? 'Ready'
-                : status.helper === 'blocked'
-                  ? 'Blocked by Windows'
-                  : status.helper === 'damaged'
-                    ? 'Damaged'
-                    : 'Missing',
+                : status.helper === 'checking'
+                  ? 'Checking…'
+                  : status.helper === 'off'
+                    ? 'Off'
+                    : status.helper === 'blocked'
+                      ? 'Blocked by Windows'
+                      : status.helper === 'damaged'
+                        ? 'Damaged'
+                        : 'Missing',
               describeWindowsHelper(status.helper)
             )}
             {infoRow('Keyboard and mouse hook', hooks.label, hooks.detail)}

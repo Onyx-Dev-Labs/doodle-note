@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   DictationHelperClient,
   WINDOWS_EXIT_GRACE_MS,
+  helperSpawnEnv,
   windowsDeliverBudget
 } from './dictation-helper-client'
 
@@ -353,7 +354,7 @@ test('short transcripts clear the deadline against a C#-faithful estimate helper
     `
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
 send({ event: 'ready', pid: process.pid, platform: 'win32' })
-const PER_CHAR = 16, BOUNDARY = 70, OVERHEAD = 3000, PASTE = 1600
+const PER_CHAR = 50, BOUNDARY = 70, OVERHEAD = 3000, PASTE = 1600
 function estimate(text) {
   const n = text.replace(/\\r\\n/g, '\\n')
   let b = 0
@@ -388,6 +389,123 @@ process.stdin.on('data', (d) => {
         `${JSON.stringify(text)} should type, not be refused`
       )
     }
+  } finally {
+    await client.dispose()
+  }
+})
+
+/** A helper that records every op it receives (and its environment) and readies after `readyMs`. */
+function recordingHelper(readyMs: number): { command: string; args: string[]; log: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-rec-'))
+  const script = join(dir, 'helper.js')
+  const log = join(dir, 'ops.txt')
+  writeFileSync(
+    script,
+    `
+const fs = require('node:fs')
+const note = (line) => fs.appendFileSync(${JSON.stringify(log)}, line + '\\n')
+note('started test=' + (process.env.DICTATION_HELPER_TEST || '') + ' other=' + (process.env.DN_KEEP_ME || ''))
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    note('op ' + req.op)
+    send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
+  }
+})
+setTimeout(() => send({ event: 'ready', pid: process.pid, platform: 'test' }), ${readyMs})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  return { command: process.execPath, args: [script], log }
+}
+
+for (const platform of ['darwin', 'win32'] as const) {
+  test(`${platform}: a ready that arrives after the readiness window ${platform === 'win32' ? 're-arms' : 'does NOT re-arm'} the hold key`, async () => {
+    const fake = recordingHelper(200)
+    const client = new DictationHelperClient({ ...fake, platform, readyTimeoutMs: 50 })
+    try {
+      // Inside the window the ready has not come: the first start fails (as before on both).
+      assert.equal(await client.setHoldKey('rightOption'), 'helper-unavailable')
+      await sleep(400) // the late ready has arrived
+      const ops = await read(fake.log)
+      if (platform === 'win32')
+        assert.match(ops, /op hold-start/, 'Windows re-arms on the late ready')
+      else
+        assert.doesNotMatch(ops, /op hold-start/, 'macOS keeps the base behaviour: no late re-arm')
+    } finally {
+      await client.dispose()
+    }
+  })
+}
+
+test('Windows: a helper that fails its integrity check is never executed (status included)', async () => {
+  const fake = recordingHelper(0)
+  let checks = 0
+  const client = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    verify: async () => {
+      checks += 1
+      return false
+    }
+  })
+  try {
+    assert.equal(await client.status(), null)
+    assert.equal(await client.setHoldKey('rightControl'), 'helper-unavailable')
+    assert.equal(await read(fake.log), '', 'the helper never started')
+    assert.ok(checks >= 2, 'every spawn attempt is gated (status and hold-start)')
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: a verified helper starts, and the check runs again before a respawn', async () => {
+  const fake = recordingHelper(0)
+  let checks = 0
+  const client = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    verify: async () => {
+      checks += 1
+      return true
+    }
+  })
+  try {
+    assert.ok(await client.status())
+    assert.equal(checks, 1)
+    assert.ok(await client.status())
+    assert.equal(checks, 1, 'a running helper is not re-verified per request')
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: DICTATION_HELPER_* never reaches the helper unless the app is in test mode', async () => {
+  const env = {
+    DICTATION_HELPER_TEST: '1',
+    dictation_helper_strategy: 'type',
+    DN_KEEP_ME: 'yes',
+    PATH: 'x'
+  }
+  const clean = helperSpawnEnv(env, false)
+  assert.equal(clean.DICTATION_HELPER_TEST, undefined)
+  assert.equal(clean.dictation_helper_strategy, undefined)
+  assert.equal(clean.DN_KEEP_ME, 'yes')
+  assert.equal(clean.PATH, 'x')
+  assert.equal(helperSpawnEnv(env, true).DICTATION_HELPER_TEST, '1')
+  // End to end: the spawned helper does not see the variable.
+  const fake = recordingHelper(0)
+  const client = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    env: helperSpawnEnv({ ...process.env, DICTATION_HELPER_TEST: '1', DN_KEEP_ME: 'yes' }, false)
+  })
+  try {
+    assert.ok(await client.status())
+    assert.match(await read(fake.log), /started test= other=yes/)
   } finally {
     await client.dispose()
   }

@@ -178,7 +178,8 @@ export interface DictationStatus {
    * blocked (Windows only): Windows refused to run the unsigned helper.
    * damaged (Windows only): the helper does not match its manifest.
    */
-  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable'
+  /** Windows adds checking (being verified before it may run) and off (Bark is off; not started). */
+  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable' | 'checking' | 'off'
   toggleShortcut: ShortcutState
   pasteLastShortcut: ShortcutState
   copyLastShortcut: ShortcutState

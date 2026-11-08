@@ -3,6 +3,29 @@ import { readFileSync } from 'node:fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
+/**
+ * Windows: what Bark's helper must match, baked into the main bundle (inside app.asar, covered by
+ * the app's signature) so a packaged app never trusts the manifest file beside the helper on its
+ * own. Read from the manifest scripts/write-dictation-helper-manifest.cjs writes after the helper
+ * is built (and, in a release, signed); package:win runs that before electron-vite build.
+ * null when there is no Windows helper build (macOS, or a dev build without one).
+ */
+function helperIntegrity(): string {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(resolve('../../engine/.build/windows/dictation-helper.manifest.json'), 'utf8')
+    ) as { authenticodeSha256?: unknown; publisherCn?: unknown; thumbprints?: unknown }
+    if (typeof manifest.authenticodeSha256 !== 'string') return 'null'
+    return JSON.stringify({
+      digest: manifest.authenticodeSha256,
+      publisherCn: typeof manifest.publisherCn === 'string' ? manifest.publisherCn : null,
+      thumbprints: Array.isArray(manifest.thumbprints) ? manifest.thumbprints : []
+    })
+  } catch {
+    return 'null'
+  }
+}
+
 export default defineConfig({
   main: {
     define: {
@@ -22,6 +45,7 @@ export default defineConfig({
       __DOODLENOTE_CHANNEL__: JSON.stringify(
         process.env.DOODLENOTE_CHANNEL === 'dev' ? 'dev' : 'release'
       ),
+      __DOODLENOTE_HELPER_INTEGRITY__: helperIntegrity(),
       __DOODLENOTE_GOOGLE_CLIENT_SECRET__: JSON.stringify(
         process.env.DOODLENOTE_GOOGLE_CLIENT_SECRET?.trim() ?? ''
       )

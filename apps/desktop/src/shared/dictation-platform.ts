@@ -138,15 +138,20 @@ export function privacySettingsUrl(
 }
 
 /**
- * Windows: what the helper row says. ready: running; blocked: Windows would not start
- * it; unavailable: the program is missing from this build.
+ * Windows: what the helper row says. ready: verified and running; checking: being verified;
+ * off: Bark is off, so it is not started; blocked: Windows would not start it; damaged: it does
+ * not match this build; unavailable: the program is missing from this build.
  */
 export function describeWindowsHelper(
-  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable'
+  helper: 'ready' | 'blocked' | 'damaged' | 'unavailable' | 'checking' | 'off'
 ): string {
   switch (helper) {
     case 'ready':
       return 'Installed. It starts with DoodleNote and stops when DoodleNote quits.'
+    case 'checking':
+      return 'Checking that the helper is the one this build shipped before it runs.'
+    case 'off':
+      return `Installed. It starts when ${FEATURE_NAME} is on, after a check that it is the one this build shipped.`
     case 'blocked':
       return "Windows blocked it from starting. Your organization's app control policy may not allow it; a signed build or an allow-list entry fixes this."
     case 'damaged':

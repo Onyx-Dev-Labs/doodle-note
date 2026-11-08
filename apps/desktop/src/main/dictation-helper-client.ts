@@ -33,6 +33,27 @@ export interface HelperLaunch {
   platform?: NodeJS.Platform
   /** Overrides the readiness timeout; for tests that exercise a late ready. */
   readyTimeoutMs?: number
+  /**
+   * Windows: awaited before EVERY spawn (status included); false means the helper must not run
+   * (it failed its integrity check), so it is never executed.
+   */
+  verify?: () => Promise<boolean>
+  /** Windows: the spawn environment (see helperSpawnEnv). Defaults to the app's own. */
+  env?: NodeJS.ProcessEnv
+}
+
+/**
+ * Windows: the helper's environment. DICTATION_HELPER_* variables reach it only when the app itself
+ * runs in Bark's test mode (unpackaged with DOODLENOTE_BARK_TEST_HOOKS=1), so a user's environment
+ * can never switch on helper test facilities. (The shipped helper has none compiled in anyway.)
+ */
+export function helperSpawnEnv(env: NodeJS.ProcessEnv, testMode: boolean): NodeJS.ProcessEnv {
+  if (testMode) return { ...env }
+  const clean: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (!/^DICTATION_HELPER_/i.test(key)) clean[key] = value
+  }
+  return clean
 }
 
 /**
@@ -125,6 +146,8 @@ export class DictationHelperClient {
   private helperReady = false
   /** The child whose triggers have been re-armed, so re-arming runs once per process. */
   private rearmedChild: HelperChild | null = null
+  /** Windows: the integrity check a spawn is waiting on. */
+  private verifying: Promise<boolean> | null = null
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
 
   constructor(
@@ -530,10 +553,31 @@ export class DictationHelperClient {
     if (!this.available) return Promise.resolve(false)
     // Do not spin on a helper that dies immediately.
     if (Date.now() - this.lastExitAt < 500) return Promise.resolve(false)
+    // Windows: verify the helper immediately before every spawn; a damaged helper never runs.
+    if (this.windows && this.launch.verify) {
+      if (!this.verifying) {
+        this.verifying = this.launch.verify().then(
+          (ok) => ok,
+          () => false
+        )
+      }
+      const pending = this.verifying
+      return pending.then((ok) => {
+        if (this.verifying === pending) this.verifying = null
+        if (!ok || this.disposed) return false
+        if (this.child && this.ready) return this.ready
+        return this.spawnChild()
+      })
+    }
+    return this.spawnChild()
+  }
+
+  private spawnChild(): Promise<boolean> {
     let child: HelperChild
     try {
       child = spawn(this.launch.command, this.launch.args ?? [], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        ...(this.windows && this.launch.env ? { env: this.launch.env } : {})
       })
     } catch (error) {
       this.launchError = (error as NodeJS.ErrnoException)?.code ?? 'UNKNOWN'
@@ -567,9 +611,10 @@ export class DictationHelperClient {
           if (this.handleLine(line)) {
             this.launchError = null
             this.helperReady = true
-            // Re-arm the remembered triggers on the actual ready event — not via the ready promise,
-            // which may already have resolved false after a slow (late) Windows readiness.
-            this.rearmTriggers(child)
+            // Windows: re-arm the remembered triggers on the actual ready event, not via the ready
+            // promise, which may already have resolved false after a slow (late) readiness. macOS
+            // keeps the base behaviour (re-arm only when the ready promise resolves true, below).
+            if (this.windows) this.rearmTriggers(child)
             // The backoff resets only once this helper has proved healthy (stayed up a while), so a
             // helper that always crashes right after ready cannot restart every 0.5 s. Only the
             // backoff is reset here, not the per-session total (which is a real ceiling).
@@ -601,6 +646,13 @@ export class DictationHelperClient {
         this.scheduleRestart()
       })
     })
+    if (!this.windows) {
+      // macOS, as before Windows support: re-arm the mouse button and the hold watch on the fresh
+      // process only when it became ready within the readiness window.
+      void this.ready.then((ok) => {
+        if (ok) this.rearmTriggers(child)
+      })
+    }
     return this.ready
   }
 
