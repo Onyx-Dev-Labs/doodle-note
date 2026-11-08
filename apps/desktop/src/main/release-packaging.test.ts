@@ -48,6 +48,10 @@ const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-
     string,
     (here: Buffer, there: Buffer, dirs: { here: string; there: string }) => string | null
   >
+  PACKAGE_DIFFERENCES: Record<string, unknown>
+  versionEntries(data: Buffer): [string, string][]
+  equalExcept(a: Buffer, b: Buffer, start: number, end: number, holes?: [number, number][]): boolean
+  guidText(bytes: Buffer): string
 }
 const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
@@ -1345,4 +1349,77 @@ test('the writes a later run depends on are flushed to disk', () => {
       guards.lastIndexOf('dnMatchValue', deleted)
   )
   assert.equal([...guards.matchAll(/^\s+!insertmacro dnFlushRegistry$/gm)].length, 5)
+})
+
+/** A VS_VERSIONINFO block (wLength, wValueLength, wType, key, value, children), 4-aligned. */
+function versionBlock(key: string, value: Buffer | string | null, children: Buffer[] = []): Buffer {
+  const pad = (b: Buffer): Buffer => Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4)])
+  const text = typeof value === 'string'
+  const valueBytes =
+    value === null ? Buffer.alloc(0) : text ? Buffer.from(`${value}\0`, 'utf16le') : value
+  const head = Buffer.alloc(6)
+  head.writeUInt16LE(text ? valueBytes.length / 2 : valueBytes.length, 2)
+  head.writeUInt16LE(text ? 1 : 0, 4)
+  const body = Buffer.concat([
+    pad(Buffer.concat([head, Buffer.from(`${key}\0`, 'utf16le')])),
+    pad(valueBytes),
+    ...children.map(pad)
+  ])
+  body.writeUInt16LE(body.length, 0)
+  return body
+}
+
+test('round 8 parity: version resources, byte ranges and GUIDs are read exactly', () => {
+  const fixed = Buffer.alloc(52, 7)
+  const info = versionBlock('VS_VERSION_INFO', fixed, [
+    versionBlock('StringFileInfo', null, [
+      versionBlock('040904b0', null, [
+        versionBlock('CompanyName', 'Onyx Dev Labs'),
+        versionBlock('ProductName', 'DoodleNote QA'),
+        versionBlock('OriginalFilename', '')
+      ])
+    ]),
+    versionBlock('VarFileInfo', null, [versionBlock('Translation', Buffer.from([9, 4, 0xb0, 4]))])
+  ])
+  assert.deepEqual(packageCheck.versionEntries(info), [
+    ['VS_VERSION_INFO', fixed.toString('hex')],
+    ['VS_VERSION_INFO/StringFileInfo', ''],
+    ['VS_VERSION_INFO/StringFileInfo/040904b0', ''],
+    ['VS_VERSION_INFO/StringFileInfo/040904b0/CompanyName', 'Onyx Dev Labs'],
+    ['VS_VERSION_INFO/StringFileInfo/040904b0/ProductName', 'DoodleNote QA'],
+    ['VS_VERSION_INFO/StringFileInfo/040904b0/OriginalFilename', ''],
+    ['VS_VERSION_INFO/VarFileInfo', ''],
+    ['VS_VERSION_INFO/VarFileInfo/Translation', '0904b004']
+  ])
+
+  const a = Buffer.from('0123456789abcdef')
+  const b = Buffer.from(a)
+  b[3] = 0
+  b[10] = 0
+  assert.ok(
+    packageCheck.equalExcept(a, b, 0, 16, [
+      [3, 4],
+      [10, 11]
+    ])
+  )
+  assert.ok(
+    packageCheck.equalExcept(a, b, 0, 16, [
+      [10, 11],
+      [2, 5]
+    ])
+  )
+  assert.ok(!packageCheck.equalExcept(a, b, 0, 16, [[3, 4]]))
+  assert.ok(!packageCheck.equalExcept(a, b, 0, 16, [[4, 11]]))
+  assert.ok(!packageCheck.equalExcept(a, b, 0, 16))
+
+  // A helper build's #GUID heap and the class name csc.exe derived from it.
+  assert.equal(
+    packageCheck.guidText(Buffer.from('e67a91aba8330b43b2f2bd19dbdcc1e1', 'hex')),
+    'AB917AE6-33A8-430B-B2F2-BD19DBDCC1E1'
+  )
+  assert.deepEqual(Object.keys(packageCheck.PACKAGE_DIFFERENCES).sort(), [
+    '<productName>.exe',
+    'resources/engine/dictation-helper.exe',
+    'resources/engine/dictation-helper.manifest.json'
+  ])
 })

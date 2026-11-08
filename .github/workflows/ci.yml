@@ -279,9 +279,15 @@ jobs:
       # same app.asar.unpacked files, byte for byte (SHA-256 of every asar entry and
       # every unpacked file), apart from the identity files test-windows-package.cjs
       # allows (IDENTITY_DIFFERENCES: package.json "name"; in out/main/index.js the
-      # identity block and the Bark helper digest). --negative-control then changes
-      # one byte in an unpacked file, an asar entry and out/main/index.js outside
-      # what may differ, and fails unless each is caught (bytes put back).
+      # identity block and the Bark helper digest), and every other file of the two
+      # win-unpacked folders byte for byte as well, apart from PACKAGE_DIFFERENCES
+      # (the exe's product-name strings and ASAR integrity record; the helper's
+      # csc.exe time stamp and module version id; its manifest's digests, which
+      # must describe its own helper) and app-update.yml (production only).
+      # --negative-control then changes one byte in an unpacked file, an asar entry,
+      # out/main/index.js, resources\mcp\cli.js, the exe and the helper (incl. one
+      # inside each allowance's neighbourhood) and adds a feed file to the QA
+      # package, and fails unless each is caught exactly (bytes put back).
       # Built last: it rebuilds out/ with the QA identity.
       - name: Check the QA package ships exactly the production package's files
         timeout-minutes: 15

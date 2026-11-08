@@ -658,6 +658,24 @@ coordination after the identity it is launched with (`DICTATION_HELPER_IDENTITY`
 `%TEMP%\DoodleNote-Bark-output-<appId>.json`), so production and QA no longer
 share it.
 
+CI proves the QA package is the production package apart from its identity
+(`scripts/test-windows-package.cjs --same-files-as … --negative-control`, in
+"Check the QA package ships exactly the production package's files"): every
+app.asar entry, every app.asar.unpacked file and every other file of the two
+`win-unpacked` folders is compared by SHA-256. Only these may differ, each only
+in the stated way: `package.json` `"name"`; in `out/main/index.js` the identity
+block and the helper digest (which must be the package's own); the exe's name
+and, inside it, the version strings `FileDescription` / `InternalName` /
+`ProductName` (each the package's product name) and Electron's ASAR integrity
+record (the package's own app.asar header hash), with every byte outside the
+resource section equal; the Bark helper's csc.exe time stamp and module version
+id (also in its `<PrivateImplementationDetails>` class name, which must be the
+file's own id); the helper manifest's `sha256` / `authenticodeSha256` (which must
+describe that package's helper); and `resources\app-update.yml`, which exactly the
+production package has. The negative control changes one byte in each kind of
+file (including next to each allowance) and adds a feed file to the QA package,
+and requires each to be reported exactly.
+
 Production and QA can run at the same time, but they still share the Windows
 session. While both run, **do not**:
 

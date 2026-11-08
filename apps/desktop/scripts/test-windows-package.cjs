@@ -20,10 +20,18 @@
 // package against the production one), byte for byte: every asar entry is
 // extracted with @electron/asar (the module electron-builder packed it with) and
 // every unpacked file read, and their SHA-256 compared. Only the files in
-// IDENTITY_DIFFERENCES may differ, and only in the way each entry allows.
-// --negative-control (with --same-files-as) then changes one byte in one unpacked
-// file and one byte of one asar entry of this package, checks that each is
-// reported, and puts the byte back.
+// IDENTITY_DIFFERENCES may differ, and only in the way each entry allows. Every
+// other file of the two win-unpacked folders (the exe, Electron's DLLs and paks,
+// locales, licenses, resources\mcp, tray, engine, elevate.exe) must be
+// byte-identical too, apart from PACKAGE_DIFFERENCES (the exe's identity strings
+// and ASAR integrity record, the Bark helper's csc.exe time stamp and module
+// version id, its manifest's digests, which must describe its own helper) and
+// resources\app-update.yml, which exactly the production package has.
+// --negative-control (with --same-files-as) then changes one byte in an unpacked
+// file, an asar entry, out/main/index.js, resources\mcp\cli.js, the exe (code,
+// another version string, the integrity record) and the helper (code, module
+// version id), and adds an app-update.yml to a QA package; each must be reported
+// exactly, and every byte is put back.
 //
 // Lists the asar from its header directly: the file starts with a Chromium pickle
 // holding the JSON directory tree.
@@ -657,7 +665,7 @@ function fileListDifferences(a, b) {
  * Problems when the package at `asar` does not ship exactly the files of `otherDir`,
  * byte for byte, apart from IDENTITY_DIFFERENCES.
  */
-function sameFilesProblems(asar, files, otherDir, { log = console.log, asarApi } = {}) {
+function sameFilesProblems(asar, files, otherDir, { log = console.log, asarApi, cache } = {}) {
   const problems = []
   const otherAsar = path.join(otherDir, 'resources', 'app.asar')
   const api = asarApi ?? asarModule()
@@ -692,6 +700,11 @@ function sameFilesProblems(asar, files, otherDir, { log = console.log, asarApi }
     )
     if (ours.size === 0) problems.push(`${name}: no files`)
   }
+  // Round 8: and every other file of the two win-unpacked folders.
+  if (path.basename(path.dirname(asar)) === 'resources')
+    problems.push(
+      ...packageTreeProblems(path.dirname(path.dirname(asar)), otherDir, api, { log, cache })
+    )
   return problems
 }
 
@@ -755,25 +768,505 @@ function negativeControlProblems(asar, files, otherDir) {
       'differs outside the identity block and the helper digest'
     ]
   ]
+  // Round 8: files outside app.asar: a plain one (the MCP server), the exe
+  // outside its resource section, and the Bark helper outside csc's own bytes.
+  const dir = path.dirname(path.dirname(asar))
+  const exe = packageIdentity(dir, asarModule()).exe
+  const exeBytes = fs.readFileSync(path.join(dir, exe))
+  const text = peHeaders(exeBytes).sections.find((s) => s.name === '.text')
+  const helper = path.join(dir, 'resources', 'engine', 'dictation-helper.exe')
+  cases.push(
+    [
+      'win-unpacked/resources/mcp/cli.js',
+      path.join(dir, 'resources', 'mcp', 'cli.js'),
+      Math.floor(fs.statSync(path.join(dir, 'resources', 'mcp', 'cli.js')).size / 2)
+    ],
+    [
+      `win-unpacked/${exe}`,
+      path.join(dir, exe),
+      text.raw + Math.floor(text.rawSize / 2),
+      'bytes outside the resource section differ'
+    ],
+    [
+      'win-unpacked/resources/engine/dictation-helper.exe',
+      helper,
+      Math.floor(fs.statSync(helper).size / 2),
+      // The changed helper no longer matches its own manifest either.
+      [
+        'win-unpacked/resources/engine/dictation-helper.exe: differs beyond the time stamp and module version id',
+        `win-unpacked/resources/engine/dictation-helper.manifest.json: ${exe}'s manifest does not describe its own helper`
+      ]
+    ]
+  )
+  // ...and each allowance stays narrow: another version string, the ASAR
+  // integrity record and the helper's module version id are still caught.
+  const at = (buffer, part) => part.byteOffset - buffer.byteOffset
+  const resources = peResources(exeBytes)
+  const version = [...resources].find(([key]) => key.startsWith('#16/'))[1].data
+  const company = version.indexOf(Buffer.from('Onyx Dev Labs', 'utf16le'))
+  const integrity = [...resources].find(([key]) => key.startsWith('INTEGRITY/'))
+  const helperBytes = fs.readFileSync(helper)
+  const mvid = clrStreams(helperBytes).get('#GUID')
+  const helperManifestProblem = `win-unpacked/resources/engine/dictation-helper.manifest.json: ${exe}'s manifest does not describe its own helper`
+  cases.push(
+    [
+      `win-unpacked/${exe}`,
+      path.join(dir, exe),
+      at(exeBytes, version) + company,
+      'version entry VS_VERSION_INFO/StringFileInfo/040904b0/CompanyName differs'
+    ],
+    [
+      `win-unpacked/${exe}`,
+      path.join(dir, exe),
+      at(exeBytes, integrity[1].data) + integrity[1].data.length - 6,
+      `resource ${integrity[0]} is not ${exe}'s own app.asar header hash`
+    ],
+    [
+      'win-unpacked/resources/engine/dictation-helper.exe',
+      helper,
+      mvid[0] + 3,
+      [
+        'win-unpacked/resources/engine/dictation-helper.exe: this package: <PrivateImplementationDetails> does not carry its own module version id',
+        helperManifestProblem
+      ]
+    ]
+  )
+  if (company < 0) problems.push('negative control: no CompanyName in the exe version resource')
+  const cache = new Map()
   for (const [label, file, offset, why = 'content differs'] of cases) {
     const found = withFlippedByte(file, offset, () =>
-      sameFilesProblems(asar, files, otherDir, { log: quiet })
+      sameFilesProblems(asar, files, otherDir, { log: quiet, cache })
     )
-    const expected = [`${label}: ${why}`]
+    const expected = Array.isArray(why) ? why : [`${label}: ${why}`]
     const ok = JSON.stringify(found) === JSON.stringify(expected)
+    const what = Array.isArray(why) ? why[0].slice(label.length + 2) : why
     console.log(
-      `  negative control, one byte of ${label}: ${ok ? 'caught' : `NOT caught (${JSON.stringify(found)})`}`
+      `  negative control, one byte of ${label} (${what}): ${ok ? 'caught' : `NOT caught (${JSON.stringify(found)})`}`
     )
     if (!ok)
       problems.push(`negative control: one changed byte in ${label} was not reported exactly`)
   }
-  const after = sameFilesProblems(asar, files, otherDir, { log: quiet })
+  // A feed file in the non-production package is caught (written, checked, removed).
+  const feedHere = path.join(dir, 'resources', 'app-update.yml')
+  const feedThere = path.join(otherDir, 'resources', 'app-update.yml')
+  const hereIdentity = packageIdentity(dir, asarModule())
+  const extra = hereIdentity.key === 'production' ? null : feedHere
+  if (extra && !fs.existsSync(extra) && fs.existsSync(feedThere)) {
+    fs.copyFileSync(feedThere, extra, fs.constants.COPYFILE_EXCL)
+    let found
+    try {
+      found = sameFilesProblems(asar, files, otherDir, { log: quiet, cache })
+    } finally {
+      fs.unlinkSync(extra)
+    }
+    const expected = [
+      `win-unpacked/resources/app-update.yml: the ${hereIdentity.key} package has it (${dir})`
+    ]
+    const ok = JSON.stringify(found) === JSON.stringify(expected)
+    console.log(
+      `  negative control, an app-update.yml in the ${hereIdentity.key} package: ${ok ? 'caught' : `NOT caught (${JSON.stringify(found)})`}`
+    )
+    if (!ok)
+      problems.push('negative control: a feed file in the QA package was not reported exactly')
+  }
+  const after = sameFilesProblems(asar, files, otherDir, { log: quiet, cache })
   if (after.length)
     problems.push(`negative control: the package did not come back intact (${after[0]})`)
   return problems
 }
 
+// ---------------------------------------------------------------------------
+// Round 8: the rest of win-unpacked. Everything outside app.asar and
+// app.asar.unpacked (the exe, Electron's DLLs and paks, locales, licenses,
+// resources\mcp, resources\tray, resources\engine, elevate.exe) must be
+// byte-identical too, apart from PACKAGE_DIFFERENCES and app-update.yml, which
+// only the production package has (the QA build has no feed).
+
+const identities = require(path.join(__dirname, '..', 'src', 'shared', 'app-identities.json'))
+
+/** The identity a package was built for: its app.asar package.json "name". */
+function packageIdentity(dir, api) {
+  const asar = path.join(dir, 'resources', 'app.asar')
+  const { name } = JSON.parse(api.extractFile(asar, 'package.json').toString('utf8'))
+  const [key, identity] =
+    Object.entries(identities).find(([, value]) => value.packageName === name) ?? []
+  if (!identity) throw new Error(`${dir}: package name ${name} is no known identity`)
+  return { key, ...identity, exe: `${identity.productName}.exe` }
+}
+
+/** Where the exe is listed in the tree comparison: its name is the identity's. */
+const EXE = '<productName>.exe'
+
+/** SHA-256 of every file of `dir` outside app.asar(.unpacked), the exe as EXE. */
+function packageTreeHashes(dir, identity) {
+  const out = new Map()
+  for (const rel of listTree(dir)) {
+    if (/^resources\/app\.asar(\.unpacked\/|$)/.test(rel)) continue
+    const key = rel === identity.exe ? EXE : rel
+    out.set(key, sha256(fs.readFileSync(path.join(dir, rel))))
+  }
+  return out
+}
+
+/** A PE file's section table and data directories (PE32 and PE32+), for comparisons. */
+function peHeaders(buffer) {
+  const pe = buffer.readUInt32LE(0x3c)
+  if (buffer.toString('latin1', pe, pe + 4) !== 'PE\0\0') throw new Error('not a PE file')
+  const count = buffer.readUInt16LE(pe + 6)
+  const optional = pe + 24
+  const directories = optional + (buffer.readUInt16LE(optional) === 0x20b ? 112 : 96)
+  const sections = []
+  for (let i = 0; i < count; i++) {
+    const at = optional + buffer.readUInt16LE(pe + 20) + 40 * i
+    sections.push({
+      name: buffer.toString('latin1', at, at + 8).replace(/\0+$/, ''),
+      header: at,
+      virtualSize: buffer.readUInt32LE(at + 8),
+      va: buffer.readUInt32LE(at + 12),
+      rawSize: buffer.readUInt32LE(at + 16),
+      raw: buffer.readUInt32LE(at + 20)
+    })
+  }
+  const directory = (index) => ({
+    at: directories + 8 * index,
+    rva: buffer.readUInt32LE(directories + 8 * index),
+    size: buffer.readUInt32LE(directories + 8 * index + 4)
+  })
+  const sectionAt = (rva) =>
+    sections.find((s) => rva >= s.va && rva < s.va + Math.max(s.virtualSize, s.rawSize))
+  const offset = (rva) => {
+    const section = sectionAt(rva)
+    if (!section) throw new Error(`RVA ${rva} is in no section`)
+    return section.raw + rva - section.va
+  }
+  return { pe, sections, directory, sectionAt, offset }
+}
+
+/** Whether a and b are equal over [start, end), apart from `holes` ([from, to) ranges). */
+function equalExcept(a, b, start, end, holes = []) {
+  let at = start
+  for (const [from, to] of [...holes].sort((x, y) => x[0] - y[0])) {
+    if (from > at && a.compare(b, at, from, at, from) !== 0) return false
+    at = Math.max(at, to)
+  }
+  return at >= end || a.compare(b, at, end, at, end) === 0
+}
+
+/** Every resource of a PE file: `type/name/language` -> { data, codePage }. */
+function peResources(buffer, headers = peHeaders(buffer)) {
+  const root = headers.directory(2)
+  const out = new Map()
+  if (!root.rva) return out
+  const base = headers.offset(root.rva)
+  const label = (id) => {
+    if (!(id & 0x80000000)) return `#${id}`
+    const at = base + (id & 0x7fffffff)
+    return buffer.toString('utf16le', at + 2, at + 2 + 2 * buffer.readUInt16LE(at))
+  }
+  const walk = (at, names, depth) => {
+    if (depth > 3) throw new Error('resource tree deeper than type/name/language')
+    const entries = buffer.readUInt16LE(at + 12) + buffer.readUInt16LE(at + 14)
+    for (let i = 0; i < entries; i++) {
+      const entry = at + 16 + 8 * i
+      const key = [...names, label(buffer.readUInt32LE(entry))]
+      const target = buffer.readUInt32LE(entry + 4)
+      if (target & 0x80000000) walk(base + (target & 0x7fffffff), key, depth + 1)
+      else {
+        const data = base + target
+        const start = headers.offset(buffer.readUInt32LE(data))
+        out.set(key.join('/'), {
+          data: buffer.subarray(start, start + buffer.readUInt32LE(data + 4)),
+          codePage: buffer.readUInt32LE(data + 8)
+        })
+      }
+    }
+  }
+  walk(base, [], 1)
+  return out
+}
+
+/** A VS_VERSIONINFO resource as `[path, value]` pairs (strings as text, the rest as hex). */
+function versionEntries(data) {
+  const out = []
+  const align = (n) => (n + 3) & ~3
+  const block = (at, names) => {
+    const length = data.readUInt16LE(at)
+    const valueLength = data.readUInt16LE(at + 2)
+    const text = data.readUInt16LE(at + 4) === 1
+    let end = at + 6
+    while (data.readUInt16LE(end) !== 0) end += 2
+    const key = [...names, data.toString('utf16le', at + 6, end)]
+    let p = align(end + 2)
+    const value = data.subarray(p, p + (text ? 2 * valueLength : valueLength))
+    out.push([
+      key.join('/'),
+      text ? value.toString('utf16le').replace(/\0+$/, '') : value.toString('hex')
+    ])
+    p = align(p + value.length)
+    while (p < at + length && data.readUInt16LE(p) > 0) {
+      const child = data.readUInt16LE(p)
+      block(p, key)
+      p = align(p + child)
+    }
+  }
+  block(0, [])
+  return out
+}
+
+/** The version strings rcedit sets to the identity's product name (electron-builder's own list). */
+const PRODUCT_NAME_STRINGS = ['FileDescription', 'InternalName', 'ProductName']
+
+/** SHA-256 of an asar's header JSON: what Electron's ASAR integrity resource records. */
+function asarHeaderHash(file) {
+  const fd = fs.openSync(file, 'r')
+  try {
+    const sizes = Buffer.alloc(16)
+    fs.readSync(fd, sizes, 0, 16, 0)
+    const json = Buffer.alloc(sizes.readUInt32LE(12))
+    fs.readSync(fd, json, 0, json.length, 16)
+    return sha256(json)
+  } finally {
+    fs.closeSync(fd)
+  }
+}
+
+/**
+ * Why two packages' exes differ beyond what their identities allow, or null. The
+ * PE layout must be the same; every byte outside the resource section must be
+ * equal apart from the two sizes the resource section has (data directory 2 and
+ * the section's VirtualSize); and the resources must be the same set with the
+ * same data, apart from (1) the version strings FileDescription, InternalName
+ * and ProductName, which must each be that package's own product name, and (2)
+ * Electron's ASAR integrity record, which must be the SHA-256 of that package's
+ * own app.asar header. Bytes of the resource section that no resource uses (its
+ * directory tables and padding) are not compared.
+ */
+function exeDifference(here, there, context) {
+  const [a, b] = [peHeaders(here), peHeaders(there)]
+  const rsrc = (h) => h.sectionAt(h.directory(2).rva)
+  const [ra, rb] = [rsrc(a), rsrc(b)]
+  if (!ra || !rb) return 'no resource section'
+  if (here.length !== there.length) return `size ${here.length} / ${there.length}`
+  const layout = (h) => h.sections.map((s) => [s.name, s.va, s.rawSize, s.raw].join(':')).join(',')
+  if (layout(a) !== layout(b) || ra.header !== rb.header) return 'section layout differs'
+  const holes = [
+    [a.directory(2).at + 4, a.directory(2).at + 8],
+    [ra.header + 8, ra.header + 12],
+    [ra.raw, ra.raw + ra.rawSize]
+  ]
+  if (!equalExcept(here, there, 0, here.length, holes))
+    return 'bytes outside the resource section differ'
+  const [resA, resB] = [peResources(here, a), peResources(there, b)]
+  for (const key of new Set([...resA.keys(), ...resB.keys()])) {
+    const [x, y] = [resA.get(key), resB.get(key)]
+    if (!x || !y) return `resource ${key} only in one package`
+    if (x.codePage !== y.codePage) return `resource ${key}: code page differs`
+    if (key.startsWith('INTEGRITY/')) {
+      for (const [record, side] of [
+        [x, context.here],
+        [y, context.there]
+      ]) {
+        const expected = JSON.stringify([
+          { file: 'resources\\app.asar', alg: 'SHA256', value: side.asarHeader }
+        ])
+        if (record.data.toString('utf8') !== expected)
+          return `resource ${key} is not ${side.identity.exe}'s own app.asar header hash`
+      }
+      continue
+    }
+    if (key.startsWith('#16/')) {
+      const [va, vb] = [new Map(versionEntries(x.data)), new Map(versionEntries(y.data))]
+      for (const entry of new Set([...va.keys(), ...vb.keys()])) {
+        const name = entry.split('/').pop()
+        if (
+          /^VS_VERSION_INFO\/StringFileInfo\/[0-9a-f]{8}\//i.test(entry) &&
+          PRODUCT_NAME_STRINGS.includes(name)
+        ) {
+          if (
+            va.get(entry) !== context.here.identity.productName ||
+            vb.get(entry) !== context.there.identity.productName
+          )
+            return `version string ${name} is not each package's product name (${va.get(entry)} / ${vb.get(entry)})`
+        } else if (va.get(entry) !== vb.get(entry)) return `version entry ${entry} differs`
+      }
+      continue
+    }
+    if (x.data.compare(y.data) !== 0) return `resource ${key} differs`
+  }
+  return null
+}
+
+/** The .NET metadata streams of a managed PE file: name -> [start, end) file offsets. */
+function clrStreams(buffer, headers = peHeaders(buffer)) {
+  const cli = headers.directory(14)
+  if (!cli.rva) throw new Error('not a .NET assembly')
+  const root = headers.offset(buffer.readUInt32LE(headers.offset(cli.rva) + 8))
+  if (buffer.readUInt32LE(root) !== 0x424a5342) throw new Error('no metadata root')
+  let at = root + 16 + buffer.readUInt32LE(root + 12)
+  const count = buffer.readUInt16LE(at + 2)
+  at += 4
+  const streams = new Map()
+  for (let i = 0; i < count; i++) {
+    const offset = buffer.readUInt32LE(at)
+    const size = buffer.readUInt32LE(at + 4)
+    let end = at + 8
+    while (buffer[end] !== 0) end++
+    streams.set(buffer.toString('latin1', at + 8, end), [root + offset, root + offset + size])
+    at = (end + 4) & ~3
+  }
+  return streams
+}
+
+/** A GUID's 16 bytes (little-endian fields) as Windows prints it: {AB917AE6-33A8-...}. */
+function guidText(bytes) {
+  const hex = (b) => b.toString('hex').toUpperCase()
+  const reversed = (b) => hex(Buffer.from(b).reverse())
+  return `${reversed(bytes.subarray(0, 4))}-${reversed(bytes.subarray(4, 6))}-${reversed(bytes.subarray(6, 8))}-${hex(bytes.subarray(8, 10))}-${hex(bytes.subarray(10, 16))}`
+}
+
+const PRIVATE_DETAILS = Buffer.from('<PrivateImplementationDetails>{', 'latin1')
+
+/**
+ * Why two Bark helper builds differ beyond what csc.exe 4.x's lack of
+ * /deterministic explains, or null. Each package build recompiles the helper;
+ * csc then writes a new COFF time stamp, a new module version id (the #GUID heap,
+ * one GUID) and that id again in the name of its <PrivateImplementationDetails>
+ * class (#Strings). Every other byte must be equal, and in each file that class
+ * name must hold that file's own module version id.
+ */
+function helperDifference(here, there) {
+  if (here.length !== there.length) return `size ${here.length} / ${there.length}`
+  const [a, b] = [peHeaders(here), peHeaders(there)]
+  const [sa, sb] = [clrStreams(here, a), clrStreams(there, b)]
+  if (a.pe !== b.pe || JSON.stringify([...sa]) !== JSON.stringify([...sb]))
+    return 'metadata layout differs'
+  const guid = sa.get('#GUID')
+  const strings = sa.get('#Strings')
+  if (!guid || guid[1] - guid[0] !== 16 || !strings) return 'not one module version id'
+  const holes = [
+    [a.pe + 8, a.pe + 12],
+    [guid[0], guid[1]]
+  ]
+  for (const [buffer, name] of [
+    [here, 'this package'],
+    [there, 'the other package']
+  ]) {
+    const mvid = guidText(buffer.subarray(guid[0], guid[1]))
+    for (
+      let at = buffer.indexOf(PRIVATE_DETAILS, strings[0]);
+      at >= 0 && at < strings[1];
+      at = buffer.indexOf(PRIVATE_DETAILS, at + 1)
+    ) {
+      const start = at + PRIVATE_DETAILS.length
+      if (buffer.toString('latin1', start, start + 37) !== `${mvid}}`)
+        return `${name}: <PrivateImplementationDetails> does not carry its own module version id`
+      holes.push([start, start + 36])
+    }
+  }
+  return equalExcept(here, there, 0, here.length, holes)
+    ? null
+    : 'differs beyond the time stamp and module version id'
+}
+
+/**
+ * The package-level files that may differ between two identity packages, and how
+ * (`check(here, there, context)` -> null when expected, else what is wrong).
+ * `context.here` / `context.there`: { dir, identity, asarHeader }.
+ */
+const PACKAGE_DIFFERENCES = {
+  [EXE]: exeDifference,
+  'resources/engine/dictation-helper.exe': (here, there) => helperDifference(here, there),
+  // Each manifest describes its own helper; nothing else in it may differ.
+  'resources/engine/dictation-helper.manifest.json': (here, there, context) => {
+    const { stableDigest } = require('./authenticode-digest.mjs')
+    const sides = [
+      [here, context.here],
+      [there, context.there]
+    ].map(([buffer, side]) => {
+      const manifest = JSON.parse(buffer.toString('utf8'))
+      const helper = fs.readFileSync(
+        path.join(side.dir, 'resources', 'engine', 'dictation-helper.exe')
+      )
+      return { manifest, sha: sha256(helper), digest: stableDigest(helper), side }
+    })
+    for (const { manifest, sha, digest, side } of sides)
+      if (manifest.sha256 !== sha || manifest.authenticodeSha256 !== digest)
+        return `${side.identity.exe}'s manifest does not describe its own helper`
+    const rest = ({ manifest }) =>
+      JSON.stringify({ ...manifest, sha256: undefined, authenticodeSha256: undefined })
+    return rest(sides[0]) === rest(sides[1]) ? null : 'differs in more than the helper digests'
+  }
+}
+
+/** Files only one identity's package has: app-update.yml, production only (no QA feed). */
+const PRODUCTION_ONLY = new Set(['resources/app-update.yml'])
+
+/** Problems when the two packages' files outside app.asar(.unpacked) differ unexpectedly. */
+function packageTreeProblems(dir, otherDir, api, { log = console.log, cache } = {}) {
+  const side = (folder) => {
+    const identity = packageIdentity(folder, api)
+    return {
+      dir: folder,
+      identity,
+      asarHeader: asarHeaderHash(path.join(folder, 'resources', 'app.asar'))
+    }
+  }
+  const here = side(dir)
+  const there = side(otherDir)
+  const theirs = cache?.get(otherDir) ?? packageTreeHashes(otherDir, there.identity)
+  cache?.set(otherDir, theirs)
+  const ours = packageTreeHashes(dir, here.identity)
+  const problems = []
+  let allowed = 0
+  // Present exactly in the production package, whichever side it is.
+  for (const rel of PRODUCTION_ONLY)
+    for (const [s, hashes] of [
+      [here, ours],
+      [there, theirs]
+    ])
+      if (hashes.has(rel) !== (s.identity.key === 'production'))
+        problems.push(
+          `win-unpacked/${rel}: the ${s.identity.key} package ${hashes.has(rel) ? 'has' : 'lacks'} it (${s.dir})`
+        )
+  const differences = hashDifferences('win-unpacked', ours, theirs, otherDir)
+  for (const { label, problem } of differences) {
+    const rel = label.slice('win-unpacked/'.length)
+    const shown = rel === EXE ? `win-unpacked/${here.identity.exe}` : label
+    if (PRODUCTION_ONLY.has(rel)) {
+      allowed++
+      log(`  ${label}: only in the production package`)
+      continue
+    }
+    const check = PACKAGE_DIFFERENCES[rel]
+    if (problem === 'content differs' && check) {
+      const read = (s) => fs.readFileSync(path.join(s.dir, rel === EXE ? s.identity.exe : rel))
+      const why = check(read(here), read(there), { here, there })
+      if (!why) {
+        allowed++
+        log(`  ${shown}: differs as the identity allows`)
+        continue
+      }
+      problems.push(`${shown}: ${why}`)
+    } else problems.push(`${shown}: ${problem}`)
+  }
+  if (!ours.has(EXE)) problems.push(`win-unpacked/${here.identity.exe}: missing`)
+  const identical = [...ours].filter(([rel, hash]) => theirs.get(rel) === hash).length
+  log(
+    `  win-unpacked outside app.asar: ${ours.size} files here, ${theirs.size} in ${otherDir}; ${identical} identical (SHA-256), ${allowed} allowed difference(s), ${differences.length - allowed} other difference(s)`
+  )
+  if (ours.size === 0) problems.push('win-unpacked: no files outside app.asar')
+  return problems
+}
+
 module.exports.IDENTITY_DIFFERENCES = IDENTITY_DIFFERENCES
+module.exports.PACKAGE_DIFFERENCES = PACKAGE_DIFFERENCES
+module.exports.packageTreeProblems = packageTreeProblems
+module.exports.exeDifference = exeDifference
+module.exports.helperDifference = helperDifference
+module.exports.peResources = peResources
+module.exports.versionEntries = versionEntries
+module.exports.equalExcept = equalExcept
+module.exports.guidText = guidText
 module.exports.sameFilesProblems = sameFilesProblems
 module.exports.negativeControlProblems = negativeControlProblems
 module.exports.asarHashes = asarHashes
@@ -886,6 +1379,6 @@ if (require.main === module) {
   )
   if (sameAs)
     console.log(
-      `Same app.asar entries and app.asar.unpacked files as ${sameAs}, byte for byte apart from the identity files${negativeControl ? '; one changed byte in any of them is caught' : ''}`
+      `Same app.asar entries, app.asar.unpacked files and other win-unpacked files as ${sameAs}, byte for byte apart from the identity differences${negativeControl ? '; one changed byte in any of them is caught' : ''}`
     )
 }
