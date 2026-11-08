@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs'
 import type { Readable, Writable } from 'node:stream'
 import type {
   AppInfoEntry,
+  ClipboardOffer,
+  ClipboardOfferRestore,
   DeliveryGuards,
   HelperDelivery,
   HelperDeliveryTimings,
@@ -121,8 +123,11 @@ export const SPIN_GUARD_MS = 500
  * exactly at the guard could be refused by it. A restart that still meets the guard waits out the rest.
  */
 export const RESTART_MARGIN_MS = 100
-/** Late clipboard results kept for deliveries still awaiting their reply (normally one at a time). */
-const LATE_OUTCOMES_CAP = 16
+/**
+ * Deliveries the client keeps outstanding at once (the service sends one at a time). Late clipboard
+ * results are kept only for outstanding deliveries, so this also bounds what is kept; none is evicted.
+ */
+export const MAX_DELIVERIES_IN_FLIGHT = 4
 /** Backoff between automatic helper restarts after a crash, capped. Every step is past the spin guard. */
 export const RESTART_BACKOFF_MS: readonly number[] = [
   SPIN_GUARD_MS + RESTART_MARGIN_MS,
@@ -178,6 +183,28 @@ export const DEFAULT_HELPER_TIMEOUTS: HelperTimeouts = {
  * the helper is started lazily and restarted on demand after a crash, with its
  * hold-key watch re-armed. It never receives a credential or provider key.
  */
+/** A helper's offer (event or list entry), checked field by field; null when malformed. */
+function toOffer(value: unknown): ClipboardOffer | null {
+  if (!value || typeof value !== 'object') return null
+  const o = value as Record<string, unknown>
+  if (typeof o.record !== 'string' || !/^[0-9a-f]{32}$/.test(o.record)) return null
+  if (
+    typeof o.formats !== 'number' ||
+    typeof o.bytes !== 'number' ||
+    typeof o.sequence !== 'number'
+  )
+    return null
+  return {
+    record: o.record,
+    delivery: typeof o.delivery === 'string' ? o.delivery : '',
+    formats: o.formats,
+    bytes: o.bytes,
+    sequence: o.sequence,
+    created: typeof o.created === 'string' ? o.created : '',
+    likelyOurs: o.likelyOurs === true
+  }
+}
+
 export class DictationHelperClient {
   private child: HelperChild | null = null
   private ready: Promise<boolean> | null = null
@@ -230,6 +257,8 @@ export class DictationHelperClient {
    * delivery settles: its reply, its timeout, or the helper's exit.
    */
   private readonly awaitingDeliver = new Set<string>()
+  private readonly offerListeners = new Set<(offer: ClipboardOffer) => void>()
+  private readonly offerGoneListeners = new Set<(record: string) => void>()
   private readonly lateOutcomes = new Map<string, string>()
 
   constructor(
@@ -280,6 +309,56 @@ export class DictationHelperClient {
    * Windows: the clipboard rollback of the LAST delivery finished after its reply (the reply said the
    * clipboard state was unknown); `clipboard` is what happened after all (restored, untouched, …).
    */
+  /** Windows: a kept clipboard transaction is offered to the user (the helper wrote nothing). */
+  onClipboardOffer(listener: (offer: ClipboardOffer) => void): () => void {
+    this.offerListeners.add(listener)
+    return () => this.offerListeners.delete(listener)
+  }
+
+  /** Windows: an offer no longer stands (restored, dismissed, stale, expired). */
+  onClipboardOfferGone(listener: (record: string) => void): () => void {
+    this.offerGoneListeners.add(listener)
+    return () => this.offerGoneListeners.delete(listener)
+  }
+
+  /** Windows: the offers the helper's kept records stand for now (after a restart too). */
+  async clipboardOffers(): Promise<ClipboardOffer[]> {
+    if (!this.windows) return []
+    const reply = await this.request('clipboard-offers', {}, this.timeouts.status)
+    const list = Array.isArray(reply?.offers) ? (reply.offers as unknown[]) : []
+    return list.map(toOffer).filter((offer): offer is ClipboardOffer => offer !== null)
+  }
+
+  /**
+   * Windows: the user's Restore of an offer. It runs only while the clipboard is unchanged since
+   * `sequence` (the offer's, or the one a "changed" answer gave); otherwise "changed" says what a
+   * restore would overwrite (formats and size only).
+   */
+  async restoreClipboardOffer(record: string, sequence: number): Promise<ClipboardOfferRestore> {
+    if (!this.windows) return { result: 'gone' }
+    const reply = await this.request(
+      'clipboard-restore',
+      { record, sequence },
+      this.timeouts.deliver
+    )
+    if (!reply || typeof reply.result !== 'string') return { result: 'failed' }
+    return {
+      result: reply.result,
+      ...(typeof reply.formats === 'number' ? { formats: reply.formats } : {}),
+      ...(typeof reply.bytes === 'number' || reply.bytes === null
+        ? { bytes: reply.bytes as number | null }
+        : {}),
+      ...(typeof reply.sequence === 'number' ? { sequence: reply.sequence } : {})
+    }
+  }
+
+  /** Windows: the user dismissed an offer; the helper deletes its record. */
+  async dismissClipboardOffer(record: string): Promise<boolean> {
+    if (!this.windows) return false
+    const reply = await this.request('clipboard-dismiss', { record }, this.timeouts.status)
+    return reply?.dismissed === true
+  }
+
   onClipboardLate(listener: (clipboard: string, deliveryId?: string) => void): () => void {
     this.clipboardLateListeners.add(listener)
     return () => this.clipboardLateListeners.delete(listener)
@@ -402,6 +481,10 @@ export class DictationHelperClient {
     // typing fallback never times out and lands later; macOS keeps its fixed deliver timeout.
     const budget = this.windows ? windowsDeliverBudget(text) : null
     const id = deliveryId
+    if (this.windows && this.awaitingDeliver.size >= MAX_DELIVERIES_IN_FLIGHT) {
+      console.error('[dictation] too many deliveries outstanding; refused')
+      return { outcome: 'refused', reason: 'helper-busy', verified: false, clipboard: 'untouched' }
+    }
     if (this.windows) this.awaitingDeliver.add(id)
     const pendingReply = this.request(
       'deliver',
@@ -1025,16 +1108,27 @@ export class DictationHelperClient {
             : 'unknown'
       const id = typeof parsed.id === 'string' ? parsed.id : ''
       console.error(`[dictation] clipboard ${parsed.phase} for an earlier delivery: ${clipboard}`)
+      const record = typeof parsed.record === 'string' ? parsed.record : ''
+      // A kept transaction the helper could not prove its own: offered to the user, nothing written.
+      if (parsed.phase === 'pending' && record) {
+        const offer = toOffer(parsed)
+        if (offer) for (const listener of this.offerListeners) listener(offer)
+        return false
+      }
+      if (parsed.phase === 'recovered' && record)
+        for (const listener of this.offerGoneListeners) listener(record)
       // Its delivery's reply is not consumed yet: that reply carries it (see deliver()).
       if (id && this.awaitingDeliver.has(id)) {
-        this.lateOutcomes.delete(id)
+        // Bounded by MAX_DELIVERIES_IN_FLIGHT; it leaves when its delivery settles (never evicted).
         this.lateOutcomes.set(id, clipboard)
-        // Bounded, oldest first (entries also leave when their delivery settles).
-        while (this.lateOutcomes.size > LATE_OUTCOMES_CAP)
-          this.lateOutcomes.delete(this.lateOutcomes.keys().next().value as string)
         return false
       }
       for (const listener of this.clipboardLateListeners) listener(clipboard, id || undefined)
+      return false
+    }
+    if (parsed.event === 'clipboard' && parsed.phase === 'offer-gone') {
+      const record = typeof parsed.record === 'string' ? parsed.record : ''
+      if (record) for (const listener of this.offerGoneListeners) listener(record)
       return false
     }
     if (parsed.event === 'parse-error') return false

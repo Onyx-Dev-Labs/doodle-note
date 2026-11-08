@@ -3,6 +3,8 @@ import { mock, test } from 'node:test'
 import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/dictation-api'
 import { BUILTIN_TRANSFORMS } from '../shared/dictation-transforms'
 import type {
+  ClipboardOffer,
+  ClipboardOfferRestore,
   HelperDelivery,
   FieldReading,
   HelperStatus,
@@ -45,6 +47,13 @@ interface Harness {
     willRestart?: boolean
     clipboardLateListener?: (clipboard: string, deliveryId?: string) => void
     lastDeliveryId?: string
+    /** Windows clipboard offers: what the fake helper offers, and what the service asked of it. */
+    offers: ClipboardOffer[]
+    offerListener?: (offer: ClipboardOffer) => void
+    offerGoneListener?: (record: string) => void
+    restoreAnswers: ClipboardOfferRestore[]
+    restoreCalls: Array<{ record: string; sequence: number }>
+    dismissCalls: string[]
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     deliverGuards: DeliveryGuards[]
@@ -153,6 +162,10 @@ function harness(
   }
   let engineBusy = false
   const helper: Harness['helper'] = {
+    offers: [],
+    restoreAnswers: [],
+    restoreCalls: [],
+    dismissCalls: [],
     statusCalls: 0,
     target: {
       snapshotId: 'x',
@@ -231,6 +244,23 @@ function harness(
       onClipboardLate: (listener: (clipboard: string, deliveryId?: string) => void) => {
         helper.clipboardLateListener = listener
         return () => {}
+      },
+      onClipboardOffer: (listener: (offer: ClipboardOffer) => void) => {
+        helper.offerListener = listener
+        return () => {}
+      },
+      onClipboardOfferGone: (listener: (record: string) => void) => {
+        helper.offerGoneListener = listener
+        return () => {}
+      },
+      clipboardOffers: async () => helper.offers,
+      restoreClipboardOffer: async (record: string, sequence: number) => {
+        helper.restoreCalls.push({ record, sequence })
+        return helper.restoreAnswers.shift() ?? { result: 'restored' }
+      },
+      dismissClipboardOffer: async (record: string) => {
+        helper.dismissCalls.push(record)
+        return true
       },
       ...(options.helperBlocked ? { blocked: true } : {}),
       status: async (): Promise<HelperStatus> => {
@@ -2890,6 +2920,89 @@ test('Windows: a kept transaction left pending for the newest delivery is surfac
   h.helper.clipboardLateListener!('unrestored', h.helper.lastDeliveryId)
   await tick()
   assert.match(JSON.stringify(h.overlay.at(-1)), /clipboard/i, 'the user is told')
+})
+
+const offer = (over: Partial<ClipboardOffer> = {}): ClipboardOffer => ({
+  record: '0123456789abcdef0123456789abcdef',
+  delivery: 'd1',
+  formats: 2,
+  bytes: 1300,
+  sequence: 41,
+  created: '2026-11-08T10:00:00Z',
+  likelyOurs: true,
+  ...over
+})
+
+test('Windows: a kept clipboard is offered with Restore and Dismiss, formats and size only', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.offers = [offer()]
+  await h.service.start()
+  await tick()
+  const card = h.overlay.at(-1)!
+  assert.equal(
+    card.title,
+    'DoodleNote may have changed your clipboard while dictating. Put back what you had copied before?'
+  )
+  assert.match(
+    card.detail,
+    /Restore puts back what you had copied \(2 formats, 1\.3 KB\) in place of what is on your clipboard now/
+  )
+  assert.match(card.detail, /Dismiss deletes that copy and leaves your clipboard as it is/)
+  assert.match(card.detail, /password manager marked private is never saved or offered/)
+  assert.equal(card.controls.restore, true)
+  assert.equal(card.controls.dismiss, true)
+  // Restore asks the helper with the offer's sequence; done, the card goes.
+  h.service.onOverlayAction('restore', null)
+  await tick()
+  assert.deepEqual(h.helper.restoreCalls, [{ record: offer().record, sequence: 41 }])
+  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+})
+
+test('Windows: a clipboard that changed since the offer is shown and asked again, never overwritten silently', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.offers = [offer()]
+  h.helper.restoreAnswers = [
+    { result: 'changed', formats: 3, bytes: 4096, sequence: 44 },
+    { result: 'restored' }
+  ]
+  await h.service.start()
+  await tick()
+  h.service.onOverlayAction('restore', null)
+  await tick()
+  const card = h.overlay.at(-1)!
+  assert.equal(card.title, 'Your clipboard has changed since DoodleNote offered this.')
+  assert.match(
+    card.detail,
+    /replaces what is on your clipboard \(3 formats, 4\.0 KB\) with what you had copied before \(2 formats, 1\.3 KB\)/
+  )
+  assert.equal(card.controls.restore, true)
+  h.service.onOverlayAction('restore', null)
+  await tick()
+  assert.deepEqual(
+    h.helper.restoreCalls.map((c) => c.sequence),
+    [41, 44],
+    'the second click confirms the state the card showed'
+  )
+  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /changed since DoodleNote offered/)
+})
+
+test('Windows: Dismiss deletes the kept clipboard; a withdrawn offer leaves; an offer waits for another panel', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  h.helper.offerListener!(offer({ record: 'a'.repeat(32) }))
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  h.service.onOverlayAction('dismiss', null)
+  await tick()
+  assert.deepEqual(h.helper.dismissCalls, ['a'.repeat(32)])
+  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  // A new offer, withdrawn by the helper (restored by a retry, stale, expired): the card goes.
+  h.helper.offerListener!(offer({ record: 'b'.repeat(32) }))
+  await tick()
+  assert.match(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
+  h.helper.offerGoneListener!('b'.repeat(32))
+  await tick()
+  assert.doesNotMatch(JSON.stringify(h.overlay.at(-1)), /Put back what you had copied/)
 })
 
 test('Windows: paste last and a refused paste report the clipboard too', async () => {

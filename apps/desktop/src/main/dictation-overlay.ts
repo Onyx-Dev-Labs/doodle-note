@@ -15,7 +15,7 @@ import { overlayHtml } from './dictation-overlay-page'
 import { tagDictationWindow } from './dictation-windows'
 
 export type OverlayAction =
-  'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu' | 'view' | 'undo'
+  'stop' | 'cancel' | 'copy' | 'dismiss' | 'pill' | 'menu' | 'view' | 'undo' | 'restore'
 
 const DRAG_TICK_MS = 16
 /** A drag whose release never arrived (pointer lost) ends by itself. */
@@ -245,6 +245,7 @@ export class DictationOverlay {
       case 'menu':
       case 'view':
       case 'undo':
+      case 'restore':
         this.onAction(name, this.lastView?.gen ?? null)
         break
     }

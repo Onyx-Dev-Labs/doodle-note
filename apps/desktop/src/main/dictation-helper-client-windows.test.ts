@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   BARK_HELPER_IDENTITY,
   DictationHelperClient,
+  MAX_DELIVERIES_IN_FLIGHT,
   RESTART_BACKOFF_MS,
   RESTART_MARGIN_MS,
   SPIN_GUARD_MS,
@@ -134,6 +135,83 @@ process.stdin.on('end', () => process.exit(0))
   )
   return { command: process.execPath, args: [script] }
 }
+
+/** A stand-in helper with one kept clipboard: it offers it, answers restore/dismiss, and never replies to deliver. */
+function offerHelper(): { command: string; args: string[] } {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-offer-'))
+  const script = join(dir, 'helper.js')
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+const offer = { record: '0123456789abcdef0123456789abcdef', delivery: 'd0', formats: 2, bytes: 1300, sequence: 41, created: '2026-11-08T10:00:00Z', likelyOurs: true }
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+send({ event: 'clipboard', phase: 'pending', id: 'd0', clipboard: 'unrestored', ...offer })
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op === 'clipboard-offers') send({ event: 'reply', id: req.id, ok: true, offers: [offer, { record: 'not-a-record', formats: 1, bytes: 1, sequence: 1 }] })
+    else if (req.op === 'clipboard-restore') send({ event: 'reply', id: req.id, ok: true, ...(req.sequence === 41 ? { result: 'changed', formats: 3, bytes: null, sequence: 44 } : { result: 'restored' }) })
+    else if (req.op === 'clipboard-dismiss') { send({ event: 'reply', id: req.id, ok: true, dismissed: true }); send({ event: 'clipboard', phase: 'offer-gone', record: req.record, id: 'd0', why: 'dismissed by the user' }) }
+    else if (req.op === 'deliver') {} // never answered: deliveries stay outstanding
+    else send({ event: 'reply', id: req.id, ok: true, accessibility: true, inputMonitoring: true, conflicts: [] })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  return { command: process.execPath, args: [script] }
+}
+
+test('Windows: a kept clipboard is offered (never sent as a late result), restored with a re-check, dismissed', async () => {
+  const client = new DictationHelperClient({ ...offerHelper(), platform: 'win32' })
+  const offered: string[] = []
+  const gone: string[] = []
+  const late: string[] = []
+  client.onClipboardOffer((o) =>
+    offered.push(`${o.record.slice(0, 4)} ${o.formats} ${o.bytes} ${o.sequence}`)
+  )
+  client.onClipboardOfferGone((record) => gone.push(record.slice(0, 4)))
+  client.onClipboardLate((clipboard) => late.push(clipboard))
+  try {
+    const offers = await client.clipboardOffers()
+    assert.equal(offers.length, 1, 'a malformed entry is dropped')
+    assert.deepEqual(offered, ['0123 2 1300 41'], 'the start-up offer reached the offer listeners')
+    assert.deepEqual(late, [], 'and not the late-result listeners')
+    assert.deepEqual(await client.restoreClipboardOffer(offers[0]!.record, 41), {
+      result: 'changed',
+      formats: 3,
+      bytes: null,
+      sequence: 44
+    })
+    assert.deepEqual(await client.restoreClipboardOffer(offers[0]!.record, 44), {
+      result: 'restored'
+    })
+    assert.equal(await client.dismissClipboardOffer(offers[0]!.record), true)
+    assert.ok(await waitFor(() => gone.length === 1))
+  } finally {
+    await client.dispose()
+  }
+})
+
+test('Windows: deliveries outstanding at once are bounded; a late result of an outstanding one is never evicted', async () => {
+  const client = new DictationHelperClient({ ...offerHelper(), platform: 'win32' })
+  try {
+    assert.ok(await client.status())
+    // The fake never answers a deliver: these stay outstanding.
+    const outstanding = Array.from({ length: MAX_DELIVERIES_IN_FLIGHT }, (_, i) =>
+      client.deliver('s1', 'x', {}, `d${i + 1}`)
+    )
+    const refused = await client.deliver('s1', 'x', {}, 'one-too-many')
+    assert.equal(refused.outcome, 'refused')
+    assert.equal(refused.reason, 'helper-busy')
+    void outstanding
+  } finally {
+    await client.dispose()
+  }
+})
 
 const lateOutcomesOf = (client: DictationHelperClient): number =>
   (client as unknown as { lateOutcomes: Map<string, string> }).lateOutcomes.size

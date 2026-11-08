@@ -226,3 +226,29 @@ export function helperDeliverEstimateMs(text: string): number {
     HELPER_TYPE_OVERHEAD_MS
   return Math.max(HELPER_PASTE_ESTIMATE_MS, typing)
 }
+
+/**
+ * Windows: a kept clipboard transaction the user may restore (the helper could not prove the clipboard
+ * is its own, so it wrote nothing). Formats and size only, never content.
+ */
+export interface ClipboardOffer {
+  record: string
+  /** The delivery it belongs to (empty when unknown). */
+  delivery: string
+  formats: number
+  bytes: number
+  /** The clipboard sequence number when offered: a restore runs only while it is unchanged. */
+  sequence: number
+  created: string
+  /** A hint only (never authority to write): the state looked like ours, cut short. */
+  likelyOurs: boolean
+}
+
+/** Windows: what the user's Restore of an offer did. */
+export interface ClipboardOfferRestore {
+  /** restored | partial | skipped: done. changed: the clipboard changed since (formats/bytes: what a restore would overwrite now; sequence: ask again with it). gone: the offer no longer stands. failed | unrestored | busy | helper-busy: not done, still offered. */
+  result: string
+  formats?: number
+  bytes?: number | null
+  sequence?: number
+}

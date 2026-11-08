@@ -3,7 +3,9 @@ import { test } from 'node:test'
 import { initialSessionState, reduce, type SessionEvent } from '../shared/dictation-session'
 import type { SessionState } from '../shared/dictation-session'
 import {
+  CLIPBOARD_OFFER_COPY,
   WARNINGS,
+  describeClipboardSize,
   overlaySize,
   overlayView,
   panelView,
@@ -316,4 +318,32 @@ test('the learned-word panel names the pair, or counts several, and only offers 
     base
   )
   assert.equal(two.title, 'Added 2 corrections to your dictionary.')
+})
+
+test('Windows: the clipboard offer card names formats and size only, with Restore and Dismiss', () => {
+  const base = overlayView(initialSessionState(), ctx())
+  const view = panelView(
+    {
+      kind: 'clipboard-offer',
+      offer: {
+        record: '0'.repeat(32),
+        delivery: '',
+        formats: 1,
+        bytes: 900,
+        sequence: 3,
+        created: '',
+        likelyOurs: false
+      }
+    },
+    base
+  )
+  assert.equal(view.title, CLIPBOARD_OFFER_COPY.title)
+  assert.match(view.detail, /\(1 format, 900 bytes\)/)
+  assert.deepEqual(
+    { restore: view.controls.restore, dismiss: view.controls.dismiss, copy: view.controls.copy },
+    { restore: true, dismiss: true, copy: false }
+  )
+  assert.deepEqual(overlaySize(view), { width: 460, height: 236 })
+  assert.equal(describeClipboardSize(3, 2 * 1024 * 1024), '3 formats, 2.0 MB')
+  assert.equal(describeClipboardSize(2, null), '2 formats')
 })

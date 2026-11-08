@@ -2,6 +2,7 @@ import { FEATURE_NAME } from '../shared/dictation-brand'
 import { isMessageShown, type PillEdge, type Size } from '../shared/dictation-pill'
 import type { DiffSegment } from '../shared/dictation-transforms'
 import type { RecoveryReason, SessionState } from '../shared/dictation-session'
+import type { ClipboardOffer } from '../shared/dictation-helper-protocol'
 
 /** rest: the small idle pill. session: the live pill. message: a notice or kept text. */
 export type OverlayMode = 'rest' | 'session' | 'message'
@@ -33,6 +34,8 @@ export interface OverlayView {
     view: boolean
     /** Put the text from before the transform back. */
     undo: boolean
+    /** Windows: put back the clipboard a kept transaction offers (absent: hidden). */
+    restore?: boolean
   }
   /** Before and after words, shown as a diff in a message card; null otherwise. */
   diff: DiffSegment[] | null
@@ -124,6 +127,8 @@ const WINDOW = {
   warningLine: 26,
   detailBlock: 64,
   message: { width: 380, height: 132 },
+  /** Windows: the clipboard offer card (a longer explanation and two buttons). */
+  offer: { width: 460, height: 236 },
   diff: { width: 480, height: 300 }
 } as const
 
@@ -138,6 +143,7 @@ export function overlaySize(view: OverlayView): Size {
       height: Math.max(WINDOW.message.height, Math.min(WINDOW.diff.height, 110 + lines * 19))
     }
   }
+  if (view.mode === 'message' && view.controls.restore) return { ...WINDOW.offer }
   if (view.mode === 'message')
     // A warning line on a card (Windows: the clipboard could not be fully put back) needs room.
     return view.warning
@@ -338,6 +344,35 @@ export type OverlayPanel =
   | { kind: 'diff'; name: string; segments: DiffSegment[] }
   | { kind: 'learned'; pairs: Array<{ from: string; to: string }> }
   | { kind: 'clipboard'; problem: ClipboardProblem }
+  /** Windows: a kept clipboard the helper could not prove its own; `changed`: what a restore would overwrite now. */
+  | {
+      kind: 'clipboard-offer'
+      offer: ClipboardOffer
+      changed?: { formats: number; bytes: number | null }
+    }
+
+/** "2 formats, 1.2 KB": an offer describes formats and size only, never content. */
+export function describeClipboardSize(formats: number, bytes: number | null): string {
+  const what = formats === 1 ? '1 format' : `${formats} formats`
+  if (bytes === null || bytes < 0) return what
+  const size =
+    bytes < 1024
+      ? `${bytes} bytes`
+      : bytes < 1024 * 1024
+        ? `${(bytes / 1024).toFixed(1)} KB`
+        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${what}, ${size}`
+}
+
+export const CLIPBOARD_OFFER_COPY = {
+  title:
+    'DoodleNote may have changed your clipboard while dictating. Put back what you had copied before?',
+  changedTitle: 'Your clipboard has changed since DoodleNote offered this.',
+  detail: (saved: string): string =>
+    `Restore puts back what you had copied (${saved}) in place of what is on your clipboard now. Dismiss deletes that copy and leaves your clipboard as it is. Content a password manager marked private is never saved or offered.`,
+  changedDetail: (saved: string, now: string): string =>
+    `Restore now replaces what is on your clipboard (${now}) with what you had copied before (${saved}). Dismiss deletes the saved copy and leaves your clipboard as it is.`
+} as const
 
 /** The view for a panel; `base` supplies the edge and the quiet settings. */
 export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
@@ -387,5 +422,21 @@ export function panelView(panel: OverlayPanel, base: OverlayView): OverlayView {
         controls: { ...NONE, dismiss: true },
         diff: null
       }
+    case 'clipboard-offer': {
+      const saved = describeClipboardSize(panel.offer.formats, panel.offer.bytes)
+      return {
+        ...common,
+        tone: 'warn',
+        title: panel.changed ? CLIPBOARD_OFFER_COPY.changedTitle : CLIPBOARD_OFFER_COPY.title,
+        detail: panel.changed
+          ? CLIPBOARD_OFFER_COPY.changedDetail(
+              saved,
+              describeClipboardSize(panel.changed.formats, panel.changed.bytes)
+            )
+          : CLIPBOARD_OFFER_COPY.detail(saved),
+        controls: { ...NONE, restore: true, dismiss: true },
+        diff: null
+      }
+    }
   }
 }
