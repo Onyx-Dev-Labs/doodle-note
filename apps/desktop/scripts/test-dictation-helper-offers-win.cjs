@@ -391,6 +391,9 @@ async function main() {
   {
     copyMulti(user)
     await keptRecord('dictated text C')
+    // A second private format, so the second transaction saves more than what its cut-short put-back leaves
+    // (a record whose saved content is already back on the clipboard is dropped as untouched, correctly).
+    addFormat()
     await keptRecord('dictated text D')
     const h = start(release)
     await h.ready
