@@ -204,6 +204,8 @@ export class DictationHelperClient {
   private readonly clipboardLateListeners = new Set<(clipboard: string) => void>()
   /** The last deliver request's id (a late clipboard rollback names the delivery it belongs to). */
   private lastDeliverId: string | null = null
+  /** A late clipboard result that arrived before its delivery's reply: applied to that reply. */
+  private readonly lateBeforeReply = new Map<string, string>()
 
   constructor(
     private readonly launch: HelperLaunch,
@@ -955,8 +957,18 @@ export class DictationHelperClient {
     if (parsed.event === 'clipboard' && parsed.phase === 'late-restore') {
       const clipboard = typeof parsed.clipboard === 'string' ? parsed.clipboard : 'unknown'
       console.error(`[dictation] the clipboard's late rollback finished: ${clipboard}`)
-      if (parsed.id === this.lastDeliverId)
+      const id = typeof parsed.id === 'string' ? parsed.id : ''
+      // Before the reply (the typing fallback outlasted the stall): the reply carries it instead.
+      if (id && this.pending.has(id)) this.lateBeforeReply.set(id, clipboard)
+      else if (id === this.lastDeliverId)
         for (const listener of this.clipboardLateListeners) listener(clipboard)
+      return false
+    }
+    if (parsed.event === 'clipboard' && parsed.phase === 'recovered') {
+      // A kept transaction was put back later (a retry, or the next helper's start): earlier warnings go.
+      const clipboard = typeof parsed.clipboard === 'string' ? parsed.clipboard : 'restored'
+      console.error(`[dictation] an earlier clipboard transaction was put back: ${clipboard}`)
+      for (const listener of this.clipboardLateListeners) listener(clipboard)
       return false
     }
     if (parsed.event === 'parse-error') return false
@@ -965,6 +977,14 @@ export class DictationHelperClient {
       if (entry) {
         clearTimeout(entry.timer)
         this.pending.delete(parsed.id)
+        const late = this.lateBeforeReply.get(parsed.id)
+        if (late !== undefined) {
+          this.lateBeforeReply.delete(parsed.id)
+          // The latest known clipboard outcome wins over what the helper knew when it replied.
+          parsed.clipboard = late
+          if (late === 'unrestored') parsed.clipboardHolds = 'unknown'
+          else delete parsed.clipboardHolds
+        }
         entry.resolve(parsed as Reply)
       }
     }

@@ -96,6 +96,57 @@ test(
   }
 )
 
+/** A stand-in helper whose deliver sends the late clipboard result before or after its reply. */
+function lateClipboardHelper(order: 'before' | 'after'): { command: string; args: string[] } {
+  const dir = mkdtempSync(join(tmpdir(), 'dictation-late-'))
+  const script = join(dir, 'helper.js')
+  writeFileSync(
+    script,
+    `
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+send({ event: 'ready', pid: process.pid, platform: 'win32' })
+let buf = ''
+process.stdin.on('data', (d) => {
+  buf += d
+  for (let i = buf.indexOf('\\n'); i !== -1; i = buf.indexOf('\\n')) {
+    const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
+    if (req.op !== 'deliver') { send({ event: 'reply', id: req.id, ok: true }); continue }
+    const late = { event: 'clipboard', phase: 'late-restore', id: req.id, clipboard: 'restored' }
+    const reply = { event: 'reply', id: req.id, ok: true, outcome: 'delivered', method: 'type', verified: true, clipboard: 'unrestored', clipboardHolds: 'unknown' }
+    if (${JSON.stringify(order)} === 'before') { send(late); send(reply) } else { send(reply); setTimeout(() => { send(late); send({ event: 'clipboard', phase: 'recovered', clipboard: 'restored' }) }, 100) }
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+  )
+  return { command: process.execPath, args: [script] }
+}
+
+test('Windows: a late clipboard result before the reply is carried by the reply; after it, it reaches the listeners', async () => {
+  const before = new DictationHelperClient({ ...lateClipboardHelper('before'), platform: 'win32' })
+  const heardBefore: string[] = []
+  before.onClipboardLate((clipboard) => heardBefore.push(clipboard))
+  try {
+    const result = await before.deliver('s1', 'hello')
+    assert.equal(result.clipboard, 'restored', 'the reply says the latest known outcome')
+    assert.equal(result.clipboardHolds, undefined)
+    assert.deepEqual(heardBefore, [], 'nothing left over to clear later')
+  } finally {
+    await before.dispose()
+  }
+  const after = new DictationHelperClient({ ...lateClipboardHelper('after'), platform: 'win32' })
+  const heardAfter: string[] = []
+  after.onClipboardLate((clipboard) => heardAfter.push(clipboard))
+  try {
+    const result = await after.deliver('s1', 'hello')
+    assert.equal(result.clipboard, 'unrestored')
+    assert.ok(await waitFor(() => heardAfter.length === 2))
+    assert.deepEqual(heardAfter, ['restored', 'restored'], 'the late result, then a later recovery')
+  } finally {
+    await after.dispose()
+  }
+})
+
 test("Windows: the exit grace covers the helper's own worst-case exit (its constants, read from the C#)", () => {
   const read = (file: string): string =>
     readFileSync(

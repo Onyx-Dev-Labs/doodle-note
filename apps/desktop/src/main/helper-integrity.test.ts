@@ -1004,6 +1004,20 @@ test('the hold timing is one consistent source: the confirmation cap and the spa
   assert.equal(timing.holdTimingProblem(), null)
   assert.ok(timing.worstHoldToConfirmMs() < timing.HOLD_EXPIRY_MS)
   assert.match(String(timing.holdTimingProblem(10_000)), /could expire/)
+  // The dev-only QA hold pause is part of the guarded worst case, and it is capped.
+  assert.equal(
+    timing.worstHoldToConfirmMs(),
+    timing.SIGNATURE_BUDGET_MS +
+      timing.MAX_QA_HOLD_PAUSE_MS +
+      2 * timing.CONFIRM_CAP_MS +
+      timing.SPAWN_ALLOWANCE_MS
+  )
+  assert.equal(timing.qaHoldPauseMs('8000'), timing.MAX_QA_HOLD_PAUSE_MS)
+  assert.equal(timing.qaHoldPauseMs('Infinity'), 0)
+  assert.equal(timing.qaHoldPauseMs('abc'), 0)
+  assert.equal(timing.qaHoldPauseMs('1200'), 1200)
+  const host = readFileSync(fileURLToPath(new URL('./dictation-host.ts', import.meta.url)), 'utf8')
+  assert.match(host, /qaHoldPauseMs\(process\.env\.DOODLENOTE_BARK_TEST_HOLD_PAUSE_MS\)/)
   const integrityModule = await import('./helper-integrity')
   assert.equal(
     integrityModule.LEASE_MAX_MS,

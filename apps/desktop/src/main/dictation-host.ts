@@ -36,6 +36,7 @@ import {
   helperSpawnEnv
 } from './dictation-helper-client'
 import { HelperIntegrity, resolveHelperExpectation, type HelperHolder } from './helper-integrity'
+import { qaHoldPauseMs } from './helper-hold-timing'
 import { DictationOverlay } from './dictation-overlay'
 import { DictationService, type EngineLike } from './dictation-service'
 import { DictationSettingsStore } from './dictation-settings'
@@ -146,8 +147,9 @@ export function createDictationHost(options: DictationHostOptions): {
             const lease = await integrity.acquire()
             // QA only (unpackaged with Bark's test hooks on): hold the lease a while before the spawn,
             // so a test can end the speech worker in the middle of the hold.
+            // Capped (helper-hold-timing.ts) so the hold cannot expire inside the spawn path.
             const pause = testHooks
-              ? Number(process.env.DOODLENOTE_BARK_TEST_HOLD_PAUSE_MS) || 0
+              ? qaHoldPauseMs(process.env.DOODLENOTE_BARK_TEST_HOLD_PAUSE_MS)
               : 0
             if (pause > 0 && lease.locked)
               await new Promise((resolve) => setTimeout(resolve, pause))
