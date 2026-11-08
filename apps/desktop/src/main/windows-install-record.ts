@@ -91,6 +91,24 @@ export function installMigrationIdentity(
 }
 
 /**
+ * The record's time: exactly this shape, D an ASCII digit. The installer checks the
+ * same shape (DN_RECORD_TIME_SHAPE, dnTimeCheck in build/windows-install-guards.nsh),
+ * so a record one of them calls complete the other does too
+ * (src/main/fixtures/install-record-times.json).
+ */
+export const RECORD_TIME_SHAPE = 'DDDD-DD-DDTDD:DD:DDZ'
+
+export function recordTimeValid(at: string): boolean {
+  if (at.length !== RECORD_TIME_SHAPE.length) return false
+  for (let i = 0; i < RECORD_TIME_SHAPE.length; i++) {
+    const want = RECORD_TIME_SHAPE[i]
+    const got = at[i]
+    if (want === 'D' ? got < '0' || got > '9' : got !== want) return false
+  }
+  return true
+}
+
+/**
  * Parses a MigrationRecord value for `identity` (installMigrationIdentity): the
  * record when it is complete, null when there is none, `{ pending }` when it is
  * there but anything less than complete for this identity.
@@ -109,8 +127,7 @@ export function parseInstallRecordValue(
     return { pending: 'for another app identity', code: 'record-foreign' }
   const [from, to, at] = parts.slice(4, 7)
   if (!from.trim() || !to.trim()) return { pending: 'incomplete', code: 'record-incomplete' }
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(at))
-    return { pending: 'no valid time', code: 'record-time' }
+  if (!recordTimeValid(at)) return { pending: 'no valid time', code: 'record-time' }
   return { from, to, at }
 }
 

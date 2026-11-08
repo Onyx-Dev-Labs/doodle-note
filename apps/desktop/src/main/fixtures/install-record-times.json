@@ -1,0 +1,27 @@
+{
+  "comment": "MigrationRecord times: the installer (dnTimeCheck, build/windows-install-guards.nsh) and the app (recordTimeValid, src/main/windows-install-record.ts) must agree on every one. Checked by windows-install-migration.test.ts and scripts/test-windows-installer-guards.cjs.",
+  "valid": ["2026-11-08T01:02:03Z", "1999-12-31T23:59:59Z", "0000-00-00T00:00:00Z", "2026-13-40T25:61:61Z"],
+  "invalid": [
+    "",
+    "2026-11-08 01:02:03",
+    "2026-11-08T01:02:03",
+    "2026-11-08T01:02:03z",
+    "2026-11-08t01:02:03Z",
+    "2026-11-08T01:02:03.000Z",
+    "2026-11-08T01:02:03+00:00",
+    "26-11-08T01:02:03Z",
+    "2026-1-08T01:02:03Z",
+    "2026-11-08T01:02:3Z",
+    "x026-11-08T01:02:03Z",
+    "２026-11-08T01:02:03Z",
+    "٢026-11-08T01:02:03Z",
+    "2026/11/08T01:02:03Z",
+    "2026-11-08T01-02-03Z",
+    " 2026-11-08T01:02:03Z",
+    "2026-11-08T01:02:03Z ",
+    "+026-11-08T01:02:03Z",
+    "-026-11-08T01:02:03Z",
+    "2026-11-08",
+    "malformed"
+  ]
+}

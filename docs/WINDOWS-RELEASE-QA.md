@@ -490,7 +490,12 @@ launch the app repoints the "Open at login" entry (keeping a Task Manager
 disable) and MCP client configs (Claude Desktop, Claude Code, Codex) that
 launched the old exe (`src/main/windows-install-migration.ts`), but only on the
 installer's record: it must be complete and for this identity (version, the
-identity's `APP_GUID` and both folder names, both folders, a UTC time, `END`),
+identity's `APP_GUID` and both folder names, both folders, a UTC time of exactly
+the shape `YYYY-MM-DDTHH:MM:SSZ` (ASCII digits; the installer's `dnRecordCheck`
+requires the same shape, so a record one calls complete the other does too, and
+recovery replaces a live record with a malformed time from a valid copy rather
+than keep it; `src/main/fixtures/install-record-times.json` holds the cases both
+are tested against), `END`),
 its new folder must be the running exe's own folder, and the old exe must be
 gone. A record that is there but not complete for this identity is left exactly
 as it is (logged `install record left for the installer`) for a later installer
@@ -554,7 +559,7 @@ the move is recorded in two places, by the installer and by a user uninstall:
 
 | `LastStep` | `LastResult` | `LastReason` |
 |---|---|---|
-| `recover` | `recovered`, `recover-incomplete` (copy kept), `recovery-ignored` (nothing in the copy passed its checks; kept) | `restored`; the first reason the copy must stay: `journal-mismatch` / `record-mismatch` (a live value differs from the copy's after the write), `journal-incomplete`, `journal-identity`, `journal-folders`, `record-format`, `record-identity`, `record-folders`; `recovery-foreign` (another identity's) |
+| `recover` | `recovered`, `recover-incomplete` (copy kept), `recovery-ignored` (nothing in the copy passed its checks; kept) | `restored`; the first reason the copy must stay: `journal-mismatch` / `record-mismatch` (a live value differs from the copy's after the write), `journal-incomplete`, `journal-identity`, `journal-folders`, `record-format`, `record-identity`, `record-time`, `record-folders`; `recovery-foreign` (another identity's) |
 | `plan` | `plan-move` (the move starts) or `plan-in-place` | `legacy-found`, `journal-resumed`; `no-legacy` (already moved), `fresh-install`, `custom-dir` (`/D`), `not-default-folder`, `uninstall-command`, or the refusing check: `legacy-link`, `legacy-no-exe`, `legacy-missing`, `legacy-not-folder`, `legacy-resolves-elsewhere`, `dest-link`, `dest-open-failed`, `dirs-overlap`, `dirs-same`, `profile-overlap`, `profile-overlap-resolved`, `profile-invalid`, `resolve-failed`, `open-failed`, `path-invalid` |
 | `close` | `close-ok`, `close-keep`, `exit-2`, `cancelled` | `none`, `closed`; `app-running`, `unknown-process`; `app-running-silent` (old app, `/S` without `--updated`), `app-running` (in-place); `user-cancelled` |
 | `park` | `parked`, `refused-park` (exit code 2) | `parked`, `nothing-to-park`; `uninstall-command` |

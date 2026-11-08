@@ -2132,10 +2132,61 @@ FunctionEnd
   ; form for its own identity and leaves anything else for a later run to repair.
   !define DN_RECORD_VERSION "DNMR1"
 
+  ; The record's time: exactly this shape, D an ASCII digit (UTC to the second, as
+  ; dnWriteRecord writes it). The app requires the same shape (RECORD_TIME_SHAPE,
+  ; src/main/windows-install-record.ts); both are checked against
+  ; src/main/fixtures/install-record-times.json.
+  !define DN_RECORD_TIME_SHAPE "DDDD-DD-DDTDD:DD:DDZ"
+
+  ; Push VALUE; Call dnTimeCheck; Pop OK: "1" when VALUE has DN_RECORD_TIME_SHAPE.
+  Function dnTimeCheck
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    Push $4
+    Push $5
+    StrLen $1 $0
+    StrLen $2 "${DN_RECORD_TIME_SHAPE}"
+    StrCpy $5 "0"
+    ${if} $1 = $2
+      StrCpy $5 "1"
+      StrCpy $1 0
+      ${do}
+        ${if} $1 >= $2
+          ${break}
+        ${endif}
+        StrCpy $3 $0 1 $1
+        StrCpy $4 "${DN_RECORD_TIME_SHAPE}" 1 $1
+        ${if} $4 S== "D"
+          ; A digit is the one character that reads back as itself as a number.
+          IntOp $4 $3 + 0
+          ${if} $4 S!= $3
+            StrCpy $5 "0"
+            ${break}
+          ${endif}
+        ${elseif} $3 S!= $4
+          StrCpy $5 "0"
+          ${break}
+        ${endif}
+        IntOp $1 $1 + 1
+      ${loop}
+    ${endif}
+    StrCpy $0 $5
+    Pop $5
+    Pop $4
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
   ; Push VALUE; Call dnRecordCheck; Pop REASON: "" when VALUE is a complete record
   ; for this identity naming exactly <Programs>\APP_FILENAME -> <Programs>\
-  ; PRODUCT_FILENAME (compared canonical); else "none" (empty), "format",
-  ; "identity" or "folders".
+  ; PRODUCT_FILENAME (compared canonical) at a time of DN_RECORD_TIME_SHAPE; else
+  ; "none" (empty), "format", "identity", "time" or "folders". Recovery, save and
+  ; restore treat anything but "" as no record: a live one is replaced from a
+  ; complete copy, and never copied over one.
   Function dnRecordCheck
     Exch $0
     Push $1
@@ -2185,6 +2236,14 @@ FunctionEnd
       ${orIf} $4 == ""
       ${orIf} $5 == ""
         StrCpy $0 "format"
+      ${else}
+        Push $5
+        Call dnTimeCheck
+        Pop $5
+      ${endif}
+      ${if} $0 == "format"
+      ${elseif} $5 != "1"
+        StrCpy $0 "time"
       ${else}
         Push $dnProgramsRoot
         Call dnCanonical

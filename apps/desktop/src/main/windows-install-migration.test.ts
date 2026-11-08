@@ -33,6 +33,8 @@ import {
   installStatusKey,
   parseInstallRecordValue,
   readInstallRecord,
+  recordTimeValid,
+  RECORD_TIME_SHAPE,
   writeInstallMigrationStatus,
   type InstallMigrationRecord,
   type InstallRecordPending,
@@ -962,4 +964,32 @@ test('Settings shows the move only while it is unfinished, with what to expect',
   assert.match(steps?.detail ?? '', /tries again/)
   const installer = installMigrationNotice({ state: 'pending', at, reason: 'record-incomplete' })
   assert.match(installer?.detail ?? '', /running the DoodleNote installer again/)
+})
+
+test('the app and the installer accept exactly the same record times', () => {
+  const times = JSON.parse(
+    readFileSync(new URL('./fixtures/install-record-times.json', import.meta.url), 'utf8')
+  ) as { valid: string[]; invalid: string[] }
+  const identity = installMigrationIdentity(APP_IDENTITY)
+  const value = (time: string): string =>
+    ['DNMR1', identity, record.from, record.to, time, 'END'].join('|')
+  for (const time of times.valid) {
+    assert.ok(recordTimeValid(time), time)
+    assert.deepEqual(parseInstallRecordValue(value(time), identity), { ...record, at: time })
+  }
+  for (const time of times.invalid) {
+    assert.ok(!recordTimeValid(time), time)
+    const parsed = parseInstallRecordValue(value(time), identity)
+    assert.ok(parsed && 'pending' in parsed, time)
+  }
+  // The installer's rule is the same shape, character for character.
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  )
+  assert.ok(guards.includes(`!define DN_RECORD_TIME_SHAPE "${RECORD_TIME_SHAPE}"`))
+  // It checks the time of every record it trusts (dnRecordCheck), before the folders.
+  const check = guards.slice(guards.indexOf('Function dnRecordCheck'))
+  assert.ok(check.indexOf('Call dnTimeCheck') > 0)
+  assert.ok(check.indexOf('StrCpy $0 "time"') < check.indexOf('StrCpy $0 "folders"'))
 })

@@ -12,6 +12,10 @@ const os = require('node:os')
 const path = require('node:path')
 
 const desktop = path.resolve(__dirname, '..')
+/** MigrationRecord times the installer and the app must agree on (windows-install-record.ts). */
+const recordTimes = JSON.parse(
+  fs.readFileSync(path.join(desktop, 'src', 'main', 'fixtures', 'install-record-times.json'), 'utf8')
+)
 const IDENTITY = 'guards-test|desktop|DoodleNote'
 /** The one-value record (dnWriteRecord): DNMR1|<identity>|<old>|<new>|<UTC>|END. */
 const RECORD_FORM =
@@ -1732,6 +1736,11 @@ async function main() {
       ['rcheck', '', recordValue(p6Foreign, p6To), 'folders'],
       ['rcheck', '', recordValue(p6To, p6From), 'folders'],
       ['rcheck', '', recordValue(p6From, path.join(p6Real, 'DoodleNote QA')), 'folders'],
+      // Round 7: the time has exactly the shape the app requires (one fixture for both).
+      ...recordTimes.valid.map((time) => ['rcheck', '', recordValue(p6From, p6To, time), 'ok']),
+      ...recordTimes.invalid
+        .filter((time) => time !== '')
+        .map((time) => ['rcheck', '', recordValue(p6From, p6To, time), 'time']),
       ['wipe', '', '', 'done'],
       ['jcheck', p6Journal, '', 'none'],
       ['jwrite', 'Identity', IDENTITY, 'set'],
@@ -1991,6 +2000,14 @@ async function main() {
       ['recover', '', '', 'done'],
       ['record', '', '', p6Rec],
       ['rstate', '', '', 'none'],
+      // Round 7: so is a live record whose time is malformed (the app would leave it
+      // pending forever): the copy's valid record replaces it, and the copy goes.
+      ['rwrite', 'MigrationRecord', p6Rec, 'set'],
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ['lwrite', 'MigrationRecord', recordValue(p6From, p6To, '2026-11-08 01:02:03'), 'set'],
+      ['recover', '', '', 'done'],
+      ['record', '', '', p6Rec],
+      ['rstate', '', '', 'none'],
       // A complete live record that differs is not overwritten, and the copy stays.
       ['rwrite', 'MigrationRecord', p6Rec, 'set'],
       ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
@@ -2059,6 +2076,29 @@ async function main() {
       ...p6Clean
     ]
     checkCases('p6-parent', p6Parents, phase('p6-parent', p6Parents).results)
+
+    // Round 7: a save never copies a malformed live record over a valid copy: the kept
+    // copy keeps its record, the uninstaller's wipe follows, and the restore brings back
+    // the valid one.
+    const p7Malformed = recordValue(p6From, p6To, '2026-11-08T1:02:03Z')
+    const p7Save = [
+      ...p6Setup,
+      ['wipe', '', '', 'done'],
+      ['rwipe', '', '', 'done'],
+      ...p6Values.map(([name, data]) => ['rwrite', name, data, 'set']),
+      ['rwrite', 'MigrationRecord', p6Rec, 'set'],
+      ['rwrite', 'RecoveryFor', IDENTITY, 'set'],
+      ...p6Values.map(([name, data]) => ['jwrite', name, data, 'set']),
+      ['lwrite', 'MigrationRecord', p7Malformed, 'set'],
+      ['rcheck', '', p7Malformed, 'time'],
+      ['save', '', '', 'done'],
+      ['rread', 'MigrationRecord', '', p6Rec],
+      ['wipe', '', '', 'done'],
+      ['restore', '', '', 'done'],
+      ['record', '', '', p6Rec],
+      ...p6Clean
+    ]
+    checkCases('p7-save-malformed', p7Save, phase('p7-save-malformed', p7Save).results)
 
     // The app leaves a record that is not complete for its identity where it is,
     // for a later installer run to repair, and acts on nothing.
