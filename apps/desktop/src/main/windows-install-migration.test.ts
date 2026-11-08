@@ -517,6 +517,99 @@ test('an unresolvable Run value or MCP command stays pending: not repointed, rec
   assert.equal(deps.record, null)
 })
 
+/**
+ * Round 11: the old folder is still on disk (in part) and holds `linked`, a junction.
+ * `junction` is where it leads (null: it cannot be resolved, access denied); the
+ * record's folders resolve normally.
+ */
+function legacyWithJunction(junction: string | null): (path: string) => string {
+  const disk = movedDisk()
+  const legacyDir = `${LONG_PROGRAMS}\\desktop`.toLowerCase()
+  return (path) => {
+    const lower = path.toLowerCase()
+    if (lower === legacyDir) return `${LONG_PROGRAMS}\\desktop`
+    if (lower === `${legacyDir}\\linked` || lower.startsWith(`${legacyDir}\\linked\\`)) {
+      if (junction === null) throw Object.assign(new Error(`EACCES ${path}`), { code: 'EACCES' })
+      return junction + path.slice(`${legacyDir}\\linked`.length)
+    }
+    return disk(path)
+  }
+}
+
+test('round 11: a long-form path inside the old folder is resolved before it counts', () => {
+  const legacy = `${LONG_PROGRAMS}\\desktop`
+  const tool = `${legacy}\\linked\\tool.exe`
+  // Unresolvable (EACCES): no answer, as for the short-form ones, however it is written.
+  assert.throws(() => isInsideFolder(tool, legacy, legacyWithJunction(null)), PathResolutionError)
+  assert.throws(
+    () => isInsideFolder(tool.toUpperCase(), legacy, legacyWithJunction(null), 'DESKTO~1'),
+    PathResolutionError
+  )
+  // A nested junction whose destination lies outside the old folder: not inside.
+  assert.ok(!isInsideFolder(tool, legacy, legacyWithJunction('D:\\Tools\\linked')))
+  assert.ok(!isInsideFolder(tool, legacy, legacyWithJunction(`${LONG_PROGRAMS}\\desktop-old`)))
+  // One whose destination is inside it still is.
+  assert.ok(isInsideFolder(tool, legacy, legacyWithJunction(`${legacy}\\resources`)))
+  // A path that resolves normally, or whose old part is gone, is inside as before.
+  assert.ok(isInsideFolder(`${legacy}\\DoodleNote.exe`, legacy, legacyWithJunction(null)))
+  assert.ok(isInsideFolder(`${legacy}\\gone\\x.exe`, legacy, movedDisk()))
+})
+
+test('round 11: an unresolvable long-form Run value or MCP command stays pending, record kept', async () => {
+  const tool = `${LONG_PROGRAMS}\\desktop\\linked\\tool.exe`
+  const junction: { to: string | null } = { to: null }
+  const disk = legacyWithJunction(null)
+  const realPath = (path: string): string =>
+    junction.to === null ? disk(path) : legacyWithJunction(junction.to)(path)
+  const resolved: string[] = []
+  const repointed: string[] = []
+  const deps = fakeDeps({
+    execPath: `${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`,
+    realPath: (path) => {
+      resolved.push(path)
+      return realPath(path)
+    },
+    loginItem: {
+      stateFor: (isLegacyPath) => ({ registered: isLegacyPath(tool), enabled: true }),
+      registerCurrent: (enabled) => {
+        deps.registered.push(enabled)
+      }
+    },
+    repointMcpClients: (isLegacy) => {
+      try {
+        if (isLegacy(tool)) repointed.push('codex')
+        return [{ id: 'codex', outcome: isLegacy(tool) ? 'updated' : 'unchanged' }]
+      } catch (error) {
+        return [{ id: 'codex', outcome: 'failed', error: (error as Error).message }]
+      }
+    }
+  })
+  deps.record = { ...record, from: `${LONG_PROGRAMS}\\desktop`, to: `${LONG_PROGRAMS}\\DoodleNote` }
+  deps.files = new Set([`${LONG_PROGRAMS}\\DoodleNote\\DoodleNote.exe`])
+  const first = await runWindowsInstallMigration(deps)
+  // The candidate itself was resolved (before round 11: never), and it failed.
+  assert.ok(resolved.some((path) => /\\desktop\\linked\\tool\.exe$/i.test(path)))
+  assert.deepEqual(first.pending, ['login-item', 'codex'])
+  assert.equal(first.retry, true)
+  assert.deepEqual(deps.registered, [])
+  assert.deepEqual(repointed, [])
+  assert.notEqual(deps.record, null)
+  assert.deepEqual(first.status, {
+    state: 'pending',
+    at: '2026-11-08T07:08:09Z',
+    reason: 'steps-pending:login-item,codex'
+  })
+  // Resolvable now, but the junction leads outside the old folder: nothing of ours,
+  // so nothing is repointed or registered; the steps are done, the record consumed.
+  junction.to = 'D:\\Tools\\linked'
+  const second = await runWindowsInstallMigration(deps)
+  assert.deepEqual(second.pending, [])
+  assert.deepEqual(deps.registered, [])
+  assert.deepEqual(repointed, [])
+  assert.equal(deps.record, null)
+  assert.equal(second.status?.reason, 'repointed')
+})
+
 test('a record whose folders cannot be resolved now is left for the next try', async () => {
   const deps = fakeDeps({
     realPath: () => {

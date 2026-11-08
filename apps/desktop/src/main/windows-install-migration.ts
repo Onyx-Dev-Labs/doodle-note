@@ -157,7 +157,9 @@ export function legacyInstallFor(
  * `shortName` counts, the alias Windows reported for it before the installer
  * removed it (the record's, never one guessed from its long name: another folder
  * may have had `DESKTO~2`). A part that exists but cannot be resolved throws
- * PathResolutionError: the caller cannot tell, so it leaves the entry alone.
+ * PathResolutionError: the caller cannot tell, so it leaves the entry alone. The
+ * comparison is only ever made on the resolved forms: a path written inside the
+ * folder is not taken at its word.
  */
 export function isInsideFolder(
   path: string,
@@ -178,7 +180,10 @@ export function isInsideFolder(
       (part, i) =>
         part === a[i] || (aliases && i === b.length - 1 && alias !== null && a[i] === alias)
     )
-  if (inside(parts(path), parts(folder), false)) return true
+  // Always resolved first (round 11), even when the path is written inside the
+  // folder: a part that exists may lead elsewhere (a junction inside the old folder
+  // whose destination lies outside it), and one that cannot be resolved is no
+  // answer however it is written (PathResolutionError: the step stays pending).
   return inside(parts(longPath(path, realPath)), parts(longPath(folder, realPath)), true)
 }
 
