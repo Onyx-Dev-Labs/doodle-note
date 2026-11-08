@@ -130,3 +130,41 @@ test('a config that exists but cannot be read is never replaced blind', () => {
     assert.ok(statSync(join(home, '.claude.json')).isDirectory())
   })
 })
+
+test('repointing: an entry without a command, an empty file and a BOM are not failures', () => {
+  withHome((home) => {
+    const claudeCode = join(home, '.claude.json')
+    const http = JSON.stringify({ mcpServers: { 'doodle-note': { url: 'http://127.0.0.1:1/mcp' } } })
+    writeFileSync(claudeCode, http)
+    mkdirSync(join(home, '.codex'))
+    const codex = join(home, '.codex', 'config.toml')
+    writeFileSync(codex, '')
+    const service = new AgentAccessService(() => join(home, 'meetings'), spec, home)
+    assert.deepEqual(
+      service.repointStaleClients(() => true),
+      [
+        { id: 'claude-desktop', outcome: 'unchanged' },
+        { id: 'claude-code', outcome: 'unchanged' },
+        { id: 'codex', outcome: 'unchanged' }
+      ]
+    )
+    assert.equal(readFileSync(claudeCode, 'utf8'), http)
+    assert.equal(readFileSync(codex, 'utf8'), '')
+
+    // A BOM is stripped for parsing and kept on write.
+    const stale = { ...spec, command: 'C:\\Programs\\desktop\\DoodleNote.exe' }
+    writeFileSync(claudeCode, '\uFEFF' + JSON.stringify({ mcpServers: { 'doodle-note': stale } }))
+    assert.equal(service.status().clients.find((c) => c.id === 'claude-code')?.connected, true)
+    assert.deepEqual(
+      service.repointStaleClients(() => true, ['claude-code']),
+      [{ id: 'claude-code', outcome: 'updated' }]
+    )
+    const text = readFileSync(claudeCode, 'utf8')
+    assert.ok(text.startsWith('\uFEFF'))
+    assert.equal(JSON.parse(text.slice(1)).mcpServers['doodle-note'].command, spec.command)
+
+    // Connecting into an empty file writes a fresh config.
+    service.setClientConnected('codex', true)
+    assert.match(readFileSync(codex, 'utf8'), /^\[mcp_servers\.doodle-note\]/)
+  })
+})

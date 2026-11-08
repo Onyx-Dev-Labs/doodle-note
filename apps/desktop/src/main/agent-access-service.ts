@@ -58,6 +58,17 @@ export function readConfigFile(
   }
 }
 
+/**
+ * A config file's text without a UTF-8 byte order mark (returned separately so a
+ * rewrite keeps it); an empty or blank file is no config at all (null).
+ */
+export function configText(raw: string | null): { bom: string; text: string | null } {
+  if (raw === null) return { bom: '', text: null }
+  const bom = raw.startsWith('\uFEFF') ? '\uFEFF' : ''
+  const text = raw.slice(bom.length)
+  return { bom, text: text.trim() === '' ? null : text }
+}
+
 /** True when two config texts say the same thing (JSON compared parsed, TOML as text). */
 export function sameConfigContent(a: string, b: string, dialect: 'json' | 'toml'): boolean {
   if (dialect === 'json') {
@@ -273,10 +284,12 @@ export class AgentAccessService {
 
   /**
    * Read-modify-write of one client config: `change` gets the current text (null:
-   * no file) and returns the new text, or null for no change. Nothing is written
-   * when the content would not change; the write is atomic (replaceConfigFile) and
-   * starts over if the client rewrote the file in the meantime. A config that
-   * exists but cannot be read throws, so it is never replaced blind.
+   * no file, or an empty one) and returns the new text, or null for no change. A
+   * UTF-8 byte order mark is not part of the text `change` sees and is kept on
+   * write. Nothing is written when the content would not change; the write is
+   * atomic (replaceConfigFile) and starts over if the client rewrote the file in
+   * the meantime. A config that exists but cannot be read throws, so it is never
+   * replaced blind.
    */
   private updateClientConfig(
     def: McpClientDef,
@@ -286,10 +299,11 @@ export class AgentAccessService {
       const read = readConfigFile(def.configPath)
       if (read.state === 'error') throw new Error(read.message)
       const raw = read.state === 'read' ? read.raw : null
-      const next = change(raw)
-      if (next === null || (raw !== null && sameConfigContent(raw, next, def.dialect)))
+      const { bom, text } = configText(raw)
+      const next = change(text)
+      if (next === null || (text !== null && sameConfigContent(text, next, def.dialect)))
         return 'unchanged'
-      if (replaceConfigFile(def.configPath, raw, next)) return 'updated'
+      if (replaceConfigFile(def.configPath, raw, bom + next)) return 'updated'
     }
     throw new Error(`${def.configPath} kept changing while it was being updated; try again.`)
   }
@@ -331,7 +345,7 @@ export class AgentAccessService {
   }
 
   private clientStatus(def: McpClientDef): McpClientStatus {
-    const raw = this.tryRead(def.configPath)
+    const raw = configText(this.tryRead(def.configPath)).text
     const connected =
       raw !== null &&
       (def.dialect === 'json' ? jsonConfigHasServer(raw) : codexConfigHasServer(raw))

@@ -410,10 +410,17 @@ test('the MCP server command is read back from both client dialects', () => {
   // Unreadable is not "absent": the caller retries instead of finishing.
   assert.throws(() => jsonConfigServerCommand('not json', 'x'), ClientConfigError)
   assert.throws(() => jsonConfigServerCommand('[]', 'x'), ClientConfigError)
-  assert.throws(
-    () => jsonConfigServerCommand('{"mcpServers":{"doodle-note":{"args":[]}}}', 'x'),
-    ClientConfigError
+  // Our key without a command (an HTTP-transport entry): nothing to repoint.
+  assert.equal(jsonConfigServerCommand('{"mcpServers":{"doodle-note":{"args":[]}}}', 'x'), null)
+  assert.equal(
+    jsonConfigServerCommand('{"mcpServers":{"doodle-note":{"url":"http://127.0.0.1:1/mcp"}}}', 'x'),
+    null
   )
+  assert.equal(
+    codexConfigServerCommand('[mcp_servers.doodle-note]\nurl = "http://127.0.0.1:1/mcp"\n', 'x'),
+    null
+  )
+  assert.equal(jsonConfigServerCommand('\uFEFF{"mcpServers":{}}', 'x'), null)
   assert.throws(
     () => codexConfigServerCommand('[mcp_servers.doodle-note]\ncommand = "unterminated\n', 'x'),
     ClientConfigError

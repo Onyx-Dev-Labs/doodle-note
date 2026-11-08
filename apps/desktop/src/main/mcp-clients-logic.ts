@@ -23,7 +23,7 @@ interface JsonConfig {
 function parseJsonConfig(raw: string, path: string): JsonConfig {
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''))
   } catch {
     throw new ClientConfigError(`${path} is not valid JSON — fix or remove it, then retry.`)
   }
@@ -61,7 +61,7 @@ export function jsonConfigWithoutServer(raw: string, path: string): string {
 
 export function jsonConfigHasServer(raw: string): boolean {
   try {
-    const config = JSON.parse(raw) as JsonConfig
+    const config = JSON.parse(raw.replace(/^\uFEFF/, '')) as JsonConfig
     return Boolean(
       config &&
       typeof config === 'object' &&
@@ -75,19 +75,17 @@ export function jsonConfigHasServer(raw: string): boolean {
 }
 
 /**
- * The command our JSON-dialect entry launches, or null when there is no entry.
- * Throws ClientConfigError when the file cannot be parsed, so a caller can tell
- * "nothing to do" from "could not tell" (and try again later).
+ * The command our JSON-dialect entry launches, or null when there is nothing to
+ * repoint: no entry, or one without a command (an HTTP-transport entry the user
+ * wrote, say). Throws ClientConfigError when the file cannot be parsed, so a
+ * caller can tell "nothing to do" from "could not tell" (and try again later).
  */
 export function jsonConfigServerCommand(raw: string, path: string): string | null {
   const config = parseJsonConfig(raw, path)
   const servers = config.mcpServers
   if (!servers || typeof servers !== 'object' || !(MCP_SERVER_KEY in servers)) return null
   const entry = servers[MCP_SERVER_KEY] as { command?: unknown } | null
-  if (typeof entry?.command !== 'string') {
-    throw new ClientConfigError(`${path} has a ${MCP_SERVER_KEY} entry without a command.`)
-  }
-  return entry.command
+  return typeof entry?.command === 'string' ? entry.command : null
 }
 
 const CODEX_HEADER = `[mcp_servers.${MCP_SERVER_KEY}]`
@@ -323,26 +321,31 @@ export function codexConfigHasServer(raw: string): boolean {
 }
 
 /**
- * The command our Codex entry launches, or null when there is no entry. Throws
- * ClientConfigError when the entry is there but its command cannot be read.
+ * The command our Codex entry launches, or null when there is nothing to
+ * repoint: no entry, or one that defines no command (a `url` entry, say).
+ * Throws ClientConfigError when a command is there but cannot be read.
  */
 export function codexConfigServerCommand(raw: string, path: string): string | null {
   const owned = codexOwnedStatements(raw.split('\n'))
   if (owned.length === 0) return null
+  let sawCommand = false
   for (const statement of owned) {
     if (statement.kind !== 'keyval') continue
     const rest = statement.path.slice(2)
     if (rest.length === 1 && rest[0] === 'command') {
+      sawCommand = true
       const value = tomlStringValue(statement.value)
       if (value !== null) return value
       break
     }
     // An inline table: doodle-note = { command = "...", ... }
     if (rest.length === 0) {
+      if (/(?:^|[{,\s])command\s*=/.test(statement.value)) sawCommand = true
       const inline = /(?:^|[{,\s])command\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')/.exec(statement.value)
       const value = inline ? tomlStringValue(inline[1]) : null
       if (value !== null) return value
     }
   }
+  if (!sawCommand) return null
   throw new ClientConfigError(`${path} has a ${CODEX_HEADER} entry without a readable command.`)
 }
