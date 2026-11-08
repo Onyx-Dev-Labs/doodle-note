@@ -184,6 +184,12 @@ test('the app uses the identity for its AUMID, login item, agent access and upda
   assert.match(index, /new AgentAccessService\(\s+\(\) => join\(libraryRoot\(\), 'meetings'\),\s+resolveMcpServerSpec\(\),\s+(?:\/\/[^\n]*\n\s+)*agentAccessRoots\(/)
   assert.doesNotMatch(read('src/main/agent-access-service.ts'), /process\.env\.APPDATA|process\.env\.DOODLE_NOTE_MCP_CONFIG/)
   assert.match(index, /enabled: profile\.updatesEnabled && APP_IDENTITY\.updatesAllowed/)
+  // A QA profile never adopts the production profile's meetings or settings.
+  assert.match(index, /planProfile\(\{\s+channel: APP_CHANNEL,\s+identity: APP_IDENTITY\.name,/)
+  assert.match(
+    index,
+    /if \(!app\.isPackaged \|\| !profile\.adoptLegacyData \|\| APP_IDENTITY\.name !== 'production'\) return/
+  )
   assert.match(index, /identityMismatch\(app\.getName\(\)\)/)
   // No identity literal is left in the main process besides the identity file.
   const main = join(desktop, 'src', 'main')

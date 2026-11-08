@@ -1,5 +1,6 @@
 import { posix } from 'node:path'
 import { DEV_APP_NAME, type AppChannel } from '../shared/app-channel'
+import type { AppIdentityName } from './app-identity'
 
 // The development build is macOS-only, so these are always POSIX paths, whatever platform
 // the tests happen to run on.
@@ -10,6 +11,8 @@ const PRODUCTION_PROFILE_NAMES = ['DoodleNote', 'desktop', 'DoodleNote Local']
 
 export interface ProfileInputs {
   channel: AppChannel
+  /** The build identity (src/main/app-identity.ts): production or QA. */
+  identity: AppIdentityName
   isPackaged: boolean
   /** The per-user platform root, e.g. ~/Library/Application Support. */
   appData: string
@@ -28,7 +31,12 @@ export interface ProfilePlan {
   logs: string | null
   /** Auto-update is a production capability. A dev build never contacts a feed. */
   updatesEnabled: boolean
-  /** Copying a prior profile's meetings/settings into this one is production-only. */
+  /**
+   * Copying a prior profile's meetings/settings into this one is for the
+   * production identity only: a QA build's sibling "desktop" profile is the
+   * production profile (meetings, settings with the encrypted cloud API key,
+   * chat), so a QA profile always starts empty.
+   */
   adoptLegacyData: boolean
 }
 
@@ -56,7 +64,7 @@ export function planProfile(input: ProfileInputs): ProfilePlan {
     userData: input.env.DOODLE_USER_DATA && !input.isPackaged ? input.env.DOODLE_USER_DATA : null,
     logs: null,
     updatesEnabled: true,
-    adoptLegacyData: true
+    adoptLegacyData: input.identity === 'production'
   }
 }
 

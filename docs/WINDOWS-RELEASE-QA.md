@@ -392,7 +392,9 @@ every identity-bearing name from the one entry in
 | Old / new install folder | `Programs\desktop` / `Programs\DoodleNote` | `Programs\desktop-qa` / `Programs\DoodleNote QA` |
 | AppUserModelID and the "Open at login" Run value | `com.doodlenote.desktop` | `com.doodlenote.desktop.qa` |
 | MCP entry in client configs | `doodle-note` | `doodle-note-qa` |
-| MCP opt-in file and client configs | the real home directory | a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`), like the dev channel |
+| MCP opt-in file and client configs | the real home directory and `%APPDATA%\Claude` | all of them in a sandbox in the profile (`%APPDATA%\desktop-qa\agent-access-home`: its own `.doodlenote\mcp.json`, `.claude.json`, `.codex\config.toml` and `AppData\Roaming\Claude`), like the dev channel; neither `%APPDATA%` nor an inherited `DOODLE_NOTE_MCP_CONFIG` is consulted |
+| MCP server launch spec | `ELECTRON_RUN_AS_NODE` | also `DOODLE_NOTE_MCP_CONFIG` (the sandbox opt-in file, absolute) and `DOODLE_NOTE_MCP_IDENTITY=qa`; the server then reads only that file, only if it was written for `qa`, and never falls back to `~\.doodlenote\mcp.json` |
+| Profile data at first launch | an older profile's meetings, folders, settings and chat are adopted | starts empty: the sibling `%APPDATA%\desktop` is the production profile and is never copied (meetings, settings with the encrypted cloud API key, chat) |
 | Migration journal | `HKCU\Software\f85f8dcf-...\InstallMigration` | `HKCU\Software\320d0756-...\InstallMigration` |
 | Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
 | Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
@@ -414,9 +416,13 @@ share it.
 Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 `Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
 
-1. Install `release-qa-legacy\DoodleNote QA-<version>-setup.exe`. Turn on Open
+1. Install `release-qa-legacy\DoodleNote QA-<version>-setup.exe`. The QA profile
+   starts empty: seed it with test data only (import a test recording or create a
+   few test meetings; never copy anything from `%APPDATA%\desktop`). Turn on Open
    at login, enable agent access and connect the three MCP clients (they are
-   written in the sandbox above, never the real `~/.claude.json` etc.). Record the
+   written in the sandbox above, never the real `~/.claude.json`,
+   `%APPDATA%\Claude\claude_desktop_config.json` or `~/.codex`; check those
+   real files are byte-for-byte unchanged). Record the
    QA Run value (`com.doodlenote.desktop.qa`) and confirm the production one, if
    any, is unchanged.
 2. Run `release-qa\DoodleNote QA-<version>-setup.exe` (also with `/S --updated`).

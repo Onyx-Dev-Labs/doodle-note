@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import { assertIsolatedFromProduction, planProfile } from './profile-identity'
 
 const base = {
+  identity: 'production' as const,
   isPackaged: true,
   appData: '/Users/t/Library/Application Support',
   home: '/Users/t',
@@ -53,4 +54,15 @@ test('an overlapping profile directory is rejected', () => {
   assert.throws(() => assertIsolatedFromProduction(`${root}/DoodleNote`, root))
   assert.throws(() => assertIsolatedFromProduction(`${root}/desktop/inner`, root))
   assert.doesNotThrow(() => assertIsolatedFromProduction(`${root}/DoodleNote Dev`, root))
+})
+
+test('a QA identity build never adopts another profile, packaged or not', () => {
+  for (const isPackaged of [true, false]) {
+    const plan = planProfile({ ...base, identity: 'qa', isPackaged, channel: 'release' })
+    assert.equal(plan.adoptLegacyData, false)
+    assert.equal(plan.userData, null)
+  }
+  // The production identity keeps adopting, and the dev channel never does.
+  assert.equal(planProfile({ ...base, channel: 'release' }).adoptLegacyData, true)
+  assert.equal(planProfile({ ...base, channel: 'dev' }).adoptLegacyData, false)
 })

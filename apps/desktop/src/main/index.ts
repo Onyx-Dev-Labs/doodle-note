@@ -178,8 +178,9 @@ function resolveMcpServerSpec(): McpServerSpec {
  * on first launch. Models are discovered in place by NotesService.
  */
 function migrateDevUserData(): void {
-  // A development build never adopts another profile's meetings or settings.
-  if (!app.isPackaged || !profile.adoptLegacyData) return
+  // A development or QA identity build never adopts another profile's meetings or
+  // settings (planProfile: production identity only).
+  if (!app.isPackaged || !profile.adoptLegacyData || APP_IDENTITY.name !== 'production') return
   try {
     const newDir = app.getPath('userData')
     const oldDir = join(newDir, '..', 'desktop')
@@ -216,6 +217,7 @@ if (process.platform === 'win32' && app.isPackaged && APP_CHANNEL === 'release')
 // isolate a packaged app. Must run before anything resolves a path or locks.
 const profile = planProfile({
   channel: APP_CHANNEL,
+  identity: APP_IDENTITY.name,
   isPackaged: app.isPackaged,
   appData: app.getPath('appData'),
   home: app.getPath('home'),
