@@ -1783,8 +1783,14 @@ export class DictationService {
    * outcome: a panel after a delivery, the recovery card's warning line when one is showing.
    * Returns the sentence for a caller that shows a plain notice instead (no card), else null.
    */
-  private reportClipboard(outcome: { kind: string; clipboard?: string }): string | null {
-    const problem = this.windows ? clipboardProblem(outcome.clipboard) : null
+  private reportClipboard(outcome: {
+    kind: string
+    clipboard?: string
+    clipboardHolds?: string
+  }): string | null {
+    const problem = this.windows
+      ? clipboardProblem(outcome.clipboard, outcome.clipboardHolds)
+      : null
     if (!problem) return null
     if (outcome.kind === 'delivered') {
       this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
@@ -1804,7 +1810,13 @@ export class DictationService {
     text: string,
     onStage?: (stage: 'sent') => void,
     guards?: DeliveryGuards
-  ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings; clipboard?: string }> {
+  ): Promise<
+    DeliveryOutcome & {
+      helper?: HelperDeliveryTimings
+      clipboard?: string
+      clipboardHolds?: string
+    }
+  > {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
     if (!target) return { kind: 'recover', reason: 'helper-unavailable' }
@@ -1819,11 +1831,20 @@ export class DictationService {
     // The helper's clipboard result travels with the outcome to every caller (reportClipboard).
     const helper = {
       ...(result.timings ? { helper: result.timings } : {}),
-      clipboard: result.clipboard
+      clipboard: result.clipboard,
+      ...(result.clipboardHolds ? { clipboardHolds: result.clipboardHolds } : {})
     }
     if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }
-    if (result.outcome === 'uncertain')
+    if (result.outcome === 'uncertain') {
+      // Windows: the typing fallback stopped part-way, and the helper says why.
+      if (this.windows && result.method === 'type' && typeof result.charsDelivered === 'number')
+        return {
+          kind: 'recover',
+          reason: result.reason === 'secure-field' ? 'typing-stopped-secure' : 'typing-stopped',
+          ...helper
+        }
       return { kind: 'recover', reason: 'insertion-uncertain', ...helper }
+    }
     if (result.outcome === 'refused')
       return { kind: 'recover', reason: refusalReason(result.reason), ...helper }
     return { kind: 'recover', reason: 'insertion-failed', ...helper }
@@ -2351,6 +2372,8 @@ function refusalReason(reason: string | undefined): RecoveryReason {
       return 'paste-unavailable'
     case 'target-unverifiable':
       return 'target-unverifiable'
+    case 'helper-busy':
+      return 'helper-busy'
     // A delivery the helper refused because the client had already given up: keep the text.
     case 'deadline-exceeded':
       return 'insertion-failed'

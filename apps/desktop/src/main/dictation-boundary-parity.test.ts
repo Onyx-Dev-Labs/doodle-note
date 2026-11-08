@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import {
+  HELPER_PASTE_ESTIMATE_MS,
   HELPER_TYPE_BOUNDARY_MS,
   HELPER_TYPE_OVERHEAD_MS,
   HELPER_TYPE_PER_CHAR_MS,
@@ -39,13 +40,42 @@ test('the TS typing-boundary predicate matches .NET for every BMP code unit', ()
   )
 })
 
-test('the estimate counts U+0085 (NEL) as a boundary, where JS \\s would not', () => {
-  // 36 × U+0085 was the reviewer's counter-example; TS must match the C# count.
-  const text = '\u0085'.repeat(36)
-  // 36 units × the per-character cost + 36 boundaries × the boundary pause + the fixed overhead,
-  // exactly as Delivery.cs TypeEstimateMs computes it (the constants mirror the C# values).
-  assert.equal(
-    helperDeliverEstimateMs(text),
-    36 * HELPER_TYPE_PER_CHAR_MS + 36 * HELPER_TYPE_BOUNDARY_MS + HELPER_TYPE_OVERHEAD_MS
+/**
+ * The C# helper's own numbers, read from Delivery.cs (not restated here): TypeEstimateMs is
+ * `normalized.Length * <perChar> + boundaries * <boundary> + <overhead>`, PasteEstimateMs returns
+ * <paste>. The TS estimate must be computed from exactly these.
+ */
+function csharpEstimate(): { perChar: number; boundary: number; overhead: number; paste: number } {
+  const source = readFileSync(
+    new URL('../../../../engine/windows/dictation-helper/Delivery.cs', import.meta.url),
+    'utf8'
   )
+  const typing = /return normalized\.Length \* (\d+) \+ boundaries \* (\d+) \+ (\d+);/.exec(source)
+  const paste = /static int PasteEstimateMs \{ get \{ return (\d+); \} \}/.exec(source)
+  assert.ok(typing, 'TypeEstimateMs found in Delivery.cs')
+  assert.ok(paste, 'PasteEstimateMs found in Delivery.cs')
+  return {
+    perChar: Number(typing[1]),
+    boundary: Number(typing[2]),
+    overhead: Number(typing[3]),
+    paste: Number(paste[1])
+  }
+}
+
+test("the TS estimate constants are the C# helper's, read from Delivery.cs", () => {
+  const cs = csharpEstimate()
+  assert.equal(HELPER_TYPE_PER_CHAR_MS, cs.perChar, 'per character')
+  assert.equal(HELPER_TYPE_BOUNDARY_MS, cs.boundary, 'per word boundary')
+  assert.equal(HELPER_TYPE_OVERHEAD_MS, cs.overhead, 'fixed overhead')
+  assert.equal(HELPER_PASTE_ESTIMATE_MS, cs.paste, 'paste estimate')
+})
+
+test('the estimate counts U+0085 (NEL) as a boundary, where JS \\s would not', () => {
+  // 36 × U+0085 was the reviewer's counter-example; TS must match the C# count, computed here
+  // from the C# constants themselves.
+  const cs = csharpEstimate()
+  const text = '\u0085'.repeat(36)
+  assert.equal(helperDeliverEstimateMs(text), 36 * cs.perChar + 36 * cs.boundary + cs.overhead)
+  // A plain word: 5 units, no boundary.
+  assert.equal(helperDeliverEstimateMs('hello'), Math.max(cs.paste, 5 * cs.perChar + cs.overhead))
 })

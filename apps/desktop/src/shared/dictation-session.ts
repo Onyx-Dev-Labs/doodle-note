@@ -52,6 +52,15 @@ export type RecoveryReason =
   | 'paste-unavailable'
   /** Windows: whether the field is safe to type into (identity, password state) could not be read. */
   | 'target-unverifiable'
+  /**
+   * Windows: the typing fallback stopped part-way: a character could not be confirmed as it arrived,
+   * focus moved, or it ran out of time. Some of the text may be in the field.
+   */
+  | 'typing-stopped'
+  /** Windows: the typing fallback stopped part-way because the field became a password field. */
+  | 'typing-stopped-secure'
+  /** Windows: the helper's calls into other apps are stuck (an app is not responding). */
+  | 'helper-busy'
 
 export type DeliveryOutcome =
   { kind: 'delivered' } | { kind: 'recover'; reason: RecoveryReason; detail?: string }

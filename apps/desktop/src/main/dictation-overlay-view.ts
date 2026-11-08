@@ -86,9 +86,15 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
     'The selection changed while the text was being rewritten, so nothing was replaced.',
   'text-changed': 'The text there has changed since, so it was not put back.',
   'paste-unavailable':
-    'Could not paste into this app, and typing there could not be done safely. Your text is kept for copying.',
+    'Could not paste into this app. Typing instead works only in classic Windows text boxes, not in browsers, Electron apps or other modern apps, so nothing was typed. Your text is kept for copying.',
   'target-unverifiable':
-    'Could not check that this field is safe to type into, so nothing more was typed. Your text is kept for copying.'
+    'Could not check that this field is safe to type into, so nothing more was typed. Your text is kept for copying.',
+  'typing-stopped':
+    'Typing stopped part-way because a character could not be confirmed. Check the field before pasting; your text is kept for copying.',
+  'typing-stopped-secure':
+    'Typing stopped because the field became a password field. Check it; the rest was not typed, and your text is kept for copying.',
+  'helper-busy':
+    'An app is not responding, so DoodleNote could not check the field. Try again in a moment. Your text is kept for copying.'
 }
 
 /** Copy for the heads-up line under the live pill. */
@@ -285,18 +291,38 @@ export function overlayView(state: SessionState, ctx: OverlayContext): OverlayVi
 }
 
 /** Windows: how the user's clipboard fared after a paste (see the helper's restore results). */
-export type ClipboardProblem = 'skipped' | 'partial' | 'unrestored'
+export type ClipboardProblem =
+  | 'skipped'
+  | 'partial'
+  /** Not put back; it still holds the dictated text. */
+  | 'unrestored'
+  /** Not put back; another app copied something since, which it now holds. */
+  | 'unrestored-foreign'
+  /** Not put back; what it holds could not be told. */
+  | 'unrestored-unknown'
 
 /** What the overlay says about each clipboard problem. Accurate to what the helper reported. */
 export const CLIPBOARD_PROBLEM_MESSAGES: Record<ClipboardProblem, string> = {
   skipped: 'Part of your clipboard was too large or could not be kept, so it was not put back.',
   partial: 'Part of your clipboard could not be put back.',
-  unrestored: 'Your clipboard could not be put back. It now holds the dictated text.'
+  unrestored: 'Your clipboard could not be put back. It now holds the dictated text.',
+  'unrestored-foreign':
+    'Your earlier clipboard could not be put back. It now holds what another app copied since.',
+  'unrestored-unknown':
+    'Your clipboard could not be put back, and DoodleNote could not tell what it holds now.'
 }
 
 /** The clipboard problem a helper restore result describes, or null when there is none. */
-export function clipboardProblem(result: string | undefined): ClipboardProblem | null {
-  return result === 'skipped' || result === 'partial' || result === 'unrestored' ? result : null
+export function clipboardProblem(
+  result: string | undefined,
+  holds?: string
+): ClipboardProblem | null {
+  if (result === 'skipped' || result === 'partial') return result
+  if (result !== 'unrestored') return null
+  // Only what the helper reported: our text, another app's newer copy, or unknown.
+  if (holds === 'dictated') return 'unrestored'
+  if (holds === 'foreign') return 'unrestored-foreign'
+  return 'unrestored-unknown'
 }
 
 /** A small panel the service shows after a transform, over the resting pill. */

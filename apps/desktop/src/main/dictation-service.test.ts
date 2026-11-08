@@ -2671,19 +2671,31 @@ test('Windows: a clipboard that could not be fully put back is shown, for every 
   await tick()
   assert.match(JSON.stringify(delivered.overlay.at(-1)), /too large or could not be kept/)
 
-  const unrestored = harness({ platform: 'win32', helperIntegrity: 'ok' })
-  unrestored.helper.delivery = {
-    outcome: 'delivered',
-    method: 'paste',
-    verified: true,
-    clipboard: 'unrestored'
+  // "unrestored" says only what the helper reported the clipboard holds now.
+  const holds = [
+    ['dictated', /could not be put back\. It now holds the dictated text/],
+    ['foreign', /earlier clipboard could not be put back\. It now holds what another app copied/],
+    ['unknown', /could not tell what it holds now/],
+    [undefined, /could not tell what it holds now/]
+  ] as const
+  for (const [clipboardHolds, message] of holds) {
+    const unrestored = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    unrestored.helper.delivery = {
+      outcome: 'delivered',
+      method: 'paste',
+      verified: true,
+      clipboard: 'unrestored',
+      ...(clipboardHolds ? { clipboardHolds } : {})
+    }
+    await speak(unrestored, 'locked clipboard')
+    await tick()
+    assert.match(JSON.stringify(unrestored.overlay.at(-1)), message, String(clipboardHolds))
+    assert.doesNotMatch(
+      JSON.stringify(unrestored.overlay.at(-1)),
+      clipboardHolds === 'dictated' ? /another app/ : /holds the dictated text/,
+      'never claims what the helper did not report'
+    )
   }
-  await speak(unrestored, 'locked clipboard')
-  await tick()
-  assert.match(
-    JSON.stringify(unrestored.overlay.at(-1)),
-    /could not be put back\. It now holds the dictated text/
-  )
 
   const uncertain = harness({ platform: 'win32', helperIntegrity: 'ok' })
   uncertain.helper.delivery = {
@@ -2738,6 +2750,52 @@ test('Windows: an unverified helper is checked before dictation, and Bark off ne
   assert.equal(status.helper, 'off')
 })
 
+test('Windows: why typing stopped, or never started, reaches the recovery card', async () => {
+  const cases = [
+    // Paste failed and the target is UIA-only: refused up front, nothing typed.
+    [
+      { outcome: 'refused', reason: 'typing-unsupported', method: 'type' },
+      /classic Windows text boxes/
+    ],
+    // An app is not responding: the helper's bounded calls are all stuck.
+    [{ outcome: 'refused', reason: 'helper-busy' }, /An app is not responding/],
+    // Typing stopped part-way: the specific reason is kept, the card says so.
+    [
+      {
+        outcome: 'uncertain',
+        reason: 'secure-field',
+        method: 'type',
+        charsDelivered: 12,
+        charsUnconfirmed: 0
+      },
+      /became a password field/
+    ],
+    [
+      {
+        outcome: 'uncertain',
+        reason: 'target-changed',
+        method: 'type',
+        charsDelivered: 7,
+        charsUnconfirmed: 1
+      },
+      /Typing stopped part-way/
+    ],
+    // A paste that could not be confirmed keeps its own message.
+    [
+      { outcome: 'uncertain', reason: 'insertion-unverifiable', method: 'paste' },
+      /Could not confirm the text was inserted/
+    ]
+  ] as const
+  for (const [delivery, message] of cases) {
+    const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+    h.helper.delivery = { verified: false, clipboard: 'untouched', ...delivery }
+    await speak(h, 'some words')
+    await tick()
+    assert.equal(h.service.phase, 'recovery', JSON.stringify(delivery))
+    assert.match(JSON.stringify(h.overlay.at(-1)), message, JSON.stringify(delivery))
+  }
+})
+
 test('Windows: paste last and a refused paste report the clipboard too', async () => {
   const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
   await h.service.start()
@@ -2757,7 +2815,8 @@ test('Windows: paste last and a refused paste report the clipboard too', async (
     outcome: 'refused',
     reason: 'focus-changed',
     verified: false,
-    clipboard: 'unrestored'
+    clipboard: 'unrestored',
+    clipboardHolds: 'dictated'
   }
   await h.service.pasteLast()
   await tick()
