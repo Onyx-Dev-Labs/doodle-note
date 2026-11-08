@@ -66,7 +66,11 @@
 !define DN_OPEN_NO_FOLLOW 0x02200000
 ; DELETE | FILE_READ_ATTRIBUTES
 !define DN_ACCESS_DELETE 0x10080
-!define DN_POWERSHELL "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+; The harness overrides DN_POWERSHELL (a path that does not exist: the closer
+; cannot start) and DN_CLOSE_PS_PRELUDE (ConstrainedLanguage mode first, as an
+; application-control policy would impose); both must give "unknown".
+!define /ifndef DN_POWERSHELL "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+!define /ifndef DN_CLOSE_PS_PRELUDE ""
 ; Wall-clock limits for the closer (dnRunHidden); past them it is stopped and its
 ; answer is "unknown", the conservative path.
 !define /ifndef DN_CLOSE_FIND_TIMEOUT_MS 30000
@@ -128,7 +132,7 @@ Var dnLocked
 !macro dnCloseAppIn DIR POLICY RESULT
   System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_EXE", w "${DIR}\${DN_APP_EXE}")'
   System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_MODE", w "find")'
-  Push `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS}"`
+  Push `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS_PRELUDE}${DN_CLOSE_PS}"`
   Push ${DN_CLOSE_FIND_TIMEOUT_MS}
   Call ${DN_FN}dnRunHidden
   Pop ${RESULT}
@@ -148,7 +152,7 @@ Var dnLocked
     ${if} ${RESULT} == "close"
       DetailPrint "$(appClosing)"
       System::Call 'kernel32::SetEnvironmentVariableW(w "DN_CLOSE_MODE", w "close")'
-      Push `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS}"`
+      Push `"${DN_POWERSHELL}" -NoProfile -NonInteractive -Command "${DN_CLOSE_PS_PRELUDE}${DN_CLOSE_PS}"`
       Push ${DN_CLOSE_TIMEOUT_MS}
       Call ${DN_FN}dnRunHidden
       Pop ${RESULT}

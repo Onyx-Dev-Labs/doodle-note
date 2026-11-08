@@ -14,7 +14,10 @@ const path = require('node:path')
 const desktop = path.resolve(__dirname, '..')
 /** MigrationRecord times the installer and the app must agree on (windows-install-record.ts). */
 const recordTimes = JSON.parse(
-  fs.readFileSync(path.join(desktop, 'src', 'main', 'fixtures', 'install-record-times.json'), 'utf8')
+  fs.readFileSync(
+    path.join(desktop, 'src', 'main', 'fixtures', 'install-record-times.json'),
+    'utf8'
+  )
 )
 const IDENTITY = 'guards-test|desktop|DoodleNote'
 /** The one-value record (dnWriteRecord): DNMR1|<identity>|<old>|<new>|<UTC>|END. */
@@ -221,6 +224,17 @@ async function main() {
       '-DDN_CLOSE_TIMEOUT_MS=3000'
     ])
     // The same guards stopping between dnPinLegacy's checks and the removal until
+    // Round 8: a closer that cannot start (DN_POWERSHELL names no file: PowerShell
+    // removed or blocked) and one in ConstrainedLanguage mode (as an application-control
+    // policy imposes; the real closer script, downgraded first). Test builds only.
+    const noStartExe = path.join(sandbox, 'harness-closer-missing.exe')
+    compile(noStartExe, [
+      `-DDN_POWERSHELL=${path.join(sandbox, 'no-such-folder', 'powershell.exe')}`
+    ])
+    const clmExe = path.join(sandbox, 'harness-closer-clm.exe')
+    compile(clmExe, [
+      "-DDN_CLOSE_PS_PRELUDE=$$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage'; "
+    ])
     // <pause>.go exists (test builds only: DN_TEST_PAUSE is never set for an installer).
     const pauseBase = path.join(sandbox, 'pause')
     const pauseExe = path.join(sandbox, 'harness-pause.exe')
@@ -1316,6 +1330,44 @@ async function main() {
       stallKeep,
       phase('d5-stall-keep', stallKeep, { exe: stallExe }).results
     )
+
+    // D5b (round 8): the closer cannot start, or runs in ConstrainedLanguage mode, with
+    // the old app really running from the old folder. Both answer "unknown": the old
+    // folder (and with it the old exe the login item starts) is kept, the move is
+    // recorded as close-keep / unknown-process, and the old app is left running. A
+    // full-language closer finds the same process (control).
+    const d5bDir = path.join(sandbox, 'd5b', 'desktop')
+    const d5bApp = runAs(path.join(d5bDir, 'DoodleNote.exe'))
+    started.push(d5bApp)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    checkCases(
+      'd5b-control',
+      [['close', d5bDir, 'never', 'running']],
+      phase('d5b-control', [['close', d5bDir, 'never', 'running']]).results
+    )
+    for (const [name, exe] of [
+      ['d5b-missing', noStartExe],
+      ['d5b-clm', clmExe]
+    ]) {
+      const state = `${journalKey}-${name}`
+      registryKeys.push(state, `${state}-status`)
+      const keep = [
+        ['close', d5bDir, 'close', 'unknown'],
+        ['root', path.join(sandbox, 'd5b'), path.join(sandbox, 'd5b-profile')],
+        ['jkey', `${state}\\InstallMigration`, ''],
+        ['stkey', `${state}-status`, path.join(sandbox, `${name}-install.log`), 'set'],
+        ['migclose', d5bDir, path.join(sandbox, 'd5b', 'DoodleNote'), 'close', '1'],
+        ['status', '', '', (r) => /^close\|close-keep\|unknown-process\|\d{4}-/.test(r)]
+      ]
+      checkCases(name, keep, phase(name, keep, { exe }).results)
+      assert.ok(fs.existsSync(path.join(d5bDir, 'DoodleNote.exe')), `${name}: the old exe is kept`)
+      assert.ok(alive(d5bApp.pid), `${name}: the old app was not closed`)
+      assert.match(
+        fs.readFileSync(path.join(sandbox, `${name}-install.log`), 'utf8'),
+        /close-keep.*unknown-process/,
+        `${name}: the install log records it`
+      )
+    }
 
     // D6: silent, no --updated, old app running: quit with exit code 2; no folder touched.
     const d6 = path.join(sandbox, 'd6', 'Local', 'Programs')

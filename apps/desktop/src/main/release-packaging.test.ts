@@ -581,6 +581,15 @@ test('the install migration never removes through a link and closes only its own
     guards.slice(guards.indexOf('!define DN_CLOSE_PS')).split('\n')[0],
     /\$\{DIR\}|\$INSTDIR/
   )
+  // Round 8: an installer runs the system's Windows PowerShell with no prelude; only the
+  // harness (-D) names a missing PowerShell or prepends ConstrainedLanguage mode.
+  assert.match(
+    guards,
+    /^!define \/ifndef DN_POWERSHELL "\$SYSDIR\\WindowsPowerShell\\v1\.0\\powershell\.exe"$/m
+  )
+  assert.match(guards, /^!define \/ifndef DN_CLOSE_PS_PRELUDE ""$/m)
+  for (const text of [installer, builderConfig, desktopPackage])
+    assert.doesNotMatch(text, /DN_POWERSHELL|DN_CLOSE_PS_PRELUDE/)
   // A pending migration checks the old folder on its own, whatever exists in the new one.
   const check = installer.slice(installer.indexOf('!macro dnMigrationCheckAppRunning'))
   assert.match(

@@ -357,7 +357,17 @@ moves an existing install on upgrade:
    the installer or uninstaller; a timeout counts as "cannot be established". If
    the old folder's app cannot be closed, or which processes are ours cannot be
    established (no PowerShell, a timeout, or an unreadable process with the same
-   name), the new copy is installed and the old folder is kept for the next run. It
+   name), the new copy is installed and the old folder is kept for the next run.
+   **The installer's closer still needs Windows PowerShell** (the app's record path
+   does not since round 7). If PowerShell cannot start (removed, blocked by
+   AppLocker / WDAC) or runs in ConstrainedLanguage mode (as an application-control
+   policy imposes: the closer's `[Diagnostics.Stopwatch]` call is refused, exit 3),
+   the answer is "unknown": the move does not happen, the old folder stays, and the
+   old exe keeps starting at login from its Run value until a later run succeeds.
+   That is the fail-safe direction and it is visible: the status key and the install
+   log read `close / close-keep / unknown-process`. The harness proves both (a closer
+   that names no PowerShell, and the real closer downgraded to ConstrainedLanguage
+   first, with the old app really running; `d5b-missing`, `d5b-clm`). It
    then parks the old uninstall command in the journal
    `HKCU\Software\{APP_GUID}\InstallMigration` (the GUID derives from `appId`),
    so electron-builder's "uninstall old version" step does not delete the old
