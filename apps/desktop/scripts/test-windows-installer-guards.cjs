@@ -12,6 +12,7 @@ const os = require('node:os')
 const path = require('node:path')
 
 const desktop = path.resolve(__dirname, '..')
+const IDENTITY = 'guards-test|desktop|DoodleNote'
 
 async function makensis() {
   const builder = path.dirname(
@@ -50,6 +51,13 @@ function alive(pid) {
   }
 }
 
+/**
+ * A case is [kind, a, b, expected] or, for kinds with a third field, [kind, a, b, c, expected].
+ */
+const THREE_FIELDS = new Set(['arm', 'migclose', 'finish'])
+const fields = (c) => (THREE_FIELDS.has(c[0]) ? c.slice(0, 4) : c.slice(0, 3))
+const expectation = (c) => (THREE_FIELDS.has(c[0]) ? c[4] : c[3])
+
 async function main() {
   if (process.platform !== 'win32') {
     console.log('skipped: Windows only')
@@ -60,6 +68,10 @@ async function main() {
     : null
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'dn-guards-'))
   const started = []
+  /** Files held open (no sharing) while the harness runs. */
+  const holds = []
+  /** Throwaway HKCU keys the harness writes; deleted afterwards. */
+  const registryKeys = []
   try {
     const nsis = await makensis()
     const exe = path.join(sandbox, 'harness.exe')
@@ -71,6 +83,7 @@ async function main() {
         '-DAPP_FILENAME=desktop',
         '-DPRODUCT_FILENAME=DoodleNote',
         '-DDN_APP_EXE=DoodleNote.exe',
+        `-DDN_MIGRATION_IDENTITY=${IDENTITY}`,
         `-DGUARDS=${path.join(desktop, 'build', 'windows-install-guards.nsh')}`,
         `-DOUT_FILE=${exe}`,
         path.join(__dirname, 'test-windows-installer-guards.nsi')
@@ -113,6 +126,7 @@ async function main() {
     write(path.join(held, 'DoodleNote.exe'), 'old')
     write(path.join(held, 'locked.dat'), 'x')
     write(path.join(held, 'other.dat'), 'x')
+    holds.push(path.join(held, 'locked.dat'))
 
     // Processes: the old exe, a sibling folder that shares its prefix, and the QA name.
     const running = runAs(path.join(sandbox, 'procs', 'desktop', 'DoodleNote.exe'))
@@ -163,6 +177,97 @@ async function main() {
       ['locked', path.join(old, 'DoodleNote.exe'), '', '0'],
       ['ensure', path.join(sandbox, 'procs', 'desktop'), '', 'done']
     ]
+    const lower = (value) => value.toLowerCase()
+    const real = (...parts) => path.join(fs.realpathSync.native(parts[0]), ...parts.slice(1))
+    const journalKey = `Software\\DoodleNoteGuardsTest-${path.basename(sandbox)}`
+    registryKeys.push(journalKey)
+    cases.push(['jkey', `${journalKey}\\InstallMigration`, ''])
+
+    // L1: only <Programs>\desktop itself is redirected; any other folder named
+    // desktop (an earlier /D=X\desktop) is upgraded in place, never moved or deleted.
+    const mig = path.join(sandbox, 'mig', 'Local', 'Programs')
+    const migProfile = path.join(sandbox, 'mig', 'Roaming', 'desktop')
+    write(path.join(mig, 'desktop', 'DoodleNote.exe'), 'old')
+    write(path.join(mig, 'desktop', 'resources', 'app.asar'), 'asar')
+    write(path.join(mig, 'DoodleNote', 'DoodleNote.exe'), 'new')
+    fs.mkdirSync(migProfile, { recursive: true })
+    const otherParent = path.join(sandbox, 'mig', 'Other')
+    write(path.join(otherParent, 'desktop', 'DoodleNote.exe'), 'old')
+    write(path.join(otherParent, 'desktop', 'resources', 'app.asar'), 'asar')
+    const otherEmpty = path.join(sandbox, 'mig', 'OtherEmpty', 'desktop')
+    fs.mkdirSync(otherEmpty, { recursive: true })
+    const fresh = path.join(sandbox, 'fresh', 'Programs')
+    fs.mkdirSync(fresh, { recursive: true })
+    const moved = `${lower(real(mig, 'DoodleNote'))}|${lower(real(mig, 'desktop'))}|`
+    cases.push(['root', mig, migProfile])
+    cases.push(['plan', path.join(mig, 'desktop'), '', (r) => lower(r) === moved])
+    cases.push(['plan', `${path.join(mig, 'desktop')}\\`, '', (r) => lower(r) === moved])
+    cases.push(['plan', path.join(mig, 'desktop').toUpperCase(), '', (r) => lower(r) === moved])
+    cases.push([
+      'plan',
+      path.join(otherParent, 'desktop'),
+      '',
+      (r) => r.startsWith(`${path.join(otherParent, 'desktop')}||`) && / is not in /.test(r)
+    ])
+    cases.push([
+      'plan',
+      otherEmpty,
+      '',
+      (r) => r.startsWith(`${otherEmpty}||`) && / is not in /.test(r)
+    ])
+    cases.push(['plan', path.join(mig, 'Custom'), '', `${path.join(mig, 'Custom')}||`])
+    // Defence in depth: even if asked, the finish step refuses that folder.
+    cases.push([
+      'finish',
+      path.join(otherParent, 'desktop'),
+      path.join(otherParent, 'DoodleNote'),
+      '0',
+      /^kept: the old folder is not /
+    ])
+    cases.push(['root', fresh, path.join(sandbox, 'fresh', 'Roaming', 'desktop')])
+    cases.push([
+      'plan',
+      path.join(fresh, 'desktop'),
+      '',
+      (r) => lower(r) === `${lower(real(fresh, 'DoodleNote'))}||`
+    ])
+
+    // L3: a pending migration with the old app running AND the new exe present.
+    const l3 = path.join(sandbox, 'l3', 'Local', 'Programs')
+    const l3Profile = path.join(sandbox, 'l3', 'Roaming', 'desktop')
+    fs.mkdirSync(l3Profile, { recursive: true })
+    write(path.join(l3, 'desktop', 'resources', 'app.asar'), 'asar')
+    write(path.join(l3, 'desktop', 'locked.dat'), 'x')
+    write(path.join(l3, 'DoodleNote', 'DoodleNote.exe'), 'new')
+    const l3Old = runAs(path.join(l3, 'desktop', 'DoodleNote.exe'))
+    started.push(l3Old)
+    const l3Source = path.join(l3, 'desktop')
+    const l3Dest = path.join(l3, 'DoodleNote')
+    const trusted = (r) => lower(r) === lower(real(l3, 'desktop'))
+    cases.push(['root', l3, l3Profile])
+    cases.push(['jstate', '', '', 'none'])
+    cases.push(['arm', l3Source, l3Dest, 'someone-else|desktop|DoodleNote', 'armed'])
+    cases.push(['journal', l3Dest, '', /^none: the migration journal is for another app/])
+    cases.push(['arm', l3Source, l3Dest, '', 'armed'])
+    cases.push([
+      'journal',
+      path.join(mig, 'DoodleNote'),
+      '',
+      /^none: the migration journal is for /
+    ])
+    cases.push(['journal', l3Dest, '', trusted])
+    // Not allowed to close (silent, no --updated): keep the old folder, journal armed.
+    cases.push(['migclose', l3Source, l3Dest, 'never', '1'])
+    cases.push(['finish', l3Source, l3Dest, '1', /^kept: .* is still running/])
+    cases.push(['jstate', '', '', 'armed'])
+    cases.push(['journal', l3Dest, '', trusted])
+    // --updated: the closer closes exactly the old app although the new exe exists.
+    cases.push(['migclose', l3Source, l3Dest, 'close', '0'])
+    // A file there is still held: removal refuses, the exe stays, the journal stays armed.
+    cases.push(['finish', l3Source, l3Dest, '0', 'kept: a file is still in use'])
+    cases.push(['jstate', '', '', 'armed'])
+    cases.push(['journal', l3Dest, '', trusted])
+    holds.push(path.join(l3, 'desktop', 'locked.dat'))
     // 8.3 short names: the old folder exists, the new one does not yet. Runner TEMP
     // paths are short already (C:\\Users\\RUNNER~1); elsewhere use the short form.
     const shortRoot = execFileSync(
@@ -178,6 +283,14 @@ async function main() {
     if (shortRoot && shortRoot.toLowerCase() !== root.toLowerCase()) {
       cases.push(['root', shortRoot, profile])
       cases.push(['check', `${shortRoot}\\desktop`, `${shortRoot}\\DoodleNote`, 'ok'])
+      // L1: an install recorded under the short form of Programs is still the old default.
+      cases.push([
+        'plan',
+        `${shortRoot}\\desktop`,
+        '',
+        (r) =>
+          r.toLowerCase() === `${real(root, 'DoodleNote')}|${real(root, 'desktop')}|`.toLowerCase()
+      ])
       cases.push([
         'canonical',
         `${shortRoot}\\DoodleNote`,
@@ -195,21 +308,23 @@ async function main() {
     const outFile = path.join(sandbox, 'results.txt')
     fs.writeFileSync(
       casesFile,
-      Buffer.from(cases.map(([kind, a, b]) => `${kind}|${a}|${b}\r\n`).join(''), 'utf16le')
+      Buffer.from(cases.map((c) => `${fields(c).join('|')}\r\n`).join(''), 'utf16le')
     )
 
-    // Hold locked.dat without sharing so the harness cannot delete it.
-    const holder = spawn(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `$f = [IO.File]::Open('${path.join(held, 'locked.dat')}', 'Open', 'ReadWrite', 'None'); Start-Sleep -Seconds 120; $f.Close()`
-      ],
-      { stdio: 'ignore', windowsHide: true }
-    )
-    started.push(holder)
+    // Hold each file without sharing so the harness cannot delete it.
+    for (const file of holds) {
+      const holder = spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          "$f = [IO.File]::Open($env:DN_HOLD, 'Open', 'ReadWrite', 'None'); Start-Sleep -Seconds 120; $f.Close()"
+        ],
+        { stdio: 'ignore', windowsHide: true, env: { ...process.env, DN_HOLD: file } }
+      )
+      started.push(holder)
+    }
     await new Promise((resolve) => setTimeout(resolve, 2000))
 
     execFileSync(exe, [`/cases=${casesFile}`, `/out=${outFile}`], {
@@ -221,14 +336,18 @@ async function main() {
       .split(/\r?\n/)
       .filter(Boolean)
       .map((line) => line.slice(line.indexOf('|') + 1))
-    const report = cases.map(([kind, a, b], i) => `${kind} ${a} ${b} => ${results[i]}`)
+    const report = cases.map((c, i) => `${fields(c).join(' ')} => ${results[i]}`)
     console.log(report.join('\n'))
     if (keep) write(path.join(keep, 'installer-guards-results.txt'), report.join('\r\n') + '\r\n')
 
     assert.equal(results.length, cases.length)
-    cases.forEach(([kind, a, , expected], i) => {
-      if (expected === undefined || kind === 'root' || kind === 'noop') return
+    cases.forEach((c, i) => {
+      const [kind, a] = c
+      const expected = expectation(c)
+      if (expected === undefined || ['root', 'noop', 'jkey'].includes(kind)) return
       if (expected instanceof RegExp) assert.match(results[i], expected, `${kind} ${a}`)
+      else if (typeof expected === 'function')
+        assert.ok(expected(results[i]), `${kind} ${a}: ${results[i]}`)
       else if (kind === 'canonical')
         assert.equal(results[i].toLowerCase(), expected.toLowerCase(), `${kind} ${a}`)
       else assert.equal(results[i], expected, `${kind} ${a}`)
@@ -244,6 +363,15 @@ async function main() {
     assert.ok(!alive(running.pid), 'the old app was closed')
     assert.ok(alive(sibling.pid), 'a process in desktop-qa was left alone')
     assert.ok(alive(qa.pid), 'DoodleNote QA was left alone')
+    // L1: the install in another folder named desktop is intact.
+    assert.ok(fs.existsSync(path.join(otherParent, 'desktop', 'DoodleNote.exe')))
+    assert.ok(fs.existsSync(path.join(otherParent, 'desktop', 'resources', 'app.asar')))
+    assert.ok(!fs.existsSync(path.join(otherParent, 'DoodleNote')))
+    // L3: the old app was closed by exact path; its exe and held file stay for the retry.
+    assert.ok(!alive(l3Old.pid), 'the old app in the pending migration was closed')
+    assert.ok(fs.existsSync(path.join(l3, 'desktop', 'DoodleNote.exe')))
+    assert.ok(fs.existsSync(path.join(l3, 'desktop', 'locked.dat')))
+    assert.ok(fs.existsSync(path.join(l3, 'DoodleNote', 'DoodleNote.exe')))
     console.log(`installer guards: ${cases.length} cases passed`)
   } finally {
     for (const child of started) {
@@ -254,6 +382,13 @@ async function main() {
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 1000))
+    for (const key of registryKeys) {
+      try {
+        execFileSync('reg.exe', ['delete', `HKCU\\${key}`, '/f'], { stdio: 'ignore' })
+      } catch {
+        // never written
+      }
+    }
     fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 })
   }
 }

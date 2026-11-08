@@ -9,6 +9,13 @@
 ;   locked|<exe>                         dnExeLocked: 1 | 0
 ;   canonical|<path>                     dnCanonical: the normalised long path
 ;   ensure|<dir>                         dnEnsureNotRunning (silent: quits if the app stays running): done
+;   plan|<instdir>                       dnPlanMigration: <install dir>|<legacy dir>|<note>
+;   jkey|<key>                           sets $dnJournalKey (HKCU, a throwaway test key)
+;   arm|<source>|<dest>[|<identity>]     writes a journal as the installer does (default identity: ours)
+;   jstate                               armed | none
+;   journal|<dest>                       dnTrustedJournal: the trusted source, or "none: <note>"
+;   migclose|<legacy>|<new>|<policy>     dnMigrationClose: KEEP (1 | 0)
+;   finish|<legacy>|<new>|<keep>         dnFinishMigration: removed | kept: <why>
 Unicode true
 SilentInstall silent
 RequestExecutionLevel user
@@ -34,6 +41,7 @@ Var n
 Var kind
 Var a
 Var b
+Var c
 Var result
 
 Section
@@ -79,6 +87,7 @@ Function .onInit
     !insertmacro next_field $kind
     !insertmacro next_field $a
     !insertmacro next_field $b
+    !insertmacro next_field $c
     StrCpy $result "?"
     ${if} $kind == "root"
       StrCpy $dnProgramsRoot $a
@@ -109,6 +118,47 @@ Function .onInit
       StrCpy $dnClosePolicy "never"
       !insertmacro dnEnsureNotRunning $a
       StrCpy $result "done"
+    ${elseif} $kind == "plan"
+      StrCpy $dnPlanDir $a
+      Call dnPlanMigration
+      StrCpy $result "$dnPlanDir|$dnPlanLegacy|$dnPlanNote"
+    ${elseif} $kind == "jkey"
+      StrCpy $dnJournalKey $a
+      StrCpy $result "set"
+    ${elseif} $kind == "arm"
+      ${if} $c == ""
+        StrCpy $c "${DN_MIGRATION_IDENTITY}"
+      ${endif}
+      WriteRegStr HKCU $dnJournalKey "Identity" $c
+      WriteRegStr HKCU $dnJournalKey "SourceDir" $a
+      WriteRegStr HKCU $dnJournalKey "DestDir" $b
+      StrCpy $result "armed"
+    ${elseif} $kind == "jstate"
+      ReadRegStr $result HKCU $dnJournalKey "Identity"
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${else}
+        StrCpy $result "armed"
+      ${endif}
+    ${elseif} $kind == "journal"
+      Push $a
+      Call dnTrustedJournal
+      Pop $result
+      ${if} $result == ""
+        StrCpy $result "none: $dnPlanNote"
+      ${endif}
+    ${elseif} $kind == "migclose"
+      StrCpy $dnClosePolicy $c
+      Push $a
+      Push $b
+      Call dnMigrationClose
+      Pop $result
+    ${elseif} $kind == "finish"
+      Push $a
+      Push $b
+      Push $c
+      Call dnFinishMigration
+      Pop $result
     ${endif}
     FileWriteUTF16LE $out "$n|$result$\r$\n"
   ${loop}

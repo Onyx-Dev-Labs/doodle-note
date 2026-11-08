@@ -3,10 +3,11 @@
 ; test harness and check them against real folders, links and processes.
 ;
 ; Needs these defines: APP_FILENAME (the old folder name, the package name),
-; PRODUCT_FILENAME (the new folder name) and DN_APP_EXE (the app's exe name in
+; PRODUCT_FILENAME (the new folder name), DN_APP_EXE (the app's exe name in
 ; both; electron-builder's APP_EXECUTABLE_FILENAME is defined only after this
-; file is compiled). The installer and the harness set $dnProgramsRoot and
-; $dnProfileDir before calling dnCheckLegacyDir.
+; file is compiled) and DN_MIGRATION_IDENTITY (what a journal must name). The
+; installer and the harness set $dnProgramsRoot, $dnProfileDir and
+; $dnJournalKey (HKCU) before calling the functions below.
 
 !include LogicLib.nsh
 !include FileFunc.nsh
@@ -132,6 +133,10 @@ Var dnLocked
 !ifndef BUILD_UNINSTALLER
   Var dnProgramsRoot
   Var dnProfileDir
+  Var dnJournalKey
+  Var dnPlanDir
+  Var dnPlanLegacy
+  Var dnPlanNote
 
   ; Push PATH; Call dnCanonical; Pop RESULT: absolute, long-name form without a
   ; trailing separator ("" when the path is not valid). Links are not resolved.
@@ -520,5 +525,174 @@ Var dnLocked
     Pop $2
     Pop $1
     Exch $0
+  FunctionEnd
+  ; Where to install, from the folder electron-builder chose (no /D).
+  ; In: $dnPlanDir. Out: $dnPlanDir, the folder to install to; $dnPlanLegacy, the
+  ; old install to move from ("" for none); $dnPlanNote, why a folder named
+  ; APP_FILENAME is upgraded where it is. Only <$dnProgramsRoot>\APP_FILENAME
+  ; itself is ever redirected (compared after normalising case, separators and
+  ; short names): a recorded install in any other folder named APP_FILENAME, for
+  ; example from an earlier /D=X\desktop, stays where it is and nothing is moved
+  ; or deleted.
+  Function dnPlanMigration
+    Push $0
+    Push $1
+    Push $2
+    Push $3
+    StrCpy $dnPlanLegacy ""
+    StrCpy $dnPlanNote ""
+    Push $dnPlanDir
+    Call dnCanonical
+    Pop $0
+    Push $dnProgramsRoot
+    Call dnCanonical
+    Pop $1
+    ${if} $0 == ""
+    ${orIf} $1 == ""
+      StrCpy $dnPlanNote "a path is not valid"
+    ${else}
+      ${GetFileName} $0 $2
+      ${GetParent} $0 $3
+      ${if} $2 != "${APP_FILENAME}"
+        ; Not the old default folder name: nothing to do.
+      ${elseif} $3 != $1
+        StrCpy $dnPlanNote "$0 is not in $1"
+      ${elseif} ${FileExists} "$0\${DN_APP_EXE}"
+        Push $0
+        Push "$1\${PRODUCT_FILENAME}"
+        Call dnCheckLegacyDir
+        Pop $2
+        ${if} $2 == ""
+          StrCpy $dnPlanLegacy $0
+          StrCpy $dnPlanDir "$1\${PRODUCT_FILENAME}"
+        ${else}
+          StrCpy $dnPlanNote $2
+        ${endif}
+      ${else}
+        ; A fresh install to the default folder gets the new name.
+        StrCpy $dnPlanDir "$1\${PRODUCT_FILENAME}"
+      ${endif}
+    ${endif}
+    Pop $3
+    Pop $2
+    Pop $1
+    Pop $0
+  FunctionEnd
+
+  ; Push DEST; Call dnTrustedJournal; Pop SOURCE: the old folder an earlier,
+  ; unfinished run recorded in the journal at $dnJournalKey, or "" when there is
+  ; none or it is not trusted: it must name this identity and DEST, and its
+  ; source must still pass dnCheckLegacyDir. $dnPlanNote says why not.
+  Function dnTrustedJournal
+    Exch $0
+    Push $1
+    Push $2
+    Push $3
+    StrCpy $dnPlanNote ""
+    ReadRegStr $1 HKCU $dnJournalKey "Identity"
+    ReadRegStr $2 HKCU $dnJournalKey "SourceDir"
+    ReadRegStr $3 HKCU $dnJournalKey "DestDir"
+    ${if} $1 == ""
+      StrCpy $0 ""
+    ${elseif} $1 != "${DN_MIGRATION_IDENTITY}"
+      StrCpy $dnPlanNote "the migration journal is for another app"
+      StrCpy $0 ""
+    ${else}
+      Push $0
+      Call dnCanonical
+      Pop $0
+      Push $3
+      Call dnCanonical
+      Pop $3
+      ${if} $3 != $0
+        StrCpy $dnPlanNote "the migration journal is for $3"
+        StrCpy $0 ""
+      ${else}
+        Push $2
+        Push $0
+        Call dnCheckLegacyDir
+        Pop $1
+        ${if} $1 != ""
+          StrCpy $dnPlanNote "the migration journal for $2: $1"
+          StrCpy $0 ""
+        ${else}
+          Push $2
+          Call dnCanonical
+          Pop $0
+        ${endif}
+      ${endif}
+    ${endif}
+    Pop $3
+    Pop $2
+    Pop $1
+    Exch $0
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Call dnMigrationClose; Pop KEEP. A pending migration
+  ; checks both folders, each on its own, with $dnClosePolicy: the app running
+  ; from exactly LEGACY\DN_APP_EXE (a new exe that already exists never
+  ; suppresses this), then exactly NEW\DN_APP_EXE, which must not run while its
+  ; files are replaced (dnEnsureNotRunning). KEEP is "1" when the old app could
+  ; not be closed or identified: the new copy is installed, the old folder and
+  ; the journal stay for the next run.
+  Function dnMigrationClose
+    Exch $1
+    Exch
+    Exch $0
+    Push $2
+    StrCpy $2 "0"
+    !insertmacro dnCloseAppIn "$0" $dnClosePolicy $dnCloseResult
+    ${if} $dnCloseResult == "cancel"
+      Quit
+    ${elseif} $dnCloseResult != "none"
+    ${andIf} $dnCloseResult != "closed"
+      StrCpy $2 "1"
+      DetailPrint "Keeping $0 until ${PRODUCT_NAME} there can be closed"
+    ${endif}
+    !insertmacro dnEnsureNotRunning "$1"
+    StrCpy $0 $2
+    Pop $2
+    Exch $0
+    Exch
+    Pop $1
+  FunctionEnd
+
+  ; Push LEGACY; Push NEW; Push KEEP; Call dnFinishMigration; Pop RESULT, once the
+  ; new copy in NEW is verified. Checks LEGACY again right before deleting
+  ; anything (the folders may have changed since the run started), then removes
+  ; it without following links and clears the journal. RESULT: "removed", or
+  ; "kept: <why>" with the journal left armed so the next run retries.
+  Function dnFinishMigration
+    Exch $2
+    Exch
+    Exch $1
+    Exch 2
+    Exch $0
+    Push $3
+    Push $0
+    Push $1
+    Call dnCheckLegacyDir
+    Pop $3
+    ${if} $2 == "1"
+      StrCpy $3 "kept: ${PRODUCT_NAME} there is still running"
+    ${elseif} $3 != ""
+      StrCpy $3 "kept: $3"
+    ${else}
+      Push $0
+      Call dnRemoveLegacyDir
+      Pop $3
+      ${if} $3 == "removed"
+        DeleteRegKey HKCU $dnJournalKey
+      ${else}
+        StrCpy $3 "kept: a file is still in use"
+      ${endif}
+    ${endif}
+    DetailPrint "$0: $3"
+    StrCpy $0 $3
+    Pop $3
+    Exch $0
+    Exch 2
+    Pop $1
+    Pop $2
   FunctionEnd
 !endif

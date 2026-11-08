@@ -189,16 +189,33 @@ test('Windows installs move to a DoodleNote folder without forking the install o
     assert.match(installer, new RegExp(`!macro ${hook}\\b`))
   }
   // The old folder is deleted only in customInstall, after the new copy is verified
-  // and the old folder has been checked again.
+  // and the old folder has been checked again (dnFinishMigration).
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
   const install = installer.slice(installer.indexOf('!macro customInstall'))
-  assert.equal(installer.match(/Call dnRemoveLegacyDir/g)?.length, 1)
+  assert.equal(installer.match(/Call dnRemoveLegacyDir/g), null)
+  assert.equal(installer.match(/Call dnFinishMigration/g)?.length, 1)
   assert.ok(
     install.indexOf('FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') <
-      install.indexOf('Call dnCheckLegacyDir')
+      install.indexOf('Call dnFinishMigration')
   )
-  assert.ok(install.indexOf('Call dnCheckLegacyDir') < install.indexOf('Call dnRemoveLegacyDir'))
-  // A /D=<folder> install is never redirected.
-  assert.match(installer, /GetDParameter \$R0\s+\$\{if\} \$R0 == ""/)
+  const finish = guards.slice(guards.indexOf('Function dnFinishMigration'))
+  assert.equal(guards.match(/^\s+Call dnRemoveLegacyDir$/gm)?.length, 1)
+  assert.ok(finish.indexOf('Call dnCheckLegacyDir') < finish.indexOf('Call dnRemoveLegacyDir'))
+  // A /D=<folder> install is never redirected, and only <LocalAppData>\Programs\APP_FILENAME
+  // itself is (an install recorded in another folder named desktop is upgraded in place).
+  assert.match(
+    installer,
+    /GetDParameter \$R0\s+\$\{if\} \$R0 == ""\s+StrCpy \$dnPlanDir "\$INSTDIR"\s+Call dnPlanMigration/
+  )
+  const plan = guards.slice(
+    guards.indexOf('Function dnPlanMigration'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnPlanMigration'))
+  )
+  assert.ok(plan.indexOf('Push $dnPlanDir\n    Call dnCanonical') > 0)
+  assert.ok(plan.indexOf('${elseif} $3 != $1') < plan.indexOf('StrCpy $dnPlanDir'))
 })
 
 test('the install migration journal belongs to one app identity and is validated before use', () => {
@@ -220,17 +237,28 @@ test('the install migration journal belongs to one app identity and is validated
     installer.indexOf('!macro customInit'),
     installer.indexOf('!macroend', installer.indexOf('!macro customInit'))
   )
-  // Identity, destination and source are all checked before anything recorded is used.
+  // Identity, destination and source are all checked (dnTrustedJournal) before
+  // anything recorded is used.
   const restore = init.indexOf('WriteRegStr HKCU "${UNINSTALL_REGISTRY_KEY}" "UninstallString"')
   assert.ok(restore > 0)
-  for (const check of [
-    '${if} $R5 != "${DN_MIGRATION_IDENTITY}"',
-    '${elseif} $R7 != $R8',
-    '${elseif} $R4 != ""',
-    '${if} $R7 == $R9'
-  ]) {
+  for (const check of ['Call dnTrustedJournal', '${if} $R6 != ""', '${if} $R7 == $R9']) {
     const at = init.indexOf(check)
     assert.ok(at > 0 && at < restore, check)
+  }
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const trust = guards.slice(
+    guards.indexOf('Function dnTrustedJournal'),
+    guards.indexOf('FunctionEnd', guards.indexOf('Function dnTrustedJournal'))
+  )
+  for (const check of [
+    '${elseif} $1 != "${DN_MIGRATION_IDENTITY}"',
+    '${if} $3 != $0',
+    'Call dnCheckLegacyDir'
+  ]) {
+    assert.ok(trust.includes(check), check)
   }
   // Only the old folder's own uninstaller, reconstructed, is ever put back or parked.
   assert.match(installer, /StrCpy \$\{OUT\} '"\$\{DIR\}\\\$\{UNINSTALL_FILENAME\}" \/currentuser'/)
@@ -293,11 +321,10 @@ test('the install migration never removes through a link and closes only its own
   const check = installer.slice(installer.indexOf('!macro dnMigrationCheckAppRunning'))
   assert.match(
     check,
-    /^\s+\$\{if\} \$dnLegacyDir != ""\n\s+;[^\n]*\n\s+;[^\n]*\n\s+!insertmacro dnCloseAppIn "\$dnLegacyDir"/m
+    /^\s+\$\{if\} \$dnLegacyDir != ""\n\s+Push \$dnLegacyDir\n\s+Push \$INSTDIR\n\s+Call dnMigrationClose/m
   )
-  assert.ok(
-    check.indexOf('dnCloseAppIn "$dnLegacyDir"') < check.indexOf('dnEnsureNotRunning "$INSTDIR"')
-  )
+  const close = guards.slice(guards.indexOf('Function dnMigrationClose'))
+  assert.ok(close.indexOf('dnCloseAppIn "$0"') < close.indexOf('dnEnsureNotRunning "$1"'))
   // Nothing is closed without consent: silent installs nobody asked for never close.
   assert.match(guards, /\$\{elseif\} \$\{Silent\}\n\s+StrCpy \$\{OUT\} "never"/)
   assert.match(
