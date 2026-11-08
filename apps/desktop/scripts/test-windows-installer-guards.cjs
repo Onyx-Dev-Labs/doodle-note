@@ -1239,8 +1239,14 @@ async function main() {
     assert.equal(consumed.result.ran, true)
     assert.equal(consumed.after, null)
     assert.deepEqual(
-      [consumed.record.from, consumed.record.to, consumed.record.at],
-      p2Record.split('|').slice(4, 7)
+      // DNMR2|<identity (3 fields)>|<old>|<new>|<old 8.3 name>|<UTC>|END
+      [
+        consumed.record.from,
+        consumed.record.to,
+        consumed.record.fromShortName ?? '',
+        consumed.record.at
+      ],
+      p2Record.split('|').slice(4, 8)
     )
     total += 1
     // The recovery copy is checked before anything is restored from it; one that
