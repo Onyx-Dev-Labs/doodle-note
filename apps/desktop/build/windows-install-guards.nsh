@@ -8,8 +8,9 @@
 ; APP_EXECUTABLE_FILENAME and UNINSTALL_FILENAME are defined only after this file
 ; is compiled), and DN_MIGRATION_IDENTITY (what a journal must name). The
 ; installer and the harness set $dnProgramsRoot, $dnProfileDir, $dnJournalKey,
-; $dnStateKey, $dnUninstallKey and $dnUninstallKey2 (all HKCU) before calling the
-; functions below.
+; $dnStateKey, $dnUninstallKey and $dnUninstallKey2 (all HKCU), and $dnStatusKey
+; and $dnStatusLog (where decisions are recorded, dnStatus; "" = not recorded),
+; before calling the functions below.
 ;
 ; electron-builder compiles the installer and the uninstaller separately (the
 ; uninstaller with BUILD_UNINSTALLER, where every function must be named un.*).
@@ -207,6 +208,9 @@ FunctionEnd
   ${do}
     !insertmacro dnCloseAppIn "${DIR}" $dnClosePolicy $dnCloseResult
     ${if} $dnCloseResult == "cancel"
+      !ifdef DN_PATH_FUNCTIONS
+        !insertmacro dnStatus close cancelled user-cancelled "in=${DIR}"
+      !endif
       Quit
     ${endif}
     ${if} $dnCloseResult == "unknown"
@@ -219,10 +223,16 @@ FunctionEnd
     ${endif}
     ${if} ${Silent}
       DetailPrint `"${PRODUCT_NAME}" is running from ${DIR} and was not closed`
+      !ifdef DN_PATH_FUNCTIONS
+        !insertmacro dnStatus close exit-2 app-running "in=${DIR}"
+      !endif
       SetErrorLevel 2
       Quit
     ${endif}
     ${ifnot} ${Cmd} `MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(appCannotBeClosed)" IDRETRY`
+      !ifdef DN_PATH_FUNCTIONS
+        !insertmacro dnStatus close cancelled user-cancelled "in=${DIR}"
+      !endif
       Quit
     ${endif}
   ${loop}
@@ -241,6 +251,131 @@ FunctionEnd
   Var dnPinDest
   Var dnProtectProfile
   Var dnProtectDest
+
+  ; Diagnostics. A one-click installer shows no details and keeps no log, so each
+  ; decision is recorded where QA (or support) can read it afterwards:
+  ; LastRun (UTC), LastStep, LastResult and LastReason (short machine-readable
+  ; codes, listed in docs/WINDOWS-RELEASE-QA.md) under HKCU\$dnStatusKey, and the
+  ; same as one line appended to $dnStatusLog (UTF-16, past 64 KiB it becomes
+  ; <log>.1 and a new one starts). Nothing else is written: no user data, and the
+  ; only paths are the install and old install folders. "" turns either off.
+  Var dnStatusKey
+  Var dnStatusLog
+  ; The code for the reason the last guard refused (dnCheckLegacyDir, dnPinLegacy,
+  ; dnTrustedJournal, dnCheckUninstallCommand, dnPlanMigration).
+  Var dnWhy
+
+  !macro dnFail OUT CODE TEXT
+    StrCpy ${OUT} "${TEXT}"
+    StrCpy $dnWhy "${CODE}"
+  !macroend
+
+  !ifdef BUILD_UNINSTALLER
+    !define DN_STATUS_PROGRAM "uninstaller"
+  !else
+    !define DN_STATUS_PROGRAM "installer"
+  !endif
+  !ifdef VERSION
+    !define DN_STATUS_VERSION " version=${VERSION}"
+  !else
+    !define DN_STATUS_VERSION ""
+  !endif
+
+  ; Push STEP; Push RESULT; Push REASON; Push DIRS; Call dnStatus. Records one
+  ; decision (see above). STEP "note" goes to the log only. DIRS is "" or
+  ; "from=<old> to=<new>"-style text naming only the install folders. Never fails
+  ; the run and leaves the error flag as it was.
+  Function ${DN_FN}dnStatus
+    Exch $3
+    Exch
+    Exch $2
+    Exch 2
+    Exch $1
+    Exch 3
+    Exch $0
+    Push $4
+    Push $5
+    Push $6
+    Push $7
+    Push $8
+    Push $9
+    StrCpy $8 "0"
+    ${if} ${Errors}
+      StrCpy $8 "1"
+    ${endif}
+    ${if} $dnStatusKey != ""
+    ${orIf} $dnStatusLog != ""
+      ; UTC now, from SYSTEMTIME (year, month, day of week, day, hour, minute, second).
+      System::Alloc 16
+      Pop $4
+      System::Call 'kernel32::GetSystemTime(p r4)'
+      System::Call '*$4(&i2 .r5, &i2 .r6, &i2, &i2 .r7)'
+      IntFmt $6 "%02u" $6
+      IntFmt $7 "%02u" $7
+      StrCpy $9 "$5-$6-$7"
+      System::Call '*$4(&i2, &i2, &i2, &i2, &i2 .r5, &i2 .r6, &i2 .r7)'
+      System::Free $4
+      IntFmt $5 "%02u" $5
+      IntFmt $6 "%02u" $6
+      IntFmt $7 "%02u" $7
+      StrCpy $9 "$9T$5:$6:$7Z"
+      ${if} $dnStatusKey != ""
+      ${andIf} $0 != "note"
+        WriteRegStr HKCU $dnStatusKey "LastRun" $9
+        WriteRegStr HKCU $dnStatusKey "LastStep" $0
+        WriteRegStr HKCU $dnStatusKey "LastResult" $1
+        WriteRegStr HKCU $dnStatusKey "LastReason" $2
+      ${endif}
+      ${if} $dnStatusLog != ""
+        ClearErrors
+        FileOpen $4 $dnStatusLog r
+        ${ifNot} ${Errors}
+          FileSeek $4 0 END $5
+          FileClose $4
+          ${if} $5 > 65536
+            Delete "$dnStatusLog.1"
+            Rename $dnStatusLog "$dnStatusLog.1"
+          ${endif}
+        ${endif}
+        ClearErrors
+        FileOpen $4 $dnStatusLog a
+        ${ifNot} ${Errors}
+          FileSeek $4 0 END $5
+          ${if} $5 = 0
+            FileWriteWord $4 0xFEFF
+          ${endif}
+          StrCpy $6 "$9 ${DN_STATUS_PROGRAM}${DN_STATUS_VERSION} step=$0 result=$1 reason=$2"
+          ${if} $3 != ""
+            StrCpy $6 "$6 $3"
+          ${endif}
+          FileWriteUTF16LE $4 "$6$\r$\n"
+          FileClose $4
+        ${endif}
+      ${endif}
+    ${endif}
+    ClearErrors
+    ${if} $8 == "1"
+      SetErrors
+    ${endif}
+    Pop $9
+    Pop $8
+    Pop $7
+    Pop $6
+    Pop $5
+    Pop $4
+    Pop $0
+    Pop $3
+    Pop $2
+    Pop $1
+  FunctionEnd
+
+  !macro dnStatus STEP RESULT REASON DIRS
+    Push "${STEP}"
+    Push "${RESULT}"
+    Push "${REASON}"
+    Push "${DIRS}"
+    Call ${DN_FN}dnStatus
+  !macroend
 
   ; Push PATH; Call dnCanonical; Pop RESULT: absolute, long-name form without a
   ; trailing separator ("" when the path is not valid). Links are not resolved.
@@ -538,6 +673,7 @@ FunctionEnd
     Push $4
     Push $5
     StrCpy $5 ""
+    StrCpy $dnWhy ""
     Push $0
     Call ${DN_FN}dnCanonical
     Pop $0
@@ -550,11 +686,11 @@ FunctionEnd
     ${if} $0 == ""
     ${orIf} $1 == ""
     ${orIf} $2 == ""
-      StrCpy $5 "a path is not valid"
+      !insertmacro dnFail $5 path-invalid "a path is not valid"
     ${elseif} $0 != "$2\${APP_FILENAME}"
-      StrCpy $5 "the old folder is not $2\${APP_FILENAME}"
+      !insertmacro dnFail $5 legacy-not-default "the old folder is not $2\${APP_FILENAME}"
     ${elseif} $1 != "$2\${PRODUCT_FILENAME}"
-      StrCpy $5 "the new folder is not $2\${PRODUCT_FILENAME}"
+      !insertmacro dnFail $5 dest-not-sibling "the new folder is not $2\${PRODUCT_FILENAME}"
     ${endif}
     ${if} $5 == ""
       Push $0
@@ -562,7 +698,7 @@ FunctionEnd
       Call ${DN_FN}dnOverlaps
       Pop $3
       ${if} $3 == "1"
-        StrCpy $5 "the old and new folders overlap"
+        !insertmacro dnFail $5 dirs-overlap "the old and new folders overlap"
       ${endif}
     ${endif}
     ${if} $5 == ""
@@ -570,7 +706,7 @@ FunctionEnd
       Call ${DN_FN}dnCanonical
       Pop $3
       ${if} $3 == ""
-        StrCpy $5 "the profile path is not valid"
+        !insertmacro dnFail $5 profile-invalid "the profile path is not valid"
       ${else}
         Push $0
         Push $3
@@ -582,7 +718,7 @@ FunctionEnd
         Pop $3
         ${if} $4 == "1"
         ${orIf} $3 == "1"
-          StrCpy $5 "a folder overlaps the app profile"
+          !insertmacro dnFail $5 profile-overlap "a folder overlaps the app profile"
         ${endif}
       ${endif}
     ${endif}
@@ -592,13 +728,13 @@ FunctionEnd
       Pop $3
       IntOp $4 $3 & ${DN_ATTR_REPARSE_POINT}
       ${if} $3 = -1
-        StrCpy $5 "the old folder does not exist"
+        !insertmacro dnFail $5 legacy-missing "the old folder does not exist"
       ${elseif} $4 <> 0
-        StrCpy $5 "the old folder is a junction or link"
+        !insertmacro dnFail $5 legacy-link "the old folder is a junction or link"
       ${else}
         IntOp $4 $3 & ${DN_ATTR_DIRECTORY}
         ${if} $4 = 0
-          StrCpy $5 "the old folder is not a folder"
+          !insertmacro dnFail $5 legacy-not-folder "the old folder is not a folder"
         ${endif}
       ${endif}
     ${endif}
@@ -609,7 +745,7 @@ FunctionEnd
       IntOp $4 $3 & 0x410
       ${if} $3 = -1
       ${orIf} $4 <> 0
-        StrCpy $5 "the old folder has no ${DN_APP_EXE}"
+        !insertmacro dnFail $5 legacy-no-exe "the old folder has no ${DN_APP_EXE}"
       ${endif}
     ${endif}
     ${if} $5 == ""
@@ -619,7 +755,7 @@ FunctionEnd
       ${if} $3 <> -1
         IntOp $4 $3 & 0x410
         ${if} $4 <> ${DN_ATTR_DIRECTORY}
-          StrCpy $5 "the new folder is a junction, link or file"
+          !insertmacro dnFail $5 dest-link "the new folder is a junction, link or file"
         ${endif}
       ${endif}
     ${endif}
@@ -633,9 +769,9 @@ FunctionEnd
       Pop $3
       ${if} $2 == ""
       ${orIf} $3 == ""
-        StrCpy $5 "a folder cannot be opened"
+        !insertmacro dnFail $5 open-failed "a folder cannot be opened"
       ${elseif} $3 != "$2\${APP_FILENAME}"
-        StrCpy $5 "the old folder resolves to $3"
+        !insertmacro dnFail $5 legacy-resolves-elsewhere "the old folder resolves to $3"
       ${else}
         Push $1
         Call ${DN_FN}dnAttributes
@@ -645,14 +781,14 @@ FunctionEnd
           Call ${DN_FN}dnFinalPath
           Pop $4
           ${if} $4 == ""
-            StrCpy $5 "the new folder cannot be opened"
+            !insertmacro dnFail $5 dest-open-failed "the new folder cannot be opened"
           ${else}
             Push $3
             Push $4
             Call ${DN_FN}dnOverlaps
             Pop $4
             ${if} $4 == "1"
-              StrCpy $5 "the old and new folders resolve to the same place"
+              !insertmacro dnFail $5 dirs-same "the old and new folders resolve to the same place"
             ${endif}
           ${endif}
         ${endif}
@@ -675,14 +811,14 @@ FunctionEnd
       ${if} $3 == ""
       ${orIf} $4 == ""
       ${orIf} $2 == ""
-        StrCpy $5 "a folder or the app profile cannot be resolved"
+        !insertmacro dnFail $5 resolve-failed "a folder or the app profile cannot be resolved"
       ${else}
         Push $3
         Push $2
         Call ${DN_FN}dnOverlaps
         Pop $2
         ${if} $2 == "1"
-          StrCpy $5 "the old folder really overlaps the app profile"
+          !insertmacro dnFail $5 profile-overlap-resolved "the old folder really overlaps the app profile"
         ${else}
           Push $dnProfileDir
           Call ${DN_FN}dnResolved
@@ -692,14 +828,14 @@ FunctionEnd
           Call ${DN_FN}dnOverlaps
           Pop $2
           ${if} $2 == "1"
-            StrCpy $5 "the new folder really overlaps the app profile"
+            !insertmacro dnFail $5 profile-overlap-resolved "the new folder really overlaps the app profile"
           ${else}
             Push $3
             Push $4
             Call ${DN_FN}dnOverlaps
             Pop $2
             ${if} $2 == "1"
-              StrCpy $5 "the old and new folders resolve to the same place"
+              !insertmacro dnFail $5 dirs-same "the old and new folders resolve to the same place"
             ${endif}
           ${endif}
         ${endif}
@@ -946,11 +1082,12 @@ FunctionEnd
     Push $6
     Call ${DN_FN}dnUnpin
     StrCpy $5 ""
+    StrCpy $dnWhy ""
     Push $0
     Call ${DN_FN}dnCanonical
     Pop $2
     ${if} $2 == ""
-      StrCpy $5 "a path is not valid"
+      !insertmacro dnFail $5 path-invalid "a path is not valid"
     ${else}
       Push $2
       Push ${DN_ACCESS_DELETE}
@@ -973,10 +1110,10 @@ FunctionEnd
       Pop $5
       ${if} $5 == ""
       ${andIf} $dnPinRoot = 0
-        StrCpy $5 "the old folder cannot be opened"
+        !insertmacro dnFail $5 pin-open-failed "the old folder cannot be opened"
       ${elseif} $5 == ""
       ${andIf} $dnPinParent = 0
-        StrCpy $5 "the old folder cannot be opened"
+        !insertmacro dnFail $5 pin-open-failed "the old folder cannot be opened"
       ${endif}
     ${endif}
     ${if} $5 == ""
@@ -986,7 +1123,7 @@ FunctionEnd
       IntOp $4 $3 & 0x410
       ${if} $3 = -1
       ${orIf} $4 <> ${DN_ATTR_DIRECTORY}
-        StrCpy $5 "the pinned old folder is not a real folder"
+        !insertmacro dnFail $5 pin-not-folder "the pinned old folder is not a real folder"
       ${endif}
     ${endif}
     ${if} $5 == ""
@@ -1003,9 +1140,9 @@ FunctionEnd
       ${endif}
       ${if} $2 == ""
       ${orIf} $3 == ""
-        StrCpy $5 "a pinned folder cannot be read"
+        !insertmacro dnFail $5 pin-read-failed "a pinned folder cannot be read"
       ${elseif} $2 != "$3\${APP_FILENAME}"
-        StrCpy $5 "the pinned old folder is $2, not in $3"
+        !insertmacro dnFail $5 pin-moved "the pinned old folder is $2, not in $3"
       ${endif}
     ${endif}
     ${if} $5 == ""
@@ -1015,7 +1152,7 @@ FunctionEnd
       Call ${DN_FN}dnOpenNoFollow
       Pop $4
       ${if} $4 = 0
-        StrCpy $5 "the pinned old folder has no ${DN_APP_EXE}"
+        !insertmacro dnFail $5 pin-no-exe "the pinned old folder has no ${DN_APP_EXE}"
       ${else}
         Push $4
         Call ${DN_FN}dnHandleAttributes
@@ -1028,7 +1165,7 @@ FunctionEnd
         ${if} $3 = -1
         ${orIf} $4 <> 0
         ${orIf} $6 != "$2\${DN_APP_EXE}"
-          StrCpy $5 "the pinned old folder has no ${DN_APP_EXE}"
+          !insertmacro dnFail $5 pin-no-exe "the pinned old folder has no ${DN_APP_EXE}"
         ${endif}
       ${endif}
     ${endif}
@@ -1042,7 +1179,7 @@ FunctionEnd
       Pop $3
       ${if} $6 == ""
       ${orIf} $3 == ""
-        StrCpy $5 "a pinned folder or the app profile cannot be read"
+        !insertmacro dnFail $5 pin-read-failed "a pinned folder or the app profile cannot be read"
       ${else}
         Push $2
         Push $3
@@ -1058,7 +1195,7 @@ FunctionEnd
           ${endif}
         ${endif}
         ${if} $4 == "1"
-          StrCpy $5 "the pinned old folder overlaps the app profile"
+          !insertmacro dnFail $5 pin-profile-overlap "the pinned old folder overlaps the app profile"
         ${endif}
       ${endif}
     ${endif}
@@ -1068,7 +1205,7 @@ FunctionEnd
       Call ${DN_FN}dnWhereIs
       Pop $3
       ${if} $3 == ""
-        StrCpy $5 "the new folder cannot be read"
+        !insertmacro dnFail $5 pin-dest-read-failed "the new folder cannot be read"
       ${else}
         Push $2
         Push $3
@@ -1084,7 +1221,7 @@ FunctionEnd
           ${endif}
         ${endif}
         ${if} $4 == "1"
-          StrCpy $5 "the pinned old folder overlaps the new folder"
+          !insertmacro dnFail $5 pin-dest-overlap "the pinned old folder overlaps the new folder"
         ${endif}
       ${endif}
     ${endif}
@@ -1204,6 +1341,7 @@ FunctionEnd
       StrCpy $0 ""
     ${elseif} $1 != "${DN_MIGRATION_IDENTITY}"
       StrCpy $dnPlanNote "the migration journal is for another app"
+      StrCpy $dnWhy "journal-foreign"
       StrCpy $0 ""
     ${else}
       Push $0
@@ -1214,6 +1352,7 @@ FunctionEnd
       Pop $3
       ${if} $3 != $0
         StrCpy $dnPlanNote "the migration journal is for $3"
+        StrCpy $dnWhy "journal-other-dest"
         StrCpy $0 ""
       ${else}
         Push $2
@@ -1222,6 +1361,7 @@ FunctionEnd
         Pop $1
         ${if} $1 != ""
           StrCpy $dnPlanNote "the migration journal for $2: $1"
+          StrCpy $dnWhy "journal-$dnWhy"
           StrCpy $0 ""
         ${else}
           Push $2
@@ -1255,12 +1395,20 @@ FunctionEnd
     Call ${DN_FN}dnTrustedJournal
     Pop $1
     ${if} $1 == ""
+      !insertmacro dnStatus uninstall uninstalled no-pending-move "in=$0"
       StrCpy $0 "none"
     ${else}
       !insertmacro dnCloseAppIn "$1" $dnClosePolicy $dnCloseResult
       ${if} $dnCloseResult != "none"
       ${andIf} $dnCloseResult != "closed"
         StrCpy $0 "kept: ${PRODUCT_NAME} there is $dnCloseResult"
+        ${if} $dnCloseResult == "unknown"
+          StrCpy $dnWhy "unknown-process"
+        ${elseif} $dnCloseResult == "cancel"
+          StrCpy $dnWhy "user-declined"
+        ${else}
+          StrCpy $dnWhy "app-running"
+        ${endif}
       ${else}
         Push $1
         Push $0
@@ -1278,12 +1426,19 @@ FunctionEnd
             StrCpy $0 "removed"
           ${elseif} $2 == "unsafe"
             StrCpy $0 "kept: an identity check failed while removing it"
+            StrCpy $dnWhy "identity-check"
           ${else}
             StrCpy $0 "kept: a file is still in use"
+            StrCpy $dnWhy "file-in-use"
           ${endif}
         ${endif}
       ${endif}
       DetailPrint "$1: $0"
+      ${if} $0 == "removed"
+        !insertmacro dnStatus uninstall uninstalled-legacy-removed removed "from=$1"
+      ${else}
+        !insertmacro dnStatus uninstall uninstalled-legacy-kept $dnWhy "from=$1"
+      ${endif}
     ${endif}
     Pop $2
     Pop $1
@@ -1307,6 +1462,8 @@ FunctionEnd
   Var dnSavedTo
   Var dnSavedAt
   Var dnRecoveryKey
+  ; Why dnMigrationClose kept the old folder (app-running | unknown-process).
+  Var dnKeepWhy
 
   ; Where to install, from the folder electron-builder chose (no /D).
   ; In: $dnPlanDir. Out: $dnPlanDir, the folder to install to; $dnPlanLegacy, the
@@ -1323,6 +1480,7 @@ FunctionEnd
     Push $3
     StrCpy $dnPlanLegacy ""
     StrCpy $dnPlanNote ""
+    StrCpy $dnWhy ""
     Push $dnPlanDir
     Call dnCanonical
     Pop $0
@@ -1331,14 +1489,15 @@ FunctionEnd
     Pop $1
     ${if} $0 == ""
     ${orIf} $1 == ""
-      StrCpy $dnPlanNote "a path is not valid"
+      !insertmacro dnFail $dnPlanNote path-invalid "a path is not valid"
     ${else}
       ${GetFileName} $0 $2
       ${GetParent} $0 $3
       ${if} $2 != "${APP_FILENAME}"
         ; Not the old default folder name: nothing to do.
+        StrCpy $dnWhy "no-legacy"
       ${elseif} $3 != $1
-        StrCpy $dnPlanNote "$0 is not in $1"
+        !insertmacro dnFail $dnPlanNote not-default-folder "$0 is not in $1"
       ${elseif} ${FileExists} "$0\${DN_APP_EXE}"
         Push $0
         Push "$1\${PRODUCT_FILENAME}"
@@ -1347,13 +1506,21 @@ FunctionEnd
         ${if} $2 == ""
           StrCpy $dnPlanLegacy $0
           StrCpy $dnPlanDir "$1\${PRODUCT_FILENAME}"
+          StrCpy $dnWhy "legacy-found"
         ${else}
+          ; $dnWhy: dnCheckLegacyDir's code.
           StrCpy $dnPlanNote $2
         ${endif}
       ${else}
         ; A fresh install to the default folder gets the new name.
         StrCpy $dnPlanDir "$1\${PRODUCT_FILENAME}"
+        StrCpy $dnWhy "fresh-install"
       ${endif}
+    ${endif}
+    ${if} $dnPlanLegacy != ""
+      !insertmacro dnStatus plan plan-move $dnWhy "from=$dnPlanLegacy to=$dnPlanDir"
+    ${else}
+      !insertmacro dnStatus plan plan-in-place $dnWhy "to=$dnPlanDir"
     ${endif}
     Pop $3
     Pop $2
@@ -1376,8 +1543,10 @@ FunctionEnd
     Exch $0
     Push $2
     StrCpy $2 "0"
+    StrCpy $dnKeepWhy ""
     !insertmacro dnCloseAppIn "$0" $dnClosePolicy $dnCloseResult
     ${if} $dnCloseResult == "cancel"
+      !insertmacro dnStatus close cancelled user-cancelled "from=$0"
       Quit
     ${elseif} $dnCloseResult == "running"
     ${andIf} $dnClosePolicy == "never"
@@ -1386,12 +1555,20 @@ FunctionEnd
       ; that one running, starting at login and holding the single-instance lock
       ; the new exe needs. Quit before anything changed, like an in-place install.
       DetailPrint `"${PRODUCT_NAME}" is running from $0 and a silent install without --updated does not close it; nothing was installed, moved or deleted`
+      !insertmacro dnStatus close exit-2 app-running-silent "from=$0"
       SetErrorLevel 2
       Quit
     ${elseif} $dnCloseResult != "none"
     ${andIf} $dnCloseResult != "closed"
       StrCpy $2 "1"
+      StrCpy $dnKeepWhy "app-running"
+      ${if} $dnCloseResult == "unknown"
+        StrCpy $dnKeepWhy "unknown-process"
+      ${endif}
       DetailPrint "Keeping $0 until ${PRODUCT_NAME} there can be closed"
+      !insertmacro dnStatus close close-keep $dnKeepWhy "from=$0"
+    ${else}
+      !insertmacro dnStatus close close-ok $dnCloseResult "from=$0"
     ${endif}
     !insertmacro dnEnsureNotRunning "$1"
     StrCpy $0 $2
@@ -1435,7 +1612,12 @@ FunctionEnd
     ${endif}
     ${if} $2 == "1"
       StrCpy $3 "kept: ${PRODUCT_NAME} there is still running"
+      StrCpy $dnWhy $dnKeepWhy
+      ${if} $dnWhy == ""
+        StrCpy $dnWhy "app-running"
+      ${endif}
     ${elseif} $3 != ""
+      ; $dnWhy: dnPinLegacy's code.
       StrCpy $3 "kept: $3"
     ${else}
       Push $0
@@ -1444,6 +1626,7 @@ FunctionEnd
       Call dnUnpin
       ${if} $3 == "removed"
         DeleteRegKey HKCU $dnJournalKey
+        !insertmacro dnStatus remove moved removed "from=$0 to=$1"
         Push $0
         Call dnCanonical
         Pop $2
@@ -1460,13 +1643,27 @@ FunctionEnd
         IntFmt $R5 "%02u" $R5
         IntFmt $R6 "%02u" $R6
         WriteRegStr HKCU $dnStateKey "MigratedAt" "$R2-$R1-$R0T$R4:$R5:$R6Z"
+        ; The record must read back whole (the app acts on nothing less).
+        ReadRegStr $R3 HKCU $dnStateKey "MigratedAt"
+        ReadRegStr $2 HKCU $dnStateKey "MigratedTo"
+        ${if} $R3 == "$R2-$R1-$R0T$R4:$R5:$R6Z"
+        ${andIf} $2 != ""
+          !insertmacro dnStatus record moved record-written "from=$0 to=$1"
+        ${else}
+          !insertmacro dnStatus record moved record-failed "from=$0 to=$1"
+        ${endif}
       ${elseif} $3 == "unsafe"
         StrCpy $3 "kept: something in the old folder failed an identity check while it was being removed; removal stopped"
+        StrCpy $dnWhy "identity-check"
       ${else}
         StrCpy $3 "kept: a file is still in use"
+        StrCpy $dnWhy "file-in-use"
       ${endif}
     ${endif}
     DetailPrint "$0: $3"
+    ${if} $3 != "removed"
+      !insertmacro dnStatus remove kept $dnWhy "from=$0 to=$1"
+    ${endif}
     StrCpy $0 $3
     Pop $R6
     Pop $R5
@@ -1725,6 +1922,9 @@ FunctionEnd
         ${endif}
       ${endif}
     ${endif}
+    ${if} $4 != ""
+      StrCpy $dnWhy "uninstall-command"
+    ${endif}
     StrCpy $0 $4
     Pop $4
     Pop $3
@@ -1785,6 +1985,13 @@ FunctionEnd
           ${endif}
         ${endif}
       ${endif}
+    ${endif}
+    ${if} $4 == "parked"
+      !insertmacro dnStatus park parked parked "from=$0 to=$1"
+    ${elseif} $4 == "nothing to park"
+      !insertmacro dnStatus park parked nothing-to-park "from=$0 to=$1"
+    ${else}
+      !insertmacro dnStatus park refused-park uninstall-command "from=$0 to=$1"
     ${endif}
     StrCpy $0 $4
     Pop $4
@@ -1940,9 +2147,13 @@ FunctionEnd
       ${endif}
       ${if} $5 == "1"
         DeleteRegKey HKCU $dnRecoveryKey
+        !insertmacro dnStatus recover recovered restored ""
       ${else}
         DetailPrint "Kept HKCU\$dnRecoveryKey: the install state could not be written back"
+        !insertmacro dnStatus recover recover-incomplete writeback-failed ""
       ${endif}
+    ${elseif} $0 != ""
+      !insertmacro dnStatus recover recovery-ignored recovery-foreign ""
     ${endif}
     Pop $5
     Pop $4

@@ -517,7 +517,7 @@ test('the install migration never removes through a link and closes only its own
   assert.match(guards, /\$\{elseif\} \$\{Silent\}\n\s+StrCpy \$\{OUT\} "never"/)
   assert.match(
     close,
-    /\$\{elseif\} \$dnCloseResult == "running"\n\s+\$\{andIf\} \$dnClosePolicy == "never"\n(?:\s+;[^\n]*\n)*\s+DetailPrint [^\n]+\n\s+SetErrorLevel 2\n\s+Quit/
+    /\$\{elseif\} \$dnCloseResult == "running"\n\s+\$\{andIf\} \$dnClosePolicy == "never"\n(?:\s+;[^\n]*\n)*\s+DetailPrint [^\n]+\n\s+!insertmacro dnStatus close exit-2 app-running-silent "from=\$0"\n\s+SetErrorLevel 2\n\s+Quit/
   )
   // The journal and record survive electron-builder's uninstaller deleting
   // Software\{APP_GUID}: saved before "uninstall old version", restored first in customInstall.
@@ -532,6 +532,71 @@ test('the install migration never removes through a link and closes only its own
     ciWorkflow.replace(/\r\n/g, '\n'),
     /node apps\/desktop\/scripts\/test-windows-installer-guards\.cjs/
   )
+})
+
+test('every installer decision is recorded where QA can read it (status key and log)', () => {
+  const installer = readFileSync(
+    new URL('../../build/windows-installer.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const guards = readFileSync(
+    new URL('../../build/windows-install-guards.nsh', import.meta.url),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  // Per identity, outside Software\{APP_GUID} (deleted by every "uninstall old version").
+  assert.match(
+    installer,
+    /!define DN_STATUS_KEY "Software\\DoodleNote-InstallStatus\\\$\{APP_GUID\}"/
+  )
+  assert.match(installer, /!define DN_STATUS_LOG "\$TEMP\\DoodleNote-install-\$\{APP_ID\}\.log"/)
+  const init = installer.slice(installer.indexOf('!macro customInit'))
+  assert.ok(
+    init.indexOf('StrCpy $dnStatusKey "${DN_STATUS_KEY}"') < init.indexOf('Call dnRecoverState')
+  )
+  const uninstall = installer.slice(installer.indexOf('!macro customUnInstall'))
+  assert.ok(
+    uninstall.indexOf('StrCpy $dnStatusKey "${DN_STATUS_KEY}"') <
+      uninstall.indexOf('Call un.dnUninstallLegacy')
+  )
+  // Every way out of the run is recorded first: each Quit in the guards follows a dnStatus.
+  const lines = guards.split('\n')
+  lines.forEach((line, i) => {
+    if (line.trim() !== 'Quit') return
+    const before = lines.slice(Math.max(0, i - 5), i).join('\n')
+    assert.match(before, /!insertmacro dnStatus close (exit-2|cancelled) /, `Quit at line ${i + 1}`)
+  })
+  // Each decision point writes a status.
+  for (const [fn, step] of [
+    ['Function dnRecoverState', 'recover'],
+    ['Function dnPlanMigration', 'plan'],
+    ['Function dnMigrationClose', 'close'],
+    ['Function dnParkUninstaller', 'park'],
+    ['Function dnFinishMigration', 'remove'],
+    ['Function dnFinishMigration', 'record'],
+    ['Function ${DN_FN}dnUninstallLegacy', 'uninstall']
+  ]) {
+    const body = guards.slice(guards.indexOf(fn), guards.indexOf('FunctionEnd', guards.indexOf(fn)))
+    assert.match(body, new RegExp(`!insertmacro dnStatus ${step} `), `${fn}: ${step}`)
+  }
+  const install = installer.slice(installer.indexOf('!macro customInstall'))
+  assert.match(install, /!insertmacro dnStatus install in-place \$dnInstallWhy "to=\$INSTDIR"/)
+  assert.match(install, /!insertmacro dnStatus install kept incomplete-install /)
+  // The writer: four values and one log line; the log is bounded and starts with a BOM.
+  const writer = guards.slice(guards.indexOf('Function ${DN_FN}dnStatus'))
+  for (const value of ['LastRun', 'LastStep', 'LastResult', 'LastReason'])
+    assert.match(writer, new RegExp(`WriteRegStr HKCU \\$dnStatusKey "${value}"`))
+  assert.match(
+    writer,
+    /\$\{if\} \$5 > 65536\n\s+Delete "\$dnStatusLog\.1"\n\s+Rename \$dnStatusLog "\$dnStatusLog\.1"/
+  )
+  assert.match(writer, /FileWriteWord \$4 0xFEFF/)
+  // The documented sentence about an install log is gone.
+  const doc = readFileSync(
+    new URL('../../../../docs/WINDOWS-RELEASE-QA.md', import.meta.url),
+    'utf8'
+  )
+  assert.doesNotMatch(doc, /the reason is in the install\s+log/)
+  assert.match(doc, /HKCU\\Software\\DoodleNote-InstallStatus\\\{APP_GUID\}/)
 })
 
 test('a Windows package missing its speech engine, Koffi, reflink or llama binaries fails', () => {

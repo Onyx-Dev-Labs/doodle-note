@@ -69,6 +69,11 @@
 !define DN_UNINSTALLER_EXE "Uninstall ${PRODUCT_FILENAME}.exe"
 ; What a journal must name to be trusted by this installer.
 !define DN_MIGRATION_IDENTITY "${APP_GUID}|${APP_FILENAME}|${PRODUCT_FILENAME}"
+; Where each run records what it decided (dnStatus): LastRun / LastStep /
+; LastResult / LastReason per identity, outside Software\${APP_GUID} (which
+; electron-builder's uninstaller deletes on every update), and a log in %TEMP%.
+!define DN_STATUS_KEY "Software\DoodleNote-InstallStatus\${APP_GUID}"
+!define DN_STATUS_LOG "$TEMP\DoodleNote-install-${APP_ID}.log"
 !ifdef BUILD_UNINSTALLER
 !if "${APP_FILENAME}" != "${PRODUCT_FILENAME}"
   ; The uninstaller removes an old folder left by an unfinished move.
@@ -118,6 +123,8 @@
   Var dnHadStartMenuLink
   ; "1" when the old folder must stay this run (its app could not be closed).
   Var dnKeepLegacy
+  ; The plan's reason code, recorded again when an in-place install completes.
+  Var dnInstallWhy
 
   ; Exactly what electron-builder registers for a per-user install in DIR.
   !macro dnUninstallCommand DIR OUT
@@ -129,6 +136,8 @@
     StrCpy $dnHadDesktopLink "1"
     StrCpy $dnHadStartMenuLink "1"
     StrCpy $dnKeepLegacy "0"
+    StrCpy $dnStatusKey "${DN_STATUS_KEY}"
+    StrCpy $dnStatusLog "${DN_STATUS_LOG}"
     StrCpy $dnProgramsRoot "$LOCALAPPDATA\Programs"
     StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
     StrCpy $dnJournalKey "${DN_MIGRATION_KEY}"
@@ -149,6 +158,7 @@
       Call dnPlanMigration
       StrCpy $INSTDIR $dnPlanDir
       StrCpy $dnLegacyDir $dnPlanLegacy
+      StrCpy $dnInstallWhy $dnWhy
       ${if} $dnPlanNote != ""
         ; Not provably the old install: upgrade in place, exactly as before.
         DetailPrint "Not moving $INSTDIR: $dnPlanNote"
@@ -161,6 +171,7 @@
       Pop $R6
       ${if} $dnPlanNote != ""
         DetailPrint "Ignoring $dnPlanNote"
+        !insertmacro dnStatus note journal-ignored $dnWhy ""
       ${endif}
       ${if} $R6 == ""
         ; Shortcut answers recorded by an untrusted journal are not this move's.
@@ -169,6 +180,8 @@
       ${else}
         ${if} $dnLegacyDir == ""
           StrCpy $dnLegacyDir $R6
+          StrCpy $dnInstallWhy "journal-resumed"
+          !insertmacro dnStatus plan plan-move journal-resumed "from=$R6 to=$INSTDIR"
         ${endif}
         ; Put back a parked uninstall command only if it is exactly the old
         ; folder's own uninstaller and nothing is registered now, so Apps &
@@ -199,8 +212,13 @@
           DetailPrint "Not moving $dnLegacyDir: $R6"
           StrCpy $INSTDIR $dnLegacyDir
           StrCpy $dnLegacyDir ""
+          StrCpy $dnInstallWhy "uninstall-command"
+          !insertmacro dnStatus plan plan-in-place uninstall-command "to=$INSTDIR"
         ${endif}
       ${endif}
+    ${else}
+      StrCpy $dnInstallWhy "custom-dir"
+      !insertmacro dnStatus plan plan-in-place custom-dir "to=$INSTDIR"
     ${endif}
 
   !macroend
@@ -279,7 +297,10 @@
         ${endif}
       ${else}
         DetailPrint "The new install in $INSTDIR is incomplete; keeping $dnLegacyDir"
+        !insertmacro dnStatus install kept incomplete-install "from=$dnLegacyDir to=$INSTDIR"
       ${endif}
+    ${else}
+      !insertmacro dnStatus install in-place $dnInstallWhy "to=$INSTDIR"
     ${endif}
   !macroend
 !endif
@@ -295,6 +316,8 @@
       StrCpy $dnProgramsRoot "$LOCALAPPDATA\Programs"
       StrCpy $dnProfileDir "$APPDATA\${APP_FILENAME}"
       StrCpy $dnJournalKey "Software\${APP_GUID}\InstallMigration"
+      StrCpy $dnStatusKey "${DN_STATUS_KEY}"
+      StrCpy $dnStatusLog "${DN_STATUS_LOG}"
       Push $INSTDIR
       Call un.dnUninstallLegacy
       Pop $R0

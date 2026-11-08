@@ -326,9 +326,11 @@ moves an existing install on upgrade:
    case; a short name for an uninstaller that is gone cannot be expanded and
    counts as foreign); any other command could not be parked and
    electron-builder would run it before the new copy exists, so the install is
-   upgraded in place and the journal is left alone (the reason is in the install
-   log; the exit code stays 0, as for any in-place upgrade). Anything else is
-   upgraded in place, as before.
+   upgraded in place and the journal is left alone (the one-click installer
+   shows no details and keeps no install log: the reason is recorded as
+   `LastReason` = `uninstall-command`, see "Where an install records what it
+   decided" below; the exit code stays 0, as for any in-place upgrade). Anything
+   else is upgraded in place, as before.
 2. `customCheckAppRunning` closes copies running from exactly the old exe and
    exactly the new exe, each checked on its own, through `Win32_Process`
    executable paths (never electron-builder's path-prefix match, which also
@@ -465,6 +467,43 @@ record naming its folder and changes nothing. Client configs are replaced atomic
 a symbolic link is followed), only when their content changes, and not at all if
 the client rewrote the file in the meantime (the update starts over from the new
 text).
+
+### Where an install records what it decided
+
+A one-click installer runs without a details page and writes no log of its own
+(`SetDetailsPrint none`; `customInit` runs in `.onInit`), so every decision of
+the move is recorded in two places, by the installer and by a user uninstall:
+
+- `HKCU\Software\DoodleNote-InstallStatus\{APP_GUID}` (one per identity,
+  outside `Software\{APP_GUID}`, which electron-builder's uninstaller deletes on
+  every update): `LastRun` (UTC, ISO 8601), `LastStep`, `LastResult`,
+  `LastReason`, overwritten at each decision, so after a run they say how it
+  ended (or where it stopped). They stay after an uninstall on purpose.
+- `%TEMP%\DoodleNote-install-<appId>.log` (`DoodleNote-install-com.doodlenote.desktop.qa.log`
+  for QA): the same decisions, one line each, appended (UTF-16):
+  `<UTC> installer version=<v> step=<step> result=<result> reason=<code> [from=<old folder>] [to=<new folder>]`.
+  Past 64 KiB it is renamed to `<log>.1` (replacing an older one) and a new one
+  starts. The only paths in it are the install folders; nothing about the
+  profile, accounts or library.
+
+| `LastStep` | `LastResult` | `LastReason` |
+|---|---|---|
+| `recover` | `recovered`, `recover-incomplete`, `recovery-ignored` | `restored`, `writeback-failed`, `recovery-foreign` |
+| `plan` | `plan-move` (the move starts) or `plan-in-place` | `legacy-found`, `journal-resumed`; `no-legacy` (already moved), `fresh-install`, `custom-dir` (`/D`), `not-default-folder`, `uninstall-command`, or the refusing check: `legacy-link`, `legacy-no-exe`, `legacy-missing`, `legacy-not-folder`, `legacy-resolves-elsewhere`, `dest-link`, `dest-open-failed`, `dirs-overlap`, `dirs-same`, `profile-overlap`, `profile-overlap-resolved`, `profile-invalid`, `resolve-failed`, `open-failed`, `path-invalid` |
+| `close` | `close-ok`, `close-keep`, `exit-2`, `cancelled` | `none`, `closed`; `app-running`, `unknown-process`; `app-running-silent` (old app, `/S` without `--updated`), `app-running` (in-place); `user-cancelled` |
+| `park` | `parked`, `refused-park` (exit code 2) | `parked`, `nothing-to-park`; `uninstall-command` |
+| `remove` | `moved` or `kept` (journal stays armed) | `removed`; `app-running`, `unknown-process`, `file-in-use`, `identity-check`, or the refusing check: `pin-open-failed`, `pin-not-folder`, `pin-read-failed`, `pin-moved`, `pin-no-exe`, `pin-profile-overlap`, `pin-dest-read-failed`, `pin-dest-overlap`, any `legacy-*` / `dest-*` / `profile-*` code above |
+| `record` | `moved` | `record-written`, `record-failed` (record did not read back) |
+| `install` | `in-place`, `kept` | the plan's code; `incomplete-install` |
+| `uninstall` | `uninstalled`, `uninstalled-legacy-removed`, `uninstalled-legacy-kept` | `no-pending-move`, `removed`; `app-running`, `unknown-process`, `user-declined`, `file-in-use`, `identity-check`, or a `pin-*` / `legacy-*` code |
+
+The log also has `note` lines that do not change the registry values
+(`journal-ignored` with the reason the journal was not trusted:
+`journal-foreign`, `journal-other-dest`, `journal-<check code>`). A run whose
+`LastStep` is `plan`, `close` or `park` with no `exit-2` / `cancelled` stopped
+before `customInstall`. The guard harness checks these values for every outcome
+above, the line format, rotation, and that a log that cannot be written never
+stops the run.
 
 ### Upgrade test: QA identity only
 

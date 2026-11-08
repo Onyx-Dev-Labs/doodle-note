@@ -38,6 +38,10 @@
 ;   kill                                 terminates this process at once (an installer that dies)
 ;   wipe                                 deletes $dnStateKey with its journal subkey, as electron-builder's uninstaller does
 ;   unlegacy|<dest>|<policy>             dnUninstallLegacy: none | removed | kept: <why>
+;   stkey|<key>|<log>                    sets $dnStatusKey (HKCU, a throwaway test key) / $dnStatusLog
+;   status                               LastStep|LastResult|LastReason|LastRun, or none
+;   why                                  $dnWhy (the last refusal's code), or none
+;   stwrite|<step>|<result>|<reason>     dnStatus with no folders: done
 Unicode true
 SilentInstall silent
 RequestExecutionLevel user
@@ -330,6 +334,27 @@ Function .onInit
       Push $a
       Call dnUninstallLegacy
       Pop $result
+    ${elseif} $kind == "stkey"
+      StrCpy $dnStatusKey $a
+      StrCpy $dnStatusLog $b
+      StrCpy $result "set"
+    ${elseif} $kind == "status"
+      ReadRegStr $0 HKCU $dnStatusKey "LastStep"
+      ReadRegStr $1 HKCU $dnStatusKey "LastResult"
+      ReadRegStr $2 HKCU $dnStatusKey "LastReason"
+      ReadRegStr $3 HKCU $dnStatusKey "LastRun"
+      StrCpy $result "$0|$1|$2|$3"
+      ${if} $result == "|||"
+        StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "why"
+      StrCpy $result $dnWhy
+      ${if} $result == ""
+        StrCpy $result "none"
+      ${endif}
+    ${elseif} $kind == "stwrite"
+      !insertmacro dnStatus $a $b $c ""
+      StrCpy $result "done"
     ${elseif} $kind == "finish"
       Push $a
       Push $b

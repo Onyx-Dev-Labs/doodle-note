@@ -154,7 +154,7 @@ function alive(pid) {
 /**
  * A case is [kind, a, b, expected] or, for kinds with a third field, [kind, a, b, c, expected].
  */
-const THREE_FIELDS = new Set(['arm', 'migclose', 'finish', 'pins'])
+const THREE_FIELDS = new Set(['arm', 'migclose', 'finish', 'pins', 'stwrite'])
 let d3ShortTested = false
 let d3ShortExeTested = false
 const fields = (c) => (THREE_FIELDS.has(c[0]) ? c.slice(0, 4) : c.slice(0, 3))
@@ -1263,6 +1263,22 @@ async function main() {
       stallMarker
     ).trim()
     assert.equal(leftover, '0', 'the stalled closer was terminated')
+    // L2: a closer that cannot tell which processes are ours keeps the old folder,
+    // recorded as unknown-process.
+    const d5State = `${journalKey}-d5`
+    registryKeys.push(d5State, `${d5State}-status`)
+    const stallKeep = [
+      ['root', path.join(sandbox, 'd5'), path.join(sandbox, 'd5-profile')],
+      ['jkey', `${d5State}\\InstallMigration`, ''],
+      ['stkey', `${d5State}-status`, path.join(sandbox, 'd5-install.log'), 'set'],
+      ['migclose', d5Dir, path.join(sandbox, 'd5', 'DoodleNote'), 'close', '1'],
+      ['status', '', '', (r) => /^close\|close-keep\|unknown-process\|\d{4}-/.test(r)]
+    ]
+    checkCases(
+      'd5-stall-keep',
+      stallKeep,
+      phase('d5-stall-keep', stallKeep, { exe: stallExe }).results
+    )
 
     // D6: silent, no --updated, old app running: quit with exit code 2; no folder touched.
     const d6 = path.join(sandbox, 'd6', 'Local', 'Programs')
@@ -1275,15 +1291,207 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 1500))
     const d6State = `${journalKey}-d6`
     registryKeys.push(d6State)
+    const d6Status = `${d6State}-status`
+    const d6Log = path.join(sandbox, 'd6-install.log')
+    registryKeys.push(d6Status)
     const silent = [
       ['root', d6, d6Profile],
       ['jkey', `${d6State}\\InstallMigration`, ''],
+      ['stkey', d6Status, d6Log, 'set'],
       ['migclose', path.join(d6, 'desktop'), path.join(d6, 'DoodleNote'), 'never', '(quits)']
     ]
     const silentRun = phase('d6-silent', silent, { status: 2 })
-    assert.equal(silentRun.results.length, 2, 'the harness quit at the silent case')
+    assert.equal(silentRun.results.length, 3, 'the harness quit at the silent case')
+    // L2: the exit code 2 is recorded before the installer quits.
+    const d6Values = JSON.parse(
+      powershell(
+        "$k = Get-ItemProperty -LiteralPath ('HKCU:\\' + ($env:DN_DATA | ConvertFrom-Json)); ConvertTo-Json -Compress @($k.LastStep, $k.LastResult, $k.LastReason)",
+        d6Status
+      )
+    )
+    assert.deepEqual(d6Values, ['close', 'exit-2', 'app-running-silent'])
+    const d6Line = fs.readFileSync(d6Log).subarray(2).toString('utf16le').trim()
+    assert.match(d6Line, / installer step=close result=exit-2 reason=app-running-silent from=/)
+    reports.push(`d6 status: ${d6Values.join('|')}`, `d6 log: ${d6Line}`)
+    total += 1
     assert.ok(alive(d6App.pid), 'the running old app was left alone')
     assert.ok(fs.existsSync(path.join(d6, 'desktop', 'resources', 'app.asar')))
+
+    // L2: every decision is recorded where QA can read it after a one-click run:
+    // LastStep / LastResult / LastReason / LastRun under the identity's status key,
+    // and the same as one line in the log, naming no path but the install folders.
+    const l2 = path.join(sandbox, 'l2', 'Local', 'Programs')
+    const l2Profile = path.join(sandbox, 'l2', 'Roaming', 'desktop')
+    const l2Old = path.join(l2, 'desktop')
+    const l2New = path.join(l2, 'DoodleNote')
+    fs.mkdirSync(l2Profile, { recursive: true })
+    write(path.join(l2Profile, 'settings.json'), 'profile')
+    write(path.join(l2Old, 'DoodleNote.exe'), 'old')
+    write(path.join(l2Old, 'resources', 'app.asar'), 'asar')
+    write(path.join(l2Old, 'held.dat'), 'x')
+    write(path.join(l2New, 'DoodleNote.exe'), 'new')
+    const l2Alias = path.join(sandbox, 'l2-alias', 'Programs')
+    write(path.join(l2Alias, 'DoodleNote', 'DoodleNote.exe'), 'new')
+    junction(path.join(l2Alias, 'desktop'), path.join(l2Alias, 'DoodleNote'))
+    const l2State = `${journalKey}-l2`
+    const l2Status = `${journalKey}-l2-status`
+    registryKeys.push(l2State, `${l2State}-uninstall`, `${l2State}-recovery`, l2Status)
+    const l2Log = path.join(sandbox, 'l2-logs', 'DoodleNote-install-test.log')
+    fs.mkdirSync(path.dirname(l2Log), { recursive: true })
+    const status = (step, result, reason) => (r) =>
+      new RegExp(
+        `^${step}\\|${result}\\|${reason}\\|\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$`
+      ).test(r)
+    const l2Setup = [
+      ['root', l2, l2Profile],
+      ['jkey', `${l2State}\\InstallMigration`, ''],
+      ['skey', l2State, ''],
+      ['ukey', `${l2State}-uninstall`, ''],
+      ['rkey', `${l2State}-recovery`, ''],
+      ['stkey', l2Status, l2Log, 'set']
+    ]
+    const foreignUninstaller = `"${path.join(sandbox, 'Elsewhere')}\\Uninstall DoodleNote.exe" /currentuser`
+    const l2Holder = hold(path.join(l2Old, 'held.dat'))
+    started.push(l2Holder)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const l2Plan = [
+      ...l2Setup,
+      ['plan', l2New, '', (r) => r.endsWith('||')],
+      ['status', '', '', status('plan', 'plan-in-place', 'no-legacy')],
+      ['root', fresh, path.join(sandbox, 'fresh', 'Roaming', 'desktop')],
+      ['plan', path.join(fresh, 'desktop'), '', (r) => r.endsWith('||')],
+      ['status', '', '', status('plan', 'plan-in-place', 'fresh-install')],
+      ['root', l2Alias, l2Profile],
+      ['plan', path.join(l2Alias, 'desktop'), '', /junction or link/],
+      ['status', '', '', status('plan', 'plan-in-place', 'legacy-link')],
+      ['root', l2, l2Profile],
+      ['plan', path.join(otherParent, 'desktop'), '', / is not in /],
+      ['status', '', '', status('plan', 'plan-in-place', 'not-default-folder')],
+      [
+        'plan',
+        l2Old,
+        '',
+        (r) => lower(r) === `${lower(real(l2, 'DoodleNote'))}|${lower(real(l2, 'desktop'))}|`
+      ],
+      ['status', '', '', status('plan', 'plan-move', 'legacy-found')],
+      // The journal's refusals carry codes too.
+      ['arm', l2Old, l2New, 'someone-else|desktop|DoodleNote', 'armed'],
+      ['journal', l2New, '', /^none: /],
+      ['why', '', '', 'journal-foreign'],
+      ['arm', l2Old, path.join(l2, 'Elsewhere'), '', 'armed'],
+      ['journal', l2New, '', /^none: /],
+      ['why', '', '', 'journal-other-dest'],
+      // Park: a foreign uninstall command is refused (customInit quits with 2), ours parked.
+      ['ucmd', foreignUninstaller, '1', 'set'],
+      ['park', l2Old, l2New, /^refused: /],
+      ['status', '', '', status('park', 'refused-park', 'uninstall-command')],
+      ['ucmd', `"${l2Old}\\Uninstall DoodleNote.exe" /currentuser`, '1', 'set'],
+      ['park', l2Old, l2New, 'parked'],
+      ['status', '', '', status('park', 'parked', 'parked')],
+      // Close: nothing runs from either folder.
+      ['migclose', l2Old, l2New, 'close', '0'],
+      ['status', '', '', status('close', 'close-ok', 'none')],
+      // Remove: kept (app not closed, a held file, a folder that is not the old default).
+      ['finish', l2Old, l2New, '1', /^kept: .* still running/],
+      ['status', '', '', status('remove', 'kept', 'app-running')],
+      ['finish', l2Old, l2New, '0', 'kept: a file is still in use'],
+      ['status', '', '', status('remove', 'kept', 'file-in-use')],
+      [
+        'finish',
+        path.join(otherParent, 'desktop'),
+        path.join(otherParent, 'DoodleNote'),
+        '0',
+        /^kept: the old folder is not /
+      ],
+      ['status', '', '', status('remove', 'kept', 'legacy-not-default')],
+      ['jstate', '', '', 'armed'],
+      ['record', '', '', 'none']
+    ]
+    checkCases('l2-decisions', l2Plan, phase('l2-decisions', l2Plan).results)
+    process.kill(l2Holder.pid)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const l2Done = [
+      ...l2Setup,
+      ['finish', l2Old, l2New, '0', 'removed'],
+      ['status', '', '', status('record', 'moved', 'record-written')],
+      ['record', '', '', (r) => /\\desktop\|.*\\DoodleNote\|\d{4}-/.test(r)],
+      // Recover: a copy saved before "uninstall old version" is restored next run.
+      ['save', '', '', 'done'],
+      ['wipe', '', '', 'done'],
+      ['recover', '', '', 'done'],
+      ['status', '', '', status('recover', 'recovered', 'restored')],
+      ['rwrite', 'RecoveryFor', 'other-guid|desktop|DoodleNote', 'set'],
+      ['recover', '', '', 'done'],
+      ['status', '', '', status('recover', 'recovery-ignored', 'recovery-foreign')],
+      // The uninstaller's own result.
+      ['unlegacy', l2New, 'never', 'none'],
+      ['status', '', '', status('uninstall', 'uninstalled', 'no-pending-move')],
+      // A note goes to the log only.
+      ['stwrite', 'note', 'journal-ignored', 'journal-foreign', 'done'],
+      ['status', '', '', status('uninstall', 'uninstalled', 'no-pending-move')]
+    ]
+    checkCases('l2-moved', l2Done, phase('l2-moved', l2Done).results)
+    assert.ok(!fs.existsSync(l2Old), 'l2: the old folder was removed')
+    // The log: one line per decision, in order, in the documented form, naming
+    // only the install folders (never the profile or the foreign uninstaller).
+    const readLog = (file) => {
+      const raw = fs.readFileSync(file)
+      assert.deepEqual([...raw.subarray(0, 2)], [0xff, 0xfe], `${file}: UTF-16 with a BOM`)
+      return raw.subarray(2).toString('utf16le').split('\r\n').filter(Boolean)
+    }
+    const l2Lines = readLog(l2Log)
+    reports.push('--- l2 log', ...l2Lines)
+    const lineForm =
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z installer step=[a-z-]+ result=[a-z0-9-]+ reason=[a-z0-9-]*( (from|to|in)=[^=]+)*$/
+    for (const line of l2Lines) {
+      assert.match(line, lineForm)
+      assert.ok(!lower(line).includes(lower(l2Profile)), `l2 log names the profile: ${line}`)
+      assert.ok(!line.includes('Elsewhere\\Uninstall'), `l2 log names a command: ${line}`)
+    }
+    const steps = l2Lines.map((line) =>
+      / step=(\S+) result=(\S+) reason=(\S*)/.exec(line).slice(1).join(' ')
+    )
+    for (const expected of [
+      'plan plan-in-place no-legacy',
+      'plan plan-move legacy-found',
+      'park refused-park uninstall-command',
+      'park parked parked',
+      'close close-ok none',
+      'remove kept app-running',
+      'remove kept file-in-use',
+      'remove moved removed',
+      'record moved record-written',
+      'recover recovered restored',
+      'recover recovery-ignored recovery-foreign',
+      'uninstall uninstalled no-pending-move',
+      'note journal-ignored journal-foreign'
+    ])
+      assert.ok(steps.includes(expected), `l2 log has "${expected}"`)
+    assert.ok(
+      steps.indexOf('remove moved removed') < steps.indexOf('record moved record-written'),
+      'removal is logged before the record'
+    )
+    // Bounded: past 64 KiB the log becomes <log>.1 (replacing an older one).
+    const l2Big = path.join(sandbox, 'l2-logs', 'big.log')
+    fs.writeFileSync(l2Big, Buffer.alloc(70000, 0x41))
+    fs.writeFileSync(`${l2Big}.1`, 'older')
+    const l2Rotate = [
+      ['stkey', l2Status, l2Big, 'set'],
+      ['stwrite', 'plan', 'plan-move', 'legacy-found', 'done']
+    ]
+    checkCases('l2-rotate', l2Rotate, phase('l2-rotate', l2Rotate).results)
+    assert.equal(fs.statSync(`${l2Big}.1`).size, 70000, 'the full log became <log>.1')
+    assert.equal(readLog(l2Big).length, 1)
+    checkCases('l2-append', l2Rotate, phase('l2-append', l2Rotate).results)
+    assert.equal(readLog(l2Big).length, 2, 'a small log is appended to')
+    assert.equal(fs.statSync(`${l2Big}.1`).size, 70000)
+    // A log that cannot be written never stops the run.
+    const l2NoLog = [
+      ['stkey', l2Status, path.join(sandbox, 'no-such-folder', 'x.log'), 'set'],
+      ['stwrite', 'park', 'parked', 'parked', 'done'],
+      ['status', '', '', status('park', 'parked', 'parked')]
+    ]
+    checkCases('l2-nolog', l2NoLog, phase('l2-nolog', l2NoLog).results)
 
     if (keep) write(path.join(keep, 'installer-guards-results.txt'), reports.join('\r\n') + '\r\n')
     console.log(`installer guards: ${total} cases passed`)
