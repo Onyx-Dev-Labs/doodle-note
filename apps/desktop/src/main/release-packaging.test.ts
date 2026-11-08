@@ -27,6 +27,7 @@ const desktopPackage = readFileSync(new URL('../../package.json', import.meta.ur
 const packageCheck = createRequire(import.meta.url)('../../scripts/test-windows-package.cjs') as {
   problemsFor(files: string[]): string[]
   foreignNativeBinaries(unpackedDir: string): string[]
+  nativeBinariesInAsar(file: string): { path: string; machine: string }[]
 }
 const updaterSource = readFileSync(new URL('./updater.ts', import.meta.url), 'utf8')
 
@@ -352,6 +353,62 @@ test('the install migration never removes through a link and closes only its own
     ciWorkflow.replace(/\r\n/g, '\n'),
     /node apps\/desktop\/scripts\/test-windows-installer-guards\.cjs/
   )
+})
+
+test('native binaries packed inside app.asar itself are checked for their CPU too', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dn-asar-'))
+  try {
+    const pe = (machine: number): Buffer => {
+      const b = Buffer.alloc(0x90)
+      b.write('MZ', 0, 'latin1')
+      b.writeUInt32LE(0x80, 0x3c)
+      b.write('PE\0\0', 0x80, 'latin1')
+      b.writeUInt16LE(machine, 0x84)
+      return b
+    }
+    const contents: [string, Buffer][] = [
+      ['out/main/index.js', Buffer.from('// app')],
+      ['node_modules/a/x64.node', pe(0x8664)],
+      ['node_modules/b/arm64.node', pe(0xaa64)],
+      ['node_modules/c/linux.node', Buffer.from('\x7fELF' + '.'.repeat(80))],
+      ['node_modules/d/short.dll', Buffer.from('MZ')]
+    ]
+    // An asar: [4][header pickle size] then the pickled JSON tree, then the file data.
+    const files: Record<string, unknown> = {}
+    let offset = 0
+    for (const [rel, bytes] of contents) {
+      const parts = rel.split('/')
+      let node = files
+      for (const part of parts.slice(0, -1)) {
+        node[part] ??= { files: {} }
+        node = (node[part] as { files: Record<string, unknown> }).files
+      }
+      node[parts.at(-1)!] = { size: bytes.length, offset: String(offset) }
+      offset += bytes.length
+    }
+    ;(files.node_modules as { files: Record<string, unknown> }).files.e = {
+      files: { 'unpacked.node': { size: 10, unpacked: true } }
+    }
+    const json = Buffer.from(JSON.stringify({ files }))
+    const padded = Math.ceil(json.length / 4) * 4
+    const headerPickle = Buffer.alloc(8 + padded)
+    headerPickle.writeUInt32LE(4 + padded, 0)
+    headerPickle.writeUInt32LE(json.length, 4)
+    json.copy(headerPickle, 8)
+    const prefix = Buffer.alloc(8)
+    prefix.writeUInt32LE(4, 0)
+    prefix.writeUInt32LE(headerPickle.length, 4)
+    const asar = join(dir, 'app.asar')
+    writeFileSync(asar, Buffer.concat([prefix, headerPickle, ...contents.map(([, b]) => b)]))
+    assert.deepEqual(packageCheck.nativeBinariesInAsar(asar), [
+      { path: 'node_modules/a/x64.node', machine: 'x64' },
+      { path: 'node_modules/b/arm64.node', machine: '0xaa64' },
+      { path: 'node_modules/c/linux.node', machine: 'not-pe' },
+      { path: 'node_modules/d/short.dll', machine: 'not-pe' }
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('only x64 Windows native binaries ship unpacked in the Windows package', () => {

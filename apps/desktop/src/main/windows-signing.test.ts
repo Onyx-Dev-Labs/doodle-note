@@ -261,7 +261,7 @@ test('the files electron-builder never offers to its signer are found outside ap
 })
 
 test('packaging signs the helper before anything else reads it, and every PE through the hook', () => {
-  assert.match(builderConfig, /^ {2}signtoolOptions:\n {4}sign: scripts\/sign-windows\.cjs$/m)
+  assert.match(builderConfig, /^ {2}signtoolOptions:\n {4}sign: \.\/scripts\/sign-windows\.cjs$/m)
   assert.match(builderConfig, /^ {4}signingHashAlgorithms: \[sha256\]$/m)
   assert.match(builderConfig, /^ {2}signExts: \["\.dll", "\.node"\]$/m)
   const steps = desktopPackage.scripts['package:win'].split(' && ')

@@ -2,7 +2,8 @@
 // Packaged-content check for the Windows build: lists resources/app.asar and fails
 // if app source, build scripts, docs, tests or sourcemaps were bundled into it, or
 // if app.asar.unpacked carries native binaries for another OS or CPU (they cannot
-// load, and cannot be Authenticode-signed).
+// load, and cannot be Authenticode-signed), or if a native binary (.node, .dll,
+// .exe) was packed inside app.asar itself for another OS or CPU.
 //
 //   node scripts/test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]
 //
@@ -11,7 +12,8 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-function readAsarHeader(file) {
+/** The asar's JSON directory tree, and where file contents start (`dataOffset`). */
+function readAsar(file) {
   const fd = fs.openSync(file, 'r')
   try {
     const sizeBuf = Buffer.alloc(8)
@@ -22,10 +24,15 @@ function readAsarHeader(file) {
     fs.readSync(fd, headerBuf, 0, headerSize, 8)
     // Pickle 2: [payload size][string length][utf8 json]
     const jsonLength = headerBuf.readUInt32LE(4)
-    return JSON.parse(headerBuf.subarray(8, 8 + jsonLength).toString('utf8'))
+    const header = JSON.parse(headerBuf.subarray(8, 8 + jsonLength).toString('utf8'))
+    return { header, dataOffset: 8 + headerSize }
   } finally {
     fs.closeSync(fd)
   }
+}
+
+function readAsarHeader(file) {
+  return readAsar(file).header
 }
 
 /** Every file path in the archive, POSIX-separated, relative to its root. */
@@ -73,22 +80,56 @@ function problemsFor(files) {
 const NATIVE_EXTENSIONS = ['.node', '.dll', '.exe']
 const IMAGE_FILE_MACHINE_AMD64 = 0x8664
 
-/** 'x64', another PE machine as hex, or 'not-pe' (an ELF / Mach-O build for another OS). */
-function peMachine(file) {
+/**
+ * 'x64', another PE machine as hex, or 'not-pe' (an ELF / Mach-O build for another
+ * OS), for the file at `start` (`size` bytes) in `file`; the whole file by default.
+ */
+function peMachine(file, start = 0, size = Infinity) {
   const fd = fs.openSync(file, 'r')
   try {
-    const head = Buffer.alloc(64)
-    if (fs.readSync(fd, head, 0, 64, 0) < 64 || head.toString('latin1', 0, 2) !== 'MZ')
-      return 'not-pe'
+    const read = (length, at) => {
+      if (at + length > size) return null
+      const buf = Buffer.alloc(length)
+      return fs.readSync(fd, buf, 0, length, start + at) === length ? buf : null
+    }
+    const head = read(64, 0)
+    if (!head || head.toString('latin1', 0, 2) !== 'MZ') return 'not-pe'
     const peOffset = head.readUInt32LE(0x3c)
-    const pe = Buffer.alloc(6)
-    if (fs.readSync(fd, pe, 0, 6, peOffset) < 6 || pe.toString('latin1', 0, 4) !== 'PE\0\0')
-      return 'not-pe'
+    const pe = read(6, peOffset)
+    if (!pe || pe.toString('latin1', 0, 4) !== 'PE\0\0') return 'not-pe'
     const machine = pe.readUInt16LE(4)
     return machine === IMAGE_FILE_MACHINE_AMD64 ? 'x64' : `0x${machine.toString(16)}`
   } finally {
     fs.closeSync(fd)
   }
+}
+
+/**
+ * Native binaries packed inside app.asar itself (not unpacked), each with its
+ * machine: [{ path, machine }]. Files marked `unpacked` live in app.asar.unpacked
+ * and are checked there.
+ */
+function nativeBinariesInAsar(file) {
+  const { header, dataOffset } = readAsar(file)
+  const found = []
+  const walk = (node, prefix) => {
+    for (const [name, child] of Object.entries(node.files ?? {})) {
+      const rel = prefix ? `${prefix}/${name}` : name
+      if (child.files) walk(child, rel)
+      else if (
+        !child.unpacked &&
+        NATIVE_EXTENSIONS.includes(path.extname(name).toLowerCase()) &&
+        child.offset !== undefined
+      ) {
+        found.push({
+          path: rel,
+          machine: peMachine(file, dataOffset + Number(child.offset), Number(child.size))
+        })
+      }
+    }
+  }
+  walk(header, '')
+  return found
 }
 
 /** Native binaries under app.asar.unpacked that cannot load in the x64 Windows app. */
@@ -111,7 +152,14 @@ function foreignNativeBinaries(unpackedDir) {
   return problems
 }
 
-module.exports = { readAsarHeader, listAsar, problemsFor, peMachine, foreignNativeBinaries }
+module.exports = {
+  readAsarHeader,
+  listAsar,
+  problemsFor,
+  peMachine,
+  foreignNativeBinaries,
+  nativeBinariesInAsar
+}
 
 if (require.main === module) {
   const args = process.argv.slice(2)
@@ -137,6 +185,18 @@ if (require.main === module) {
   problems.push(...foreign.map((problem) => `app.asar.unpacked/${problem}`))
   console.log(
     `  app.asar.unpacked: ${foreign.length} native binaries that cannot load on Windows x64`
+  )
+  const packed = nativeBinariesInAsar(asar)
+  for (const binary of packed) console.log(`  inside app.asar: ${binary.path} (${binary.machine})`)
+  const packedForeign = packed.filter((binary) => binary.machine !== 'x64')
+  problems.push(
+    ...packedForeign.map(
+      (binary) =>
+        `app.asar/${binary.path}: ${binary.machine === 'not-pe' ? 'not a Windows binary' : `PE machine ${binary.machine}, not x64`}`
+    )
+  )
+  console.log(
+    `  inside app.asar: ${packed.length} native binaries, ${packedForeign.length} that cannot load on Windows x64`
   )
   if (problems.length) {
     console.error(`FAIL: ${problems.length} file(s) must not ship in app.asar`)

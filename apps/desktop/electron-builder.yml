@@ -153,7 +153,7 @@ win:
   # Unsigned builds make SmartScreen warn on install.
   signExts: [".dll", ".node"]
   signtoolOptions:
-    sign: scripts/sign-windows.cjs
+    sign: ./scripts/sign-windows.cjs
     # Artifact Signing signs SHA-256 only; one call per file.
     signingHashAlgorithms: [sha256]
 nsis:
