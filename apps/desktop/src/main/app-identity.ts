@@ -1,4 +1,5 @@
 import identities from '../shared/app-identities.json'
+import { DEFAULT_DICTATION_SETTINGS, type DictationSettings } from '../shared/dictation-api'
 
 /**
  * Which app identity this build carries. Baked in at build time by electron-vite
@@ -40,6 +41,22 @@ export interface AppIdentity {
   isolatesAgentAccess: boolean
   /** Only production may contact an update feed. */
   updatesAllowed: boolean
+  /**
+   * Default global dictation shortcuts for a fresh profile. Only one app can
+   * register a global shortcut, so a QA build running beside production must not
+   * default to production's: QA toggles with Control+Alt+Shift+D and leaves paste
+   * last / copy last off, and production keeps Control+Alt+D and both of its keys.
+   */
+  dictationShortcuts: Pick<
+    DictationSettings,
+    'toggleShortcut' | 'pasteLastShortcut' | 'copyLastShortcut'
+  >
+}
+
+const QA_DICTATION_SHORTCUTS: AppIdentity['dictationShortcuts'] = {
+  toggleShortcut: 'Control+Alt+Shift+D',
+  pasteLastShortcut: '',
+  copyLastShortcut: ''
 }
 
 export function appIdentity(name: AppIdentityName): AppIdentity {
@@ -55,7 +72,15 @@ export function appIdentity(name: AppIdentityName): AppIdentity {
     legacyInstallFolder: base.packageName,
     mcpServerKey: base.mcpServerKey,
     isolatesAgentAccess: name !== 'production',
-    updatesAllowed: name === 'production'
+    updatesAllowed: name === 'production',
+    dictationShortcuts:
+      name === 'production'
+        ? {
+            toggleShortcut: DEFAULT_DICTATION_SETTINGS.toggleShortcut,
+            pasteLastShortcut: DEFAULT_DICTATION_SETTINGS.pasteLastShortcut,
+            copyLastShortcut: DEFAULT_DICTATION_SETTINGS.copyLastShortcut
+          }
+        : { ...QA_DICTATION_SHORTCUTS }
   }
 }
 

@@ -4,7 +4,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_DICTATION_SETTINGS } from '../shared/dictation-api'
-import { DictationSettingsStore, normalizeDictationSettings } from './dictation-settings'
+import { shortcutsCollide } from '../shared/dictation-pill'
+import { APP_IDENTITY, appIdentity } from './app-identity'
+import {
+  DictationSettingsStore,
+  dictationDefaults,
+  normalizeDictationSettings
+} from './dictation-settings'
 
 test('an old settings file gains the pill defaults and keeps what it had', () => {
   const settings = normalizeDictationSettings({
@@ -250,4 +256,36 @@ test('the word threshold for the model defaults to 12 and rejects nonsense', () 
       String(bad)
     )
   }
+})
+
+test('a QA build defaults to global shortcuts production does not use', () => {
+  const qa = dictationDefaults(appIdentity('qa'))
+  const production = dictationDefaults(appIdentity('production'))
+  // Production is unchanged.
+  assert.deepEqual(production, DEFAULT_DICTATION_SETTINGS)
+  assert.equal(production.toggleShortcut, 'Control+Alt+D')
+  assert.equal(qa.toggleShortcut, 'Control+Alt+Shift+D')
+  assert.equal(qa.pasteLastShortcut, '')
+  assert.equal(qa.copyLastShortcut, '')
+  // None of QA's global shortcuts is one of production's (the second app to
+  // register a shortcut gets nothing).
+  const keys = ['toggleShortcut', 'pasteLastShortcut', 'copyLastShortcut'] as const
+  for (const ours of keys)
+    for (const theirs of keys)
+      assert.equal(shortcutsCollide(qa[ours], production[theirs]), false, `${ours} vs ${theirs}`)
+  // A fresh QA profile gets them; a damaged file too; a stored choice is kept.
+  const dir = mkdtempSync(join(tmpdir(), 'dn-qa-shortcuts-'))
+  assert.equal(new DictationSettingsStore(dir, qa).get().toggleShortcut, 'Control+Alt+Shift+D')
+  writeFileSync(join(dir, 'dictation.json'), '{ not json')
+  assert.equal(new DictationSettingsStore(dir, qa).get().toggleShortcut, 'Control+Alt+Shift+D')
+  const store = new DictationSettingsStore(dir, qa)
+  store.update({ enabled: true })
+  assert.equal(new DictationSettingsStore(dir, qa).get().copyLastShortcut, '')
+  store.update({ toggleShortcut: 'Control+Alt+Q' })
+  assert.equal(new DictationSettingsStore(dir, qa).get().toggleShortcut, 'Control+Alt+Q')
+  // The build's own identity is the default (tests run as production).
+  assert.equal(
+    dictationDefaults().toggleShortcut,
+    appIdentity(APP_IDENTITY.name).dictationShortcuts.toggleShortcut
+  )
 })

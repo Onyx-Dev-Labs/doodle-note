@@ -487,6 +487,7 @@ every identity-bearing name from the one entry in
 | MCP server launch spec | `ELECTRON_RUN_AS_NODE` | also `DOODLE_NOTE_MCP_CONFIG` (the sandbox opt-in file, absolute) and `DOODLE_NOTE_MCP_IDENTITY=qa`; the server then reads only that file, only if it was written for `qa`, and never falls back to `~\.doodlenote\mcp.json` |
 | Profile data at first launch | an older profile's meetings, folders, settings and chat are adopted | starts empty: the sibling `%APPDATA%\desktop` is the production profile and is never copied (meetings, settings with the encrypted cloud API key, chat) |
 | Local AI models (meeting notes) | its profile's `models`, then `%APPDATA%\DoodleNote`, `%APPDATA%\desktop` and `%APPDATA%\DoodleNote Local` `models`, then `~\.cache\doodle-note\models` | only `%APPDATA%\desktop-qa\models`: download them in the QA build (or copy test models there); the production profile and the shared cache are never read |
+| Default global dictation shortcuts (fresh profile) | toggle `Control+Alt+D`, paste last `Control+Alt+Shift+V`, copy last `Control+Alt+Shift+C` | toggle `Control+Alt+Shift+D`, paste last and copy last off: only one app can register a global shortcut, so production's keep working while QA runs |
 | Migration journal | `HKCU\Software\f85f8dcf-...\InstallMigration` | `HKCU\Software\320d0756-...\InstallMigration` |
 | Completed-move record (`MigratedFrom/To/At`) | `HKCU\Software\f85f8dcf-...` | `HKCU\Software\320d0756-...` |
 | Update feed | (off on Windows until activation) | never: no `app-update.yml`, checks disabled |
@@ -504,6 +505,25 @@ coordination after the identity it is launched with (`DICTATION_HELPER_IDENTITY`
 = the build's `appId`: `Local\DoodleNote-Bark-output-<appId>` and
 `%TEMP%\DoodleNote-Bark-output-<appId>.json`), so production and QA no longer
 share it.
+
+Production and QA can run at the same time, but they still share the Windows
+session. While both run, **do not**:
+
+- give QA production's global shortcuts. Windows gives a global shortcut to the
+  first app that registers it; the second one's registration fails (Settings
+  shows it as a conflict). A fresh QA profile defaults to `Control+Alt+Shift+D`
+  with paste last / copy last off for that reason; do not change them to
+  `Control+Alt+D`, `Control+Alt+Shift+V` or `Control+Alt+Shift+C`, and to test
+  paste last / copy last pick keys production does not use.
+- turn on Bark's hold key (or the hold mouse button) in both apps. Each app runs
+  its own helper with its own low-level hooks, so one press starts both and both
+  type the transcript into the focused field. Turn Bark on in QA only, or quit
+  production for the Bark part of the pass.
+- sign the QA build in to the owner's DoodleNote account (or any account that
+  holds real data). QA's cloud sync would then read and write the owner's real
+  meetings. Stay signed out, or use a disposable test account.
+- copy anything from `%APPDATA%\desktop` into `%APPDATA%\desktop-qa` (meetings,
+  settings, models): see step 1.
 
 Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 `Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
