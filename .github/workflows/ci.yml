@@ -339,12 +339,13 @@ jobs:
         env:
           DOODLENOTE_QA_IDENTITY: '1'
           npm_config_user_agent: pnpm
+        # Quoted: pwsh splits a bare -c.key=value native argument at the dot.
         run: |
           $env:DOODLENOTE_QA_LEGACY_LAYOUT = '1'
-          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never -c.compression=store
+          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never '-c.compression=store'
           if ($LASTEXITCODE -ne 0) { throw "legacy-layout installer build failed" }
           Remove-Item Env:DOODLENOTE_QA_LEGACY_LAYOUT
-          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never -c.compression=store -c.nsis.include=build/windows-installer-test-steps.nsh -c.directories.output=release-qa-steps
+          node node_modules/electron-builder/cli.js --win nsis --x64 --prepackaged release-qa/win-unpacked --config electron-builder.qa.cjs --publish never '-c.compression=store' '-c.nsis.include=build/windows-installer-test-steps.nsh' '-c.directories.output=release-qa-steps'
           if ($LASTEXITCODE -ne 0) { throw "kill-step installer build failed" }
           Get-ChildItem release-qa*/*-setup.exe | ForEach-Object { "$($_.FullName) $($_.Length)" }
 
