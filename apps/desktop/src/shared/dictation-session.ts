@@ -45,6 +45,13 @@ export type RecoveryReason =
   | 'selection-changed'
   /** Undo: the field no longer holds the text that was inserted. */
   | 'text-changed'
+  /**
+   * Windows: the clipboard could not be used to paste, and typing the text instead is not safe there
+   * (an app whose accessibility updates cannot be observed per keystroke, such as Chromium apps).
+   */
+  | 'paste-unavailable'
+  /** Windows: whether the field is safe to type into (identity, password state) could not be read. */
+  | 'target-unverifiable'
 
 export type DeliveryOutcome =
   { kind: 'delivered' } | { kind: 'recover'; reason: RecoveryReason; detail?: string }

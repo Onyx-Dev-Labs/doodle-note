@@ -154,7 +154,9 @@ export function micLooksMuted(state: InputState | null): boolean {
 
 /**
  * Per-character typing cost; matches Delivery.cs TypeEstimateMs: the 8 ms pacing, the per-keystroke
- * password/focus guard and the wait for the target to process each key (43-45 ms measured on Dev04).
+ * password/focus guard and the wait for the target to show it processed each key (30-35 ms measured
+ * on Dev04 in Notepad and WinForms, besides the boundary pauses; the typing fallback is refused up
+ * front for targets it cannot observe, such as Chromium apps).
  */
 export const HELPER_TYPE_PER_CHAR_MS = 50
 /** Extra pause at each word boundary (whitespace/punctuation). */

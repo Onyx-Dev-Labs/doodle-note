@@ -1755,17 +1755,13 @@ export class DictationService {
     this.lastTranscript = text
     // Ask the helper to keep the field only when learning from corrections is on.
     const learn = context?.settings.learnFromEdits === true
-    let clipboardResult: string | undefined
     const outcome = await this.deliver(
       context,
       text,
       (stage) => {
         if (stage === 'sent') this.mark(gen, 'helperSent')
       },
-      learn ? { watch: true } : undefined,
-      (clipboard) => {
-        clipboardResult = clipboard
-      }
+      learn ? { watch: true } : undefined
     )
     this.mark(gen, 'deliverEnd')
     if (context?.detail && outcome.helper) context.detail.helper = outcome.helper
@@ -1778,24 +1774,37 @@ export class DictationService {
     if (context) this.recordLatency(context)
     // A newer session may exist by now; the reducer ignores a stale generation.
     this.dispatch({ type: 'delivery-done', gen, outcome })
-    // Windows only: the user's own clipboard could not be fully put back. Say so whatever the
-    // outcome: as a panel after a delivery, on the recovery card's warning line otherwise.
-    const problem = this.windows ? clipboardProblem(clipboardResult) : null
-    if (problem && outcome.kind === 'delivered') {
+    this.reportClipboard(outcome)
+  }
+
+  /**
+   * Windows only: the user's own clipboard could not be fully put back after a delivery attempt.
+   * Every entry point (dictation, paste last, undo, transforms) reports it here, whatever the
+   * outcome: a panel after a delivery, the recovery card's warning line when one is showing.
+   * Returns the sentence for a caller that shows a plain notice instead (no card), else null.
+   */
+  private reportClipboard(outcome: { kind: string; clipboard?: string }): string | null {
+    const problem = this.windows ? clipboardProblem(outcome.clipboard) : null
+    if (!problem) return null
+    if (outcome.kind === 'delivered') {
       this.setPanel({ kind: 'clipboard', problem }, NOTICE_MS)
-    } else if (problem) {
-      this.clipboardWarning = { gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
-      this.render()
+      return null
     }
+    const resting = this.state.resting
+    if (resting?.kind === 'recovery') {
+      this.clipboardWarning = { gen: resting.gen, message: CLIPBOARD_PROBLEM_MESSAGES[problem] }
+      this.render()
+      return null
+    }
+    return CLIPBOARD_PROBLEM_MESSAGES[problem]
   }
 
   private async deliver(
     context: Pick<SessionContext, 'snapshotId' | 'target'> | undefined,
     text: string,
     onStage?: (stage: 'sent') => void,
-    guards?: DeliveryGuards,
-    onClipboard?: (clipboard: string) => void
-  ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings }> {
+    guards?: DeliveryGuards
+  ): Promise<DeliveryOutcome & { helper?: HelperDeliveryTimings; clipboard?: string }> {
     if (!context) return { kind: 'recover', reason: 'no-target' }
     const target = await context.target
     if (!target) return { kind: 'recover', reason: 'helper-unavailable' }
@@ -1804,11 +1813,14 @@ export class DictationService {
     if (target.secure) return { kind: 'recover', reason: 'secure-field' }
     onStage?.('sent')
     const result = await this.deps.helper.deliver(context.snapshotId, text, guards)
-    onClipboard?.(result.clipboard)
     this.deps.log(
       `delivery ${result.outcome}${result.reason ? ` (${result.reason})` : ''} via ${result.method ?? 'none'}, clipboard ${result.clipboard}`
     )
-    const helper = result.timings ? { helper: result.timings } : {}
+    // The helper's clipboard result travels with the outcome to every caller (reportClipboard).
+    const helper = {
+      ...(result.timings ? { helper: result.timings } : {}),
+      clipboard: result.clipboard
+    }
     if (result.outcome === 'delivered') return { kind: 'delivered', ...helper }
     if (result.outcome === 'uncertain')
       return { kind: 'recover', reason: 'insertion-uncertain', ...helper }
@@ -1849,11 +1861,19 @@ export class DictationService {
         { snapshotId, target: this.deps.helper.snapshot(snapshotId) },
         text
       )
-      this.dispatch(
-        outcome.kind === 'delivered'
-          ? { type: 'notice', level: 'success', message: 'Pasted.' }
-          : { type: 'notice', level: 'error', message: RECOVERY_MESSAGES[outcome.reason] }
-      )
+      if (outcome.kind === 'delivered') {
+        this.dispatch({ type: 'notice', level: 'success', message: 'Pasted.' })
+        this.reportClipboard(outcome)
+      } else {
+        const note = this.reportClipboard(outcome)
+        this.dispatch({
+          type: 'notice',
+          level: 'error',
+          message: note
+            ? `${RECOVERY_MESSAGES[outcome.reason]} ${note}`
+            : RECOVERY_MESSAGES[outcome.reason]
+        })
+      }
     } finally {
       this.deps.helper.release(snapshotId)
       this.pasting = false
@@ -1988,6 +2008,7 @@ export class DictationService {
       } else {
         this.dispatch({ type: 'keep', text: change.before, reason: outcome.reason })
       }
+      this.reportClipboard(outcome)
     } finally {
       this.deps.helper.release(snapshotId)
       this.broadcast()
@@ -2118,6 +2139,7 @@ export class DictationService {
         // Never lose the rewrite: it waits on the card for copying.
         this.dispatch({ type: 'keep', text: verdict.text, reason: outcome.reason })
       }
+      this.reportClipboard(outcome)
     } finally {
       clearTimeout(timeout)
       if (this.transforming === controller) this.transforming = null
@@ -2323,6 +2345,12 @@ function refusalReason(reason: string | undefined): RecoveryReason {
       return reason
     case 'helper-unavailable':
       return 'helper-unavailable'
+    // Windows: the paste could not happen and the typing fallback was refused up front.
+    case 'typing-unsupported':
+    case 'typing-unobservable':
+      return 'paste-unavailable'
+    case 'target-unverifiable':
+      return 'target-unverifiable'
     // A delivery the helper refused because the client had already given up: keep the text.
     case 'deadline-exceeded':
       return 'insertion-failed'

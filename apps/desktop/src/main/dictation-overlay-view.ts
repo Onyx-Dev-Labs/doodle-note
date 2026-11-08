@@ -84,7 +84,11 @@ export const RECOVERY_MESSAGES: Record<RecoveryReason, string> = {
   'helper-unavailable': 'The insertion helper is unavailable, so nothing was typed.',
   'selection-changed':
     'The selection changed while the text was being rewritten, so nothing was replaced.',
-  'text-changed': 'The text there has changed since, so it was not put back.'
+  'text-changed': 'The text there has changed since, so it was not put back.',
+  'paste-unavailable':
+    'Could not paste into this app, and typing there could not be done safely. Your text is kept for copying.',
+  'target-unverifiable':
+    'Could not check that this field is safe to type into, so nothing more was typed. Your text is kept for copying.'
 }
 
 /** Copy for the heads-up line under the live pill. */

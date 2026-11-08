@@ -2737,3 +2737,33 @@ test('Windows: an unverified helper is checked before dictation, and Bark off ne
   )
   assert.equal(status.helper, 'off')
 })
+
+test('Windows: paste last and a refused paste report the clipboard too', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  await h.service.start()
+  await speak(h, 'first words')
+  finish(h)
+  h.clock.now += 5_000
+  h.helper.delivery = { outcome: 'delivered', method: 'type', verified: true, clipboard: 'skipped' }
+  await h.service.pasteLast()
+  await tick()
+  assert.match(
+    JSON.stringify(h.overlay.at(-1)),
+    /too large or could not be kept/,
+    'panel after Paste last'
+  )
+  h.clock.now += 5_000
+  h.helper.delivery = {
+    outcome: 'refused',
+    reason: 'focus-changed',
+    verified: false,
+    clipboard: 'unrestored'
+  }
+  await h.service.pasteLast()
+  await tick()
+  assert.match(
+    JSON.stringify(h.overlay.at(-1)),
+    /could not be put back\. It now holds the dictated text/,
+    'a refused paste still says what happened to the clipboard'
+  )
+})
