@@ -472,12 +472,16 @@ async function main() {
     // their arguments and description; the others are byte-for-byte untouched.
     const pinAfter = readShortcuts(Object.values(pinFiles))
     const [a, b, c, d, e] = pinAfter
-    assert.equal(lower(a.target), lower(pinNew))
+    // Paths compared resolved: Windows may store a long or an 8.3 form (the runner's TEMP is 8.3).
+    const same = (stored, expected) =>
+      lower(fs.realpathSync.native(stored)) === lower(fs.realpathSync.native(expected))
+    assert.ok(same(a.target, pinNew), a.target)
     assert.equal(a.args, '--hidden')
     assert.equal(a.description, 'keep me')
-    assert.equal(lower(a.icon), lower(`${pinNew},0`))
-    assert.equal(lower(a.workdir), lower(path.dirname(pinNew)))
-    assert.equal(lower(c.target), lower(pinNew))
+    assert.match(a.icon, /,0$/)
+    assert.ok(same(a.icon.replace(/,0$/, ''), pinNew), a.icon)
+    assert.ok(same(a.workdir, path.dirname(pinNew)), a.workdir)
+    assert.ok(same(c.target, pinNew), c.target)
     assert.deepEqual([b, d, e], [pinBefore[1], pinBefore[3], pinBefore[4]])
     for (const [file, bytes] of pinBytes) assert.ok(fs.readFileSync(file).equals(bytes), file)
     assert.equal(fs.readFileSync(path.join(pins, 'notes.txt'), 'utf8'), 'not a shortcut')
