@@ -143,14 +143,64 @@ interface McpClientDef {
 }
 
 /**
+ * Where agent access reads and writes: the home the client dotfiles live in
+ * (~/.claude.json, ~/.codex), the per-user app data folder Claude Desktop keeps
+ * its config in, and the opt-in file the MCP server requires.
+ */
+export interface AgentAccessRoots {
+  home: string
+  appData: string
+  mcpConfigPath: string
+  /**
+   * Set for a sandbox: the identity the opt-in file is written for. The server
+   * spec then names the sandbox's opt-in file and this identity, and the MCP
+   * server refuses any other file (packages/doodle-note-mcp/src/config.ts).
+   */
+  sandboxIdentity: string | null
+}
+
+/** Environment that binds the MCP server to a sandbox's opt-in file. */
+export const MCP_CONFIG_ENV = 'DOODLE_NOTE_MCP_CONFIG'
+export const MCP_IDENTITY_ENV = 'DOODLE_NOTE_MCP_IDENTITY'
+
+/**
+ * The real locations, shared by every production DoodleNote of this user; or,
+ * with `sandbox`, every one of them inside its home folder. A development or QA
+ * identity build passes its sandbox, so no client config root (not even
+ * %APPDATA%, nor a DOODLE_NOTE_MCP_CONFIG inherited from the environment) can
+ * lead it to the production files.
+ */
+export function agentAccessRoots(options: {
+  platform: NodeJS.Platform
+  env: NodeJS.ProcessEnv
+  home: string
+  sandbox?: { home: string; identity: string }
+}): AgentAccessRoots {
+  const sandboxHome = options.sandbox?.home
+  const { platform, env } = options
+  const home = sandboxHome ?? options.home
+  const appData =
+    platform === 'win32'
+      ? sandboxHome === undefined && env.APPDATA
+        ? env.APPDATA
+        : join(home, 'AppData', 'Roaming')
+      : join(home, 'Library', 'Application Support')
+  const defaultConfig = join(home, '.doodlenote', 'mcp.json')
+  return {
+    home,
+    appData,
+    mcpConfigPath:
+      sandboxHome === undefined ? (env.DOODLE_NOTE_MCP_CONFIG ?? defaultConfig) : defaultConfig,
+    sandboxIdentity: options.sandbox?.identity ?? null
+  }
+}
+
+/**
  * The MCP clients whose configs the Connect buttons manage. Both JSON
  * clients keep a top-level `mcpServers` map, so one dialect covers each.
  */
-function clientDefs(home: string): McpClientDef[] {
-  const appData =
-    process.platform === 'win32'
-      ? (process.env.APPDATA ?? join(home, 'AppData', 'Roaming'))
-      : join(home, 'Library', 'Application Support')
+export function clientDefs(roots: AgentAccessRoots): McpClientDef[] {
+  const { home, appData } = roots
   const claudeDesktopDir = join(appData, 'Claude')
   return [
     {
@@ -193,18 +243,51 @@ function clientDefs(home: string): McpClientDef[] {
 export class AgentAccessService {
   private readonly configPath: string
   private readonly clients: McpClientDef[]
+  private readonly sandboxIdentity: string | null
+  /** The launch spec written into client configs and shown in Settings. */
+  private readonly server: McpServerSpec
 
   private get meetingsDir(): string {
     return resolveLibraryPath(this.meetingsDirSource)
   }
 
+  /**
+   * `roots` defaults to the real locations; a string is a home folder that holds
+   * every one of them (tests).
+   */
   constructor(
     private readonly meetingsDirSource: LibraryPath,
-    private readonly server: McpServerSpec,
-    home = homedir()
+    server: McpServerSpec,
+    roots: AgentAccessRoots | string = agentAccessRoots({
+      platform: process.platform,
+      env: process.env,
+      home: homedir()
+    })
   ) {
-    this.configPath = process.env.DOODLE_NOTE_MCP_CONFIG ?? join(home, '.doodlenote', 'mcp.json')
-    this.clients = clientDefs(home)
+    const resolved =
+      typeof roots === 'string'
+        ? agentAccessRoots({
+            platform: process.platform,
+            env: process.env,
+            home: roots,
+            sandbox: { home: roots, identity: '' }
+          })
+        : roots
+    this.configPath = resolved.mcpConfigPath
+    this.clients = clientDefs(resolved)
+    this.sandboxIdentity = resolved.sandboxIdentity || null
+    // A sandbox's server must read the sandbox's opt-in file, never the real
+    // ~/.doodlenote/mcp.json (which would expose the production library).
+    this.server = this.sandboxIdentity
+      ? {
+          ...server,
+          env: {
+            ...server.env,
+            [MCP_CONFIG_ENV]: this.configPath,
+            [MCP_IDENTITY_ENV]: this.sandboxIdentity
+          }
+        }
+      : server
   }
 
   /** Preserve consent while following a successfully relocated library. */
@@ -259,7 +342,15 @@ export class AgentAccessService {
     mkdirSync(dirname(this.configPath), { recursive: true })
     writeFileSync(
       this.configPath,
-      JSON.stringify({ enabled, meetingsDir: this.meetingsDir }, null, 2) + '\n'
+      JSON.stringify(
+        {
+          enabled,
+          meetingsDir: this.meetingsDir,
+          ...(this.sandboxIdentity ? { identity: this.sandboxIdentity } : {})
+        },
+        null,
+        2
+      ) + '\n'
     )
     return this.status()
   }

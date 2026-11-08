@@ -65,7 +65,7 @@ import { initAutoUpdater, isQuittingForUpdate } from './updater'
 import { isInsideFolder, runWindowsInstallMigration } from './windows-install-migration'
 import { clearInstallRecord, installStateKey, readInstallRecord } from './windows-install-record'
 import { MediaService } from './media-service'
-import { AgentAccessService } from './agent-access-service'
+import { AgentAccessService, agentAccessRoots } from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
 import { MeetingsService } from './meetings-service'
 import { MicWatcher } from './mic-watcher'
@@ -1154,11 +1154,22 @@ app.whenReady().then(async () => {
     () => join(libraryRoot(), 'meetings'),
     resolveMcpServerSpec(),
     // The opt-in file and client configs normally live in the real home
-    // directory and are shared by every DoodleNote. A development or QA identity
-    // build gets a sandboxed home inside its own profile so it can never rewrite them.
-    APP_CHANNEL === 'dev' || APP_IDENTITY.isolatesAgentAccess
-      ? join(app.getPath('userData'), 'agent-access-home')
-      : undefined
+    // directory (and %APPDATA%) and are shared by every DoodleNote. A development
+    // or QA identity build gets a sandboxed home inside its own profile holding all
+    // of them, so it can never read or rewrite them, and its MCP server spec names
+    // the sandbox's opt-in file.
+    agentAccessRoots({
+      platform: process.platform,
+      env: process.env,
+      home: app.getPath('home'),
+      sandbox:
+        APP_CHANNEL === 'dev' || APP_IDENTITY.isolatesAgentAccess
+          ? {
+              home: join(app.getPath('userData'), 'agent-access-home'),
+              identity: APP_CHANNEL === 'dev' ? 'dev' : APP_IDENTITY.name
+            }
+          : undefined
+    })
   )
   const previousLibrary = storage?.status().recoveryPath
   if (previousLibrary) {

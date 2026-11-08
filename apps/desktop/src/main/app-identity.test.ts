@@ -178,8 +178,11 @@ test('the app uses the identity for its AUMID, login item, agent access and upda
   for (const write of writes) assert.match(write, /name: APP_IDENTITY\.loginItemName/)
   assert.match(
     index,
-    /APP_CHANNEL === 'dev' \|\| APP_IDENTITY\.isolatesAgentAccess\s+\? join\(app\.getPath\('userData'\), 'agent-access-home'\)/
+    /APP_CHANNEL === 'dev' \|\| APP_IDENTITY\.isolatesAgentAccess\s+\? \{\s+home: join\(app\.getPath\('userData'\), 'agent-access-home'\),\s+identity: APP_CHANNEL === 'dev' \? 'dev' : APP_IDENTITY\.name\s+\}/
   )
+  // The client roots and the opt-in file come only from agentAccessRoots.
+  assert.match(index, /new AgentAccessService\(\s+\(\) => join\(libraryRoot\(\), 'meetings'\),\s+resolveMcpServerSpec\(\),\s+(?:\/\/[^\n]*\n\s+)*agentAccessRoots\(/)
+  assert.doesNotMatch(read('src/main/agent-access-service.ts'), /process\.env\.APPDATA|process\.env\.DOODLE_NOTE_MCP_CONFIG/)
   assert.match(index, /enabled: profile\.updatesEnabled && APP_IDENTITY\.updatesAllowed/)
   assert.match(index, /identityMismatch\(app\.getName\(\)\)/)
   // No identity literal is left in the main process besides the identity file.

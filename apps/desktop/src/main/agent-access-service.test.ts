@@ -13,7 +13,13 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { AgentAccessService, replaceConfigFile, sameConfigContent } from './agent-access-service'
+import {
+  AgentAccessService,
+  agentAccessRoots,
+  clientDefs,
+  replaceConfigFile,
+  sameConfigContent
+} from './agent-access-service'
 import type { McpServerSpec } from '../shared/integrations-api'
 
 const spec: McpServerSpec = {
@@ -131,10 +137,108 @@ test('a config that exists but cannot be read is never replaced blind', () => {
   })
 })
 
+test('production roots are the real ones; a sandbox holds every client root and the opt-in file', () => {
+  const env = {
+    APPDATA: 'C:\\Users\\u\\AppData\\Roaming',
+    DOODLE_NOTE_MCP_CONFIG: 'C:\\elsewhere\\mcp.json'
+  }
+  const home = 'C:\\Users\\u'
+  const sandboxHome = join('C:\\Users\\u\\AppData\\Roaming\\desktop-qa', 'agent-access-home')
+  for (const platform of ['win32', 'darwin'] as const) {
+    const production = agentAccessRoots({ platform, env, home })
+    assert.equal(production.sandboxIdentity, null)
+    assert.equal(production.mcpConfigPath, env.DOODLE_NOTE_MCP_CONFIG)
+    assert.equal(
+      production.appData,
+      platform === 'win32' ? env.APPDATA : join(home, 'Library', 'Application Support')
+    )
+    assert.deepEqual(
+      clientDefs(production).map((def) => def.configPath),
+      [
+        join(production.appData, 'Claude', 'claude_desktop_config.json'),
+        join(home, '.claude.json'),
+        join(home, '.codex', 'config.toml')
+      ]
+    )
+
+    const qa = agentAccessRoots({
+      platform,
+      env,
+      home,
+      sandbox: { home: sandboxHome, identity: 'qa' }
+    })
+    assert.equal(qa.sandboxIdentity, 'qa')
+    // Neither %APPDATA% nor an inherited DOODLE_NOTE_MCP_CONFIG escapes the sandbox.
+    assert.equal(qa.mcpConfigPath, join(sandboxHome, '.doodlenote', 'mcp.json'))
+    const paths = [
+      qa.home,
+      qa.appData,
+      qa.mcpConfigPath,
+      ...clientDefs(qa).flatMap((def) => [def.configPath, ...def.detectPaths])
+    ]
+    assert.equal(paths.length, 10)
+    for (const path of paths) {
+      assert.ok(path.startsWith(sandboxHome), `${path} is outside the sandbox`)
+    }
+  }
+})
+
+test('a sandbox writes its identity into the opt-in file and binds the server spec to it', () => {
+  withHome((root) => {
+    const sandboxHome = join(root, 'agent-access-home')
+    const service = new AgentAccessService(
+      () => join(root, 'meetings'),
+      spec,
+      agentAccessRoots({
+        platform: process.platform,
+        env: { DOODLE_NOTE_MCP_CONFIG: join(root, 'prod-mcp.json') },
+        home: root,
+        sandbox: { home: sandboxHome, identity: 'qa' }
+      })
+    )
+    const optIn = join(sandboxHome, '.doodlenote', 'mcp.json')
+    const status = service.setEnabled(true)
+    assert.equal(status.configPath, optIn)
+    assert.deepEqual(JSON.parse(readFileSync(optIn, 'utf8')), {
+      enabled: true,
+      meetingsDir: join(root, 'meetings'),
+      identity: 'qa'
+    })
+    assert.deepEqual(status.server.env, {
+      ELECTRON_RUN_AS_NODE: '1',
+      DOODLE_NOTE_MCP_CONFIG: optIn,
+      DOODLE_NOTE_MCP_IDENTITY: 'qa'
+    })
+    // What Connect writes into a client is that same spec.
+    service.setClientConnected('claude-code', true)
+    const written = JSON.parse(readFileSync(join(sandboxHome, '.claude.json'), 'utf8'))
+    assert.deepEqual(written.mcpServers['doodle-note'].env, status.server.env)
+    assert.ok(!readdirSync(root).includes('prod-mcp.json'))
+  })
+})
+
+test('a production spec carries no sandbox binding', () => {
+  withHome((home) => {
+    const service = new AgentAccessService(
+      () => join(home, 'meetings'),
+      spec,
+      agentAccessRoots({ platform: process.platform, env: {}, home })
+    )
+    assert.deepEqual(service.status().server, spec)
+    service.setEnabled(true)
+    assert.deepEqual(JSON.parse(readFileSync(join(home, '.doodlenote', 'mcp.json'), 'utf8')), {
+      enabled: true,
+      meetingsDir: join(home, 'meetings')
+    })
+  })
+})
+
 test('repointing: an entry without a command, an empty file and a BOM are not failures', () => {
   withHome((home) => {
     const claudeCode = join(home, '.claude.json')
-    const http = JSON.stringify({ mcpServers: { 'doodle-note': { url: 'http://127.0.0.1:1/mcp' } } })
+    const http = JSON.stringify({
+      mcpServers: { 'doodle-note': { url: 'http://127.0.0.1:1/mcp' } }
+    })
     writeFileSync(claudeCode, http)
     mkdirSync(join(home, '.codex'))
     const codex = join(home, '.codex', 'config.toml')
