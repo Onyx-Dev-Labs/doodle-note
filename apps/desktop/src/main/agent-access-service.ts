@@ -266,11 +266,14 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * it (chmod 0444) is one the base's write, already open, would have outlived too:
  * the text is written and the file keeps the mode it has just before the rename. A change made before it
  * fails the open and the base's write decides. A new file is linked into place
- * (link(2), never replacing a file that appeared meanwhile). If anything on the
- * way fails (the open, the temporary file, the link or the rename), or the name
- * no longer holds the opened file (replaced meanwhile), the original is untouched
- * and the base's in-place write decides: it succeeds or fails (same error)
- * exactly as it would have at that moment.
+ * (link(2), never replacing a file that appeared meanwhile). If a step on the way
+ * fails for want of permission or support (the open, the temporary file, the link
+ * or the rename; BASE_DECIDES), or the name no longer holds the opened file
+ * (replaced meanwhile), the original is untouched and the base's in-place write
+ * decides: it succeeds or fails (same error) exactly as it would have at that
+ * moment. Any other failure (a full disk, EDQUOT, EIO) is thrown with the original
+ * untouched, where the base's write would have truncated it first (round 12: the
+ * one difference in failure, disclosed).
  *
  * The temporary file is created exclusively (createTemporaryBeside: a taken name
  * is retried with a fresh one, then the base's write decides), and only a file
@@ -316,6 +319,8 @@ export function replaceConfigFileBase(path: string, next: string): void {
   // taken (EEXIST) belongs to someone else and is never removed.
   let temporary: string | null = null
   let done = false
+  let failure: unknown = null
+  const replaced = new Error('replaced meanwhile')
   try {
     // A new file: the default mode (0666 less the umask), as writeFileSync created
     // it. A replacement: private until it takes the original's mode below.
@@ -328,7 +333,7 @@ export function replaceConfigFileBase(path: string, next: string): void {
         // The mode the file has now (changed after the open: kept), set exactly.
         const now = fstatSync(authority)
         const here = lstatSync(target)
-        if (here.ino !== now.ino || here.dev !== now.dev) throw new Error('replaced meanwhile')
+        if (here.ino !== now.ino || here.dev !== now.dev) throw replaced
         fchmodSync(fd, now.mode & 0o7777)
         // Released before the rename (Windows refuses to rename over an open file);
         // from here on a change lands on the replaced file: the stated residual.
@@ -341,15 +346,46 @@ export function replaceConfigFileBase(path: string, next: string): void {
     if (replacing) renameSync(temporary, target)
     else linkSync(temporary, target)
     done = true
-  } catch {
-    // The original is untouched: the base's write decides.
+  } catch (error) {
+    // The original is untouched. A permission or compatibility failure, or a file
+    // replaced or removed meanwhile: the base's write decides. Anything else (a
+    // full disk, I/O) is thrown as is, the original left intact (round 12).
+    const code = (error as NodeJS.ErrnoException).code
+    if (error !== replaced && !BASE_DECIDES.has(code ?? '')) failure = error
   } finally {
     if (authority !== null) closeSync(authority)
     // Renamed into place: the name is free again and may be another writer's now.
     if (temporary !== null && !(done && replacing)) removeOwnTemporary(temporary)
   }
+  if (failure !== null) throw failure
   if (!done) writeFileSync(path, next)
 }
+
+/**
+ * The failures of the atomic replace after which the base's in-place write
+ * decides (round 12): those of permission and compatibility, where the base's own
+ * write may succeed (or fails with its own error): access refused, a read-only
+ * volume, no hard links or renames here (EXDEV, ENOTSUP, EINVAL, EMLINK), a name
+ * too long, every temporary name taken or a file that appeared before the link
+ * (EEXIST), and a file or folder removed meanwhile (ENOENT). Any other failure
+ * (ENOSPC, EDQUOT, EIO, ENOMEM, EMFILE, ...) is thrown with the original
+ * untouched, because the in-place write truncates first: on a full disk it would
+ * leave the config empty or cut short (the base's behavior; a disclosed, owner-
+ * acknowledged difference).
+ */
+const BASE_DECIDES = new Set([
+  'EACCES',
+  'EPERM',
+  'EROFS',
+  'EXDEV',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+  'EINVAL',
+  'EMLINK',
+  'ENAMETOOLONG',
+  'EEXIST',
+  'ENOENT'
+])
 
 /** access(2) W_OK (macOS: also honours ACLs and the immutable flags). */
 function writable(path: string): boolean {

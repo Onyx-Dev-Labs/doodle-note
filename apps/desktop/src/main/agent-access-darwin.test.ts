@@ -1390,7 +1390,7 @@ test('round 12: a failed exclusive create removes nothing, both writers', (t) =>
   try {
     let n = 0
     for (const writer of WRITERS)
-      for (const code of ['EACCES', 'EEXIST']) {
+      for (const code of ['EACCES', 'ENOSPC', 'EEXIST']) {
         const label = `${writer}, temporary file creation ${code}`
         const folder = join(root, String(n++))
         mkdirSync(folder)
@@ -1415,11 +1415,59 @@ test('round 12: a failed exclusive create removes nothing, both writers', (t) =>
         t.diagnostic(`${label}: ${thrown ?? 'written'}, ${removed.length} removals`)
         assert.deepEqual(removed, [], `${label}: no removal`)
         assert.deepEqual(temporaries(folder), [], label)
-        // darwin: the base's write decides. Windows: every failure is thrown.
-        const baseDecides = writer === 'darwin'
+        // darwin: a permission failure or every name taken -> the base's write; a full
+        // disk is thrown with the config intact. Windows: every failure is thrown.
+        const baseDecides = writer === 'darwin' && code !== 'ENOSPC'
         assert.equal(thrown, baseDecides ? null : code, label)
         assert.equal(readFileSync(path, 'utf8'), baseDecides ? '{"b":2}' : '{"a":1}', label)
       }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('round 12: a full disk or an I/O error is thrown with the config intact, both writers', (t) => {
+  // Opus S2: the base's in-place write truncates first; after ENOSPC the config
+  // would be empty or cut short. Only permission and compatibility failures fall
+  // back to it (BASE_DECIDES).
+  const root = mkdtempSync(join(tmpdir(), 'dn-temp-enospc-'))
+  try {
+    let n = 0
+    for (const writer of WRITERS)
+      for (const exists of [true, false])
+        for (const code of ['ENOSPC', 'EDQUOT', 'EIO']) {
+          const label = `${writer}, ${exists ? 'existing' : 'new'} config, ${code} on the temporary write`
+          const folder = join(root, String(n++))
+          mkdirSync(folder)
+          const path = join(folder, 'config.json')
+          if (exists) writeFileSync(path, '{"a":1}')
+          const ino = exists ? statSync(path).ino : null
+          let thrown: string | null = null
+          let inPlace = 0
+          withFsHook(
+            (name, args) => {
+              // The temporary file's write goes through its descriptor.
+              if (name === 'writeFileSync' && typeof args[0] === 'number') throw fsError(code)
+              if (name === 'writeFileSync') inPlace++
+            },
+            () => {
+              try {
+                writeWith(writer, path, exists)
+              } catch (error) {
+                thrown = (error as NodeJS.ErrnoException).code ?? null
+              }
+            }
+          )
+          t.diagnostic(`${label}: ${thrown ?? 'written'}`)
+          assert.equal(thrown, code, `${label}: surfaced`)
+          assert.equal(inPlace, 0, `${label}: no in-place write`)
+          assert.equal(
+            existsSync(path) ? readFileSync(path, 'utf8') : null,
+            exists ? '{"a":1}' : null
+          )
+          if (posix && ino !== null) assert.equal(statSync(path).ino, ino, `${label}: same file`)
+          assert.deepEqual(temporaries(folder), [], `${label}: temporary file removed`)
+        }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
