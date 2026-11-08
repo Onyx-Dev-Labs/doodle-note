@@ -126,7 +126,10 @@ export function createDictationHost(options: DictationHostOptions): {
   // Bark's test facilities: an unpackaged run with DOODLENOTE_BARK_TEST_HOOKS=1 only.
   const testHooks = !packaged && process.env.DOODLENOTE_BARK_TEST_HOOKS === '1'
   // Windows only: the helper's integrity is checked lazily, asynchronously and only right before
-  // it is spawned (so only once Bark is on), never at startup; a damaged helper is never executed.
+  // it is spawned, never on its own at startup; a damaged helper is never executed. The helper is
+  // spawned when Bark is on, and also with Bark off when this identity has kept clipboard records
+  // on disk (the clipboard offers; see DictationService.loadClipboardOffers), so that check (and the
+  // speech worker it uses) can then run at app start too.
   const integrity =
     platform === 'win32'
       ? new HelperIntegrity({
