@@ -585,6 +585,58 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.Equal(false, mayHaveApplied, "thrown before any side effect: nothing applied");
         }
 
+        public static void PrivacyMarkedClipboardsAreNeverWrittenDown()
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dn-pending-test-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            string old = PendingClipboard.Directory;
+            PendingClipboard.Directory = dir;
+            try
+            {
+                var items = new[] { new KeyValuePair<uint, byte[]>(13, System.Text.Encoding.Unicode.GetBytes("secret\0")) };
+                PendingRecord marked = PendingClipboard.Begin(SavedClipboard.ForTest(items, true), "dictated");
+                Assert.Equal(false, marked.Persisted, "content with a privacy marker stays in memory");
+                Assert.Equal(0, System.IO.Directory.GetFiles(dir).Length, "no file is written for it");
+                PendingClipboard.Finish(marked, "restored");
+                PendingRecord plain = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                Assert.Equal(true, plain.Persisted, "unmarked content is written down");
+                plain.PayloadWriter.Join(10000);
+                Assert.Equal(true, PendingClipboard.OnDisk(plain.Id), "its record is on disk");
+                Assert.Equal(2, System.IO.Directory.GetFiles(dir).Length, "a state file and an encrypted payload");
+                PendingClipboard.Finish(plain, "restored");
+                Assert.Equal(false, PendingClipboard.OnDisk(plain.Id), "deleted once the restore ran");
+                PendingRecord failed = PendingClipboard.Begin(SavedClipboard.ForTest(items, false), "dictated");
+                failed.PayloadWriter.Join(10000);
+                PendingClipboard.Finish(failed, "unrestored");
+                Assert.Equal(true, PendingClipboard.OnDisk(failed.Id), "kept after a restore that did not run");
+                Assert.Equal(false, PendingClipboard.Settled("unrestored"), "unrestored keeps the record");
+                foreach (string done in new[] { "restored", "partial", "skipped", "user-changed", "untouched" })
+                    Assert.Equal(true, PendingClipboard.Settled(done), done + " deletes the record");
+            }
+            finally
+            {
+                PendingClipboard.Directory = old;
+                try { System.IO.Directory.Delete(dir, true); } catch (Exception) { }
+            }
+        }
+
+        public static void RecoveryRestoresOnlyWhatIsProvablyOurs()
+        {
+            Func<bool, bool, uint, bool, bool, int, bool, ClipboardView> view = (alive, us, seq, sentinel, markers, count, only) =>
+                new ClipboardView { OwnerAlive = alive, OwnerIsUs = us, Sequence = seq, SentinelMatches = sentinel, MarkersPresent = markers, FormatCount = count, OnlySavedFormats = only };
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Stale, PendingClipboard.Decide("written", 7, view(true, false, 7, true, true, 5, false)), "a live foreign owner: someone copied since");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.OursBySequence, PendingClipboard.Decide("written", 7, view(false, false, 7, false, false, 5, false)), "the sequence right after our write");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.OursBySentinel, PendingClipboard.Decide("written", 7, view(false, false, 9, true, true, 5, false)), "our sentinel and markers");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Stale, PendingClipboard.Decide("written", 7, view(false, false, 9, false, false, 1, false)), "the same text without our sentinel is not ours");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Stale, PendingClipboard.Decide("written", 7, view(false, false, 9, true, false, 5, false)), "a sentinel without our markers is not enough");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.InterruptedEmpty, PendingClipboard.Decide("emptied", 0, view(false, false, 3, false, false, 0, true)), "emptied, then the helper ended");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.InterruptedEmpty, PendingClipboard.Decide("restoring", 7, view(false, false, 3, false, false, 0, true)), "restoring, empty");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.InterruptedRestore, PendingClipboard.Decide("restoring", 7, view(false, false, 3, false, false, 2, true)), "a restore cut short");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Stale, PendingClipboard.Decide("restoring", 7, view(false, false, 3, false, false, 2, false)), "other content after a restore: not ours");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Stale, PendingClipboard.Decide("written", 7, view(false, false, 3, false, false, 0, true)), "empty after our write was complete: someone emptied it");
+            Assert.Equal(PendingClipboard.RecoveryVerdict.Stale, PendingClipboard.Decide("saved", 7, view(false, false, 7, true, true, 1, true)), "nothing was emptied");
+        }
+
         public static void TheSharedWatcherGetsItsRealTickAndEvidenceWindow()
         {
             // Static fields initialize in the order written: Shared must not be built before the tick

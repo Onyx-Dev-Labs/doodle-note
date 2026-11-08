@@ -37,6 +37,14 @@ namespace DoodleNote.DictationHelper
             // them, or a reader still waiting in a render would keep the app from seeing them close.
             foreach (int which in new[] { -10, -11, -12 }) // STD_INPUT / STD_OUTPUT / STD_ERROR_HANDLE
                 Native.SetHandleInformation(Native.GetStdHandle(which), Native.HANDLE_FLAG_INHERIT, 0);
+            // An unhandled exception anywhere runs the same bounded shutdown (delivery, rollback, sound).
+            // Set before any window exists (WinForms refuses it later).
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+            AppDomain.CurrentDomain.UnhandledException += delegate (object sender, UnhandledExceptionEventArgs e)
+            {
+                Wire.Log("ERROR: unhandled " + (e.ExceptionObject is Exception ? e.ExceptionObject.GetType().Name : "exception") + "; leaving");
+                Shutdown(ExitCrash, null, QuitWaitMs);
+            };
             Wire.Start();
             SelfImage.Hold();
             // Provider calls stuck past the cap never come back: leave with ExitBusy so the app restarts
@@ -45,8 +53,8 @@ namespace DoodleNote.DictationHelper
             // Clipboard readers stuck on owners that never render: no clipboard save is possible any more.
             ClipboardReaderClient.Exhausted += delegate { Restart("clipboard-readers", "clipboard readers are waiting on owners that do not render"); };
             Ui.Install();
-            // A clipboard left holding an earlier helper's dictated text (it ended before its restore).
-            PendingClipboard.RecoverLeftover();
+            // A clipboard transaction an earlier helper could not finish (it ended before its restore).
+            PendingClipboard.RecoverLeftover("start");
             work = new WorkQueue("dictation.work");
             audio = new WorkQueue("dictation.audio");
             audio.Async(OutputAudio.RecoverLeftover);
@@ -85,7 +93,10 @@ namespace DoodleNote.DictationHelper
                 }
             }
             catch (IOException) { }
-            // The app is gone. Make sure no hold stays "down" and no sound stays muted, then leave.
+            // The app is gone (closing stdin is how the app asks the helper to quit; there is no quit
+            // op). If a restart is already waiting for a delivery, it now waits only the quit grace.
+            DeliveriesInFlight.Shorten(QuitWaitMs);
+            // Make sure no hold stays "down" and no sound stays muted, then leave.
             Shutdown();
         }
 
@@ -96,7 +107,16 @@ namespace DoodleNote.DictationHelper
         /// a quit (the app is going) briefly; a restart (nothing is waiting on us) up to the longest
         /// delivery the app allows, so a typing fallback is never cut off half-way.
         /// </summary>
-        const int QuitWaitMs = 3000, RestartWaitMs = 60000;
+        public const int QuitWaitMs = 3000, RestartWaitMs = 60000;
+        /// <summary>
+        /// The clean-up after that wait, each bounded: stopping the hooks, giving back muted sound,
+        /// draining the last replies. QuitWaitMs plus these (plus the clipboard readers' idle exit wait,
+        /// ClipboardReaderClient.IdleExitWaitMs) stays below the app's WINDOWS_EXIT_GRACE_MS (a test reads
+        /// these constants).
+        /// </summary>
+        public const int HooksStopMs = 1000, AudioRestoreMs = 2000, DrainMs = 500;
+        /// <summary>Exit code after an unhandled exception (the same bounded shutdown ran first).</summary>
+        public const int ExitCrash = 4;
 
         static void Shutdown() { Shutdown(0, null, QuitWaitMs); }
 
@@ -113,16 +133,22 @@ namespace DoodleNote.DictationHelper
         static void Shutdown(int exitCode, string restartReason, int waitMs)
         {
             if (Interlocked.Exchange(ref exiting, 1) == 1) return;
-            // Every exit path: no new delivery starts, and the running one finishes its restore and reply.
+            // Every exit path: no new delivery starts, the running one finishes its restore and reply,
+            // and an abandoned clipboard write finishes its rollback, all within the one wait (which
+            // stdin closing shortens to QuitWaitMs). Past it, the transaction's record (PendingClipboard)
+            // is how the next helper finishes the job.
             Stopwatch wait = Stopwatch.StartNew();
             bool idle = DeliveriesInFlight.CloseAndWait(waitMs);
-            Wire.Log(idle ? "leaving with no delivery in progress (waited " + wait.ElapsedMilliseconds + " ms)"
-                : "leaving with a delivery still in progress after " + wait.ElapsedMilliseconds + " ms (its saved clipboard is written down for the next helper)");
+            bool writesDone = ClipboardText.WaitForLateWrites(Math.Max(0, DeliveriesInFlight.RemainingMs));
+            Wire.Log((idle ? "leaving with no delivery in progress" : "leaving with a delivery still in progress")
+                + (writesDone ? "" : " and an abandoned clipboard write still waiting")
+                + " (waited " + wait.ElapsedMilliseconds + " ms)"
+                + (idle && writesDone ? "" : "; its transaction record lets the next helper put the clipboard back"));
             if (restartReason != null) Wire.Send(Wire.Fields("event", "restarting", "reason", restartReason));
-            Ui.Invoke(delegate { HoldWatcher.Shared.StopAll(); MouseCapture.Shared.Cancel("stopped"); return true; }, 1000, false);
+            Ui.Invoke(delegate { HoldWatcher.Shared.StopAll(); MouseCapture.Shared.Cancel("stopped"); return true; }, HooksStopMs, false);
             ClipboardReaderClient.Shutdown();
-            audio.Sync(delegate { OutputAudio.Restore(); }, 2000);
-            Wire.Drain(500);
+            if (audio != null) audio.Sync(delegate { OutputAudio.Restore(); }, AudioRestoreMs);
+            Wire.Drain(DrainMs);
             Environment.Exit(exitCode);
         }
 
@@ -140,7 +166,10 @@ namespace DoodleNote.DictationHelper
                 return;
             }
             int queuedMs = unchecked(Environment.TickCount - receiptTick);
-            DeliveryResult result = Delivery.Deliver(snapshot, text, guards, deadlineMs, queuedMs);
+            Delivery.CurrentRequestId = id;
+            DeliveryResult result;
+            try { result = Delivery.Deliver(snapshot, text, guards, deadlineMs, queuedMs); }
+            finally { Delivery.CurrentRequestId = null; }
             // A snapshot is single-use: a second deliver can never re-insert.
             snapshots.Drop(snapshotId);
             // Keep the field for read-backs only when asked, only after a confirmed
