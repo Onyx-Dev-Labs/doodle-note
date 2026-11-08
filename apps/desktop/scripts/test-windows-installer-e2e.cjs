@@ -334,10 +334,23 @@ async function installLegacy(label) {
   assert.equal(code, 0, `${label}: legacy install exit code`)
   assert.ok(fs.existsSync(path.join(OLD, EXE)), `${label}: legacy exe in ${OLD}`)
   assert.ok(!fs.existsSync(NEW), `${label}: no new folder yet`)
+  assertRegisteredIn(OLD, `${label}: the legacy install is registered`)
+}
+
+/**
+ * electron-builder registers an install twice: UninstallString in the uninstall
+ * entry and InstallLocation in Software\{GUID}. Both must name `dir`.
+ */
+function assertRegisteredIn(dir, label) {
   assert.equal(
-    reg(KEYS.uninstall)?.InstallLocation?.toLowerCase(),
-    OLD.toLowerCase(),
-    `${label}: legacy uninstall entry`
+    reg(KEYS.uninstall)?.UninstallString?.toLowerCase(),
+    `"${path.join(dir, UNINSTALLER)}" /currentuser`.toLowerCase(),
+    `${label}: UninstallString`
+  )
+  assert.equal(
+    reg(KEYS.state)?.InstallLocation?.toLowerCase(),
+    dir.toLowerCase(),
+    `${label}: InstallLocation`
   )
 }
 
@@ -356,12 +369,7 @@ function assertMoved(label) {
   for (const rel of [EXE, path.join('resources', 'app.asar'), UNINSTALLER])
     assert.ok(fs.existsSync(path.join(NEW, rel)), `${label}: ${rel} in the new folder`)
   assert.deepEqual(qaUninstallEntries(), [GUID], `${label}: exactly one QA uninstall entry`)
-  const entry = reg(KEYS.uninstall)
-  assert.equal(entry.InstallLocation?.toLowerCase(), NEW.toLowerCase(), `${label}: InstallLocation`)
-  assert.equal(
-    entry.UninstallString?.toLowerCase(),
-    `"${path.join(NEW, UNINSTALLER)}" /currentuser`.toLowerCase()
-  )
+  assertRegisteredIn(NEW, `${label}: the new install is registered`)
   const state = reg(KEYS.state)
   assert.ok(state, `${label}: Software\\{GUID} exists`)
   assert.match(state.MigrationRecord ?? '', RECORD(OLD, NEW), `${label}: MigrationRecord`)
@@ -502,11 +510,7 @@ async function scenarioB() {
     assert.equal(journal?.SourceDir?.toLowerCase(), OLD.toLowerCase(), 'B2: journal SourceDir')
     assert.equal(journal?.DestDir?.toLowerCase(), NEW.toLowerCase(), 'B2: journal DestDir')
     assert.match(journal?.LegacyUninstallString ?? '', /desktop-qa/i, 'B2: old command parked')
-    assert.equal(
-      reg(KEYS.uninstall)?.InstallLocation?.toLowerCase(),
-      NEW.toLowerCase(),
-      'B2: the new copy is registered'
-    )
+    assertRegisteredIn(NEW, 'B2: the new copy is registered')
     assert.equal(reg(KEYS.state)?.MigrationRecord, undefined, 'B2: no record')
   })
   const before = installLog().length
@@ -538,11 +542,7 @@ async function scenarioC() {
     assert.equal(runInstaller(installers.current, ['/S']), 2, 'C3: exit code')
     assert.equal(legacyApp.exitCode, null, 'C3: the legacy app was not closed')
     assert.ok(fs.existsSync(path.join(OLD, EXE)), 'C3: old folder intact')
-    assert.equal(
-      reg(KEYS.uninstall)?.InstallLocation?.toLowerCase(),
-      OLD.toLowerCase(),
-      'C3: still the legacy uninstall entry'
-    )
+    assertRegisteredIn(OLD, 'C3: still the legacy install')
     const status = reg(KEYS.status)
     assert.deepEqual(
       [status?.LastStep, status?.LastResult, status?.LastReason],
