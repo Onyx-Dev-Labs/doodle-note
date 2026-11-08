@@ -11,6 +11,12 @@ const path = require('node:path')
 const desktop = path.resolve(__dirname, '..')
 const legacyLayout = process.argv.includes('--legacy-layout')
 const env = { ...process.env, DOODLENOTE_QA_IDENTITY: '1' }
+// apps/desktop has no lock file or packageManager field of its own, so electron-builder
+// picks its node_modules collector from the environment. Started with plain `node` (not
+// through pnpm) it fell back to npm's, which misses pnpm's platform packages: the QA
+// package then shipped without sherpa-onnx-win-x64, Koffi's and reflink's Windows
+// binaries. Use the same collector as package:win.
+if (!(env.npm_config_user_agent ?? '').includes('pnpm')) env.npm_config_user_agent = 'pnpm'
 if (legacyLayout) env.DOODLENOTE_QA_LEGACY_LAYOUT = '1'
 else delete env.DOODLENOTE_QA_LEGACY_LAYOUT
 delete env.DOODLENOTE_WINDOWS_UPDATES

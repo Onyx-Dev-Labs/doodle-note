@@ -3,7 +3,8 @@
 // if app source, build scripts, docs, tests or sourcemaps were bundled into it, or
 // if app.asar.unpacked carries native binaries for another OS or CPU (they cannot
 // load, and cannot be Authenticode-signed), or if a native binary (.node, .dll,
-// .exe) was packed inside app.asar itself for another OS or CPU.
+// .exe) was packed inside app.asar itself for another OS or CPU, or if a required
+// Windows runtime binary (speech engine, Koffi, reflink, llama) is missing.
 //
 //   node scripts/test-windows-package.cjs <win-unpacked dir | app.asar> [--list out.txt]
 //
@@ -132,6 +133,25 @@ function nativeBinariesInAsar(file) {
   return found
 }
 
+/**
+ * Windows runtime binaries every package must carry unpacked: the speech engine,
+ * Koffi (Windows APIs), reflink (library copies) and llama (local refinement). A
+ * build whose node_modules collector missed pnpm's platform packages lacks them.
+ */
+const REQUIRED_UNPACKED = [
+  'node_modules/sherpa-onnx-win-x64/sherpa-onnx.node',
+  'node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node',
+  'node_modules/@reflink/reflink-win32-x64-msvc/reflink.win32-x64-msvc.node',
+  'node_modules/@node-llama-cpp/win-x64/bins/win-x64/llama-addon.node'
+]
+
+/** The required Windows binaries missing from app.asar.unpacked. */
+function missingRequiredBinaries(unpackedDir) {
+  return REQUIRED_UNPACKED.filter(
+    (rel) => !fs.existsSync(path.join(unpackedDir, ...rel.split('/')))
+  )
+}
+
 /** Native binaries under app.asar.unpacked that cannot load in the x64 Windows app. */
 function foreignNativeBinaries(unpackedDir) {
   const problems = []
@@ -158,7 +178,9 @@ module.exports = {
   problemsFor,
   peMachine,
   foreignNativeBinaries,
-  nativeBinariesInAsar
+  nativeBinariesInAsar,
+  missingRequiredBinaries,
+  REQUIRED_UNPACKED
 }
 
 if (require.main === module) {
@@ -186,6 +208,13 @@ if (require.main === module) {
   console.log(
     `  app.asar.unpacked: ${foreign.length} native binaries that cannot load on Windows x64`
   )
+  const missing = missingRequiredBinaries(unpacked)
+  problems.push(
+    ...missing.map((rel) => `app.asar.unpacked/${rel}: required Windows binary missing`)
+  )
+  console.log(
+    `  app.asar.unpacked: ${REQUIRED_UNPACKED.length - missing.length}/${REQUIRED_UNPACKED.length} required Windows runtime binaries`
+  )
   const packed = nativeBinariesInAsar(asar)
   for (const binary of packed) console.log(`  inside app.asar: ${binary.path} (${binary.machine})`)
   const packedForeign = packed.filter((binary) => binary.machine !== 'x64')
@@ -199,7 +228,7 @@ if (require.main === module) {
     `  inside app.asar: ${packed.length} native binaries, ${packedForeign.length} that cannot load on Windows x64`
   )
   if (problems.length) {
-    console.error(`FAIL: ${problems.length} file(s) must not ship in app.asar`)
+    console.error(`FAIL: ${problems.length} problem(s) in the Windows package`)
     for (const problem of problems.slice(0, 40)) console.error(`  ${problem}`)
     if (problems.length > 40) console.error(`  … and ${problems.length - 40} more`)
     process.exit(1)
