@@ -2,7 +2,9 @@ import { resolveLibraryPath, type LibraryPath } from './library-path'
 import { libraryIpc } from './library-ipc'
 import { randomUUID } from 'node:crypto'
 import {
+  accessSync,
   chmodSync,
+  constants as fsConstants,
   existsSync,
   mkdirSync,
   lstatSync,
@@ -199,6 +201,14 @@ export function replaceConfigFile(path: string, expected: string | null, next: s
  * one whose target does not exist yet (writeFileSync created the target), to
  * the file the kernel's own resolution reaches (configWriteTarget). Where that
  * cannot be determined, or the place holds no file, the base's in-place write.
+ *
+ * The rename needs write permission on the folder, not on the file, so it would
+ * replace a read-only file the base could not write and fail on a writable file
+ * in a read-only folder the base could write. So the temporary file + rename is
+ * used only where both writes are allowed (the file, when it exists, and its
+ * folder); anywhere else, and if creating the temporary file or the rename is
+ * refused anyway (an ACL, a sticky folder, an immutable flag), the base's
+ * in-place write, which succeeds or fails (same error) exactly as before.
  */
 export function replaceConfigFileBase(path: string, next: string): void {
   const target = configWriteTarget(path)
@@ -216,9 +226,19 @@ export function replaceConfigFileBase(path: string, next: string): void {
     writeFileSync(path, next)
     return
   }
+  if (!writable(dirname(target)) || (stats !== null && !writable(target))) {
+    writeFileSync(path, next)
+    return
+  }
   const mode = stats === null ? null : stats.mode & 0o7777
   const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
-  writeFileSync(temporary, next, { flag: 'wx', mode: mode ?? 0o666 })
+  try {
+    writeFileSync(temporary, next, { flag: 'wx', mode: mode ?? 0o666 })
+  } catch (error) {
+    if (!refused(error)) throw error
+    writeFileSync(path, next)
+    return
+  }
   try {
     // The mode is subject to the umask on creation; an existing file's is kept exactly.
     if (mode !== null) chmodSync(temporary, mode)
@@ -229,9 +249,24 @@ export function replaceConfigFileBase(path: string, next: string): void {
     } catch {
       // already renamed or removed
     }
-    throw error
+    // The original is untouched: the base's write decides.
+    if (!refused(error)) throw error
+    writeFileSync(path, next)
   }
 }
+
+/** access(2) W_OK (macOS: also honours ACLs and the immutable flags). */
+function writable(path: string): boolean {
+  try {
+    accessSync(path, fsConstants.W_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const refused = (error: unknown): boolean =>
+  ['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')
 
 interface McpClientDef {
   id: McpClientId

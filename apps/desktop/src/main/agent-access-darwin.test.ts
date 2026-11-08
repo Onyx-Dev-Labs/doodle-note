@@ -213,22 +213,49 @@ function compare(
   client: (typeof CLIENTS)[number],
   input: string | null,
   op: Op,
-  mode = 0o640
+  mode = 0o640,
+  folderMode: number | null = null
 ): void {
   const basePath = client.path(homes.base)
   const darwinPath = client.path(homes.darwin)
   prepare(homes.base, basePath, input, mode)
   prepare(homes.darwin, darwinPath, input, mode)
-  const expected = outcome(basePath, () => {
-    if (op !== 'status') baseSetClientConnected(basePath, client.dialect, op === 'connect')
-    return baseConnected(basePath, client.dialect)
-  })
-  const actual = outcome(darwinPath, () => {
-    const service = darwinService(homes.darwin)
-    const status =
-      op === 'status' ? service.status() : service.setClientConnected(client.id, op === 'connect')
-    return status.clients.find((c) => c.id === client.id)!.connected
-  })
+  // A read-only folder: made so after the file is in place, writable again
+  // before anything else touches it.
+  const lockFolders = (folder: number): void => {
+    if (folderMode === null || !posix) return
+    mkdirSync(dirname(basePath), { recursive: true })
+    mkdirSync(dirname(darwinPath), { recursive: true })
+    chmodSync(dirname(basePath), folder)
+    chmodSync(dirname(darwinPath), folder)
+  }
+  lockFolders(folderMode ?? 0)
+  const inode = (path: string): number | null => (existsSync(path) ? statSync(path).ino : null)
+  const before = { base: inode(basePath), darwin: inode(darwinPath) }
+  let expected: Outcome
+  let actual: Outcome
+  try {
+    expected = outcome(basePath, () => {
+      if (op !== 'status') baseSetClientConnected(basePath, client.dialect, op === 'connect')
+      return baseConnected(basePath, client.dialect)
+    })
+    actual = outcome(darwinPath, () => {
+      const service = darwinService(homes.darwin)
+      const status =
+        op === 'status' ? service.status() : service.setClientConnected(client.id, op === 'connect')
+      return status.clients.find((c) => c.id === client.id)!.connected
+    })
+  } finally {
+    lockFolders(0o755)
+  }
+  // Where the base could not have renamed (a read-only file or folder), the
+  // darwin writer must not have either: the same file, written in place.
+  if (posix && (folderMode !== null || (mode & 0o200) === 0) && before.darwin !== null)
+    assert.equal(
+      inode(darwinPath) === before.darwin,
+      inode(basePath) === before.base,
+      `${client.id} ${op} in place`
+    )
   // Error messages name the file; compare them with the homes swapped.
   if (expected.error) expected.error = expected.error.split(homes.base).join(homes.darwin)
   assert.deepEqual(actual, expected, `${client.id} ${op} ${JSON.stringify(input)}`)
@@ -354,7 +381,9 @@ test('darwin: no file, an unreadable file and the permission bits are as the bas
       // never 0600; Disconnect and the status leave it absent.
       for (const op of OPS) compare(homes, client, null, op)
       // An existing file's permission bits survive every rewrite.
-      for (const mode of [0o600, 0o640, 0o644, 0o664, 0o755])
+      // Read-only ones (0444, 0400) fail Connect / Disconnect with the base's
+      // EACCES (as non-root), never replaced by a rename.
+      for (const mode of [0o600, 0o640, 0o644, 0o664, 0o755, 0o444, 0o400])
         for (const op of OPS)
           compare(homes, client, client.dialect === 'json' ? '{"a":1}' : 'model = "o3"\n', op, mode)
     }
@@ -366,6 +395,103 @@ test('darwin: no file, an unreadable file and the permission bits are as the bas
       assert.equal(statSync(path).mode & 0o777, 0o666 & ~umask)
     }
   })
+})
+
+test('darwin: a read-only file or folder succeeds or fails exactly as the base wrote in place', (t) => {
+  if (!posix) {
+    t.skip('POSIX permission bits')
+    return
+  }
+  // As root every write is allowed: both sides then succeed, still compared.
+  if (process.getuid?.() === 0)
+    t.diagnostic('running as root: permission bits do not refuse writes')
+  withHomes((homes) => {
+    let compared = 0
+    for (const client of CLIENTS) {
+      const unrelated = client.dialect === 'json' ? '{"a":1}' : 'model = "o3"\n'
+      const ours =
+        client.dialect === 'json'
+          ? jsonConfigWithServer(null, spec, 'x')
+          : codexConfigWithServer(null, spec)
+      // A writable file in a read-only folder: the base wrote it in place (and
+      // so does the darwin writer, same inode); a read-only file in a read-only
+      // folder and a new file in a read-only folder fail as the base failed.
+      for (const input of [unrelated, ours, null])
+        for (const mode of [0o644, 0o600, 0o444, 0o400])
+          for (const folderMode of [0o555, 0o500])
+            for (const op of OPS) {
+              if (input === null && mode !== 0o644) continue
+              compare(homes, client, input, op, mode, folderMode)
+              compared++
+            }
+      // A read-only file in a writable folder (the rename alone would succeed).
+      for (const input of [unrelated, ours])
+        for (const mode of [0o444, 0o400, 0o440, 0o555])
+          for (const op of OPS) {
+            compare(homes, client, input, op, mode)
+            compared++
+          }
+    }
+    t.diagnostic(`${compared} comparisons, umask ${process.umask().toString(8)}`)
+  })
+})
+
+test('darwin writer: read-only targets are written in place, exactly as writeFileSync', (t) => {
+  if (!posix) {
+    t.skip('POSIX permission bits')
+    return
+  }
+  const root = mkdtempSync(join(tmpdir(), 'dn-darwin-ro-'))
+  try {
+    const cases: { name: string; file: number | null; folder: number }[] = [
+      { name: 'read-only file 0444', file: 0o444, folder: 0o755 },
+      { name: 'read-only file 0400', file: 0o400, folder: 0o755 },
+      { name: 'writable file, read-only folder', file: 0o644, folder: 0o555 },
+      { name: 'read-only file, read-only folder', file: 0o444, folder: 0o555 },
+      { name: 'no file, read-only folder', file: null, folder: 0o555 },
+      { name: 'writable file, writable folder (atomic)', file: 0o644, folder: 0o755 }
+    ]
+    for (const c of cases) {
+      const results = (['base', 'darwin'] as const).map((side) => {
+        const folder = join(root, c.name.replace(/\W+/g, '-'), side)
+        mkdirSync(folder, { recursive: true })
+        const path = join(folder, 'config.json')
+        if (c.file !== null) {
+          writeFileSync(path, '{"a":1}')
+          chmodSync(path, c.file)
+        }
+        chmodSync(folder, c.folder)
+        const ino = c.file === null ? null : statSync(path).ino
+        let code: string | null = null
+        try {
+          if (side === 'base') writeFileSync(path, '{"b":2}')
+          else replaceConfigFileBase(path, '{"b":2}')
+        } catch (error) {
+          code = (error as NodeJS.ErrnoException).code ?? 'unknown'
+        }
+        chmodSync(folder, 0o755)
+        const exists = existsSync(path)
+        return {
+          code,
+          bytes: exists ? readFileSync(path, 'utf8') : null,
+          mode: exists ? statSync(path).mode & 0o7777 : null,
+          inPlace: ino === null || !exists ? null : statSync(path).ino === ino,
+          leftovers: readdirSync(folder).filter((f) => f !== 'config.json')
+        }
+      })
+      const [base, darwin] = results
+      t.diagnostic(
+        `${c.name}: base ${base.code ?? 'written'}, darwin ${darwin.code ?? 'written'}` +
+          (darwin.inPlace === null ? '' : darwin.inPlace ? ' in place' : ' renamed')
+      )
+      if (c.name.endsWith('(atomic)')) {
+        assert.equal(darwin.inPlace, false, 'the writable case keeps the temporary file + rename')
+        assert.deepEqual({ ...darwin, inPlace: true }, { ...base, inPlace: true }, c.name)
+      } else assert.deepEqual(darwin, base, c.name)
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("darwin: a folder in the config file's place fails as the base failed", () => {
