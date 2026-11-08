@@ -456,7 +456,8 @@ moves an existing install on upgrade:
 `apps/desktop/scripts/test-windows-installer-guards.cjs` compiles the guards
 with electron-builder's makensis and runs them against real folders, junctions,
 held files and real processes in a temporary sandbox (CI "Check Windows
-installer migration guards"; 1188 cases): the junction overlap cases above, a
+installer migration guards"; 1188 cases before round 7, see the CI log for the
+current count): the junction overlap cases above, a
 second process swapping folders for junctions to an outside folder while the
 old folder is removed (nothing outside is touched), a second process
 retargeting the `Programs` junction onto the profile's parent or onto a decoy
@@ -479,7 +480,17 @@ terminates right after a named registry write) an installer killed after each
 write of the recovery, of the journal, of the recovery copy and between the
 removal and the record, each finished by the next run, mismatching and tampered
 copies kept, the empty recovery parent removed, and the app leaving an
-incomplete or foreign record untouched.
+incomplete or foreign record untouched. Round 7 adds: a record with any time
+in `src/main/fixtures/install-record-times.json` judged as the app judges it,
+a malformed live record replaced from a valid recovery copy and a save that
+never copies one over it, the app recording `read-failed` (record untouched)
+while its reader is unavailable and consuming it on the retry, and an
+uninstaller built in electron-builder's hook order recording a `/S` uninstall of
+the running app and a cancelled close prompt. Durability: each write a later
+run depends on (the journal's `Identity`, the record, a complete recovery copy,
+a restored record) is followed by `RegFlushKey` on HKCU, so it survives a power
+loss right after it, not only a killed process; a power loss between two
+writes leaves the incomplete states the checks above handle.
 
 `appId`, the shortcut name and so the uninstall key are unchanged, so Start and
 Apps & features keep a single entry. The profile, `%APPDATA%\desktop`, holds the
@@ -650,6 +661,23 @@ session. While both run, **do not**:
 
 Steps (fresh Windows user state for the QA identity: no `Programs\desktop-qa`,
 `Programs\DoodleNote QA`, `%APPDATA%\desktop-qa` or QA journal before starting):
+
+Before step 1, check the QA identity's registry keys are clean. Unreleased QA
+builds of this change (before the record became one value) wrote three values,
+`MigratedFrom` / `MigratedTo` / `MigratedAt`, which today's installer and app
+ignore as no record at all (so they would neither be repointed nor reported):
+
+```
+reg query "HKCU\Software\320d0756-c91c-52c4-9287-55a7f514978d" /s
+reg query "HKCU\Software\DoodleNote-InstallRecovery\320d0756-c91c-52c4-9287-55a7f514978d" /s
+reg query "HKCU\Software\DoodleNote-InstallStatus\320d0756-c91c-52c4-9287-55a7f514978d"
+```
+
+Each should answer "unable to find the specified registry key" on a machine that
+never ran the QA build. On a QA machine that did, uninstall every QA copy first;
+then, only for these QA keys (`320d0756-…` is the QA `APP_GUID`; never the
+production `f85f8dcf-…` ones), `reg delete "<key>" /f` each that is still there.
+
 
 1. Install `release-qa-legacy\DoodleNote QA-<version>-setup.exe`. The QA profile
    starts empty: seed it with test data only (import a test recording or create a
