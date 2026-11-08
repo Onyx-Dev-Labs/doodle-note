@@ -370,8 +370,12 @@ test('the install migration journal belongs to one app identity and is validated
   assert.match(installer, /StrCpy \$\{OUT\} '"\$\{DIR\}\\\$\{UNINSTALL_FILENAME\}" \/currentuser'/)
   const ownUninstaller = guardsText.slice(guardsText.indexOf('Function dnUninstallerDir'))
   assert.match(ownUninstaller, /\$\{if\} \$2 S== " \/currentuser"/)
-  assert.match(ownUninstaller, /\$\{if\} \$2 == "\$\{DN_UNINSTALLER_EXE\}"/)
-  assert.ok(ownUninstaller.indexOf('Call dnCanonical') > 0)
+  assert.match(ownUninstaller, /\$\{andIf\} \$2 == "\$\{DN_UNINSTALLER_EXE\}"/)
+  // The whole exe path is normalised before its name is compared (UNINST~1.EXE).
+  assert.ok(
+    ownUninstaller.indexOf('Push $1\n          Call dnCanonical') <
+      ownUninstaller.indexOf('${GetFileName} $1 $2')
+  )
   assert.match(installer, /!define DN_UNINSTALLER_EXE "Uninstall \$\{PRODUCT_FILENAME\}\.exe"/)
   assert.match(
     init,

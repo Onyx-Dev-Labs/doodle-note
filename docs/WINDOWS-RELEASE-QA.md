@@ -321,8 +321,10 @@ moves an existing install on upgrade:
    is one, or a `Programs` folder that is a junction into the profile all
    refuse). Every registered uninstall command must also be exactly the old (or
    new) folder's own uninstaller, `"<dir>\Uninstall DoodleNote.exe" /currentuser`
-   with the folder compared normalised (short names such as
-   `C:\Users\LONGUS~1\...` and case); any other command could not be parked and
+   with the whole exe path compared normalised (short names such as
+   `C:\Users\LONGUS~1\...\UNINST~1.EXE`, expanded while the file exists, and
+   case; a short name for an uninstaller that is gone cannot be expanded and
+   counts as foreign); any other command could not be parked and
    electron-builder would run it before the new copy exists, so the install is
    upgraded in place and the journal is left alone (the reason is in the install
    log; the exit code stays 0, as for any in-place upgrade). Anything else is

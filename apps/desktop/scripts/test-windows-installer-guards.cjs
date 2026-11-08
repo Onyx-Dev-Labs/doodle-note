@@ -156,6 +156,7 @@ function alive(pid) {
  */
 const THREE_FIELDS = new Set(['arm', 'migclose', 'finish', 'pins'])
 let d3ShortTested = false
+let d3ShortExeTested = false
 const fields = (c) => (THREE_FIELDS.has(c[0]) ? c.slice(0, 4) : c.slice(0, 3))
 const expectation = (c) => (THREE_FIELDS.has(c[0]) ? c[4] : c[3])
 
@@ -654,6 +655,22 @@ async function main() {
     cases.push(['ucheck', old, now, 'ok'])
     cases.push(['park', old, now, 'nothing to park'])
     cases.push(['uread', '', '', `${cmd(real(root, 'DoodleNote'))}|`])
+    // A fully short uninstaller path (UNINST~1.EXE) is the old folder's own while the
+    // file exists; a short name that cannot be expanded is refused.
+    const oldUninstaller = path.join(old, 'Uninstall DoodleNote.exe')
+    write(oldUninstaller, 'old uninstaller')
+    const shortExe = shortPath(oldUninstaller)
+    d3ShortExeTested = !/Uninstall DoodleNote\.exe$/i.test(shortExe)
+    const shortExeCmd = `"${shortExe}" /currentuser`
+    cases.push(['jkey', `${journalKey}\\D3c\\InstallMigration`, ''])
+    cases.push(['uninstof', shortExeCmd, '', (r) => lower(r) === lower(longOld)])
+    cases.push(['uninstof', `"${longOld}\\UNINST~9.EXE" /currentuser`, '', 'none'])
+    cases.push(['ucmd', shortExeCmd, '1', 'set'])
+    cases.push(['ucmd', '', '2', 'set'])
+    cases.push(['ucheck', old, now, 'ok'])
+    cases.push(['park', old, now, 'parked'])
+    cases.push(['jread', 'LegacyUninstallString', '', shortExeCmd])
+    cases.push(['uread', '', '', '|'])
     // In customInit a refused command means: upgrade in place (pinned in windows-installer.nsh).
 
     const casesFile = path.join(sandbox, 'cases.txt')
@@ -768,6 +785,8 @@ async function main() {
     assert.equal(fs.readFileSync(path.join(pinB, 'b.txt'), 'utf8'), 'must survive')
     assert.equal(fs.readFileSync(path.join(pinB, 'sub', 'b2.txt'), 'utf8'), 'must survive')
     assert.deepEqual(fs.readdirSync(pinA), [])
+    if (!d3ShortExeTested)
+      console.log('note: 8.3 file names are off here; the UNINST~1.EXE case ran with the long name')
     if (!d3ShortTested)
       console.log(
         'note: 8.3 names are off here; the short-name command case ran with the long form'

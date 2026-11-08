@@ -1628,9 +1628,11 @@ FunctionEnd
 
   ; Push COMMAND; Call dnUninstallerDir; Pop DIR: the folder whose own uninstaller
   ; COMMAND runs, exactly as electron-builder registers a per-user install
-  ; ("<DIR>\DN_UNINSTALLER_EXE" /currentuser, nothing else), DIR normalised with
-  ; dnCanonical (an install registered through short names, C:\Users\LONGUS~1\...,
-  ; is recognised); "" when COMMAND is anything else.
+  ; ("<DIR>\DN_UNINSTALLER_EXE" /currentuser, nothing else), the exe path normalised
+  ; with dnCanonical before its name is compared (an install registered through
+  ; short names, C:\Users\LONGUS~1\...\UNINST~1.EXE, is recognised while the file
+  ; exists; a short name for a file that is gone cannot be expanded and is refused);
+  ; "" when COMMAND is anything else.
   Function dnUninstallerDir
     Exch $0
     Push $1
@@ -1655,8 +1657,14 @@ FunctionEnd
         IntOp $2 $2 + 1
         StrCpy $2 $0 "" $2
         ${if} $2 S== " /currentuser"
+          ; The whole exe path normalised first, so a short file name
+          ; (UNINST~1.EXE) is recognised too when the file exists.
+          Push $1
+          Call dnCanonical
+          Pop $1
           ${GetFileName} $1 $2
-          ${if} $2 == "${DN_UNINSTALLER_EXE}"
+          ${if} $1 != ""
+          ${andIf} $2 == "${DN_UNINSTALLER_EXE}"
             ${GetParent} $1 $2
             Push $2
             Call dnCanonical
