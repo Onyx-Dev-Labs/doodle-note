@@ -59,7 +59,13 @@ function signer(file) {
   return JSON.parse(out)
 }
 
-function main(helperPath = defaultHelper) {
+/**
+ * Writes the manifest. `options.inspectSigner` replaces the PowerShell signer lookup (tests);
+ * `options.configuredCn` replaces DOODLENOTE_HELPER_PUBLISHER_CN. Whenever the helper is ALREADY
+ * signed when this runs (package:win after a signing step: build -> sign -> manifest), the signer's
+ * exact CN and thumbprint are recorded, which turns on the thumbprint pin in the app.
+ */
+function main(helperPath = defaultHelper, options = {}) {
   const helper = path.resolve(helperPath)
   const manifestPath = path.join(path.dirname(helper), 'dictation-helper.manifest.json')
   const bytes = readFileSync(helper)
@@ -67,14 +73,17 @@ function main(helperPath = defaultHelper) {
   if (!layout) throw new Error(`${helper} is not a valid PE image`)
   const digest = stableDigest(bytes)
   if (!digest) throw new Error(`could not compute the helper digest of ${helper}`)
-  const configured = process.env.DOODLENOTE_HELPER_PUBLISHER_CN?.trim() || null
+  const configured =
+    (options.configuredCn !== undefined
+      ? options.configuredCn
+      : process.env.DOODLENOTE_HELPER_PUBLISHER_CN?.trim()) || null
   let signed = false
   let publisherCn = configured || DEFAULT_PUBLISHER_CN
   let thumbprints = []
   if (layout.table) {
-    if (process.platform !== 'win32')
+    if (!options.inspectSigner && process.platform !== 'win32')
       throw new Error('a signed helper can only be inspected on Windows')
-    const info = signer(helper)
+    const info = (options.inspectSigner || signer)(helper)
     if (!info.cn || !info.thumbprint)
       throw new Error(`the helper carries a signature without a readable signer (${info.status})`)
     if (configured && info.cn !== configured)
@@ -96,9 +105,11 @@ function main(helperPath = defaultHelper) {
     thumbprints
   }
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  if (options.quiet) return manifest
   console.log(
     `manifest authenticode=${digest.slice(0, 12)}… signed=${signed} publisher="${publisherCn}" version=${version}`
   )
+  return manifest
 }
 
 if (require.main === module)

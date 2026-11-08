@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   BARK_HELPER_IDENTITY,
   DictationHelperClient,
+  barkHelperIdentity,
   WINDOWS_EXIT_GRACE_MS,
   helperSpawnEnv,
   windowsDeliverBudget
@@ -100,7 +101,7 @@ test('the Windows deliver budget grows with the text so a long typing fallback n
   const short = windowsDeliverBudget('hello')
   assert.ok(short.timeout >= 3_500)
   assert.ok(short.deadlineMs < short.timeout)
-  // ~300 chars (typing ~ 300*8 + boundaries*70 + confirm/settle) must fit in the budget.
+  // ~300 chars (the helper's per-character typing estimate, boundaries, confirm/settle) must fit.
   const long = windowsDeliverBudget('a'.repeat(300))
   assert.ok(long.timeout > short.timeout)
   assert.ok(long.deadlineMs > 8_000)
@@ -431,8 +432,13 @@ for (const platform of ['darwin', 'win32'] as const) {
     try {
       // Inside the window the ready has not come: the first start fails (as before on both).
       assert.equal(await client.setHoldKey('rightOption'), 'helper-unavailable')
-      await sleep(400) // the late ready has arrived
-      const ops = await read(fake.log)
+      // Poll rather than sleep a fixed time: under load the late ready can take a while to land.
+      let ops = ''
+      for (let waited = 0; waited < (platform === 'win32' ? 3_000 : 1_500); waited += 50) {
+        ops = await read(fake.log)
+        if (platform === 'win32' && /op hold-start/.test(ops)) break
+        await sleep(50)
+      }
       if (platform === 'win32')
         assert.match(ops, /op hold-start/, 'Windows re-arms on the late ready')
       else
@@ -451,7 +457,7 @@ test('Windows: a helper that fails its integrity check is never executed (status
     platform: 'win32',
     verify: async () => {
       checks += 1
-      return false
+      return { ok: false }
     }
   })
   try {
@@ -472,7 +478,7 @@ test('Windows: a verified helper starts, and the check runs again before a respa
     platform: 'win32',
     verify: async () => {
       checks += 1
-      return true
+      return { ok: true }
     }
   })
   try {
@@ -541,5 +547,41 @@ test('Windows: the helper is told the app identity, which the user environment c
     assert.match(await read(qaFake.log), /identity=com\.doodlenote\.desktop\.qa/)
   } finally {
     await qa.dispose()
+  }
+})
+
+test('the helper identity follows the build channel; an identity module can override it', async () => {
+  assert.equal(barkHelperIdentity('release'), 'com.doodlenote.desktop')
+  assert.equal(
+    barkHelperIdentity('dev'),
+    'com.doodlenote.desktop.dev',
+    'the Dev app keeps its own state'
+  )
+  assert.notEqual(barkHelperIdentity('dev'), barkHelperIdentity('release'))
+  assert.equal(
+    barkHelperIdentity('release', 'com.doodlenote.desktop.qa'),
+    'com.doodlenote.desktop.qa'
+  )
+  assert.equal(
+    barkHelperIdentity('dev', '  '),
+    'com.doodlenote.desktop.dev',
+    'a blank override is ignored'
+  )
+  // End to end: a Dev-channel client hands the helper the Dev identity.
+  const fake = recordingHelper(0)
+  const dev = new DictationHelperClient({
+    ...fake,
+    platform: 'win32',
+    identity: barkHelperIdentity('dev')
+  })
+  try {
+    assert.ok(await dev.status())
+    assert.ok(
+      (await read(fake.log))
+        .split(/\r?\n/)
+        .some((line) => line.endsWith(' identity=com.doodlenote.desktop.dev'))
+    )
+  } finally {
+    await dev.dispose()
   }
 })

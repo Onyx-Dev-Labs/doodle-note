@@ -31,12 +31,12 @@ import type { PermissionPane } from '../shared/dictation-permissions'
 import { privacySettingsUrl } from '../shared/dictation-platform'
 import { CaptureOwnership } from './capture-ownership'
 import {
-  BARK_HELPER_IDENTITY,
   DictationHelperClient,
+  barkHelperIdentity,
   helperSpawnEnv
 } from './dictation-helper-client'
 import { HelperIntegrity, resolveHelperExpectation } from './helper-integrity'
-import { verifyAuthenticode } from './win-authenticode'
+import { startVerifier } from './win-authenticode'
 import { DictationOverlay } from './dictation-overlay'
 import { DictationService, type EngineLike } from './dictation-service'
 import { DictationSettingsStore } from './dictation-settings'
@@ -49,6 +49,11 @@ export interface DictationHostOptions {
   helperPath: string
   /** The app runs packaged (app.isPackaged): only the integrity values baked into the build count. */
   packaged?: boolean
+  /**
+   * Windows: the app identity the helper names its state after. Defaults from the channel
+   * (barkHelperIdentity); a build-time identity module (a QA identity) passes its own here.
+   */
+  helperIdentity?: string | null
   /** The speech engine (macOS sidecar, or Bark's Windows engine); dictation is unavailable without it. */
   engine: EngineLike | null
   /** Defaults to the running platform. */
@@ -82,6 +87,28 @@ function microphoneAccess(): MicrophoneAccess {
   }
 }
 
+/**
+ * The engine as the service sees it. Every member of EngineLike is forwarded, the optional Windows
+ * ones included (the model-readiness gate and the download retry), so nothing is silently dropped
+ * between the engine and the service. The meeting recorder's handshake counts as running.
+ */
+export function hostEngine(engine: EngineLike, meetingBusy: () => boolean): EngineLike {
+  const wrapped: EngineLike = {
+    tryStartLive: (opts) => engine.tryStartLive(opts),
+    stop: () => engine.stop(),
+    get running() {
+      return engine.running || meetingBusy()
+    },
+    get warm() {
+      return engine.warm
+    },
+    listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([])
+  }
+  if (engine.dictationModelState) wrapped.dictationModelState = () => engine.dictationModelState!()
+  if (engine.retryDictationModel) wrapped.retryDictationModel = () => engine.retryDictationModel!()
+  return wrapped
+}
+
 /** Builds the real service from Electron pieces and registers its IPC. */
 export function createDictationHost(options: DictationHostOptions): {
   service: DictationService
@@ -98,7 +125,7 @@ export function createDictationHost(options: DictationHostOptions): {
       ? new HelperIntegrity({
           helperPath: options.helperPath,
           expectation: () => resolveHelperExpectation(options.helperPath, packaged),
-          verify: verifyAuthenticode,
+          verifier: startVerifier,
           cachePath: join(options.userData, 'helper-integrity.json'),
           log: (line) => console.error(`[dictation] ${line}`)
         })
@@ -108,8 +135,12 @@ export function createDictationHost(options: DictationHostOptions): {
     platform,
     ...(integrity
       ? {
-          identity: BARK_HELPER_IDENTITY,
-          verify: () => integrity.ensure().then((verdict) => verdict === 'ok'),
+          identity: barkHelperIdentity(options.channel, options.helperIdentity),
+          verify: () =>
+            integrity.acquire().then((lease) => ({
+              ok: lease.verdict === 'ok',
+              release: lease.release
+            })),
           // A user's environment must not reach the helper's test facilities; only an unpackaged
           // run with Bark's test hooks on passes DICTATION_HELPER_* through.
           env: helperSpawnEnv(
@@ -172,17 +203,7 @@ export function createDictationHost(options: DictationHostOptions): {
     settings,
     // The meeting recorder holds the microphone before the sidecar session
     // exists; treat that handshake as busy too.
-    engine: {
-      tryStartLive: (opts) => engine.tryStartLive(opts),
-      stop: () => engine.stop(),
-      get running() {
-        return engine.running || options.meetingBusy()
-      },
-      get warm() {
-        return engine.warm
-      },
-      listInputDevices: () => engine.listInputDevices?.() ?? Promise.resolve([])
-    },
+    engine: hostEngine(engine, options.meetingBusy),
     ownership,
     helper,
     shortcuts: {

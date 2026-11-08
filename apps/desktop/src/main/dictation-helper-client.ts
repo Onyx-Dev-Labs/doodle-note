@@ -1,3 +1,4 @@
+import { DEV_BUNDLE_ID, type AppChannel } from '../shared/app-channel'
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -34,10 +35,11 @@ export interface HelperLaunch {
   /** Overrides the readiness timeout; for tests that exercise a late ready. */
   readyTimeoutMs?: number
   /**
-   * Windows: awaited before EVERY spawn (status included); false means the helper must not run
-   * (it failed its integrity check), so it is never executed.
+   * Windows: awaited before EVERY spawn (status included). ok false means the helper must not run
+   * (it failed its integrity check), so it is never executed. release() is called right after the
+   * spawn: until then the verifier may hold the helper file locked against replacement.
    */
-  verify?: () => Promise<boolean>
+  verify?: () => Promise<HelperLaunchVerdict>
   /** Windows: the spawn environment (see helperSpawnEnv). Defaults to the app's own. */
   env?: NodeJS.ProcessEnv
   /**
@@ -48,11 +50,25 @@ export interface HelperLaunch {
   identity?: string
 }
 
-/**
- * The app identity passed to the Windows helper (DICTATION_HELPER_IDENTITY). The production app id;
- * a build-time identity (a QA build beside production) replaces it from one place.
- */
+/** The production app identity (electron-builder appId). */
 export const BARK_HELPER_IDENTITY = 'com.doodlenote.desktop'
+
+/**
+ * The app identity passed to the Windows helper (DICTATION_HELPER_IDENTITY), which names the
+ * helper's own state after it. Derived from the build channel the app already uses to keep the
+ * development app apart from production (DEV_BUNDLE_ID for `dev`); `override` is the hook for a
+ * build-time identity module (a QA identity installed beside production) and wins when given.
+ */
+export function barkHelperIdentity(channel: AppChannel, override?: string | null): string {
+  if (override && override.trim()) return override.trim()
+  return channel === 'dev' ? DEV_BUNDLE_ID : BARK_HELPER_IDENTITY
+}
+
+/** The integrity verdict for one spawn (see HelperLaunch.verify). */
+export interface HelperLaunchVerdict {
+  ok: boolean
+  release?: () => void
+}
 
 /**
  * Windows: the helper's environment. DICTATION_HELPER_* variables reach it only when the app itself
@@ -159,7 +175,7 @@ export class DictationHelperClient {
   /** The child whose triggers have been re-armed, so re-arming runs once per process. */
   private rearmedChild: HelperChild | null = null
   /** Windows: the integrity check a spawn is waiting on. */
-  private verifying: Promise<boolean> | null = null
+  private verifying: Promise<HelperLaunchVerdict> | null = null
   private readonly hookListeners = new Set<(phase: 'lost' | 'restored' | 'failed') => void>()
 
   constructor(
@@ -569,16 +585,27 @@ export class DictationHelperClient {
     if (this.windows && this.launch.verify) {
       if (!this.verifying) {
         this.verifying = this.launch.verify().then(
-          (ok) => ok,
-          () => false
+          (verdict) => verdict,
+          (): HelperLaunchVerdict => ({ ok: false })
         )
       }
       const pending = this.verifying
-      return pending.then((ok) => {
+      return pending.then((verdict) => {
         if (this.verifying === pending) this.verifying = null
-        if (!ok || this.disposed) return false
-        if (this.child && this.ready) return this.ready
-        return this.spawnChild()
+        if (!verdict.ok || this.disposed) {
+          verdict.release?.()
+          return false
+        }
+        if (this.child && this.ready) {
+          verdict.release?.()
+          return this.ready
+        }
+        // CreateProcess runs inside spawn(); the verifier's lock is dropped only after it.
+        try {
+          return this.spawnChild()
+        } finally {
+          verdict.release?.()
+        }
       })
     }
     return this.spawnChild()
