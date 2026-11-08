@@ -12,10 +12,21 @@
 //      the next run recovers and finishes the move;
 //   C  consent and held files: /S without --updated while the legacy app runs
 //      exits 2 and changes nothing; a held file in the old folder keeps the
-//      journal armed across two runs and the third finishes.
+//      journal armed across two runs and the third finishes;
+//   D  killed right after the stock uninstaller (round 9): an update of the NEW
+//      layout, so "uninstall old version" really runs the new copy's uninstaller,
+//      which deletes Software\{GUID}; the kill-step build terminates itself the
+//      moment uninstallOldVersion returns, first with a move's journal live, then
+//      with an unconsumed record live; each next run must put them back from the
+//      recovery copy and carry on.
+//
+// The installers are the current QA app's bytes (one win-unpacked): "legacy" is
+// the legacy installer *layout* (Programs\desktop-qa, no migration include), not
+// an older app version; the legacy and kill-step installers use stored (not
+// compressed) payloads to save time.
 //
 //   node scripts/test-windows-installer-e2e.cjs --legacy <setup.exe> --current <setup.exe>
-//     --steps <setup.exe> [--evidence <dir>] [--only A,B,C]
+//     --steps <setup.exe> [--evidence <dir>] [--only A,B,C,D]
 //
 // It refuses to run unless CI is set or DOODLENOTE_E2E_THROWAWAY_MACHINE=1, and
 // only ever stops processes it started itself.
@@ -36,7 +47,12 @@ const installers = {
   steps: option('--steps')
 }
 const evidence = option('--evidence')
-const only = new Set((option('--only') ?? 'A,B,C').split(','))
+const SCENARIOS = ['A', 'B', 'C', 'D']
+const only = new Set((option('--only') ?? SCENARIOS.join(',')).split(','))
+// Never "passed" without running: an unknown or empty selection is an error.
+const unknown = [...only].filter((name) => !SCENARIOS.includes(name))
+if (unknown.length || only.size === 0)
+  throw new Error(`--only: unknown scenario(s) ${JSON.stringify(unknown)}; known: ${SCENARIOS}`)
 
 if (process.platform !== 'win32') throw new Error('Windows only')
 if (!process.env.CI && process.env.DOODLENOTE_E2E_THROWAWAY_MACHINE !== '1')
@@ -604,6 +620,103 @@ async function scenarioC() {
   await step('C8 uninstall /S', () => uninstallAndCheck('C8'))
 }
 
+/** The recovery copy's values for the journal: what the stock uninstaller deleted. */
+const JOURNAL_VALUES = [
+  'Identity',
+  'SourceDir',
+  'DestDir',
+  'LegacyUninstallString',
+  'DesktopLink',
+  'StartMenuLink',
+  'LegacyShortName'
+]
+
+async function scenarioD() {
+  await step('D0 reset', () => {
+    resetIdentityState()
+    assertClean('D0')
+  })
+  await step('D1 legacy QA install /S', () => installLegacy('D1'))
+  await step('D1 seed login item and MCP entries', () => seedLegacyEntries())
+  // A move left unfinished (a held file), so its journal is live and the NEW copy is
+  // the registered install: the next update's stock step runs the new uninstaller.
+  const held = path.join(OLD, 'LICENSE.electron.txt')
+  const holder = await step('D2 hold a file in the old folder', () => holdFile(held))
+  const journal = await step('D2 /S --updated with the file held: journal armed', () => {
+    assert.equal(runInstaller(installers.current, ['/S', '--updated']), 0)
+    const live = reg(KEYS.journal)
+    console.log(`  journal: ${JSON.stringify(live)}`)
+    assert.ok(live?.SourceDir && live?.DestDir && live?.Identity, 'D2: journal armed')
+    assertRegisteredIn(NEW, 'D2: the new copy is registered')
+    return live
+  })
+  await step('D2 release the file', () => stopApp(holder))
+  await step('D3 kill-step update, killed the moment uninstallOldVersion returns', () => {
+    const code = runInstaller(installers.steps, ['/S', '--updated'], {
+      DN_TEST_STOP_AT: 'after-uninstall-old-version'
+    })
+    assert.equal(code, 9, 'D3: the installer terminated itself at the step')
+    // The new copy's uninstaller ran and deleted Software\{GUID} with the journal;
+    // only the recovery copy (written by dnSaveState just before) still has it.
+    assert.equal(
+      reg(KEYS.journal),
+      null,
+      'D3: the live journal was deleted by the stock uninstaller'
+    )
+    const copy = reg(KEYS.recovery)
+    console.log(`  recovery copy: ${JSON.stringify(copy)}`)
+    assert.equal(copy?.RecoveryFor?.split('|')[0], GUID, "D3: the recovery copy is this identity's")
+    for (const name of JOURNAL_VALUES)
+      assert.equal(copy?.[name], journal[name], `D3: the recovery copy has the journal's ${name}`)
+    assert.ok(fs.existsSync(path.join(OLD, EXE)), 'D3: old folder kept')
+  })
+  let before = installLog().length
+  await step('D4 /S --updated recovers the journal and finishes the move', () => {
+    assert.equal(runInstaller(installers.current, ['/S', '--updated']), 0)
+    const steps = logSteps(before)
+    console.log(`  log: ${steps.join(' -> ')}`)
+    assert.equal(steps.indexOf('recover|recovered|restored') >= 0, true, 'D4: recovered')
+    assert.ok(
+      steps.indexOf('recover|recovered|restored') < steps.indexOf('plan|plan-move|journal-resumed'),
+      'D4: recovered before the plan, which resumes the journal'
+    )
+    assertMoved('D4')
+  })
+  // Now an unconsumed record is the live state (the app has not started yet).
+  const record = reg(KEYS.state)?.MigrationRecord
+  await step(
+    'D5 kill-step update with the record live, killed the moment uninstallOldVersion returns',
+    () => {
+      const code = runInstaller(installers.steps, ['/S', '--updated'], {
+        DN_TEST_STOP_AT: 'after-uninstall-old-version'
+      })
+      assert.equal(code, 9, 'D5: the installer terminated itself at the step')
+      assert.equal(
+        reg(KEYS.state)?.MigrationRecord,
+        undefined,
+        'D5: the stock uninstaller deleted the record'
+      )
+      const copy = reg(KEYS.recovery)
+      console.log(`  recovery copy: ${JSON.stringify(copy)}`)
+      assert.equal(copy?.MigrationRecord, record, 'D5: the recovery copy has the record exactly')
+    }
+  )
+  before = installLog().length
+  await step('D6 /S --updated recovers the record', () => {
+    assert.equal(runInstaller(installers.current, ['/S', '--updated']), 0)
+    const steps = logSteps(before)
+    console.log(`  log: ${steps.join(' -> ')}`)
+    assert.ok(steps.includes('recover|recovered|restored'), 'D6: recovered')
+    assert.equal(reg(KEYS.state)?.MigrationRecord, record, 'D6: the record is back exactly')
+    assert.equal(reg(KEYS.recovery), null, 'D6: recovery copy gone')
+    assert.equal(reg(KEYS.recoveryParent), null, 'D6: recovery parent gone')
+    assertRegisteredIn(NEW, 'D6: the new install is registered')
+    assert.ok(fs.existsSync(path.join(NEW, EXE)), 'D6: the new exe is there')
+  })
+  await step('D7 first launch consumes the recovered record', () => firstLaunch('D7'))
+  await step('D8 uninstall /S', () => uninstallAndCheck('D8'))
+}
+
 async function main() {
   console.log(`QA identity ${qa.appId}, APP_GUID ${GUID}; old ${OLD}; new ${NEW}`)
   assert.ok(GUID.startsWith('320d0756-'), 'the QA APP_GUID')
@@ -611,6 +724,9 @@ async function main() {
     if (only.has('A')) await scenarioA()
     if (only.has('B')) await scenarioB()
     if (only.has('C')) await scenarioC()
+    if (only.has('D')) await scenarioD()
+    const ran = new Set(timings.map(([name]) => name[0]))
+    assert.deepEqual([...ran].sort(), [...only].sort(), 'every selected scenario ran')
   } finally {
     for (const child of started) await stopApp(child)
     const table = [
@@ -645,7 +761,7 @@ async function main() {
       )
     }
   }
-  console.log('installer end-to-end: every scenario passed')
+  console.log(`installer end-to-end: every selected scenario passed (${[...only].join(', ')})`)
 }
 
 main().catch((error) => {

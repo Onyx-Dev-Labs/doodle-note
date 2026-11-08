@@ -1530,4 +1530,28 @@ test('round 8: the installer end-to-end job and its kill-step include stay test-
     e2e,
     /if \(!process\.env\.CI && process\.env\.DOODLENOTE_E2E_THROWAWAY_MACHINE !== '1'\)/
   )
+  // Round 9: scenario D's kill point, the moment uninstallOldVersion returns. electron-
+  // builder's handleUninstallResult runs customUnInstallCheck and returns, so the
+  // macro repeats the stock result check that follows it there, line for line.
+  assert.match(e2e, /const SCENARIOS = \['A', 'B', 'C', 'D'\]/)
+  assert.match(e2e, /DN_TEST_STOP_AT: 'after-uninstall-old-version'/)
+  assert.match(e2e, /--only: unknown scenario/)
+  const util = readFileSync(
+    join(lib, 'templates', 'nsis', 'include', 'installUtil.nsh'),
+    'utf8'
+  ).replace(/\r\n/g, '\n')
+  const handle = util.slice(util.indexOf('Function handleUninstallResult'))
+  const stock = handle.slice(handle.indexOf('  IfErrors 0 +3'), handle.indexOf('FunctionEnd'))
+  assert.match(
+    handle,
+    /!ifmacrodef customUnInstallCheck\n\s+!insertmacro customUnInstallCheck\n\s+Return\n/
+  )
+  assert.ok(stock.length > 100)
+  const check = steps.slice(steps.indexOf('!macro customUnInstallCheck'))
+  assert.ok(check.slice(0, check.indexOf('!macroend')).endsWith(stock), 'the stock check, verbatim')
+  assert.ok(
+    check.indexOf('!insertmacro dnTestStep "after-uninstall-old-version"') <
+      check.indexOf('  IfErrors 0 +3')
+  )
+  assert.match(check, /!ifndef BUILD_UNINSTALLER\n\s+Push \$R1/)
 })

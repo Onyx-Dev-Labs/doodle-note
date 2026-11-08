@@ -310,14 +310,18 @@ jobs:
   # it, the app's first launch consuming the installer's record, uninstall /S; an
   # upgrade killed right after electron-builder's "uninstall old version" and then
   # recovered; /S without --updated while the legacy app runs (exit 2); a held file
-  # keeping the journal armed across two runs. Registry, folders, Run value,
+  # keeping the journal armed across two runs; (round 9, D) an update of the new
+  # layout killed the moment the stock uninstaller has deleted Software\{GUID}, once
+  # with a move's journal live and once with its record, each recovered by the next run. Registry, folders, Run value,
   # shortcuts and MCP configs are checked after each step (each step timed in the
   # job summary). It stands in for the installer items of the desktop pass while
   # Smart App Control blocks fresh unsigned executables on the QA machine
   # (docs/WINDOWS-RELEASE-QA.md "Installer end-to-end in CI"). Never production.
   # The legacy and kill-step installers are built from the same win-unpacked
-  # (--prepackaged, stored rather than compressed, to save time); the kill-step
-  # one includes build/windows-installer-test-steps.nsh, which no release uses.
+  # (--prepackaged, stored rather than compressed, to save time): all three carry
+  # the current QA app's bytes ("legacy" is the installer layout, not an older app
+  # version); the kill-step one includes build/windows-installer-test-steps.nsh,
+  # which no release uses.
   windows-installer-e2e:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
