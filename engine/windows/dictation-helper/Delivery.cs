@@ -31,19 +31,28 @@ namespace DoodleNote.DictationHelper
         public string Method;
         public bool Verified;
         /// <summary>
-        /// untouched | restored | user-changed | partial | skipped | unrestored. unrestored: the
-        /// clipboard could not be emptied to put the user's content back, so it still holds the
-        /// dictated text.
+        /// untouched | restored | user-changed | partial | skipped | unrestored. unrestored: the user's
+        /// content could not be put back; ClipboardHolds says what the clipboard holds instead.
         /// </summary>
         public string Clipboard = "untouched";
         public DeliveryTimings Timings;
-        /// <summary>Characters typed before a mid-type abort; -1 when not applicable.</summary>
+        /// <summary>
+        /// Typing: the UTF-16 units of the text whose keys were each confirmed by the field (counted up
+        /// to and including the last confirmed key); -1 for a paste.
+        /// </summary>
         public int CharsDelivered = -1;
+        /// <summary>Typing: 1 when one more key was sent but its arrival could not be confirmed (never counted as delivered).</summary>
+        public int CharsUnconfirmed = -1;
+        /// <summary>
+        /// For clipboard "unrestored": what the clipboard holds now. dictated: our text is still on it.
+        /// foreign: another app's newer copy. unknown: the helper could not tell.
+        /// </summary>
+        public string ClipboardHolds;
         /// <summary>Per-keystroke safety-check timing while typing (null for a paste).</summary>
         public GuardStats Guard;
         /// <summary>Per-keystroke wait for the target to process the key while typing (null for a paste).</summary>
         public GuardStats Settle;
-        /// <summary>The slowest single provider (UIA) call during the delivery, in ms (diagnostics).</summary>
+        /// <summary>The slowest single provider (UIA) call during THIS delivery, in ms (diagnostics).</summary>
         public double ProviderSlowestMs = -1;
 
         public DeliveryResult(DeliveryOutcome outcome, string reason) { Outcome = outcome; Reason = reason; }
@@ -55,6 +64,8 @@ namespace DoodleNote.DictationHelper
             if (Method != null) output["method"] = Method;
             if (Timings != null) output["timings"] = Timings.Fields();
             if (CharsDelivered >= 0) output["charsDelivered"] = CharsDelivered;
+            if (CharsUnconfirmed >= 0) output["charsUnconfirmed"] = CharsUnconfirmed;
+            if (ClipboardHolds != null) output["clipboardHolds"] = ClipboardHolds;
             if (Guard != null && Guard.Count > 0) output["guard"] = Guard.Fields();
             if (Settle != null && Settle.Count > 0) output["settle"] = Settle.Fields();
             if (ProviderSlowestMs >= 0) output["providerSlowestMs"] = Math.Round(ProviderSlowestMs, 1);
@@ -162,9 +173,15 @@ namespace DoodleNote.DictationHelper
         public static DeliveryResult Deliver(TargetSnapshot snapshot, string text, DeliveryGuards guards, int deadlineMs = 0, int alreadyElapsedMs = 0)
         {
             DeliveryTimings timings = new DeliveryTimings();
-            DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs, alreadyElapsedMs);
-            result.Timings = timings;
-            return result;
+            BoundedStats stats = Bounded.Track();
+            try
+            {
+                DeliveryResult result = DeliverInner(snapshot, text, guards, timings, deadlineMs, alreadyElapsedMs, stats);
+                result.Timings = timings;
+                if (result.ProviderSlowestMs < 0 && stats.SlowestMs > 0) result.ProviderSlowestMs = stats.SlowestMs;
+                return result;
+            }
+            finally { Bounded.Untrack(); }
         }
 
         /// <summary>How long a paste is expected to take, start to settled, for the deadline check.</summary>
@@ -205,8 +222,10 @@ namespace DoodleNote.DictationHelper
         /// Everything checked before an insertion, in one bounded call: the snapshot's control is still
         /// focused, readable, not secure (UIA and Win32 ES_PASSWORD), not above us, editable, and the
         /// caller's guards hold. An unreadable control is refused (target-unverifiable), never trusted.
+        /// The one side effect (selecting the text an undo replaces) goes through the call's token, so a
+        /// validation the caller already gave up on never changes the user's selection.
         /// </summary>
-        static Validation Validate(TargetSnapshot snapshot, DeliveryGuards guards)
+        static Validation Validate(TargetSnapshot snapshot, DeliveryGuards guards, CallToken token)
         {
             Validation v = new Validation();
             AutomationElement current;
@@ -228,7 +247,7 @@ namespace DoodleNote.DictationHelper
                 string value = null;
                 try { value = current != null ? UIA.ReadValue(current, FieldRead.MaxCharacters * 4) : null; }
                 catch (ElementNotAvailableException) { }
-                if (value == null || TextLocator.UniqueIndex(guards.Replace, value) < 0 || !UIA.SelectText(current, guards.Replace))
+                if (value == null || TextLocator.UniqueIndex(guards.Replace, value) < 0 || !UIA.SelectText(current, guards.Replace, token))
                 { v.Refusal = "text-changed"; return v; }
             }
             v.Current = current;
@@ -236,16 +255,20 @@ namespace DoodleNote.DictationHelper
             return v;
         }
 
-        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs, int alreadyElapsedMs)
+        static DeliveryResult DeliverInner(TargetSnapshot snapshot, string text, DeliveryGuards guards, DeliveryTimings timings, int deadlineMs, int alreadyElapsedMs, BoundedStats stats)
         {
             // The deadline is measured from when the request was received, not from here: a
             // deliver stuck behind a slow UIA call must not begin after the app gave up.
             Stopwatch began = Stopwatch.StartNew();
             Func<long> elapsed = () => began.ElapsedMilliseconds + alreadyElapsedMs;
+            // The snapshot could not be taken completely (a provider overran, or too many calls were
+            // stuck): nothing it says about the field can be trusted.
+            if (snapshot.Incomplete != null) return new DeliveryResult(DeliveryOutcome.Refused, snapshot.Incomplete);
             if (!snapshot.HasElement || snapshot.Facts == null) return new DeliveryResult(DeliveryOutcome.Refused, "no-target");
             Validation v;
-            if (!Bounded.Run(() => Validate(snapshot, guards), ValidateBudgetMs, out v))
-                return new DeliveryResult(DeliveryOutcome.Refused, "target-unverifiable");
+            Bounded.Outcome validated = Bounded.Call(token => Validate(snapshot, guards, token), ValidateBudgetMs, out v);
+            if (validated == Bounded.Outcome.Busy) return new DeliveryResult(DeliveryOutcome.Refused, "helper-busy");
+            if (validated != Bounded.Outcome.Ok) return new DeliveryResult(DeliveryOutcome.Refused, "target-unverifiable");
             if (v.Refusal != null) return new DeliveryResult(DeliveryOutcome.Refused, v.Refusal);
             AutomationElement current = v.Current;
             ControlState before = v.Before;
@@ -264,12 +287,12 @@ namespace DoodleNote.DictationHelper
                 return new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
             // What happened to the user's clipboard when a paste could not complete, so the typing
             // fallback reports it instead of "untouched".
-            string clipboardAfterPaste = "untouched";
+            string clipboardAfterPaste = "untouched", holdsAfterPaste = null;
             if (!forceType)
             {
                 if (deadlineMs == 0 || elapsed() + PasteEstimateMs <= deadlineMs)
                 {
-                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, out clipboardAfterPaste);
+                    DeliveryResult pasted = Paste(text, current, snapshot, before, timings, out clipboardAfterPaste, out holdsAfterPaste);
                     if (pasted != null) return pasted;
                 }
             }
@@ -277,32 +300,45 @@ namespace DoodleNote.DictationHelper
             {
                 DeliveryResult late = new DeliveryResult(DeliveryOutcome.Refused, "deadline-exceeded");
                 late.Clipboard = clipboardAfterPaste;
+                late.ClipboardHolds = holdsAfterPaste;
                 return late;
             }
-            DeliveryResult typed = TypeText(text, current, snapshot, before, timings, deadlineMs, elapsed);
-            if (typed.Clipboard == "untouched") typed.Clipboard = clipboardAfterPaste;
+            Wire.Log("deliver: the paste could not be used; the typing fallback starts at " + elapsed() + " ms");
+            DeliveryResult typed = TypeText(text, snapshot, timings, deadlineMs, elapsed, stats);
+            Wire.Log("deliver: typing ended at " + elapsed() + " ms");
+            if (typed.Clipboard == "untouched")
+            {
+                typed.Clipboard = clipboardAfterPaste;
+                typed.ClipboardHolds = holdsAfterPaste;
+            }
             return typed;
         }
 
         /// <summary>
         /// Null when the clipboard could not be used (nothing was pasted; the typing fallback may run).
-        /// `clipboardAfterFailedWrite` reports what happened to the user's clipboard in that case.
+        /// `clipboardAfterFailedWrite` (and `holdsAfterFailedWrite` for "unrestored") report what
+        /// happened to the user's clipboard in that case.
         /// </summary>
-        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, out string clipboardAfterFailedWrite)
+        static DeliveryResult Paste(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, out string clipboardAfterFailedWrite, out string holdsAfterFailedWrite)
         {
             clipboardAfterFailedWrite = "untouched";
+            holdsAfterFailedWrite = null;
             Stopwatch insert = Stopwatch.StartNew();
             // Saving the user's clipboard renders lazily-provided formats (OLE "Embed Source" and the
-            // like), which can take arbitrarily long; it runs on its own thread with a wall-clock bound.
+            // like), which can take arbitrarily long; it runs in the reader process, bounded per format.
             SavedClipboard saved = SavedClipboard.CaptureBounded(CaptureBudgetMs);
             if (saved == null) return null;
             ClipboardOwnership ours;
-            if (!ClipboardText.Write(text, out ours))
+            if (!ClipboardText.Write(text, out ours, saved.Sequence))
             {
                 // The write failed part-way. If we emptied the clipboard, the user's content is gone
                 // from it unless we put it back now (before any typing fallback): ownership comes from
                 // having emptied it, not from the text landing, so an owned partial write is restored.
-                if (ours.Emptied) clipboardAfterFailedWrite = saved.Restore(ours);
+                if (ours.Emptied)
+                {
+                    clipboardAfterFailedWrite = saved.Restore(ours);
+                    holdsAfterFailedWrite = saved.Holds;
+                }
                 return null;
             }
             // Immediately before Ctrl+V, the same strict check the typing path makes: anything that
@@ -313,7 +349,17 @@ namespace DoodleNote.DictationHelper
                 DeliveryResult moved = new DeliveryResult(DeliveryOutcome.Refused, unsafeReason);
                 moved.Method = "paste";
                 moved.Clipboard = saved.Restore(ours);
+                moved.ClipboardHolds = saved.Holds;
                 return moved;
+            }
+            // The clipboard must still be our write, or Ctrl+V would paste someone else's content
+            // (another app copied between our write and now). Nothing is pasted then, and their newer
+            // copy is left alone; the typing fallback may still run.
+            if (!ours.LooksOurs())
+            {
+                Wire.Log("the clipboard changed hands before Ctrl+V; not pasting");
+                clipboardAfterFailedWrite = "user-changed";
+                return null;
             }
             uint sent = Native.Send(new[]
             {
@@ -325,6 +371,7 @@ namespace DoodleNote.DictationHelper
                 DeliveryResult failed = new DeliveryResult(DeliveryOutcome.Failed, "keystroke-unavailable");
                 failed.Method = "paste";
                 failed.Clipboard = saved.Restore(ours);
+                failed.ClipboardHolds = saved.Holds;
                 return failed;
             }
             timings.InsertMs += Ms(insert);
@@ -355,6 +402,7 @@ namespace DoodleNote.DictationHelper
             result.Method = "paste";
             result.Verified = verified;
             result.Clipboard = clipboard;
+            result.ClipboardHolds = saved.Holds;
             return result;
         }
 
@@ -369,14 +417,16 @@ namespace DoodleNote.DictationHelper
             if (win32 != null) return win32;
             if (snapshot.Element == null) return null;
             string reason;
-            if (!Bounded.Run(delegate
+            Bounded.Outcome outcome = Bounded.Call(delegate (CallToken token)
             {
                 AutomationElement current;
                 if (!Target.StillFocused(snapshot, out current)) return "focus-changed";
                 bool? secure = UIA.TryIsPassword(snapshot.Element);
                 if (secure == null) return "target-unverifiable";
                 return secure.Value ? "secure-field" : null;
-            }, GuardBudgetMs, out reason)) return "target-unverifiable";
+            }, GuardBudgetMs, out reason);
+            if (outcome == Bounded.Outcome.Busy) return "helper-busy";
+            if (outcome != Bounded.Outcome.Ok) return "target-unverifiable";
             return reason;
         }
 
@@ -405,170 +455,172 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Chromium and Electron windows publish their accessibility tree to UI Automation
-        /// asynchronously, so a keystroke's effect (a field turning into a password field, focus moving)
-        /// cannot be observed before the next key. The typing fallback is refused there: the paste path
-        /// handles these apps; when it cannot, the text is kept for copying.
+        /// The typing fallback, for classic Win32 text boxes only (ClassicTextBox). Refused up front, with
+        /// nothing sent, when the focused window is unknown (WebView2, CEF and Gecko hosts report a
+        /// window the helper cannot attribute) or is not the snapshot's, when it is not a classic text box
+        /// (every UIA-only app: browsers, Electron, Firefox, Java, Qt, XAML/UWP, Office), or when the
+        /// pre-flight probe (text length, selection, ES_PASSWORD) does not answer in time. Then, for
+        /// EVERY key: the foreground app and focused window are still the snapshot's, ES_PASSWORD is
+        /// still clear (fresh GetWindowLong), the field still has the length the previous key left
+        /// (nothing else changed it), and after the key the length moves by exactly the units the key
+        /// adds minus the selection it replaces. Anything else stops typing at once (uncertain), with
+        /// the reason, the number of keys confirmed, and whether one key was sent but not confirmed.
         /// </summary>
-        internal static bool IsChromiumClass(IntPtr window)
-        {
-            for (IntPtr w = window; w != IntPtr.Zero; w = Native.GetParent(w))
-            {
-                string name = Native.ClassOf(w);
-                if (name == "Chrome_RenderWidgetHostHWND" || name == "Chrome_WidgetWin_1" || name == "Chrome_WidgetWin_0") return true;
-            }
-            return false;
-        }
-
-        static DeliveryResult TypeText(string text, AutomationElement element, TargetSnapshot snapshot, ControlState before, DeliveryTimings timings, int deadlineMs, Func<long> elapsed)
+        static DeliveryResult TypeText(string text, TargetSnapshot snapshot, DeliveryTimings timings, int deadlineMs, Func<long> elapsed, BoundedStats stats)
         {
             Stopwatch insert = Stopwatch.StartNew();
+            string normalized = text.Replace("\r\n", "\n");
             string refusal = null;
-            if (!ReleaseModifiers()) refusal = "focus-changed";
             IntPtr focusWindow = FocusWindow();
-            if (refusal == null && IsChromiumClass(focusWindow) && TestMode.Env("DICTATION_HELPER_TEST_ALLOW_CHROMIUM_TYPING") != "1")
-                refusal = "typing-unsupported";
-            // A UIA target must have an identity to compare against.
-            if (refusal == null && snapshot.Element != null && snapshot.RuntimeId == null) refusal = "target-unverifiable";
-            // Every keystroke must be observed as processed before the next one; a target whose
-            // processing cannot be observed is refused up front rather than typed into blindly.
-            KeystrokeObserver observer = null;
-            if (refusal == null)
-            {
-                observer = KeystrokeObserver.For(snapshot, focusWindow);
-                if (observer == null) refusal = "typing-unobservable";
-            }
+            // Without a focused window there is nothing to read per keystroke: refuse, never guess.
+            if (focusWindow == IntPtr.Zero) refusal = "target-unverifiable";
+            else if (snapshot.FocusWindow == IntPtr.Zero || focusWindow != snapshot.FocusWindow) refusal = "focus-changed";
+            ClassicTextBox box = null;
+            if (refusal == null) box = ClassicTextBox.Probe(focusWindow, out refusal);
+            // A single-line box ignores Enter (or presses its dialog's default button).
+            if (refusal == null && normalized.IndexOf('\n') >= 0 && !box.Multiline) refusal = "typing-unsupported";
+            if (refusal == null && !ReleaseModifiers()) refusal = "focus-changed";
+            if (refusal == null) refusal = TypingGuard(snapshot, box);
+            long confirmed = refusal == null ? box.Length() : -1;
+            if (refusal == null && confirmed < 0) refusal = "target-unverifiable";
             if (refusal != null)
             {
                 DeliveryResult refused = new DeliveryResult(DeliveryOutcome.Refused, refusal);
                 refused.Method = "type";
+                refused.ProviderSlowestMs = stats.SlowestMs;
                 return refused;
             }
-            // One character per call with a short gap: text controls built on XAML and the
-            // Text Services Framework drop Unicode keystrokes that arrive in a burst.
-            string normalized = text.Replace("\r\n", "\n");
             GuardStats guardStats = new GuardStats();
             GuardStats settleStats = new GuardStats();
-            int expected = 0;
-            uint sent = 0;
+            // The typing rate is measured from the first key sent, never including the checks above.
+            Stopwatch rate = null;
+            int keysConfirmed = 0;
             int charsTyped = 0;
-            bool aborted = false;
+            bool unconfirmed = false;
             string abortReason = null;
-            double slowestBefore = Bounded.SlowestMs;
-            using (observer)
+            for (int i = 0; i < normalized.Length; i++)
             {
-                for (int i = 0; i < normalized.Length; i++)
+                long guardStart = Stopwatch.GetTimestamp();
+                string unsafeReason = TypingGuard(snapshot, box);
+                // Nothing may have changed the field since the previous key was confirmed.
+                long now = unsafeReason == null ? box.Length() : -1;
+                if (unsafeReason == null && now < 0) { unsafeReason = "target-unverifiable"; Wire.Log("typing: the field did not answer its length"); }
+                else if (unsafeReason == null && now != confirmed) { unsafeReason = "target-changed"; Wire.Log("typing: the field changed between keys (" + confirmed + " -> " + now + ")"); }
+                int selection = unsafeReason == null ? box.SelectionLength() : 0;
+                if (unsafeReason == null && selection < 0) { unsafeReason = "target-unverifiable"; Wire.Log("typing: the selection could not be read: " + box.LastSelectionError); }
+                guardStats.Add((Stopwatch.GetTimestamp() - guardStart) * 1000.0 / Stopwatch.Frequency);
+                if (unsafeReason != null) { abortReason = unsafeReason; break; }
+                if (deadlineMs > 0 && elapsed() > deadlineMs) { abortReason = "deadline-exceeded"; break; }
+                // A target that processes keys slowly (but observably) would run past the deadline
+                // part-way through: once the rate is known from at least 10 keys, stop at once if the
+                // rest cannot finish in time, rather than typing most of the text and stopping late.
+                if (deadlineMs > 0 && rate != null && charsTyped >= 10)
                 {
-                    // Immediately before EVERY keystroke: foreground app, focused control identity and a
-                    // FRESH secure-state read, all within GuardBudgetMs of wall clock. Any failure, or
-                    // anything it cannot read in time, stops typing; not one more keystroke is sent.
-                    long guardStart = Stopwatch.GetTimestamp();
-                    string unsafeReason = KeystrokeGuard(snapshot);
-                    guardStats.Add((Stopwatch.GetTimestamp() - guardStart) * 1000.0 / Stopwatch.Frequency);
-                    if (unsafeReason != null) { aborted = true; abortReason = unsafeReason; break; }
-                    if (deadlineMs > 0 && elapsed() > deadlineMs) { aborted = true; abortReason = "deadline-exceeded"; break; }
-                    // A target that processes keys slowly (but observably) would run past the deadline
-                    // part-way through: once its rate is known (3 keys), stop at once if the rest cannot
-                    // finish in time, rather than typing most of the text and stopping late.
-                    if (deadlineMs > 0 && charsTyped >= 3)
-                    {
-                        double perChar = insert.ElapsedMilliseconds / (double)charsTyped;
-                        if (elapsed() + perChar * (normalized.Length - i) > deadlineMs) { aborted = true; abortReason = "deadline-exceeded"; break; }
-                    }
-                    char unit = normalized[i];
-                    Native.INPUT[] pair;
-                    int start = i;
-                    if (unit == '\n') pair = new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) };
-                    else if (char.IsHighSurrogate(unit) && i + 1 < normalized.Length)
-                    {
-                        // A surrogate pair goes as one call, so the character is never split.
-                        char low = normalized[++i];
-                        pair = new[] { Native.Unicode(unit, false), Native.Unicode(low, false), Native.Unicode(unit, true), Native.Unicode(low, true) };
-                    }
-                    else pair = new[] { Native.Unicode(unit, false), Native.Unicode(unit, true) };
-                    long mark = observer.Mark();
-                    expected += pair.Length;
-                    uint count = Native.Send(pair);
-                    sent += count;
-                    if (count != pair.Length) break;
-                    charsTyped = i + 1;
-                    // The key counts as processed only when the target shows it (its text length moved,
-                    // or a text/value event arrived for it) within KeySettleMs. Without that the next
-                    // guard could read state from before this key: stop instead (uncertain).
-                    long settleStart = Stopwatch.GetTimestamp();
-                    bool secureNow;
-                    bool processed = observer.WaitProcessed(mark, KeySettleMs, out secureNow);
-                    settleStats.Add((Stopwatch.GetTimestamp() - settleStart) * 1000.0 / Stopwatch.Frequency);
-                    if (secureNow) { aborted = true; abortReason = "secure-field"; break; }
-                    if (!processed) { aborted = true; abortReason = "target-unconfirmed"; break; }
-                    // Word boundaries are where editors run spelling and suggestions; keystrokes
-                    // that arrive meanwhile were seen to be dropped (Windows 11 Notepad).
-                    Thread.Sleep(char.IsWhiteSpace(normalized[start]) || char.IsPunctuation(normalized[start]) ? 70 : 8);
+                    double perChar = rate.ElapsedMilliseconds / (double)charsTyped;
+                    if (elapsed() + perChar * (normalized.Length - i) > deadlineMs) { abortReason = "deadline-exceeded"; break; }
                 }
+                char unit = normalized[i];
+                Native.INPUT[] pair;
+                int start = i;
+                int units;
+                if (unit == '\n')
+                {
+                    pair = new[] { Native.Key(Native.VK_RETURN, false, false), Native.Key(Native.VK_RETURN, true, false) };
+                    units = 2; // a multiline Edit or RichEdit stores CR LF (measured on Dev04 for all four classes)
+                }
+                else if (char.IsHighSurrogate(unit) && i + 1 < normalized.Length)
+                {
+                    // A surrogate pair goes as one call, so the character is never split.
+                    char low = normalized[++i];
+                    pair = new[] { Native.Unicode(unit, false), Native.Unicode(low, false), Native.Unicode(unit, true), Native.Unicode(low, true) };
+                    units = 2;
+                }
+                else
+                {
+                    pair = new[] { Native.Unicode(unit, false), Native.Unicode(unit, true) };
+                    units = 1;
+                }
+                long expected = confirmed + units - selection;
+                // A key that would leave the length unchanged (it replaces a selection of its own size)
+                // could not be told apart from a key that was never processed.
+                if (expected == confirmed) { abortReason = "target-unverifiable"; Wire.Log("typing: a key replacing a selection of its own size cannot be confirmed"); break; }
+                if (rate == null) rate = Stopwatch.StartNew();
+                uint count = Native.Send(pair);
+                if (count != pair.Length)
+                {
+                    // Part of the key may have gone in: say so, never count it as delivered.
+                    unconfirmed = count > 0;
+                    abortReason = "keystroke-unavailable";
+                    break;
+                }
+                long settleStart = Stopwatch.GetTimestamp();
+                long seen;
+                bool processed = box.WaitLength(confirmed, expected, KeySettleMs, out seen);
+                settleStats.Add((Stopwatch.GetTimestamp() - settleStart) * 1000.0 / Stopwatch.Frequency);
+                if (!processed)
+                {
+                    unconfirmed = true;
+                    abortReason = seen >= 0 && seen != confirmed ? "target-changed" : "target-unconfirmed";
+                    break;
+                }
+                confirmed = expected;
+                keysConfirmed++;
+                charsTyped = i + 1;
+                // Word boundaries are where editors run spelling and suggestions; keystrokes
+                // that arrive meanwhile were seen to be dropped (Windows 11 Notepad).
+                Thread.Sleep(char.IsWhiteSpace(normalized[start]) || char.IsPunctuation(normalized[start]) ? 70 : 8);
             }
             timings.InsertMs += Ms(insert);
+            if (abortReason != null)
+                Wire.Log("typing stopped: " + abortReason + " after " + keysConfirmed + " confirmed key(s)" + (unconfirmed ? " and one unconfirmed" : "")
+                    + " (field length " + confirmed + ", class " + box.ClassName + ")");
             Func<DeliveryResult, DeliveryResult> stamp = delegate (DeliveryResult r)
             {
                 r.Method = "type";
                 r.CharsDelivered = charsTyped;
+                r.CharsUnconfirmed = unconfirmed ? 1 : 0;
                 r.Guard = guardStats;
                 r.Settle = settleStats;
-                r.ProviderSlowestMs = Math.Max(Bounded.SlowestMs, slowestBefore);
+                r.ProviderSlowestMs = stats.SlowestMs;
                 return r;
             };
-            if (aborted)
+            if (abortReason != null)
             {
-                // Stopped mid-type: some characters may already be in, so the host keeps the text and
-                // must not resend.
-                return stamp(new DeliveryResult(sent == 0 ? DeliveryOutcome.Refused : DeliveryOutcome.Uncertain, sent == 0 ? abortReason : "insertion-unverifiable"));
+                // Nothing sent: a plain refusal with its reason. Something sent: the text is kept and
+                // must not be resent (uncertain), and the specific reason travels with the counts.
+                bool anySent = keysConfirmed > 0 || unconfirmed;
+                return stamp(new DeliveryResult(anySent ? DeliveryOutcome.Uncertain : DeliveryOutcome.Refused, abortReason));
             }
-            if (sent == 0) return stamp(new DeliveryResult(DeliveryOutcome.Failed, "keystroke-unavailable"));
-            if (sent != expected) return stamp(new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable"));
             Stopwatch confirm = Stopwatch.StartNew();
-            // Keystrokes arrive one by one: wait for the field to change and then to settle,
-            // so the reply (and the clipboard of a later paste) never races the last characters.
-            bool verified = before.Observable && Changed(element, before, 800 + 4 * normalized.Length) && Settled(element, 150, 2000 + 4 * normalized.Length);
-            // Keystrokes can be dropped one by one, so a change is not enough: the whole text must be there.
-            if (verified)
-            {
-                ControlState after = ControlState.TryRead(element, ReadBudgetMs);
-                verified = after != null && (after.Value == null || after.Value.Replace("\r\n", "\n").Replace('\r', '\n').Contains(normalized));
-            }
+            // Every key was confirmed one by one; a last quiet look makes sure nothing (an autocomplete
+            // after the final key) changed the field afterwards.
+            Thread.Sleep(60);
+            long final = box.Length();
             timings.ConfirmMs += Ms(confirm);
+            bool verified = final == confirmed && !box.Secure;
             DeliveryResult result = stamp(verified
                 ? new DeliveryResult(DeliveryOutcome.Delivered, null)
-                : new DeliveryResult(DeliveryOutcome.Uncertain, "insertion-unverifiable"));
+                : new DeliveryResult(DeliveryOutcome.Uncertain, final < 0 ? "target-unconfirmed" : "target-changed"));
             result.Verified = verified;
             return result;
         }
 
         /// <summary>
-        /// The safety check run immediately before each typed keystroke. Null when it is safe to send
-        /// the next key; otherwise the refusal reason. The Win32 part (foreground process, ES_PASSWORD)
-        /// makes no provider call; the UIA part (the focused element's RuntimeId, process and IsPassword,
-        /// and a fresh IsPassword on the snapshot's element) runs as ONE bounded call: a missing identity,
-        /// an unreadable secure state or a call slower than GuardBudgetMs is target-unverifiable.
+        /// The check before each typed key, with no provider call: the foreground process is the
+        /// snapshot's, its focused window is the very text box being typed into, and that box is not a
+        /// password box (ES_PASSWORD read fresh).
         /// </summary>
-        static string KeystrokeGuard(TargetSnapshot snapshot)
+        static string TypingGuard(TargetSnapshot snapshot, ClassicTextBox box)
         {
-            string win32 = Win32Guard(snapshot);
-            if (win32 != null) return win32;
-            if (snapshot.Element == null) return null;
-            string reason;
-            if (!Bounded.Run(delegate
-            {
-                AutomationElement focused = UIA.Focused();
-                string rid = UIA.RuntimeId(focused);
-                bool? focusedSecure = UIA.TryIsPassword(focused);
-                int owner = focused != null ? UIA.Pid(focused) : 0;
-                if (rid == null || focusedSecure == null) return "target-unverifiable";
-                if (focusedSecure.Value) return "secure-field";
-                if (owner != (int)snapshot.Pid || rid != snapshot.RuntimeId) return "focus-changed";
-                bool? secure = UIA.TryIsPassword(snapshot.Element);
-                if (secure == null) return "target-unverifiable";
-                return secure.Value ? "secure-field" : null;
-            }, GuardBudgetMs, out reason)) return "target-unverifiable";
-            return reason;
+            IntPtr foreground = Native.GetForegroundWindow();
+            if (foreground == IntPtr.Zero) return "focus-changed";
+            uint pid;
+            uint thread = Native.GetWindowThreadProcessId(foreground, out pid);
+            if (pid != snapshot.Pid) return "focus-changed";
+            Native.GUITHREADINFO gui = Target.GuiInfo(thread);
+            if (gui.hwndFocus != box.Window) return "focus-changed";
+            if (box.Secure || Target.IsPasswordEdit(gui.hwndFocus)) return "secure-field";
+            return null;
         }
 
         /// <summary>
@@ -601,28 +653,6 @@ namespace DoodleNote.DictationHelper
                 lift.Insert(0, Native.Key(Native.VK_MASK, false, false));
             }
             return Native.Send(lift.ToArray()) == lift.Count;
-        }
-
-        /// <summary>True once the control has read the same for quietMs (false if it never settles in time, or cannot be read).</summary>
-        static bool Settled(AutomationElement element, int quietMs, int withinMs)
-        {
-            Stopwatch watch = Stopwatch.StartNew();
-            ControlState last = ControlState.TryRead(element, ReadBudgetMs);
-            if (last == null) return false;
-            Stopwatch quiet = Stopwatch.StartNew();
-            while (watch.ElapsedMilliseconds < withinMs)
-            {
-                Thread.Sleep(15);
-                ControlState now = ControlState.TryRead(element, ReadBudgetMs);
-                if (now == null) return false;
-                if (!now.SameAs(last))
-                {
-                    last = now;
-                    quiet.Restart();
-                }
-                else if (quiet.ElapsedMilliseconds >= quietMs) return true;
-            }
-            return false;
         }
 
         /// <summary>The control reads differently from `before` within withinMs (a read that times out never counts as a change).</summary>
@@ -660,13 +690,20 @@ namespace DoodleNote.DictationHelper
         /// is set as soon as EmptyClipboard succeeds, even if the text could not be set, so the caller
         /// can still put the user's content back.
         /// </summary>
-        public static bool Write(string text, out ClipboardOwnership ownership)
+        public static bool Write(string text, out ClipboardOwnership ownership, uint expectSequence = 0)
         {
             ownership = new ClipboardOwnership();
             if (!Open()) return false;
             bool ok = false;
             try
             {
+                // Under the lock: the clipboard must still be exactly what was saved, or emptying it
+                // would discard a copy the user made after the save (it would never come back).
+                if (expectSequence != 0 && Native.GetClipboardSequenceNumber() != expectSequence)
+                {
+                    Wire.Log("the clipboard changed after it was saved; not pasting");
+                    return false;
+                }
                 if (Native.EmptyClipboard())
                 {
                     ownership.Emptied = true;
@@ -739,24 +776,40 @@ namespace DoodleNote.DictationHelper
         public bool Emptied;
         public uint SequenceInside;
         public uint SequenceFinal;
+        /// <summary>
+        /// The sequence number read right after our write closed the clipboard while our window was
+        /// still its owner (without the lock; 0 when not read). The best evidence when Confirm() cannot
+        /// take the lock: a later change to it means someone wrote after us.
+        /// </summary>
+        public uint SequenceUnlocked;
         public IntPtr Owner;
         /// <summary>Confirm() proved the clipboard was ours after our write was finalized.</summary>
         public bool Confirmed;
+        /// <summary>
+        /// Right after our write, another window already owned the clipboard: someone else emptied it
+        /// after us, so what it holds is provably not ours (a newer copy by another app).
+        /// </summary>
+        public bool ForeignAtConfirm;
 
         public void Confirm()
         {
             IntPtr window = Ui.ClipboardWindow;
             Owner = window;
+            if (window == IntPtr.Zero) return;
+            // Test build only: widen the moment between our write and its confirmation.
+            int confirmDelay = TestMode.Int("DICTATION_HELPER_TEST_CONFIRM_DELAY_MS", 0);
+            if (confirmDelay > 0) Thread.Sleep(confirmDelay);
+            if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
+            SequenceUnlocked = Native.GetClipboardSequenceNumber();
             // Test build only: simulate another reader holding the clipboard through the confirmation.
             if (TestMode.Env("DICTATION_HELPER_TEST_SKIP_CONFIRM") == "1") return;
-            if (window == IntPtr.Zero || !ClipboardText.Open()) return;
+            if (!ClipboardText.Open()) return;
             try
             {
-                if (Native.GetClipboardOwner() != window) return;
+                if (Native.GetClipboardOwner() != window) { ForeignAtConfirm = true; return; }
                 uint now = Native.GetClipboardSequenceNumber();
                 if (now < SequenceInside) return;
                 SequenceFinal = now;
-                Owner = window;
                 Confirmed = true;
             }
             finally { Native.CloseClipboard(); }
@@ -769,12 +822,32 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Under the clipboard lock, when Confirm() could not run (another reader held the clipboard):
-        /// our window is still the owner, i.e. nobody has emptied the clipboard since our write.
+        /// Under the clipboard lock, when Confirm() could not take the lock (another reader held the
+        /// clipboard): our window is still the owner (nobody has emptied it since our write) AND the
+        /// sequence number is the one read right after our write (nobody has added to it either).
         /// </summary>
         public bool OwnerUnchanged()
         {
-            return Owner != IntPtr.Zero && Native.GetClipboardOwner() == Owner;
+            return Owner != IntPtr.Zero && Native.GetClipboardOwner() == Owner
+                && SequenceUnlocked != 0 && Native.GetClipboardSequenceNumber() == SequenceUnlocked;
+        }
+
+        /// <summary>Without the lock (right before Ctrl+V): the clipboard still holds our write, as far as can be seen.</summary>
+        public bool LooksOurs()
+        {
+            if (ForeignAtConfirm || Owner == IntPtr.Zero || Native.GetClipboardOwner() != Owner) return false;
+            uint now = Native.GetClipboardSequenceNumber();
+            return Confirmed ? now == SequenceFinal : SequenceUnlocked != 0 && now == SequenceUnlocked;
+        }
+
+        /// <summary>What the clipboard holds when it could not be put back: dictated, foreign or unknown.</summary>
+        public string Holds()
+        {
+            if (Owner != IntPtr.Zero && Native.GetClipboardOwner() != Owner) return "foreign";
+            uint now = Native.GetClipboardSequenceNumber();
+            if (Confirmed && now == SequenceFinal) return "dictated";
+            if (!Confirmed && SequenceUnlocked != 0 && now == SequenceUnlocked) return "dictated";
+            return "unknown";
         }
     }
 
@@ -800,8 +873,6 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>Privacy-marker reads are tiny flags; never copy more than this many bytes of one.</summary>
         const int MaxMarkerBytes = 64;
-        /// <summary>At most this long is spent copying the clipboard.</summary>
-        const int MaxMs = 300;
         readonly List<KeyValuePair<uint, byte[]>> items = new List<KeyValuePair<uint, byte[]>>();
         IntPtr metafile = IntPtr.Zero;
         bool complete = true;
@@ -830,19 +901,7 @@ namespace DoodleNote.DictationHelper
             "dataobject", "ole private data"
         };
 
-        static byte[] ReadBytes(IntPtr data, int cap = int.MaxValue)
-        {
-            long size = (long)Native.GlobalSize(data).ToUInt64();
-            if (size <= 0 || size > cap) return null;
-            IntPtr source = Native.GlobalLock(data);
-            if (source == IntPtr.Zero) return null;
-            byte[] bytes = new byte[(int)size];
-            Marshal.Copy(source, bytes, 0, (int)size);
-            Native.GlobalUnlock(data);
-            return bytes;
-        }
-
-        static string FormatName(uint format)
+        public static string FormatName(uint format)
         {
             System.Text.StringBuilder name = new System.Text.StringBuilder(256);
             int length = Native.GetClipboardFormatName(format, name, name.Capacity);
@@ -851,7 +910,7 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>
         /// Formats an OLE source renders on demand (it may start or wake the source app): read after
-        /// every other format, so a slow render costs only itself and runs last under the time cap.
+        /// every other format, so a slow render costs only itself and comes last.
         /// </summary>
         static readonly string[] RenderedLast =
         {
@@ -860,131 +919,133 @@ namespace DoodleNote.DictationHelper
         };
 
         /// <summary>
-        /// Capture on a dedicated thread, waiting at most timeoutMs of wall clock: an owner that takes
-        /// long to render a lazily provided format (OLE "Embed Source") cannot stall the delivery. Null
-        /// when the clipboard cannot be opened or saving it did not finish in time; nothing is pasted
-        /// then (the user's clipboard would not come back), and the capture thread closes the
-        /// clipboard when the owner finally answers.
+        /// Wall-clock bound for reading one format (a render that takes longer ends the save). Each read
+        /// is also bounded by what is left of the whole save's budget, so the clipboard is never held by
+        /// the reader for longer than that budget (1.5 s): a user's copy meanwhile waits at most that.
+        /// </summary>
+        const int PerFormatMs = 1500;
+
+        /// <summary>
+        /// Save the clipboard through the reader process (ClipboardReader), one bounded request per
+        /// format, within timeoutMs in total. The clipboard is open only inside each request, never
+        /// across the helper's own work, and a read that overruns (an owner slow to render) ends the
+        /// reader, which releases the clipboard at once. Null, and nothing is pasted, when the save
+        /// cannot complete: the clipboard cannot be opened, a read overran (the owner is stuck in a
+        /// render, and the paste's own EmptyClipboard would wait for it too), or the clipboard changed
+        /// while it was being saved (someone copied meanwhile).
         /// </summary>
         public static SavedClipboard CaptureBounded(int timeoutMs)
         {
-            SavedClipboard result = null;
-            Thread thread = new Thread(delegate () { result = Capture(); });
-            thread.IsBackground = true;
-            thread.Name = "dictation-clipboard-capture";
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            if (!thread.Join(timeoutMs))
+            Stopwatch watch = Stopwatch.StartNew();
+            ClipboardReaderClient reader = ClipboardReaderClient.Get();
+            if (reader == null) return null;
+            Func<int> left = () => timeoutMs - (int)watch.ElapsedMilliseconds;
+            string list = reader.Request("list", Math.Min(PerFormatMs, left()));
+            if (list == null || !list.StartsWith("list "))
             {
-                Wire.Log("saving the clipboard took too long (a source app is rendering its content); not pasting");
+                Wire.Log(list == null ? "saving the clipboard: listing its formats overran; not pasting" : "saving the clipboard: it could not be opened; not pasting");
                 return null;
             }
-            return result;
-        }
-
-        /// <summary>Null when the clipboard cannot be opened.</summary>
-        public static SavedClipboard Capture()
-        {
-            if (!ClipboardText.Open()) return null;
-            SavedClipboard saved = new SavedClipboard();
-            Stopwatch watch = Stopwatch.StartNew();
-            int total = 0;
-            try
+            string[] head = list.Split(' ');
+            uint sequence = uint.Parse(head[1]);
+            bool hasDib = head[2] == "1";
+            bool hasEnhMetafile = head[3] == "1";
+            List<KeyValuePair<uint, string>> formats = new List<KeyValuePair<uint, string>>();
+            List<KeyValuePair<uint, string>> renderedLast = new List<KeyValuePair<uint, string>>();
+            for (int i = 4; i < head.Length; i++)
             {
-                bool hasDib = Native.IsClipboardFormatAvailable(CF_DIB) || Native.IsClipboardFormatAvailable(CF_DIBV5);
-                List<uint> formats = new List<uint>();
-                List<uint> renderedLast = new List<uint>();
-                for (uint format = Native.EnumClipboardFormats(0); format != 0; format = Native.EnumClipboardFormats(format))
+                int colon = head[i].IndexOf(':');
+                if (colon <= 0) continue;
+                uint format = uint.Parse(head[i].Substring(0, colon));
+                string name = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(head[i].Substring(colon + 1)));
+                KeyValuePair<uint, string> entry = new KeyValuePair<uint, string>(format, name);
+                if (format >= 0xC000 && Array.IndexOf(RenderedLast, name.ToLowerInvariant()) >= 0) renderedLast.Add(entry);
+                else formats.Add(entry);
+            }
+            formats.AddRange(renderedLast);
+            SavedClipboard saved = new SavedClipboard();
+            saved.Sequence = sequence;
+            long total = 0;
+            foreach (KeyValuePair<uint, string> entry in formats)
+            {
+                uint format = entry.Key;
+                string name = entry.Value;
+                long cap;
+                bool marker = false;
+                if (format == CF_BITMAP || format == CF_PALETTE)
                 {
-                    if (format >= 0xC000 && Array.IndexOf(RenderedLast, FormatName(format).ToLowerInvariant()) >= 0) renderedLast.Add(format);
-                    else formats.Add(format);
+                    // Windows rebuilds these from the device-independent bitmap.
+                    if (!hasDib) saved.complete = false;
+                    continue;
                 }
-                formats.AddRange(renderedLast);
-                int captureDelay = TestMode.Int("DICTATION_HELPER_TEST_CAPTURE_DELAY_MS", 0);
-                if (captureDelay > 0) Thread.Sleep(captureDelay);
-                foreach (uint format in formats)
+                if (format == CF_METAFILEPICT && hasEnhMetafile) continue; // synthesized from the saved EMF
+                if (format < 0xC000)
                 {
-                    // Deciding which formats are user-visible is cheap; only safe ones are read below.
-                    bool safe;
-                    if (format == CF_BITMAP || format == CF_PALETTE)
+                    if (format != CF_ENHMETAFILE && !SafeStandard.Contains(format))
                     {
-                        // Windows rebuilds these from the device-independent bitmap.
-                        if (!hasDib) saved.complete = false;
+                        // A standard format we cannot replay (GDI handles, private/display formats) is a
+                        // real loss and is reported, never dropped silently.
+                        saved.reportedSkip = true;
                         continue;
                     }
-                    if (format == CF_ENHMETAFILE)
-                    {
-                        // Route the metafile through the caps too (it is user-visible content).
-                        if (watch.ElapsedMilliseconds > MaxMs) { saved.reportedSkip = true; continue; }
-                        IntPtr handle = Native.GetClipboardData(format);
-                        uint emfSize = handle != IntPtr.Zero ? Native.GetEnhMetaFileBits(handle, 0, null) : 0;
-                        if (handle == IntPtr.Zero) { saved.complete = false; continue; }
-                        if (emfSize == 0 || emfSize > MaxFormatBytes || total + emfSize > MaxBytes) { saved.reportedSkip = true; continue; }
-                        saved.metafile = Native.CopyEnhMetaFile(handle, IntPtr.Zero);
-                        if (saved.metafile == IntPtr.Zero) saved.complete = false;
-                        else total += (int)emfSize;
-                        continue;
-                    }
-                    if (format < 0xC000) safe = SafeStandard.Contains(format);
-                    else
-                    {
-                        string name = FormatName(format);
-                        // Privacy markers (exclude-from-history / cloud): preserve their presence and
-                        // value, so restoring a password manager's entry cannot republish it into
-                        // clipboard history or cloud sync. Unreadable or oversized → set conservatively.
-                        if (Markers.Contains(name))
-                        {
-                            IntPtr markerData = Native.GetClipboardData(format);
-                            byte[] markerBytes = markerData != IntPtr.Zero ? ReadBytes(markerData, MaxMarkerBytes) : null;
-                            if (markerBytes != null) saved.items.Add(new KeyValuePair<uint, byte[]>(format, markerBytes));
-                            else saved.forceMarkers = true;
-                            continue;
-                        }
-                        // OLE live-object bookkeeping is dropped silently (expected, not a loss).
-                        if (SilentDrop.Contains(name)) continue;
-                        // Every other registered format is the app's user-visible content: preserve it.
-                        safe = true;
-                    }
-                    if (!safe)
-                    {
-                        // CF_METAFILEPICT is synthesized by Windows from a saved enhanced metafile;
-                        // any other standard format we cannot replay (GDI handles, private/display
-                        // formats) is a real loss and is reported, never dropped silently.
-                        bool synthesized = format == CF_METAFILEPICT && Native.IsClipboardFormatAvailable(CF_ENHMETAFILE);
-                        if (!synthesized) saved.reportedSkip = true;
-                        continue;
-                    }
-                    // Reading a user-visible format renders delayed ones; cap total time so one huge
-                    // read cannot stall the delivery, and report the drop as a visible loss.
-                    if (watch.ElapsedMilliseconds > MaxMs) { saved.reportedSkip = true; continue; }
-                    IntPtr data = Native.GetClipboardData(format);
-                    if (data == IntPtr.Zero)
-                    {
-                        saved.reportedSkip = true; // promised content the owner did not render: lost
-                        continue;
-                    }
-                    long size = (long)Native.GlobalSize(data).ToUInt64();
-                    // Oversized: skip without copying the bytes, so a large Excel/Photoshop clipboard
-                    // cannot blow the budget; the user is told a visible format was not kept.
-                    if (size <= 0 || size > MaxFormatBytes || total + size > MaxBytes) { saved.reportedSkip = true; continue; }
-                    IntPtr source = Native.GlobalLock(data);
-                    if (source == IntPtr.Zero)
-                    {
-                        saved.reportedSkip = true; // not global memory (or unreadable): cannot be kept
-                        continue;
-                    }
-                    byte[] bytes = new byte[(int)size];
-                    Marshal.Copy(source, bytes, 0, (int)size);
-                    Native.GlobalUnlock(data);
-                    total += (int)size;
+                    cap = Math.Min(MaxFormatBytes, MaxBytes - total);
+                }
+                else if (Markers.Contains(name)) { marker = true; cap = MaxMarkerBytes; }
+                else if (SilentDrop.Contains(name)) continue; // OLE live-object bookkeeping
+                else cap = Math.Min(MaxFormatBytes, MaxBytes - total);
+                if (left() <= 0)
+                {
+                    if (marker) saved.forceMarkers = true; else saved.reportedSkip = true;
+                    continue;
+                }
+                if (cap <= 0) { saved.reportedSkip = true; continue; }
+                string answer = reader.Request("get " + format + " " + cap, Math.Min(PerFormatMs, left()));
+                if (answer == null)
+                {
+                    Wire.Log("saving the clipboard: reading a format overran (its owner is slow to render); not pasting");
+                    return null;
+                }
+                string[] parts = answer.Split(' ');
+                if (parts.Length < 3 || parts[0] == "busy")
+                {
+                    Wire.Log("saving the clipboard: it could not be opened again; not pasting");
+                    return null;
+                }
+                if (uint.Parse(parts[2]) != sequence)
+                {
+                    Wire.Log("saving the clipboard: it changed while being saved; not pasting");
+                    return null;
+                }
+                if (parts[0] == "data" && parts.Length == 4)
+                {
+                    byte[] bytes = Convert.FromBase64String(parts[3]);
+                    total += bytes.Length;
                     saved.items.Add(new KeyValuePair<uint, byte[]>(format, bytes));
                 }
+                else if (parts[0] == "emf" && parts.Length == 4)
+                {
+                    byte[] bits = Convert.FromBase64String(parts[3]);
+                    IntPtr copy = Native.SetEnhMetaFileBits((uint)bits.Length, bits);
+                    if (copy == IntPtr.Zero) saved.complete = false;
+                    else { saved.metafile = copy; total += bits.Length; }
+                }
+                else if (marker) saved.forceMarkers = true; // present but unreadable: set conservatively
+                else saved.reportedSkip = true; // promised but not rendered, too large, or unreadable: lost
             }
-            finally { Native.CloseClipboard(); }
+            // Someone copied while the save ran: their copy is the user's clipboard now; never paste over it.
+            if (Native.GetClipboardSequenceNumber() != sequence)
+            {
+                Wire.Log("saving the clipboard: it changed while being saved; not pasting");
+                return null;
+            }
             return saved;
         }
 
         public int Count { get { return items.Count; } }
+        /// <summary>The clipboard sequence number the save was taken at (the paste requires it unchanged).</summary>
+        public uint Sequence;
+        /// <summary>After a Restore that returned "unrestored": dictated | foreign | unknown (see DeliveryResult.ClipboardHolds).</summary>
+        public string Holds;
         /// <summary>A user-visible format was dropped by a cap (not a silent private-format drop).</summary>
         public bool ReportedSkip { get { return reportedSkip; } }
 
@@ -997,8 +1058,15 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         public string Restore(ClipboardOwnership ours)
         {
+            Holds = null;
             if (ours == null || !ours.Emptied) return "untouched";
-            if (!ClipboardText.Open()) return "unrestored";
+            // Someone else emptied the clipboard right after our write: their copy is newer and wins.
+            if (ours.ForeignAtConfirm) return "user-changed";
+            if (!ClipboardText.Open())
+            {
+                Holds = ours.Holds();
+                return "unrestored";
+            }
             bool ok = true;
             try
             {
@@ -1010,14 +1078,20 @@ namespace DoodleNote.DictationHelper
                 }
                 else if (!ours.OwnerUnchanged())
                 {
-                    // Ownership was never confirmed (the clipboard was busy) and the owner changed: we
-                    // cannot tell a foreign copy from our own write, so we do not overwrite it, and say
-                    // the user's clipboard was not put back.
+                    // Ownership was never confirmed (the clipboard was busy) and the owner or the
+                    // sequence changed since our write: it is not provably ours, so it is not
+                    // overwritten, and the user is told their clipboard was not put back, and what it
+                    // holds instead.
+                    Holds = ours.Holds();
                     return "unrestored";
                 }
                 // If the clipboard cannot be emptied, do not partially overwrite it: report it plainly.
                 // (A test build can simulate EmptyClipboard failing here.)
-                if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") == "1" || !Native.EmptyClipboard()) return "unrestored";
+                if (TestMode.Env("DICTATION_HELPER_TEST_FAIL_RESTORE_EMPTY") == "1" || !Native.EmptyClipboard())
+                {
+                    Holds = "dictated";
+                    return "unrestored";
+                }
                 foreach (KeyValuePair<uint, byte[]> item in items)
                     if (!ClipboardText.SetBytes(item.Key, item.Value)) ok = false;
                 if (metafile != IntPtr.Zero)

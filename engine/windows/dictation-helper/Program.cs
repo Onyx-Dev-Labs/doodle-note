@@ -17,6 +17,8 @@ namespace DoodleNote.DictationHelper
     internal static class Program
     {
         static readonly SnapshotStore snapshots = new SnapshotStore();
+        /// <summary>Wall-clock bounds for reading a watched field and a selection through the app's provider.</summary>
+        const int WatchReadBudgetMs = 1500, SelectionBudgetMs = 1500;
         static readonly FieldWatches watches = new FieldWatches();
         // UI Automation calls can block on an unresponsive app; keep them off the main
         // thread, which services the hooks.
@@ -29,7 +31,10 @@ namespace DoodleNote.DictationHelper
         [STAThread]
         static int Main(string[] args)
         {
+            // The clipboard reader (see ClipboardReader): no hooks, no window, no protocol of its own.
+            if (args.Length == 1 && args[0] == ClipboardReader.Argument) return ClipboardReader.Serve();
             Wire.Start();
+            SelfImage.Hold();
             Ui.Install();
             work = new WorkQueue("dictation.work");
             audio = new WorkQueue("dictation.audio");
@@ -77,6 +82,7 @@ namespace DoodleNote.DictationHelper
         {
             if (Interlocked.Exchange(ref exiting, 1) == 1) return;
             Ui.Invoke(delegate { HoldWatcher.Shared.StopAll(); MouseCapture.Shared.Cancel("stopped"); return true; }, 1000, false);
+            ClipboardReaderClient.Shutdown();
             audio.Sync(delegate { OutputAudio.Restore(); }, 2000);
             Wire.Drain(500);
             Environment.Exit(0);
@@ -219,7 +225,13 @@ namespace DoodleNote.DictationHelper
                         work.Async(id, delegate
                         {
                             FieldWatches.Watch watch = watches.Get(watchId);
-                            Wire.Reply(id, true, watch == null ? Wire.Fields("state", "gone") : FieldRead.Read(watch));
+                            if (watch == null) { Wire.Reply(id, true, Wire.Fields("state", "gone")); return; }
+                            // The read goes through the watched app's provider: bounded, so a hung app
+                            // reads as unreadable instead of stalling every later request.
+                            Dictionary<string, object> read;
+                            Bounded.Outcome outcome = Bounded.Call(token => FieldRead.Read(watch), WatchReadBudgetMs, out read);
+                            Wire.Reply(id, true, outcome == Bounded.Outcome.Ok ? read
+                                : Wire.Fields("state", "unreadable", "busy", outcome == Bounded.Outcome.Busy));
                         });
                     }
                     break;
@@ -243,19 +255,20 @@ namespace DoodleNote.DictationHelper
                                 Wire.Reply(id, false, Wire.Fields("reason", "no-target"));
                                 return;
                             }
-                            System.Windows.Automation.AutomationElement current;
-                            if (!Target.StillFocused(snapshot, out current))
+                            string reason = null, selected = null;
+                            Bounded.Outcome outcome = Bounded.Call(delegate (CallToken token)
                             {
-                                Wire.Reply(id, false, Wire.Fields("reason", "focus-changed"));
-                                return;
-                            }
-                            ElementFacts facts = ElementFacts.Of(current, Target.CurrentGui());
-                            if (facts.Secure || (snapshot.Facts != null && snapshot.Facts.Secure))
-                            {
-                                Wire.Reply(id, false, Wire.Fields("reason", "secure-field"));
-                                return;
-                            }
-                            Wire.Reply(id, true, Wire.Fields("text", UIA.Selection(current) ?? ""));
+                                System.Windows.Automation.AutomationElement current;
+                                if (!Target.StillFocused(snapshot, out current)) return "focus-changed";
+                                ElementFacts facts = ElementFacts.Of(current, Target.CurrentGui());
+                                if (!facts.Readable) return "unavailable";
+                                if (facts.Secure || (snapshot.Facts != null && snapshot.Facts.Secure)) return "secure-field";
+                                selected = UIA.Selection(current) ?? "";
+                                return null;
+                            }, SelectionBudgetMs, out reason);
+                            if (outcome != Bounded.Outcome.Ok) reason = "unavailable";
+                            if (reason != null) Wire.Reply(id, false, Wire.Fields("reason", reason, "busy", outcome == Bounded.Outcome.Busy));
+                            else Wire.Reply(id, true, Wire.Fields("text", selected));
                         });
                     }
                     break;
@@ -369,6 +382,14 @@ namespace DoodleNote.DictationHelper
                         uint pid = fg == IntPtr.Zero ? 0 : Native.WindowPid(fg);
                         Wire.Reply(id, true, Wire.Fields("foregroundPid", (double)pid, "above", pid != 0 && Native.RunsAboveUs(pid)));
                     });
+                    break;
+                case "__bounded-state":
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    {
+                        int threads;
+                        using (Process self = Process.GetCurrentProcess()) threads = self.Threads.Count;
+                        Wire.Reply(id, true, Wire.Fields("abandoned", Bounded.Abandoned, "liveWorkers", Bounded.LiveThreads, "processThreads", threads));
+                    }
                     break;
                 case "__state-lock-probe":
                     if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }

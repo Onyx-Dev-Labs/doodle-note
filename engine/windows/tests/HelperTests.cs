@@ -253,6 +253,18 @@ namespace DoodleNote.DictationHelper.Tests
             Dictionary<string, object> timings = (Dictionary<string, object>)back["timings"];
             Assert.Equal(600, timings["settleMs"], "settle");
             Assert.Equal(false, timings["skippedAx"], "skippedAx");
+            Assert.True(!back.ContainsKey("charsDelivered") && !back.ContainsKey("charsUnconfirmed"), "no typing counts for a paste");
+            DeliveryResult stopped = new DeliveryResult(DeliveryOutcome.Uncertain, "secure-field");
+            stopped.Method = "type";
+            stopped.CharsDelivered = 7;
+            stopped.CharsUnconfirmed = 1;
+            stopped.Clipboard = "unrestored";
+            stopped.ClipboardHolds = "foreign";
+            Dictionary<string, object> typed = Wire.Parse(Wire.Serialize(stopped.Fields()));
+            Assert.Equal("secure-field", typed["reason"], "the specific abort reason is kept");
+            Assert.Equal(7, typed["charsDelivered"], "confirmed characters");
+            Assert.Equal(1, typed["charsUnconfirmed"], "the unconfirmed key is reported separately");
+            Assert.Equal("foreign", typed["clipboardHolds"], "what the clipboard holds");
             Assert.Equal("delivered", new DeliveryResult(DeliveryOutcome.Delivered, null).Fields()["outcome"], "delivered");
             Assert.True(!new DeliveryResult(DeliveryOutcome.Delivered, null).Fields().ContainsKey("reason"), "no reason");
         }
@@ -460,6 +472,112 @@ namespace DoodleNote.DictationHelper.Tests
             Assert.True(HelperIdentity.OutputStateFileName(prod) != HelperIdentity.OutputStateFileName(qa), "distinct state files");
             Assert.Equal("Local\\DoodleNote-Bark-output-com.doodlenote.desktop", HelperIdentity.OutputMutexName(prod), "mutex name");
             Assert.Equal("DoodleNote-Bark-output-com.doodlenote.desktop.json", HelperIdentity.OutputStateFileName(prod), "file name");
+        }
+
+        public static void MouseEvidenceOlderThanTheWindowExpires()
+        {
+            HookLossDetector mouse = new HookLossDetector(2, false, 5);
+            Assert.Equal(false, mouse.Observe(true, false, false), "first suspect");
+            for (int i = 0; i < 4; i++) Assert.Equal(false, mouse.Observe(false, false, false), "quiet tick " + i);
+            Assert.Equal(false, mouse.Observe(true, false, false), "five ticks (10 s) later the first suspect has expired");
+            Assert.Equal(true, mouse.Observe(true, false, false), "two suspects inside the window: lost");
+            HookLossDetector near = new HookLossDetector(2, false, 5);
+            near.Observe(true, false, false);
+            near.Observe(false, false, false);
+            near.Observe(false, false, false);
+            Assert.Equal(true, near.Observe(true, false, false), "two suspects three ticks apart: lost");
+        }
+
+        public static void ClassicTextBoxesAreEditAndRichEditOnly()
+        {
+            string[] classic = { "Edit", "RICHEDIT50W", "RichEdit20W", "RichEdit20A", "RichEditD2DPT", "RichEdit",
+                "WindowsForms10.EDIT.app.0.141b42a_r6_ad1", "WindowsForms10.RichEdit20W.app.0.141b42a_r6_ad1", "WindowsForms10.RICHEDIT50W.app.0.2bf8098_r6_ad1" };
+            foreach (string name in classic) Assert.True(ClassicTextBox.IsClassicClass(name, ""), name + " is a classic text box");
+            Assert.True(ClassicTextBox.IsClassicClass("TMyMemo", "Edit"), "a superclassed Edit (RealGetWindowClass) counts");
+            string[] uiaOnly = { "Chrome_RenderWidgetHostHWND", "Chrome_WidgetWin_1", "MozillaWindowClass", "Windows.UI.Core.CoreWindow",
+                "Windows.UI.Input.InputSite.WindowClass", "SunAwtFrame", "SunAwtCanvas", "Qt5QWindowIcon", "Qt663QWindowIcon", "_WwG", "EXCEL7",
+                "OpusApp", "Intermediate D3D Window", "CefBrowserWindow", "WebView2", "DirectUIHWND", "Scintilla", "" };
+            foreach (string name in uiaOnly) Assert.True(!ClassicTextBox.IsClassicClass(name, name), name + " gets no typing fallback");
+        }
+
+        static int BoundedIdle()
+        {
+            for (int i = 0; i < 200 && (Bounded.Abandoned > 0 || Bounded.LiveThreads > 1); i++) System.Threading.Thread.Sleep(10);
+            return System.Diagnostics.Process.GetCurrentProcess().Threads.Count;
+        }
+
+        public static void TwentyOverrunsKeepTheThreadCountBoundedAndItReturnsToBaseline()
+        {
+            int warm;
+            Bounded.Run(() => 1, 1000, out warm); // the one current worker exists before the baseline
+            int baseline = BoundedIdle();
+            System.Threading.ManualResetEventSlim stuck = new System.Threading.ManualResetEventSlim(false);
+            int timedOut = 0, busy = 0, peakLive = 0, peakThreads = 0;
+            for (int i = 0; i < 20; i++)
+            {
+                int result;
+                Bounded.Outcome outcome = Bounded.Call(token => { stuck.Wait(); return 1; }, 20, out result);
+                if (outcome == Bounded.Outcome.TimedOut) timedOut++;
+                if (outcome == Bounded.Outcome.Busy) busy++;
+                peakLive = Math.Max(peakLive, Bounded.LiveThreads);
+                peakThreads = Math.Max(peakThreads, System.Diagnostics.Process.GetCurrentProcess().Threads.Count);
+            }
+            Assert.Equal(Bounded.MaxAbandoned, timedOut, "only the cap's worth of calls may be stuck");
+            Assert.Equal(20 - Bounded.MaxAbandoned, busy, "past the cap every call is refused at once (helper busy)");
+            Assert.Equal(Bounded.MaxAbandoned, Bounded.Abandoned, "the stuck workers are counted exactly");
+            Assert.True(peakLive <= Bounded.MaxAbandoned + 1, "live worker threads stay bounded (" + peakLive + ")");
+            Assert.True(peakThreads <= baseline + Bounded.MaxAbandoned + 2, "process threads stay bounded (" + baseline + " -> " + peakThreads + ")");
+            stuck.Set();
+            int after = BoundedIdle();
+            Assert.Equal(0, Bounded.Abandoned, "every retired worker ended once its call returned");
+            Assert.True(Bounded.LiveThreads <= 1, "back to at most the one current worker");
+            Assert.True(after <= baseline + 1, "process threads back to baseline (" + baseline + " -> " + after + ")");
+            int again;
+            Assert.Equal(Bounded.Outcome.Ok, Bounded.Call(token => 5, 1000, out again), "calls work again");
+            Assert.Equal(5, again, "with their result");
+        }
+
+        public static void ACallGivenUpOnNeverAppliesItsSideEffectLater()
+        {
+            System.Threading.ManualResetEventSlim gate = new System.Threading.ManualResetEventSlim(false);
+            int applied = 0, queuedRan = 0, result;
+            bool mayHaveApplied;
+            Bounded.Outcome outcome = Bounded.Call(token =>
+            {
+                gate.Wait();
+                token.Commit(delegate { applied++; });
+                return 1;
+            }, 20, out result, out mayHaveApplied);
+            Assert.Equal(Bounded.Outcome.TimedOut, outcome, "the call overran");
+            Assert.Equal(false, mayHaveApplied, "nothing had been applied when it was given up on");
+            gate.Set();
+            BoundedIdle();
+            Assert.Equal(0, applied, "the late side effect was refused");
+            Assert.Equal(0, queuedRan, "nothing ran late");
+            // A side effect already under way when the caller gives up is reported, never hidden.
+            System.Threading.ManualResetEventSlim inside = new System.Threading.ManualResetEventSlim(false);
+            outcome = Bounded.Call(token =>
+            {
+                token.Commit(delegate { inside.Wait(); });
+                return 1;
+            }, 20, out result, out mayHaveApplied);
+            Assert.Equal(Bounded.Outcome.TimedOut, outcome, "overran inside the side effect");
+            Assert.Equal(true, mayHaveApplied, "reported as possibly applied");
+            inside.Set();
+            BoundedIdle();
+        }
+
+        public static void TheSharedWatcherGetsItsRealTickAndEvidenceWindow()
+        {
+            // Static fields initialize in the order written: Shared must not be built before the tick
+            // it reads (round 5 built it first, so its retry clocks ran on a 1 ms tick and the 30 s
+            // cap became 30000 ticks).
+            BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            HoldWatcher shared = HoldWatcher.Shared;
+            RetryClock retry = (RetryClock)typeof(HoldWatcher).GetField("keyRetry", flags).GetValue(shared);
+            Assert.Equal(2000, typeof(RetryClock).GetField("tickMs", flags).GetValue(retry), "the key retry clock ticks every 2 s");
+            HookLossDetector mouse = (HookLossDetector)typeof(HoldWatcher).GetField("mouseDetector", flags).GetValue(shared);
+            Assert.Equal(5, typeof(HookLossDetector).GetField("windowTicks", flags).GetValue(mouse), "the mouse evidence window is 10 s");
         }
     }
 }

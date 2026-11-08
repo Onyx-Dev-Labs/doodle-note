@@ -132,8 +132,11 @@ namespace DoodleNote.DictationHelper
             catch (Exception) { return null; }
         }
 
-        /// <summary>Select the one occurrence of text in the control. False when it cannot.</summary>
-        public static bool SelectText(AutomationElement element, string target)
+        /// <summary>
+        /// Select the one occurrence of text in the control. False when it cannot, or when the bounded
+        /// call it runs in was already given up on (the selection is then never changed).
+        /// </summary>
+        public static bool SelectText(AutomationElement element, string target, CallToken token)
         {
             try
             {
@@ -141,7 +144,7 @@ namespace DoodleNote.DictationHelper
                 if (pattern == null) return false;
                 TextPatternRange found = pattern.DocumentRange.FindText(target, false, false);
                 if (found == null) return false;
-                found.Select();
+                if (!token.Commit(delegate { found.Select(); })) return false;
                 return Selection(element) == target;
             }
             catch (Exception) { return false; }
@@ -217,6 +220,12 @@ namespace DoodleNote.DictationHelper
         public ElementFacts Facts;
         /// <summary>The target runs elevated and this helper does not: Windows drops typed input to it.</summary>
         public bool AboveUs;
+        /// <summary>
+        /// Null when the snapshot was taken completely. Otherwise why not: "target-unverifiable" (a
+        /// provider call overran its bound) or "helper-busy" (too many provider calls are stuck). An
+        /// incomplete snapshot is never delivered to.
+        /// </summary>
+        public string Incomplete;
         public DateTime Taken = DateTime.UtcNow;
 
         public bool HasElement { get { return Element != null || FocusWindow != IntPtr.Zero; } }
@@ -323,24 +332,28 @@ namespace DoodleNote.DictationHelper
             return owner == (int)pid ? element : null;
         }
 
-        /// <summary>Capture the foreground app and its focused control, without activating anything.</summary>
+        /// <summary>Wall-clock bound for each provider call while capturing a snapshot.</summary>
+        const int CaptureCallMs = 400;
+        /// <summary>Wall-clock bound for the whole wait for a slow app's automation tree.</summary>
+        const int CaptureBudgetMs = 1200;
+
+        sealed class ElementCapture
+        {
+            public string RuntimeId;
+            public ElementFacts Facts;
+        }
+
+        /// <summary>
+        /// Capture the foreground app and its focused control, without activating anything. Every UI
+        /// Automation call runs bounded (Bounded): a provider that overruns marks the snapshot
+        /// incomplete (Incomplete), and it is then refused at delivery instead of trusted.
+        /// </summary>
         public static TargetSnapshot Capture(string id)
         {
             IntPtr window;
             uint pid, thread;
             if (!Foreground(out window, out pid, out thread)) return null;
             Native.GUITHREADINFO gui = GuiInfo(thread);
-            AutomationElement element = FocusedIn(pid);
-            if (element == null)
-            {
-                // Chromium and Electron build their automation tree when a client first
-                // asks, and take a moment to do so. Wait briefly; delivery re-validates anyway.
-                for (int i = 0; i < 20 && element == null; i++)
-                {
-                    Thread.Sleep(30);
-                    element = FocusedIn(pid);
-                }
-            }
             string path = Native.ProcessPath(pid);
             TargetSnapshot snapshot = new TargetSnapshot();
             snapshot.Id = id;
@@ -350,10 +363,42 @@ namespace DoodleNote.DictationHelper
             snapshot.AppPath = path;
             snapshot.BundleId = AppNames.ExeName(path);
             snapshot.AppName = AppNames.DisplayName(path, pid);
-            snapshot.Element = element;
-            snapshot.RuntimeId = UIA.RuntimeId(element);
-            snapshot.Facts = ElementFacts.Of(element, gui);
             snapshot.AboveUs = Native.RunsAboveUs(pid);
+
+            AutomationElement element = null;
+            Stopwatch budget = Stopwatch.StartNew();
+            for (int attempt = 0; ; attempt++)
+            {
+                Bounded.Outcome found = Bounded.Call(token => FocusedIn(pid), CaptureCallMs, out element);
+                if (found == Bounded.Outcome.Busy) { snapshot.Incomplete = "helper-busy"; break; }
+                if (found == Bounded.Outcome.TimedOut) { snapshot.Incomplete = "target-unverifiable"; break; }
+                if (element != null) break;
+                // Chromium and Electron build their automation tree when a client first asks, and
+                // take a moment to do so. Wait briefly (bounded); delivery re-validates anyway.
+                if (attempt >= 20 || budget.ElapsedMilliseconds + 30 > CaptureBudgetMs) break;
+                Thread.Sleep(30);
+            }
+            snapshot.Element = snapshot.Incomplete == null ? element : null;
+            if (snapshot.Incomplete == null && element != null)
+            {
+                ElementCapture facts;
+                Bounded.Outcome read = Bounded.Call(token => new ElementCapture { RuntimeId = UIA.RuntimeId(element), Facts = ElementFacts.Of(element, gui) },
+                    CaptureCallMs, out facts);
+                if (read == Bounded.Outcome.Ok)
+                {
+                    snapshot.RuntimeId = facts.RuntimeId;
+                    snapshot.Facts = facts.Facts;
+                }
+                else snapshot.Incomplete = read == Bounded.Outcome.Busy ? "helper-busy" : "target-unverifiable";
+            }
+            if (snapshot.Facts == null) snapshot.Facts = ElementFacts.Of(null, gui);
+            if (snapshot.Incomplete != null)
+            {
+                // Nothing read through a provider that overran is kept.
+                snapshot.Element = null;
+                snapshot.RuntimeId = null;
+                snapshot.Facts.Readable = false;
+            }
             return snapshot;
         }
 
@@ -375,6 +420,7 @@ namespace DoodleNote.DictationHelper
                 output["editable"] = snapshot.Facts.Editable && !snapshot.AboveUs;
             }
             if (snapshot.AboveUs) output["elevated"] = true;
+            if (snapshot.Incomplete != null) output["incomplete"] = snapshot.Incomplete;
             return output;
         }
 

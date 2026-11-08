@@ -143,8 +143,31 @@ namespace DoodleNote.DictationHelper
         [DllImport("user32.dll")]
         public static extern IntPtr GetParent(IntPtr hwnd);
         public const uint WM_GETTEXTLENGTH = 0x000E;
+        public const uint EM_GETSEL = 0x00B0;
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint RealGetWindowClass(IntPtr hwnd, StringBuilder name, uint max);
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+        [DllImport("user32.dll")]
+        public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+        /// <summary>The tick of the last real (hardware or SendInput) input; SetCursorPos does not move it. 0 when unavailable.</summary>
+        public static uint LastInputTick()
+        {
+            LASTINPUTINFO info = new LASTINPUTINFO();
+            info.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+            return GetLastInputInfo(ref info) ? info.dwTime : 0;
+        }
+        /// <summary>GetAsyncKeyState: down now, and whether it was pressed since the previous query (the low bit).</summary>
+        public static void KeyState(int vk, out bool down, out bool pressedSince)
+        {
+            short state = GetAsyncKeyState(vk);
+            down = (state & 0x8000) != 0;
+            pressedSince = (state & 1) != 0;
+        }
         public const uint SMTO_ABORTIFHUNG = 0x0002, SMTO_BLOCK = 0x0001;
-        [DllImport("user32.dll", SetLastError = true)]
+        // The Unicode entry point: the A version translates text messages through the ANSI code page
+        // (WM_GETTEXTLENGTH would count bytes, not UTF-16 units) and returns EM_GETSEL truncated.
+        [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
 
         // Clipboard.
@@ -182,6 +205,8 @@ namespace DoodleNote.DictationHelper
         public static extern IntPtr CopyEnhMetaFile(IntPtr source, IntPtr fileName);
         [DllImport("gdi32.dll")]
         public static extern uint GetEnhMetaFileBits(IntPtr hemf, uint size, byte[] buffer);
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr SetEnhMetaFileBits(uint size, byte[] bits);
         [DllImport("gdi32.dll")]
         public static extern bool DeleteEnhMetaFile(IntPtr hemf);
         public const uint GMEM_MOVEABLE = 0x0002;

@@ -16,6 +16,13 @@ namespace DoodleNote.DictationHelper
     /// </summary>
     internal sealed class HoldWatcher
     {
+        // Static fields initialize in the order written, and Shared's constructor reads the two below,
+        // so they come first (otherwise Shared would see 0 for both).
+        /// <summary>How often the watchdog runs (a test build may shorten it).</summary>
+        static readonly int WatchdogMs = TestMode.Int("DICTATION_HELPER_WATCHDOG_MS", 2000);
+        /// <summary>10 s of watchdog ticks.</summary>
+        static readonly int MouseEvidenceWindowTicks = Math.Max(1, 10000 / WatchdogMs);
+
         public static readonly HoldWatcher Shared = new HoldWatcher();
 
         IntPtr keyHook = IntPtr.Zero;
@@ -55,10 +62,25 @@ namespace DoodleNote.DictationHelper
         bool havePrevCursor;
         readonly HookLossDetector keyDetector = new HookLossDetector(1);
         /// <summary>
-        /// Two suspect ticks for the mouse (an app moving the cursor itself once is not input); quiet
-        /// ticks in between do not clear the evidence, so occasional use still adds up.
+        /// Two suspect ticks for the mouse within MouseEvidenceWindowTicks (10 s): one stray cursor move
+        /// is not enough, and evidence older than the window expires, so isolated SetCursorPos calls by
+        /// other apps never add up to a false alarm; quiet ticks inside the window do not clear it.
         /// </summary>
-        readonly HookLossDetector mouseDetector = new HookLossDetector(2, false);
+        readonly HookLossDetector mouseDetector = new HookLossDetector(2, false, MouseEvidenceWindowTicks);
+        /// <summary>
+        /// The armed key and button are sampled this often on the hook thread (GetAsyncKeyState, its
+        /// state and its "pressed since" bit), so a short stationary press between watchdog ticks is
+        /// still seen. A transition with no hook callback across the surrounding samples is a suspect.
+        /// </summary>
+        public const int SampleMs = 40;
+        Ui.Cancelable sampler;
+        bool sampledKeyDown, sampledButtonDown;
+        /// <summary>Callback counts at the previous two samples (a callback always precedes the state change it causes).</summary>
+        long keyCountAtSample1, keyCountAtSample2, mouseCountAtSample1, mouseCountAtSample2;
+        /// <summary>Transitions of the armed key / button seen with no callback, since the last watchdog tick.</summary>
+        int keySuspectSamples, buttonSuspectSamples;
+        /// <summary>The last-input tick at the previous watchdog tick: real input moves it, SetCursorPos does not.</summary>
+        uint prevLastInput;
         /// <summary>Per hook: when to retry re-installing it (4/8/16/30 s while re-installing fails).</summary>
         readonly RetryClock keyRetry = new RetryClock(WatchdogMs), mouseRetry = new RetryClock(WatchdogMs);
         /// <summary>The armed mouse button's async state on the previous tick (stationary-use evidence).</summary>
@@ -69,8 +91,6 @@ namespace DoodleNote.DictationHelper
         /// <summary>Test build only: drop the key / mouse hook so the watchdog must notice and re-install it.</summary>
         int dropKeyHookForTest, dropMouseHookForTest;
 #endif
-        /// <summary>How often the watchdog runs (a test build may shorten it).</summary>
-        static readonly int WatchdogMs = TestMode.Int("DICTATION_HELPER_WATCHDOG_MS", 2000);
 
         public bool Active { get { return keyHook != IntPtr.Zero; } }
         public bool MouseActive { get { return mouseHook != IntPtr.Zero; } }
@@ -121,6 +141,7 @@ namespace DoodleNote.DictationHelper
             minHoldMs = HoldDelay(minHold);
             prevKeyCallbackCount = keyCallbackCount;
             prevArmedDown = Native.IsDown(spec.Vk);
+            ResetKeySamples();
             keyDetector.Reset();
             RaiseHookThreadPriority();
             StartWatchdog();
@@ -167,6 +188,8 @@ namespace DoodleNote.DictationHelper
             prevMouseCallbackCount = mouseCallbackCount;
             havePrevCursor = Native.GetCursorPos(out prevCursor);
             prevButtonDown = Native.IsDown(ButtonVk((int)button));
+            ResetMouseSamples();
+            prevLastInput = Native.LastInputTick();
             mouseDetector.Reset();
             RaiseHookThreadPriority();
             StartWatchdog();
@@ -374,16 +397,68 @@ namespace DoodleNote.DictationHelper
 
         void StartWatchdog()
         {
+            if (sampler == null) sampler = Ui.Every(SampleMs, SampleTick);
             if (watchdog != null) return;
             watchdog = Ui.Every(WatchdogMs, WatchdogTick);
         }
 
         void MaybeStopWatchdog()
         {
-            if (watchdog != null && keySpec == null && mouseMachine == null)
+            if (keySpec != null || mouseMachine != null) return;
+            if (watchdog != null)
             {
                 watchdog.Cancel();
                 watchdog = null;
+            }
+            if (sampler != null)
+            {
+                sampler.Cancel();
+                sampler = null;
+            }
+        }
+
+        void ResetKeySamples()
+        {
+            if (keySpec != null) sampledKeyDown = Native.IsDown(keySpec.Vk);
+            keyCountAtSample1 = keyCountAtSample2 = keyCallbackCount;
+            keySuspectSamples = 0;
+        }
+
+        void ResetMouseSamples()
+        {
+            if (mouseButton >= 0) sampledButtonDown = Native.IsDown(ButtonVk(mouseButton));
+            mouseCountAtSample1 = mouseCountAtSample2 = mouseCallbackCount;
+            buttonSuspectSamples = 0;
+        }
+
+        /// <summary>
+        /// Every SampleMs on the hook thread: did the armed key or button change state (or report a
+        /// press since the last query) while its hook delivered no callback across this and the previous
+        /// sample interval? The hook runs on this thread and Windows waits for it before updating the
+        /// key state, so a live hook's callback always comes first; two intervals absorb the one case
+        /// where a sample lands between the callback and the state update.
+        /// </summary>
+        public void SampleTick()
+        {
+            if (keySpec != null && keyHook != IntPtr.Zero)
+            {
+                bool down, pressed;
+                Native.KeyState(keySpec.Vk, out down, out pressed);
+                long count = keyCallbackCount;
+                if ((down != sampledKeyDown || pressed) && count == keyCountAtSample2) keySuspectSamples++;
+                sampledKeyDown = down;
+                keyCountAtSample2 = keyCountAtSample1;
+                keyCountAtSample1 = count;
+            }
+            if (mouseMachine != null && mouseHook != IntPtr.Zero && mouseButton >= 0)
+            {
+                bool down, pressed;
+                Native.KeyState(ButtonVk(mouseButton), out down, out pressed);
+                long count = mouseCallbackCount;
+                if ((down != sampledButtonDown || pressed) && count == mouseCountAtSample2) buttonSuspectSamples++;
+                sampledButtonDown = down;
+                mouseCountAtSample2 = mouseCountAtSample1;
+                mouseCountAtSample1 = count;
             }
         }
 
@@ -415,9 +490,12 @@ namespace DoodleNote.DictationHelper
             if (wantKey && keyHook != IntPtr.Zero)
             {
                 bool armedDown = Native.IsDown(keySpec.Vk);
-                bool transitioned = armedDown != prevArmedDown;
                 long count = keyCallbackCount;
                 bool advanced = count != prevKeyCallbackCount;
+                // The state at the two ticks, or any transition the 40 ms sampler saw with no callback
+                // (a short press between ticks leaves the state unchanged at both).
+                bool transitioned = armedDown != prevArmedDown || keySuspectSamples > 0;
+                keySuspectSamples = 0;
                 prevArmedDown = armedDown;
                 prevKeyCallbackCount = count;
                 if (keyDetector.Observe(transitioned && !advanced, advanced, above))
@@ -431,12 +509,19 @@ namespace DoodleNote.DictationHelper
             {
                 Native.POINT cursor;
                 bool haveCursor = Native.GetCursorPos(out cursor); // false on a secure desktop: no evidence
-                bool moved = haveCursor && havePrevCursor && (cursor.X != prevCursor.X || cursor.Y != prevCursor.Y);
+                uint lastInput = Native.LastInputTick();
+                // A cursor move counts only with real input meanwhile: another app's SetCursorPos moves
+                // the cursor without input (and without a hook callback), and is never evidence.
+                bool realInput = lastInput != 0 && lastInput != prevLastInput;
+                prevLastInput = lastInput;
+                bool moved = haveCursor && havePrevCursor && realInput && (cursor.X != prevCursor.X || cursor.Y != prevCursor.Y);
                 if (haveCursor) { prevCursor = cursor; havePrevCursor = true; }
-                // The armed button's own state, read passively: pressing it without moving the mouse
-                // is evidence too (a button the live hook swallows never changes this state).
+                // The armed button's own state, read passively at the tick and every 40 ms in between:
+                // pressing it without moving the mouse is evidence too (a button the live hook swallows
+                // never changes this state).
                 bool buttonDown = Native.IsDown(ButtonVk(mouseButton));
-                bool buttonMoved = buttonDown != prevButtonDown;
+                bool buttonMoved = buttonDown != prevButtonDown || buttonSuspectSamples > 0;
+                buttonSuspectSamples = 0;
                 prevButtonDown = buttonDown;
                 long count = mouseCallbackCount;
                 bool advanced = count != prevMouseCallbackCount;
@@ -467,6 +552,7 @@ namespace DoodleNote.DictationHelper
                 keyRetry.Succeeded();
                 prevKeyCallbackCount = keyCallbackCount;
                 prevArmedDown = Native.IsDown(keySpec.Vk);
+                ResetKeySamples();
                 keyDetector.Reset();
                 if (keyLostAnnounced) { keyLostAnnounced = false; AnnounceHooks(); }
                 return;
@@ -485,6 +571,8 @@ namespace DoodleNote.DictationHelper
                 prevMouseCallbackCount = mouseCallbackCount;
                 havePrevCursor = Native.GetCursorPos(out prevCursor);
                 prevButtonDown = Native.IsDown(ButtonVk(mouseButton));
+                ResetMouseSamples();
+                prevLastInput = Native.LastInputTick();
                 mouseDetector.Reset();
                 if (mouseLostAnnounced) { mouseLostAnnounced = false; AnnounceHooks(); }
                 return;
