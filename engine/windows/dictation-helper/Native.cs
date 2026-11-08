@@ -141,13 +141,36 @@ namespace DoodleNote.DictationHelper
         public static DateTime BootTimeUtc { get { return DateTime.UtcNow - TimeSpan.FromMilliseconds(GetTickCount64()); } }
 
         /// <summary>
-        /// A random key for this logon, kept in a VOLATILE registry key (HKCU\Software\DoodleNote.Bark.Session,
-        /// one value per app identity): it lives as long as the user's hive is loaded, so it is gone after a
-        /// logoff or a reboot, and no wall clock is involved. Created once per logon under a mutex (two
-        /// helpers starting together agree on it). Empty when the registry cannot be used.
+        /// Windows' boot counter (HKLM\...\Memory Management\PrefetchParameters\BootId), readable by any user:
+        /// a different value is a different boot, with no wall clock involved. Empty when unavailable.
         /// </summary>
-        public static string LogonSessionKey(string identity)
+        public static string BootId()
         {
+            try
+            {
+                using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters"))
+                {
+                    object value = key == null ? null : key.GetValue("BootId");
+                    return value is int ? ((int)value).ToString() : "";
+                }
+            }
+            catch (Exception) { return ""; }
+        }
+
+        public const string SessionKeyPath = @"Software\DoodleNote.Bark.Session";
+
+        /// <summary>
+        /// A random key for this logon, kept in a VOLATILE registry key (HKCU\Software\DoodleNote.Bark.Session, one
+        /// value per app identity, "key:tick it was created at"). Volatile means it is removed when the user's hive
+        /// is unloaded (logoff, reboot); the LUID covers a new logon while the hive stayed loaded, and the boot
+        /// counter a new boot. A key of that name that already exists as a normal (persistent) key (an older build,
+        /// a registry import, a profile tool) would survive reboots: it is detected (a non-volatile subkey can be
+        /// created under it) and replaced by a volatile one. Created once per logon under a mutex (two helpers
+        /// starting together agree on it). Key empty when the registry cannot be used or the key not verified.
+        /// </summary>
+        public static SessionKeyInfo LogonSessionKey(string identity, string path = SessionKeyPath)
+        {
+            SessionKeyInfo info = new SessionKeyInfo();
             try
             {
                 using (System.Threading.Mutex mutex = new System.Threading.Mutex(false, "Local\\DoodleNote-Bark-session-key-" + identity))
@@ -156,22 +179,46 @@ namespace DoodleNote.DictationHelper
                     try
                     {
                         try { held = mutex.WaitOne(2000); } catch (System.Threading.AbandonedMutexException) { held = true; }
-                        using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\DoodleNote.Bark.Session",
+                        if (!held) { info.Note = "the key could not be agreed with another helper"; return info; }
+                        if (!EnsureVolatile(path, info)) return info;
+                        using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(path,
                             Microsoft.Win32.RegistryKeyPermissionCheck.ReadWriteSubTree, Microsoft.Win32.RegistryOptions.Volatile))
                         {
-                            if (key == null) return "";
+                            if (key == null) { info.Note = "the key could not be opened"; return info; }
                             string existing = key.GetValue(identity) as string;
-                            if (existing != null && existing.Length == 32) return existing;
-                            if (!held) return ""; // could not agree with another helper: unknown, never a guess
-                            string fresh = Guid.NewGuid().ToString("N");
-                            key.SetValue(identity, fresh, Microsoft.Win32.RegistryValueKind.String);
-                            return fresh;
+                            if (SessionKeyInfo.TryParse(existing, info)) return info;
+                            info.Key = Guid.NewGuid().ToString("N");
+                            info.CreatedTick = (long)GetTickCount64();
+                            info.CreatedHere = true;
+                            key.SetValue(identity, info.Key + ":" + info.CreatedTick, Microsoft.Win32.RegistryValueKind.String);
+                            return info;
                         }
                     }
                     finally { if (held) mutex.ReleaseMutex(); }
                 }
             }
-            catch (Exception) { return ""; }
+            catch (Exception error) { info.Key = ""; info.Note = "registry: " + error.GetType().Name; return info; }
+        }
+
+        /// <summary>The key at path is volatile (or absent); a persistent one is deleted (and so recreated volatile). False: not verified.</summary>
+        static bool EnsureVolatile(string path, SessionKeyInfo info)
+        {
+            using (Microsoft.Win32.RegistryKey existing = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(path, true))
+            {
+                if (existing == null) return true;
+                string probe = "volatility-probe-" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    // A non-volatile subkey cannot be created under a volatile key (ERROR_CHILD_MUST_BE_VOLATILE).
+                    using (Microsoft.Win32.RegistryKey child = existing.CreateSubKey(probe)) { }
+                    existing.DeleteSubKey(probe, false);
+                }
+                catch (System.IO.IOException) { return true; } // volatile
+                catch (Exception error) { info.Note = "the key's volatility could not be checked: " + error.GetType().Name; return false; }
+            }
+            // A persistent key of our name: its values may predate this boot. Replace it.
+            try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(path, false); info.ReplacedPersistent = true; return true; }
+            catch (Exception error) { info.Note = "a persistent session key could not be replaced: " + error.GetType().Name; return false; }
         }
 
         /// <summary>This process's logon session (TokenStatistics.AuthenticationId); unique per logon until reboot. Empty when unreadable.</summary>
@@ -387,6 +434,31 @@ namespace DoodleNote.DictationHelper
                 return Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
             }
             finally { Marshal.FreeHGlobal(buffer); }
+        }
+    }
+
+    /// <summary>This logon's key (see Native.LogonSessionKey).</summary>
+    internal sealed class SessionKeyInfo
+    {
+        public string Key = "";
+        /// <summary>The tick count (since this boot) when the key was created.</summary>
+        public long CreatedTick;
+        /// <summary>This helper created it (it was absent, or replaced).</summary>
+        public bool CreatedHere;
+        /// <summary>A persistent key of our name was found and replaced by a volatile one.</summary>
+        public bool ReplacedPersistent;
+        public string Note = "";
+
+        public static bool TryParse(string value, SessionKeyInfo info)
+        {
+            if (value == null) return false;
+            int colon = value.IndexOf(':');
+            if (colon != 32) return false;
+            long tick;
+            if (!long.TryParse(value.Substring(33), out tick)) return false;
+            info.Key = value.Substring(0, 32);
+            info.CreatedTick = tick;
+            return true;
         }
     }
 }

@@ -46,8 +46,8 @@ namespace DoodleNote.DictationHelper
                 // A terminal request: an exit already under way (a restart's long wait) is shortened, and
                 // this thread waits for it to finish its bounded steps instead of ending the process now.
                 DeliveriesInFlight.Shorten(QuitWaitMs);
-                if (Volatile.Read(ref exiting) == 1) { WaitForExitInProgress(); return; }
-                Shutdown(ExitCrash, null, QuitWaitMs);
+                if (!TryOwnShutdown()) { shutdownDone.WaitOne(QuitWaitMs + HooksStopMs + ClipboardReaderClient.IdleExitWaitMs + AudioRestoreMs + DrainMs + 1000); return; }
+                RunShutdown(ExitCrash, null, QuitWaitMs);
             };
             Wire.Start();
             SelfImage.Hold();
@@ -64,13 +64,15 @@ namespace DoodleNote.DictationHelper
             audio.Async(OutputAudio.RecoverLeftover);
 
             // Being asked to quit must never leave the user's sound muted.
-            // A close or logoff event ends the process once this handler returns: an exit already under way
-            // (a restart's wait) is shortened and given the time to finish its bounded steps first.
+            // A close or logoff event: Windows ends a console process about 5 s after it, and at once when this
+            // handler returns. So the whole exit fits in ConsoleHandlerWaitMs: the wait for a delivery is
+            // shortened to ConsoleCloseWaitMs, and whichever thread owns the shutdown (this one, or one that
+            // started first) runs it while this handler waits for its completion signal.
             ctrlHandler = delegate(int type)
             {
-                DeliveriesInFlight.Shorten(QuitWaitMs);
-                if (Volatile.Read(ref exiting) == 1) { WaitForExitInProgress(); return true; }
-                Shutdown();
+                DeliveriesInFlight.Shorten(ConsoleCloseWaitMs);
+                if (TryOwnShutdown()) RunShutdown(0, null, ConsoleCloseWaitMs); // never returns (Environment.Exit)
+                shutdownDone.WaitOne(ConsoleHandlerWaitMs);
                 return true;
             };
             Native.SetConsoleCtrlHandler(ctrlHandler, true);
@@ -133,10 +135,16 @@ namespace DoodleNote.DictationHelper
         static void Shutdown() { Shutdown(0, null, QuitWaitMs); }
 
         /// <summary>
-        /// Another thread is already leaving (Environment.Exit ends this one too): wait out its bounded steps,
-        /// so a crash handler or a close event does not end the process in the middle of them.
+        /// A console close or logoff event: the wait for a delivery in progress, so that it plus the bounded clean-up
+        /// (hooks, readers, sound, drain) fits in ConsoleHandlerWaitMs, below the ~5 s Windows allows.
         /// </summary>
-        static void WaitForExitInProgress() { Thread.Sleep(QuitWaitMs + HooksStopMs + AudioRestoreMs + DrainMs + 1000); }
+        public const int ConsoleCloseWaitMs = 500, ConsoleHandlerWaitMs = 4500;
+
+        /// <summary>Set when the shutdown's steps are done (right before Environment.Exit).</summary>
+        static readonly ManualResetEvent shutdownDone = new ManualResetEvent(false);
+
+        /// <summary>One atomic step decides which thread runs the shutdown; every other starter waits for it.</summary>
+        static bool TryOwnShutdown() { return Interlocked.CompareExchange(ref exiting, 1, 0) == 0; }
 
         /// <summary>Leave to be replaced: only between deliveries (the running one finishes first).</summary>
         static void Restart(string reason, string why)
@@ -150,7 +158,13 @@ namespace DoodleNote.DictationHelper
 
         static void Shutdown(int exitCode, string restartReason, int waitMs)
         {
-            if (Interlocked.Exchange(ref exiting, 1) == 1) return;
+            if (!TryOwnShutdown()) return;
+            RunShutdown(exitCode, restartReason, waitMs);
+        }
+
+        /// <summary>The shutdown's steps; only the thread that won TryOwnShutdown runs them.</summary>
+        static void RunShutdown(int exitCode, string restartReason, int waitMs)
+        {
             // Every exit path: no new delivery starts, the running one finishes its restore and reply,
             // and an abandoned clipboard write finishes its rollback, all within the one wait (which
             // stdin closing shortens to QuitWaitMs). Past it, the transaction's record (PendingClipboard)
@@ -165,6 +179,7 @@ namespace DoodleNote.DictationHelper
             ClipboardReaderClient.Shutdown();
             if (audio != null) audio.Sync(delegate { OutputAudio.Restore(); }, AudioRestoreMs);
             Wire.Drain(DrainMs);
+            shutdownDone.Set();
             Environment.Exit(exitCode);
         }
 
@@ -435,6 +450,29 @@ namespace DoodleNote.DictationHelper
                             if (char.IsWhiteSpace(c) || char.IsPunctuation(c)) bits[cp >> 3] |= (byte)(1 << (cp & 7));
                         }
                         Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
+                    }
+                    break;
+                case "clipboard-offers":
+                    // Kept clipboard transactions the user may restore (formats and size only, never content).
+                    work.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("offers", PendingClipboard.Offers())); });
+                    break;
+                case "clipboard-restore":
+                    {
+                        // The user's Restore of an offer: runs only while the clipboard is as it was when offered.
+                        string record = Wire.Str(request, "record") ?? "";
+                        uint expect = (uint)(Wire.Num(request, "sequence") ?? 0);
+                        work.Async(id, delegate
+                        {
+                            if (!DeliveriesInFlight.Begin()) { Wire.Reply(id, true, Wire.Fields("result", "helper-busy")); return; }
+                            try { Wire.Reply(id, true, PendingClipboard.RestoreOffer(record, expect)); }
+                            finally { DeliveriesInFlight.End(); }
+                        });
+                    }
+                    break;
+                case "clipboard-dismiss":
+                    {
+                        string record = Wire.Str(request, "record") ?? "";
+                        work.Async(id, delegate { Wire.Reply(id, true, Wire.Fields("dismissed", PendingClipboard.DismissOffer(record))); });
                     }
                     break;
                 case "__clipboard-txn":
