@@ -533,9 +533,19 @@ launch the app repoints the "Open at login" entry (keeping a Task Manager
 disable: round 10 reads it from `Explorer\StartupApproved\Run` itself, because
 Electron's own lookup cannot match a Run value written through an 8.3 path and
 would answer "enabled"; when neither can tell, the entry is left as it is and
-the step stays pending) and MCP client configs (Claude Desktop, Claude Code, Codex) that
+the step stays pending: no login-item rewrite, only the step's status and progress
+are written. Round 11: which one decided is logged and kept in the progress marker,
+`loginItemSource`, and the e2e requires `startup-approved` after A3/B4/D7.
+Disclosed: an *empty* StartupApproved value, which Windows does not write (it
+writes 12 bytes) and whose meaning is undocumented, is not read as "enabled"; with
+an 8.3 Run program it stays unknown on every launch, so the step stays pending and
+the Run value keeps naming the removed exe (nothing starts at login) until the
+item is toggled in Task Manager or Open at login is turned on in Settings) and MCP client configs (Claude Desktop, Claude Code, Codex) that
 launched the old exe (`src/main/windows-install-migration.ts`). "Launched the old
-exe" is decided with 8.3 short names expanded on both sides (`isInsideFolder`):
+exe" is decided with 8.3 short names expanded on both sides (`isInsideFolder`;
+round 11: always on the resolved forms, so a path written inside the old folder
+counts only once it resolves there, and a junction inside it leading elsewhere
+does not):
 an MCP command or Run value the old app wrote while it was started through a
 short path (`C:\Users\PATRIC~1\...\desktop\DoodleNote.exe`) still matches, since
 the old folder's parent exists and expands; in the old folder's own place exactly
@@ -631,7 +641,18 @@ Windows) keeps the code of win/bark 9355b87 (`src/main/mcp-clients-logic-base.ts
 pinned by SHA-256) with one change: the write is a temporary file renamed over
 the config, in the file the base's `writeFileSync` wrote (the same resolution;
 where it cannot be determined, or the place holds no file, the base's in-place
-write). `src/main/agent-access-darwin.test.ts` compares a darwin service
+write). The replace is used only where the base's write would have been allowed
+too: the folder writable, and the file opened for writing first, as the base's
+write opened it (round 11: that descriptor, not an earlier access check, is the
+authority; a new file is linked into place, never over one that appeared
+meanwhile); any failure on the way, or a file replaced meanwhile, falls back to
+the base's in-place write. The temporary file's name is short and fixed
+(`.dn-<8 hex>.tmp`), whatever the config is called. Concurrency contract (tested):
+a permission change made before that open behaves as for the base (the base's
+write decides); one made after it is kept on the new file; one made in the
+microseconds between the last `fstat` and the rename lands on the replaced file
+instead; and a folder made read-only between the temporary file and the rename
+leaves that temporary file behind (the in-place write still succeeds). `src/main/agent-access-darwin.test.ts` compares a darwin service
 with the base service, byte for byte, on Connect, Disconnect and the status, and
 on 14 symbolic link topologies (a `..` after a folder link, dangling targets in
 linked folders, chains, loops) requires both writers to change the same file and
