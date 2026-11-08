@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
-  APP_REGISTRY_SCOPE,
+  appRegistryScope,
   RegistryAccess,
   asWindowsRegistry,
   type RegistryFfi,
@@ -19,35 +19,75 @@ import {
   writeInstallMigrationStatus
 } from './windows-install-record'
 import { runWindowsInstallMigration } from './windows-install-migration'
-import { APP_IDENTITY } from './app-identity'
+import { APP_IDENTITY, appIdentity } from './app-identity'
 import type { InstallMigrationStatus } from '../shared/install-migration-api'
 
 const guid = 'f85f8dcf-6782-5a3e-a989-3eae169d6efb'
 
-test('the app may read under Software, write only its status and delete only its record', () => {
-  const s = APP_REGISTRY_SCOPE
-  assert.ok(s.readable(`Software\\${guid}`, 'MigrationRecord'))
-  assert.ok(!s.readable('SYSTEM\\CurrentControlSet', 'x'))
-  assert.ok(!s.readable(`Software\\${guid}\\`, 'MigrationRecord'))
-  assert.ok(!s.readable(`Software\\${guid}`, 'Migration\0Record'))
-  // The login item's Run value, whose name is the app id (round 8, LOW-3), and only there.
+test("the worker's scope is its own identity: its record, its status, its Run value", () => {
+  const s = appRegistryScope(APP_IDENTITY)
+  const state = `Software\\${guid}`
+  const status = `Software\\DoodleNote-InstallStatus\\${guid}`
   const run = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+  // Allowed: exactly these.
+  assert.ok(s.readable(state, 'MigrationRecord'))
+  assert.ok(s.readable(state.toUpperCase(), 'migrationrecord'))
+  for (const name of ['AppMigration', 'AppMigrationReason', 'AppMigrationLastAttempt']) {
+    assert.ok(s.readable(status, name), name)
+    assert.ok(s.writable(status, name), name)
+  }
   assert.ok(s.readable(run, 'com.doodlenote.desktop'))
-  assert.ok(s.readable(run, 'com.doodlenote.desktop.qa'))
+  assert.ok(s.deletable(state, 'MigrationRecord'))
+  // Refused: another identity's keys (QA's GUID; any other syntactically valid GUID).
+  const qa = '320d0756-c91c-52c4-9287-55a7f514978d'
+  const other = '00000000-0000-0000-0000-000000000000'
+  for (const g of [qa, other]) {
+    assert.ok(!s.readable(`Software\\${g}`, 'MigrationRecord'), g)
+    assert.ok(!s.readable(`Software\\DoodleNote-InstallStatus\\${g}`, 'AppMigration'), g)
+    assert.ok(!s.writable(`Software\\DoodleNote-InstallStatus\\${g}`, 'AppMigration'), g)
+    assert.ok(!s.deletable(`Software\\${g}`, 'MigrationRecord'), g)
+  }
+  // Refused: other values in its own keys (the installer's, the journal's), other keys.
+  assert.ok(!s.readable(state, 'InstallLocation'))
+  assert.ok(!s.readable(`${state}\\InstallMigration`, 'SourceDir'))
+  assert.ok(!s.readable(status, 'LastResult'))
+  assert.ok(!s.readable(status, 'AppMigrationX'))
+  assert.ok(!s.readable('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', 'x'))
+  assert.ok(!s.readable('SYSTEM\\CurrentControlSet', 'x'))
+  assert.ok(!s.readable(`${state}\\`, 'MigrationRecord'))
+  assert.ok(!s.readable(state, 'Migration\0Record'))
+  // Refused: another app's Run value (QA's, a prefix, a longer name).
+  assert.ok(!s.readable(run, 'com.doodlenote.desktop.qa'))
+  assert.ok(!s.readable(run, 'com.doodlenote'))
   assert.ok(!s.readable(run, 'com.doodlenote.desktop\0x'))
-  assert.ok(!s.readable(run, '..\\x'))
-  assert.ok(!s.readable(`Software\\${guid}`, 'com.doodlenote.desktop'))
+  assert.ok(!s.readable(run, 'OneDrive'))
+  assert.ok(!s.readable(state, 'com.doodlenote.desktop'))
+  // Writes: only the three status values in its own status key.
+  assert.ok(!s.writable(status, 'LastResult'))
+  assert.ok(!s.writable(status, 'AppMigrationX'))
+  assert.ok(!s.writable(state, 'AppMigration'))
   assert.ok(!s.writable(run, 'com.doodlenote.desktop'))
+  assert.ok(!s.writable(run, 'AppMigration'))
+  // Deletes: only its own record.
   assert.ok(!s.deletable(run, 'com.doodlenote.desktop'))
-  assert.ok(s.writable(`Software\\DoodleNote-InstallStatus\\${guid}`, 'AppMigration'))
-  assert.ok(s.writable(`Software\\DoodleNote-InstallStatus\\${guid}`, 'AppMigrationReason'))
-  // Not the installer's own values, not another key.
-  assert.ok(!s.writable(`Software\\DoodleNote-InstallStatus\\${guid}`, 'LastResult'))
-  assert.ok(!s.writable(`Software\\${guid}`, 'AppMigration'))
-  assert.ok(!s.writable('Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'AppMigration'))
-  assert.ok(s.deletable(`Software\\${guid}`, 'MigrationRecord'))
-  assert.ok(!s.deletable(`Software\\${guid}\\InstallMigration`, 'Identity'))
-  assert.ok(!s.deletable(`Software\\${guid}`, 'Identity'))
+  assert.ok(!s.deletable(`${state}\\InstallMigration`, 'Identity'))
+  assert.ok(!s.deletable(state, 'Identity'))
+  assert.ok(!s.deletable(status, 'AppMigration'))
+  // The QA identity's scope is QA's alone.
+  const q = appRegistryScope(appIdentity('qa'))
+  assert.ok(q.readable(`Software\\${qa}`, 'MigrationRecord'))
+  assert.ok(q.readable(run, 'com.doodlenote.desktop.qa'))
+  assert.ok(!q.readable(state, 'MigrationRecord'))
+  assert.ok(!q.readable(run, 'com.doodlenote.desktop'))
+  assert.ok(!q.writable(status, 'AppMigration'))
+  assert.ok(!q.deletable(state, 'MigrationRecord'))
+  assert.throws(() => appRegistryScope({ appId: '..\\x', loginItemName: '..\\x' }), /not an app id/)
+  // The worker builds its scope from the identity it was built for, never from a message.
+  const worker = readFileSync(new URL('./engine-win.ts', import.meta.url), 'utf8')
+  assert.match(
+    worker,
+    /new RegistryAccess\(\s*\(\) => windowsFfi\(\) as unknown as RegistryFfi,\s*appRegistryScope\(APP_IDENTITY\)\s*\)/
+  )
 })
 
 /** A fake advapi32 over a Map, with RegGetValueW's sizing protocol. */
@@ -102,7 +142,13 @@ test('registry requests: exact text, absent is null, wrong type and out-of-scope
     [`Software\\${guid}|Number`, 7]
   ])
   const ffi = fakeFfi(values)
-  const access = new RegistryAccess(() => ffi)
+  const access = new RegistryAccess(() => ffi, appRegistryScope(APP_IDENTITY))
+  // The protocol (sizes, absent, types) over a scope that allows these names too.
+  const wide = new RegistryAccess(() => ffi, {
+    readable: (subKey) => subKey === `Software\\${guid}`,
+    writable: () => false,
+    deletable: () => false
+  })
   assert.deepEqual(
     access.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'MigrationRecord' }),
     {
@@ -110,13 +156,18 @@ test('registry requests: exact text, absent is null, wrong type and out-of-scope
       value: 'DNMR1|Jörg 李|😀'
     }
   )
-  assert.deepEqual(access.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'Missing' }), {
+  assert.deepEqual(wide.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'Missing' }), {
     ok: true,
     value: null
   })
-  assert.deepEqual(access.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'Number' }), {
+  assert.deepEqual(wide.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'Number' }), {
     ok: false,
     code: 'TYPE'
+  })
+  // The app's scope refuses those names (SCOPE, not TYPE: before any Win32 call).
+  assert.deepEqual(access.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'Number' }), {
+    ok: false,
+    code: 'SCOPE'
   })
   assert.deepEqual(access.handle({ op: 'read', subKey: 'SYSTEM\\Setup', name: 'x' }), {
     ok: false,
@@ -154,12 +205,12 @@ test('registry requests: exact text, absent is null, wrong type and out-of-scope
     ok: false,
     code: 'SCOPE'
   })
-  // The FFI is bound once.
-  assert.equal(ffi.calls.filter((call) => call.startsWith('bind')).length, 3)
+  // The FFI is bound once per access.
+  assert.equal(ffi.calls.filter((call) => call.startsWith('bind')).length, 6)
   // No FFI (not Windows, or Koffi failed to load): UNSUPPORTED, never a throw.
   const none = new RegistryAccess(() => {
     throw new Error('no koffi')
-  })
+  }, appRegistryScope(APP_IDENTITY))
   assert.deepEqual(none.handle({ op: 'read', subKey: `Software\\${guid}`, name: 'x' }), {
     ok: false,
     code: 'UNSUPPORTED'
@@ -181,7 +232,7 @@ test(
     const key = `Software\\DoodleNoteRegistryTest-${process.pid}`
     const statusKey = `${key}-status`
     const scope: RegistryScope = {
-      readable: APP_REGISTRY_SCOPE.readable,
+      readable: (subKey) => subKey === key || subKey === statusKey,
       writable: (subKey) => subKey === statusKey,
       deletable: (subKey, name) => subKey === key && name === 'MigrationRecord'
     }
@@ -223,7 +274,7 @@ test(
     const statusKey = `${key}-status`
     const registry = asWindowsRegistry(
       new RegistryAccess(() => koffi, {
-        readable: APP_REGISTRY_SCOPE.readable,
+        readable: (subKey) => subKey === key || subKey === statusKey,
         writable: (subKey) => subKey === statusKey,
         deletable: (subKey, name) => subKey === key && name === 'MigrationRecord'
       })

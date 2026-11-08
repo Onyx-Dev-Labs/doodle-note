@@ -554,9 +554,21 @@ already loads), never through PowerShell or `reg.exe`: no child process, so an
 execution policy or AppLocker rule for PowerShell cannot stop it, and the record's
 folders read back exactly when the user folder is not ASCII (`reg.exe query`
 prints the console's OEM code page: `Jörg Ñandú 李雷 😀` comes back as `J�rg �and� ?? ??`
-under code page 437; `evidence/step5-fix-7/reg-unicode-probe.log`). The worker may
-read any value under `HKCU\Software`, write only `AppMigration*` values in the
-identity's status key, and delete only `MigrationRecord` in `Software\{APP_GUID}`.
+under code page 437; `evidence/step5-fix-7/reg-unicode-probe.log`). Since round 9
+the worker's scope is the identity its bundle was built for, and nothing else
+(`appRegistryScope(APP_IDENTITY)`, built into `engine-win.ts`; no message can name
+another identity): it may read only `MigrationRecord` in that identity's
+`Software\{APP_GUID}`, the three `AppMigration` / `AppMigrationReason` /
+`AppMigrationLastAttempt` values in its `Software\DoodleNote-InstallStatus\{APP_GUID}`,
+and its own Run value (named after its `appId`) in
+`Software\Microsoft\Windows\CurrentVersion\Run`; write only those three status
+values; delete only that `MigrationRecord`. Anything else (another identity's
+GUID, the installer's own values such as `InstallLocation` or `LastResult`, the
+journal, another app's Run value) is refused (`SCOPE`) before any Win32 call. All
+three calls use `HKEY_CURRENT_USER` and the default registry view (no
+`KEY_WOW64_*` flag; the app and its installer are both 64-bit); a read is capped
+at 64 KiB (`SIZE`), a written value at 1024 characters, and the main process gives
+each request 60 s before it records `reader-timeout`.
 
 What the app did is recorded beside the installer's values, in the same
 `HKCU\Software\DoodleNote-InstallStatus\{APP_GUID}` key, and in

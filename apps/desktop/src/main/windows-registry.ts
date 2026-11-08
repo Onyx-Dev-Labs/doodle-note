@@ -3,11 +3,18 @@
  * writes for the install folder move (windows-install-record.ts), so the main process never starts
  * PowerShell, reg.exe or anything else for them:
  *
- *  - read: one REG_SZ value (RegGetValueW), e.g. the installer's MigrationRecord or the app's
- *    own "Open at login" Run value;
- *  - write: REG_SZ values (RegSetKeyValueW, which creates the key), only under the identity's
- *    HKCU\Software\DoodleNote-InstallStatus\<APP_GUID> key (the app's AppMigration status);
- *  - delete: one value (RegDeleteKeyValueW), only MigrationRecord in HKCU\Software\<APP_GUID>.
+ *  - read: one REG_SZ value (RegGetValueW with RRF_RT_REG_SZ): the installer's MigrationRecord,
+ *    the app's own status, or the app's own "Open at login" Run value;
+ *  - write: REG_SZ values (RegSetKeyValueW, which creates the key): only the three AppMigration
+ *    values in the identity's HKCU\Software\DoodleNote-InstallStatus\<APP_GUID> key;
+ *  - delete: one value (RegDeleteKeyValueW): only MigrationRecord in HKCU\Software\<APP_GUID>.
+ *
+ * The scope is the running build's identity only (appRegistryScope, from the identity the bundle
+ * was built for): another identity's GUID, another key or another value name is refused (SCOPE)
+ * before any Win32 call. All three calls use HKEY_CURRENT_USER and the default registry view (no
+ * KEY_WOW64_* flag; the app and its installer are both 64-bit, so both see the 64-bit view). A
+ * read is capped at 64 KiB, a written value at 1024 characters; the main process gives each request
+ * 60 s (engine-host-win.ts REGISTRY_TIMEOUT_MS) before it reports reader-timeout.
  *
  * Text stays UTF-16 end to end, so a non-ASCII user folder in the record reads back exactly (reg.exe
  * prints the console's OEM code page). The Win32 entry points come through the FFI module the worker
@@ -15,7 +22,15 @@
  * release-packaging.test.ts).
  */
 
-import type { WindowsRegistry } from './windows-install-record'
+import {
+  APP_MIGRATION_VALUES,
+  INSTALL_RECORD_VALUE,
+  electronBuilderGuid,
+  installStateKey,
+  installStatusKey,
+  type WindowsRegistry
+} from './windows-install-record'
+import type { AppIdentity } from './app-identity'
 
 type NativeFn = (...args: unknown[]) => unknown
 
@@ -39,27 +54,40 @@ export interface RegistryScope {
   deletable(subKey: string, name: string): boolean
 }
 
-const GUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-const NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/
+/** The per-user Run key; the app's own value is named after its appId. */
+export const RUN_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 
-/** The per-user Run key, whose value names are app ids (`com.doodlenote.desktop`). */
-const RUN_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
-const RUN_NAME = /^[A-Za-z][A-Za-z0-9.-]{0,127}$/
+/** The app's own AppMigration values (writeInstallMigrationStatus), and nothing else. */
+const STATUS_VALUES: ReadonlySet<string> = new Set(Object.values(APP_MIGRATION_VALUES))
 
 /**
- * What the app itself may do: read under Software (and its own login item's Run
- * value, whose name has dots), write its status, delete its record.
+ * What the app of identity `appId` may do, and nothing else: read its record
+ * (Software\<APP_GUID> MigrationRecord), its own status values
+ * (Software\DoodleNote-InstallStatus\<APP_GUID> AppMigration*) and its own Run
+ * value (its loginItemName, the appId); write those status values; delete its
+ * record. Key and value names compare case-insensitively, as the registry does.
  */
-export const APP_REGISTRY_SCOPE: RegistryScope = {
-  readable: (subKey, name) =>
-    /^Software\\[^\\\0]+(\\[^\\\0]+)*$/.test(subKey) &&
-    subKey.length < 256 &&
-    (NAME.test(name) || (subKey.toLowerCase() === RUN_KEY.toLowerCase() && RUN_NAME.test(name))),
-  writable: (subKey, name) =>
-    new RegExp(`^Software\\\\DoodleNote-InstallStatus\\\\${GUID}$`, 'i').test(subKey) &&
-    /^AppMigration[A-Za-z]*$/.test(name),
-  deletable: (subKey, name) =>
-    new RegExp(`^Software\\\\${GUID}$`, 'i').test(subKey) && name === 'MigrationRecord'
+export function appRegistryScope(
+  identity: Pick<AppIdentity, 'appId' | 'loginItemName'>
+): RegistryScope {
+  const { appId, loginItemName } = identity
+  for (const name of [appId, loginItemName])
+    if (!/^[A-Za-z][A-Za-z0-9.-]{0,127}$/.test(name)) throw new Error(`not an app id: ${name}`)
+  const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
+  const state = installStateKey(appId)
+  const status = installStatusKey(appId)
+  const statusValue = (name: string): boolean =>
+    [...STATUS_VALUES].some((value) => same(value, name))
+  // Sanity: both keys end in this identity's GUID (electron-builder's derivation).
+  if (!state.endsWith(electronBuilderGuid(appId))) throw new Error('identity key mismatch')
+  return {
+    readable: (subKey, name) =>
+      (same(subKey, state) && same(name, INSTALL_RECORD_VALUE)) ||
+      (same(subKey, status) && statusValue(name)) ||
+      (same(subKey, RUN_KEY) && same(name, loginItemName)),
+    writable: (subKey, name) => same(subKey, status) && statusValue(name),
+    deletable: (subKey, name) => same(subKey, state) && same(name, INSTALL_RECORD_VALUE)
+  }
 }
 
 /** (HKEY)(ULONG_PTR)(LONG)0x80000001, sign-extended as Windows defines it. */
@@ -83,9 +111,10 @@ interface Win32 {
 export class RegistryAccess {
   private win: Win32 | null = null
 
+  /** `scope`: appRegistryScope(the running identity's appId) in the app; tests pass their own. */
   constructor(
     private readonly ffi: () => RegistryFfi,
-    private readonly scope: RegistryScope = APP_REGISTRY_SCOPE
+    private readonly scope: RegistryScope
   ) {}
 
   private api(): Win32 {

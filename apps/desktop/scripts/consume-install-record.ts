@@ -28,12 +28,7 @@ import {
   writeInstallMigrationStatus,
   INSTALL_RECORD_VALUE
 } from '../src/main/windows-install-record'
-import {
-  APP_REGISTRY_SCOPE,
-  RegistryAccess,
-  asWindowsRegistry,
-  type RegistryFfi
-} from '../src/main/windows-registry'
+import { RegistryAccess, asWindowsRegistry, type RegistryFfi } from '../src/main/windows-registry'
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
@@ -45,10 +40,12 @@ async function main(): Promise<void> {
     )
   const key = fullKey.replace(/^HKEY_CURRENT_USER\\/i, '')
   const koffi = createRequire(__filename)('koffi') as RegistryFfi
-  // The app's scope, widened to exactly the harness's throwaway keys.
+  // The app's scope (appRegistryScope), for the harness's throwaway keys instead of an identity's.
   const registry = asWindowsRegistry(
     new RegistryAccess(() => koffi, {
-      readable: APP_REGISTRY_SCOPE.readable,
+      readable: (subKey, name) =>
+        (subKey === key && name === INSTALL_RECORD_VALUE) ||
+        (subKey === statusKey && /^AppMigration/.test(name)),
       writable: (subKey, name) => subKey === statusKey && /^AppMigration/.test(name),
       deletable: (subKey, name) => subKey === key && name === INSTALL_RECORD_VALUE
     })

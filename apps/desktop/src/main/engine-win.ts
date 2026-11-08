@@ -66,7 +66,13 @@ import {
 import { EchoOrderGate } from './windows-asr-echo-gate'
 import { HelperChecker, type FfiLike } from './windows-helper-check'
 import { boundedTestStallMs, MAX_ASR_STALL_MS, MAX_CONFIRM_STALL_MS } from './speech-worker-env'
-import { RegistryAccess, type RegistryFfi, type RegistryRequest } from './windows-registry'
+import {
+  RegistryAccess,
+  appRegistryScope,
+  type RegistryFfi,
+  type RegistryRequest
+} from './windows-registry'
+import { APP_IDENTITY } from './app-identity'
 
 interface AudioMessage {
   t: 'audio'
@@ -522,8 +528,15 @@ const helperChecker = new HelperChecker(
   // A hold that expires is reported at once, so the app never counts on it afterwards.
   (id) => port.postMessage({ t: 'helper-expired', id })
 )
-/** The install folder move's registry reads and writes, for the app (see windows-registry.ts). */
-const registry = new RegistryAccess(() => windowsFfi() as unknown as RegistryFfi)
+/**
+ * The install folder move's registry reads and writes, for the app (see windows-registry.ts):
+ * only this build's identity's keys and values (the identity the bundle was built for, never
+ * one a message names).
+ */
+const registry = new RegistryAccess(
+  () => windowsFfi() as unknown as RegistryFfi,
+  appRegistryScope(APP_IDENTITY)
+)
 
 port.on('message', (message: Electron.MessageEvent) => {
   const data = message.data as InMessage
