@@ -402,24 +402,32 @@ a key created after the record (deleted by a cleaner, or replaced), another LUID
 
 Policy: the helper writes the user's saved content back on its own ONLY when the clipboard is provably
 its own: (a) our complete write is on it (our sentinel with this transaction's nonce, set last; our
-exact marker values; our text by its hash), (b) it is empty at exactly a sequence journaled after OUR
-EmptyClipboard, or (c) our own live window owns it and our last EmptyClipboard was this transaction's.
-Every other state (our write cut short, only saved formats, an empty clipboard right after a stage
-journaled before our empty, an unknown logon, an origin that cannot be verified) is pending: the record
-is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
-dictating. Put back what you had copied before?" with Restore and Dismiss. The card names formats and
-size only, never content. Restore runs as a journaled transaction of its own, and only while the
-clipboard is exactly as it was when offered; if it changed, the card says what a restore would
-overwrite (formats and size) and asks again. Dismiss deletes the saved copy. The offer comes back after
-an app restart. A kept record is deleted without writing only when that is provable or harmless: the
-clipboard already holds exactly the saved content, nothing was emptied, a live foreign owner, the
-user's own later copy (a sequence beyond anything our own operations explain), another logon or boot,
-Dismiss, or the retention: **a kept record is deleted after 24 h**, and at logoff or reboot.
-Sequence bounds are used only for that last kind of proof and as a hint for the offer, never as
-authority to write. A target that reads the synthesized ANSI text formats was measured not to move
-the sequence (in process and from another process); the restore still accepts our window owning the
-clipboard with our complete write on it, so such a read could never turn a restore into a silent
-"user-changed". Retries use the record's own backoff (3 s, 10 s, 30 s, 60 s, 120 s): a failed attempt
+exact marker values; our text by its hash) AT a sequence within our own operations from the journaled
+write (a clipboard manager that replays every format of our write after a crash is offered, not
+restored), (b) it is empty at exactly a sequence journaled after OUR EmptyClipboard, or (c) our own live
+window owns it and our last EmptyClipboard was this transaction's. Every other state is pending: the
+record is kept, nothing is written, and the app shows "DoodleNote may have changed your clipboard while
+dictating. Put back what you had copied before?" with Restore and Dismiss (the card's own buttons; the
+shared dismiss of other cards never touches it). The card names formats and size only, never content.
+Restore runs as a journaled transaction of its own, and only while the clipboard is exactly as it was
+when first offered (the offered sequence is fixed then; a retry never refreshes it); if it changed, the
+card says what a restore would overwrite (formats and size) and asks again. Dismiss asks first ("Delete
+the saved clipboard?"); the card goes only once the helper reports the files deleted, and stays with
+"The saved copy could not be deleted. Try again." otherwise. Every outstanding offer is kept and the next
+one shows after one is resolved. Offers load at app start and every hour, whether or not Bark is on (it
+is the user's clipboard, not a dictation feature; the helper is started for it only when this identity
+has kept records on disk), and when Bark is turned on. A pending record is deleted only by the user's
+Restore or Dismiss, by the retention, or when that loses nothing (the clipboard already holds exactly the
+saved content, or nothing was emptied); never because the clipboard moved on (the user's later copy, our
+own later dictation, another offer's restore, a live foreign owner). The logoff contract, stated plainly:
+**a kept record is deleted at reboot and 24 h after it was first offered** (measured on the tick count of
+the same boot, so a clock change never deletes anything; the helper checks every 30 minutes and the app
+every hour); across a relogin in the same boot it stays offered; another session of the same user leaves
+it alone. A state or payload file that cannot be read for the moment is kept and checked again (only a
+file read in full that does not parse or decrypt is corrupt), and a payload is never deleted while its
+state file is kept. A target that reads the synthesized ANSI text formats was measured not to move the
+sequence; before a "user-changed" verdict the helper also checks whether our window owns the clipboard
+with our complete write on it. Retries use the record's own backoff (3 s, 10 s, 30 s, 60 s, 120 s): a failed attempt
 or a check that is still pending advances it, a busy clipboard stays on its step, and the checks before
 a delivery and at the next helper start never use a step. Payloads without a journal are deleted, never
 restored from, and a settled transaction is never published. Records of earlier formats are removed
