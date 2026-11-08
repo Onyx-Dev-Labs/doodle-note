@@ -41,6 +41,8 @@ interface Harness {
   helper: {
     target: TargetDescription | null
     delivery: HelperDelivery
+    /** Windows: false when the fake helper would not be restarted on its own. */
+    willRestart?: boolean
     holdListener: ((e: { phase: 'down' | 'up'; holdId: number }) => void) | null
     tapListener: (() => void) | null
     deliverGuards: DeliveryGuards[]
@@ -223,6 +225,7 @@ function harness(
     ownership,
     helper: {
       available: true,
+      willRestart: () => helper.willRestart !== false,
       ...(options.helperBlocked ? { blocked: true } : {}),
       status: async (): Promise<HelperStatus> => {
         helper.statusCalls += 1
@@ -2759,6 +2762,11 @@ test('Windows: why typing stopped, or never started, reaches the recovery card',
     ],
     // An app stopped responding: the helper's bounded calls are stuck, so it restarts itself.
     [{ outcome: 'refused', reason: 'helper-busy' }, /dictation helper is restarting/],
+    // A supported classic box that does not take Enter from dictation: refused, its own explanation.
+    [
+      { outcome: 'refused', reason: 'line-break-unsupported', method: 'type' },
+      /doesn't accept Enter from dictation/
+    ],
     // Typing stopped part-way: the specific reason is kept, the card says so.
     [
       {
@@ -2794,6 +2802,23 @@ test('Windows: why typing stopped, or never started, reaches the recovery card',
     assert.equal(h.service.phase, 'recovery', JSON.stringify(delivery))
     assert.match(JSON.stringify(h.overlay.at(-1)), message, JSON.stringify(delivery))
   }
+})
+
+test('Windows: the helper-busy card says "restarting" only while a restart will happen', async () => {
+  const h = harness({ platform: 'win32', helperIntegrity: 'ok' })
+  h.helper.willRestart = false
+  h.helper.delivery = {
+    verified: false,
+    clipboard: 'untouched',
+    outcome: 'refused',
+    reason: 'helper-busy'
+  }
+  await speak(h, 'some words')
+  await tick()
+  assert.equal(h.service.phase, 'recovery')
+  const card = JSON.stringify(h.overlay.at(-1))
+  assert.match(card, /dictation helper stopped/)
+  assert.doesNotMatch(card, /is restarting/)
 })
 
 test('Windows: paste last and a refused paste report the clipboard too', async () => {

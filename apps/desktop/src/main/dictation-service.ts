@@ -148,6 +148,8 @@ export interface HelperLike {
   onClick(listener: () => void): () => void
   /** Replace the helper process (it re-arms its triggers when it comes back). */
   restart(): void
+  /** Windows: whether a helper that leaves now is started again on its own (absent: assume yes). */
+  willRestart?(): boolean
   /** Ask macOS for Accessibility from the helper. Returns whether it is granted now. */
   requestAccessibility(): Promise<boolean | null>
   /** Ask macOS for Input Monitoring from the helper. Returns whether it is granted now. */
@@ -1850,8 +1852,12 @@ export class DictationService {
         }
       return { kind: 'recover', reason: 'insertion-uncertain', ...helper }
     }
-    if (result.outcome === 'refused')
+    if (result.outcome === 'refused') {
+      // The helper is restarting itself; say so only when a restart will actually happen.
+      if (result.reason === 'helper-busy' && this.deps.helper.willRestart?.() === false)
+        return { kind: 'recover', reason: 'helper-stopped', ...helper }
       return { kind: 'recover', reason: refusalReason(result.reason), ...helper }
+    }
     return { kind: 'recover', reason: 'insertion-failed', ...helper }
   }
 
@@ -2378,6 +2384,9 @@ function refusalReason(reason: string | undefined): RecoveryReason {
       return 'paste-unavailable'
     case 'target-unverifiable':
       return 'target-unverifiable'
+    // Windows: a classic box that does not take a line break from dictation (nothing was typed).
+    case 'line-break-unsupported':
+      return 'line-break-unsupported'
     case 'helper-busy':
       return 'helper-busy'
     // A delivery the helper refused because the client had already given up: keep the text.

@@ -57,6 +57,13 @@ export type RecoveryReason =
    * focus moved, or it ran out of time. Some of the text may be in the field.
    */
   | 'typing-stopped'
+  /**
+   * Windows: a supported classic text box that does not accept Enter from dictation (no
+   * ES_WANTRETURN), so text with a line break was not typed at all.
+   */
+  | 'line-break-unsupported'
+  /** Windows: the helper stopped (stuck app) and no automatic restart is left this session. */
+  | 'helper-stopped'
   /** Windows: the typing fallback stopped part-way because the field became a password field. */
   | 'typing-stopped-secure'
   /** Windows: the helper's calls into other apps are stuck (an app is not responding). */

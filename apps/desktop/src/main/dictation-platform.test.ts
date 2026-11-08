@@ -106,6 +106,9 @@ test('Windows helper and hook rows say what is going on', () => {
     /checked by its digest only/,
     'unheld start shown'
   )
+  // The retry rule as it is: a later start holds it again, after repeated failures only after a minute.
+  assert.match(describeWindowsHelper('ready', false), /once a minute has passed/)
+  assert.doesNotMatch(describeWindowsHelper('ready', false), /the next start holds it again/)
   assert.match(describeWindowsHelper('blocked'), /app control/)
   assert.match(describeWindowsHelper('unavailable'), /Missing/)
   assert.equal(describeWindowsHooks(null).label, 'Checking…')

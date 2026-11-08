@@ -339,7 +339,10 @@ clipboard restored (privacy markers preserved; a newer copy made during delivery
 overwritten).
 
 Typing fallback: it is available in classic Windows text boxes only (the Win32 Edit and
-RichEdit controls, such as Notepad, WordPad and classic dialogs). There, each key is confirmed
+RichEdit controls, such as Notepad, WordPad and classic dialogs). The class is decided from its
+name alone (an exact list; an unknown name only when RealGetWindowClass names a listed class), and
+no message is sent to a window before it is accepted. So a RichEdit superclass with its own name is
+refused, and so is RichEdit20A (its lengths can count bytes under a DBCS locale). There, each key is confirmed
 before the next one: the field's own text length must move by exactly that key, and the field is
 checked for the password style before every key. Browsers, Electron apps, WebView2/CEF, Firefox,
 Java, Qt, XAML/UWP and Office are reachable only through UI Automation, whose state lags the
@@ -351,11 +354,37 @@ Line breaks in the typing fallback:
 - An Edit gets a Unicode CR, never a Return key, so no dialog or form can press its default button.
 - A plain Win32 Edit without ES_WANTRETURN does not take a line break in a dialog. Text with a line
   break is refused there before any key is sent.
-- A RichEdit needs a real Return key. It is sent only when the box has ES_WANTRETURN or its window
-  has no default push button; otherwise the text is refused up front.
+- A RichEdit needs a real Return key. A dialog turns a Return key it is not asked for into OK
+  (IsDialogMessage sends IDOK even without a default button), and a WinForms form into its
+  AcceptButton (managed code; the button need not have BS_DEFPUSHBUTTON). So it is sent only when the
+  box itself has ES_WANTRETURN. Otherwise the text is refused up front ("This box doesn't accept
+  Enter from dictation"), with nothing sent. This includes Windows 11 Notepad (RichEditD2DPT, no
+  ES_WANTRETURN): there a dictation with a line break goes in by paste, never by typing.
 
 Every key is checked just before it is sent: focus, password style, password character and
 read-only. Nothing can be proved about changes the app makes after the key has been queued.
+
+Paste follows the same order: the provider's focus and password reads, the classic box's
+EM_GETPASSWORDCHAR and the wait for held modifiers come first; foreground, focused window, password
+and read-only styles and the clipboard's ownership are checked last, immediately before Ctrl+V,
+with nothing that can block in between. The same limit applies: checks are sampled, a change
+between two samples or after Ctrl+V is queued cannot be seen, and a cross-process check and the
+input it guards are never one atomic step.
+
+Clipboard: the user's content is preserved (a copy made during our save is never overwritten), but
+how long that copy takes is bounded by the slow owner, not by us. Our own write (open, empty, set,
+close) runs on its own thread for at most 1 s; an owner that answered the WM_NULL probe and then
+stalls in WM_DESTROYCLIPBOARD makes the paste give up (typing may still run), and when the owner
+returns the late write puts the user's content back, never ours. From our write until its restore,
+the saved clipboard is also written down (DPAPI-encrypted for the user, in %TEMP% under the app
+identity) and deleted once the restore ran; a helper that ends in between is followed by one that
+puts it back while the clipboard still holds our text.
+
+Leaving: on every exit path (the app quits, stdin closes, or the helper restarts itself) a
+delivery in progress finishes its restore and its reply first (a quit waits up to 3 s; a restart
+waits for the delivery to end). A restart because provider calls are stuck, or because two
+clipboard readers wait on owners that never render, happens only between deliveries. Clipboard
+readers still waiting in a render are never killed on exit; they finish the render and leave.
 
 Known limitation: non-Latin scripts and the typing fallback. The paste path handles all of
 Unicode. Typing sends `KEYEVENTF_UNICODE` keys, and surrogate pairs go as one key. Where an IME or
@@ -373,7 +402,12 @@ If the worker ends before that, the spawn is discarded and the check runs again.
 
 The client confirms that the worker still holds the file immediately before the spawn, and again
 right after it. Until that second answer comes back, the new helper is not used: no request reaches
-it, its output is held back, and no hold key is armed. Killing a helper whose confirmation failed
+it, its output is held back, and no hold key is armed. A worker that is busy (loading a model,
+decoding live captions) is waited for, never treated as a lost hold: a hold ends only by an explicit
+release or the worker's exit, which the app sees, so a worker still running after 5 s without an
+answer still holds the file. A helper ended because its hold was really lost counts against the
+restart allowance, and the next attempt waits the normal backoff. Only a launch that goes all the
+way through (spawned, confirmed, its first status answered) clears the count of lost holds. Killing a helper whose confirmation failed
 cannot undo what it already ran. Creating the process inside the worker would close that gap, but
 it is not done. The reasons are in PR #276, round 7.
 
@@ -386,7 +420,7 @@ Integrity policy (stated plainly):
   matches. A valid signature adds pinning of the signer's name and thumbprint.
 - A broken signature, or a valid one from the wrong signer, is damaged.
 - After repeated lost holds, the check runs on the digest alone. Settings shows that ("checked by
-  its digest only"), and the held check is tried again after 60 s.
+  its digest only"), and the held check is tried again once 60 s have passed.
 
 Fresh install: while the preferred Parakeet model downloads in the background a fresh
 install serves the weaker legacy Zipformer; Bark refuses to dictate on it (matching the
