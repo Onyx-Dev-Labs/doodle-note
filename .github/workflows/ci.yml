@@ -308,11 +308,15 @@ jobs:
   # A real installer lifecycle of the QA identity on this throwaway runner: the
   # legacy-layout QA package installed /S, the current QA package /S --updated over
   # it, the app's first launch consuming the installer's record, uninstall /S; an
-  # upgrade killed right after electron-builder's "uninstall old version" and then
-  # recovered; /S without --updated while the legacy app runs (exit 2); a held file
-  # keeping the journal armed across two runs; (round 9, D) an update of the new
-  # layout killed the moment the stock uninstaller has deleted Software\{GUID}, once
-  # with a move's journal live and once with its record, each recovered by the next run. Registry, folders, Run value,
+  # upgrade killed right after electron-builder's "uninstall old version" (which ran
+  # no uninstaller: the legacy command was parked), whose next run's stock step runs
+  # the new copy's uninstaller and writes the deleted journal back; /S without
+  # --updated while the legacy app runs (exit 2); a held file keeping the journal
+  # armed across two runs; (round 9, D) an update of the new layout killed the moment
+  # the stock uninstaller has deleted Software\{GUID}, once with a move's journal live
+  # and once with its record, each written back by the next run before it plans
+  # (round 10: the log's wrote= list names what was written back, and every order is
+  # asserted as a subsequence). Registry, folders, Run value,
   # shortcuts and MCP configs are checked after each step (each step timed in the
   # job summary). It stands in for the installer items of the desktop pass while
   # Smart App Control blocks fresh unsigned executables on the QA machine

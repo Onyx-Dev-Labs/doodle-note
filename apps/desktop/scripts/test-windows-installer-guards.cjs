@@ -1578,7 +1578,14 @@ async function main() {
       ['finish', l2Old, l2New, '0', 'removed'],
       ['status', '', '', status('record', 'moved', 'record-written')],
       ['record', '', '', recordOf(real(l2, 'desktop'), real(l2, 'DoodleNote'))],
-      // Recover: a copy saved before "uninstall old version" is restored next run.
+      // Recover: a copy whose values are all still live is only deleted (logged
+      // wrote=none, round 10) ...
+      ['save', '', '', 'done'],
+      ['recover', '', '', 'done'],
+      ['status', '', '', status('recover', 'recovered', 'restored')],
+      ['record', '', '', recordOf(real(l2, 'desktop'), real(l2, 'DoodleNote'))],
+      // ... and a copy saved before "uninstall old version" is restored next run
+      // (wrote=MigrationRecord: the journal was already cleared with the record written).
       ['save', '', '', 'done'],
       ['wipe', '', '', 'done'],
       ['recover', '', '', 'done'],
@@ -1605,7 +1612,7 @@ async function main() {
     const l2Lines = readLog(l2Log)
     reports.push('--- l2 log', ...l2Lines)
     const lineForm =
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z installer step=[a-z-]+ result=[a-z0-9-]+ reason=[a-z0-9-]*( (from|to|in)=[^=]+)*$/
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z installer step=[a-z-]+ result=[a-z0-9-]+ reason=[a-z0-9-]*( (from|to|in)=[^=]+)*( wrote=(none|[A-Za-z]+(,[A-Za-z]+)*))?$/
     for (const line of l2Lines) {
       assert.match(line, lineForm)
       assert.ok(!lower(line).includes(lower(l2Profile)), `l2 log names the profile: ${line}`)
@@ -1633,6 +1640,15 @@ async function main() {
     assert.ok(
       steps.indexOf('remove moved removed') < steps.indexOf('record moved record-written'),
       'removal is logged before the record'
+    )
+    // Round 10: the recovery names what it wrote back, so a log tells a restoration
+    // from a copy whose values were all still live.
+    assert.deepEqual(
+      l2Lines
+        .filter((line) => / step=recover result=recovered reason=restored /.test(line))
+        .map((line) => / wrote=(\S+)$/.exec(line)?.[1]),
+      ['none', 'MigrationRecord'],
+      'l2 log: recover lines name the values written back'
     )
     // Bounded: past 64 KiB the log becomes <log>.1 (replacing an older one).
     const l2Big = path.join(sandbox, 'l2-logs', 'big.log')

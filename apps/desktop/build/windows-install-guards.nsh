@@ -1621,6 +1621,9 @@ FunctionEnd
   Var dnRecoveryKey
   ; The key that holds every identity's recovery key ("": not deleted when empty).
   Var dnRecoveryParent
+  ; dnRecoverState: the values it wrote back this run, ",Name,Name" (round 10:
+  ; logged as wrote=, so a log tells a restoration from a copy that was already live).
+  Var dnRecoverWrote
   ; Why dnMigrationClose kept the old folder (app-running | unknown-process).
   Var dnKeepWhy
 
@@ -2711,6 +2714,7 @@ FunctionEnd
       ReadRegStr $3 HKCU $dnJournalKey "${NAME}"
       ${if} $3 == ""
         WriteRegStr HKCU $dnJournalKey "${NAME}" $2
+        StrCpy $dnRecoverWrote "$dnRecoverWrote,${NAME}"
         !insertmacro dnTestStep "recover-${NAME}"
       ${endif}
     ${endif}
@@ -2735,6 +2739,7 @@ FunctionEnd
     Push $4
     Push $5
     StrCpy $0 ""
+    StrCpy $dnRecoverWrote ""
     ${if} $dnRecoveryKey != ""
       ReadRegStr $0 HKCU $dnRecoveryKey "RecoveryFor"
     ${endif}
@@ -2774,6 +2779,7 @@ FunctionEnd
         ${if} $3 != ""
           ; None, or not a complete record for this identity: the copy's, whole.
           WriteRegStr HKCU $dnStateKey "MigrationRecord" $2
+          StrCpy $dnRecoverWrote "$dnRecoverWrote,MigrationRecord"
           !insertmacro dnTestStep "recover-MigrationRecord"
         ${endif}
       ${elseif} $1 != "none"
@@ -2811,7 +2817,14 @@ FunctionEnd
           DeleteRegKey /ifempty HKCU $dnRecoveryParent
         ${endif}
         ${if} $4 != ""
-          !insertmacro dnStatus recover recovered restored ""
+          ; The log line names what was written back ("none": the copy matched
+          ; live values, e.g. a run that stopped before the stock uninstaller).
+          ${if} $dnRecoverWrote == ""
+            StrCpy $dnRecoverWrote "none"
+          ${else}
+            StrCpy $dnRecoverWrote $dnRecoverWrote "" 1
+          ${endif}
+          !insertmacro dnStatus recover recovered restored "wrote=$dnRecoverWrote"
         ${endif}
       ${elseif} $4 == ""
         DetailPrint "Ignored HKCU\$dnRecoveryKey: it does not name this install's folders ($5)"

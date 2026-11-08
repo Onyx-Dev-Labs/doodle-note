@@ -1586,6 +1586,15 @@ test('round 8: the installer end-to-end job and its kill-step include stay test-
   assert.match(e2e, /const SCENARIOS = \['A', 'B', 'C', 'D'\]/)
   assert.match(e2e, /DN_TEST_STOP_AT: 'after-uninstall-old-version'/)
   assert.match(e2e, /--only: unknown scenario/)
+  // Round 10: a recovery is identified by what it wrote back and checked in order,
+  // never by its mere presence (logged on every move).
+  assert.doesNotMatch(e2e, /steps\.includes\('recover\|recovered\|restored'\)/)
+  assert.match(e2e, /assertOrder\(\s*steps,\s*\[\s*RECOVERED\(restored\)/)
+  assert.match(e2e, /RECOVERED\(\['MigrationRecord'\]\)/)
+  assert.match(
+    readFileSync(new URL('../../build/windows-install-guards.nsh', import.meta.url), 'utf8'),
+    /dnStatus recover recovered restored "wrote=\$dnRecoverWrote"/
+  )
   const util = readFileSync(
     join(lib, 'templates', 'nsis', 'include', 'installUtil.nsh'),
     'utf8'

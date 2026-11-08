@@ -642,7 +642,10 @@ the move is recorded in two places, by the installer and by a user uninstall:
   ended (or where it stopped). They stay after an uninstall on purpose.
 - `%TEMP%\DoodleNote-install-<appId>.log` (`DoodleNote-install-com.doodlenote.desktop.qa.log`
   for QA): the same decisions, one line each, appended (UTF-16):
-  `<UTC> installer version=<v> step=<step> result=<result> reason=<code> [from=<old folder>] [to=<new folder>]`.
+  `<UTC> installer version=<v> step=<step> result=<result> reason=<code> [from=<old folder>] [to=<new folder>]`;
+  a recovery line (`recover / recovered / restored`) ends in `wrote=<names>`, the
+  values it wrote back from the recovery copy (`wrote=none`: they were all still
+  live; round 10).
   Past 64 KiB it is renamed to `<log>.1` (replacing an older one) and a new one
   starts. The only paths in it are the install folders; nothing about the
   profile, accounts or library.
@@ -876,18 +879,23 @@ final status key).
 
 | Scenario | What it does | What it asserts |
 |---|---|---|
-| A basic | legacy `/S`; seed a Run value (the old folder's full 8.3 path, its own short name included) and the three sandboxed MCP configs naming the old exe; current `/S --updated`; launch the installed app; uninstall `/S /currentuser` | after the install: old folder gone, new folder complete, exactly one QA uninstall entry naming the new folder, `MigrationRecord` complete (`DNMR2|<GUID>|desktop-qa|DoodleNote QA|<old>|<new>|<the old folder's 8.3 name as read before the upgrade>|<UTC>|END`), journal, recovery copy and its parent gone, status `record / moved / record-written`, log `plan-move legacy-found → close-ok → parked → recovered restored → remove moved removed → record moved record-written`, Start menu and desktop shortcuts start the new exe, the Run value still names the old exe; after the first launch: `AppMigration = complete / repointed`, record consumed, Run value and all three MCP entries repointed (Codex project table kept), `install-migration-status.json`; after the uninstall: folder, uninstall entry, `Software\{GUID}`, recovery keys and shortcuts gone, status `uninstall / uninstalled / no-pending-move`, profile, status key and `%TEMP%` log kept |
-| B interrupted | legacy `/S`, seed; kill-step `/S --updated` stopped right after "uninstall old version" (exit 9); current `/S --updated`; launch; uninstall | after the kill: old folder kept, journal armed with the parked command, the new copy registered, no record; the next run's stock step runs the new copy's uninstaller (deleting `Software\{GUID}`), the recovery copy restores the journal (`recover / recovered / restored`) and the move finishes; then as A |
-| D killed after the stock uninstaller | legacy `/S`, seed; hold a file; current `/S --updated` (journal armed, the new copy registered); release; kill-step `/S --updated` stopped the moment `uninstallOldVersion` returns (exit 9); current `/S --updated`; kill-step again with the move's record live (not yet consumed); current `/S --updated`; launch; uninstall | an update of the **new** layout, so the stock step really runs the new copy's uninstaller, which deletes `Software\{GUID}`: after the first kill the live journal is gone and the recovery copy holds every journal value exactly as it was (incl. `LegacyShortName`); the next run logs `recover / recovered / restored` before it plans (on the runner `plan-move legacy-found`) and finishes the move as in A; after the second kill the live `MigrationRecord` is gone and the copy holds it exactly; the next run restores it byte for byte, the copy and its parent go; the first launch consumes it; then as A |
+| A basic | legacy `/S`; seed a Run value (the old folder's full 8.3 path, its own short name included) and the three sandboxed MCP configs naming the old exe; current `/S --updated`; launch the installed app; uninstall `/S /currentuser` | after the install: old folder gone, new folder complete, exactly one QA uninstall entry naming the new folder, `MigrationRecord` complete (`DNMR2|<GUID>|desktop-qa|DoodleNote QA|<old>|<new>|<the old folder's 8.3 name as read before the upgrade>|<UTC>|END`), journal, recovery copy and its parent gone, status `record / moved / record-written`, log, in this order, `plan-move legacy-found → close-ok → parked → recovered restored wrote=none → remove moved removed → record moved record-written` (the legacy command was parked, so the stock step ran no uninstaller and the copy is only checked and deleted: A proves no restoration), Start menu and desktop shortcuts start the new exe, the Run value still names the old exe; after the first launch: `AppMigration = complete / repointed`, record consumed, Run value and all three MCP entries repointed (Codex project table kept), `install-migration-status.json`; after the uninstall: folder, uninstall entry, `Software\{GUID}`, recovery keys and shortcuts gone, status `uninstall / uninstalled / no-pending-move`, profile, status key and `%TEMP%` log kept |
+| B interrupted | legacy `/S`, seed; kill-step `/S --updated` stopped right after "uninstall old version" (exit 9); current `/S --updated`; launch; uninstall | after the kill (the parked command meant the stock step ran no uninstaller): old folder kept, journal armed with the parked command, the new copy registered, no record; the next run logs, in this order, `recovered restored wrote=none` (B2's copy, its journal still live) → `plan-move journal-resumed` → `close-ok` → `parked nothing-to-park` → `recovered restored wrote=…SourceDir,DestDir,Identity` (its stock step ran the new copy's uninstaller, which deleted `Software\{GUID}` with the journal, written back in `customInstall`) → `remove moved removed` → `record moved record-written`; then as A |
+| D killed after the stock uninstaller | legacy `/S`, seed; hold a file; current `/S --updated` (journal armed, the new copy registered); release; kill-step `/S --updated` stopped the moment `uninstallOldVersion` returns (exit 9); current `/S --updated`; kill-step again with the move's record live (not yet consumed); current `/S --updated`; launch; uninstall | an update of the **new** layout, so the stock step really runs the new copy's uninstaller, which deletes `Software\{GUID}`: after the first kill the live journal is gone and the recovery copy holds every journal value exactly as it was (incl. `LegacyShortName`); the next run's **first** line is `recovered restored wrote=<exactly the journal's non-empty values, in dnRecoverState's order>`, before any plan (on the runner `plan-move legacy-found`), then close, park, `remove moved removed`, `record moved record-written`; after the second kill the live `MigrationRecord` is gone and the copy holds it exactly; the next run's first line is `recovered restored wrote=MigrationRecord`, before its plan, the record is back byte for byte, the copy and its parent go; the first launch consumes it; then as A |
 | C consent, held file | legacy `/S`; start the legacy app; current `/S` (no `--updated`); stop the app; hold a file in the old folder; current `/S --updated` twice; release; once more; uninstall | `/S` without `--updated`: exit 2, `close / exit-2 / app-running-silent`, app not closed, nothing moved; held: journal armed after each of two runs, `remove / kept / file-in-use`, one uninstall entry, no record; the third run completes as in A |
 
 Covered by the job: the basic move (silent), the running-app and held-file
-cases (silent), recovery after an interrupted update (killed before
-`customInstall`, and killed the moment the stock uninstaller has deleted the
-live journal or record), the silent user uninstall,
-the sandboxed MCP configs and Run value being repointed (including an 8.3 path),
-and the record and status values: what a real installer, uninstaller and the
-installed app do to the registry, folders, Run value, shortcuts and MCP configs.
+cases (silent), recovery (each restoration identified by its `wrote=` list, in
+order): B, a journal deleted by the stock uninstaller *during* a run (the new
+copy's uninstaller) written back in that run's `customInstall`; D, a run killed
+the moment the stock uninstaller deleted the live journal, then the live
+record, each written back by the next run before it plans), the silent user
+uninstall, the sandboxed MCP configs and Run value being repointed (including an
+8.3 path), and the record and status values: what a real installer, uninstaller
+and the installed app do to the registry, folders, Run value, shortcuts and MCP
+configs. A real installer killed at any other point is not covered (the guard
+harness's kill steps cover those against the installer functions), and every
+installer is built from the current app's bytes (no older app version).
 Still needs a real desktop: taskbar pins (Explorer), DPI and multi-monitor
 captures, notifications and the tray, every interactive prompt (the "close it?"
 and "Are you sure?" boxes, Cancel paths, Apps & features), the junction-profile

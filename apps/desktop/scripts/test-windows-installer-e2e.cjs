@@ -6,10 +6,13 @@
 // own consumption of the installer's record:
 //
 //   A  basic: legacy QA /S, then the current QA /S --updated, then the app's first
-//      launch consumes the record, then uninstall /S;
+//      launch consumes the record, then uninstall /S (the legacy command is
+//      parked, so nothing has to be restored: the log says wrote=none);
 //   B  interrupted: the kill-step build (windows-installer-test-steps.nsh)
-//      terminates itself right after electron-builder's "uninstall old version";
-//      the next run recovers and finishes the move;
+//      terminates itself right after electron-builder's "uninstall old version"
+//      (which, the command parked, ran no uninstaller); the next run's stock step
+//      runs the new copy's uninstaller, which deletes the journal, and its
+//      customInstall writes it back (wrote=...) and finishes the move;
 //   C  consent and held files: /S without --updated while the legacy app runs
 //      exits 2 and changes nothing; a held file in the old folder keeps the
 //      journal armed across two runs and the third finishes;
@@ -17,8 +20,10 @@
 //      layout, so "uninstall old version" really runs the new copy's uninstaller,
 //      which deletes Software\{GUID}; the kill-step build terminates itself the
 //      moment uninstallOldVersion returns, first with a move's journal live, then
-//      with an unconsumed record live; each next run must put them back from the
-//      recovery copy and carry on.
+//      with an unconsumed record live; each next run's first decision must be
+//      writing exactly those values back from the recovery copy, before it plans.
+// Recovery is identified by the log's wrote= list, and every order is checked as
+// a subsequence (assertOrder), never by mere presence.
 //
 // The installers are the current QA app's bytes (one win-unpacked): "legacy" is
 // the legacy installer *layout* (Programs\desktop-qa, no migration include), not
@@ -178,14 +183,42 @@ function installLog() {
     .filter(Boolean)
 }
 
-/** `step|result|reason` of each log line written since `from` lines. */
+/**
+ * `step|result|reason` of each log line written since `from` lines; a recovery
+ * line also carries what it wrote back: `recover|recovered|restored|wrote=<names>`
+ * (`wrote=none`: every value of the copy was still live, nothing was restored).
+ */
 function logSteps(from) {
   return installLog()
     .slice(from)
     .map((line) => {
-      const m = / step=(\S+) result=(\S+) reason=(\S+)/.exec(line)
-      return m ? `${m[1]}|${m[2]}|${m[3]}` : line
+      const m = / step=(\S+) result=(\S+) reason=(\S+)(?:.* wrote=(\S+))?/.exec(line)
+      return m ? `${m[1]}|${m[2]}|${m[3]}${m[4] ? `|wrote=${m[4]}` : ''}` : line
     })
+}
+
+/** A recovery that wrote back exactly `names` (the order dnRecoverState writes them). */
+const RECOVERED = (names) => `recover|recovered|restored|wrote=${names.length ? names.join(',') : 'none'}`
+
+/**
+ * `steps` holds `order` as a subsequence, in that order (a string matches exactly,
+ * a RegExp by test). Returns the index of each match.
+ */
+function assertOrder(steps, order, label) {
+  const found = []
+  let at = 0
+  for (const wanted of order) {
+    const index = steps.findIndex(
+      (entry, i) => i >= at && (typeof wanted === 'string' ? entry === wanted : wanted.test(entry))
+    )
+    assert.ok(
+      index >= 0,
+      `${label}: log has ${wanted} after ${found.length ? order[found.length - 1] : 'the start'} (log: ${steps.join(' -> ')})`
+    )
+    found.push(index)
+    at = index + 1
+  }
+  return found
 }
 
 // ---------------------------------------------------------------------------
@@ -499,24 +532,21 @@ async function scenarioA() {
     assertMoved('A2')
     const steps = logSteps(before)
     console.log(`  log: ${steps.join(' -> ')}`)
-    const order = [
-      'plan|plan-move|legacy-found',
-      'close|close-ok|none',
-      'park|parked|parked',
-      // The copy saved before "uninstall old version", put back in customInstall.
-      'recover|recovered|restored',
-      'remove|moved|removed',
-      'record|moved|record-written'
-    ]
-    let at = 0
-    for (const wanted of order) {
-      const found = steps.indexOf(wanted, at)
-      assert.ok(
-        found >= 0,
-        `A2: log has ${wanted} after ${order[order.indexOf(wanted) - 1] ?? 'the start'}`
-      )
-      at = found + 1
-    }
+    assertOrder(
+      steps,
+      [
+        'plan|plan-move|legacy-found',
+        'close|close-ok|none',
+        'park|parked|parked',
+        // The copy saved before "uninstall old version" is checked and deleted in
+        // customInstall; the legacy command was parked, so the stock step ran no
+        // uninstaller and nothing had to be restored. (Restoration is B3, D4, D6.)
+        RECOVERED([]),
+        'remove|moved|removed',
+        'record|moved|record-written'
+      ],
+      'A2'
+    )
     // Not yet repointed: that is the app's job, on the record.
     assert.equal(reg(KEYS.run)?.[qa.appId], seededRun, 'A2: the Run value as seeded')
   })
@@ -556,7 +586,23 @@ async function scenarioB() {
     assert.equal(runInstaller(installers.current, ['/S', '--updated']), 0)
     const steps = logSteps(before)
     console.log(`  log: ${steps.join(' -> ')}`)
-    assert.ok(steps.includes('recover|recovered|restored'), 'B3: recovered')
+    // customInit: B2's copy is checked (its journal still live, nothing to write)
+    // BEFORE the run plans, and the plan resumes the journal. Then the stock step
+    // runs the NEW copy's uninstaller (B2 registered it), which deletes
+    // Software\{GUID} with the journal; customInstall writes it back from the copy.
+    assertOrder(
+      steps,
+      [
+        RECOVERED([]),
+        'plan|plan-move|journal-resumed',
+        'close|close-ok|none',
+        'park|parked|nothing-to-park',
+        /^recover\|recovered\|restored\|wrote=(?=.*\bSourceDir\b)(?=.*\bDestDir\b).*\bIdentity$/,
+        'remove|moved|removed',
+        'record|moved|record-written'
+      ],
+      'B3'
+    )
     assertMoved('B3')
   })
   await step('B4 first launch consumes the record', () => firstLaunch('B4'))
@@ -631,6 +677,17 @@ const JOURNAL_VALUES = [
   'LegacyShortName'
 ]
 
+/** The order dnRecoverState writes the journal values back in (Identity last). */
+const JOURNAL_RESTORE_ORDER = [
+  'LegacyUninstallString',
+  'DesktopLink',
+  'StartMenuLink',
+  'LegacyShortName',
+  'SourceDir',
+  'DestDir',
+  'Identity'
+]
+
 async function scenarioD() {
   await step('D0 reset', () => {
     resetIdentityState()
@@ -675,11 +732,26 @@ async function scenarioD() {
     assert.equal(runInstaller(installers.current, ['/S', '--updated']), 0)
     const steps = logSteps(before)
     console.log(`  log: ${steps.join(' -> ')}`)
-    assert.equal(steps.indexOf('recover|recovered|restored') >= 0, true, 'D4: recovered')
+    // The first thing this run logs: the journal D3's stock uninstaller deleted,
+    // written back value for value from the copy (exactly the values it had),
+    // before any plan; then the move, from the recovered journal, finishes.
+    const restored = JOURNAL_RESTORE_ORDER.filter((name) => journal[name])
+    const [first] = assertOrder(
+      steps,
+      [
+        RECOVERED(restored),
+        /^plan\|plan-move\|/,
+        'close|close-ok|none',
+        /^park\|parked\|/,
+        'remove|moved|removed',
+        'record|moved|record-written'
+      ],
+      'D4'
+    )
+    assert.equal(first, 0, 'D4: the recovery is the run\'s first decision (customInit)')
     assert.ok(
-      steps.indexOf('recover|recovered|restored') <
-        steps.findIndex((entry) => entry.startsWith('plan|')),
-      'D4: the journal is recovered before the run plans (customInit)'
+      first < steps.findIndex((entry) => entry.startsWith('plan|')),
+      'D4: the journal is recovered before the run plans'
     )
     assertMoved('D4')
   })
@@ -707,7 +779,10 @@ async function scenarioD() {
     assert.equal(runInstaller(installers.current, ['/S', '--updated']), 0)
     const steps = logSteps(before)
     console.log(`  log: ${steps.join(' -> ')}`)
-    assert.ok(steps.includes('recover|recovered|restored'), 'D6: recovered')
+    // First: the record D5's stock uninstaller deleted, written back from the copy,
+    // before any plan.
+    const [first] = assertOrder(steps, [RECOVERED(['MigrationRecord']), /^plan\|/], 'D6')
+    assert.equal(first, 0, 'D6: the recovery is the run\'s first decision (customInit)')
     assert.equal(reg(KEYS.state)?.MigrationRecord, record, 'D6: the record is back exactly')
     assert.equal(reg(KEYS.recovery), null, 'D6: recovery copy gone')
     assert.equal(reg(KEYS.recoveryParent), null, 'D6: recovery parent gone')
