@@ -917,7 +917,7 @@ test('CI builds and retains a real Windows installer', () => {
   assert.match(ciWorkflow, /pnpm --filter desktop package:win/)
   assert.match(ciWorkflow, /Smoke packaged Windows native modules/)
   assert.match(
-    ciWorkflow,
+    ciWorkflow.replace(/\r\n/g, '\n'),
     /Check Windows app\.asar contents[\s\S]*?run: node apps\/desktop\/scripts\/test-windows-package\.cjs apps\/desktop\/release\/win-unpacked\n/
   )
   assert.match(ciWorkflow, /sherpa and llama native modules loaded successfully/)
@@ -1076,11 +1076,14 @@ test('the uninstaller records its earliest exits: status is set in the hook elec
   const require = createRequire(import.meta.url)
   const builder = require.resolve('electron-builder/package.json')
   const libPackage = createRequire(builder).resolve('app-builder-lib/package.json')
-  const lib = JSON.parse(readFileSync(libPackage, 'utf8')) as { version: string }
+  const lib = JSON.parse(readFileSync(libPackage, 'utf8').replace(/\r\n/g, '\n')) as {
+    version: string
+  }
   // A new electron-builder must be checked against this test (and the harness) first.
   assert.equal(lib.version, '26.15.3')
   const templates = join(libPackage, '..', 'templates', 'nsis')
-  const template = (name: string): string => readFileSync(join(templates, name), 'utf8')
+  const template = (name: string): string =>
+    readFileSync(join(templates, name), 'utf8').replace(/\r\n/g, '\n')
   const uninstaller = template('uninstaller.nsh')
   const unOnInit = uninstaller.slice(
     uninstaller.indexOf('Function un.onInit'),
@@ -1115,7 +1118,7 @@ test('the uninstaller records its earliest exits: status is set in the hook elec
   const installer = readFileSync(
     new URL('../../build/windows-installer.nsh', import.meta.url),
     'utf8'
-  )
+  ).replace(/\r\n/g, '\n')
   const hook = installer.slice(
     installer.indexOf('!macro customCheckAppRunning'),
     installer.indexOf('!macroend', installer.indexOf('!macro customCheckAppRunning'))
@@ -1128,7 +1131,7 @@ test('the uninstaller records its earliest exits: status is set in the hook elec
   const harness = readFileSync(
     new URL('../../scripts/test-windows-uninstaller-hooks.nsi', import.meta.url),
     'utf8'
-  )
+  ).replace(/\r\n/g, '\n')
   const harnessInit = harness.slice(harness.indexOf('Function un.onInit'))
   assert.ok(
     harnessInit.indexOf('call un.checkAppRunning') <
@@ -1144,7 +1147,7 @@ test('the uninstaller records its earliest exits: status is set in the hook elec
   const guards = readFileSync(
     new URL('../../build/windows-install-guards.nsh', import.meta.url),
     'utf8'
-  )
+  ).replace(/\r\n/g, '\n')
   assert.match(
     guards,
     /!ifdef DN_TEST_ASK_CANCEL\n\s+Var dnTestAsk\n\s+!define DN_ASK_ANSWER "\/SD IDCANCEL"\n!else\n\s+!define DN_ASK_ANSWER ""\n!endif/
@@ -1316,7 +1319,7 @@ test('the writes a later run depends on are flushed to disk', () => {
   const guards = readFileSync(
     new URL('../../build/windows-install-guards.nsh', import.meta.url),
     'utf8'
-  )
+  ).replace(/\r\n/g, '\n')
   assert.match(
     guards,
     /!macro dnFlushRegistry\n\s+System::Call 'advapi32::RegFlushKey\(i 0x80000001\)'\n!macroend/
