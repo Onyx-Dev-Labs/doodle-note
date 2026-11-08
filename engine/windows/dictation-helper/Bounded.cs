@@ -42,6 +42,9 @@ namespace DoodleNote.DictationHelper
             return true;
         }
 
+        /// <summary>A side effect started or finished (whatever happened after it, it may have applied).</summary>
+        internal bool Started { get { lock (gate) return committing || committed; } }
+
         /// <summary>Cancel; true when a side effect had started or finished (it may have applied).</summary>
         internal bool Cancel()
         {
@@ -203,7 +206,8 @@ namespace DoodleNote.DictationHelper
                     return Outcome.TimedOut;
                 }
             }
-            if (job.Failed) return Outcome.Failed;
+            // A call that threw AFTER its side effect began may still have applied it.
+            if (job.Failed) { mayHaveApplied = job.Token.Started; return Outcome.Failed; }
             result = (T)job.Result;
             return Outcome.Ok;
         }
@@ -214,6 +218,9 @@ namespace DoodleNote.DictationHelper
         /// </summary>
         public static event Action Saturated;
         static int saturatedRaised;
+
+        /// <summary>Test build only (TestMode): act as if the cap had just been hit.</summary>
+        public static void TestSaturate() { if (TestMode.On) RaiseSaturated(); }
 
         static void RaiseSaturated()
         {

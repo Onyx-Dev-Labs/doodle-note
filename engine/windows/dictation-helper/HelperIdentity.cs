@@ -34,5 +34,8 @@ namespace DoodleNote.DictationHelper
 
         /// <summary>The mute-recovery record's file name (in the per-user %TEMP%).</summary>
         public static string OutputStateFileName(string sanitized) { return "DoodleNote-Bark-output-" + sanitized + ".json"; }
+
+        /// <summary>The pending clipboard record's file name (in the per-user %TEMP%; DPAPI-encrypted).</summary>
+        public static string ClipboardStateFileName(string sanitized) { return "DoodleNote-Bark-clipboard-" + sanitized + ".bin"; }
     }
 }

@@ -571,9 +571,9 @@ namespace DoodleNote.DictationHelper
                 Wire.Log("mouse hook re-installed");
                 mouseRetry.Succeeded();
                 prevMouseCallbackCount = mouseCallbackCount;
-                    prevButtonDown = Native.IsDown(ButtonVk(mouseButton));
+                prevButtonDown = Native.IsDown(ButtonVk(mouseButton));
                 ResetMouseSamples();
-                    mouseDetector.Reset();
+                mouseDetector.Reset();
                 if (mouseLostAnnounced) { mouseLostAnnounced = false; AnnounceHooks(); }
                 return;
             }

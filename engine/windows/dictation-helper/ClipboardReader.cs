@@ -21,9 +21,11 @@ namespace DoodleNote.DictationHelper
     /// in a render. A read that overruns is abandoned and the save gives up: the reader is NOT killed,
     /// because ending it mid-render loses the format being rendered; it finishes the render, finds its
     /// stdin closed and exits (verified: the owner's "Embed Source" is still there after the render).
-    /// At most MaxAbandoned readers may be waiting like that (past that, no save is attempted). A timer
+    /// At most MaxAbandoned readers may be waiting like that; reaching it asks for a helper restart
+    /// through the safe path (between deliveries; the waiting readers are left to finish). A timer
     /// prunes them every few seconds; one is ended only if it is still waiting after AbandonedMaxMs AND
-    /// the clipboard's owner is confirmed hung (IsHungAppWindow), when that render is not coming. Since
+    /// the owner it waits on is confirmed hung (IsHungAppWindow), when that render is not coming. The
+    /// helper's own exit (quit or restart) closes their stdin and never kills one under that rule. Since
     /// other apps can write meanwhile, every read reports the clipboard sequence number taken after it,
     /// and any change since the list (or before the paste empties the clipboard) discards the save.
     /// The reader exits when its stdin closes, so it never outlives the helper.
@@ -59,8 +61,13 @@ namespace DoodleNote.DictationHelper
                 try { reply = Answer(line.Trim()); }
                 catch (Exception) { reply = "busy"; }
                 byte[] bytes = new UTF8Encoding(false).GetBytes(reply + "\n");
-                output.Write(bytes, 0, bytes.Length);
-                output.Flush();
+                // The helper may have exited while this reader finished a render: nobody is listening.
+                try
+                {
+                    output.Write(bytes, 0, bytes.Length);
+                    output.Flush();
+                }
+                catch (IOException) { return 0; }
             }
             return 0;
         }
@@ -131,8 +138,16 @@ namespace DoodleNote.DictationHelper
         public const int MaxAbandoned = 2;
         const int AbandonedMaxMs = 30000;
         readonly Stopwatch age = new Stopwatch();
+        /// <summary>The clipboard owner whose render this reader was waiting on when it was abandoned.</summary>
+        IntPtr waitedOwner;
         /// <summary>Prunes abandoned readers on its own, not only when the next save asks.</summary>
         static Timer pruneTimer;
+        /// <summary>
+        /// Raised (once) when MaxAbandoned readers are waiting: the helper could no longer save the
+        /// clipboard at all, so it asks for a restart through the safe path (Program).
+        /// </summary>
+        public static event Action Exhausted;
+        static int exhaustedRaised;
 
         readonly ReaderProcess process;
         readonly BlockingCollection<string> lines = new BlockingCollection<string>();
@@ -170,7 +185,9 @@ namespace DoodleNote.DictationHelper
                 }
                 if (abandoned.Count >= MaxAbandoned)
                 {
-                    Wire.Log("clipboard readers are still waiting on a slow owner; not saving the clipboard");
+                    Wire.Log("clipboard readers are still waiting on a slow owner; not saving the clipboard (asking for a restart)");
+                    Action handler = Exhausted;
+                    if (handler != null && Interlocked.Exchange(ref exhaustedRaised, 1) == 0) ThreadPool.QueueUserWorkItem(delegate { handler(); });
                     return null;
                 }
                 try
@@ -226,6 +243,7 @@ namespace DoodleNote.DictationHelper
             {
                 if (shared == this) shared = null;
                 age.Restart();
+                waitedOwner = Native.GetClipboardOwner();
                 abandoned.Add(this);
                 if (pruneTimer == null) pruneTimer = new Timer(delegate { lock (gate) Prune(); }, null, 5000, 5000);
             }
@@ -243,15 +261,23 @@ namespace DoodleNote.DictationHelper
             {
                 ClipboardReaderClient reader = abandoned[i];
                 if (reader.Exited) { abandoned.RemoveAt(i); try { reader.process.Dispose(); } catch (Exception) { } }
-                else if (reader.age.ElapsedMilliseconds > AbandonedMaxMs && OwnerHung()) { abandoned.RemoveAt(i); reader.End(); }
+                else if (reader.MayEnd) { abandoned.RemoveAt(i); reader.End(); }
             }
             if (abandoned.Count == 0 && pruneTimer != null) { pruneTimer.Dispose(); pruneTimer = null; }
         }
 
-        static bool OwnerHung()
+        /// <summary>
+        /// Waiting past AbandonedMaxMs on an owner that is confirmed hung (the one it was waiting on,
+        /// not whoever owns the clipboard now): that render is not coming, so ending it loses nothing.
+        /// </summary>
+        bool MayEnd
         {
-            IntPtr owner = Native.GetClipboardOwner();
-            return owner != IntPtr.Zero && Native.IsHungAppWindow(owner);
+            get
+            {
+                IntPtr owner = waitedOwner;
+                return age.ElapsedMilliseconds > AbandonedMaxMs && owner != IntPtr.Zero
+                    && Native.IsWindow(owner) && Native.IsHungAppWindow(owner);
+            }
         }
 
         public static int AbandonedCount { get { lock (gate) { Prune(); return abandoned.Count; } } }
@@ -268,24 +294,37 @@ namespace DoodleNote.DictationHelper
             try { process.Dispose(); } catch (Exception) { }
         }
 
-        /// <summary>End the shared reader, if any (helper shutdown).</summary>
+        /// <summary>
+        /// Helper exit (quit, or a restart): every reader's stdin is closed, so an idle one exits at once
+        /// and one still waiting in a render exits when that render returns (the owner's format stays
+        /// whole). None is killed, except one that may be ended by the prune rule anyway (MayEnd).
+        /// </summary>
         public static void Shutdown()
         {
-            ClipboardReaderClient current;
             List<ClipboardReaderClient> waiting;
+            ClipboardReaderClient idle;
             lock (gate)
             {
-                current = shared;
-                shared = null;
                 waiting = new List<ClipboardReaderClient>(abandoned);
+                idle = shared;
+                shared = null;
                 abandoned.Clear();
+                if (pruneTimer != null) { pruneTimer.Dispose(); pruneTimer = null; }
             }
-            if (current != null)
+            // The shared reader is idle between saves (no delivery runs now): its stdin closing ends it.
+            if (idle != null)
             {
-                try { current.process.StandardInput.Close(); } catch (Exception) { }
-                current.End();
+                try { idle.process.StandardInput.Close(); } catch (Exception) { }
+                try { idle.process.WaitForExit(500); } catch (Exception) { }
             }
-            foreach (ClipboardReaderClient reader in waiting) reader.End();
+            int left = 0;
+            foreach (ClipboardReaderClient reader in waiting)
+            {
+                try { reader.process.StandardInput.Close(); } catch (Exception) { }
+                if (reader.MayEnd) reader.End();
+                else if (!reader.Exited) left++;
+            }
+            if (left > 0) Wire.Log(left + " abandoned clipboard reader(s) still waiting on a render are left to finish on their own");
         }
     }
 

@@ -15,8 +15,11 @@ namespace DoodleNote.DictationHelper
     ///    replaced selection, read with EM_GETSEL) proves that key, and only that key, was processed;
     ///  - ES_PASSWORD / ES_READONLY are window styles (GetWindowLong), and EM_GETPASSWORDCHAR covers a
     ///    RichEdit put in password mode by message alone.
-    /// The control is recognized by an exact class allowlist (or a superclass whose real class is Edit,
-    /// or that answers like a RichEdit) AND a positive capability probe; anything ambiguous is refused.
+    /// The control is recognized by an exact class allowlist, applied FIRST and with no message sent
+    /// (GetClassName, RealGetWindowClass): an unknown class is accepted only when its real class is one
+    /// of the allowed names. Only then does it get any EM_* message (a capability probe that must
+    /// answer like the accepted kind); a window outside the list never receives a WM_USER-range message,
+    /// whose meaning is the application's own. Anything ambiguous is refused.
     /// Every other target (browsers, Electron, WebView2/CEF, Firefox, Java, Qt, XAML/UWP, Office) is
     /// reachable only through UI Automation; typing is refused there and paste is the only way in.
     /// </summary>
@@ -28,12 +31,13 @@ namespace DoodleNote.DictationHelper
         const int PollTimeoutMs = 100;
         /// <summary>EM_GETSEL packs 16-bit offsets: past this length a selection cannot be read exactly.</summary>
         public const int MaxLength = 0xFFFF;
-        const int GWL_STYLE = -16, ES_MULTILINE = 0x4, ES_PASSWORD = 0x20, ES_READONLY = 0x800;
+        const int GWL_STYLE = -16, ES_MULTILINE = 0x4;
+        public const int ES_PASSWORD = 0x20, ES_READONLY = 0x800;
         const uint WM_GETTEXT = 0x000D, EM_GETLIMITTEXT = 0x00D5, EM_GETPASSWORDCHAR = 0x00D2, EM_GETTEXTMODE = 0x045A;
 
         public readonly IntPtr Window;
         public readonly string ClassName;
-        /// <summary>A RichEdit (it answers EM_GETTEXTMODE); positions in EM_GETSEL count a paragraph break as 1.</summary>
+        /// <summary>A RichEdit (by class); positions in EM_GETSEL count a paragraph break as 1.</summary>
         public readonly bool RichEdit;
 
         ClassicTextBox(IntPtr window, string className, bool richEdit)
@@ -49,21 +53,60 @@ namespace DoodleNote.DictationHelper
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         /// <summary>
-        /// The exact allowlist by class name: Edit; RichEdit20W, RichEdit20A, RICHEDIT50W, RichEditD2DPT
-        /// (Windows 11 Notepad); WinForms' EDIT / RichEdit20W / RICHEDIT50W classes. A superclassed Edit is
-        /// recognized by RealGetWindowClass. Nothing else by name (a "RichEditor" is not a RichEdit).
+        /// The exact allowlist by class name: Edit; RichEdit20W, RICHEDIT50W, RichEditD2DPT (Windows 11
+        /// Notepad); WinForms' EDIT / RichEdit20W / RICHEDIT50W classes. Any other name is accepted only
+        /// when RealGetWindowClass resolves it to one of those names (a superclass Windows can attribute).
+        /// Nothing else, by name or by behaviour: a "RichEditor", or a control that happens to answer
+        /// EM_GETTEXTMODE, is not a RichEdit. RichEdit20A (ANSI) is refused: under a DBCS system locale its
+        /// length can move in bytes, so exact per-key lengths could not be relied on.
         /// </summary>
         public static ClassKind Classify(string name, string realClass)
         {
+            ClassKind byName = ByName(name);
+            if (byName != ClassKind.None || string.IsNullOrEmpty(name)) return byName;
+            if (string.Equals(name, "RichEdit20A", StringComparison.OrdinalIgnoreCase)) return ClassKind.None;
+            if (string.Equals(realClass, "RichEdit20A", StringComparison.OrdinalIgnoreCase)) return ClassKind.None;
+            return ByName(realClass);
+        }
+
+        static ClassKind ByName(string name)
+        {
             if (string.IsNullOrEmpty(name)) return ClassKind.None;
             if (string.Equals(name, "Edit", StringComparison.OrdinalIgnoreCase)) return ClassKind.Edit;
-            foreach (string rich in new[] { "RichEdit20W", "RichEdit20A", "RICHEDIT50W", "RichEditD2DPT" })
+            foreach (string rich in new[] { "RichEdit20W", "RICHEDIT50W", "RichEditD2DPT" })
                 if (string.Equals(name, rich, StringComparison.OrdinalIgnoreCase)) return ClassKind.RichEdit;
             Match winForms = WinForms.Match(name);
             if (winForms.Success)
                 return string.Equals(winForms.Groups[1].Value, "EDIT", StringComparison.OrdinalIgnoreCase) ? ClassKind.Edit : ClassKind.RichEdit;
-            if (string.Equals(realClass, "Edit", StringComparison.OrdinalIgnoreCase)) return ClassKind.Edit;
             return ClassKind.None;
+        }
+
+        /// <summary>The kind of a window by its class names alone (no message is sent).</summary>
+        public static ClassKind KindOf(IntPtr window) { return Classify(Native.ClassOf(window), RealClass(window)); }
+
+        /// <summary>
+        /// A known Edit/RichEdit control for the paste checks (by class names, no message): the typing
+        /// allowlist plus RichEdit20A, which is refused for typing only because of its DBCS lengths.
+        /// </summary>
+        public static bool IsKnownTextBox(IntPtr window)
+        {
+            string name = Native.ClassOf(window), real = RealClass(window);
+            return Classify(name, real) != ClassKind.None
+                || string.Equals(name, "RichEdit20A", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(real, "RichEdit20A", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>A window style bit right now (GetWindowLong; no message).</summary>
+        public static bool HasStyle(IntPtr window, int bit) { return (Native.GetWindowLong(window, GWL_STYLE) & bit) != 0; }
+
+        /// <summary>
+        /// EM_GETPASSWORDCHAR for a window already classified as a classic text box (never send it to
+        /// anything else): true when it masks its text, null when it does not answer in time.
+        /// </summary>
+        public static bool? PasswordCharOf(IntPtr window)
+        {
+            long reply = Query(window, EM_GETPASSWORDCHAR, QueryTimeoutMs);
+            return reply < 0 ? (bool?)null : reply != 0;
         }
 
         /// <summary>Kept for the class tests: whether a name (and real class) is on the allowlist.</summary>
@@ -85,11 +128,11 @@ namespace DoodleNote.DictationHelper
         }
 
         /// <summary>
-        /// Everything checked before the first key, with nothing sent. The class must be on the allowlist
-        /// (or be a superclass that answers like a RichEdit) and pass a positive capability probe:
-        /// EM_GETLIMITTEXT answers a positive limit (Edit and RichEdit do; a lookalike window answers 0),
-        /// EM_GETTEXTMODE answers non-zero exactly for a RichEdit, and EM_GETSEL returns a sane range. The
-        /// box must also be editable, not secure, answer within the timeout, and be shorter than 65,535.
+        /// Everything checked before the first key, with nothing typed. The class must be on the allowlist
+        /// (decided first, with no message sent). Only an accepted control is then probed: EM_GETLIMITTEXT
+        /// answers a positive limit, EM_GETTEXTMODE answers non-zero exactly for a RichEdit (zero for an
+        /// Edit), and EM_GETSEL returns a sane range. The box must also be editable, not secure, answer
+        /// within the timeout, and be shorter than 65,535.
         /// </summary>
         public static ClassicTextBox Probe(IntPtr window, out string refusal)
         {
@@ -97,13 +140,13 @@ namespace DoodleNote.DictationHelper
             if (window == IntPtr.Zero || !Native.IsWindow(window)) { refusal = "target-unverifiable"; return null; }
             string name = Native.ClassOf(window);
             ClassKind kind = Classify(name, RealClass(window));
+            // Not on the list: refused before any message reaches the window.
+            if (kind == ClassKind.None) { refusal = "typing-unsupported"; return null; }
             long limit = Query(window, EM_GETLIMITTEXT, QueryTimeoutMs);
             long textMode = Query(window, EM_GETTEXTMODE, QueryTimeoutMs);
             if (limit < 0 || textMode < 0) { refusal = "target-unverifiable"; return null; }
-            bool answersLikeRichEdit = textMode > 0;
-            if (kind == ClassKind.None && answersLikeRichEdit) kind = ClassKind.RichEdit; // a custom-named RichEdit superclass
-            bool capable = limit > 0 && (kind == ClassKind.RichEdit ? answersLikeRichEdit : kind == ClassKind.Edit && !answersLikeRichEdit);
-            if (kind == ClassKind.None || !capable) { refusal = "typing-unsupported"; return null; }
+            bool capable = limit > 0 && (kind == ClassKind.RichEdit ? textMode > 0 : textMode == 0);
+            if (!capable) { refusal = "typing-unsupported"; return null; }
             ClassicTextBox box = new ClassicTextBox(window, name, kind == ClassKind.RichEdit);
             if (box.StyleSecure) { refusal = "secure-field"; return null; }
             if (box.StyleReadOnly) { refusal = "not-editable"; return null; }
@@ -127,26 +170,6 @@ namespace DoodleNote.DictationHelper
         /// <summary>A WinForms text box class (WindowsForms10.EDIT...): it takes a Unicode CR as a line break.</summary>
         public bool WinFormsClass { get { return ClassName.StartsWith("WindowsForms10.", StringComparison.OrdinalIgnoreCase); } }
 
-        /// <summary>
-        /// Whether the box's top-level window has a default push button a Return key could press: a
-        /// dialog that answers DM_GETDEFID, or any button (Win32 or WinForms) with BS_DEFPUSHBUTTON.
-        /// </summary>
-        public bool TopLevelHasDefaultButton()
-        {
-            IntPtr top = Native.GetAncestor(Window, 2); // GA_ROOT
-            if (top == IntPtr.Zero) return true; // cannot tell: assume it has one
-            long defId = Query(top, 0x0400, QueryTimeoutMs); // DM_GETDEFID
-            if (defId < 0 || ((defId >> 16) & 0xFFFF) == 0x534B) return true; // no answer, or DC_HASDEFID
-            bool found = false;
-            Native.EnumChildWindows(top, delegate (IntPtr child, IntPtr l)
-            {
-                if (Native.ClassOf(child).IndexOf("BUTTON", StringComparison.OrdinalIgnoreCase) >= 0
-                    && (Native.GetWindowLong(child, GWL_STYLE) & 0x0F) == 1) { found = true; return false; } // BS_DEFPUSHBUTTON
-                return true;
-            }, IntPtr.Zero);
-            return found;
-        }
-
         /// <summary>The control has the password style right now (a fresh GetWindowLong; no message).</summary>
         public bool StyleSecure { get { return (Native.GetWindowLong(Window, GWL_STYLE) & ES_PASSWORD) != 0; } }
 
@@ -157,11 +180,7 @@ namespace DoodleNote.DictationHelper
         /// EM_GETPASSWORDCHAR: true when the control masks its text (a RichEdit can be put in password
         /// mode by this message alone, without the style bit); null when it does not answer in time.
         /// </summary>
-        public bool? PasswordCharSet()
-        {
-            long reply = Query(Window, EM_GETPASSWORDCHAR, QueryTimeoutMs);
-            return reply < 0 ? (bool?)null : reply != 0;
-        }
+        public bool? PasswordCharSet() { return PasswordCharOf(Window); }
 
         /// <summary>The control's text length, answered by its UI thread; -1 when it does not answer in time.</summary>
         public long Length() { return Query(Window, Native.WM_GETTEXTLENGTH, QueryTimeoutMs); }

@@ -54,6 +54,8 @@ function compile(output, files, defines = []) {
     `/r:${path.join(wpf, 'WindowsBase.dll')}`,
     '/r:System.Windows.Forms.dll',
     '/r:System.Drawing.dll',
+    // DPAPI (ProtectedData) for the pending-clipboard record (PendingClipboard.cs).
+    '/r:System.Security.dll',
     `/out:${output}`,
     ...files
   ]

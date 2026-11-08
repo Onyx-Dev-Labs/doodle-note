@@ -41,14 +41,12 @@ namespace DoodleNote.DictationHelper
             SelfImage.Hold();
             // Provider calls stuck past the cap never come back: leave with ExitBusy so the app restarts
             // a fresh helper (its replies "helper-busy" have gone out first).
-            Bounded.Saturated += delegate
-            {
-                Thread.Sleep(300);
-                Wire.Log("provider calls are stuck past the cap; restarting");
-                Wire.Send(Wire.Fields("event", "restarting", "reason", "helper-busy"));
-                Shutdown(ExitBusy);
-            };
+            Bounded.Saturated += delegate { Restart("helper-busy", "provider calls are stuck past the cap"); };
+            // Clipboard readers stuck on owners that never render: no clipboard save is possible any more.
+            ClipboardReaderClient.Exhausted += delegate { Restart("clipboard-readers", "clipboard readers are waiting on owners that do not render"); };
             Ui.Install();
+            // A clipboard left holding an earlier helper's dictated text (it ended before its restore).
+            PendingClipboard.RecoverLeftover();
             work = new WorkQueue("dictation.work");
             audio = new WorkQueue("dictation.audio");
             audio.Async(OutputAudio.RecoverLeftover);
@@ -91,19 +89,66 @@ namespace DoodleNote.DictationHelper
             Shutdown();
         }
 
-        /// <summary>Exit code when the helper leaves because provider calls are stuck (the app restarts it).</summary>
+        /// <summary>Exit code when the helper leaves to be replaced (stuck provider calls or clipboard readers; the app restarts it).</summary>
         public const int ExitBusy = 3;
+        /// <summary>
+        /// How long an exit waits for a delivery in progress to finish its clipboard restore and reply:
+        /// a quit (the app is going) briefly; a restart (nothing is waiting on us) up to the longest
+        /// delivery the app allows, so a typing fallback is never cut off half-way.
+        /// </summary>
+        const int QuitWaitMs = 3000, RestartWaitMs = 60000;
 
-        static void Shutdown() { Shutdown(0); }
+        static void Shutdown() { Shutdown(0, null, QuitWaitMs); }
 
-        static void Shutdown(int exitCode)
+        /// <summary>Leave to be replaced: only between deliveries (the running one finishes first).</summary>
+        static void Restart(string reason, string why)
+        {
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                Wire.Log(why + "; restarting once the delivery in progress (if any) is done");
+                Shutdown(ExitBusy, reason, RestartWaitMs);
+            });
+        }
+
+        static void Shutdown(int exitCode, string restartReason, int waitMs)
         {
             if (Interlocked.Exchange(ref exiting, 1) == 1) return;
+            // Every exit path: no new delivery starts, and the running one finishes its restore and reply.
+            Stopwatch wait = Stopwatch.StartNew();
+            bool idle = DeliveriesInFlight.CloseAndWait(waitMs);
+            Wire.Log(idle ? "leaving with no delivery in progress (waited " + wait.ElapsedMilliseconds + " ms)"
+                : "leaving with a delivery still in progress after " + wait.ElapsedMilliseconds + " ms (its saved clipboard is written down for the next helper)");
+            if (restartReason != null) Wire.Send(Wire.Fields("event", "restarting", "reason", restartReason));
             Ui.Invoke(delegate { HoldWatcher.Shared.StopAll(); MouseCapture.Shared.Cancel("stopped"); return true; }, 1000, false);
             ClipboardReaderClient.Shutdown();
             audio.Sync(delegate { OutputAudio.Restore(); }, 2000);
             Wire.Drain(500);
             Environment.Exit(exitCode);
+        }
+
+        static void DeliverOne(string id, string snapshotId, string text, DeliveryGuards guards, bool watch, int deadlineMs, int receiptTick)
+        {
+            if (text.Length == 0)
+            {
+                Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Failed, "empty-text").Fields());
+                return;
+            }
+            TargetSnapshot snapshot = snapshots.Get(snapshotId);
+            if (snapshot == null)
+            {
+                Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Refused, "no-target").Fields());
+                return;
+            }
+            int queuedMs = unchecked(Environment.TickCount - receiptTick);
+            DeliveryResult result = Delivery.Deliver(snapshot, text, guards, deadlineMs, queuedMs);
+            // A snapshot is single-use: a second deliver can never re-insert.
+            snapshots.Drop(snapshotId);
+            // Keep the field for read-backs only when asked, only after a confirmed
+            // insertion, and never a secure field.
+            if (watch && result.Outcome == DeliveryOutcome.Delivered && snapshot.Element != null
+                && !(snapshot.Facts != null && snapshot.Facts.Secure))
+                watches.Start(snapshotId, snapshot.Pid, snapshot.Element);
+            Wire.Reply(id, true, result.Fields());
         }
 
         static void Handle(Dictionary<string, object> request)
@@ -213,27 +258,14 @@ namespace DoodleNote.DictationHelper
                         int receiptTick = (int)(Wire.Num(request, "__receiptTick") ?? Environment.TickCount);
                         work.Async(id, delegate
                         {
-                            if (text.Length == 0)
+                            // The helper is leaving (quit or restart): never start a delivery it might not finish.
+                            if (!DeliveriesInFlight.Begin())
                             {
-                                Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Failed, "empty-text").Fields());
+                                Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Refused, "helper-busy").Fields());
                                 return;
                             }
-                            TargetSnapshot snapshot = snapshots.Get(snapshotId);
-                            if (snapshot == null)
-                            {
-                                Wire.Reply(id, true, new DeliveryResult(DeliveryOutcome.Refused, "no-target").Fields());
-                                return;
-                            }
-                            int queuedMs = unchecked(Environment.TickCount - receiptTick);
-                            DeliveryResult result = Delivery.Deliver(snapshot, text, guards, deadlineMs, queuedMs);
-                            // A snapshot is single-use: a second deliver can never re-insert.
-                            snapshots.Drop(snapshotId);
-                            // Keep the field for read-backs only when asked, only after a confirmed
-                            // insertion, and never a secure field.
-                            if (watch && result.Outcome == DeliveryOutcome.Delivered && snapshot.Element != null
-                                && !(snapshot.Facts != null && snapshot.Facts.Secure))
-                                watches.Start(snapshotId, snapshot.Pid, snapshot.Element);
-                            Wire.Reply(id, true, result.Fields());
+                            try { DeliverOne(id, snapshotId, text, guards, watch, deadlineMs, receiptTick); }
+                            finally { DeliveriesInFlight.End(); }
                         });
                     }
                     break;
@@ -359,6 +391,12 @@ namespace DoodleNote.DictationHelper
                         }
                         Wire.Reply(id, true, Wire.Fields("bitsBase64", Convert.ToBase64String(bits)));
                     }
+                    break;
+                case "__saturate":
+                    // Test build only: act as if the bounded-call cap had just been hit (the busy restart).
+                    if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
+                    Wire.Reply(id, true, Wire.Fields());
+                    Bounded.TestSaturate();
                     break;
                 case "__throw":
                     if (!TestMode.On) { Wire.Reply(id, false, Wire.Fields("reason", "unknown-op")); break; }
