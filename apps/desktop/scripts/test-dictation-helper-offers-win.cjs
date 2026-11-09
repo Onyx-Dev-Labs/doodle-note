@@ -1361,7 +1361,7 @@ async function main() {
         restored.result === 'restored' &&
         names() === userFormats &&
         recordFiles().length === 0,
-      `${JSON.stringify(restored)}; ${names()}`
+      `${JSON.stringify(restored)}; [${names()}] vs [${userFormats}]; ${recordFiles()}; release log: ${h.logs.slice(-10).join(' / ')}`
     )
     await h.stop()
     cleanup()
@@ -1416,13 +1416,23 @@ async function main() {
     await a.kill()
     const bin = recordFiles().find((f) => f.endsWith('.bin'))
     if (bin) fs.renameSync(path.join(os.tmpdir(), bin), path.join(os.tmpdir(), bin + '.tmp'))
+    // Its start-up check runs the adoption: kill it once the offer-only fact is on disk (the move waits 15 s).
     const b = start(testops, {
       DICTATION_HELPER_TEST: '1',
       DICTATION_HELPER_TEST_STALL_IN_ADOPT_MS: '15000'
     })
-    await b.ready
-    void b.req('clipboard-offers')
-    await sleep(1500)
+    const marked = () => {
+      const f = recordFiles().find((x) => x.endsWith('.state'))
+      try {
+        return (
+          !!f && JSON.parse(fs.readFileSync(path.join(os.tmpdir(), f), 'utf8')).offerOnly === true
+        )
+      } catch {
+        return false
+      }
+    }
+    for (let i = 0; i < 200 && !marked(); i++) await sleep(50)
+    await sleep(300)
     await b.kill()
     const st = recordFiles().find((f) => f.endsWith('.state'))
     const quarantined = st
